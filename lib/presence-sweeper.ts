@@ -10,7 +10,8 @@ import { realEventsWhere, venueDaysWhere } from "./event-kind"
 import { resolveFence, fenceSelect } from "./geofence"
 import { evaluatePresence, type PresenceState } from "./presence"
 import { sendBulkPushNotifications } from "./push-notifications"
-import { venueTakeoverWhere } from "./venue-visibility"
+import { hit } from "./rate-limit-store"
+import { atTheVenue, takeoverSelect, venueTakeoverWhere } from "./venue-visibility"
 
 /**
  * Close out people who have gone.
@@ -293,6 +294,7 @@ export async function sweepVenueDays(now: Date = new Date()): Promise<VenueDaySw
   const expired = await expireWindows(now)
   const started = await closeForStartingEvents(now)
   const rooms = await sweepRooms(venueDaysWhere, MAX_VENUE_DAYS_PER_SWEEP, now)
+  await forgetGoLiveCoordinates(now)
   const result = { expired, ...started, rooms }
   if (expired > 0 || started.closedForEvents > 0 || rooms.checkedOut > 0 || rooms.guarded.length > 0) {
     logger.info("Venue-day sweep", {
@@ -312,9 +314,10 @@ export async function sweepVenueDays(now: Date = new Date()): Promise<VenueDaySw
  * sweeper's timing added. A window open at the venue's reset ended at the
  * reset: Go Live never sets one past it (D-4).
  */
-async function expireWindows(now: Date): Promise<number> {
+export async function expireWindows(now: Date = new Date()): Promise<number> {
   const due = await db.event_check_ins.findMany({
     where: { status: "checked_in", expires_at: { lte: now } },
+    // `event_check_ins_status_expires_at_idx`: starts at the open windows.
     orderBy: { expires_at: "asc" },
     take: MAX_EXPIRIES_PER_SWEEP,
     select: { id: true, expires_at: true },
@@ -349,12 +352,18 @@ async function expireWindows(now: Date): Promise<number> {
  * a second pass, or a second instance, finds them already out.
  */
 async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: number; pushed: number }> {
-  // The events on right now at a venue — few at any moment, so asked first.
+  /*
+   * Only events on now at a venue where somebody is live: one bounded query,
+   * not every event on the platform and a lookup each.
+   */
   const starting = await db.events.findMany({
-    where: { venue_id: { not: null }, ...venueTakeoverWhere(now, { leadMinutes: 0 }) },
+    where: {
+      ...venueTakeoverWhere(now, { leadMinutes: 0 }),
+      venue: { events: { some: { ...venueDaysWhere, check_ins: { some: { status: "checked_in" } } } } },
+    },
     orderBy: { start_time: "asc" },
     take: MAX_VENUE_DAYS_PER_SWEEP,
-    select: { id: true, title: true, min_age: true, venue_id: true, venue: { select: { name: true } } },
+    select: { ...takeoverSelect, min_age: true, venue: { select: { geofence: true } } },
   })
   if (starting.length === MAX_VENUE_DAYS_PER_SWEEP) {
     logger.warn("Venue-day sweep hit its event-start cap", { cap: MAX_VENUE_DAYS_PER_SWEEP })
@@ -365,10 +374,13 @@ async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: num
   const handled = new Set<string>()
   for (const event of starting) {
     if (!event.venue_id || handled.has(event.venue_id)) continue
+    // A link alone is not a takeover: confirmed, or the event's area at the venue (D-x3).
+    if (!atTheVenue(event, event.venue?.geofence)) continue
     handled.add(event.venue_id)
 
     const live = await db.event_check_ins.findMany({
       where: { status: "checked_in", event: { ...venueDaysWhere, venue_id: event.venue_id } },
+      take: MAX_CLOSED_PER_VENUE,
       select: { id: true, user: { select: { profile: { select: { age: true, date_of_birth: true } } } } },
     })
     const told: string[] = []
@@ -382,24 +394,86 @@ async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: num
     closedForEvents += told.length
     if (told.length === 0) continue
 
+    /*
+     * Words nobody but us wrote. The event's title and the venue's name are
+     * typed by organisers, and a takeover pushes to everybody live at a venue
+     * — a stranger's lock screen is the last place for text a stranger chose
+     * (D-x3). The event is in `data`, so the tap opens it. And once per person
+     * per event per window: two replicas closing the same room, or a second
+     * event at the venue, never ring anybody twice.
+     */
+    const fresh: string[] = []
+    for (const userId of new Set(told)) {
+      if ((await hit(`takeover-push:${event.id}:${userId}`, TAKEOVER_PUSH_WINDOW_MS)).count === 1) fresh.push(userId)
+    }
+    if (fresh.length === 0) continue
     await sendBulkPushNotifications({
-      userIds: [...new Set(told)],
-      title: event.venue?.name ?? event.title,
-      body: `${event.title} just started here. Tap to check in.`,
+      userIds: fresh,
+      title: "Blend'n",
+      body: TAKEOVER_PUSH_BODY,
       data: { type: "event_update", eventId: event.id },
     }).catch((error) =>
       logger.warn("Event-start push failed", { eventId: event.id, error: error instanceof Error ? error.message : String(error) })
     )
-    pushed += new Set(told).size
+    pushed += fresh.length
   }
   return { closedForEvents, pushed }
 }
 
+/** The push when an event takes a venue over: fixed words, no organiser's text (D-x3). */
+export const TAKEOVER_PUSH_BODY = "An event just started here — tap to check in"
+
+/** One takeover push per person per event in this long. */
+export const TAKEOVER_PUSH_WINDOW_MS = 6 * 60 * 60_000
+
+/** How many people one pass closes at one venue when an event starts there. */
+export const MAX_CLOSED_PER_VENUE = 500
+
+/** How long after a window ends its coordinates are kept. */
+export const GO_LIVE_COORDINATES_DAYS = 3
+
+/**
+ * Where somebody stood when they went live is kept a few days — long enough
+ * to look into a report or a fence that turned people away — then dropped
+ * (step 4 review). Go Live rows only: `expires_at` is set on nothing else.
+ * Bounded per pass, and only over the last month's windows, so the scan
+ * never walks the whole history of rows already cleared.
+ */
+export async function forgetGoLiveCoordinates(now: Date = new Date()): Promise<number> {
+  const before = new Date(now.getTime() - GO_LIVE_COORDINATES_DAYS * 24 * 3_600_000)
+  const since = new Date(before.getTime() - 30 * 24 * 3_600_000)
+  return db.$executeRaw`
+    WITH old AS (
+      SELECT id, occurrence_id, user_id FROM event_check_ins
+       WHERE expires_at > ${since} AND expires_at < ${before}
+         AND (latitude IS NOT NULL OR longitude IS NOT NULL)
+       ORDER BY expires_at
+       LIMIT 1000
+    ), sessions AS (
+      UPDATE presence_sessions ps
+         SET last_lat = NULL, last_lng = NULL, last_accuracy = NULL
+        FROM old
+       WHERE ps.occurrence_id = old.occurrence_id AND ps.user_id = old.user_id
+    )
+    UPDATE event_check_ins c SET latitude = NULL, longitude = NULL FROM old WHERE c.id = old.id
+  `
+}
+
 let timer: NodeJS.Timeout | null = null
+let expiryTimer: NodeJS.Timeout | null = null
+
+/** How often windows that ended are checked out, between the timers (`lib/live-timers.ts`). */
+export const EXPIRY_INTERVAL_MS = 30_000
 
 /**
  * Self-scheduling rather than `setInterval`, so a slow pass cannot overlap the
  * next one. Same reasoning as the chat lifecycle sweeper.
+ *
+ * Two loops. The five-minute one sweeps rooms: events, then venue days, each
+ * in its own try so one failing never stops the other (F5). The thirty-second
+ * one ends Go Live windows: each window schedules its own end, and this is
+ * the backstop for the ones a restart or another replica lost — a window must
+ * not outlive its end by five minutes (step 4 review).
  */
 export function startPresenceSweeper(): void {
   if (timer) return
@@ -423,12 +497,28 @@ export function startPresenceSweeper(): void {
       timer = setTimeout(run, SWEEP_INTERVAL_MS)
     }
   }
+  const expire = async () => {
+    try {
+      await expireWindows()
+    } catch (error) {
+      logger.error("Go Live expiry pass failed", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      expiryTimer = setTimeout(expire, EXPIRY_INTERVAL_MS)
+    }
+  }
   timer = setTimeout(run, SWEEP_INTERVAL_MS)
+  expiryTimer = setTimeout(expire, EXPIRY_INTERVAL_MS)
 }
 
 export function stopPresenceSweeper(): void {
   if (timer) {
     clearTimeout(timer)
     timer = null
+  }
+  if (expiryTimer) {
+    clearTimeout(expiryTimer)
+    expiryTimer = null
   }
 }

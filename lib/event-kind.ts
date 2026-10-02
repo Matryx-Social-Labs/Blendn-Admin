@@ -31,9 +31,28 @@ export const venueDaysWhere = { kind: "venue_day" } as const
  *
  * Wrapped in `AND`, so spreading it beside another `OR` replaces nothing.
  */
-export function inRoomWhere(now: Date = new Date()) {
+export function inRoomWhere(viewerId?: string, now: Date = new Date()) {
   return {
-    AND: [{ OR: [{ event: realEventsWhere }, { status: "checked_in" as const, expires_at: { gt: now } }] }],
+    AND: [
+      {
+        OR: [
+          { event: realEventsWhere },
+          {
+            status: "checked_in" as const,
+            expires_at: { gt: now },
+            /*
+             * Asked about one person: and not banned from the venue's room. Go
+             * Live keeps a ban a person pressed (the check-in stands, the room
+             * stays shut), and the roster, the grid, waves and likes are the
+             * room's too (step 4 review).
+             */
+            ...(viewerId && {
+              event: { chat_group: { members: { none: { user_id: viewerId, status: "banned" as const } } } },
+            }),
+          },
+        ],
+      },
+    ],
   }
 }
 

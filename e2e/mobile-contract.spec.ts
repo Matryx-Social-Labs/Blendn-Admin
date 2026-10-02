@@ -51,7 +51,6 @@ const ROUTES = [
   "/api/mobile/notifications",
   "/api/mobile/message-requests",
   "/api/mobile/users/blocked",
-  "/api/mobile/checkins/active",
   /*
    * The board's two reads. Both are new client surfaces with no caller yet, so
    * this is the shape the Phase 2 migration will be written against — recorded
@@ -170,6 +169,8 @@ test.describe("mobile API contract", () => {
         pin: ["messages[]", "pagination"],
       },
       "/api/mobile/profiles/:userId (own)": { url: `/api/mobile/profiles/${user!.id}`, pin: ["profile"] },
+      // A Go Live is an active check-in too: `kind`, `expiresAt` and `stay` say which (step 4).
+      "/api/mobile/checkins/active": { url: "/api/mobile/checkins/active", pin: ["checkIns[]"] },
       // Go Live's venue (PL-C02): `venue` must never grow a `geofence`.
       "/api/mobile/venues/:venueId": { url: `/api/mobile/venues/${live!.venue_id}`, pin: ["venue", "live"] },
     }

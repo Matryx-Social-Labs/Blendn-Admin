@@ -121,7 +121,7 @@ export async function matchesForEvent(
     // what they *chose* now lives in `event_match_preferences`, because this
     // query returns an arbitrary one of their check-in rows.
     // At a venue day, only while live (`inRoomWhere`): the grid is reciprocal.
-    where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null }, ...inRoomWhere() },
+    where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null }, ...inRoomWhere(viewerId) },
     select: { id: true },
   })
   if (!viewerCheckIn) return null

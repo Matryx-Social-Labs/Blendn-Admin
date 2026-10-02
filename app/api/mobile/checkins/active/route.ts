@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import {
   successResponse,
@@ -20,11 +21,14 @@ export async function GET(request: NextRequest) {
       where: {
         user_id: authUser.userId,
         status: "checked_in",
+        // A Go Live whose window ended is not active, swept or not (`inRoomWhere`).
+        ...inRoomWhere(authUser.userId),
       },
       include: {
         event: {
           select: {
             id: true,
+            kind: true,
             title: true,
             slug: true,
             cover_image_url: true,
@@ -65,6 +69,11 @@ export async function GET(request: NextRequest) {
         id: c.id,
         eventId: c.event_id,
         checkInTime: c.check_in_time,
+        /** `venue_day`: a Go Live at a venue — label it as the place, count down to `expiresAt`. */
+        kind: c.event.kind,
+        /** When a Go Live ends. Null at an event, which ends with the event or a checkout. */
+        expiresAt: c.expires_at,
+        stay: c.stay,
         /*
          * Their own state, and only ever their own — this endpoint is scoped to
          * the authenticated user, so it cannot disclose anyone else's choice.

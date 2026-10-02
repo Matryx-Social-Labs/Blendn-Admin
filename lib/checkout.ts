@@ -104,8 +104,11 @@ export async function performCheckout(
       id: checkInId,
       status: "checked_in",
       // An expiry acts only on the window it read: going live again in between
-      // moved `expires_at` past it, and that window is not over.
-      ...(reason === "expired" && { expires_at: { lte: now } }),
+      // moved `expires_at` past it, and that window is not over. Below the
+      // next millisecond, not at it: Postgres keeps microseconds and a JS Date
+      // does not, so a row ending at .000500 read back as .000 would never
+      // match `lte` and would sit first in the sweep's queue for ever.
+      ...(reason === "expired" && { expires_at: { lt: new Date(now.getTime() + 1) } }),
     },
     data: { status: "checked_out", check_out_time: now, updated_at: now },
   })

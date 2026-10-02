@@ -712,10 +712,15 @@ model event_check_ins {
   /// When a Go Live window at a venue ends (step 4). Null for an event
   /// check-in, which ends with the event or a checkout.
   expires_at            DateTime? @db.Timestamptz(6)
-  /// Set when the Go Live is "stay": the furthest an in-fence ping may push
-  /// `expires_at` — four hours from choosing it, or the venue's reset if that
-  /// is sooner (lib/go-live.ts). Null for a fixed window and for events.
+  /// The furthest an in-fence ping may push `expires_at` while `stay` — four
+  /// hours from the first time "stay" was chosen here today, or the venue's
+  /// reset if sooner (lib/go-live.ts). Kept for the day once set, so choosing
+  /// "stay" again never buys a fresh four hours. Null until "stay" is chosen,
+  /// and for events.
   stay_until            DateTime? @db.Timestamptz(6)
+  /// Whether this Go Live is "stay" now. A fixed window keeps `stay_until`
+  /// (for a later "stay") but is not extended.
+  stay                  Boolean   @default(false)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -747,6 +752,9 @@ model event_check_ins {
   @@index([check_in_time])
   /// Drives the sweeper: everyone still inside with a departure pending.
   @@index([status, left_area_at])
+  /// The Go Live expiry sweep: still checked in, window ended, oldest first.
+  /// The partial `expires_at` index alone walks every Go Live ever made.
+  @@index([status, expires_at])
   @@index([occurrence_id, status])
   @@index([user_id])
   @@index([user_id, status])

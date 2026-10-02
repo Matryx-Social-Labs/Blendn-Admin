@@ -43,7 +43,11 @@ only somebody whose Go Live window is open now (`liveInVenueDay`,
 a watcher read each arrival off the number, and the venue's public count is the
 bucket on `GET /venues/:venueId`. When a window ends — expiry, a switch, a
 checkout, an event starting there — the person's sockets get `live:ended` and
-are taken out of all three rooms; a rejoin is refused.
+are taken out of all three rooms; a rejoin is refused. The end is scheduled at
+the window's second (`lib/live-timers.ts`, with a 30 s backstop), and every
+emit to those rooms goes only to members still live, so a socket the eviction
+has not reached yet hears nothing either. Across replicas the eviction needs
+the Redis adapter (`REDIS_URL`).
 
 On refusal the server emits `error` and the socket is **not** added to the room:
 

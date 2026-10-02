@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { inRoomWhere } from "@/lib/event-kind"
+import { inRoomWhere, realEventsWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PAGINATION } from "@/lib/constants"
 import { idForViewer } from "@/lib/room-handle"
@@ -31,6 +31,18 @@ export async function GET(request: NextRequest) {
     const page = boundedInt(searchParams.get("page"), 1, 1, Number.MAX_SAFE_INTEGER)
     const limit = boundedInt(searchParams.get("limit"), PAGINATION.DEFAULT_LIMIT, 1, PAGINATION.MAX_LIMIT)
 
+    /*
+     * A venue's room is in the list only while your Go Live there is open
+     * (`liveInVenueDay`). After it, the row carried the room's last message,
+     * its sender's pseudonym, an exact unread count and member count — the
+     * room you can no longer open, read from outside, and a counter that moves
+     * with each arrival (step 4 review). Event rooms stay as they were.
+     */
+    const now = new Date()
+    const liveRoomsOnly = {
+      AND: [{ OR: [{ chat_group: { event: realEventsWhere } }, { last_allowed_at: { gt: now } }] }],
+    }
+
     // Get total count of user's chat groups
     const totalCount = await db.chat_group_members.count({
       where: {
@@ -51,6 +63,7 @@ export async function GET(request: NextRequest) {
           // any-kind: a member's own rooms, and a venue day's room is one they went live in (D-6).
           event: { deleted_at: null, status: { not: "draft" } },
         },
+        ...liveRoomsOnly,
       },
     })
 
@@ -74,6 +87,7 @@ export async function GET(request: NextRequest) {
           // any-kind: a member's own rooms, and a venue day's room is one they went live in (D-6).
           event: { deleted_at: null, status: { not: "draft" } },
         },
+        ...liveRoomsOnly,
       },
       include: {
         chat_group: {
@@ -221,7 +235,7 @@ export async function GET(request: NextRequest) {
             status: "checked_in",
             check_out_time: null,
             // A venue's room is live for you only while your Go Live is.
-            ...inRoomWhere(),
+            ...inRoomWhere(authUser.userId, now),
           },
           select: { event_id: true },
         })

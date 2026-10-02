@@ -56,7 +56,8 @@ export async function GET(request: NextRequest) {
 
     const [attended, totalCount] = await Promise.all([
       attendedEventIds(authUser.userId, { limit, skip: paginationSkip(page, limit) }),
-      distinctEventsAttended(authUser.userId),
+      // Places included: the list below includes them (D-6).
+      distinctEventsAttended(authUser.userId, { places: true }),
     ])
 
     // Deleted events are already out of both queries (SCRUM-432). This filter

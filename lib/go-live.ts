@@ -47,7 +47,14 @@ export type GoLiveInput = z.infer<typeof goLiveSchema>
 
 export interface LiveWindow {
   expiresAt: Date
-  /** Non-null for "stay": the cap an in-fence ping may extend to. */
+  /** Whether this window follows the person ("stay") rather than ending when it said. */
+  stay: boolean
+  /**
+   * The furthest "stay" may carry the window: four hours from the FIRST time
+   * "stay" was chosen at this venue today, or the reset (D-x5). Kept for the
+   * day once set, through a switch to a fixed window, so tapping "stay"
+   * again never buys a fresh four hours.
+   */
   stayUntil: Date | null
 }
 
@@ -58,22 +65,23 @@ export interface LiveWindow {
  * `expired` (D-4), and tomorrow is a new room with new pseudonyms. Never
  * shorter than a window already open: going live again while live extends,
  * it does not cut short (an accidental "20" after a "60" must not end you
- * early — checking out is how you leave).
+ * early — checking out is how you leave). "Stay"'s cap limits how far it is
+ * extended, never how long a window already open lasts.
  */
 export function goLiveWindow(
   choice: { minutes: GoLiveMinutes } | { stay: true },
   now: Date,
   dayEnd: Date,
-  current: Date | null = null
+  current: { expiresAt: Date | null; stayUntil: Date | null } | null = null
 ): LiveWindow {
   const stay = "stay" in choice
-  const length = stay ? STAY_FIRST_MINUTES : choice.minutes
-  const asked = new Date(now.getTime() + minutes(length))
-  const kept = current && current > asked ? current : asked
-  return {
-    expiresAt: earlier(kept, dayEnd),
-    stayUntil: stay ? earlier(new Date(now.getTime() + minutes(STAY_MAX_MINUTES)), dayEnd) : null,
-  }
+  const open = current?.expiresAt && current.expiresAt > now ? current.expiresAt : null
+  const stayUntil =
+    current?.stayUntil ?? (stay ? earlier(new Date(now.getTime() + minutes(STAY_MAX_MINUTES)), dayEnd) : null)
+  let asked = new Date(now.getTime() + minutes(stay ? STAY_FIRST_MINUTES : choice.minutes))
+  if (stay && stayUntil) asked = earlier(asked, stayUntil)
+  const kept = open && open > asked ? open : asked
+  return { expiresAt: earlier(kept, dayEnd), stay, stayUntil }
 }
 
 /**
@@ -83,8 +91,11 @@ export function goLiveWindow(
  * asks only on a ping that put the person inside the fence, and only while the
  * window is still open — an expired window is ended, not revived.
  */
-export function stayExtension(window: { expiresAt: Date; stayUntil: Date | null }, now: Date): Date | null {
-  if (!window.stayUntil || window.expiresAt <= now) return null
+export function stayExtension(
+  window: { expiresAt: Date; stay: boolean; stayUntil: Date | null },
+  now: Date
+): Date | null {
+  if (!window.stay || !window.stayUntil || window.expiresAt <= now) return null
   const next = earlier(new Date(now.getTime() + minutes(STAY_EXTEND_MINUTES)), window.stayUntil)
   return next > window.expiresAt ? next : null
 }

@@ -15,13 +15,14 @@ import { fenceRefusal, personAtTheDoor, seatAtTheDoor, vagueFixRefusal } from "@
 import { performCheckout } from "@/lib/checkout"
 import { db } from "@/lib/db"
 import { plusGating } from "@/lib/env"
-import { validateGeofence } from "@/lib/geofence"
 import { goLiveSchema, goLiveWindow } from "@/lib/go-live"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { venueDayFor } from "@/lib/venue-day"
-import { venueTakeoverWhere } from "@/lib/venue-visibility"
+import { clientIpFrom } from "@/lib/client-ip"
+import { scheduleLiveEnd } from "@/lib/live-timers"
+import { venueDayAt, venueDayBounds, venueDayFor } from "@/lib/venue-day"
+import { eventTakingOver, goLiveArea } from "@/lib/venue-visibility"
 
 interface RouteParams {
   params: Promise<{ venueId: string }>
@@ -50,6 +51,17 @@ interface RouteParams {
  * live somewhere else — or checking in to an event — ends this one as a
  * switch.
  */
+/** Go Live attempts from one address a minute: a ceiling for scripts, far above a crowded venue's wifi. */
+const PER_IP_PER_MINUTE = 300
+/** Go Live attempts at one venue a minute, whoever makes them. */
+const PER_VENUE_PER_MINUTE = 240
+/**
+ * Too close to the reset to be worth a window in today's room: going live in
+ * the last minutes opens tomorrow's instead (D-4) — a window of seconds, which
+ * would end the moment it began, is no window.
+ */
+export const ROLLOVER_MINUTES = 5
+
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { venueId } = await params
@@ -60,8 +72,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const userId = authUser.userId
 
     // The check-in's bucket shape, its own scope: probing a fence by
-    // refreshing a token must not get a fresh allowance here either.
-    const limited = await rateLimit(request, userLimit("safety", "go-live", userId))
+    // refreshing a token must not get a fresh allowance here either. Then a
+    // ceiling per address and per venue, so no one source can make a venue's
+    // day, or hammer its door, at script speed.
+    const limited =
+      (await rateLimit(request, userLimit("safety", "go-live", userId))) ??
+      (await rateLimit(request, {
+        windowMs: 60_000,
+        maxRequests: PER_IP_PER_MINUTE,
+        keyGenerator: (req) => `go-live-ip:${clientIpFrom(req.headers)}`,
+      })) ??
+      (await rateLimit(request, {
+        windowMs: 60_000,
+        maxRequests: PER_VENUE_PER_MINUTE,
+        keyGenerator: () => `go-live-venue:${venueId}`,
+      }))
     if (limited) return limited
 
     const parsed = goLiveSchema.safeParse(await readJson(request))
@@ -76,20 +101,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const venue = await db.venues.findFirst({
       where: { id: venueId, deleted_at: null, status: "active" },
-      select: { id: true },
+      select: { id: true, name: true, geofence: true, timezone: true, day_reset_hour: true },
     })
     if (!venue) return notFoundResponse("Venue not found")
 
-    // Strictly 18+, as at every door; a venue day has no age rule of its own.
+    // Strictly 18+, with a known age (`personAtTheDoor`).
     const person = await personAtTheDoor(userId, null)
     if ("refusal" in person) return person.refusal
 
     const now = new Date()
-    const takeover = await db.events.findFirst({
-      where: { venue_id: venueId, ...venueTakeoverWhere(now, { viewerAge: ageFrom(person.profile) }) },
-      orderBy: { start_time: "asc" },
-      select: { id: true, title: true },
-    })
+    const takeover = await eventTakingOver(venueId, now, { viewerAge: ageFrom(person.profile) })
     if (takeover) {
       return NextResponse.json(
         {
@@ -102,13 +123,41 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    // After the refusals that need no day, so a 409 or a 403 makes none.
-    const day = await venueDayFor(venueId, now)
-    if (!day) return notFoundResponse("Venue not found")
-
     const gpsAccuracy = input.deviceInfo?.gpsAccuracy
     const vague = vagueFixRefusal(gpsAccuracy)
     if (vague) return vague
+
+    /*
+     * Which day, and judged against which area — before anything is written.
+     * The day is found, never made, until the person is known to be standing
+     * there: somebody elsewhere must not be able to create a venue's day (and
+     * its room) by asking. The area is the one the day copied when it was made
+     * (owner's ruling 3), or the venue's own when nobody has gone live yet —
+     * the same answer `GET /venues/:id` gives (`goLiveArea`).
+     */
+    const { end } = venueDayBounds(venue.timezone, venue.day_reset_hour, now)
+    const at = end.getTime() - now.getTime() < ROLLOVER_MINUTES * 60_000 ? end : now
+    const existing = await venueDayAt(venueId, at)
+    if (existing?.deleted_at) return notFoundResponse("Venue not found")
+    const area = goLiveArea(existing, venue)
+    const existingOccurrence = existing
+      ? await db.event_occurrences.findFirst({ where: { event_id: existing.id }, select: { id: true } })
+      : null
+
+    const refused = fenceRefusal({
+      fence: area,
+      point: { lat: input.latitude, lng: input.longitude },
+      gpsAccuracy,
+      userId,
+      record: existing && existingOccurrence ? { eventId: existing.id, occurrenceId: existingOccurrence.id } : null,
+      noFenceMessage: "This place has no check-in area yet, so you can't go live here.",
+      // Never the distance: a venue's area is nobody's to map by asking (D-x6).
+      outsideMessage: `You're not at ${venue.name} yet.`,
+    })
+    if (refused) return refused
+
+    const day = await venueDayFor(venueId, at)
+    if (!day) return notFoundResponse("Venue not found")
 
     const event = await db.events.findUniqueOrThrow({
       where: { id: day.id },
@@ -118,7 +167,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         title: true,
         venue_name: true,
         organizer_org_id: true,
-        geofence: true,
         deleted_at: true,
         venue: { select: { owner_org_id: true } },
       },
@@ -128,38 +176,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (event.deleted_at) return notFoundResponse("Venue not found")
 
     /*
-     * The venue's area as the day copied it, and only that: no fallback to the
-     * venue's point and the events' default radius (`resolveFence`'s legacy
-     * branch). A venue nobody drew an area for has none, and Go Live is
-     * refused there rather than judged against a 30-metre guess.
-     */
-    const area = validateGeofence(event.geofence)
-    const refused = fenceRefusal({
-      fence: area.ok ? area.fence : null,
-      point: { lat: input.latitude, lng: input.longitude },
-      gpsAccuracy,
-      eventId: day.id,
-      userId,
-      occurrenceId: day.occurrenceId,
-      noFenceMessage: "This place has no check-in area yet, so you can't go live here.",
-    })
-    if (refused) return refused
-
-    /*
      * Already live here? Then this extends. A window that ended but has not
      * been swept yet ends first, as `expired` at its own time, so going again
      * after expiry is a new session rather than one stretched over the gap.
      */
     const current = await db.event_check_ins.findUnique({
       where: { occurrence_id_user_id: { occurrence_id: day.occurrenceId, user_id: userId } },
-      select: { id: true, status: true, expires_at: true },
+      select: { id: true, status: true, expires_at: true, stay_until: true },
     })
-    let openWindow: Date | null = null
+    let open: Date | null = null
     if (current?.status === "checked_in" && current.expires_at) {
       if (current.expires_at <= now) await performCheckout(current.id, "expired", current.expires_at)
-      else openWindow = current.expires_at
+      else open = current.expires_at
     }
-    const live = goLiveWindow(choice, now, day.end_time, openWindow)
+    const live = goLiveWindow(choice, now, day.end_time, { expiresAt: open, stayUntil: current?.stay_until ?? null })
 
     const seat = await seatAtTheDoor({
       event,
@@ -170,14 +200,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       deviceInfo: input.deviceInfo,
       now,
       live,
+      extending: open !== null,
     })
+    // Ends at its second, not at the next sweep (`lib/live-timers.ts`).
+    scheduleLiveEnd(seat.checkIn.id, live.expiresAt)
 
     return successResponse({
       venueDayId: day.id,
       chatGroupId: seat.chatGroupId,
       expiresAt: live.expiresAt.toISOString(),
-      stay: live.stayUntil !== null,
-      stayUntil: live.stayUntil?.toISOString() ?? null,
+      stay: live.stay,
+      stayUntil: live.stay ? live.stayUntil?.toISOString() ?? null : null,
       checkIn: {
         id: seat.checkIn.id,
         status: seat.checkIn.status,

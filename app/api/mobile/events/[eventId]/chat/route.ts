@@ -40,6 +40,7 @@ import { roomMuteState } from "@/lib/room-mute"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { readJson, isUuid } from "@/lib/api-input"
+import { createRoom } from "@/lib/check-in-core"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -124,7 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
       const event = await db.events.findUnique({
         where: { id: eventId, deleted_at: null },
-        select: { title: true, status: true },
+        select: { title: true, status: true, kind: true, venue_name: true },
       })
       // No room is ever made for a missing or hidden event — refusing it only
       // after creation left a row the 404 concealed (SCRUM-205).
@@ -132,14 +133,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         return notFoundResponse("Chat not available for this event")
       }
 
-      chatGroup = await db.chat_groups.create({
-        data: {
-          event_id: eventId,
-          name: `${event.title || "Event"} Chat`,
-          description: `Chat for ${event.title || "Event"}`,
-          status: "active",
-          member_count: 0,
-        },
+      // The one room writer, which reads back a room somebody made a moment ago.
+      const room = await createRoom(event, eventId)
+      chatGroup = await db.chat_groups.findUniqueOrThrow({
+        where: { id: room.id },
         include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
       })
     }
@@ -537,20 +534,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // pulled anyway because `chatWindowState` treats a missing start as "no
         // floor" rather than erroring, so an event object in this file that
         // lacks it is one edit away from silently opening a room early.
-        select: { title: true, start_time: true, end_time: true, status: true },
+        select: { title: true, start_time: true, end_time: true, status: true, kind: true, venue_name: true },
       })
       if (!event || event.status === "draft") {
         return notFoundResponse("Chat not available for this event")
       }
 
-      chatGroup = await db.chat_groups.create({
-        data: {
-          event_id: eventId,
-          name: `${event.title || "Event"} Chat`,
-          description: `Chat for ${event.title || "Event"}`,
-          status: "active",
-          member_count: 0,
-        },
+      const room = await createRoom(event, eventId)
+      chatGroup = await db.chat_groups.findUniqueOrThrow({
+        where: { id: room.id },
         include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
       })
     }

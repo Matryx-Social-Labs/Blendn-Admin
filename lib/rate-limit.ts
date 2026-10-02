@@ -188,6 +188,11 @@ const USER_POLICIES = {
    * the oldest hundred. Thirty is more than a person in real trouble files.
    */
   reportDay: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 30 },
+  /**
+   * Reads a watcher could poll for a change: the venue page's live count. A
+   * phone refreshes it every half minute; sixty a minute is a script.
+   */
+  read: { windowMs: 60 * 1000, maxRequests: 60 },
   /** Ordinary writes: RSVP, favourite, rating, interest, profile edits. */
   write: { windowMs: 60 * 1000, maxRequests: 30 },
   /** Creating or destroying whole objects. */

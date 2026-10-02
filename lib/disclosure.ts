@@ -187,17 +187,16 @@ export function discloseHeadcount(count: number): number | null {
  * How many people are live at a venue, as the app may show it (D-19, F14).
  *
  * Never a number. The floor alone is not enough for a figure that updates
- * while you watch: a count that goes from "a few" to 5 the moment one person
- * walks in tells the watcher that person is there (cf. SCRUM-472). Buckets
- * move only at their edges, and under the floor (`MIN_CELL`) there is no
- * number at all. Zero is its own answer, like `discloseHeadcount`'s: an empty
- * place identifies nobody.
+ * while you watch: a count that goes from 4 to 5 the moment one person walks
+ * in tells the watcher that person is there (cf. SCRUM-472). Buckets move only
+ * at their edges, and under the floor (`MIN_CELL`) there is one answer,
+ * `quiet`, zero included — "nobody" against "a few" was itself an arrival
+ * oracle (orchestrator ruling D-x2, shared with SCRUM-516).
  */
-export type LiveCountBucket = "none" | "a_few" | "5-9" | "10-19" | "20+"
+export type LiveCountBucket = "quiet" | "5-9" | "10-19" | "20+"
 
 export function liveCountBucket(count: number): LiveCountBucket {
-  if (count <= 0) return "none"
-  if (count < MIN_CELL) return "a_few"
+  if (count < MIN_CELL) return "quiet"
   if (count < 10) return "5-9"
   if (count < 20) return "10-19"
   return "20+"

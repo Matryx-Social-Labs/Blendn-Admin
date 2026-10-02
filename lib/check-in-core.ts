@@ -4,7 +4,7 @@ import { outOfRangeMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
+import { ADULTS_ONLY, ageFrom, FINISH_ONBOARDING, isAdult, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
 import { openSession } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { evaluateCheckIn, type Geofence } from "@/lib/geofence"
@@ -88,6 +88,17 @@ export async function personAtTheDoor(
   // Not onboarded and no adult age on file: held here as at every door (SCRUM-331).
   if (!mayParticipate(profile)) return { refusal: errorResponse(FINISH_ONBOARDING, 403, ErrorCode.FORBIDDEN) }
 
+  /*
+   * A venue's live room is an adult room with no event to carry an age rule,
+   * so the account rule is its rule — and an unknown age is refused, not
+   * waved through. `mayParticipate` lets an onboarded account with no age, or
+   * an under-18 one from before the 18+ ruling, keep using what it used; it
+   * must not let either into a room of strangers at a bar (step 4 review).
+   */
+  if (!room && !isAdult(profileAge)) {
+    return { refusal: errorResponse(`${ADULTS_ONLY} Add your date of birth to your profile to go live.`, 403, ErrorCode.AGE_RESTRICTED) }
+  }
+
   const ageRefusal = room && minAgeRefusal(profileAge, room.minAge)
   if (room && ageRefusal) {
     recordRefusal({ eventId: room.eventId, userId, reason: "under_age" })
@@ -120,14 +131,26 @@ export function fenceRefusal(input: {
   fence: Geofence | null
   point: { lat: number; lng: number }
   gpsAccuracy: number | undefined
-  eventId: string
   userId: string
-  occurrenceId: string
+  /**
+   * Where the refusal is recorded, or null for none. Go Live judges the fence
+   * before it makes the venue's day, so that a refusal never creates the row
+   * it would be recorded against; it records only when the day exists.
+   */
+  record: { eventId: string; occurrenceId: string } | null
   noFenceMessage: string
+  /**
+   * The words for "outside", when the distance must not be told. A venue's
+   * area is drawn by nobody the caller knows, and "you are 40 m away", asked
+   * from a few places, draws it for them (D-x6). Events keep the distance:
+   * the fence is the organiser's door, and the number is how a guest finds it.
+   */
+  outsideMessage?: string
 }) {
+  const record = input.record
   if (!input.fence) {
-    logger.error("Check-in attempted with no area to check against", { eventId: input.eventId })
-    recordRefusal({ eventId: input.eventId, userId: input.userId, reason: "no_geofence" })
+    logger.error("Check-in attempted with no area to check against", { eventId: record?.eventId ?? null })
+    if (record) recordRefusal({ eventId: record.eventId, userId: input.userId, reason: "no_geofence" })
     return errorResponse(input.noFenceMessage, 400, ErrorCode.OUT_OF_RANGE)
   }
 
@@ -141,15 +164,17 @@ export function fenceRefusal(input: {
    * The shortfall and the reported accuracy, never the coordinates -- see
    * lib/check-in-refusals.ts.
    */
-  recordRefusal({
-    eventId: input.eventId,
-    userId: input.userId,
-    reason: "out_of_range",
-    occurrenceId: input.occurrenceId,
-    shortfallMetres: verdict.shortfall,
-    accuracyMetres: input.gpsAccuracy,
-  })
-  return errorResponse(outOfRangeMessage(verdict.shortfall), 400, ErrorCode.OUT_OF_RANGE)
+  if (record) {
+    recordRefusal({
+      eventId: record.eventId,
+      userId: input.userId,
+      reason: "out_of_range",
+      occurrenceId: record.occurrenceId,
+      shortfallMetres: verdict.shortfall,
+      accuracyMetres: input.gpsAccuracy,
+    })
+  }
+  return errorResponse(input.outsideMessage ?? outOfRangeMessage(verdict.shortfall), 400, ErrorCode.OUT_OF_RANGE)
 }
 
 export interface SeatInput {
@@ -168,7 +193,12 @@ export interface SeatInput {
   deviceInfo: CheckinInput["deviceInfo"]
   now: Date
   /** A Go Live window: written to the check-in and, as the room's cut-off, to the membership. */
-  live?: { expiresAt: Date; stayUntil: Date | null }
+  live?: { expiresAt: Date; stayUntil: Date | null; stay: boolean }
+  /**
+   * Going live again while live: the window moves, nobody arrived. The room
+   * is not told of an arrival that did not happen (step 4 review).
+   */
+  extending?: boolean
 }
 
 /**
@@ -225,7 +255,7 @@ export async function seatAtTheDoor(input: SeatInput) {
   const seededIntents = stripDating(profile?.intent_default ?? [], ageFrom(profile))
 
   // A Go Live's window, on the row the sweeper expires (null for an event).
-  const window = live ? { expires_at: live.expiresAt, stay_until: live.stayUntil } : {}
+  const window = live ? { expires_at: live.expiresAt, stay_until: live.stayUntil, stay: live.stay } : {}
 
   // Create or update check-in record
   const checkIn = await db.event_check_ins.upsert({
@@ -367,13 +397,15 @@ export async function seatAtTheDoor(input: SeatInput) {
 
   // Emit real-time check-in event: the pseudonym, except to whoever the
   // roster lets recognise them (the emitter decides, per recipient).
-  emitEventCheckIn(
-    eventId,
-    userId,
-    displayName,
-    { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
-    blockedIds
-  )
+  if (!input.extending) {
+    emitEventCheckIn(
+      eventId,
+      userId,
+      displayName,
+      { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
+      blockedIds
+    )
+  }
 
   /*
    * No push. Every arrival used to push "X just checked in!" to everybody
@@ -412,16 +444,24 @@ export async function seatAtTheDoor(input: SeatInput) {
   }
 }
 
-async function createRoom(input: SeatInput, eventId: string): Promise<{ id: string }> {
-  const { event } = input
+/**
+ * An event's room, made — or, when somebody else made it a moment ago, read
+ * back. The one writer of `chat_groups` for an event: the check-in door, Go
+ * Live and the event chat route all come here, so the race is handled once.
+ */
+export async function createRoom(
+  event: { kind: event_kind; title: string | null; venue_name: string | null },
+  eventId: string
+): Promise<{ id: string }> {
   // A venue day's room is named for the venue: its title is bookkeeping.
-  const roomName = event.kind === "venue_day" ? event.venue_name ?? "Live here" : `${event.title} Chat`
+  const eventTitle = event.title || "Event"
+  const roomName = event.kind === "venue_day" ? event.venue_name ?? "Live here" : `${eventTitle} Chat`
   try {
     return await db.chat_groups.create({
       data: {
         event_id: eventId,
         name: roomName,
-        description: event.kind === "venue_day" ? `Live at ${roomName} today` : `Chat for ${event.title}`,
+        description: event.kind === "venue_day" ? `Live at ${roomName} today` : `Chat for ${eventTitle}`,
         status: "active",
         member_count: 0,
       },
@@ -453,7 +493,7 @@ async function seatInRoom(input: SeatInput, eventId: string, now: Date): Promise
    * constraint's name, never `meta.target`, which the driver adapter leaves
    * empty (memory: P2002 has no target here).
    */
-  const chatGroup = (await db.chat_groups.findUnique({ where: { event_id: eventId }, select: { id: true } })) ?? (await createRoom(input, eventId))
+  const chatGroup = (await db.chat_groups.findUnique({ where: { event_id: eventId }, select: { id: true } })) ?? (await createRoom(input.event, eventId))
   const chatGroupId = chatGroup.id
 
   const existingMembership = await db.chat_group_members.findUnique({
@@ -486,7 +526,13 @@ async function seatInRoom(input: SeatInput, eventId: string, now: Date): Promise
         db.chat_group_members.update({
           where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
           data: {
-            status: "active",
+            /*
+             * A mute survives the door, as a human's ban does. It lifts on its
+             * own clock (`checkAndAutoUnmute`), not by walking out and back in
+             * — which, before this, any muted person could do at a venue in
+             * one tap (step 4 review).
+             */
+            status: existingMembership.status === "muted" ? "muted" : "active",
             last_allowed_at: cutOff,
             // Checking in again is the way back into a room you left
             // yourself (`POST /chat/groups/:id/leave`).

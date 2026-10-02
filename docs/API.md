@@ -682,8 +682,9 @@ there is a second page. Needs raw SQL.
 ### GET /venues/:venueId
 
 One venue, as the Go Live screen needs it. 404 for an unknown, archived or
-deleted venue; 403 `FORBIDDEN` for a profile neither onboarded nor of a known
-adult age (as at every door).
+deleted venue; 403 `FORBIDDEN` for a profile not onboarded, `AGE_RESTRICTED`
+for one with no known adult age (as at its door). 60 a minute per person, then
+429.
 
 ```json
 { "success": true, "data": {
@@ -692,7 +693,7 @@ adult age (as at every door).
              "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
              "claimed": false },
   "live": { "open": true, "closedReason": null, "eventId": null,
-            "liveNow": "a_few",
+            "liveNow": "quiet",
             "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false,
             "venueDayId": "…", "chatGroupId": "…" },
   "tonight": { "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
@@ -703,8 +704,8 @@ adult age (as at every door).
 | Field | Meaning |
 |---|---|
 | `live.open` | Whether going live here would be accepted now, the fence aside |
-| `live.closedReason` | `event_live_here` (a real event has the venue: check in to `live.eventId`) or `no_check_in_area` (nobody drew this venue's area) |
-| `live.liveNow` | `none`, `a_few` (1–4), `5-9`, `10-19` or `20+`. **Never a number** (D-19): a count that moved from 4 to 5 as you watched would tell you somebody just walked in |
+| `live.closedReason` | `event_live_here` (a real event has the venue: check in to `live.eventId`) or `no_check_in_area` (nobody drew this venue's area — judged against the same area as the door: today's copy once anybody went live) |
+| `live.liveNow` | `quiet` (fewer than 5, none included), `5-9`, `10-19` or `20+`. **Never a number** (D-19, D-x2): a count that moved from 4 to 5 as you watched would tell you somebody just walked in. Guests only (not the venue's staff), never counting you, read at most once a minute per venue, and slow to fall (it drops a bucket only once one more person would not hold it) |
 | `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
 | `tonight` | The next public event here before the venue's day resets (06:00 local by default), age-filtered for you, or null |
@@ -725,7 +726,9 @@ Go Live: be visible at this venue for a window you choose.
 
 `minutes` is `20`, `45` or `60`; or send `"stay": true` instead — 60 minutes,
 then each presence ping **inside** the area carries it on 20 minutes past the
-ping, up to four hours from choosing it. Anything else is `400`.
+ping, up to four hours from the first time you chose "stay" at this venue
+today (choosing it again does not restart the four hours). Anything else is
+`400`.
 
 ```json
 { "success": true, "data": {
@@ -738,18 +741,21 @@ ping, up to four hours from choosing it. Anything else is `400`.
 
 - **No window runs past the venue's reset** (06:00 local by default): a session
   open then ends `expired` there, and tomorrow is a new room with new
-  pseudonyms.
-- **Going live again while live extends**, never shortens. Going live somewhere
-  else, or checking in to an event, ends it as a switch.
+  pseudonyms. In the last five minutes before the reset, Go Live opens
+  tomorrow's room.
+- **Going live again while live extends**, never shortens, and the room is not
+  told of an arrival. Going live somewhere else, or checking in to an event,
+  ends it as a switch.
 - **When it ends** you are checked out (`departed_source = expired`), and the
   venue's room is closed to you at that second — reading, posting, the socket,
   the roster and the grid answer `403 NOT_LIVE` ("You're not live here any
   more. Go live at the venue to join today's room."). Your sockets get
   `live:ended` (docs/SOCKET_EVENTS.md) and leave its rooms. Leave early with
   `POST /events/:venueDayId/checkout`.
-- **When a public event at the venue starts**, everyone live there is checked
-  out (`ended`) and pushed once: "‹Event› just started here. Tap to check in."
-  (`kind: event_update`, `data.eventId`).
+- **When a public event at the venue starts** — its link confirmed by the
+  venue, or its own area at the venue — everyone live there is checked out
+  (`ended`) and pushed once: "An event just started here — tap to check in"
+  (`kind: event_update`, `data.eventId`). The words are ours, never the event's.
 - `POST /events/:venueDayId/presence` answers `expiresAt` too, and a ping past
   the end answers `{ status: "checked_out", reason: "expired" }`.
 
@@ -757,10 +763,10 @@ ping, up to four hours from choosing it. Anything else is `400`.
 |---|---|
 | 403 `PLUS_REQUIRED` | `stay` while Plus gating is on (off today: "stay" is everyone's) |
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
-| 403 `FORBIDDEN` | Not onboarded and no adult age |
-| 409 `EVENT_LIVE_HERE` | A public event linked to this venue is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
-| 400 `OUT_OF_RANGE` | A fix worse than 150 m, a venue with no check-in area, or a position outside it |
-| 429 `RATE_LIMITED` | 20 a minute per person |
+| 403 `FORBIDDEN` / `AGE_RESTRICTED` | Not onboarded / no known adult age (an unknown age is refused here) |
+| 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
+| 400 `OUT_OF_RANGE` | A fix worse than 150 m, a venue with no check-in area, or a position outside it — "You're not at ‹venue› yet.", never a distance. A refusal writes nothing: no venue day is made for it |
+| 429 `RATE_LIMITED` | 20 a minute per person; ceilings per address and per venue |
 
 ```json
 { "success": false, "error": "Friday session is on here. Check in to it instead.",
@@ -866,6 +872,10 @@ ended, and there is no auto-join — going live is the only way in. It closes at
 the venue's reset (`closesAt` is the reset, not a day later).
 
 ### GET /chat/groups
+A venue's room (a venue day) is listed only while your Go Live there is open;
+once it ends the room leaves the list — its last message and counts are not
+readable from outside a room you can no longer open.
+
 Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
 no `check_out_time`, so the room is live for them right now. The app lifts those
 rooms into The Banter's "Live now" rail and leaves them out of Recent.
@@ -2282,7 +2292,7 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | GET | `/categories` | List all categories |
 | GET | `/amenities` | The amenity vocabulary — what an event can say it offers |
 | GET | `/work-fields` | The eighteen coarse fields of work, as `{ slug, label }` |
-| GET | `/checkins/active` | Get user's active check-ins |
+| GET | `/checkins/active` | Get user's active check-ins. Each carries `kind` (`venue_day` is a Go Live: label it by `event.venueName`), `expiresAt` (a Go Live's end; null at an event) and `stay`. A Go Live past its end is never listed, swept or not |
 | POST | `/notifications/token` | Register push token |
 | DELETE | `/notifications/token` | Remove push token |
 | GET | `/notifications` | The notifications centre, newest first |

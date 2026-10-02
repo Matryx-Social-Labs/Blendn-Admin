@@ -93,7 +93,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      */
     // At a venue day, only while live: you see who is here while you can be seen (`inRoomWhere`).
     const attended = await db.event_check_ins.findFirst({
-      where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere() },
+      where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
       select: { id: true },
     })
 

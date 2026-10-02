@@ -151,7 +151,7 @@ export async function canJoinEventRoom(userId: string, eventId: string): Promise
     // closes with the rest of it (SCRUM-8).
     // any-kind: one room by id, and being checked in is how anybody enters a venue day's.
     // `inRoomWhere`: a venue day's roster is for the people live in it now.
-    where: { event_id: eventId, user_id: userId, check_in_time: { not: null }, event: { status: { not: "draft" } }, ...inRoomWhere() },
+    where: { event_id: eventId, user_id: userId, check_in_time: { not: null }, event: { status: { not: "draft" } }, ...inRoomWhere(userId) },
     select: { id: true },
   })
   return checkIn !== null

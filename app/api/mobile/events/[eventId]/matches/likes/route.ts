@@ -77,7 +77,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const [mine, theirs] = await Promise.all([
       // Both in the room — at a venue day, both live there now (`inRoomWhere`).
       db.event_check_ins.findFirst({
-        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null }, ...inRoomWhere() },
+        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null }, ...inRoomWhere(authUser.userId) },
         select: { id: true },
       }),
       likedId && db.event_check_ins.findFirst({

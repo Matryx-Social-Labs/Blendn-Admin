@@ -136,7 +136,19 @@
     ],
     "data": [
       "checkIns"
-    ]
+    ],
+    "nested": {
+      "checkIns[]": [
+        "checkInTime",
+        "event",
+        "eventId",
+        "expiresAt",
+        "id",
+        "kind",
+        "revealed",
+        "stay"
+      ]
+    }
   },
   "/api/mobile/board/requests": {
     "status": 200,

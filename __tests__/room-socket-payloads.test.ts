@@ -20,6 +20,8 @@ jest.mock("@/lib/db", () => ({
   db: {
     event_check_ins: { findMany: (...a: unknown[]) => mockFindMany(...a) },
     chat_groups: { findUnique: (...a: unknown[]) => mockChatGroup(...a) },
+    // The emitter asks a room's kind: a venue day's goes only to the people live in it.
+    events: { findUnique: async () => ({ kind: "event" }) },
   },
 }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn(), accountBlockReason: jest.fn() }))

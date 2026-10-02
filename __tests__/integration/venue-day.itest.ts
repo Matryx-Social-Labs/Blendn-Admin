@@ -21,6 +21,7 @@ const orgs: string[] = []
 afterAll(async () => {
   const days = await db.events.findMany({ where: { venue_id: { in: venues } }, select: { id: true } })
   const ids = days.map((d) => d.id)
+  await db.presence_sessions.deleteMany({ where: { event_id: { in: ids } } })
   await db.event_check_ins.deleteMany({ where: { event_id: { in: ids } } })
   await db.event_occurrences.deleteMany({ where: { event_id: { in: ids } } })
   await db.events.deleteMany({ where: { id: { in: ids } } })
@@ -277,13 +278,22 @@ describe("who owns a venue day", () => {
     const day = await venueDayFor(await venue(), new Date())
     const [a, b, c] = [await makeUser("vd_a"), await makeUser("vd_b"), await makeUser("vd_c")]
     users.push(a, b, c)
-    for (const user_id of [a, b]) {
+    const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000)
+    // a and b live at the same time; c later the same day, after a had gone (D-x4).
+    const windows: Array<[string, Date, Date | null]> = [[a, at(90), at(30)], [b, at(60), null], [c, at(20), null]]
+    for (const [user_id, arrived, departed] of windows) {
       await db.event_check_ins.create({
-        data: { event_id: day!.id, occurrence_id: day!.occurrenceId, user_id, status: "checked_in", check_in_time: new Date() },
+        data: { event_id: day!.id, occurrence_id: day!.occurrenceId, user_id, status: "checked_in", check_in_time: arrived },
+      })
+      await db.presence_sessions.create({
+        data: { event_id: day!.id, occurrence_id: day!.occurrenceId, user_id, arrived_at: arrived, departed_at: departed },
       })
     }
     expect(await haveSharedAnEvent(a, b)).toBe(true)
+    expect(await haveSharedAnEvent(b, c)).toBe(true)
+    // Same venue, same day, never there together.
     expect(await haveSharedAnEvent(a, c)).toBe(false)
+    expect(await haveSharedAnEvent(c, a)).toBe(false)
   })
 
   it("is a user nobody can sign in as", async () => {

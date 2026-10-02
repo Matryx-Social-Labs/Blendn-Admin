@@ -8,6 +8,8 @@ const mockDb = {
   // `emitPrivateRead` persists before it relays: the receipt used to be a live
   // broadcast that reverted to a single tick on reload.
   private_messages: { updateMany: jest.fn() },
+  // The emitter asks a room's kind: a venue day's goes only to the people live in it.
+  events: { findUnique: jest.fn().mockResolvedValue({ kind: "event" }) },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))

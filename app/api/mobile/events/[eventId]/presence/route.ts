@@ -16,6 +16,7 @@ import {
 } from "@/lib/presence"
 import { isUuid } from "@/lib/api-input"
 import { stayExtension } from "@/lib/go-live"
+import { scheduleLiveEnd } from "@/lib/live-timers"
 
 export const dynamic = "force-dynamic"
 
@@ -72,6 +73,7 @@ export async function POST(
       // A Go Live's window (venue days only; null at an event).
       expires_at: true,
       stay_until: true,
+      stay: true,
       // `id` is needed to move the presence session's heartbeat. Without it
       // the session goes stale PRESENCE_CUTOFF_MINUTES after arrival and the
       // room reads empty while everyone is still in it.
@@ -173,19 +175,31 @@ export async function POST(
     // their "stay" asks it here.
     (decision.reason === "staff_exempt" &&
       evaluateCheckIn({ lat: latitude, lng: longitude }, fence, body.accuracy ?? null).ok)
-  const extended =
+  const proposed =
     inside && checkIn.expires_at
-      ? stayExtension({ expiresAt: checkIn.expires_at, stayUntil: checkIn.stay_until }, now)
+      ? stayExtension({ expiresAt: checkIn.expires_at, stay: checkIn.stay, stayUntil: checkIn.stay_until }, now)
       : null
-  if (extended) {
-    await db.event_check_ins.updateMany({
-      where: { id: checkIn.id, status: "checked_in" },
-      data: { expires_at: extended, updated_at: now },
+  let extended: Date | null = null
+  if (proposed && checkIn.expires_at) {
+    /*
+     * Only the window this ping read: still checked in, still ending when it
+     * did. Between the read and this write the sweeper (or a timer) may have
+     * expired it, and an unguarded write would reopen the room to somebody
+     * already checked out. The membership's cut-off moves only when the
+     * window did (step 4 review).
+     */
+    const { count } = await db.event_check_ins.updateMany({
+      where: { id: checkIn.id, status: "checked_in", expires_at: checkIn.expires_at },
+      data: { expires_at: proposed, updated_at: now },
     })
-    await db.chat_group_members.updateMany({
-      where: { user_id: authUser.userId, chat_group: { event_id: eventId } },
-      data: { last_allowed_at: extended, updated_at: now },
-    })
+    if (count === 1) {
+      extended = proposed
+      await db.chat_group_members.updateMany({
+        where: { user_id: authUser.userId, chat_group: { event_id: eventId } },
+        data: { last_allowed_at: proposed, updated_at: now },
+      })
+      scheduleLiveEnd(checkIn.id, proposed)
+    }
   }
 
   const leftAt = decision.action === "record_departure" ? now : checkIn.left_area_at

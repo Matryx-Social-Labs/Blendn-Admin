@@ -80,7 +80,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const [mine, theirs] = await Promise.all([
       db.event_check_ins.findFirst({
         // At a venue day, a window still open (`inRoomWhere`), not the sweeper's lag.
-        where: { event_id: eventId, user_id: fromUserId, status: "checked_in", ...inRoomWhere() },
+        where: { event_id: eventId, user_id: fromUserId, status: "checked_in", ...inRoomWhere(fromUserId) },
         select: { id: true },
       }),
       toUserId && db.event_check_ins.findFirst({
