@@ -612,7 +612,11 @@ registry.registerPath({
   summary: "Like someone from this event",
   description:
     "A mutual like opens a conversation. The response never reveals whether the other person liked you first.\n\n" +
-    "`userId` must be the handle this event's deck or roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as an unknown person — 404 `User not found` — because a raw-id like would say whether that account is in this room. Your own id is 400.",
+    "`userId` must be the handle this event's deck or roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as an unknown person — 404 `User not found` — because a raw-id like would say whether that account is in this room. Your own id is 400." +
+    "\n\nWith `asCrewId` it is a **crew → person** like, on your crew's behalf (step 8): your crew must be here (two of you checked in; 403 otherwise) with " +
+    "\"Room for one more\" on and 6 or fewer members (403), and the person here now, opted in to crews for this event, in no block with any member " +
+    "of the crew, and — if your crew is out for dating — out for dating too; any of those about them is the same 404 `User not found`. " +
+    "Answers `{ liked: true, blend }`: `blend` is the Blend room when they had liked your crew. Your crew chat says you liked them for the crew.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

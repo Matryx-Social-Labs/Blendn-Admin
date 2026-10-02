@@ -460,6 +460,10 @@ export async function identityForRef(
  *   friend invited them and they accepted, which is the friend-surface rule
  *   (2026-09-27): both said yes, so real names. The first name only, never the
  *   full one (SCRUM-493: a full name reaching a room was a defect).
+ * - **A Blend's room: tonight's pseudonym** — the one each person carries in
+ *   the event's own room, so two crews meet as the menagerie they saw on the
+ *   card. A reveal shows on the Blend's people list (`blendView`, through
+ *   `visibleInRoom`, the event room's one rule), never in the chat.
  * - **Every other room: the pseudonym on their member row in it**, as before —
  *   an event's, a venue day's, a board post's. Nobody is named in those here;
  *   who may be recognised there is `visibleInRoom`'s question, asked by the
@@ -484,8 +488,15 @@ export async function namesInRoom(
     )
     return new Map(ids.map((id) => [id, named.get(id) ?? UNNAMED]))
   }
+  // A Blend's people go by their names in the event's room; anything else by its own rows.
+  const eventId =
+    room.kind === "blend"
+      ? (await db.chat_groups.findUnique({ where: { id: room.id }, select: { blend: { select: { occurrence: { select: { event_id: true } } } } } }))
+          ?.blend?.occurrence.event_id
+      : undefined
+  if (room.kind === "blend" && !eventId) return new Map(ids.map((id) => [id, "Attendee"]))
   const rows = await db.chat_group_members.findMany({
-    where: { chat_group_id: room.id, user_id: { in: ids } },
+    where: { ...(eventId ? { chat_group: { event_id: eventId } } : { chat_group_id: room.id }), user_id: { in: ids } },
     select: { user_id: true, anonymous_name: true },
   })
   const named = new Map(rows.map((r) => [r.user_id, r.anonymous_name || "Attendee"]))

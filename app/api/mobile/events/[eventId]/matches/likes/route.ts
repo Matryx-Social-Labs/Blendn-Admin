@@ -15,6 +15,8 @@ import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import { likeAtEvent } from "@/lib/matches"
+import { isRefusal, refusalResponse } from "@/lib/crews/crews"
+import { likePersonAsCrew } from "@/lib/crews/like"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { announceRoomMatch } from "@/lib/room-match"
@@ -27,7 +29,11 @@ interface RouteParams {
 
 // User ids are cuid, not uuid — do not tighten this to z.string().uuid(). And
 // the deck sends room handles (`rh_…`, SCRUM-371), which are neither.
-const likeSchema = z.object({ userId: z.string().min(1) })
+const likeSchema = z.object({
+  userId: z.string().min(1),
+  /** Like them on your crew's behalf (crew → person, step 8): lib/crews/like.ts decides. */
+  asCrewId: z.string().uuid().optional(),
+})
 
 /**
  * Like someone who was in the room with you.
@@ -64,6 +70,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (likedId === authUser.userId) {
       return errorResponse("You cannot like yourself")
+    }
+
+    /*
+     * On a crew's behalf: a different like with its own guardrails — the
+     * person opted in to crews, the crew has room for one more and is 6 or
+     * fewer, dating only if both chose it, no block across any member — and
+     * its own outcome, a Blend rather than a conversation. One writer of
+     * `crew_likes` (lib/crews/like.ts).
+     */
+    if (parsed.data.asCrewId) {
+      if (!likedId) return notFoundResponse("User not found")
+      const outcome = await likePersonAsCrew(authUser.userId, eventId, parsed.data.asCrewId, likedId)
+      return isRefusal(outcome) ? refusalResponse(outcome) : successResponse(outcome)
     }
 
     /*

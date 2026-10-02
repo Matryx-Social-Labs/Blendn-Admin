@@ -5,6 +5,7 @@ import { lockPair, severFriendship } from "@/lib/friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { closeBlendsBetween } from "@/lib/crews/like"
 import { blockIdFromRef, userIdFromRef } from "@/lib/room-handle"
 import { isUuid } from "@/lib/api-input"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -159,6 +160,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (closedConversationId) {
       closeConversationRoom(closedConversationId)
     }
+    // And any Blend with one of them on each side (§6 Safety): closed, emptied.
+    await closeBlendsBetween(authUser.userId, targetId)
 
     return successResponse({ blocked: true })
   } catch (error) {

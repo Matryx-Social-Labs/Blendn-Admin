@@ -17,6 +17,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { closeBlendsBetween } from "@/lib/crews/like"
 
 interface RouteParams {
   params: Promise<{ requestId: string }>
@@ -161,6 +162,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         create: { blocker_id: authUser.userId, blocked_id: messageRequest.sender_id },
         update: {},
       })
+      // And any Blend with one of them on each side (§6 Safety).
+      await closeBlendsBetween(authUser.userId, messageRequest.sender_id)
     }
 
     // Notify the original sender of the response (async, don't await)

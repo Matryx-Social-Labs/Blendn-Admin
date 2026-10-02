@@ -497,9 +497,10 @@ export async function emitChatTyping(
     // the same people `emitChatMessage` leaves out. Typing went to the whole
     // room, so a blocker watched the person they blocked type (SCRUM-338).
     const hidden = await blockCounterparties(socket.data.userId)
-    // A crew's room calls its members by first name; any other by the pseudonym on the row.
+    // A crew's room calls its members by first name, a Blend's by tonight's
+    // pseudonym (`namesInRoom`); an event's by the pseudonym on the row.
     const userName =
-      membership.chat_group.kind === "crew"
+      membership.chat_group.kind !== "event"
         ? ((await namesInRoom(membership.chat_group, [socket.data.userId])).get(socket.data.userId) ?? "Someone")
         : membership.anonymous_name || "Someone"
     /*

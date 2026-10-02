@@ -47,10 +47,14 @@ describe("a match snapshots what it needs at the moment it happens", () => {
 
 describe("revealing in the room carries into DMs from that room", () => {
   const src = read(PREFS)
+  // Shared with the crew reveal since step 8: `revealConversationsFrom` in lib/matches.ts.
+  const lib = read("lib/matches.ts")
+  const propagate = lib.slice(lib.indexOf("export async function revealConversationsFrom"), lib.indexOf("export async function revealAt"))
 
   it("updates conversations from this event, on the matching side", () => {
-    expect(src).toMatch(/origin_event_id: eventId[\s\S]{0,200}user1_revealed: false/)
-    expect(src).toMatch(/origin_event_id: eventId[\s\S]{0,200}user2_revealed: false/)
+    expect(src).toMatch(/if \(revealed === true\) await revealConversationsFrom\(eventId, \[authUser\.userId\]\)/)
+    expect(propagate).toMatch(/origin_event_id: eventId[\s\S]{0,200}user1_revealed: false/)
+    expect(propagate).toMatch(/origin_event_id: eventId[\s\S]{0,200}user2_revealed: false/)
   })
 
   it("only ever propagates true, never false", () => {
@@ -60,14 +64,18 @@ describe("revealing in the room carries into DMs from that room", () => {
      * otherwise would be the app lying about what it can do.
      */
     expect(src).toContain("if (revealed === true)")
-    expect(src).not.toMatch(/data: \{ user1_revealed: false \}/)
-    expect(src).not.toMatch(/data: \{ user2_revealed: false \}/)
+    for (const code of [src, propagate]) {
+      expect(code).not.toMatch(/data: \{ user1_revealed: false \}/)
+      expect(code).not.toMatch(/data: \{ user2_revealed: false \}/)
+    }
   })
 
   it("skips closed conversations", () => {
     // Nobody to reveal to. Also keeps a closed row from being rewritten by a
     // later room action.
-    expect(src).toMatch(/origin_event_id: eventId[\s\S]{0,200}closed_at: null/)
+    expect(propagate).toMatch(/origin_event_id: eventId[\s\S]{0,200}closed_at: null/)
+    // On both sides' updates, not one.
+    expect(propagate.match(/closed_at: null/g)).toHaveLength(2)
   })
 })
 

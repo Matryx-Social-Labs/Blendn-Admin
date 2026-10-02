@@ -17,6 +17,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { readJson, isUuid } from "@/lib/api-input"
+import { revealConversationsFrom } from "@/lib/matches"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -33,6 +34,12 @@ const preferencesSchema = z.object({
     })
     .optional(),
   revealed: z.boolean().optional(),
+  /**
+   * "Open to joining a crew tonight" (plan v2 §8.3): without it a person here
+   * alone is never shown crews, and no crew can like them. Per event, off
+   * until they say so.
+   */
+  openToCrews: z.boolean().optional(),
 
   /*
    * Two remembers, because one of them was writing something it never said.
@@ -85,7 +92,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const parsed = preferencesSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { intent, revealed, remember } = parsed.data
+    const { intent, revealed, openToCrews, remember } = parsed.data
     // The deprecated flag means both, which is what it always did.
     const rememberIntent = parsed.data.rememberIntent ?? remember ?? false
     const rememberReveal = parsed.data.rememberReveal ?? remember ?? false
@@ -133,13 +140,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         user_id: authUser.userId,
         intent: intent ?? [],
         revealed: revealed ?? false,
+        open_to_crews: openToCrews ?? false,
       },
       update: {
         ...(intent !== undefined ? { intent } : {}),
         ...(revealed !== undefined ? { revealed } : {}),
+        ...(openToCrews !== undefined ? { open_to_crews: openToCrews } : {}),
         updated_at: new Date(),
       },
-      select: { intent: true, revealed: true },
+      select: { intent: true, revealed: true, open_to_crews: true },
     })
 
     /*
@@ -155,28 +164,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * implied otherwise would be a lie. `revealed: false` in the filter is what
      * makes it monotonic — an already-revealed side is left alone.
      */
-    if (revealed === true) {
-      await Promise.all([
-        db.private_conversations.updateMany({
-          where: {
-            origin_event_id: eventId,
-            user1_id: authUser.userId,
-            user1_revealed: false,
-            closed_at: null,
-          },
-          data: { user1_revealed: true },
-        }),
-        db.private_conversations.updateMany({
-          where: {
-            origin_event_id: eventId,
-            user2_id: authUser.userId,
-            user2_revealed: false,
-            closed_at: null,
-          },
-          data: { user2_revealed: true },
-        }),
-      ])
-    }
+    if (revealed === true) await revealConversationsFrom(eventId, [authUser.userId])
 
     if (rememberIntent || rememberReveal) {
       await db.profiles.update({
@@ -188,7 +176,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       })
     }
 
-    return successResponse(updated)
+    return successResponse({ intent: updated.intent, revealed: updated.revealed, openToCrews: updated.open_to_crews })
   } catch (error) {
     logger.error("Match preferences error", {
       error: error instanceof Error ? error.message : String(error),

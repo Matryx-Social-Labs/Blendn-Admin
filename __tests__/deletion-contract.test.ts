@@ -103,6 +103,14 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "DELETED",
     why: "Invites to them and from them: an invite from an erased account would put a ghost's name on somebody's screen, and one to them can never be accepted.",
   },
+  crew_likes: {
+    how: "RETAINED",
+    why: "A like a crew made is the crew's, and a like on a person is half of somebody else's Blend: `liked_by_user_id` stays as the record of who tapped (CR-I15), on an account that is anonymised, never deleted. Nothing reads it to name anybody.",
+  },
+  blends: {
+    how: "RETAINED",
+    why: "A Blend is two sides' shared night and the owner of a room of other people's messages (RESTRICT). An erased solo side is out of it at once — the door refuses a deleted account — and it closes 12 hours after the night anyway.",
+  },
   crews: {
     how: "RETAINED",
     why: "A crew belongs to the friends still in it, not to whoever made it: its name and bio are the crew's, `created_by` is an audit field, and the crew goes on (or dissolves) without them.",

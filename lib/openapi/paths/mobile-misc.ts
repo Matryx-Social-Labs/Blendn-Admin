@@ -522,6 +522,7 @@ const NotificationSchema = z.object({
     "rating_request",
     "crew_invite",
     "crew_here",
+    "blend",
   ]),
   title: z.string(),
   body: z.string(),

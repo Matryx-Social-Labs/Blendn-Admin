@@ -488,11 +488,22 @@ export const MatchListResponseSchema = z
   .openapi("MatchListResponse")
 
 export const LikeRequestSchema = z
-  .object({ userId: ThisRoomRefSchema })
+  .object({
+    userId: ThisRoomRefSchema,
+    /** Like them on your crew's behalf (crew → person); see the description. */
+    asCrewId: z.string().uuid().optional(),
+  })
   .openapi("LikeRequest")
 
 export const LikeResponseSchema = z
-  .object({ mutual: z.boolean(), conversationId: z.string().optional() })
+  .object({
+    mutual: z.boolean().optional(),
+    conversationId: z.string().optional(),
+    /** With `asCrewId`: the crew like was recorded. */
+    liked: z.literal(true).optional(),
+    /** With `asCrewId`: the Blend it made, if they had liked your crew. */
+    blend: z.object({ blendId: z.string().uuid(), chatGroupId: z.string().uuid() }).nullable().optional(),
+  })
   .openapi("LikeResponse")
 
 export const RoomPreviewResponseSchema = z
@@ -516,6 +527,8 @@ export const MatchPreferencesSchema = z
   .object({
     intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).optional(),
     revealed: z.boolean().optional(),
+    /** "Open to joining a crew tonight": crews are shown to you, and may like you, only with this on. */
+    openToCrews: z.boolean().optional(),
     /** Writes `profiles.intent_default`. */
     rememberIntent: z.boolean().optional(),
     /** Writes `profiles.reveal_by_default` — the *suggestion*, not a state. */

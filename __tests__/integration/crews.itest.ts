@@ -218,7 +218,7 @@ describe("the database holds the shape", () => {
     await expect(insert("event", eventId, null).then(() => insert("event", null, null))).rejects.toThrow(oneOwner)
     await insert("crew", crew.id, null)
     await expect(insert("crew", crew.id, null)).rejects.toThrow(/23505[\s\S]*chat_groups_crew_id_key/)
-    // No Blend owner yet.
+    // Nor a Blend room without its Blend (blends.itest.ts proves that arm).
     await expect(insert("blend", null, null)).rejects.toThrow(oneOwner)
   })
 

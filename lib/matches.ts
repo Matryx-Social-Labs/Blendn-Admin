@@ -630,3 +630,47 @@ export async function likeAtEvent(
     throw e
   }
 }
+
+/**
+ * Going public in a room carries into the DMs already opened from it.
+ *
+ * Somebody who reveals mid-event has shown their name and face to everyone
+ * there — including people they already matched with — so a DM still calling
+ * them by their pseudonym would protect nothing. Monotonic: `revealed: false`
+ * in the filter leaves a revealed side alone, and nothing here ever hides a
+ * name again (D-10: a reveal can't be unseen).
+ */
+export async function revealConversationsFrom(eventId: string, userIds: readonly string[]): Promise<void> {
+  if (userIds.length === 0) return
+  const ids = [...userIds]
+  await Promise.all([
+    db.private_conversations.updateMany({
+      where: { origin_event_id: eventId, user1_id: { in: ids }, user1_revealed: false, closed_at: null },
+      data: { user1_revealed: true },
+    }),
+    db.private_conversations.updateMany({
+      where: { origin_event_id: eventId, user2_id: { in: ids }, user2_revealed: false, closed_at: null },
+      data: { user2_revealed: true },
+    }),
+  ])
+}
+
+/**
+ * These people's reveal at this event — `event_match_preferences.revealed`,
+ * the one flag every room surface reads through `visibleInRoom` — and the
+ * DMs from it. For the crew reveal (lib/crews/blends.ts), which writes each
+ * consenting member's own per-event reveal: there is no other identity path.
+ */
+export async function revealAt(eventId: string, userIds: readonly string[]): Promise<void> {
+  if (userIds.length === 0) return
+  await db.$transaction(
+    userIds.map((id) =>
+      db.event_match_preferences.upsert({
+        where: { event_id_user_id: { event_id: eventId, user_id: id } },
+        create: { event_id: eventId, user_id: id, intent: [], revealed: true },
+        update: { revealed: true, updated_at: new Date() },
+      })
+    )
+  )
+  await revealConversationsFrom(eventId, userIds)
+}

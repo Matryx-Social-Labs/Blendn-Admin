@@ -53,9 +53,11 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
 
   /*
    * A board post's room closes `OWNER_ROOM_HOURS` after the post's event ends
-   * (E2; a Blend's will, in step 8). Its door already refuses writes on the
-   * clock (`roomWindowFor`); this archives it, releases its members and takes
-   * their sockets out (E3). A crew's room never closes on a clock.
+   * (E2), and a Blend's at its `closes_at` (the occurrence's end + the same
+   * twelve hours) or when a block across its sides closed it early. Their
+   * doors already refuse on the clock (`roomWindowFor`, `roomOwnerDenial`);
+   * this archives them, releases their members and takes their sockets out
+   * (E3). A crew's room never closes on a clock.
    */
   const ownerExpired = await db.chat_groups.findMany({
     where: {
@@ -67,10 +69,21 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
     select: { id: true },
     take: SWEEP_BATCH,
   })
+  const blendsOver = await db.chat_groups.findMany({
+    where: {
+      status: "active",
+      kind: "blend",
+      blend: { OR: [{ closes_at: { lte: new Date(now) } }, { closed_at: { not: null } }] },
+    },
+    select: { id: true },
+    take: SWEEP_BATCH,
+  })
 
-  if (expired.length === 0 && ownerExpired.length === 0) return { archived: 0, released: 0, hasMore: false }
+  if (expired.length === 0 && ownerExpired.length === 0 && blendsOver.length === 0) {
+    return { archived: 0, released: 0, hasMore: false }
+  }
 
-  const ids = [...expired, ...ownerExpired].map((group) => group.id)
+  const ids = [...expired, ...ownerExpired, ...blendsOver].map((group) => group.id)
 
   const [archived, released] = await db.$transaction([
     db.chat_groups.updateMany({
@@ -103,13 +116,13 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
   ])
 
   // Only another kind's: an archived event room stays readable to its members, as before.
-  for (const { id } of ownerExpired) closeRoomSockets(id)
+  for (const { id } of [...ownerExpired, ...blendsOver]) closeRoomSockets(id)
 
   return {
     // What changed, not what was selected.
     archived: archived.count,
     released: released.count,
-    hasMore: expired.length === SWEEP_BATCH || ownerExpired.length === SWEEP_BATCH,
+    hasMore: expired.length === SWEEP_BATCH || ownerExpired.length === SWEEP_BATCH || blendsOver.length === SWEEP_BATCH,
   }
 }
 
