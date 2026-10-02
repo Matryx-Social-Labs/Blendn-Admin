@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation"
 
-import { MetricTile } from "@/components/dashboard/primitives"
+import { KpiStrip } from "@/components/dashboard/kit"
 import { getAuth } from "@/lib/auth"
 import { attendeeRoster } from "@/lib/attendee-roster"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
@@ -40,23 +40,25 @@ export default async function AttendeesPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap gap-1">
-        <MetricTile label="Unique attendees" value={formatNumber(uniqueAttendees)} />
-        <MetricTile
-          label="Came back"
-          value={repeatCount}
-          hint={
-            uniqueAttendees === 0
-              ? "needs 2+ events"
-              : `${Math.round((repeatCount / uniqueAttendees) * 100)}% of attendees`
-          }
-        />
-        <MetricTile
-          label="No-show rate"
-          value={noShowPct === null ? null : formatPct(noShowPct)}
-          hint={noShowPct === null ? "needs a past event" : "committed RSVPs who didn't check in"}
-        />
-      </div>
+      {/* Every figure here is free and stays free (pricing audit §6.1). */}
+      <KpiStrip
+        items={[
+          { label: "Unique attendees", value: formatNumber(uniqueAttendees), hint: "checked in at least once" },
+          {
+            label: "Came back",
+            value: repeatCount,
+            hint:
+              uniqueAttendees === 0
+                ? "needs 2+ events"
+                : `${Math.round((repeatCount / uniqueAttendees) * 100)}% of attendees`,
+          },
+          {
+            label: "No-show rate",
+            value: noShowPct === null ? null : formatPct(noShowPct),
+            hint: noShowPct === null ? "needs a past event" : "committed RSVPs who didn't check in",
+          },
+        ]}
+      />
 
       <AttendeesTable rows={rows} />
     </div>
