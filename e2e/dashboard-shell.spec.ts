@@ -255,6 +255,23 @@ test.describe("the shell", () => {
     await ctx.close()
   })
 
+  test("at the 767/768 seam there is exactly one nav surface", async ({ baseURL }) => {
+    // Below 768 the sheet, at 768 and up the sidebar — never both, never neither.
+    for (const [width, desktop] of [[767, false], [768, true]] as const) {
+      const { ctx, page } = await open("organizer", width, baseURL)
+      await page.goto("/dashboard", { waitUntil: "networkidle" })
+      if (desktop) {
+        await expect(sidebar(page)).toBeVisible()
+        await expect(page.locator('[data-mobile="true"]')).toHaveCount(0)
+      } else {
+        await expect(sidebar(page)).toBeHidden()
+        await clickUntil(page, trigger(page), () => expect(page.locator('[data-mobile="true"]')).toBeVisible({ timeout: 1000 }))
+        await expect(sidebar(page)).toBeHidden()
+      }
+      await ctx.close()
+    }
+  })
+
   for (const width of [768, 1440]) {
     test(`at ${width} the sidebar collapses out of the tab order, and comes back`, async ({ baseURL }) => {
       const { ctx, page } = await open("organizer", width, baseURL)
