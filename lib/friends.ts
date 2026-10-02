@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { blockedEitherWay, conversationPair, pairIsClosed } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
 import { UNNAMED } from "@/lib/conversation-identity"
+import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 
 /**
  * Friends: two people who both said yes.
@@ -330,10 +331,15 @@ export async function withdrawFriendRequest(requestId: string, senderId: string)
 /**
  * No longer friends. Silent — nobody is told — and it leaves any conversation
  * alone: unfriending is not blocking, and the DM is the pair's own record.
+ * The crew invites between them go with it: an invite is a friend asking
+ * (lib/crews/blocks.ts).
  */
 export async function unfriend(a: string, b: string): Promise<void> {
   const [user1_id, user2_id] = conversationPair(a, b)
-  await db.friendships.deleteMany({ where: { user1_id, user2_id } })
+  await db.$transaction(async (tx) => {
+    await tx.friendships.deleteMany({ where: { user1_id, user2_id } })
+    await dropCrewInvitesBetween(tx, a, b)
+  })
 }
 
 /**
@@ -347,11 +353,13 @@ export async function unfriend(a: string, b: string): Promise<void> {
 export async function severFriendship(
   a: string,
   b: string,
-  client: Pick<typeof db, "friendships" | "friend_requests">
+  client: Pick<typeof db, "friendships" | "friend_requests" | "crew_invites">
 ): Promise<void> {
   const [user1_id, user2_id] = conversationPair(a, b)
   await client.friendships.deleteMany({ where: { user1_id, user2_id } })
   await client.friend_requests.deleteMany({ where: eitherWay(a, b) })
+  // And any crew invite between them (C5): one friend asking the other.
+  await dropCrewInvitesBetween(client, a, b)
 }
 
 /*

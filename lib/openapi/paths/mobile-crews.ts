@@ -6,7 +6,7 @@ import { standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
  * friend graph, 2–12 people, a crew chat (a room of kind `crew`), "We're here",
  * and crew cards at an event. Inside a crew people are named (first name and
- * photo); outside it a crew is an emblem, a name and tonight's pseudonyms.
+ * photo); outside it a crew is an emblem, a name and counts — never a person.
  */
 
 const bearerAuth = [{ bearerAuth: [] }]
@@ -17,9 +17,11 @@ const json = (schema: z.ZodTypeAny) => ({ content: { "application/json": { schem
 const CREW_404 =
   "A crew you are not in — or that does not exist, or has dissolved — is the same 404, so nothing here says which crews exist. "
 const ADULTS =
-  "403 \"Crews are for people 18 and over who have finished setting up.\" for an account under 18 or not finished onboarding. "
+  "403 \"Crews are for people 18 and over who have finished setting up.\" for an account under 18, with no age, or not finished onboarding. "
 const TEXT_CHECKS =
-  "The name (2–32 characters, not unique) and bio (≤140) go through the moderation pipeline and a strict contact-detail " +
+  "The name (2–32 characters, not unique) and bio (≤140) are folded first — compatibility forms (fullwidth, ligatures), any script's " +
+  "digits to 0–9, look-alike Cyrillic and Greek letters to Latin — and stored folded; a name with an invisible character in it " +
+  "(zero-width, bidi override; an emoji's own joiner aside) is 400, a bio has them stripped. Then the moderation pipeline and a strict contact-detail " +
   "check — phone numbers, handles, emails and web addresses, written out or spelled (\"nine eight…\", \"at gmail dot com\"). " +
   "A refusal is 400 with a sentence saying which, and nothing is written. "
 
@@ -72,12 +74,12 @@ const CrewCardSchema = z
     name: z.string(),
     bio: z.string().nullable(),
     emblemSeed: z.string(),
-    size: z.number().int().describe("\"Crew of N\""),
+    size: z.number().int().describe("\"Crew of N\": its active members"),
     presentCount: z.number().int().describe("\"Here now · N of size\" — always ≥ 2"),
     tags: z.array(Tag),
     intent: z.array(Intent),
-    menagerie: z.array(z.string()).describe("Tonight's room pseudonyms of the members here now. Never a name or a photo"),
   })
+  .describe("Counts only: never a person's name, photo or pseudonym")
   .openapi("CrewCard")
 
 const CrewFields = {
@@ -113,7 +115,9 @@ registry.registerPath({
     ADULTS +
     TEXT_CHECKS +
     "You are its owner. `inviteUserIds` must all be your friends (a non-friend is the same 404 whoever they are, and nothing is written); " +
-    "each gets a push that names nobody. The crew chat is made with the crew.",
+    "each gets a push that names nobody (one per inviter and invitee a day). `invited` is how many you asked for — a friend kept apart from you " +
+    "(a block or a closed conversation) is left out without a word. The crew chat is made with the crew. " +
+    "Caps: 409 when you already own 3 standing crews or are in 10; 429 after 3 new crews in 24 hours.",
   security: bearerAuth,
   request: {
     body: json(
@@ -146,6 +150,28 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/report",
+  tags,
+  summary: "Report a crew's card",
+  description:
+    "Its name or bio. Reaches the admin queue with the name and bio as they read now; a moderator can hide the crew (no card, likes or " +
+    "Blends; its members keep it) or dissolve it. Nobody in the crew is told. A second report from you while the first waits is the same " +
+    "report (201 either way). 404 for a crew that is not there. Capped per minute and per day.",
+  security: bearerAuth,
+  request: {
+    params: crewParams,
+    body: json(
+      z.object({
+        reason: z.enum(["spam", "offensive", "contact_details", "impersonation", "other"]),
+        description: z.string().max(500).optional(),
+      })
+    ),
+  },
+  responses: { 201: { description: "Reported", ...json(wrap(z.object({ reported: z.literal(true) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
   method: "patch",
   path: "/api/mobile/crews/{crewId}",
   tags,
@@ -163,8 +189,11 @@ registry.registerPath({
   summary: "Invite friends into a crew",
   description:
     CREW_404 +
-    "Any member, their own friends only (the same 404 for anyone else). Somebody already in, or already invited " +
-    "— whatever they answered — is skipped and not re-notified. 409 when members plus open invites would pass 12.",
+    "Any member, their own friends only (the same 404 for anyone else, and nothing is written). Each friend is then invited, or skipped " +
+    "without a word: already in, or invited and the invite still open; declined in the last 30 days; removed by the owner (only an owner's " +
+    "invite brings them back); kept apart from anybody in the crew (a block or a closed conversation). `invited` is how many you asked for " +
+    "either way, so it says nothing about anybody. An invite lapses after 14 days and can be sent again. One push per inviter and invitee a day. " +
+    "409 when members plus open invites would pass 12.",
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ userIds: z.array(z.string()).min(1).max(11) })) },
   responses: { 200: { description: "Invited", ...json(wrap(z.object({ invited: z.number().int() }))) }, ...standardErrors },
@@ -177,7 +206,9 @@ registry.registerPath({
   summary: "Accept my invite",
   description:
     ADULTS +
-    "404 without an open invite. 409 when the crew already has 12 — counted under a lock, so two accepts at once cannot both take the last seat. " +
+    "404 without an open invite — and the same 404 when whoever invited you has left the crew or is no longer your friend, or you are kept " +
+    "apart (a block or a closed conversation, either way) from anybody in it. 409 when the crew already has 12 — counted under a lock, so " +
+    "two accepts at once cannot both take the last seat — or when you are already in 10 crews. " +
     "Joining is the reveal consent; `keepMeAnonymous` is the personal override.",
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ revealConsent: Consent, keepMeAnonymous: z.boolean().optional() })) },
@@ -189,7 +220,7 @@ registry.registerPath({
   path: "/api/mobile/crews/{crewId}/join",
   tags,
   summary: "Decline my invite",
-  description: "Nobody is told. The invite stops showing, and inviting you again does not re-notify you.",
+  description: "Nobody is told. The invite stops showing, and for 30 days inviting you again neither re-invites nor re-notifies you.",
   security: bearerAuth,
   request: { params: crewParams },
   responses: { 200: { description: "Declined", ...json(wrap(z.object({ declined: z.literal(true) }))) }, ...standardErrors },
@@ -218,8 +249,9 @@ registry.registerPath({
   description:
     CREW_404 +
     "Your own id leaves. The owner removes somebody by their handle in the crew's room (from `GET /crews/{crewId}`); a raw id or " +
-    "another room's handle names nobody. An owner who leaves hands the crew to whoever has been in it longest. " +
-    "A crew left with one person dissolves (`dissolved: true`): its chat archives and closes.",
+    "another room's handle names nobody. A removal sticks: only an owner's invite brings them back. An owner who leaves hands the crew " +
+    "to the active member who has been in it longest. A crew left with fewer than two active members (suspended and erased people do " +
+    "not count) dissolves (`dissolved: true`): its chat archives and closes.",
   security: bearerAuth,
   request: { params: z.object({ crewId: z.string().uuid(), userId: UserRefParamSchema }) },
   responses: { 200: { description: "Out", ...json(wrap(z.object({ dissolved: z.boolean() }))) }, ...standardErrors },
@@ -233,9 +265,10 @@ registry.registerPath({
   description:
     CREW_404 +
     "You must be checked in at the event now (403 otherwise); nobody else is checked in by this — each member checks in by their own GPS. " +
-    "Writes a line in the crew chat (type `system`, metadata `{ kind: \"crew_here\", eventId }`) and pushes every other member " +
-    "who has not muted the crew chat, turned notifications off or blocked you — once per person per night " +
-    "(`repeated: true` after that). The push names nobody and no place. 403 when the host turned crews off.",
+    "Writes a line in the crew chat (type `system`, metadata `{ kind: \"crew_here\", eventId, occurrenceId }`) and pushes every other " +
+    "member who has not muted the crew chat or blocked you — once per person per crew per occurrence (`repeated: true` after that; the " +
+    "line itself is the record, so it holds across restarts). Somebody who turned notifications off gets the bell line, not a push. " +
+    "The push names nobody and no place. 403 when the host turned crews off.",
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
   responses: {
@@ -250,12 +283,19 @@ registry.registerPath({
   tags,
   summary: "Crews here now",
   description:
-    "For somebody checked in here now (403 `NOT_CHECKED_IN` otherwise). A crew is here when two or more of its members are checked in at this " +
-    "occurrence — derived, never stored. Never your own crews (those are `myCrews`), never a crew with any member in a block either way with " +
-    "you or any member of your crews here. Without a crew of your own here you see crews only after opting in to crews for this event, " +
-    "and only crews with room for one more and no bigger than 6. `crewsEnabled: false` when the host turned crews off.",
+    "For somebody checked in here now (403 `NOT_CHECKED_IN` otherwise). A crew is here when two or more of its active members are checked in " +
+    "at this occurrence — derived, never stored. Never your own crews (those are `myCrews`), never a hidden crew, never a crew with any member " +
+    "kept apart (a block or a closed conversation, either way) from you or any member of your crews here. Without a crew of your own here " +
+    "you see crews only after opting in (\"Open to joining a crew tonight\", for the night you said it), and only crews with room for one more " +
+    "and no bigger than 6. Cards carry counts, never people. Most here first, a page at a time. `crewsEnabled: false` when the host turned crews off.",
   security: bearerAuth,
-  request: { params: z.object({ eventId: z.string().uuid() }) },
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    query: z.object({
+      limit: z.number().int().min(1).max(50).optional().describe("Default 30"),
+      offset: z.number().int().min(0).optional(),
+    }),
+  },
   responses: {
     200: {
       description: "Crews",
@@ -265,6 +305,8 @@ registry.registerPath({
             crewsEnabled: z.boolean(),
             crews: z.array(CrewCardSchema),
             myCrews: z.array(z.object({ crewId: z.string().uuid(), name: z.string(), presentCount: z.number().int() })),
+            total: z.number().int().describe("Every crew you may see here now, across pages"),
+            hasMore: z.boolean(),
           })
         )
       ),

@@ -33,6 +33,7 @@ const row = (id: string, over: Partial<ReportRow>): ReportRow => ({
   eventTitle: "Techno Tuesday",
   eventId: "e1",
   room: false,
+  crew: null,
   reviewedBy: null,
   ...over,
 })
@@ -74,4 +75,34 @@ it("tells an erased ask from one that never had a message", () => {
 it("says how many people reported the same thing", () => {
   expect(render([row("a", { sameSubject: 3 })])).toContain("3 reports")
   expect(render([row("a", { sameSubject: 1 })])).not.toContain("1 reports")
+})
+
+it("offers a reported crew's levers — Hide and Dissolve, never Suspend — only while it stands (C12)", () => {
+  const crew = (state: { hidden: boolean; dissolved: boolean } | null) =>
+    row("k", {
+      messageType: "crew",
+      boardKind: null,
+      removable: false,
+      subjectId: null,
+      subjectName: "Crew · Saturday Lot",
+      excerpt: "Saturday Lot\nquiz nights",
+      eventTitle: null,
+      eventId: null,
+      crew: state,
+    })
+  const standing = render([crew({ hidden: false, dissolved: false })])
+  expect(standing).toContain(">Crew<")
+  expect(standing).toContain("Crew · Saturday Lot")
+  expect(standing).toContain(">Hide crew<")
+  expect(standing).toContain(">Dissolve crew<")
+  expect(standing).not.toContain(">Suspend<")
+  expect(standing).not.toContain(">Remove post<")
+  const hidden = render([crew({ hidden: true, dissolved: false })])
+  expect(hidden).not.toContain(">Hide crew<")
+  expect(hidden).toContain(">Dissolve crew<")
+  for (const gone of [crew({ hidden: false, dissolved: true }), crew(null)]) {
+    const html = render([gone])
+    expect(html).not.toContain(">Hide crew<")
+    expect(html).not.toContain(">Dissolve crew<")
+  }
 })

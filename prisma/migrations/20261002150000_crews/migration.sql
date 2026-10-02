@@ -25,7 +25,7 @@
 -- are kept evidence); DELETE FROM chat_groups WHERE kind = 'crew'; restore
 -- `chat_groups_one_owner` to its step-7 form; DROP TABLE crew_invites,
 -- crew_members, crews; DROP TYPE crew_role; DROP COLUMN events.crews_enabled
--- and event_match_preferences.open_to_crews. The two notification kinds stay
+-- and event_match_preferences.open_to_crews_until. The two notification kinds stay
 -- (Postgres cannot drop an enum value); nothing writes them after the code
 -- rollback. A rollback of the CODE alone is safe while no crew room exists:
 -- the step-7 code refuses a crew room at its door.
@@ -47,6 +47,8 @@ CREATE TABLE "crews" (
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "dissolved_at" TIMESTAMPTZ(6),
+    -- Hidden by a platform admin after a report: off every surface outside the crew.
+    "hidden_at" TIMESTAMPTZ(6),
 
     CONSTRAINT "crews_pkey" PRIMARY KEY ("id"),
     -- Counted in characters, as the app counts them (`[...text].length`), so
@@ -75,6 +77,9 @@ CREATE TABLE "crew_invites" (
     "invited_by" TEXT NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "declined_at" TIMESTAMPTZ(6),
+    -- The owner removed this person: a marker, not an invite. Nobody but an
+    -- owner can invite them back (lib/crews/crews.ts).
+    "removed_at" TIMESTAMPTZ(6),
 
     CONSTRAINT "crew_invites_pkey" PRIMARY KEY ("id"),
     -- Nobody invites themselves.
@@ -88,6 +93,10 @@ CREATE INDEX "crew_members_user_id_idx" ON "crew_members"("user_id");
 CREATE INDEX "crew_invites_invited_user_id_idx" ON "crew_invites"("invited_user_id");
 CREATE INDEX "crew_invites_invited_by_idx" ON "crew_invites"("invited_by");
 CREATE UNIQUE INDEX "crew_invites_crew_id_invited_user_id_key" ON "crew_invites"("crew_id", "invited_user_id");
+-- One owner per crew, held by the database: a hand-off that promoted a second
+-- owner, or two racing ones, fails here instead of leaving two. Partial, so
+-- schema.prisma cannot say it (CLAUDE.md).
+CREATE UNIQUE INDEX "crew_members_one_owner" ON "crew_members"("crew_id") WHERE "role" = 'owner';
 
 ALTER TABLE "crews" ADD CONSTRAINT "crews_created_by_fkey"
   FOREIGN KEY ("created_by") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -123,5 +132,8 @@ ALTER TABLE "chat_groups" ADD CONSTRAINT "chat_groups_one_owner" CHECK (
 -- The host's switch (the kit's "Allow group check-in"), on unless turned off.
 ALTER TABLE "events" ADD COLUMN "crews_enabled" BOOLEAN NOT NULL DEFAULT true;
 
--- A solo person's "Open to joining a crew tonight", per event, off by default.
-ALTER TABLE "event_match_preferences" ADD COLUMN "open_to_crews" BOOLEAN NOT NULL DEFAULT false;
+-- A solo person's "Open to joining a crew tonight": until when. Set to the end
+-- of the occurrence they said it at, so it means tonight and lapses by itself —
+-- the row is per event, and a multi-day event's Tuesday answer must not carry
+-- into Wednesday.
+ALTER TABLE "event_match_preferences" ADD COLUMN "open_to_crews_until" TIMESTAMPTZ(6);

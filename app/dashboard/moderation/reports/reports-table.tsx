@@ -24,6 +24,8 @@ const TOAST: Record<ReportDecision, string> = {
   suspend: "Account suspended and signed out",
   reinstate: "Account reinstated",
   delist: "Event delisted — removed from the feed, search and city counts",
+  hide_crew: "Crew hidden — no card, likes or Blends; its members keep their crew",
+  dissolve_crew: "Crew dissolved and its chat archived",
 }
 
 export function ReportsTable({
@@ -98,7 +100,9 @@ export function ReportsTable({
                     `Board · ${row.boardKind ?? "post"}`
                   : row.messageType === "board_request"
                     ? "Board ask"
-                    : "Room message"}
+                    : row.messageType === "crew"
+                      ? "Crew"
+                      : "Room message"}
           {row.sameSubject > 1 ? (
             // How many people reported the same thing: a pile-on is one
             // subject, not a column of separate rows to read one by one.
@@ -235,6 +239,22 @@ export function ReportsTable({
               curated event `organizer_id` is the admin who curated it, so
               wiring suspension to an event report could suspend a colleague.
             */}
+            {/*
+              A crew's card (C12): the subject is the crew, not a person, so
+              no Suspend. Hide keeps the crew for its members and takes it off
+              every stranger's screen; Dissolve ends it. Neither is offered
+              once the crew has dissolved.
+            */}
+            {row.crew && !row.crew.dissolved && !row.crew.hidden ? (
+              <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(row, "hide_crew")}>
+                Hide crew
+              </Button>
+            ) : null}
+            {row.crew && !row.crew.dissolved ? (
+              <Button size="sm" variant="destructive" disabled={busy} onClick={() => decide(row, "dissolve_crew")}>
+                Dissolve crew
+              </Button>
+            ) : null}
             {row.kind === "event" && row.eventId && !row.room ? (
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => decide(row, "delist")}>
                 Delist
@@ -273,7 +293,7 @@ export function ReportsTable({
           title={status === "pending" ? "No reports waiting" : `Nothing ${status}`}
           description={
             status === "pending"
-              ? "Reports arrive when someone uses Report on a person, a message, a board post or ask, or an event in the app. Dismissing records that a human looked; delisting takes an event out of the feed, search and city counts while leaving its room and check-ins alone; suspending blocks sign-in, ends the current session, revokes app tokens, stops notifications, and removes them from every room."
+              ? "Reports arrive when someone uses Report on a person, a message, a board post or ask, a crew, or an event in the app. Dismissing records that a human looked; delisting takes an event out of the feed, search and city counts while leaving its room and check-ins alone; suspending blocks sign-in, ends the current session, revokes app tokens, stops notifications, and removes them from every room."
               : "Reports land here once an admin has ruled on them. Reviewed means looked at, resolved means acted on."
           }
         />

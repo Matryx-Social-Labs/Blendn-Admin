@@ -15,6 +15,8 @@ export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    const limited = await rateLimit(request, userLimit("read", "crews-list", authUser.userId))
+    if (limited) return limited
     return successResponse(await crewsOf(authUser.userId))
   } catch (error) {
     logger.error("List crews error", { error: error instanceof Error ? error.message : String(error) })

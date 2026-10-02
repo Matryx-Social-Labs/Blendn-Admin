@@ -227,6 +227,7 @@ registry.registerPath({
             cover_image_url: z.string().optional(),
             external_link: z.string().optional(),
             is_featured: z.boolean().optional(),
+            crews_enabled: z.boolean().optional().describe("\"Allow crews at this event\". On unless turned off."),
             is_recurring: z.boolean().optional(),
             check_in_radius: z.number().optional(),
             full_description: z.string().optional(),

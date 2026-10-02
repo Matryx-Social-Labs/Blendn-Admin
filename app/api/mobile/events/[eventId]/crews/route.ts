@@ -9,9 +9,11 @@ import {
   successResponse,
   unauthorizedResponse,
 } from "@/lib/api-response"
+import { CREW } from "@/lib/constants"
 import { crewsAtEvent } from "@/lib/crews/presence"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { boundedInt } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
 interface RouteParams {
@@ -19,10 +21,11 @@ interface RouteParams {
 }
 
 /**
- * GET /api/mobile/events/:eventId/crews — the crews here now, as cards:
- * emblem, name, "Crew of N", how many are here, tags and intent, and the
- * menagerie of tonight's pseudonyms. Never a name or a photo. For people
- * checked in here now, as the roster is. See `crewsAtEvent`.
+ * GET /api/mobile/events/:eventId/crews?limit=&offset= — the crews here now,
+ * as cards: emblem, name, "Crew of N", how many are here, tags and intent.
+ * Counts only — never a name, a photo or a pseudonym. Most here first, a page
+ * at a time (`limit` 30 by default, at most 50; `total`, `hasMore`). For
+ * people checked in here now, as the roster is. See `crewsAtEvent`.
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
@@ -33,7 +36,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { eventId } = await params
     if (!isUuid(eventId)) return notFoundResponse("Event not found")
-    const result = await crewsAtEvent(eventId, authUser.userId)
+    const query = request.nextUrl.searchParams
+    const result = await crewsAtEvent(eventId, authUser.userId, {
+      limit: boundedInt(query.get("limit"), CREW.CARDS_DEFAULT, 1, CREW.CARDS_MAX),
+      offset: boundedInt(query.get("offset"), 0, 0, 10_000),
+    })
     if (result === null) return notFoundResponse("Event not found")
     if (result === "not_here") {
       return errorResponse("Check in to see the crews here.", 403, ErrorCode.NOT_CHECKED_IN)

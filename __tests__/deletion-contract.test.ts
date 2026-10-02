@@ -97,7 +97,7 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
   },
   crew_members: {
     how: "DELETED",
-    why: "Being in a crew is the person's own standing with their friends, and their reveal consent with it. Each crew they leave is settled after the commit: one left alone dissolves (D-15), an owner is handed on.",
+    why: "Being in a crew is the person's own standing with their friends, and their reveal consent with it. Deleted inside the erasure (`DELETE … RETURNING`, the crews locked first); each crew they leave is settled after the commit: one left alone dissolves (D-15), an owner is handed on — and the chat sweeper repairs any that settle missed.",
   },
   crew_invites: {
     how: "DELETED",
@@ -196,7 +196,10 @@ describe("the deletion contract", () => {
         continue
       }
       const verb = how === "SCRUBBED" ? "updateMany" : "deleteMany"
-      if (!new RegExp(`db\\.${model}\\.${verb}\\(`).test(route)) {
+      // A DELETE written in SQL counts too: the crew rows are deleted with
+      // `DELETE … RETURNING`, so the erasure learns which crews to settle.
+      const sql = how === "DELETED" ? `|DELETE FROM ${model}\\b` : ""
+      if (!new RegExp(`db\\.${model}\\.${verb}\\(${sql}`).test(route)) {
         broken.push(`${model}: declared ${how} but no db.${model}.${verb} in the deletion path`)
       }
     }

@@ -174,7 +174,8 @@ migration SQL and therefore in every deployed environment:
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
 venue per local day — `lib/venue-day.ts` recovers a lost race by that name),
-`event_check_ins_expires_at_idx`, the system user `blendn-system` that owns
+`event_check_ins_expires_at_idx`, `crew_members_one_owner` (one owner per
+crew), the system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its
 deletion. On a `db push` database `venueDayFor` fails for want of that user,
 and says so. See `docs/VENUES.md` § Venue days.
