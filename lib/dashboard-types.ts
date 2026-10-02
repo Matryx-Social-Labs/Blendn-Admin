@@ -1,6 +1,8 @@
 // Type-only, so neither module's `db` import survives into a client bundle.
 import type { AttentionQueue } from "@/lib/attention-queues"
 import type { RefusalBreakdown } from "@/lib/check-in-refusals"
+import type { EventRowData } from "@/lib/event-row"
+import type { SetupFacts } from "@/lib/setup-checklist"
 
 /**
  * Roles that get a dashboard shell.
@@ -19,20 +21,6 @@ export type DashboardRole = "app_admin" | "organizer" | "venue_owner" | "sponsor
 /* Shared                                                                      */
 /* -------------------------------------------------------------------------- */
 
-export interface EventRow {
-  id: string
-  name: string
-  startAt: string
-  city: string
-  venue: string
-  status: string
-  going: number
-  /** null when the event states no capacity — there is no target to fill. */
-  fillPct: number | null
-  /** null until the event has run. */
-  turnUpPct: number | null
-}
-
 /** Cumulative RSVPs at a given number of days before the event starts. */
 export interface PacingPoint {
   daysOut: number
@@ -50,6 +38,8 @@ export interface NextEvent {
   id: string
   title: string
   startAt: string
+  /** "Sat 12 Oct", on the event's own clock (SCRUM-496), not the server's. */
+  dayLabel: string
   venue: string
   city: string
   daysOut: number
@@ -66,21 +56,51 @@ export interface NextEvent {
   pacingNote: string | null
 }
 
+/**
+ * The night that is running now, for the overview's banner. Exact counts: the
+ * organiser overview only ever lists events its organisation hosts.
+ */
+export interface LiveEvent {
+  id: string
+  title: string
+  venue: string | null
+  /** Doors, on the event's own clock. */
+  doors: string
+  /** Pending moderation flags in its room: what is waiting on a person. */
+  flags: number
+  /** Inside right now, staff included (fire safety counts bodies). */
+  inside: number
+  /** Distinct guests who have checked in tonight. */
+  checkedIn: number
+  messages: number
+}
+
 export interface OrganizerOverview {
   role: "organizer"
+  /** The earliest night running now, or null. */
+  live: LiveEvent | null
   nextEvent: NextEvent | null
   pacing: PacingPoint[]
   pacingCapacity: number | null
   /** The last event that ran, on the same window — the ghost under the live curve. */
   benchmark: { title: string; points: PacingPoint[] } | null
+  /** What the "Getting set up" checklist is derived from. */
+  setup: SetupFacts
+  /** Check-ins (person × event) at events in the last 30 days, and the 30 before. */
+  checkIns: { current: number; previous: number }
   ratings: RatingCounts
   noShowRatePct: number | null
   noShowDelta: number | null
   repeatAttendees: number | null
   averageRating: number | null
   ratingCount: number
-  chatToday: number
-  events: EventRow[]
+  /**
+   * The most recent event whose own ratings clear the floor (SCRUM-437), with
+   * its bars. Null when none does.
+   */
+  latestFeedback: { eventId: string; title: string; ratings: RatingCounts; averageRating: number } | null
+  /** Ahead and drafts, soonest first: the overview's Coming up. */
+  comingUp: EventRowData[]
 }
 
 /* -------------------------------------------------------------------------- */

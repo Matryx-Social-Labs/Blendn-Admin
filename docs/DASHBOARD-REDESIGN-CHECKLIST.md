@@ -67,8 +67,8 @@ gates, the specialists, and a drive, before the next one starts.
 
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
-| `/dashboard` (organiser overview) | ✅ ea82077 (mockup `overview-organizer-20260911`) | ✅ 2026-09-11 as Arjun Rao | pacing vs last event, days-to-go, ratings only when rated |
-| `/dashboard/events` | ✅ shared with admin | ✅ | organiser scope = org membership |
+| `/dashboard` (organiser overview) | ✅ ea82077 (mockup `overview-organizer-20260911`); step 15 to the kit (mockup: kit `organiser/screens-home.jsx` Overview) | ✅ 2026-09-11 as Arjun Rao; step 15 local seed at 375/768/1440, axe clean in `main` (`e2e/organiser-screens.spec.ts`) | live banner while a night runs (pending flags in red), next-up hero, Getting set up derived from rows (org, domain, a publish, a colleague — no QR tick, nothing records one), Last 30 days strip (check-ins, no-show rate in pts, avg rating, came back), pacing kept (free figure), Coming up rows, latest feedback above the floor; no range control (fixed windows); cut: Your events table, Chat today, the greeting |
+| `/dashboard/events` | ✅ shared with admin; step 15 to the kit (mockup: kit `screens-home.jsx` Events) | ✅ step 15 local seed, organiser + venue owner, 375/768/1440 | Upcoming / Drafts / Past tabs with counts, kit EventRow cells (date tile red "Live", status word + no fence, attendance by phase: going vs capacity → checked in → came vs going), page Create button cut (the top bar's pill), bulk delete kept; held-back counts read — (SCRUM-501) |
 | `/dashboard/events/new` | ✅ 081bd48 | ✅ 2026-09-11 | shared with admin |
 | `/dashboard/events/[id]/edit` | ✅ 081bd48 | ✅ 2026-09-11 | |
 | `/dashboard/events/[id]` + tabs | ✅ 8d6f547 | ✅ 2026-09-11 | shared with admin |

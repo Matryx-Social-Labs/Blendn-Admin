@@ -26,7 +26,7 @@ export function RoutePageHeader({ role }: { role: string }) {
       title={title}
       description={description}
       actions={
-        showsRange(pathname) ? (
+        showsRange(pathname, role) ? (
           // useSearchParams needs a Suspense boundary or the whole route opts
           // out of static rendering and the build warns.
           <Suspense fallback={<div className="h-9 w-[250px]" />}>
