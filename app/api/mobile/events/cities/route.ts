@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
 import { ageFrom } from "@/lib/age"
-import { groupCities } from "@/lib/address"
+import { cityCentres, cityKey, groupCities } from "@/lib/address"
 import {
   successResponse,
   unauthorizedResponse,
@@ -79,10 +79,16 @@ export async function GET(request: NextRequest) {
           ? { OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }
           : {}),
       },
-      select: { city: true },
+      select: { city: true, latitude: true, longitude: true },
     })
 
-    return successResponse({ cities: groupCities(rows.map((row) => row.city)) })
+    // Where the home map goes when the city is picked (step 2): the mean of its events' points.
+    const centres = cityCentres(rows)
+    const cities = groupCities(rows.map((row) => row.city)).map((c) => ({
+      ...c,
+      centre: centres.get(cityKey(c.city) ?? "") ?? null,
+    }))
+    return successResponse({ cities })
   } catch (error) {
     logger.error("Failed to list event cities", { error })
     return serverErrorResponse("Failed to load cities")
