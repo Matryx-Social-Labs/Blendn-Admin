@@ -93,7 +93,7 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
   },
   board_posts: {
     how: "DELETED",
-    why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence. A post moderation hid is kept: it is removed content, which the IT Rules 2021 r.3(1)(g) require for 180 days.",
+    why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence. A post moderation hid is kept: it is removed content, which the IT Rules 2021 r.3(1)(g) require for 180 days. A post WITH A ROOM is kept as a row too (step 7): the room is other people's conversation and kept evidence, and board_post_id is ON DELETE RESTRICT — so the post is taken off the board (deleted_at, which closes the room's door), its body erased, and the room archived with its messages and members.",
   },
   board_requests: {
     how: "SCRUBBED",

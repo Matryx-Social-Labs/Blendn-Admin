@@ -59,6 +59,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { chatGroupId } = await params
     const room = await roomForMember(chatGroupId, authUser.userId, { allowHidden: true })
     if (!room) return notFoundResponse("Chat group not found")
+    // A room report is filed against the room's event (`event_reports`), and
+    // only an event's room has one. In a room of any other kind each message is
+    // reported on its own (`POST /messages/:id/report`), which every room takes.
+    if (room.group.kind !== "event" || !room.group.event_id) return notFoundResponse("Chat group not found")
 
     await db.event_reports.create({
       data: {

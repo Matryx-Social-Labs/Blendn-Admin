@@ -57,6 +57,10 @@ export async function GET(request: NextRequest) {
          */
         status: { in: ["active", "muted"] },
         chat_group: {
+          // Event rooms. A room of another kind has no event to show here, and
+          // an installed app reads `event` off every row; those rooms get their
+          // own place in the list when the app does (step 9).
+          kind: "event",
           status: { in: ["active", "locked"] },
           // A draft or deleted event has no room (SCRUM-8, SCRUM-303) — the
           // same rule as `eventHidesRoom`, so the list agrees with the room.
@@ -68,7 +72,7 @@ export async function GET(request: NextRequest) {
     })
 
     // Fetch user's chat group memberships with chat group and event details
-    const memberships = await db.chat_group_members.findMany({
+    const rows = await db.chat_group_members.findMany({
       where: {
         user_id: authUser.userId,
         /*
@@ -81,6 +85,10 @@ export async function GET(request: NextRequest) {
          */
         status: { in: ["active", "muted"] },
         chat_group: {
+          // Event rooms. A room of another kind has no event to show here, and
+          // an installed app reads `event` off every row; those rooms get their
+          // own place in the list when the app does (step 9).
+          kind: "event",
           status: { in: ["active", "locked"] },
           // A draft or deleted event has no room (SCRUM-8, SCRUM-303) — the
           // same rule as `eventHidesRoom`, so the list agrees with the room.
@@ -124,6 +132,12 @@ export async function GET(request: NextRequest) {
       skip: (page - 1) * limit,
       take: limit,
     })
+
+    // The where above reads only event rooms; this says so to the type, with
+    // nothing to fall back on — a row without its event is not listed.
+    const memberships = rows.flatMap((m) =>
+      m.chat_group.event ? [{ ...m, chat_group: { ...m.chat_group, event: m.chat_group.event } }] : []
+    )
 
     // Batch fetch all data in 3 queries instead of N*3 queries
     const chatGroupIds = memberships.map((m) => m.chat_group_id)

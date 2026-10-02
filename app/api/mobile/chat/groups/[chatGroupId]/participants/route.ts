@@ -3,7 +3,8 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
-import { NOT_LIVE_MESSAGE, roomReadDenial } from "@/lib/chat-window"
+import { NOT_LIVE_MESSAGE } from "@/lib/chat-window"
+import { boardPostDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
 import {
@@ -42,7 +43,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Check if chat group exists
     const chatGroup = await db.chat_groups.findUnique({
       where: { id: chatGroupId, deleted_at: null },
-      select: { id: true, event_id: true, event: { select: { status: true, deleted_at: true, kind: true } } },
+      select: {
+        id: true,
+        kind: true,
+        event_id: true,
+        event: { select: { status: true, deleted_at: true, kind: true } },
+        board_post: boardPostDoor(authUser.userId),
+      },
     })
 
     if (!chatGroup) {
@@ -59,8 +66,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // The roster is part of reading the room; same rule (SCRUM-205).
-    const denial = roomReadDenial(membership, chatGroup.event)
+    // The roster is part of reading the room; same rule (SCRUM-205), every kind (F8).
+    const denial = roomReadDenialFor(chatGroup, membership, authUser.userId)
     if (denial === "hidden") return notFoundResponse("Chat group not found")
     if (denial === "not_member") return errorResponse("You are not a member of this chat group", 403)
     if (denial === "banned") return errorResponse(bannedRefusal(membership!), 403, ErrorCode.USER_BANNED)
@@ -80,11 +87,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * says "50 members" over 49 rows, which is its own quiet tell.
      */
     const hidden = await blockCounterparties(authUser.userId)
+    /*
+     * In a room that is not an event's, only the people its owner admits: a
+     * member row is not membership there (F8). Null for an event's room.
+     */
+    const admitted = await ownerRoster(chatGroupId)
 
     const visibleMembers = {
       chat_group_id: chatGroupId,
       status: "active" as const,
       ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
+      // Under AND, so it never replaces the block filter's `user_id` above.
+      ...(admitted && { AND: [{ user_id: { in: [...admitted] } }] }),
     }
 
     // Get total count
@@ -109,10 +123,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       take: limit,
     })
 
+    const scope = roomScope(chatGroup)
     return successResponse({
       participants: members.map((m) => ({
         // Yours real; everyone else's as their handle in this room (SCRUM-371).
-        userId: idForViewer(authUser.userId, chatGroup.event_id, m.user.id),
+        userId: idForViewer(authUser.userId, scope, m.user.id),
         name: m.anonymous_name || "Anonymous",
         avatar: null,
         role: m.role,

@@ -141,6 +141,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    // Found or made by its event, so an event's room, and its event is there
+    // (`chat_groups_one_owner`). Without it — only on a database built without
+    // the CHECK — there is no room, never a stand-in event.
+    const roomEvent = chatGroup.event
+    if (!roomEvent) return notFoundResponse("Chat not available for this event")
+
     // Check if user is a member of the chat group
     const membership = await db.chat_group_members.findUnique({
       where: {
@@ -157,7 +163,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * history — the ban stopped their posts and served them the room. A
      * non-member is not refused here: the join below is how they get in.
      */
-    const readDenial = roomReadDenial(membership, chatGroup.event)
+    const readDenial = roomReadDenial(membership, roomEvent)
     if (readDenial === "hidden") return notFoundResponse("Chat not available for this event")
     if (readDenial === "banned" && membership) {
       return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
@@ -167,7 +173,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * and its window; there is no auto-join below for it (F7). Not live — never
      * joined, or the window ended — is refused, never re-joined.
      */
-    if (readDenial === "not_live" || (!membership && chatGroup.event.kind === "venue_day")) {
+    if (readDenial === "not_live" || (!membership && roomEvent.kind === "venue_day")) {
       return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
     }
     /*
@@ -214,7 +220,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * would be a licence to a public channel for three months.
        */
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
-      const window = chatWindowState(chatGroup.event, chatGroup)
+      const window = chatWindowState(roomEvent, chatGroup)
 
       if (!entitlementAdmits(entitlement, window)) {
         // Says which of the two things is missing, because they have different
@@ -410,7 +416,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // it `active`. A banned or muted row is never replaced, so it arrives here
       // intact and `mayWriteToRoom` sees the truth.
       membership ?? { status: "active", last_allowed_at: null },
-      chatGroup.event,
+      roomEvent,
       chatGroup
     )
 
@@ -424,9 +430,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ? chatClosedMessage(denial.reason)
           : null,
         /** When the 24-hour window shuts. Independent of the archive job. */
-        closesAt: chatClosesAt(chatGroup.event),
+        closesAt: chatClosesAt(roomEvent),
         /** Past this, the room is a read-only record of the night. */
-        eventEndedAt: chatGroup.event.end_time,
+        eventEndedAt: roomEvent.end_time,
       },
       /**
        * Whether you silenced this room's pushes (`POST /chat/groups/:id/mute`),
@@ -452,7 +458,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             // an organiser's announcement included — as their handle in this
             // room (SCRUM-371, `lib/room-handle.ts`).
             id: idForViewer(authUser.userId, eventId, m.user.id),
-            name: roomSenderName(m, anonMap.get(m.user.id), chatGroup.event),
+            name: roomSenderName(m, anonMap.get(m.user.id), roomEvent),
             image: null,
           },
           reactions: isHidden ? [] : tallyReactions(m.reactions, authUser.userId),
@@ -547,6 +553,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    // Found or made by its event, so an event's room, and its event is there
+    // (`chat_groups_one_owner`). Without it — only on a database built without
+    // the CHECK — there is no room, never a stand-in event.
+    const roomEvent = chatGroup.event
+    if (!roomEvent) return notFoundResponse("Chat not available for this event")
+
     /*
      * Same rule as the other write path — see lib/chat-window.ts.
      *
@@ -554,7 +566,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * an event that finished last month must close immediately, not be born
      * open because it happens to be new.
      */
-    const window = chatWindowState(chatGroup.event, chatGroup)
+    const window = chatWindowState(roomEvent, chatGroup)
     if (!window.open) {
       return forbiddenResponse(chatClosedMessage(window.reason))
     }
@@ -599,12 +611,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * handlers, is the only version of this that stays fixed.
      */
     // Go Live is a venue day's only door (see the GET).
-    if (!membership && chatGroup.event.kind === "venue_day") {
+    if (!membership && roomEvent.kind === "venue_day") {
       return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
     }
     if (!membership) {
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
-      const window = chatWindowState(chatGroup.event, chatGroup)
+      const window = chatWindowState(roomEvent, chatGroup)
 
       if (!entitlementAdmits(entitlement, window)) {
         // Which of the two things is missing, because the remedies differ:
@@ -668,7 +680,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * write does not: leaving does not unsee what you saw.
      */
     if (membershipFresh) {
-      const denial = mayWriteToRoom(membershipFresh, chatGroup.event, chatGroup)
+      const denial = mayWriteToRoom(membershipFresh, roomEvent, chatGroup)
       if (denial) {
         if (denial.reason === "banned") {
           return errorResponse(bannedRefusal(membershipFresh), 403, ErrorCode.USER_BANNED)
@@ -953,7 +965,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     await deliverToRoom({
       chatGroupId: chatGroup.id,
-      eventId,
+      // An event's room is scoped by its event (`roomScope`).
+      scope: eventId,
       groupName: chatGroup.name,
       senderId: authUser.userId,
       senderAnonName: senderMembership?.anonymous_name || "Attendee",

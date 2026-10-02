@@ -15,7 +15,7 @@ On connect, server emits:
 ## Rooms
 
 - `user:{userId}` — personal room, auto-joined on connect
-- `chat:{chatGroupId}` — event chat rooms (joined via `join:chat`)
+- `chat:{chatGroupId}` — chat rooms of every kind (joined via `join:chat`): an event's room today, and a board post's, crew's or Blend's as those ship
 - `event:{eventId}` — event-level updates (joined via `join:event`)
 - `conversation:{conversationId}` — private conversations (joined via `join:conversation`)
 
@@ -29,7 +29,7 @@ the database before the socket is added to the room (`lib/socket-auth.ts`):
 
 | Room | Who may join |
 |------|--------------|
-| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` |
+| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` and anyone who left by choice — **and** whoever the room's owner admits (`lib/room-kind.ts`, step 7). An event's room: as before. A board post's: its author, or an asker the author accepted and not in a block with the author either way; a member row alone is not enough. Closed with its post, its event, and 12 h after the event ends. A crew's or Blend's: nobody yet (no owner until step 8). An unknown kind or a missing owner: nobody |
 | `conversation:{conversationId}` | The two participants only |
 | `event:{eventId}` | Anyone, for `public`/`unlisted` events. For `private`: the organizer, or a user with an RSVP |
 
@@ -62,13 +62,21 @@ malformed ID, and a room you simply lack access to all return the same
 Authorization is re-checked on every join, including the automatic rejoins the
 client performs after a reconnect.
 
+**A room that is not an event's is re-checked on every delivery, too** (step 7).
+Every `chat:*` event into such a room asks the owner again for each recipient:
+whoever it no longer admits (the post withdrawn or taken down, the ask undone,
+a block with the author) gets nothing and is taken out of the room. And every
+writer that closes one — withdraw, moderation takedown, account erasure, the
+12-hour sweep — empties the room at once (`lib/room-close.ts`). A rejoin meets
+the door. An event's room is unchanged: its door is the join.
+
 ## Client → Server Events
 
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `join:event` | `eventId: string` | Join an event room (authorized) |
 | `leave:event` | `eventId: string` | Leave an event room |
-| `join:chat` | `chatGroupId: string` | Join an event chat room (authorized) |
+| `join:chat` | `chatGroupId: string` | Join a chat room of any kind (authorized per kind — see above) |
 | `leave:chat` | `chatGroupId: string` | Leave a chat room |
 | `join:conversation` | `conversationId: string` | Join a private conversation (authorized) |
 | `leave:conversation` | `conversationId: string` | Leave a private conversation |
@@ -103,9 +111,15 @@ Every `userId` / `otherUserId` / `fromUserId` on a `chat:*`, `event:*` or
 person's **room handle** for the event: `rh_` + an opaque string
 (`lib/room-handle.ts`, SCRUM-371). Field names and shapes are unchanged.
 
-- A handle is stable for one person in one event, so the roster, the match
+- A handle is stable for one person in one room, so the roster, the match
   deck, chat history and these events all use the same string for them.
   The same person at another event has a different, unrelated handle.
+- **A handle belongs to one room, of one kind** (step 7). An event's room is
+  scoped by its event, exactly as before, so every handle a client already
+  holds still resolves. A room of another kind (a board post's; a crew's or a
+  Blend's later) is scoped by its own id and its kind, so a handle from it is
+  refused in every other room, an event's included, and names nobody on the
+  profile, friend or block routes. Treat it as opaque, as now.
 - Compare with your own id exactly as before: your bubbles, your own check-in
   and your own typing still arrive under your real id.
 - Every REST endpoint that takes a user id accepts a handle (see `docs/API.md`,

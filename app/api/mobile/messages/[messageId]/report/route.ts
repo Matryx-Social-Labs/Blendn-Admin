@@ -13,6 +13,7 @@ import {
   errorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { boardPostDoor, roomOwnerDenial } from "@/lib/room-kind"
 
 interface RouteParams {
   params: Promise<{ messageId: string }>
@@ -59,15 +60,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * distinct 403 would confirm that a given id exists, which is exactly the
      * probe this is closing.
      */
+    /*
+     * In a room: a member row, AND the room's owner standing behind it — the
+     * door's owner half (`roomOwnerDenial`). A board post's asker the author
+     * never accepted holds a row and saw nothing. `hidden` is allowed, as the
+     * room report allows it: a room whose post or event came down is still
+     * evidence, and somebody banned or gone may need to report it most.
+     */
     const visible =
       messageType === "group"
-        ? await db.chat_messages.findFirst({
-            where: {
-              id: messageId,
-              chat_group: { members: { some: { user_id: authUser.userId } } },
-            },
-            select: { id: true },
-          })
+        ? await db.chat_messages
+            .findFirst({
+              where: {
+                id: messageId,
+                chat_group: { members: { some: { user_id: authUser.userId } } },
+              },
+              select: {
+                id: true,
+                chat_group: {
+                  select: { kind: true, event: { select: { status: true, deleted_at: true } }, board_post: boardPostDoor(authUser.userId) },
+                },
+              },
+            })
+            .then((m) => (m && roomOwnerDenial(m.chat_group, authUser.userId) !== "not_member" ? m : null))
         : await db.private_messages.findFirst({
             where: {
               id: messageId,
