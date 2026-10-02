@@ -29,7 +29,12 @@ import type { RoomScope } from "./room-handle"
  *               event, and for writes `OWNER_ROOM_HOURS` after the event ends
  *   crew        a member of the crew now — not suspended, the crew not
  *               dissolved. Real names inside (`namesInRoom`, lib/identity.ts)
- *   blend       a present member of either side — no owner column yet
+ *   blend       one of the people here when it matched (its member rows, a
+ *               snapshot) still on their side — a member of that crew, or the
+ *               person matched — until the Blend closes (12 h after the
+ *               occurrence ends, or when a side dissolves or is hidden), and
+ *               never somebody kept apart from anyone on the other side: that
+ *               pair is hidden, the room goes on for the rest (D-9)
  *
  * A member row is never enough on its own for a room that is not an event's:
  * it records a pseudonym, a mute, a ban or a leave, and the owner says whether
@@ -121,13 +126,103 @@ interface CrewOwner {
   members: { user_id: string }[]
 }
 
+/** A block either way between a person and any of these viewers. */
+/**
+ * Kept apart from any of these viewers: a block either way, or a closed
+ * conversation (an unmatch is permanent — C6, lib/crews/blocks.ts).
+ */
+function blocksWith(viewerIds: string[]) {
+  const closed = { closed_at: { not: null } }
+  return {
+    blocked_users: { where: { blocked_id: { in: viewerIds } }, select: { blocked_id: true } },
+    blocked_by: { where: { blocker_id: { in: viewerIds } }, select: { blocker_id: true } },
+    conversations_as_user1: { where: { user2_id: { in: viewerIds }, ...closed }, select: { user2_id: true } },
+    conversations_as_user2: { where: { user1_id: { in: viewerIds }, ...closed }, select: { user1_id: true } },
+  }
+}
+
+/**
+ * One side's crew, as the Blend door reads it for these viewers: their own
+ * member rows, and every member in a block with one of them — the two things
+ * the door asks of a side. Never the whole crew.
+ */
+function blendSideSelect(viewerIds: string[]) {
+  return {
+    select: {
+      dissolved_at: true,
+      members: {
+        where: {
+          user: { suspended_at: null, deletedAt: null },
+          OR: [
+            { user_id: { in: viewerIds } },
+            {
+              user: {
+                OR: [
+                  { blocked_users: { some: { blocked_id: { in: viewerIds } } } },
+                  { blocked_by: { some: { blocker_id: { in: viewerIds } } } },
+                  { conversations_as_user1: { some: { user2_id: { in: viewerIds }, closed_at: { not: null } } } },
+                  { conversations_as_user2: { some: { user1_id: { in: viewerIds }, closed_at: { not: null } } } },
+                ],
+              },
+            },
+          ],
+        },
+        select: { user_id: true, user: { select: blocksWith(viewerIds) } },
+      },
+    },
+  }
+}
+
+/** Everything the Blend door reads, for these viewers. Every viewer-specific row names its viewer. */
+function blendSelect(viewerIds: string[]) {
+  return {
+    select: {
+      closes_at: true,
+      closed_at: true,
+      b_user_id: true,
+      // At the occurrence: a check-in there, whenever (attendance outlives presence).
+      occurrence: {
+        select: { check_ins: { where: { user_id: { in: viewerIds }, check_in_time: { not: null } }, select: { user_id: true } } },
+      },
+      a_crew: blendSideSelect(viewerIds),
+      b_crew: blendSideSelect(viewerIds),
+      b_user: { select: { suspended_at: true, deletedAt: true, ...blocksWith(viewerIds) } },
+    },
+  }
+}
+
+/** The Blend behind a room, as its door reads it for one caller. */
+export function blendDoor(viewerId: string) {
+  return blendSelect([viewerId])
+}
+
+interface Blocks {
+  blocked_users: { blocked_id: string }[]
+  blocked_by: { blocker_id: string }[]
+  conversations_as_user1: { user2_id: string }[]
+  conversations_as_user2: { user1_id: string }[]
+}
+interface BlendSide {
+  dissolved_at: Date | null
+  members: { user_id: string; user: Blocks }[]
+}
+interface BlendOwner {
+  closes_at: Date
+  closed_at: Date | null
+  b_user_id: string | null
+  occurrence: { check_ins: { user_id: string }[] }
+  a_crew: BlendSide
+  b_crew: BlendSide | null
+  b_user: (Blocks & { suspended_at: Date | null; deletedAt: Date | null }) | null
+}
+
 /**
  * Every owner's door for one caller, to spread into a room's select: whatever
  * the room's kind, the row its door needs is read, and a kind added without
  * one fails closed (`roomOwnerDenial` reads a missing owner as "hidden").
  */
 export function ownerDoor(viewerId: string) {
-  return { board_post: boardPostDoor(viewerId), crew: crewDoor(viewerId) }
+  return { board_post: boardPostDoor(viewerId), crew: crewDoor(viewerId), blend: blendDoor(viewerId) }
 }
 
 interface RoomOwners<E> {
@@ -136,6 +231,43 @@ interface RoomOwners<E> {
   board_post: BoardPostOwner | null
   /** Optional so an older select fails closed rather than failing to compile into an open door. */
   crew?: CrewOwner | null
+  blend?: BlendOwner | null
+}
+
+const blocksUser = (b: Blocks, userId: string) =>
+  b.blocked_users.some((x) => x.blocked_id === userId) ||
+  b.blocked_by.some((x) => x.blocker_id === userId) ||
+  b.conversations_as_user1.some((x) => x.user2_id === userId) ||
+  b.conversations_as_user2.some((x) => x.user1_id === userId)
+
+const onSide = (side: BlendSide | null, userId: string) =>
+  !!side && !side.dissolved_at && side.members.some((m) => m.user_id === userId)
+
+const sideBlocks = (side: BlendSide | null, userId: string) =>
+  !!side && side.members.some((m) => m.user_id !== userId && blocksUser(m.user, userId))
+
+/**
+ * The Blend door (plan v2 §6). Gone for everyone once it closes — on its clock,
+ * whether or not the sweeper has run, or early when a side's crew dissolved or
+ * was hidden. For one person: on a side (a member of that crew now, or the
+ * matched person), at the occurrence, and kept apart (a block or a closed
+ * conversation, C6) from nobody on the other side. A block across the sides
+ * hides THAT PAIR — each is refused here — and the room goes on for everyone
+ * else (D-9). Who is in it at all is the room's member rows: a snapshot of who
+ * was here when it matched (C3), so the routes' "no row, no room" refuses a
+ * late arrival before this is asked.
+ */
+function blendDenial(blend: BlendOwner | null | undefined, userId: string, now: Date = new Date()): "hidden" | "not_member" | null {
+  if (!blend || blend.closed_at || blend.closes_at <= now) return "hidden"
+  const solo = blend.b_user_id === userId && !!blend.b_user && !blend.b_user.suspended_at && !blend.b_user.deletedAt
+  const onA = onSide(blend.a_crew, userId)
+  const onB = onSide(blend.b_crew, userId) || solo
+  if (!onA && !onB) return "not_member"
+  if (!blend.occurrence.check_ins.some((c) => c.user_id === userId)) return "not_member"
+  const blockedAcross =
+    (onA && (sideBlocks(blend.b_crew, userId) || (!!blend.b_user && blend.b_user_id !== userId && blocksUser(blend.b_user, userId)))) ||
+    (onB && sideBlocks(blend.a_crew, userId))
+  return blockedAcross ? "hidden" : null
 }
 
 function crewDenial(crew: CrewOwner | null | undefined, userId: string): "hidden" | "not_member" | null {
@@ -178,9 +310,8 @@ export function roomOwnerDenial(
       return boardPostDenial(room.board_post, userId)
     case "crew":
       return crewDenial(room.crew, userId)
-    // No owner column yet, and `chat_groups_one_owner` refuses the row.
     case "blend":
-      return "hidden"
+      return blendDenial(room.blend, userId)
     default: {
       const unknown: never = room.kind
       void unknown
@@ -238,7 +369,9 @@ export function mayWriteToRoomFor<E extends Parameters<typeof mayWriteToRoom>[1]
  * (`chatWindowState`). A board post's closes `OWNER_ROOM_HOURS` after its
  * event ends — on the clock, whether or not the sweeper has archived it yet —
  * and before that when locked or archived. A crew's has no clock: it is open
- * until it is locked or archived (a dissolved crew's is). Blend: no owner yet.
+ * until it is locked or archived (a dissolved crew's is). A Blend's closes at
+ * its `closes_at` (the occurrence's end + `OWNER_ROOM_HOURS`), or earlier when
+ * a side's crew dissolved or was hidden.
  */
 export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
   room: {
@@ -246,11 +379,17 @@ export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
     status: chat_group_status
     event: E | null
     board_post?: { event: { end_time: Date } } | null
+    blend?: { closes_at: Date; closed_at: Date | null } | null
   },
   now: Date = new Date()
 ): ChatWindowState {
   if (room.kind === "event") return room.event ? chatWindowState(room.event, room, now) : { open: false, reason: "hidden" }
   if (room.kind === "crew") return room.status === "active" ? { open: true } : { open: false, reason: room.status }
+  if (room.kind === "blend") {
+    if (!room.blend || room.blend.closed_at) return { open: false, reason: "hidden" }
+    if (room.status !== "active") return { open: false, reason: room.status }
+    return now >= room.blend.closes_at ? { open: false, reason: "window_closed" } : { open: true }
+  }
   if (room.kind !== "board_post" || !room.board_post) return { open: false, reason: "hidden" }
   if (room.status !== "active") return { open: false, reason: room.status }
   if (now >= ownerRoomClosesAt(room.board_post.event)) return { open: false, reason: "window_closed" }
@@ -269,11 +408,12 @@ export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
 export async function ownerAdmits(chatGroupId: string, candidates: string[]): Promise<Set<string> | null> {
   const room = await db.chat_groups.findUnique({
     where: { id: chatGroupId },
-    select: { kind: true, board_post: boardPostSelect(candidates), crew: crewSelect(candidates) },
+    select: { kind: true, board_post: boardPostSelect(candidates), crew: crewSelect(candidates), blend: blendSelect(candidates) },
   })
   if (!room) return new Set()
   if (room.kind === "event") return null
   if (room.kind === "crew") return new Set(candidates.filter((id) => crewDenial(room.crew, id) === null))
+  if (room.kind === "blend") return new Set(candidates.filter((id) => blendDenial(room.blend, id) === null))
   const post = room.board_post
   return new Set(
     candidates.filter(
@@ -298,9 +438,23 @@ export async function ownerAdmits(chatGroupId: string, candidates: string[]): Pr
 }
 
 /**
+ * `ownerAdmits` for many Blend rooms at once — one read however many — for a
+ * screen that lists a person's Blends (`blendsOf`): which of `candidates` each
+ * room's door lets in now. A room that is not a Blend's admits nobody here.
+ */
+export async function blendAdmitsMany(roomIds: readonly string[], candidates: readonly string[]): Promise<Map<string, Set<string>>> {
+  if (roomIds.length === 0 || candidates.length === 0) return new Map()
+  const rooms = await db.chat_groups.findMany({
+    where: { id: { in: [...roomIds] }, kind: "blend" },
+    select: { id: true, blend: blendSelect([...candidates]) },
+  })
+  return new Map(rooms.map((r) => [r.id, new Set(candidates.filter((id) => blendDenial(r.blend, id) === null))]))
+}
+
+/**
  * Everybody a room that is not an event's admits, for its roster: a board
- * post's author and the accepted askers, a crew's members. Null for an event's
- * room. Blend: nobody, until it has an owner.
+ * post's author and the accepted askers, a crew's members, a Blend's snapshot
+ * of the people here when it matched. Null for an event's room.
  */
 export async function ownerRoster(chatGroupId: string): Promise<Set<string> | null> {
   const room = await db.chat_groups.findUnique({
@@ -309,13 +463,17 @@ export async function ownerRoster(chatGroupId: string): Promise<Set<string> | nu
       kind: true,
       board_post: { select: { author_id: true, requests: { where: { status: "accepted" }, select: { from_user_id: true } } } },
       crew: { select: { members: { select: { user_id: true } } } },
+      // A Blend's people are its snapshot: the member rows made at match time (C3).
+      members: { select: { user_id: true } },
     },
   })
   if (!room) return new Set()
   if (room.kind === "event") return null
   const candidates = room.board_post
     ? [room.board_post.author_id, ...room.board_post.requests.map((r) => r.from_user_id)]
-    : (room.crew?.members.map((m) => m.user_id) ?? [])
+    : room.kind === "blend"
+      ? room.members.map((m) => m.user_id)
+      : (room.crew?.members.map((m) => m.user_id) ?? [])
   return candidates.length ? ownerAdmits(chatGroupId, candidates) : new Set()
 }
 

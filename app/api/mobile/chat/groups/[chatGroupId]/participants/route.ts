@@ -125,9 +125,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     const scope = roomScope(chatGroup)
-    // A crew's room names its members (first names); every other room by pseudonym (`namesInRoom`).
+    // A crew's room names its members (first names), a Blend's by tonight's
+    // pseudonyms; an event's room by the pseudonym on the row (`namesInRoom`).
     const names =
-      chatGroup.kind === "crew" ? await namesInRoom(chatGroup, members.map((m) => m.user.id)) : null
+      chatGroup.kind !== "event" ? await namesInRoom(chatGroup, members.map((m) => m.user.id)) : null
     return successResponse({
       participants: members.map((m) => ({
         // Yours real; everyone else's as their handle in this room (SCRUM-371).

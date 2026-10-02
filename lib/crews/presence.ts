@@ -61,7 +61,7 @@ export async function occurrenceHereNow(eventId: string, userId: string): Promis
 }
 
 /** An event a crew surface may be about: there, not a draft, not deleted. */
-async function crewEvent(eventId: string) {
+export async function crewEvent(eventId: string) {
   return db.events.findFirst({
     // any-kind: a crew can be here at a venue's room too — "We're here" at an event or a venue (§6).
     where: { id: eventId, deleted_at: null, status: { not: "draft" } },
@@ -70,7 +70,7 @@ async function crewEvent(eventId: string) {
 }
 
 /** Active members, by crew, for these crews. */
-async function membersOf(crewIds: readonly string[]): Promise<Map<string, string[]>> {
+export async function membersOf(crewIds: readonly string[]): Promise<Map<string, string[]>> {
   const rows = await db.crew_members.findMany({
     where: { crew_id: { in: [...crewIds] }, user: { suspended_at: null, deletedAt: null } },
     select: { crew_id: true, user_id: true },
@@ -78,6 +78,42 @@ async function membersOf(crewIds: readonly string[]): Promise<Map<string, string
   const byCrew = new Map<string, string[]>()
   for (const r of rows) byCrew.set(r.crew_id, [...(byCrew.get(r.crew_id) ?? []), r.user_id])
   return byCrew
+}
+
+/**
+ * Whether a crew and one person may match at all (§8.3, the research's
+ * guardrails): the crew has room for one more, is no bigger than
+ * `CREW.MAX_SOLO_MATCH` active members, and dating is out unless both chose it
+ * — a group approaching one person romantically is the scenario women report
+ * as unsafe. The person's own opt-in ("Open to joining a crew tonight") is
+ * asked separately, because it is theirs to give. Pure.
+ */
+export function crewMayMeetSolo(
+  crew: { open_to_solo: boolean; intent: readonly string[] },
+  size: number,
+  personIntents: readonly string[]
+): boolean {
+  if (!crew.open_to_solo || size > CREW.MAX_SOLO_MATCH) return false
+  return !crew.intent.includes("dating") || personIntents.includes("dating")
+}
+
+/**
+ * A person's intents at this event — what they chose here, else their
+ * profile's default — and whether they are open to crews **now**: the opt-in
+ * lasts until the end of the occurrence they gave it at (`open_to_crews_until`).
+ */
+export async function intentsAt(eventId: string, userId: string): Promise<{ intents: string[]; openToCrews: boolean }> {
+  const [pref, profile] = await Promise.all([
+    db.event_match_preferences.findUnique({
+      where: { event_id_user_id: { event_id: eventId, user_id: userId } },
+      select: { intent: true, open_to_crews_until: true },
+    }),
+    db.profiles.findUnique({ where: { id: userId }, select: { intent_default: true } }),
+  ])
+  return {
+    intents: pref?.intent.length ? pref.intent : (profile?.intent_default ?? []),
+    openToCrews: !!pref?.open_to_crews_until && pref.open_to_crews_until > new Date(),
+  }
 }
 
 export interface CrewCard {
@@ -91,6 +127,8 @@ export interface CrewCard {
   presentCount: number
   tags: { slug: string; label: string }[]
   intent: string[]
+  /** Whether your side has liked them tonight. Never whether they liked you. */
+  youLiked: boolean
 }
 
 /**
@@ -130,8 +168,8 @@ export type CrewsAtEvent =
  *   from each other (§6 Safety, C6).
  * - A caller here without a crew of their own sees crews only after opting
  *   in ("Open to joining a crew tonight", until the end of the occurrence they
- *   said it at), and then only crews with room for one more and no bigger than
- *   `CREW.MAX_SOLO_MATCH` (§8.3).
+ *   said it at), and then only crews they may meet (`crewMayMeetSolo`: room
+ *   for one more, ≤ 6, dating only if both chose it — §8.3).
  * - Most here first, then by id, a page at a time.
  *
  * A fixed handful of set-based reads however many crews are here (the PR
@@ -167,18 +205,29 @@ export async function crewsAtEvent(
   let visible = others.filter((c) => !blocksExclude(mySide, members.get(c.id) ?? [], blocked))
 
   if (mine.length === 0) {
-    const opted = await db.event_match_preferences.findFirst({
-      where: { event_id: eventId, user_id: viewerId, open_to_crews_until: { gt: new Date() } },
-      select: { user_id: true },
-    })
-    visible = opted
-      ? visible.filter((c) => c.open_to_solo && (members.get(c.id)?.length ?? 0) <= CREW.MAX_SOLO_MATCH)
+    const me = await intentsAt(eventId, viewerId)
+    visible = me.openToCrews
+      ? visible.filter((c) => crewMayMeetSolo(c, members.get(c.id)?.length ?? 0, me.intents))
       : []
   }
 
   const presentCount = (id: string) => present.get(id)?.length ?? 0
   visible.sort((a, b) => presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1))
   const shown = visible.slice(page.offset, page.offset + page.limit)
+
+  // What your side liked tonight, of this page: your crews here, or you.
+  const liked = new Set(
+    (
+      await db.crew_likes.findMany({
+        where: {
+          occurrence_id: occurrenceId,
+          to_crew_id: { in: shown.map((c) => c.id) },
+          ...(mine.length ? { from_crew_id: { in: mine.map((c) => c.id) } } : { from_user_id: viewerId }),
+        },
+        select: { to_crew_id: true },
+      })
+    ).map((l) => l.to_crew_id)
+  )
 
   return {
     crewsEnabled: true,
@@ -191,6 +240,7 @@ export async function crewsAtEvent(
       presentCount: presentCount(c.id),
       tags: c.tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] })),
       intent: c.intent,
+      youLiked: liked.has(c.id),
     })),
     myCrews: mine.map((c) => ({ crewId: c.id, name: c.name, presentCount: presentCount(c.id) })),
     total: visible.length,

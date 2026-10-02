@@ -34,6 +34,7 @@ const mockDb = {
   friend_invites: { deleteMany: jest.fn() },
   // Their crews: locked and left INSIDE the transaction (raw SQL, below), settled after.
   crew_invites: { deleteMany: jest.fn() },
+  blend_reveals: { deleteMany: jest.fn() },
   product_events: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },

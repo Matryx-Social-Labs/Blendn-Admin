@@ -78,6 +78,7 @@ const CrewCardSchema = z
     presentCount: z.number().int().describe("\"Here now · N of size\" — always ≥ 2"),
     tags: z.array(Tag),
     intent: z.array(Intent),
+    youLiked: z.boolean().describe("Whether your side liked this crew tonight. Never whether they liked you"),
   })
   .describe("Counts only: never a person's name, photo or pseudonym")
   .openapi("CrewCard")
@@ -287,7 +288,7 @@ registry.registerPath({
     "at this occurrence — derived, never stored. Never your own crews (those are `myCrews`), never a hidden crew, never a crew with any member " +
     "kept apart (a block or a closed conversation, either way) from you or any member of your crews here. Without a crew of your own here " +
     "you see crews only after opting in (\"Open to joining a crew tonight\", for the night you said it), and only crews with room for one more " +
-    "and no bigger than 6. Cards carry counts, never people. Most here first, a page at a time. `crewsEnabled: false` when the host turned crews off.",
+    "no bigger than 6, and not out for dating unless you are too. Cards carry counts, never people. Most here first, a page at a time. `crewsEnabled: false` when the host turned crews off.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -307,6 +308,110 @@ registry.registerPath({
             myCrews: z.array(z.object({ crewId: z.string().uuid(), name: z.string(), presentCount: z.number().int() })),
             total: z.number().int().describe("Every crew you may see here now, across pages"),
             hasMore: z.boolean(),
+          })
+        )
+      ),
+    },
+    ...standardErrors,
+  },
+})
+
+const BlendRef = z.object({ blendId: z.string().uuid(), chatGroupId: z.string().uuid() })
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/crews/{crewId}/like",
+  tags,
+  summary: "Like a crew here now",
+  description:
+    "You must be checked in here now (403). With `asCrewId` (one of your crews here — two of you checked in, 403 otherwise) it is crew → crew, " +
+    "on your crew's behalf: no vote, and your crew chat says \"liked <crew> for the crew\". Without it, it is you → crew: you must have opted in " +
+    "to crews tonight (403), and the crew must have room for one more, be 6 or fewer active members, and not be out for dating unless you are. " +
+    "403 when the host turned crews off. A crew not here (or hidden), anybody on one side kept apart from anybody on the other (a block or a " +
+    "closed conversation — asked again inside the transaction that would write the like, so nothing is stored), two crews sharing a member, " +
+    "or a guardrail about the other side is the same 404. If they liked you back, `blend` is the one Blend room it made — two likes at the " +
+    "same instant still make one; a Blend between you that has closed answers `blend: null`. Liking twice is liking once. Nothing anywhere " +
+    "says who liked first. The Blend's room is the people checked in on either side at that moment (and the person): somebody who arrives " +
+    "later is not in it.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid(), crewId: z.string().uuid() }),
+    body: json(z.object({ asCrewId: z.string().uuid().optional() })),
+  },
+  responses: {
+    200: { description: "Liked", ...json(wrap(z.object({ liked: z.literal(true), blend: BlendRef.nullable() }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/blends/{blendId}/reveal",
+  tags,
+  summary: "Reveal my crew in this Blend",
+  description:
+    "One tap, in an open Blend I am in: each member of my crew who is checked in now and in this Blend's room, except anybody who has " +
+    "switched on \"keep me anonymous\" (read again as it is written) — consent was taken when they joined. The matched person in a crew ↔ " +
+    "person Blend reveals only themselves. Shown to this Blend's people, by first name and one photo, and to nobody else: not the event's " +
+    "room or its deck, not a DM, not another Blend. Never un-revealed by anything later (D-10). 404 for a Blend that is not open or not mine.",
+  security: bearerAuth,
+  request: { params: z.object({ blendId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: "Revealed",
+      ...json(wrap(z.object({ revealed: z.number().int(), keptPrivate: z.number().int() }))),
+    },
+    ...standardErrors,
+  },
+})
+
+const BlendPersonSchema = z
+  .object({
+    userId: z.string().describe("Yours is your own id; anyone else's is their handle in the Blend's room"),
+    pseudonym: z.string().describe("Tonight's pseudonym"),
+    name: z.string().nullable().describe("First name, only when revealed in this Blend, or recognised in the event's room"),
+    photo: z.string().nullable(),
+  })
+  .openapi("BlendPerson")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/blends",
+  tags,
+  summary: "My open Blends",
+  description:
+    "Each Blend I am let into now: its room (`chatGroupId`, a room of kind `blend`), when it closes (the occurrence's end + 12 h, or earlier " +
+    "when a side's crew dissolves or is hidden), and its two sides — the people who were here when it matched, by tonight's pseudonym, " +
+    "named only when revealed in this Blend (or recognised in the event's room), with \"N revealed · M keep it private\" per crew. Never " +
+    "somebody kept apart from me (a block or a closed conversation), nor anybody who turned \"show online\" off. A block across the " +
+    "sides takes that pair out of the Blend; it goes on for everyone else. Anyone may leave it on their own " +
+    "(`POST /chat/groups/{chatGroupId}/leave`).",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "Blends",
+      ...json(
+        wrap(
+          z.object({
+            blends: z.array(
+              z.object({
+                blendId: z.string().uuid(),
+                chatGroupId: z.string().uuid(),
+                eventId: z.string().uuid(),
+                closesAt: z.string(),
+                sides: z.array(
+                  z.object({
+                    kind: z.enum(["crew", "person"]),
+                    crewId: z.string().uuid().nullable(),
+                    name: z.string().nullable(),
+                    emblemSeed: z.string().nullable(),
+                    revealed: z.number().int(),
+                    keptPrivate: z.number().int(),
+                    people: z.array(BlendPersonSchema),
+                  })
+                ),
+              })
+            ),
           })
         )
       ),

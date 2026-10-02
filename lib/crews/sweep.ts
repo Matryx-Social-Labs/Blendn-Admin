@@ -8,6 +8,7 @@ import { CREW } from "../constants"
 import { db } from "../db"
 import { logger } from "../logger"
 import { closeRoomSockets } from "../room-close"
+import { OWNER_ROOM_HOURS } from "../room-kind"
 
 /**
  * A crew's standing: whether it still has enough people to be one, and an
@@ -42,24 +43,49 @@ export async function lockCrew(
   return rows[0] ?? null
 }
 
+/** Rooms archived and everyone in them released, inside the caller's transaction. */
+async function archiveRooms(tx: Prisma.TransactionClient, roomIds: readonly string[]): Promise<void> {
+  if (roomIds.length === 0) return
+  await tx.chat_groups.updateMany({ where: { id: { in: [...roomIds] }, status: "active" }, data: { status: "archived" } })
+  await tx.chat_group_members.updateMany({
+    where: { chat_group_id: { in: [...roomIds] }, status: { in: ["active", "muted"] } },
+    data: { status: "left" },
+  })
+}
+
+/**
+ * Every open Blend this crew is a side of, closed now (`closed_at`), its room
+ * archived and released: a crew that dissolves, or that a moderator hides,
+ * takes its Blends with it. Inside the caller's transaction; the room ids
+ * come back for the sockets after commit.
+ */
+export async function closeCrewBlendsLocked(tx: Prisma.TransactionClient, crewId: string): Promise<string[]> {
+  const open = await tx.blends.findMany({
+    where: { closed_at: null, OR: [{ a_crew_id: crewId }, { b_crew_id: crewId }] },
+    select: { id: true, room: { select: { id: true } } },
+  })
+  if (open.length === 0) return []
+  await tx.blends.updateMany({ where: { id: { in: open.map((b) => b.id) }, closed_at: null }, data: { closed_at: new Date() } })
+  const roomIds = open.flatMap((b) => (b.room ? [b.room.id] : []))
+  await archiveRooms(tx, roomIds)
+  return roomIds
+}
+
 /**
  * D-15, inside the caller's transaction holding the crew lock: `dissolved_at`,
- * every member and invite row gone, the room archived and everyone in it
- * released. The room id, for the caller to take the sockets out after commit.
+ * every member and invite row gone, the crew's room archived and everyone in
+ * it released, and its open Blends closed. The room ids, for the caller to
+ * take the sockets out after commit.
  */
-export async function dissolveLocked(tx: Prisma.TransactionClient, crewId: string): Promise<string | null> {
+export async function dissolveLocked(tx: Prisma.TransactionClient, crewId: string): Promise<string[]> {
   const now = new Date()
   await tx.crews.update({ where: { id: crewId }, data: { dissolved_at: now, updated_at: now } })
   await tx.crew_members.deleteMany({ where: { crew_id: crewId } })
   await tx.crew_invites.deleteMany({ where: { crew_id: crewId } })
   const room = await tx.chat_groups.findUnique({ where: { crew_id: crewId }, select: { id: true } })
-  if (!room) return null
-  await tx.chat_groups.update({ where: { id: room.id }, data: { status: "archived" } })
-  await tx.chat_group_members.updateMany({
-    where: { chat_group_id: room.id, status: { in: ["active", "muted"] } },
-    data: { status: "left" },
-  })
-  return room.id
+  const roomIds = room ? [room.id] : []
+  await archiveRooms(tx, roomIds)
+  return [...roomIds, ...(await closeCrewBlendsLocked(tx, crewId))]
 }
 
 /**
@@ -73,13 +99,13 @@ export async function dissolveLocked(tx: Prisma.TransactionClient, crewId: strin
 export async function settleLocked(
   tx: Prisma.TransactionClient,
   crewId: string
-): Promise<{ dissolved: boolean; roomId: string | null }> {
+): Promise<{ dissolved: boolean; roomIds: string[] }> {
   const active = await tx.crew_members.findMany({
     where: { crew_id: crewId, ...activeMemberWhere },
     select: { user_id: true, role: true },
     orderBy: [{ joined_at: "asc" }, { user_id: "asc" }],
   })
-  if (active.length < CREW.MIN_MEMBERS) return { dissolved: true, roomId: await dissolveLocked(tx, crewId) }
+  if (active.length < CREW.MIN_MEMBERS) return { dissolved: true, roomIds: await dissolveLocked(tx, crewId) }
   if (!active.some((m) => m.role === "owner")) {
     await tx.crew_members.updateMany({ where: { crew_id: crewId, role: "owner" }, data: { role: "member" } })
     await tx.crew_members.update({
@@ -87,16 +113,16 @@ export async function settleLocked(
       data: { role: "owner" },
     })
   }
-  return { dissolved: false, roomId: null }
+  return { dissolved: false, roomIds: [] }
 }
 
 /** `settleLocked` in its own transaction, then the sockets out if it dissolved. */
 export async function settleCrew(crewId: string): Promise<{ dissolved: boolean }> {
   const result = await db.$transaction(async (tx) => {
-    if (!(await lockCrew(tx, crewId))) return { dissolved: false, roomId: null }
+    if (!(await lockCrew(tx, crewId))) return { dissolved: false, roomIds: [] }
     return settleLocked(tx, crewId)
   })
-  if (result.roomId) closeRoomSockets(result.roomId)
+  for (const id of result.roomIds) closeRoomSockets(id)
   return { dissolved: result.dissolved }
 }
 
@@ -154,15 +180,41 @@ export async function repairCrews(): Promise<{ repaired: number; dissolved: numb
 
 /**
  * A moderator's dissolve (C12, the reports queue): the crew ends as if its
- * last member had left (D-15), whatever its size. Inside the caller's
- * transaction, so the report's verdict and the dissolve commit together; the
- * room id comes back for the caller to take the sockets out after commit.
+ * last member had left (D-15), whatever its size, and its open Blends close.
+ * Inside the caller's transaction, so the report's verdict and the dissolve
+ * commit together; the room ids come back for the sockets after commit.
  * Null when it had already dissolved.
  */
 export async function dissolveCrewLocked(
   tx: Prisma.TransactionClient,
   crewId: string
-): Promise<{ roomId: string | null } | null> {
+): Promise<{ roomIds: string[] } | null> {
   if (!(await lockCrew(tx, crewId))) return null
-  return { roomId: await dissolveLocked(tx, crewId) }
+  return { roomIds: await dissolveLocked(tx, crewId) }
+}
+
+/**
+ * Crew likes that never made a Blend, gone once their night is over: 12 hours
+ * after the occurrence ends (`OWNER_ROOM_HOURS`, when a Blend from it would
+ * have closed). A like that went nowhere is somebody's unanswered interest,
+ * with the name of the member who tapped it (`liked_by_user_id`); kept past
+ * the night it is only something to leak. A like that made a Blend stays with
+ * the Blend it explains. Bounded per pass, like every sweeper arm.
+ */
+export async function purgeLapsedCrewLikes(): Promise<number> {
+  return db.$executeRaw`
+    DELETE FROM crew_likes WHERE id IN (
+      SELECT l.id FROM crew_likes l
+      JOIN event_occurrences o ON o.id = l.occurrence_id
+      WHERE o.end_time < now() - make_interval(hours => ${OWNER_ROOM_HOURS})
+        AND NOT EXISTS (
+          SELECT 1 FROM blends b WHERE b.occurrence_id = l.occurrence_id AND (
+            (l.to_crew_id IS NOT NULL AND l.from_crew_id IS NOT NULL
+              AND b.a_crew_id = LEAST(l.from_crew_id, l.to_crew_id) AND b.b_crew_id = GREATEST(l.from_crew_id, l.to_crew_id))
+            OR (l.to_user_id IS NOT NULL AND b.a_crew_id = l.from_crew_id AND b.b_user_id = l.to_user_id)
+            OR (l.from_user_id IS NOT NULL AND b.a_crew_id = l.to_crew_id AND b.b_user_id = l.from_user_id)
+          )
+        )
+      LIMIT ${REPAIR_BATCH * 5}
+    )`
 }

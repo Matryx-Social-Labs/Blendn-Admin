@@ -172,6 +172,16 @@
       "invites"
     ]
   },
+  "/api/mobile/blends": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "blends"
+    ]
+  },
   "/api/mobile/events/:eventId": {
     "status": 200,
     "envelope": [

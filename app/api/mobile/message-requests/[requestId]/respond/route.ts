@@ -17,6 +17,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 
 interface RouteParams {
@@ -166,6 +167,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // And any crew invite between them (C5), with the block.
         await dropCrewInvitesBetween(tx, authUser.userId, messageRequest.sender_id)
       })
+      // Out of any Blend room that now refuses them; the Blend goes on for the rest (D-9).
+      await evictBlockedFromBlends(authUser.userId, messageRequest.sender_id)
     }
 
     // Notify the original sender of the response (async, don't await)

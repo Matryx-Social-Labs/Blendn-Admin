@@ -238,7 +238,7 @@ describe("the database holds the shape", () => {
     await expect(insert("event", eventId, null).then(() => insert("event", null, null))).rejects.toThrow(oneOwner)
     await insert("crew", crew.id, null)
     await expect(insert("crew", crew.id, null)).rejects.toThrow(/23505[\s\S]*chat_groups_crew_id_key/)
-    // No Blend owner yet.
+    // Nor a Blend room without its Blend (blends.itest.ts proves that arm).
     await expect(insert("blend", null, null)).rejects.toThrow(oneOwner)
   })
 
@@ -509,7 +509,7 @@ describe("\"We're here\" and presence at an event (CR-I04, CR-I05)", () => {
     expect(card).toMatchObject({ name: "Two Here", size: 3, presentCount: 2 })
     // Counts, never people (C4): no ids, names, photos or pseudonyms — the
     // card's keys are exactly these.
-    expect(Object.keys(card).sort()).toEqual(["bio", "crewId", "emblemSeed", "intent", "name", "presentCount", "size", "tags"])
+    expect(Object.keys(card).sort()).toEqual(["bio", "crewId", "emblemSeed", "intent", "name", "presentCount", "size", "tags", "youLiked"])
     expect(JSON.stringify(card)).not.toMatch(new RegExp([p1.id, p2.id, p3.id, "Asha"].join("|")))
     expect(seen.body.data).toMatchObject({ total: 1, hasMore: false })
     // Derived: the crew and its rows are exactly as they were.

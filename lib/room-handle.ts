@@ -157,6 +157,16 @@ function openHandle(ref: string): { userId: string; scope: RoomScope } | null {
 }
 
 /**
+ * A handle's person and the room it came from, whatever kind of room — for the
+ * one action that may name somebody across any room it was shown in: a block
+ * (the block route asks that room's door whether the caller is let in it now).
+ * Null for anything that is not a handle or does not verify.
+ */
+export function openRoomHandle(ref: string): { userId: string; scope: RoomScope } | null {
+  return isRoomHandle(ref) ? openHandle(ref) : null
+}
+
+/**
  * The person behind a ref: a handle is decrypted and verified; anything else
  * is a raw id (the contract before handles, still accepted). Null for a handle
  * that does not verify — malformed, truncated, tampered or from another key —
