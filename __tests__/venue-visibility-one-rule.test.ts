@@ -52,7 +52,7 @@ describe("one hiding rule (HM-G01)", () => {
   })
 
   it("defines the hour before the start in lib/venue-visibility.ts only", () => {
-    expect(files.filter(([rel, src]) => LEAD.test(src)).map(([rel]) => rel)).toEqual([RULE])
+    expect(files.filter(([, src]) => LEAD.test(src)).map(([rel]) => rel)).toEqual([RULE])
   })
 
   it.each([
