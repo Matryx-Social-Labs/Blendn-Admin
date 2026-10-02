@@ -140,13 +140,9 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
   it("suppresses the category count without hiding the category", () => {
     // An organiser still needs to know a safety concern was raised.
     const src = code("lib/feedback-digest.ts")
-    // Since step 15 the digest lives in lib/feedback-digest.ts, and a venue's
-    // view holds a count under the floor back too; the value still comes from
-    // the disclosure, and the category is still listed.
-    expect(src).toMatch(
-      /const shown = venue && disclosure\.value !== null && disclosure\.value < MIN_CELL_VENUE \? null : disclosure\.value/
-    )
-    expect(src).toMatch(/count: shown,\s*suppressed: shown === null/)
+    // In lib/feedback-digest.ts since step 15.
+    expect(src).toMatch(/count: disclosure\.value/)
+    expect(src).toMatch(/suppressed: disclosure\.suppressed/)
   })
 })
 

@@ -3,7 +3,7 @@ import type { feedback_sentiment, issue_category } from "@prisma/client"
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseFigure, discloseHeadcount, discloseStars, mayQuote, MIN_CELL as MIN_CELL_VENUE, type SuppressionReason } from "./disclosure"
+import { discloseFigure, discloseHeadcount, discloseStars, mayQuote, type SuppressionReason } from "./disclosure"
 import { escalates } from "./sentiment/taxonomy"
 
 /*
@@ -181,13 +181,13 @@ export async function buildFeedbackDigest(
           contributors: categoryContributors.get(category)?.size ?? 0,
           population,
         })
-        // A venue gets no count under the floor, whatever the room's size.
-        const shown = venue && disclosure.value !== null && disclosure.value < MIN_CELL_VENUE ? null : disclosure.value
+        // Already floored at five for everybody, a venue included: a count
+        // can't clear the floor with fewer than five contributors.
         return {
           category,
-          count: shown,
-          suppressed: shown === null,
-          suppressionReason: shown === null ? (disclosure.reason ?? ("min_cell" as const)) : null,
+          count: disclosure.value,
+          suppressed: disclosure.suppressed,
+          suppressionReason: disclosure.reason,
         }
       })
       .sort((a, b) => (b.count ?? 0) - (a.count ?? 0)),

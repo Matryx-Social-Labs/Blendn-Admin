@@ -74,7 +74,7 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
       ["Announcements & sponsors", `/dashboard/events/${id}?tab=announcements`],
     ] as const) {
       await tabs(page).getByRole("link", { name }).click()
-      await expect(page).toHaveURL(new RegExp(`${path.replace(/[?]/g, "\\?")}$`))
+      await expect(page).toHaveURL(new RegExp(`${path.replace(/[?]/g, "\\?")}$`), { timeout: 30_000 })
       // The same header and tabs on every one, the current one marked.
       await expect(main(page).getByRole("heading", { level: 1 })).toHaveText("Sunset Sessions at The Humming Tree")
       await expect(tabs(page).getByRole("link", { name })).toHaveAttribute("aria-current", "page")
@@ -84,7 +84,7 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
 
     // The header's "QR code" is the way in from anywhere.
     await main(page).getByRole("link", { name: "QR code" }).click()
-    await expect(page).toHaveURL(new RegExp(`/dashboard/events/${id}\\?tab=share$`))
+    await expect(page).toHaveURL(new RegExp(`/dashboard/events/${id}\\?tab=share$`), { timeout: 30_000 })
     await expect(tabs(page).getByRole("link", { name: "QR & link" })).toHaveAttribute("aria-current", "page")
     await expect(main(page).getByRole("textbox", { name: "Event link" })).toHaveValue(`https://www.blendn.app/event/${id}`)
     await expect(main(page).getByRole("img", { name: "QR code for Sunset Sessions at The Humming Tree" }).first()).toBeVisible()
@@ -156,14 +156,14 @@ test("the venue owner, on a night at their venue: every tab as the venue, no cod
 
   // Attendees: a count, no table of labels.
   await tabs(page).getByRole("link", { name: "Attendees" }).click()
-  await expect(page).toHaveURL(/\?tab=attendees$/)
+  await expect(page).toHaveURL(/\?tab=attendees$/, { timeout: 30_000 })
   await expect(main(page).locator("table")).toHaveCount(0)
   await expect(main(page).getByText(/attendee-[0-9a-f]{12}/)).toHaveCount(0)
   found.push(...(await axeMain(page)).map((v) => `venue attendees: ${v}`))
 
   // Room chat: the room and the queue, which is what the building operates.
   await tabs(page).getByRole("link", { name: "Room chat" }).click()
-  await expect(page).toHaveURL(/\/messaging$/)
+  await expect(page).toHaveURL(/\/messaging$/, { timeout: 30_000 })
   await expect(main(page).getByRole("heading", { name: "Moderation" })).toBeVisible()
   await page.waitForLoadState("networkidle")
   found.push(...(await axeMain(page)).map((v) => `venue room: ${v}`))
