@@ -542,9 +542,11 @@ page it opens is public: the claimant needs no account, filing grants nothing,
 and a person reviews every claim. Computed by `offersClaim` in `lib/curation.ts`.
 
 **`venue` on each card of `GET /events` is the place to name** — `{ id, name }`
-of the venue the event is linked to, or `null` when the venue's owner disputed
-the link, the venue is archived or deleted, or there is none; then say the
-organiser's free-text `venueName`. Only those two fields: never the venue's area
+of the venue the event is at, by the takeover's own test: a `confirmed` link,
+or the event's own area at the venue (`atTheVenue`). `null` for a disputed
+link, an auto-link whose area is elsewhere (any organiser can link any venue,
+and a card must not lend them a famous bar's name), an archived or deleted
+venue, or none; then say the organiser's free-text `venueName`. Only those two fields: never the venue's area
 or owner. While the event has the venue (an hour before it starts until it
 ends) `GET /venues` leaves the venue out, so this card is where the app says
 "at The Humming Tree". Computed by `eventVenue` in `lib/venue-visibility.ts`.
@@ -685,8 +687,17 @@ page and the door.
 
 **`liveNow` is a bucket, never a number** — `quiet` (fewer than 5, none
 included), `5-9`, `10-19` or `20+`: the same figure as `live.liveNow` on
-`GET /venues/:venueId`, guests only, never counting you, read at most once a
-minute per venue and slow to fall (D-19, F14).
+`GET /venues/:venueId` (both count through `liveGuestIds`: distinct guests,
+never staff), read at most once a minute per venue and slow to fall (D-19,
+F14). You are left out only when the figure counted you, so going live or
+leaving inside the minute moves nothing you see. **`null`** for a caller the
+venue page would refuse — not onboarded, or no known adult age — and the app
+hides the chip.
+
+**Order** is by name, then id (or distance, then id): two venues with one name
+keep one order, so a page boundary between them never repeats or skips one.
+A venue taken over between your page reads shifts the offsets (a venue may be
+skipped, none repeated); dedupe by `id` regardless.
 
 **The card image comes from the next event.** `venues` has no image column.
 Rather than a wall of grey cards or an invented placeholder, each venue carries

@@ -431,6 +431,12 @@ describe("the Places list's cost does not grow with the page", () => {
      */
     const viewerId = await makeUser(testId("qb_places"))
     users.push(viewerId)
+    // An onboarded adult: `liveNow` is read only for somebody the venue page would answer.
+    await db.profiles.upsert({
+      where: { id: viewerId },
+      create: { id: viewerId, name: "Test", onboarded: true, date_of_birth: new Date(Date.now() - 30 * 365.25 * 86_400_000) },
+      update: { onboarded: true, date_of_birth: new Date(Date.now() - 30 * 365.25 * 86_400_000) },
+    })
     const viewer = await db.user.findUniqueOrThrow({ where: { id: viewerId }, select: { email: true } })
     const token = signAccessToken(viewerId, viewer.email)
     const list = (tag: string) =>

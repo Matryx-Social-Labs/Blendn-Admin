@@ -5,10 +5,14 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
+import { venueDayFor } from "@/lib/venue-day"
+import { venuesTakenOver } from "@/lib/venue-visibility"
+
 import { closeDb, db, makeUser, testId } from "./helpers"
 import { cleanupWorld, goLive, LAT, LNG, person, realEvent, req, venue, world } from "./go-live-world"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
+const venueRoute = require("@/app/api/mobile/venues/[venueId]/route") as typeof import("@/app/api/mobile/venues/[venueId]/route")
 const venuesRoute = require("@/app/api/mobile/venues/route") as typeof import("@/app/api/mobile/venues/route")
 const eventsRoute = require("@/app/api/mobile/events/route") as typeof import("@/app/api/mobile/events/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -43,7 +47,7 @@ async function place(label: string, opts: Parameters<typeof venue>[0] = {}) {
 type Row = {
   id: string
   name: string
-  liveNow: string
+  liveNow: string | null
   upcomingEventCount: number
   nextEvent: { id: string } | null
 }
@@ -188,11 +192,17 @@ describe("the viewer's age, beside the search (HM-I02, D-3, F4)", () => {
 })
 
 describe("GET /events: a card names its venue (HM-I04, HM-U08)", () => {
-  it("as {id, name} when linked and undisputed; null when disputed, the venue is archived, or there is none", async () => {
+  it("as {id, name} by the takeover's own test; null when disputed, far and auto-linked, archived, or there is none", async () => {
     const [linked, disputed, archived] = [await place("linked"), await place("disputed card"), await place("archived")]
-    const named = async (venueId: string | null, link: "confirmed" | "disputed" | null, label: string) => {
+    const [autoNear, autoFar, confirmedFar] = [await place("auto near"), await place("auto far"), await place("confirmed far")]
+    const named = async (
+      venueId: string | null,
+      link: "auto_linked" | "confirmed" | "disputed" | null,
+      label: string,
+      far = false
+    ) => {
       const id = venueId
-        ? await realEvent(venueId, { startsInMin: 180, link })
+        ? await realEvent(venueId, { startsInMin: 180, link, far })
         : await realEvent(linked, { startsInMin: 180 }).then(async (e) => {
             await db.events.update({ where: { id: e }, data: { venue_id: null } })
             return e
@@ -205,6 +215,10 @@ describe("GET /events: a card names its venue (HM-I04, HM-U08)", () => {
       disputed: await named(disputed, "disputed", "disputed"),
       archived: await named(archived, "confirmed", "archived"),
       none: await named(null, null, "none"),
+      autoNear: await named(autoNear, "auto_linked", "auto near"),
+      // Any organiser can auto-link any venue; a kilometre away it lends them no name.
+      autoFar: await named(autoFar, "auto_linked", "auto far", true),
+      confirmedFar: await named(confirmedFar, "confirmed", "confirmed far", true),
     }
     await db.venues.update({ where: { id: archived }, data: { status: "archived" } })
 
@@ -218,6 +232,9 @@ describe("GET /events: a card names its venue (HM-I04, HM-U08)", () => {
     expect(card(ids.disputed)).toMatchObject({ venue: null, venueName: "disputed free text" })
     expect(card(ids.archived)?.venue).toBeNull()
     expect(card(ids.none)?.venue).toBeNull()
+    expect(card(ids.autoNear)?.venue).toEqual({ id: autoNear, name: `${TOKEN} auto near` })
+    expect(card(ids.autoFar)).toMatchObject({ venue: null, venueName: "auto far free text" })
+    expect(card(ids.confirmedFar)?.venue).toEqual({ id: confirmedFar, name: `${TOKEN} confirmed far` })
     // `{id, name}` only: never the venue's area or its owner.
     expect(text).not.toMatch(/geofence|owner_org_id|"ring"/)
   })
@@ -227,5 +244,164 @@ describe("GET /venues refuses a bad viewport (HM-I06)", () => {
   it.each(["radius=1e9", "radius=-1", "radius=NaN", "lat=200&lon=77&radius=5"])("%s → 400, never 500", async (q) => {
     const res = await venuesRoute.GET(req(`/api/mobile/venues?${q}`, (await person()).token))
     expect(res.status).toBe(400)
+  })
+})
+
+/** `n` guests (or staff) live at the venue's day now, written straight in: no Go Live per person. */
+async function liveAt(venueId: string, n: number, kind: "attendee" | "staff" = "attendee") {
+  const day = await venueDayFor(venueId)
+  if (!day) throw new Error("no venue day")
+  for (let i = 0; i < n; i++) {
+    const user = await makeUser(testId("vh_live"))
+    world.users.push(user)
+    await db.event_check_ins.create({
+      data: {
+        event_id: day.id,
+        occurrence_id: day.occurrenceId,
+        user_id: user,
+        kind,
+        status: "checked_in",
+        check_in_time: new Date(),
+        expires_at: new Date(Date.now() + 60 * MIN),
+      },
+    })
+  }
+}
+
+async function detailLiveNow(token: string, venueId: string) {
+  const res = await venueRoute.GET(req(`/api/mobile/venues/${venueId}`, token), { params: Promise.resolve({ venueId }) })
+  expect(res.status).toBe(200)
+  return (await res.json()).data.live.liveNow as string
+}
+
+describe("the window's edges, at a fixed now (HM-U01)", () => {
+  it("is open from exactly an hour before the start until the instant before the end", async () => {
+    const v = await place("fixed now")
+    const start = new Date(Math.ceil((Date.now() + 5 * 60 * MIN) / MIN) * MIN)
+    const end = new Date(start.getTime() + 120 * MIN)
+    const id = await realEvent(v, { startsInMin: 0, link: "confirmed" })
+    await db.events.update({ where: { id }, data: { start_time: start, end_time: end } })
+    await db.event_occurrences.updateMany({ where: { event_id: id }, data: { start_time: start, end_time: end } })
+    const at = async (ms: number) => (await venuesTakenOver(new Date(ms), { id: v })).includes(v)
+    expect(await at(start.getTime() - 61 * MIN)).toBe(false)
+    expect(await at(start.getTime() - 60 * MIN)).toBe(true)
+    expect(await at(end.getTime() - 1)).toBe(true)
+    expect(await at(end.getTime())).toBe(false)
+  })
+})
+
+describe("liveNow on the list (D-19, F14, step 2 review)", () => {
+  it.each([
+    [4, "quiet"],
+    [5, "5-9"],
+    [9, "5-9"],
+    [10, "10-19"],
+    [19, "10-19"],
+    [20, "20+"],
+  ])("%s guests read %s", async (n, bucket) => {
+    const v = await place(`edge ${n}`)
+    await liveAt(v, n)
+    const { rows } = await places((await person()).token)
+    expect(rows.find((r) => r.id === v)?.liveNow).toBe(bucket)
+  })
+
+  it("agrees with the venue page, and never counts the venue's staff", async () => {
+    const [five, staffed] = [await place("agrees"), await place("staffed")]
+    await liveAt(five, 5)
+    await liveAt(staffed, 4)
+    await liveAt(staffed, 1, "staff")
+    const viewer = await person()
+    const { rows } = await places(viewer.token)
+    expect(rows.find((r) => r.id === five)?.liveNow).toBe("5-9")
+    expect(await detailLiveNow(viewer.token, five)).toBe("5-9")
+    expect(rows.find((r) => r.id === staffed)?.liveNow).toBe("quiet")
+    expect(await detailLiveNow(viewer.token, staffed)).toBe("quiet")
+  })
+
+  it("does not move when you go live yourself inside the minute: the edge your arrival crossed stays hidden", async () => {
+    const v = await place("go live, re-read")
+    await liveAt(v, 5)
+    const me = await person()
+    expect((await places(me.token)).rows.find((r) => r.id === v)?.liveNow).toBe("5-9")
+    expect((await goLive(me.token, v)).status).toBe(200)
+    // The figure was read without you; subtracting you from it would say "quiet" — four others, exactly.
+    expect((await places(me.token)).rows.find((r) => r.id === v)?.liveNow).toBe("5-9")
+    expect(await detailLiveNow(me.token, v)).toBe("5-9")
+  })
+
+  it.each([
+    ["an unknown age", { age: null }],
+    ["under 18", { age: 16 }],
+  ])("is null for %s, whom the venue page would refuse", async (_label, opts) => {
+    const v = await place(`gate ${_label}`)
+    await liveAt(v, 5)
+    const { rows } = await places((await person("vhgate", opts)).token)
+    expect(rows.find((r) => r.id === v)?.liveNow).toBeNull()
+  })
+})
+
+describe("whom a venue is hidden from (D-3)", () => {
+  it("hides behind a 21+ night from somebody of unknown age: discovery hides nothing from them", async () => {
+    const v = await place("unknown age")
+    await realEvent(v, { startsInMin: -30, link: "confirmed", minAge: 21 })
+    expect(listed((await places((await person("vhunk", { age: null })).token)).rows, v)).toBe(false)
+  })
+
+  it("hides from a 19-year-old when an all-ages night shares the venue with a 21+ one", async () => {
+    const v = await place("mixed ages")
+    await realEvent(v, { startsInMin: -30, link: "confirmed", minAge: 21 })
+    await realEvent(v, { startsInMin: -20, link: "confirmed" })
+    expect(listed((await places((await person("vh19b", { age: 19 })).token)).rows, v)).toBe(false)
+  })
+})
+
+describe("paging around a taken-over venue", () => {
+  it("counts only what is listed: totalCount and hasMore leave the hidden venue out", async () => {
+    const sub = `${TOKEN}pg`
+    const ids = [await place("pg a"), await place("pg b"), await place("pg c")]
+    for (const id of ids) await db.venues.update({ where: { id }, data: { name: `${sub} ${id}` } })
+    await realEvent(ids[0], { startsInMin: -30, link: "confirmed" })
+    const token = (await person()).token
+    const page = async (n: number) =>
+      JSON.parse(await (await venuesRoute.GET(req(`/api/mobile/venues?search=${sub}&limit=1&page=${n}`, token))).text()).data
+    const [one, two] = [await page(1), await page(2)]
+    expect(one.pagination).toMatchObject({ totalCount: 2, hasMore: true })
+    expect(two.pagination).toMatchObject({ totalCount: 2, hasMore: false })
+    expect([...one.venues, ...two.venues].map((v: Row) => v.id).sort()).toEqual([ids[1], ids[2]].sort())
+  })
+
+  it("keeps one order for venues with one name, and never repeats a venue when one is taken over between pages", async () => {
+    const name = `${TOKEN}same`
+    const ids = [await place("same 1"), await place("same 2"), await place("same 3")]
+    for (const id of ids) await db.venues.update({ where: { id }, data: { name } })
+    const sorted = [...ids].sort()
+    const token = (await person()).token
+    const page = async (n: number) =>
+      (JSON.parse(await (await venuesRoute.GET(req(`/api/mobile/venues?search=${name}&limit=1&page=${n}`, token))).text()).data
+        .venues as Row[]).map((v) => v.id)
+    // Ties by id: the same order on every read.
+    expect([...(await page(1)), ...(await page(2)), ...(await page(3))]).toEqual(sorted)
+    const first = await page(1)
+    await realEvent(first[0], { startsInMin: -30, link: "confirmed" })
+    // Offsets shift left: page 2 may skip a venue (the app pages on), never repeat one.
+    expect(first).not.toContain((await page(2))[0])
+  })
+
+  it("leaves the venue out of the distance sort too", async () => {
+    const [taken, open] = [await place("distance taken"), await place("distance open")]
+    await realEvent(taken, { startsInMin: -30, link: "confirmed" })
+    const { rows } = await places((await person()).token, `&lat=${LAT}&lon=${LNG}&radius=5&sortBy=distance`)
+    expect(listed(rows, taken)).toBe(false)
+    expect(listed(rows, open)).toBe(true)
+  })
+})
+
+describe("GET /venues is limited per person", () => {
+  it("answers 429 from the 61st read in a minute", async () => {
+    const me = await person()
+    const statuses: number[] = []
+    for (let i = 0; i < 61; i++) statuses.push((await venuesRoute.GET(req(`/api/mobile/venues?search=${TOKEN}zzz&limit=1`, me.token))).status)
+    expect(statuses.slice(0, 60).every((s) => s === 200)).toBe(true)
+    expect(statuses[60]).toBe(429)
   })
 })
