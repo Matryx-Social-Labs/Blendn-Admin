@@ -22,6 +22,11 @@ import { join } from "path"
  * member mute, the moderation queue and its decisions — already gated on
  * `canOperate`. The API was right and the page was not.
  *
+ * Since step 15 all three of the event's routes load through one loader
+ * (`lib/event-page.ts`), Room chat holds the feed and the moderation queue, and
+ * the composer and sponsors are the Announcements & sponsors tab — `canEdit`'s,
+ * in the tab list and again on the page, because a URL is not a tab list.
+ *
  * Source text rather than a rendered assertion: what is being pinned is which
  * predicate each side reaches for, and that is the thing that silently drifted.
  */
@@ -32,48 +37,69 @@ const read = (p: string) =>
 const TABS = read("app/dashboard/events/[id]/event-tabs.tsx")
 const EVENT_PAGE = read("app/dashboard/events/[id]/page.tsx")
 const MESSAGING = read("app/dashboard/events/[id]/messaging/page.tsx")
+const FEEDBACK = read("app/dashboard/events/[id]/feedback/page.tsx")
+const LOADER = read("lib/event-page.ts")
+
+/** The body of `if (activeTab === "<key>") { … }` in the event page, brace-matched. */
+function branch(key: string): string {
+  const at = EVENT_PAGE.indexOf(`if (activeTab === "${key}") {`)
+  if (at < 0) return ""
+  let depth = 0
+  for (let i = EVENT_PAGE.indexOf("{", at); i < EVENT_PAGE.length; i++) {
+    if (EVENT_PAGE[i] === "{") depth++
+    else if (EVENT_PAGE[i] === "}" && --depth === 0) return EVENT_PAGE.slice(at, i + 1)
+  }
+  return ""
+}
 
 describe("the tab list and its destination agree", () => {
-  it("found all three files, so the assertions below are not vacuous", () => {
+  it("found every file, so the assertions below are not vacuous", () => {
     expect(TABS).toContain("eventTabsFor")
     expect(EVENT_PAGE).toContain("eventTabsFor(")
-    expect(MESSAGING).toContain("eventPermissions(")
+    expect(LOADER).toContain("eventPermissions(")
+    expect(branch("announcements")).toContain("EventMessaging")
   })
 
-  it("offers Chat and Attendees on canOperate", () => {
+  it("offers Room chat and Attendees on canOperate, and Announcements on canEdit", () => {
     expect(TABS).toContain("opts.canOperate")
     expect(TABS).toContain('key: "attendees"')
     expect(TABS).toContain('key: "chat"')
+    expect(TABS).toMatch(/if \(opts\.canEdit\) tabs\.push\(\{ key: "announcements"/)
   })
 
-  it("lets canOperate into the page those tabs lead to", () => {
+  it("lets canOperate into every page those tabs lead to — one loader, asked the same way", () => {
     /*
      * The exact line that was wrong. `canEdit` here is what turned an offered
      * tab into a redirect to another event's page.
      */
-    expect(MESSAGING).toContain("if (!permissions.canOperate) redirect")
-    expect(MESSAGING).not.toMatch(/canEdit\)\s*\{?\s*redirect/)
+    expect(LOADER).toContain("if (!permissions.canOperate) redirect")
+    expect(LOADER).not.toMatch(/canEdit\)\s*\{?\s*redirect/)
+    for (const page of [EVENT_PAGE, MESSAGING, FEEDBACK]) expect(page).toMatch(/await loadEventPage\(id\)/)
   })
 
-  it("keeps the composer and the sponsor panel behind canEdit", () => {
+  it("keeps the composer and the sponsor panel behind canEdit, on the page as well as in the tab list", () => {
     /*
      * The other half, and the reason the predicate could not simply be flipped.
      * A venue owner announcing into an event they do not run is K3.12, and R37
-     * removes that right deliberately.
+     * removes that right deliberately. A URL is not a tab list, so the branch
+     * asks again.
      */
-    const guarded = MESSAGING.match(/permissions\.canEdit \? \(([\s\S]*?)\) : null/)
-    expect(guarded).not.toBeNull()
-    expect(guarded![1]).toContain("EventSponsors")
-    expect(guarded![1]).toContain("EventMessaging")
+    const announcements = branch("announcements")
+    expect(announcements).toMatch(/if \(!permissions\.canEdit\) redirect/)
+    expect(announcements.indexOf("if (!permissions.canEdit)")).toBeLessThan(announcements.indexOf("<EventMessaging"))
+    expect(announcements).toContain("<EventSponsors")
+    // Nowhere else on the event's pages.
+    for (const page of [MESSAGING, FEEDBACK, EVENT_PAGE.replace(announcements, "")]) {
+      expect(page).not.toContain("<EventMessaging")
+      expect(page).not.toContain("<EventSponsors")
+    }
   })
 
-  it("leaves the chat feed and the moderation queue outside that guard", () => {
+  it("puts the chat feed and the moderation queue on the Room page, behind nothing but canOperate", () => {
     // What `canOperate` is defined as: "chat, moderation, the attendee list —
     // what happens in your building".
-    const guarded = MESSAGING.match(/permissions\.canEdit \? \(([\s\S]*?)\) : null/)
-    expect(guarded![1]).not.toContain("ChatFeed")
-    expect(guarded![1]).not.toContain("ModerationQueue")
     expect(MESSAGING).toContain("<ChatFeed")
     expect(MESSAGING).toContain("<ModerationQueue")
+    expect(MESSAGING).not.toMatch(/canEdit/)
   })
 })

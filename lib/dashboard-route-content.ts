@@ -201,7 +201,7 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
   if (exact) return exact
 
   if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/messaging")) {
-    return { title: "Room", description: "What is being said, and what needs you." }
+    return { title: "Room chat", description: "What is being said, and what needs you." }
   }
   if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/edit")) {
     return { title: "Edit event", description: "Changes go live as soon as you save." }

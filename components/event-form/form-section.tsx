@@ -4,13 +4,11 @@ import { useId, useState } from "react"
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react"
 
 /**
- * A step of the form: a number, a heading and a rule. No box.
- *
- * The previous version was a bordered, collapsible card per section — eight
- * of them, at identical weight, which `docs/DESIGN_SYSTEM.md` names as the
- * thing that leaves the eye nowhere to land. Hierarchy here comes from the
- * heading and the numbering; the only thing that folds is "More", because
- * that is the one section an organiser does not need on the first pass.
+ * A step of the form: a number, a heading and a rule, in the kit's bordered
+ * panel (R3, step 15). Five of them, not eight, and none inside another — a
+ * sub-section (`level={3}`) inside "More" stays a heading and a rule. The only
+ * thing that folds is "More", because that is the one section an organiser
+ * does not need on the first pass.
  */
 export function FormSection({
   step,
@@ -50,7 +48,7 @@ export function FormSection({
       ) : null}
       <Heading
         id={headingId}
-        className={level === 2 ? "text-[1.0625rem] font-bold tracking-[-0.01em]" : "text-[0.9375rem] font-bold"}
+        className={level === 2 ? "text-panel-title font-bold" : "text-[0.9375rem] font-bold"}
       >
         {title}
       </Heading>
@@ -64,7 +62,8 @@ export function FormSection({
       aria-labelledby={headingId}
       className={
         level === 2
-          ? "border-t border-border pt-6 pb-7 first:border-t-0 first:pt-1 scroll-mt-6"
+          ? // Clear of the 60px sticky top bar when a rail link scrolls here.
+            "scroll-mt-[84px] rounded-panel border border-border bg-card px-5 pt-4 pb-5"
           : "pt-2 pb-4 scroll-mt-6"
       }
     >
