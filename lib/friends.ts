@@ -62,14 +62,8 @@ export function personCard(user: {
   }
 }
 
-/**
- * The first word of a display name, for the one surface a person who has not
- * signed in can reach (`GET /friends/invite/:token/preview`). "Someone" stays
- * "Someone".
- */
-export function firstName(name: string): string {
-  return name.trim().split(/\s+/)[0] || name
-}
+/** Lives with `UNNAMED` now; the crew room names people by it too (`namesInRoom`). */
+export { firstName } from "@/lib/conversation-identity"
 
 /** 16 random bytes, base64url: 22 characters, 128 bits. Not guessable, not enumerable. */
 export function newInviteToken(): string {

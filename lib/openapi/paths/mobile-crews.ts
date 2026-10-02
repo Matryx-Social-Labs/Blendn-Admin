@@ -1,0 +1,274 @@
+import { z } from "zod"
+import { registry } from "@/lib/openapi/registry"
+import { standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+
+/*
+ * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
+ * friend graph, 2–12 people, a crew chat (a room of kind `crew`), "We're here",
+ * and crew cards at an event. Inside a crew people are named (first name and
+ * photo); outside it a crew is an emblem, a name and tonight's pseudonyms.
+ */
+
+const bearerAuth = [{ bearerAuth: [] }]
+const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
+const tags = ["Mobile Crews"]
+const json = (schema: z.ZodTypeAny) => ({ content: { "application/json": { schema } } })
+
+const CREW_404 =
+  "A crew you are not in — or that does not exist, or has dissolved — is the same 404, so nothing here says which crews exist. "
+const ADULTS =
+  "403 \"Crews are for people 18 and over who have finished setting up.\" for an account under 18 or not finished onboarding. "
+const TEXT_CHECKS =
+  "The name (2–32 characters, not unique) and bio (≤140) go through the moderation pipeline and a strict contact-detail " +
+  "check — phone numbers, handles, emails and web addresses, written out or spelled (\"nine eight…\", \"at gmail dot com\"). " +
+  "A refusal is 400 with a sentence saying which, and nothing is written. "
+
+const Intent = z.enum(["dating", "networking", "friendship", "just_here"])
+const Tag = z.object({ slug: z.string(), label: z.string() }).openapi("CrewTag")
+
+const CrewMemberSchema = z
+  .object({
+    userId: z.string().describe("Yours is your own id; anyone else's is their handle in the crew's room"),
+    name: z.string().describe("First name only"),
+    photo: z.string().nullable(),
+    role: z.enum(["owner", "member"]),
+    joinedAt: z.string(),
+  })
+  .openapi("CrewMember")
+
+const CrewSchema = z
+  .object({
+    crewId: z.string().uuid(),
+    name: z.string(),
+    bio: z.string().nullable(),
+    intent: z.array(Intent),
+    tags: z.array(Tag),
+    emblemSeed: z.string().describe("Seeds the generated emblem"),
+    openToSolo: z.boolean().describe("\"Room for one more tonight\""),
+    createdAt: z.string(),
+    chatGroupId: z.string().uuid().nullable().describe("The crew chat: `/chat/groups/{chatGroupId}/…`"),
+    size: z.number().int(),
+    you: z.object({ role: z.enum(["owner", "member"]), keepMeAnonymous: z.boolean() }).nullable(),
+    members: z.array(CrewMemberSchema),
+  })
+  .openapi("Crew")
+
+const CrewInviteSchema = z
+  .object({
+    crewId: z.string().uuid(),
+    name: z.string(),
+    bio: z.string().nullable(),
+    emblemSeed: z.string(),
+    tags: z.array(Tag),
+    size: z.number().int(),
+    invitedBy: z.string().describe("The friend who invited you, by first name"),
+    invitedAt: z.string(),
+  })
+  .openapi("CrewInvite")
+
+const CrewCardSchema = z
+  .object({
+    crewId: z.string().uuid(),
+    name: z.string(),
+    bio: z.string().nullable(),
+    emblemSeed: z.string(),
+    size: z.number().int().describe("\"Crew of N\""),
+    presentCount: z.number().int().describe("\"Here now · N of size\" — always ≥ 2"),
+    tags: z.array(Tag),
+    intent: z.array(Intent),
+    menagerie: z.array(z.string()).describe("Tonight's room pseudonyms of the members here now. Never a name or a photo"),
+  })
+  .openapi("CrewCard")
+
+const CrewFields = {
+  name: z.string().min(2).max(32),
+  bio: z.string().max(140).nullable().optional(),
+  intent: z.array(Intent).optional(),
+  tags: z.array(z.string()).max(3).optional().describe("Curated slugs only: quiz-team, run-club, techno-heads, office-gang, birthday-crew, foodies, board-gamers, gig-goers, book-club, dance-floor"),
+  openToSolo: z.boolean().optional(),
+}
+const Consent = z
+  .literal(true)
+  .describe("Required. The app shows: \"Anyone in this crew can reveal the crew — your name and photos — to people you match with.\"")
+const crewParams = z.object({ crewId: z.string().uuid() })
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/crews",
+  tags,
+  summary: "My crews, and invites waiting for me",
+  security: bearerAuth,
+  responses: {
+    200: { description: "Crews", ...json(wrap(z.object({ crews: z.array(CrewSchema), invites: z.array(CrewInviteSchema) }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews",
+  tags,
+  summary: "Make a crew",
+  description:
+    ADULTS +
+    TEXT_CHECKS +
+    "You are its owner. `inviteUserIds` must all be your friends (a non-friend is the same 404 whoever they are, and nothing is written); " +
+    "each gets a push that names nobody. The crew chat is made with the crew.",
+  security: bearerAuth,
+  request: {
+    body: json(
+      z.object({
+        ...CrewFields,
+        inviteUserIds: z.array(z.string()).max(11).optional(),
+        revealConsent: Consent,
+        keepMeAnonymous: z.boolean().optional().describe("\"Keep me anonymous even when my crew reveals\""),
+      })
+    ),
+  },
+  responses: {
+    201: {
+      description: "Made",
+      ...json(wrap(z.object({ crewId: z.string().uuid(), chatGroupId: z.string().uuid(), invited: z.number().int() }))),
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/crews/{crewId}",
+  tags,
+  summary: "One of my crews",
+  description: CREW_404,
+  security: bearerAuth,
+  request: { params: crewParams },
+  responses: { 200: { description: "Crew", ...json(wrap(CrewSchema)) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/mobile/crews/{crewId}",
+  tags,
+  summary: "Edit a crew (its owner)",
+  description: CREW_404 + TEXT_CHECKS,
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ ...CrewFields, name: CrewFields.name.optional() })) },
+  responses: { 200: { description: "Crew", ...json(wrap(CrewSchema)) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/invites",
+  tags,
+  summary: "Invite friends into a crew",
+  description:
+    CREW_404 +
+    "Any member, their own friends only (the same 404 for anyone else). Somebody already in, or already invited " +
+    "— whatever they answered — is skipped and not re-notified. 409 when members plus open invites would pass 12.",
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ userIds: z.array(z.string()).min(1).max(11) })) },
+  responses: { 200: { description: "Invited", ...json(wrap(z.object({ invited: z.number().int() }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/join",
+  tags,
+  summary: "Accept my invite",
+  description:
+    ADULTS +
+    "404 without an open invite. 409 when the crew already has 12 — counted under a lock, so two accepts at once cannot both take the last seat. " +
+    "Joining is the reveal consent; `keepMeAnonymous` is the personal override.",
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ revealConsent: Consent, keepMeAnonymous: z.boolean().optional() })) },
+  responses: { 200: { description: "Joined", ...json(wrap(z.object({ chatGroupId: z.string().uuid() }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}/join",
+  tags,
+  summary: "Decline my invite",
+  description: "Nobody is told. The invite stops showing, and inviting you again does not re-notify you.",
+  security: bearerAuth,
+  request: { params: crewParams },
+  responses: { 200: { description: "Declined", ...json(wrap(z.object({ declined: z.literal(true) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/mobile/crews/{crewId}/members/{userId}",
+  tags,
+  summary: "My settings in a crew",
+  description:
+    "`userId` is your own id. \"Keep me anonymous even when my crew reveals\" — from now on: a crew reveal already made is not undone (D-10).",
+  security: bearerAuth,
+  request: {
+    params: z.object({ crewId: z.string().uuid(), userId: UserRefParamSchema }),
+    body: json(z.object({ keepMeAnonymous: z.boolean() })),
+  },
+  responses: { 200: { description: "Saved", ...json(wrap(z.object({ keepMeAnonymous: z.boolean() }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}/members/{userId}",
+  tags,
+  summary: "Leave a crew, or remove a member (its owner)",
+  description:
+    CREW_404 +
+    "Your own id leaves. The owner removes somebody by their handle in the crew's room (from `GET /crews/{crewId}`); a raw id or " +
+    "another room's handle names nobody. An owner who leaves hands the crew to whoever has been in it longest. " +
+    "A crew left with one person dissolves (`dissolved: true`): its chat archives and closes.",
+  security: bearerAuth,
+  request: { params: z.object({ crewId: z.string().uuid(), userId: UserRefParamSchema }) },
+  responses: { 200: { description: "Out", ...json(wrap(z.object({ dissolved: z.boolean() }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/here",
+  tags,
+  summary: "\"We're here\"",
+  description:
+    CREW_404 +
+    "You must be checked in at the event now (403 otherwise); nobody else is checked in by this — each member checks in by their own GPS. " +
+    "Writes a line in the crew chat (type `system`, metadata `{ kind: \"crew_here\", eventId }`) and pushes every other member " +
+    "who has not muted the crew chat, turned notifications off or blocked you — once per person per night " +
+    "(`repeated: true` after that). The push names nobody and no place. 403 when the host turned crews off.",
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
+  responses: {
+    200: { description: "Told", ...json(wrap(z.object({ notified: z.number().int(), repeated: z.boolean() }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/crews",
+  tags,
+  summary: "Crews here now",
+  description:
+    "For somebody checked in here now (403 `NOT_CHECKED_IN` otherwise). A crew is here when two or more of its members are checked in at this " +
+    "occurrence — derived, never stored. Never your own crews (those are `myCrews`), never a crew with any member in a block either way with " +
+    "you or any member of your crews here. Without a crew of your own here you see crews only after opting in to crews for this event, " +
+    "and only crews with room for one more and no bigger than 6. `crewsEnabled: false` when the host turned crews off.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string().uuid() }) },
+  responses: {
+    200: {
+      description: "Crews",
+      ...json(
+        wrap(
+          z.object({
+            crewsEnabled: z.boolean(),
+            crews: z.array(CrewCardSchema),
+            myCrews: z.array(z.object({ crewId: z.string().uuid(), name: z.string(), presentCount: z.number().int() })),
+          })
+        )
+      ),
+    },
+    ...standardErrors,
+  },
+})

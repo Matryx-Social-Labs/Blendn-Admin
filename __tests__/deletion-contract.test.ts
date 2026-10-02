@@ -95,6 +95,18 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "DELETED",
     why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence. A post moderation hid is kept: it is removed content, which the IT Rules 2021 r.3(1)(g) require for 180 days. A post WITH A ROOM is kept as a row too (step 7): the room is other people's conversation and kept evidence, and board_post_id is ON DELETE RESTRICT — so the post is taken off the board (deleted_at, which closes the room's door), its body erased, and the room archived with its messages and members.",
   },
+  crew_members: {
+    how: "DELETED",
+    why: "Being in a crew is the person's own standing with their friends, and their reveal consent with it. Each crew they leave is settled after the commit: one left alone dissolves (D-15), an owner is handed on.",
+  },
+  crew_invites: {
+    how: "DELETED",
+    why: "Invites to them and from them: an invite from an erased account would put a ghost's name on somebody's screen, and one to them can never be accepted.",
+  },
+  crews: {
+    how: "RETAINED",
+    why: "A crew belongs to the friends still in it, not to whoever made it: its name and bio are the crew's, `created_by` is an audit field, and the crew goes on (or dissolves) without them.",
+  },
   board_requests: {
     how: "SCRUBBED",
     why: "Same as message_requests: the row survives so the recipient's board does not develop holes, and only the words they SENT are theirs to erase.",

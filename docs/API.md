@@ -800,8 +800,8 @@ Body: `{ "eventIds": ["uuid", ...] }` (max 50)
 | GET | `/chat/groups` | List user's chat groups |
 
 **Rooms of every kind (step 7).** A room has a kind: an event's room, a board
-post's (its author and the askers the author accepted), and later a crew's or a
-Blend's. The `/chat/groups/:chatGroupId/...` routes take a room of any kind and
+post's (its author and the askers the author accepted), a crew's (its members
+now — see Crews), and later a Blend's. The `/chat/groups/:chatGroupId/...` routes take a room of any kind and
 admit whoever its owner admits — for a room that is not an event's, a
 membership row alone is not enough, and a refusal reads exactly as "not a
 member". Every id they send is a handle in that room's own scope (see Room
@@ -812,7 +812,10 @@ people its owner admits, an asker in a block with the author is out, writes
 stop 12 hours after the event ends (`CHAT_CLOSED`), and a withdrawn or
 taken-down post closes the room (404). To block or report somebody there, use
 the board's own routes (by post or by ask): the user routes read a board
-room's handle as an unknown id.
+room's handle as an unknown id. In a crew's room people are named by **first
+name** (history, live messages, typing, roster, reply push) — they are there
+because a friend invited them and they said yes — and a member who leaves or is
+removed is out of the room at once, their row kept `left` for the history.
 
 ### GET /chat/groups
 Lists every **event** room the caller is still a member of: `active` and **`muted`** memberships (a mute silences, it does not banish — the room stays readable and a post is refused with the reason), in `active` and **`locked`** rooms (read-only until the organiser reopens it). Each row carries `membership.status` and the room's `status` so the client can label _Muted_ / _Locked_. Banned and left memberships, and archived rooms, are not listed.
@@ -1289,6 +1292,91 @@ forwarded — and refuses with the same 404 for a malformed, unknown or reset
 token or a deleted or suspended owner. A caller who sends a bearer token also
 gets the block rule, so the public door never shows what the signed-in one
 hides.
+
+## Crews
+
+Friends who go out together (plan v2 §6). 2–12 people, made from the friend
+graph, with a crew chat (a room of kind `crew`), "We're here", and crew cards
+at an event. `lib/crews/`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/crews` | My crews `{ crews, invites }` — invites waiting for me, by the inviting friend's first name |
+| POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous? }` → 201 `{ crewId, chatGroupId, invited }` |
+| GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
+| PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
+| POST | `/crews/:crewId/invites` | Any member invites their own friends `{ userIds }` → `{ invited }` |
+| POST | `/crews/:crewId/join` | Accept my invite `{ revealConsent: true, keepMeAnonymous? }` → `{ chatGroupId }` |
+| DELETE | `/crews/:crewId/join` | Decline my invite — told to nobody |
+| PATCH | `/crews/:crewId/members/:userId` | My own settings (`userId` = my id): `{ keepMeAnonymous }` |
+| DELETE | `/crews/:crewId/members/:userId` | Leave (my id), or the owner removes a member (their handle) → `{ dissolved }` |
+| POST | `/crews/:crewId/here` | "We're here" `{ eventId }` → `{ notified, repeated }` |
+| GET | `/events/:eventId/crews` | The crews here now, as cards → `{ crewsEnabled, crews, myCrews }` |
+
+**Made from friends.** Every invitee must be a friend of whoever invites them —
+at creation and on every later invite, by any member. Anybody else (a stranger,
+an erased account, an id nobody has) is the **same 404** and nothing is
+written, so inviting cannot be used to learn who uses the app. Somebody already
+in, or already invited whatever they answered, is skipped and not re-notified.
+Crews are 18+ and need a finished profile (403 otherwise).
+
+**2–12.** `CREW.MAX_MEMBERS` is 12. An invite that would take members plus open
+invites past 12 is 409, and an accept counts the members under a row lock on
+the crew, so two accepts at once can never both take the last seat. A crew left
+with one person **dissolves** (D-15): its chat archives and closes (404 from
+then on), the last member is let go, open invites are withdrawn. An owner who
+leaves hands the crew to whoever has been in it longest.
+
+**Joining is consent.** Creating or joining requires `revealConsent: true`. The
+app shows, beside it: *"Anyone in this crew can reveal the crew — your name and
+photos — to people you match with."* `keepMeAnonymous` is the personal override
+("Keep me anonymous even when my crew reveals"); changing it later applies from
+then on — a reveal already made can't be unseen (D-10).
+
+**The name and bio** — 2–32 characters (not unique) and ≤ 140 — are shown to
+strangers on the crew card, so they go through the moderation pipeline and a
+**strict** contact-detail check (`findProfileContactInfo`): phone numbers, any
+@handle, emails and web addresses, written out or spelled ("nine eight four…",
+"at gmail dot com", "dot in"). A refusal is 400 with a sentence naming what was
+found, and nothing is stored. Tags are curated slugs (`quiz-team`, `run-club`,
+`techno-heads`, `office-gang`, `birthday-crew`, `foodies`, `board-gamers`,
+`gig-goers`, `book-club`, `dance-floor`), at most 3. Intent is the person
+intent enum.
+
+**Inside a crew people are named** — first name and one photo, never the full
+name — on `/crews` and in the crew's room. Member ids are handles in the crew's
+room (yours is your own id); `DELETE /crews/:crewId/members/:userId` takes that
+handle back, and a raw id or another room's handle names nobody (404).
+
+**"We're here"** needs the tapper checked in at the event now (403 otherwise)
+and checks **nobody else** in: every member checks in by their own GPS. It
+writes a line in the crew chat (type `system`, `"We're here 👋"`, metadata
+`{ kind: "crew_here", eventId }`) and sends `crew_here` (`crewId`,
+`chatGroupId`) to every other member who has not muted the crew chat, turned
+notifications off or blocked the tapper — **once per person per night**; a
+second tap answers `repeated: true` and tells nobody. The push names nobody
+and no place: *"Someone from your crew is here 👋"*, titled with the crew's
+name. A crew invite sends `crew_invite` (`crewId`), naming nobody.
+
+**Presence is derived, never stored.** A crew is *here* when two or more of its
+members are checked in at the same occurrence now (`checked_in`, no checkout;
+at a venue day, while live). `GET /events/:eventId/crews` is for people checked
+in there now (403 `NOT_CHECKED_IN` otherwise) and lists the crews here, never
+your own (those are `myCrews`, what a like is sent as). A card is the emblem
+seed, name, bio, `size` ("Crew of N"), `presentCount`, tags, intent and the
+**menagerie** — tonight's room pseudonyms of the members here (a member with
+"show online" off is counted, not listed). Never a name, photo or id.
+Hidden from you: any crew with a member in a block, either way, with you or
+with any member of your crews here. Here without a crew of your own, you see
+crews only after opting in to crews for this event (`open_to_crews`), and only
+crews with "room for one more" (`openToSolo`) of 6 or fewer. When the host
+turns crews off (`events.crews_enabled`), the list is `crewsEnabled: false` and
+"We're here" is 403.
+
+**Safety.** A suspended member is on no crew surface (cards, counts, the crew
+room). Deleting your account takes you out of every crew — a crew left with one
+person dissolves — and deletes every crew invite to or from you; your messages
+in a crew chat stay, as in any room.
 
 ---
 
@@ -2389,6 +2477,8 @@ them any more. Rows written before that are hidden, and retention removes them.
 | An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going, maybe, waitlisted and saved | `event:{eventId}`, replaced in place: only the latest state is true |
 | An organiser announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, board, message request | The person it is about, immediately | One each |
+| A crew invite | The friend invited (`crew_invite`, `crewId`), naming nobody | One each |
+| "We're here" | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`), once per person per night; no name, no place | One each |
 | An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
 
 A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push

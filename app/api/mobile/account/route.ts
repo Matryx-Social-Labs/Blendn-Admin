@@ -6,6 +6,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { evictUserSockets } from "@/lib/socket-server"
 import { closeRoomSockets } from "@/lib/room-close"
+import { settleCrewsAfterErasure } from "@/lib/crews/crews"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
@@ -78,6 +79,11 @@ export async function DELETE(request: NextRequest) {
         select: { message_id: true },
       })
     ).map((r) => r.message_id)
+
+    // Their crews, settled after the erasure below (D-15: one left dissolves).
+    const crewIds = (await db.crew_members.findMany({ where: { user_id: authUser.userId }, select: { crew_id: true } })).map(
+      (m) => m.crew_id
+    )
 
     // The rooms of their posts, which close with the erasure below (E1, E3).
     const postRooms = await db.chat_groups.findMany({
@@ -211,6 +217,16 @@ export async function DELETE(request: NextRequest) {
         where: { OR: [{ sender_id: authUser.userId }, { recipient_id: authUser.userId }] },
       }),
       db.friend_invites.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * Out of every crew, and every crew invite either way goes. Their crew
+       * chats' member rows went `left` above with every room's, and their
+       * messages stay, as in any room. Each crew is settled after the commit
+       * (`settleCrewsAfterErasure`): one left alone dissolves.
+       */
+      db.crew_invites.deleteMany({
+        where: { OR: [{ invited_user_id: authUser.userId }, { invited_by: authUser.userId }] },
+      }),
+      db.crew_members.deleteMany({ where: { user_id: authUser.userId } }),
       /*
        * DELETED, not scrubbed, and the consequence is stated because it is
        * visible: every historical "active this week" figure drops by the days
@@ -425,6 +441,8 @@ export async function DELETE(request: NextRequest) {
     // Their posts' rooms are archived and their door now says hidden; whoever
     // was still in one is taken out, as from a post withdrawn (E3).
     for (const room of postRooms) closeRoomSockets(room.id)
+    // A crew they leave with one person in it dissolves; an owner is handed on.
+    await settleCrewsAfterErasure(crewIds)
 
     // Seats they held are free now; the waitlist moves, per event.
     for (const eventId of openEventIds) {

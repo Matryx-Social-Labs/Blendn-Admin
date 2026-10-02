@@ -193,3 +193,33 @@ export const BOARD = {
   /** Longest an ask may be. "Can I join?" needs no essay. */
   MAX_REQUEST_LENGTH: 300,
 } as const
+
+/**
+ * Crews (plan v2 §6, §8.3). Product decisions, so they live here where they
+ * can be argued with, not in a route.
+ */
+export const CREW = {
+  /**
+   * Room for a birthday or an office table, small enough that a crew card is
+   * not a mob in a room of 80. Counted under a lock on the crew row, so two
+   * accepts at once cannot both take the last seat (lib/crews/crews.ts).
+   */
+  MAX_MEMBERS: 12,
+  /** Below this a crew dissolves (D-15): one person is not a crew. */
+  MIN_MEMBERS: 2,
+  /**
+   * Crews larger than this match crews only, never one person: one stranger
+   * facing a big group is a bad night and a safety concern (§8.3).
+   */
+  MAX_SOLO_MATCH: 6,
+  NAME_MIN: 2,
+  NAME_MAX: 32,
+  BIO_MAX: 140,
+  MAX_TAGS: 3,
+  /**
+   * "We're here" pushes the rest of the crew once per person per night out:
+   * a second tap within this window changes nothing. Six hours covers a
+   * night; the next night is a new occurrence anyway.
+   */
+  HERE_WINDOW_MS: 6 * 60 * 60 * 1000,
+} as const

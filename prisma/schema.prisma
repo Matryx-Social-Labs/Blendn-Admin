@@ -121,6 +121,12 @@ model User {
   received_friend_requests friend_requests[] @relation("FriendRequestRecipient")
   friend_invite            friend_invites?
 
+  // Crews — see `crews`
+  crews_created            crews[]           @relation("CrewCreator")
+  crew_memberships         crew_members[]
+  crew_invites_got         crew_invites[]    @relation("CrewInvitee")
+  crew_invites_sent        crew_invites[]    @relation("CrewInviter")
+
   // Announcements
   sent_announcements event_announcements[]
 
@@ -472,6 +478,9 @@ model events {
   external_link     String?
   is_featured       Boolean            @default(false)
   is_recurring      Boolean            @default(false)
+  /// The host lets crews show up together here (plan v2 §6, the kit's "Allow
+  /// group check-in"): crew cards, "We're here" and crew likes. Default on.
+  crews_enabled     Boolean            @default(true)
   check_in_radius   Float              @default(30)
   /// Extent + buffer, superseding check_in_radius. Null falls back to
   /// latitude/longitude/check_in_radius so no existing event needs a backfill.
@@ -761,10 +770,10 @@ model event_check_ins {
 }
 
 /// A room. Every room has a kind and exactly one owner of that kind (plan v2
-/// §7): an event's room is owned by the event, a board post's by the post.
-/// `chat_groups_one_owner` (a CHECK in the migration; schema.prisma cannot say
-/// it, and `db push` drops it) holds the pairing, and refuses `crew` and
-/// `blend` rooms outright until step 8 gives them owner columns.
+/// §7): an event's room is owned by the event, a board post's by the post, a
+/// crew's chat by the crew. `chat_groups_one_owner` (a CHECK in the migration;
+/// schema.prisma cannot say it, and `db push` drops it) holds the pairing, and
+/// refuses a `blend` room outright until `blends` gives it an owner column.
 ///
 /// Who may enter is `roomOwnerDenial` in lib/room-kind.ts, one switch on
 /// `kind` for the socket join and every HTTP read — never "has a member row".
@@ -779,6 +788,9 @@ model chat_groups {
   /// Set exactly when `kind = board_post`. One room per post; the post cannot
   /// be hard-deleted while it has one (RESTRICT).
   board_post_id   String?           @unique @db.Uuid
+  /// Set exactly when `kind = crew`. One room per crew, made with the crew; it
+  /// outlives nights out and archives when the crew dissolves (RESTRICT).
+  crew_id         String?           @unique @db.Uuid
   /// Unread since the baseline: every row is `event`. Room kinds are `kind`.
   type            chat_group_type   @default(event)
   name            String
@@ -797,6 +809,9 @@ model chat_groups {
   /// evidence, so deleting a post with a room is refused. Account erasure
   /// soft-deletes such a post and archives its room instead.
   board_post board_posts?         @relation(fields: [board_post_id], references: [id], onDelete: Restrict)
+  /// RESTRICT: a crew is never deleted, only dissolved, and its room keeps
+  /// its members' messages as evidence like every other room.
+  crew       crews?               @relation(fields: [crew_id], references: [id], onDelete: Restrict)
   messages   chat_messages[]
   members    chat_group_members[]
 
@@ -1160,6 +1175,10 @@ enum notification_kind {
   /// with. Sent once per event by `sendRatingRequests`; the app routes this
   /// exact string to `/rate/[eventId]`.
   rating_request
+  /// A friend invited you into a crew; joining needs your accept.
+  crew_invite
+  /// A crewmate tapped "We're here". No place in it: the crew chat says where.
+  crew_here
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.
@@ -2425,6 +2444,10 @@ model event_match_preferences {
   /// Empty falls back to `profiles.intent_default` — see `effectiveIntents`.
   intent   connection_intent[]
   revealed Boolean             @default(false)
+  /// "Open to joining a crew tonight" — a solo person's opt-in to crew cards
+  /// and crew likes at this event (plan v2 §8.3). Off unless they say so: a
+  /// crew never appears in the deck of somebody who did not ask for crews.
+  open_to_crews Boolean        @default(false)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -3193,6 +3216,102 @@ model friend_invites {
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// ── Crews ─────────────────────────────────────────────
+
+/// Friends who go out together (plan v2 §6).
+///
+/// Made from the friend graph: every member was invited by a friend and
+/// accepted, and joining is consent to the crew reveal (`crew_members`).
+/// Never deleted — a crew that drops below two members is dissolved
+/// (`dissolved_at`, D-15) and its room archived, so other people's messages
+/// stay. Presence is never stored: "here tonight" is ≥2 members checked into
+/// the same occurrence, asked of `event_check_ins` (lib/crews/presence.ts).
+///
+/// CHECKs in the migration (schema.prisma cannot say them): a name of 2–32
+/// characters, a bio of at most 140, at most 3 tags.
+model crews {
+  id           String              @id @default(uuid()) @db.Uuid
+  /// 2–32 characters, not unique ("The Usual Suspects" can exist twice).
+  /// Through the moderation pipeline and the contact-detail detector.
+  name         String
+  /// At most 140 characters, the same checks.
+  bio          String?
+  /// What the crew is out for. Empty means "not said".
+  intent       connection_intent[]
+  /// Curated slugs only (`CREW_TAGS`), at most 3. Never free text.
+  tags         String[]
+  /// Seeds the generated emblem, so an anonymous crew has a face that is not a face.
+  emblem_seed  String
+  /// "Room for one more tonight": the crew may be matched with one person,
+  /// not only with crews. Never for a crew over `CREW.MAX_SOLO_MATCH` (§8.3).
+  open_to_solo Boolean             @default(false)
+  /// Who made it. Audit only: the owner is `crew_members.role`.
+  created_by   String
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime            @default(now()) @db.Timestamptz(6)
+  dissolved_at DateTime?           @db.Timestamptz(6)
+
+  creator User           @relation("CrewCreator", fields: [created_by], references: [id], onDelete: Restrict)
+  members crew_members[]
+  invites crew_invites[]
+  /// The crew chat (kind `crew`), made with the crew.
+  room    chat_groups?
+
+  @@index([created_by])
+}
+
+enum crew_role {
+  owner
+  member
+}
+
+/// Who is in a crew now. Leaving deletes the row; there is no "left" state to
+/// drift. At most `CREW.MAX_MEMBERS` per crew, counted under a lock on the
+/// crew row (lib/crews/crews.ts), never by a read-then-write.
+model crew_members {
+  crew_id             String    @db.Uuid
+  user_id             String
+  role                crew_role @default(member)
+  joined_at           DateTime  @default(now()) @db.Timestamptz(6)
+  /// "Keep me anonymous even when my crew reveals." A crew reveal writes the
+  /// per-event reveal of every member without this; it never undoes one
+  /// already written (D-10: a reveal can't be unseen).
+  keep_me_anonymous   Boolean   @default(false)
+  /// When they accepted "anyone in this crew can reveal the crew — your name
+  /// and photos — to people you match with". Required: no member without it.
+  consented_reveal_at DateTime  @db.Timestamptz(6)
+
+  crew crews @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  user User  @relation(fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@id([crew_id, user_id])
+  /// "My crews", and the cascade path a user's rows are found by.
+  @@index([user_id])
+}
+
+/// A friend asked into a crew, waiting for their accept. Only ever a friend of
+/// the person who invited them. Accepting deletes it and writes the member;
+/// declining sets `declined_at`, which hides it from the invitee and holds the
+/// slot nowhere — the inviter is not told, as a friend "Not now" is not told.
+model crew_invites {
+  id              String    @id @default(uuid()) @db.Uuid
+  crew_id         String    @db.Uuid
+  invited_user_id String
+  invited_by      String
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  declined_at     DateTime? @db.Timestamptz(6)
+
+  crew    crews @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  invitee User  @relation("CrewInvitee", fields: [invited_user_id], references: [id], onDelete: Restrict)
+  inviter User  @relation("CrewInviter", fields: [invited_by], references: [id], onDelete: Restrict)
+
+  /// One invite per person per crew, whatever became of it: asking again
+  /// after a decline would re-notify somebody who said no.
+  @@unique([crew_id, invited_user_id])
+  @@index([invited_user_id])
+  @@index([invited_by])
 }
 
 // ── Content Moderation ────────────────────────────────

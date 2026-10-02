@@ -136,9 +136,63 @@ describe("a board post's room: the author, or an asker the author accepted", () 
   })
 })
 
-describe("crew and Blend rooms have no owner yet, so nobody is in one", () => {
-  it.each(["crew", "blend"] as const)("a %s room refuses even an active member row", (kind) => {
-    const room = { kind, status: "active" as const, event: null, board_post: null }
+/** A crew's room as `crewDoor(viewer)` reads it: the viewer's own member row, if they are in the crew. */
+function crewRoom(over: { viewer?: string; member?: boolean; dissolved?: boolean; status?: "active" | "locked" | "archived" } = {}) {
+  const viewer = over.viewer ?? ASKER
+  return {
+    kind: "crew" as const,
+    status: over.status ?? ("active" as const),
+    event: null,
+    board_post: null,
+    crew: { dissolved_at: over.dissolved ? new Date() : null, members: over.member ? [{ user_id: viewer }] : [] },
+  }
+}
+
+describe("a crew's room: its members now, and nobody else", () => {
+  it("admits a member of the crew", () => {
+    expect(roomReadDenialFor(crewRoom({ member: true }), active, ASKER)).toBeNull()
+    expect(mayWriteToRoomFor(crewRoom({ member: true }), { status: "active", last_allowed_at: null }, ASKER)).toBeNull()
+  })
+
+  it("refuses somebody with a member row who is no longer in the crew — the row is not the key", () => {
+    // Left or removed: the room row stays (`left`), the crew row is gone.
+    expect(roomReadDenialFor(crewRoom(), active, ASKER)).toBe("not_member")
+    expect(mayWriteToRoomFor(crewRoom(), { status: "active", last_allowed_at: null }, ASKER)).toEqual({ reason: "not_member" })
+  })
+
+  it("refuses a stranger with no row", () => {
+    expect(roomReadDenialFor(crewRoom({ viewer: STRANGER }), null, STRANGER)).toBe("not_member")
+  })
+
+  it("is gone for everyone once the crew dissolves (D-15)", () => {
+    expect(roomReadDenialFor(crewRoom({ member: true, dissolved: true }), active, ASKER)).toBe("hidden")
+  })
+
+  it("still honours the member row: a ban, and leaving by choice", () => {
+    expect(roomReadDenialFor(crewRoom({ member: true }), { status: "banned", left_at: null, last_allowed_at: null }, ASKER)).toBe("banned")
+    expect(roomReadDenialFor(crewRoom({ member: true }), { status: "left", left_at: new Date(), last_allowed_at: null }, ASKER)).toBe("not_member")
+  })
+
+  it("has no clock: open while active, closed when locked or archived", () => {
+    expect(roomWindowFor(crewRoom({ member: true }), new Date("2030-01-01"))).toEqual({ open: true })
+    expect(roomWindowFor(crewRoom({ member: true, status: "archived" }))).toEqual({ open: false, reason: "archived" })
+    expect(mayWriteToRoomFor(crewRoom({ member: true, status: "locked" }), { status: "active", last_allowed_at: null }, ASKER)).toEqual({ reason: "locked" })
+  })
+
+  it("never answers for somebody other than the viewer it was read for", () => {
+    expect(roomOwnerDenial(crewRoom({ viewer: ASKER, member: true }), STRANGER)).toBe("not_member")
+  })
+
+  it("fails closed on a select that never read the crew", () => {
+    const { crew, ...unread } = crewRoom({ member: true })
+    void crew
+    expect(roomOwnerDenial(unread, ASKER)).toBe("hidden")
+  })
+})
+
+describe("a Blend room has no owner yet, so nobody is in one", () => {
+  it("refuses even an active member row", () => {
+    const room = { kind: "blend" as const, status: "active" as const, event: null, board_post: null }
     expect(roomReadDenialFor(room, active, AUTHOR)).toBe("hidden")
     expect(mayWriteToRoomFor(room, { status: "active", last_allowed_at: null }, AUTHOR)).toEqual({ reason: "hidden" })
   })
@@ -171,6 +225,31 @@ describe("every door goes through the one rule (structural)", () => {
     for (const k of ["event", "board_post", "crew", "blend"]) expect(owner).toContain(`case "${k}":`)
     // The arm TypeScript fails on when a kind is added without a door.
     expect(owner).toMatch(/const \w+: never = room\.kind/)
+  })
+
+  it("every room select reads every owner's door (`ownerDoor`), never one owner by hand", () => {
+    // A select that names `board_post: boardPostDoor(…)` alone reads no crew,
+    // so a crew room's door would answer "hidden" there — or, worse, a door
+    // added later would be read by half the routes.
+    const files = [
+      "lib/socket-auth.ts",
+      "lib/socket-server.ts",
+      "lib/room-delivery.ts",
+      "lib/room-membership.ts",
+      "app/api/mobile/messages/[messageId]/report/route.ts",
+      "app/api/mobile/chat/groups/[chatGroupId]/participants/route.ts",
+      "app/api/mobile/chat/groups/[chatGroupId]/messages/[messageId]/reactions/route.ts",
+      "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts",
+    ]
+    for (const file of files) {
+      const src = read(file)
+      expect({ file, byHand: /\b(?:boardPostDoor|crewDoor)\(/.test(src) }).toEqual({ file, byHand: false })
+      expect({ file, ownerDoor: /\.\.\.ownerDoor\(/.test(src) }).toEqual({ file, ownerDoor: true })
+    }
+    const kind = read("lib/room-kind.ts")
+    const door = kind.slice(kind.indexOf("export function ownerDoor"), kind.indexOf("interface RoomOwners"))
+    expect(door).toMatch(/board_post: boardPostDoor\(viewerId\)/)
+    expect(door).toMatch(/crew: crewDoor\(viewerId\)/)
   })
 
   it("no route that takes a room by id reads it by the event-only rules", () => {

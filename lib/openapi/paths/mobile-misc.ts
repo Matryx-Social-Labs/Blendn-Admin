@@ -520,6 +520,8 @@ const NotificationSchema = z.object({
     "friend_request",
     "friend_accepted",
     "rating_request",
+    "crew_invite",
+    "crew_here",
   ]),
   title: z.string(),
   body: z.string(),

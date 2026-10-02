@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
+import { namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
@@ -24,7 +25,7 @@ import {
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
-import { boardPostDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { ownerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { clientMessageMetadata, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -68,7 +69,7 @@ export async function GET(
           where: { user_id: user.userId },
         },
         event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
-        board_post: boardPostDoor(user.userId),
+        ...ownerDoor(user.userId),
       },
     })
 
@@ -188,13 +189,8 @@ export async function GET(
       pseudonymFor.add(m.user.id)
       if (m.parent_message) pseudonymFor.add(m.parent_message.user.id)
     }
-    const pageMembers = pseudonymFor.size
-      ? await db.chat_group_members.findMany({
-          where: { chat_group_id: chatGroupId, user_id: { in: [...pseudonymFor] } },
-          select: { user_id: true, anonymous_name: true },
-        })
-      : []
-    const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
+    // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
+    const anonMap = await namesInRoom(chatGroup, [...pseudonymFor])
 
     /*
      * Every other person's id as their handle in this room, yours as yours
@@ -325,7 +321,7 @@ export async function POST(
         // `chatWindowState` treats a missing start as "no lower bound", which
         // is the right default for old callers and the wrong one here.
         event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
-        board_post: boardPostDoor(user.userId),
+        ...ownerDoor(user.userId),
       },
     })
 
@@ -676,8 +672,14 @@ export async function POST(
       data: { last_message_at: new Date() },
     })
 
-    // Use anonymous name for socket emit and push
-    const senderAnonName = membership.anonymous_name || "Attendee"
+    /*
+     * The sender and the quoted author by the names this room gives them — a
+     * pseudonym, or a first name in a crew's room (`namesInRoom`) — for the
+     * socket emit, the push and the response alike.
+     */
+    const quoted = message.parent_message
+    const names = await namesInRoom(chatGroup, quoted ? [user.userId, quoted.user.id] : [user.userId])
+    const senderAnonName = names.get(user.userId) ?? "Attendee"
 
     /*
      * Socket then push, block-filtered, in `lib/room-delivery.ts`.
@@ -704,19 +706,11 @@ export async function POST(
     })
 
     /*
-     * The quoted author by their own name in this room. This labelled them with
-     * the SENDER's pseudonym — reply to Cosmic Panda as Quiet Otter and the
-     * response said Quiet Otter had written the quote — which the history GET,
-     * reading the author's own row, then contradicted.
+     * The quoted author by their own name in this room (`names`, above). This
+     * once labelled them with the SENDER's pseudonym — reply to Cosmic Panda
+     * as Quiet Otter and the response said Quiet Otter had written the quote —
+     * which the history GET, reading the author's own row, then contradicted.
      */
-    const quoted = message.parent_message
-    const quotedAuthor =
-      quoted && quoted.user.id !== user.userId
-        ? await db.chat_group_members.findUnique({
-            where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: quoted.user.id } },
-            select: { anonymous_name: true },
-          })
-        : membership
 
     // Return anonymized response. The sender's own id stays real; the quoted
     // author's is their handle in this room (SCRUM-371).
@@ -732,7 +726,7 @@ export async function POST(
             ...quoted,
             user: {
               id: idForViewer(user.userId, roomScope(chatGroup), quoted.user.id),
-              name: roomSenderName(quoted, quotedAuthor?.anonymous_name || undefined, chatGroup.event),
+              name: roomSenderName(quoted, names.get(quoted.user.id), chatGroup.event),
             },
           }
         : null,

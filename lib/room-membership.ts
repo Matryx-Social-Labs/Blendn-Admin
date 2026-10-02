@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 import { isUuid } from "@/lib/api-input"
-import { boardPostDoor, roomOwnerDenial, roomWindowFor } from "@/lib/room-kind"
+import { ownerDoor, roomOwnerDenial, roomWindowFor } from "@/lib/room-kind"
 
 /**
  * A room and the caller's own row in it, for the routes a member acts on
@@ -30,7 +30,7 @@ export async function roomForMember(
       event_id: true,
       status: true,
       event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
-      board_post: boardPostDoor(userId),
+      ...ownerDoor(userId),
     },
   })
   if (!group) return null

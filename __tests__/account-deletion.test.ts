@@ -32,6 +32,9 @@ const mockDb = {
   friendships: { deleteMany: jest.fn() },
   friend_requests: { deleteMany: jest.fn() },
   friend_invites: { deleteMany: jest.fn() },
+  // Their crews: read before the transaction, rows deleted inside it, settled after.
+  crew_members: { findMany: jest.fn().mockResolvedValue([{ crew_id: "crew-1" }]), deleteMany: jest.fn() },
+  crew_invites: { deleteMany: jest.fn() },
   product_events: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
@@ -67,6 +70,8 @@ const mockEvict = jest.fn()
 jest.mock("@/lib/socket-server", () => ({ evictUserSockets: (...a: unknown[]) => mockEvict(...a) }))
 const mockCloseRoom = jest.fn()
 jest.mock("@/lib/room-close", () => ({ closeRoomSockets: (...a: unknown[]) => mockCloseRoom(...a) }))
+const mockSettleCrews = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/crews/crews", () => ({ settleCrewsAfterErasure: (...a: unknown[]) => mockSettleCrews(...a) }))
 const mockPromote = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => mockPromote(...a) }))
 
@@ -157,6 +162,14 @@ describe("deleting an account scrubs the matching inputs", () => {
       where: { OR: [{ sender_id: USER }, { recipient_id: USER }] },
     })
     expect(mockDb.friend_invites.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // Out of every crew, every crew invite either way gone; the crews are
+    // settled after the commit (one left alone dissolves, D-15).
+    expect(mockDb.crew_members.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    expect(mockDb.crew_invites.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ invited_user_id: USER }, { invited_by: USER }] },
+    })
+    expect(mockSettleCrews).toHaveBeenCalledWith(["crew-1"])
+    expect(mockSettleCrews.mock.invocationCallOrder[0]).toBeGreaterThan(mockDb.$transaction.mock.invocationCallOrder[0])
     /*
      * DELETED, not scrubbed. A scrubbed row cannot be counted as a distinct
      * person, so nulling `user_id` would keep a record of when somebody was
