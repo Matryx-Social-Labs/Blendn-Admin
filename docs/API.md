@@ -665,6 +665,9 @@ vocabulary, meaning exactly what it means there.
 | `venueType` | One of the 35 slugs; anything else is a 400 |
 | `sortBy` | `name` (default) or `distance` |
 
+60 a minute per person, then 429 — every row carries a live count, as on the
+venue page.
+
 **Active venues only.** `archived` is how a venue is retired without deleting
 the events that happened in it, so it never appears in discovery.
 
