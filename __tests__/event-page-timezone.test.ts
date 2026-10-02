@@ -25,12 +25,20 @@ describe("the event's pages format in the event's timezone", () => {
   const page = read("app/dashboard/events/[id]/page.tsx")
 
   it("the page reads the event's timezone and tells every time through its clock", () => {
-    expect(page).toMatch(/timezone: true/)
-    expect(page).toMatch(/eventClock\(event\.timezone\)/)
-    expect(page).toMatch(/clock\.dateTime\(event\.start_time\)/)
+    // Since step 15 the three routes under an event load it through one
+    // loader and draw one header (`lib/event-page.ts`, `EventHeader`).
+    const loader = read("lib/event-page.ts")
+    const header = read("components/dashboard/event-header.tsx")
+    expect(page).toMatch(/loadEventPage\(id\)/)
+    expect(loader).toMatch(/timezone: true/)
+    expect(header).toMatch(/eventClock\(event\.timezone\)/)
+    expect(header).toMatch(/clock\.dateTime\(event\.start_time\)/)
     // Days to the doors by the event's calendar, not by 24-hour blocks.
-    expect(page).toMatch(/clock\.daysUntil\(event\.start_time, now\)/)
-    expect(page).not.toMatch(/86_400_000/)
+    expect(header).toMatch(/clock\.daysUntil\(event\.start_time, now\)/)
+    expect(header).not.toMatch(/86_400_000/)
+    // The QR & link tab's "when" is the same clock.
+    expect(page).toMatch(/const clock = eventClock\(event\.timezone\)/)
+    expect(page).toMatch(/when=\{`\$\{clock\.dateTime\(event\.start_time\)\}/)
   })
 
   it("nothing on the event's pages formats a time in the server's or the viewer's zone", () => {
@@ -38,6 +46,8 @@ describe("the event's pages format in the event's timezone", () => {
       ...filesUnder("app/dashboard/events/[id]"),
       "components/dashboard/live-tab.tsx",
       "components/dashboard/issue-log.tsx",
+      "components/dashboard/event-header.tsx",
+      "components/dashboard/event-share.tsx",
       "lib/issue-timestamp.ts",
     ]
     const offenders = files.filter((f) => /Intl\.DateTimeFormat\(|toLocale(Date|Time)?String\(/.test(read(f)))

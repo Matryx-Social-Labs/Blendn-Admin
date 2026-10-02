@@ -163,3 +163,34 @@ describe("no host surface reads a person's identity without an admin gate", () =
     expect(open).toEqual([])
   })
 })
+
+describe("the event's header, loader and QR & link tab reach no person (step 15)", () => {
+  /*
+   * The pieces step 15 put on every event page. They read the event, the
+   * venue's name (a place) and the viewer's permissions, and the QR encodes the
+   * event's id — never an attendee, and never who is looking.
+   */
+  const SOURCES = [
+    "lib/event-page.ts",
+    "lib/event-share.ts",
+    "components/dashboard/event-header.tsx",
+    "components/dashboard/event-share.tsx",
+    "app/dashboard/events/[id]/messaging/page.tsx",
+  ]
+
+  it.each(SOURCES)("%s selects no user, profile, name, email, image or phone", (rel) => {
+    // A venue's name is a place, not a person: the one name these may read.
+    const src = code(rel).replace(/venue:\s*\{\s*select:\s*\{[^{}]*\}\s*\}/g, "")
+    expect(src).not.toMatch(/db\.user\b/)
+    expect(src).not.toMatch(/\b(user|profile|organizer|attendees?)\s*:\s*\{/)
+    expect(src).not.toMatch(new RegExp(`\\b(${IDENTITY})\\s*:\\s*true`))
+    expect(src).not.toMatch(/\.(email|image|phone|photos)\b/)
+  })
+
+  it("encodes the event's id in the link and nothing about the viewer", () => {
+    const share = code("lib/event-share.ts")
+    expect(share).toMatch(/return EVENT_LINK_BASE \+ encodeURIComponent\(eventId\)\s*\n\s*\}/)
+    const page = code("app/dashboard/events/[id]/page.tsx")
+    expect(page).toMatch(/url=\{eventShareUrl\(event\.id\)\}/)
+  })
+})

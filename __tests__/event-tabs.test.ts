@@ -25,8 +25,8 @@ const at = (iso: string) => new Date(iso)
 const keys = (
   start: string,
   end: string,
-  opts: { canOperate: boolean; canViewAttendees?: boolean; feedbackWindowOpen: boolean }
-) => eventTabsFor(start, end, { canViewAttendees: opts.canOperate, ...opts }).map((t) => t.key)
+  opts: { canOperate: boolean; canEdit?: boolean; canViewAttendees?: boolean }
+) => eventTabsFor(start, end, { canViewAttendees: opts.canOperate, canEdit: opts.canOperate, ...opts }).map((t) => t.key)
 
 describe("livePhaseFor", () => {
   it("reads the phase from the event's own schedule", () => {
@@ -43,7 +43,7 @@ describe("livePhaseFor", () => {
 })
 
 describe("tab visibility follows the lifecycle", () => {
-  const operator = { canOperate: true, feedbackWindowOpen: false }
+  const operator = { canOperate: true }
 
   it("hides Live before doors and after the end", () => {
     jest.useFakeTimers().setSystemTime(at("2026-08-05T12:00:00.000Z"))
@@ -60,23 +60,27 @@ describe("tab visibility follows the lifecycle", () => {
     jest.useRealTimers()
   })
 
-  it("shows Feedback only after the end and while the window is open", () => {
+  it("shows Feedback once the event has ended, and keeps it after the 24h window (step 15)", () => {
     jest.useFakeTimers().setSystemTime(at("2026-08-06T02:00:00.000Z"))
-    expect(keys(START, END, { canOperate: true, feedbackWindowOpen: true })).toContain("feedback")
-    // Window closed — the chat is archived, so there is nothing to read.
-    expect(keys(START, END, { canOperate: true, feedbackWindowOpen: false })).not.toContain(
-      "feedback"
-    )
+    expect(keys(START, END, operator)).toContain("feedback")
+    // A week on: the digest and the stars are still there to read, so the tab is.
+    jest.setSystemTime(at("2026-08-12T02:00:00.000Z"))
+    expect(keys(START, END, operator)).toContain("feedback")
     jest.useRealTimers()
   })
 
-  it("never shows Feedback while the event is still running", () => {
-    // The window has not opened; showing it mid-event would promise a digest
-    // of an event that has not finished.
-    jest.useFakeTimers().setSystemTime(at("2026-08-05T21:00:00.000Z"))
-    expect(keys(START, END, { canOperate: true, feedbackWindowOpen: true })).not.toContain(
-      "feedback"
-    )
+  it("never shows Feedback before the event has ended", () => {
+    // Showing it mid-event would promise a digest of an event that has not finished.
+    for (const now of ["2026-08-05T12:00:00.000Z", "2026-08-05T21:00:00.000Z"]) {
+      jest.useFakeTimers().setSystemTime(at(now))
+      expect(keys(START, END, operator)).not.toContain("feedback")
+    }
+    jest.useRealTimers()
+  })
+
+  it("puts the tabs in the kit's order, with QR & link last", () => {
+    jest.useFakeTimers().setSystemTime(at("2026-08-06T02:00:00.000Z"))
+    expect(keys(START, END, operator)).toEqual(["overview", "attendees", "chat", "announcements", "feedback", "share"])
     jest.useRealTimers()
   })
 })
@@ -84,33 +88,38 @@ describe("tab visibility follows the lifecycle", () => {
 describe("tab visibility follows permissions", () => {
   it("gives someone without operational access only the overview", () => {
     jest.useFakeTimers().setSystemTime(at("2026-08-05T21:00:00.000Z"))
-    expect(keys(START, END, { canOperate: false, feedbackWindowOpen: true })).toEqual([
-      "overview",
-    ])
+    expect(keys(START, END, { canOperate: false, canEdit: false })).toEqual(["overview"])
     jest.useRealTimers()
   })
 
-  it("gives an operator the room and the guest list", () => {
+  it("gives an operator the room, the guest list and the code, but not the composer without canEdit", () => {
     jest.useFakeTimers().setSystemTime(at("2026-08-05T21:00:00.000Z"))
-    const tabs = keys(START, END, { canOperate: true, feedbackWindowOpen: false })
+    const tabs = keys(START, END, { canOperate: true, canEdit: false })
     // The venue-owner case: they can operate the room without being able to
     // edit the event, so these must not depend on canEdit.
     expect(tabs).toContain("attendees")
     expect(tabs).toContain("chat")
     expect(tabs).toContain("live")
+    expect(tabs).toContain("share")
+    // Announcing into a night they do not run is K3.12 (R37).
+    expect(tabs).not.toContain("announcements")
     jest.useRealTimers()
+  })
+
+  it("gives whoever runs the event Announcements & sponsors", () => {
+    expect(keys(START, END, { canOperate: true, canEdit: true })).toContain("announcements")
   })
 
   it("always starts with overview", () => {
     for (const canOperate of [true, false]) {
-      expect(keys(START, END, { canOperate, feedbackWindowOpen: true })[0]).toBe("overview")
+      expect(keys(START, END, { canOperate })[0]).toBe("overview")
     }
   })
 })
 
 describe("a venue day, for its venue's owner (F1)", () => {
   it("offers the room and no Attendees tab", () => {
-    const tabs = keys(START, END, { canOperate: true, canViewAttendees: false, feedbackWindowOpen: false })
+    const tabs = keys(START, END, { canOperate: true, canEdit: false, canViewAttendees: false })
     expect(tabs).toContain("chat")
     expect(tabs).not.toContain("attendees")
   })

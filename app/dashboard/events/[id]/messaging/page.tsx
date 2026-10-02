@@ -1,16 +1,9 @@
-import { notFound, redirect } from "next/navigation"
-import { PageHeader } from "@/components/dashboard/page-header"
-import { getAuth } from "@/lib/auth"
+import { EventHeader } from "@/components/dashboard/event-header"
+import { Panel } from "@/components/dashboard/kit"
 import { eventTitleFor } from "@/lib/dashboard-record-titles"
-import { db } from "@/lib/db"
-import { canBroadcast, eventPermissions } from "@/lib/rbac"
-import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
-import { EventMessaging } from "@/components/event-messaging"
-import { EventSponsors } from "@/components/event-sponsors"
+import { loadEventPage } from "@/lib/event-page"
 import { ChatFeed } from "@/components/chat-feed"
 import { ModerationQueue } from "@/components/moderation-queue"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { eventClock, eventStateFor, STATE_LABEL } from "@/lib/event-phase"
 
 interface Props {
   params: Promise<{ id: string }>
@@ -18,110 +11,50 @@ interface Props {
 
 export async function generateMetadata({ params }: Props) {
   const name = await eventTitleFor((await params).id)
-  return { title: name ? `Room · ${name}` : "Room" }
+  return { title: name ? `Room chat · ${name}` : "Room chat" }
 }
 
+/**
+ * The event's Room chat tab: the feed, and beside it what is waiting on a
+ * person.
+ *
+ * `canOperate`, not `canEdit` (`loadEventPage`). This route used to deny on
+ * `canEdit` while the tab that led here was offered on `canOperate`, so a venue
+ * owner clicked a tab their own page had just offered and was redirected to
+ * the global chatrooms list, showing a different event. `canOperate` is defined
+ * as "chat, moderation, the attendee list — what happens in your building",
+ * which is this page exactly.
+ *
+ * The composer and the sponsor placements — what `canEdit` buys — are the
+ * Announcements & sponsors tab now (step 15), not a column of this page. A
+ * venue owner announcing into an event they do not run is K3.12, and R37
+ * removes it deliberately.
+ */
 export default async function EventMessagingPage({ params }: Props) {
-  const session = await getAuth()
-  if (!session?.user) redirect("/login")
-
-  const { id: eventId } = await params
-
-  const event = await db.events.findFirst({
-    where: { id: eventId, deleted_at: null },
-    select: {
-      id: true,
-      title: true,
-      start_time: true,
-      end_time: true,
-      timezone: true,
-      status: true,
-      venue_name: true,
-      kind: true,
-      organizer_org_id: true,
-      venue: { select: { owner_org_id: true, claimed_at: true } },
-    },
-  })
-
-  if (!event) notFound()
-
-  /*
-   * `canOperate`, not `canEdit` — and then the left column is what `canEdit`
-   * buys.
-   *
-   * The event page gates on `canOperate` and `eventTabsFor` offers Chat and
-   * Attendees on the same flag, under a comment reading "a tab list that offers
-   * something the server will deny is its own bug". This route then denied on
-   * `canEdit`, so a venue owner clicked a tab their own page had just offered
-   * and was redirected to the **global chatrooms list, showing a different
-   * event**. Not a refusal — a silent landing somewhere else.
-   *
-   * Driven on staging as the owner of QA Stadium, on an event another
-   * organisation runs there. The overview card promises in as many words: "you
-   * get the live view, the attendee count and the chatroom".
-   *
-   * The predicate could not simply be flipped, because this page is two things.
-   * `canOperate` is defined as "chat, moderation, the attendee list — what
-   * happens in your building", which is the right column exactly. The left is
-   * a broadcast composer and sponsor placements: a venue owner announcing into
-   * an event they do not run is K3.12, and R37 removes it deliberately.
-   */
-  const actor = await actorFor(session.user)
-  const permissions = eventPermissions(actor, event)
-  if (!permissions.canOperate) redirect("/dashboard/chatrooms")
-  // What the sponsored-message routes allow, asked the same way they ask it, so
-  // the tab offers only what will be accepted (SCRUM-308).
-  const mayAuthorSponsored = canBroadcast(actor, event, "sponsored", (await resolveSponsorGrant(actor, event.id)) ?? undefined)
-
-  const state = eventStateFor(event)
-  // The event's own clock, not the server's (SCRUM-421).
-  const clock = eventClock(event.timezone)
-  const when = `${clock.format(event.start_time, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} – ${clock.time(event.end_time)}`
+  const { id } = await params
+  const data = await loadEventPage(id)
+  const { event } = data
 
   return (
     <div className="flex flex-col gap-5">
-      {/*
-        The event's name, then the room. Owned header (`OWNED_HEADERS`): the
-        layout's would say "Room" and nothing about which one.
-      */}
-      <PageHeader
-        title={event.title}
-        description={`${STATE_LABEL[state]} · ${when}${event.venue_name ? ` · ${event.venue_name}` : ""}`}
-        back={{ href: `/dashboard/events/${eventId}`, label: "Back to event" }}
-      />
+      {/* Owned header (`OWNED_HEADERS`): the event's own, with its tabs. */}
+      <EventHeader data={data} active="chat" />
 
-      <div className="grid gap-8 @4xl/main:grid-cols-[minmax(0,1fr)_380px] @4xl/main:items-start">
-        {/* The room, and what is waiting on a human. */}
-        <Tabs defaultValue="chat" className="flex min-w-0 flex-col gap-3">
-          <TabsList className="w-fit">
-            <TabsTrigger value="chat">Messages</TabsTrigger>
-            <TabsTrigger value="moderation">Moderation</TabsTrigger>
-          </TabsList>
-          <TabsContent value="chat">
-            <ChatFeed eventId={event.id} />
-          </TabsContent>
-          <TabsContent value="moderation">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @4xl/main:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <Panel title="Room chat" hint="attendees appear under generated names">
+          <ChatFeed eventId={event.id} />
+        </Panel>
+        <div className="flex flex-col gap-5 @4xl/main:sticky @4xl/main:top-[84px]">
+          <Panel title="Moderation">
             <ModerationQueue eventId={event.id} />
-          </TabsContent>
-        </Tabs>
-
-        {/*
-          What `canEdit` buys: the composer and the sponsors. A venue owner
-          gets the room and nothing to say into it — K3.12, R37. Sticky clear
-          of the 60px top bar (60 + the page's 24px gap).
-        */}
-        {permissions.canEdit ? (
-          <div className="flex flex-col gap-6 @4xl/main:sticky @4xl/main:top-[84px]">
-            <EventMessaging eventId={event.id} mayAuthorSponsored={mayAuthorSponsored} />
-            {/*
-              Sponsors after the composer. A sponsored campaign is refused
-              without a placement, and the fix for that refusal lives here.
-            */}
-            <div className="border-t border-border pt-5">
-              <EventSponsors eventId={event.id} />
-            </div>
-          </div>
-        ) : null}
+          </Panel>
+          <Panel title="How it is checked">
+            <p className="text-[0.8125rem] leading-5 text-muted-foreground">
+              A keyword filter, a spam check and automated moderation read every message before anyone else sees
+              it. Flags and reports wait here for a decision.
+            </p>
+          </Panel>
+        </div>
       </div>
     </div>
   )
