@@ -293,6 +293,7 @@ async function sendOne(
       // A hidden or deleted event's room is closed to placements too (SCRUM-8, SCRUM-303).
       status: true,
       deleted_at: true,
+      kind: true,
       organizer_id: true,
       chat_group: { select: { id: true, status: true } },
     },

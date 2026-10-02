@@ -276,20 +276,32 @@ live: venue days will soon outnumber events many times over. Nothing archives
 them yet; a retention plan (roll old days' counts into the venue's aggregates,
 then delete or archive the rows) is a follow-up: SCRUM-528.
 
-**Still open for step 4**, which makes venue days reachable:
+**Reachable since step 4 (Go Live, docs/CHECKIN.md § Go Live).**
+`POST /venues/:id/live` is the one door into a venue day; what step 3 left open
+is closed:
 
 - The by-id attendee routes — `GET /events/:id`, RSVP, favourite, interest,
-  rating and the plain event check-in — take any event id that is not
-  private, so they would accept a venue day's. The Go Live route is the only
-  door in; each of those refuses the kind.
-- The presence sweeper's venue-day pass, with its own bound (F5), the
-  `expired` departure (F6), and expiries kept away from the mass-checkout
-  breaker (D-20).
-- The check-in kind: `checkInKindFor` makes anybody in the venue's owning org
-  `staff`. Decide whether venue staff going live at their own venue are staff
-  or attendees.
-- `/me/attendance` gains a `kind` so the app can label a venue day as a place
-  (D-6; step 4 or 5, with the OpenAPI change).
+  the board, the room preview, rating and the plain event check-in — answer a
+  venue day's id with `404`, as for an unknown id (`attendeeEventAccess`, and
+  the check-in and rating routes themselves).
+- The presence sweeper has a venue-day pass with its own bounds (F5): expiries
+  as `expired` at the window's end (F6), never through the mass-checkout guard
+  (D-20); the venue's sessions closed as `ended` with one push each when a
+  public event there starts; then the same fence-and-guard pass as events.
+- Check-in kind: somebody whose organisation owns the venue going live at it is
+  `staff`, as at an event there (`checkInKindFor` already reads the venue's
+  owner; pinned by a test). Decided by step 4.
+- `/me/attendance` carries `kind`, so the app labels a venue day as a place
+  (D-6).
+- The room, its roster, grid and counter are for the people live there now
+  (`liveInVenueDay`, `inRoomWhere`), and close at the reset (D-5).
+
+`GET /venues/:id` answers whether going live is open, the live count as a
+bucket (D-19), the caller's own window and tonight's event — never the area,
+never who is live.
+
+D-13 ("Open on Blendn" as an opt-out for claimed venues) is not built: every
+active venue is live. It belongs with the venue owner's screens (step 17).
 
 Already closed here: the system user can sign in on no surface
 (`accountBlockReason`) and has no public profile. Two people live at the same
@@ -303,7 +315,8 @@ venue day count as having shared an event for message requests
 | File | What lives there |
 |---|---|
 | `lib/venue-day.ts` | `venueDayFor`, `venueDayBounds`, `SYSTEM_USER_ID` — the venue day |
-| `lib/event-kind.ts` | `realEventsWhere` / `venueDaysWhere`, the fragments every events reader uses |
+| `lib/event-kind.ts` | `realEventsWhere` / `venueDaysWhere`, the fragments every events reader uses; `inRoomWhere`, "in this room" for a check-in lookup |
+| `lib/venue-visibility.ts` | `venueTakeoverWhere`: when a real event takes its venue over (Go Live refused, sessions closed at its start; step 2's Places list) |
 | `lib/venue-types.ts` | The 35-type vocabulary, labels, default extents, OSM mapping |
 | `lib/venue-actions.ts` | `venuesNear`, `createVenue`, `updateVenue`, `assignVenueOwner`, `searchVenues`, `venueById` — all `"use server"` |
 | `lib/venue-claim-actions.ts` | `fileVenueClaim`, `getVenueClaimQueue`, `decideVenueClaim` |

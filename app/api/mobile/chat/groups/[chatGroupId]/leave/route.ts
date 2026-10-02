@@ -134,7 +134,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       data: {
         status: membership.muted_at ? "muted" : "active",
         left_at: null,
-        last_allowed_at: null,
+        // `last_allowed_at` is left alone: in a venue day's room it is the end
+        // of the caller's Go Live, and rejoining does not extend or end it.
         updated_at: new Date(),
       },
     })

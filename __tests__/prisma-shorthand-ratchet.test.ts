@@ -94,7 +94,6 @@ const BASELINE: Record<string, string[]> = {
   "app/api/mobile/chat/groups/[chatGroupId]/messages/[messageId]/reactions/route.ts": ["emoji"],
   "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts": ["content", "type"],
   "app/api/mobile/events/[eventId]/chat/route.ts": ["anonymous_name", "content", "type"],
-  "app/api/mobile/events/[eventId]/checkin/route.ts": ["anonymous_name"],
   // `rating` is required by the schema and `issue` is defaulted in the
   // destructure; `note`, the optional one, is a conditional spread.
   "app/api/mobile/events/[eventId]/peer-ratings/route.ts": ["issue", "rating"],
@@ -104,6 +103,8 @@ const BASELINE: Record<string, string[]> = {
   "app/dashboard/events/[id]/feedback/actions.ts": ["category", "sentiment"],
   "app/dashboard/events/curate/actions.ts": ["geofence"],
   "app/dashboard/users/actions.ts": ["role"],
+  // Moved with the check-in core out of the event check-in route (step 4).
+  "lib/check-in-core.ts": ["anonymous_name"],
   "lib/admin-role-actions.ts": ["name", "role", "status"],
   "lib/amenity-actions.ts": ["name"],
   "lib/category-actions.ts": ["slug"],

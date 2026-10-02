@@ -203,7 +203,9 @@ export async function GET(
       interests: user.user_interests.map((ui) => ui.category),
       memberSince: user.createdAt,
       stats: {
-        eventsAttended: await distinctEventsAttended(user.id),
+        // Your own count includes the places you went live at, as your list
+        // does; anybody else's view of you counts events only.
+        eventsAttended: await distinctEventsAttended(user.id, { places: isOwnProfile }),
         eventsFavorited: user._count.event_favorites,
         eventsOrganized: user._count.organized_events,
       },

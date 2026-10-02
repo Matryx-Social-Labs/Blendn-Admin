@@ -32,6 +32,13 @@ describe("checkInKindFor", () => {
     ).toBe("staff")
   })
 
+  it("marks the venue's own people as staff when they go live at it (a venue day, step 4)", () => {
+    // A venue day has no organising org (CHECK events_venue_day_shape); the
+    // venue's owning org working its own room is staff, as at an event there.
+    expect(checkInKindFor(actor(VENUE_ORG), { organizer_org_id: null, venue: { owner_org_id: VENUE_ORG } })).toBe("staff")
+    expect(checkInKindFor(actor(MY_ORG), { organizer_org_id: null, venue: { owner_org_id: VENUE_ORG } })).toBe("attendee")
+  })
+
   it("marks an ordinary guest as an attendee", () => {
     expect(
       checkInKindFor(actor(), { organizer_org_id: MY_ORG, venue: { owner_org_id: VENUE_ORG } })

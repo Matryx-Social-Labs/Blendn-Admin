@@ -102,14 +102,17 @@ export const RoomWriteSchema = z
   .object({
     allowed: z.boolean(),
     reason: z
-      .enum(["archived", "locked", "window_closed", "not_open_yet", "hidden", "muted", "banned", "left"])
+      .enum(["archived", "locked", "window_closed", "not_open_yet", "hidden", "not_live", "muted", "banned", "left"])
       .nullable()
       .describe("Null when `allowed`."),
     message: z
       .string()
       .nullable()
       .describe("A sentence for the composer. Null when allowed, and for `muted`, `banned` and `left`."),
-    closesAt: z.string().datetime().describe("When the 24-hour window after the event shuts."),
+    closesAt: z
+      .string()
+      .datetime()
+      .describe("When the 24-hour window after the event shuts. A venue day's room closes at its reset instead."),
     eventEndedAt: z.string().datetime().describe("Past this, the room is a read-only record of the night."),
   })
   .openapi("RoomWrite")

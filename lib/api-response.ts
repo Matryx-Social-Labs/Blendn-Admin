@@ -51,6 +51,18 @@ export const ErrorCode = {
    * is yours: check in again, or `DELETE /chat/groups/:id/leave` to rejoin.
    */
   LEFT_ROOM: "LEFT_ROOM",
+  /**
+   * A venue day's room, and your Go Live there has ended (`liveInVenueDay`).
+   * The remedy is yours: go live again.
+   */
+  NOT_LIVE: "NOT_LIVE",
+  /**
+   * Go Live refused because a real event is on at this venue, or starts within
+   * the hour: check in to that instead. The body carries its `eventId`.
+   */
+  EVENT_LIVE_HERE: "EVENT_LIVE_HERE",
+  /** "Stay" is Blendn+ once `PLUS_GATING` is on. */
+  PLUS_REQUIRED: "PLUS_REQUIRED",
 } as const
 
 /**

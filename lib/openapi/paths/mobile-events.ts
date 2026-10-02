@@ -331,7 +331,10 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/checkin",
   tags: ["Mobile Events"],
   summary: "Check in to event",
-  description: PARTICIPATION_GATE + "GPS-verified check-in. Must be within event's check-in radius. Max GPS accuracy: 150m.",
+  description:
+    PARTICIPATION_GATE +
+    "GPS-verified check-in. Must be within event's check-in radius. Max GPS accuracy: 150m. " +
+    "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`).",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -399,6 +402,16 @@ registry.registerPath({
               reason: z.string().optional(),
               shortfallMetres: z.number().nullable().optional(),
               graceEndsAt: z.string().nullable().optional(),
+              expiresAt: z
+                .string()
+                .datetime()
+                .nullable()
+                .optional()
+                .describe(
+                  "A venue Go Live's end, after this ping: a \"stay\" window moves on with each in-fence ping, " +
+                    "up to four hours or the venue's reset. Null at an event. A ping past the end checks you out " +
+                    "with `status: checked_out`, `reason: expired`."
+                ),
               nextPingInSeconds: z.number().optional(),
             })
           ),

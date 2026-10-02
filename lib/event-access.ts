@@ -60,9 +60,15 @@ export async function attendeeEventAccess(
 ): Promise<EventAccessDenial | null> {
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { status: true, visibility: true, min_age: true },
+    select: { status: true, visibility: true, min_age: true, kind: true },
   })
-  if (!event || event.status === "draft") return { kind: "not_found" }
+  /*
+   * A venue day is not an event anybody opens, RSVPs to, saves or reads the
+   * board of: it is `unlisted`, not `private`, so without this its id passed
+   * every rule below. Its one door is Go Live (`POST /venues/:id/live`), and
+   * its room's own routes check being live (`liveInVenueDay`, `inRoomWhere`).
+   */
+  if (!event || event.status === "draft" || event.kind === "venue_day") return { kind: "not_found" }
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
     return { kind: "not_found" }
   }

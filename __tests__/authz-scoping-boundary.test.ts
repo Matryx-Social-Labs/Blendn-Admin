@@ -176,6 +176,9 @@ const VENUE_ID_READS_ALLOWED = new Map([
   ["lib/venue-actions.ts", "counts future bookings to refuse a retire; nothing is shown"],
   ["lib/venue-claim-actions.ts", "venue_claims rows, not events"],
   ["lib/venue-day.ts", "finds the venue's own day to go live in; nothing is shown to an owner"],
+  ["lib/venue-visibility.ts", "whether a real event has a venue now, for Go Live, the venue page and the sweeper; nothing is shown to an owner"],
+  ["app/api/mobile/venues/[venueId]/route.ts", "the attendee's venue page: a bucketed live count and tonight's public event; nothing per person, nothing to an owner"],
+  ["lib/presence-sweeper.ts", "closes a venue's Go Live sessions when an event there starts; nothing is shown to anyone"],
 ])
 
 describe("a venue owner's view starts at the claim", () => {
