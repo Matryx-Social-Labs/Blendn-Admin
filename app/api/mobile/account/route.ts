@@ -232,14 +232,24 @@ export async function DELETE(request: NextRequest) {
       }),
       db.friend_invites.deleteMany({ where: { user_id: authUser.userId } }),
       /*
-       * Out of every crew, and every crew invite either way goes — removal
-       * markers too: there is nobody left to keep out. Their crew chats'
+       * Out of every crew, and every crew invite to them or from them goes —
+       * their removal markers too (there is nobody left to keep out), but not
+       * the ones they wrote about others (below). Their crew chats'
        * member rows went `left` above with every room's, and their messages
        * stay, as in any room. Each crew is settled after the commit
        * (`settleCrewsAfterErasure`): one left alone dissolves.
        */
       db.crew_invites.deleteMany({
-        where: { OR: [{ invited_user_id: authUser.userId }, { invited_by: authUser.userId }] },
+        where: {
+          OR: [
+            { invited_user_id: authUser.userId },
+            // Their open invites go. What they wrote about somebody else stays:
+            // a removal marker (the owner's word that a person is out) and a
+            // decline (that person's 30 days of quiet) belong to the person
+            // they are about, and erasing the owner must not lift either.
+            { invited_by: authUser.userId, removed_at: null, declined_at: null },
+          ],
+        },
       }),
       leaveCrews,
       // Their reveals inside Blends: a name shown to that night's people, theirs to take back now.

@@ -119,5 +119,12 @@ describe("one writer (CR-G03)", () => {
     const recheck = tx.indexOf("blocksBetween(sides.a, sides.b, tx)")
     expect(recheck).toBeGreaterThan(0)
     expect(recheck).toBeLessThan(tx.indexOf("crew_likes.createMany("))
+    // And both crews still standing and not hidden, under a share lock, so a
+    // dissolve or a moderator's hide in flight is seen (step 8 follow-up).
+    const standing = tx.indexOf("hidden_at IS NULL FOR SHARE")
+    const aborts = tx.indexOf("if (standing.length !== crewIds.length) return null")
+    expect(standing).toBeGreaterThan(0)
+    expect(aborts).toBeGreaterThan(standing)
+    expect(aborts).toBeLessThan(tx.indexOf("crew_likes.createMany("))
   })
 })

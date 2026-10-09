@@ -160,6 +160,8 @@ const ADULTS: CrewRefusal = { refusal: "Crews are for people 18 and over who hav
 const OWNS_ENOUGH: CrewRefusal = { refusal: `You can own up to ${CREW.MAX_OWNED} crews at a time.`, status: 409 }
 const IN_ENOUGH: CrewRefusal = { refusal: `You can be in up to ${CREW.MAX_JOINED} crews at a time.`, status: 409 }
 const MADE_ENOUGH: CrewRefusal = { refusal: "That's enough new crews for today — try again tomorrow.", status: 429 }
+/** A crew a moderator hid takes nobody new: it is off every surface outside itself (C12). */
+const HIDDEN: CrewRefusal = { refusal: "A moderator has hidden this crew, so it can't take new members.", status: 403 }
 
 /* -------------------------------------------------------------------------- */
 /* Name and bio                                                               */
@@ -367,13 +369,15 @@ export async function inviteToCrew(
   const now = new Date()
 
   const result = await db.$transaction(async (tx) => {
-    if (!(await lockCrew(tx, crewId))) return NO_CREW
+    const crew = await lockCrew(tx, crewId)
+    if (!crew) return NO_CREW
     const members = await tx.crew_members.findMany({
       where: { crew_id: crewId },
       select: { user_id: true, role: true, user: { select: { suspended_at: true, deletedAt: true } } },
     })
     const me = members.find((m) => m.user_id === inviterId && !m.user.suspended_at && !m.user.deletedAt)
     if (!me) return NO_CREW
+    if (crew.hidden) return HIDDEN
     const active = members.filter((m) => !m.user.suspended_at && !m.user.deletedAt).map((m) => m.user_id)
 
     const [invites, apart] = await Promise.all([
@@ -396,7 +400,11 @@ export async function inviteToCrew(
       return !isOpen(row, now) // lapsed: ask again
     })
     const open = invites.filter((i) => isOpen(i, now)).length
-    if (members.length + open + ask.length > CREW.MAX_MEMBERS) return FULL
+    // The seats are counted on everyone asked for who is not already in or
+    // already holding an open invite — BEFORE the silent skips above, so a
+    // 409 cannot tell the inviter that one of their friends was skipped.
+    const asked = wanted.filter((id) => !inCrew.has(id) && !(rowOf.has(id) && isOpen(rowOf.get(id)!, now)))
+    if (members.length + open + asked.length > CREW.MAX_MEMBERS) return FULL
 
     const fresh = ask.filter((id) => !rowOf.has(id))
     const renewed = ask.filter((id) => rowOf.has(id))
@@ -437,7 +445,9 @@ export async function acceptCrewInvite(
   if (!(await mayJoinCrews(userId))) return ADULTS
   const now = new Date()
   return db.$transaction(async (tx) => {
-    if (!(await lockCrew(tx, crewId))) return NO_CREW
+    const crew = await lockCrew(tx, crewId)
+    // A hidden crew is the same 404 to somebody outside it as no crew.
+    if (!crew || crew.hidden) return NO_CREW
     const invite = await tx.crew_invites.findUnique({
       where: { crew_id_invited_user_id: { crew_id: crewId, invited_user_id: userId } },
       select: { id: true, invited_by: true, declined_at: true, removed_at: true, created_at: true },

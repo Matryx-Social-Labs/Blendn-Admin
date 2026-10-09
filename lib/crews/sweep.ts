@@ -37,9 +37,9 @@ export const activeMemberWhere = { user: { suspended_at: null, deletedAt: null }
 export async function lockCrew(
   tx: Prisma.TransactionClient,
   crewId: string
-): Promise<{ id: string; name: string } | null> {
-  const rows = await tx.$queryRaw<{ id: string; name: string }[]>`
-    SELECT id::text, name FROM crews WHERE id = ${crewId}::uuid AND dissolved_at IS NULL FOR UPDATE`
+): Promise<{ id: string; name: string; hidden: boolean } | null> {
+  const rows = await tx.$queryRaw<{ id: string; name: string; hidden: boolean }[]>`
+    SELECT id::text, name, hidden_at IS NOT NULL AS hidden FROM crews WHERE id = ${crewId}::uuid AND dissolved_at IS NULL FOR UPDATE`
   return rows[0] ?? null
 }
 
@@ -91,8 +91,8 @@ export async function dissolveLocked(tx: Prisma.TransactionClient, crewId: strin
 /**
  * Settle a crew whose membership just changed, inside the caller's
  * transaction holding its lock: below `CREW.MIN_MEMBERS` active members it
- * dissolves; without an active owner, the longest-standing active member is
- * made owner (the old owner, if still a member, steps down first —
+ * dissolves; without an active owner, the longest-standing active member who
+ * owns fewer than `CREW.MAX_OWNED` crews is made owner (the old owner, if still a member, steps down first —
  * `crew_members_one_owner` allows one). Idempotent: a settled crew is left as
  * it is.
  */
@@ -107,9 +107,19 @@ export async function settleLocked(
   })
   if (active.length < CREW.MIN_MEMBERS) return { dissolved: true, roomIds: await dissolveLocked(tx, crewId) }
   if (!active.some((m) => m.role === "owner")) {
+    // The longest-standing active member who can take another crew under the
+    // cap (`CREW.MAX_OWNED`); only if nobody can, the longest-standing anyway —
+    // a crew must have an owner, and nobody is made to leave one.
+    const owned = await tx.crew_members.groupBy({
+      by: ["user_id"],
+      where: { user_id: { in: active.map((m) => m.user_id) }, role: "owner", crew: { dissolved_at: null } },
+      _count: { _all: true },
+    })
+    const full = new Set(owned.filter((o) => o._count._all >= CREW.MAX_OWNED).map((o) => o.user_id))
+    const heir = active.find((m) => !full.has(m.user_id)) ?? active[0]
     await tx.crew_members.updateMany({ where: { crew_id: crewId, role: "owner" }, data: { role: "member" } })
     await tx.crew_members.update({
-      where: { crew_id_user_id: { crew_id: crewId, user_id: active[0].user_id } },
+      where: { crew_id_user_id: { crew_id: crewId, user_id: heir.user_id } },
       data: { role: "owner" },
     })
   }

@@ -2,8 +2,11 @@ import { readdirSync, readFileSync, statSync } from "fs"
 import { join, relative } from "path"
 
 /**
- * Every writer of a block, and every unfriend, withdraws the crew invites
- * between the two people (C5, lib/crews/blocks.ts `dropCrewInvitesBetween`).
+ * Every writer of a block, every route that closes a conversation (an unmatch
+ * keeps two people apart like a block, C6), and every unfriend, withdraws the
+ * crew invites between the two people (C5, lib/crews/blocks.ts
+ * `dropCrewInvitesBetween`); the closers also take the pair out of the Blends
+ * that now refuse them (`evictBlockedFromBlends`).
  *
  * An invite is a friend asking. One left standing after a block lets the
  * blocked person accept into a crew with the person who blocked them — the
@@ -46,6 +49,26 @@ describe("crew invites do not outlive a block or an unfriend", () => {
 
   it("has every writer of blocked_users withdraw the pair's crew invites", () => {
     const missing = writers.filter((file) => !WITHDRAWS.test(readFileSync(file, "utf8"))).map((f) => relative(ROOT, f))
+    expect(missing).toEqual([])
+  })
+
+  it("has every route that closes a conversation withdraw them and take the pair out of their Blends (C6)", () => {
+    // A closed conversation keeps two people apart like a block. The erasure
+    // closes every conversation of a person who leaves every crew anyway.
+    const closers = sources(join(ROOT, "app"))
+      .filter((file) => /closeConversation\(|closed_reason:/.test(readFileSync(file, "utf8")))
+      .filter((file) => !file.endsWith(join("account", "route.ts")))
+    expect(closers.map((f) => relative(ROOT, f)).sort()).toEqual([
+      "app/api/mobile/conversations/[conversationId]/leave/route.ts",
+      "app/api/mobile/conversations/[conversationId]/route.ts",
+      "app/api/mobile/users/[userId]/block/route.ts",
+    ])
+    const missing = closers
+      .filter((file) => {
+        const src = readFileSync(file, "utf8")
+        return !WITHDRAWS.test(src) || !/evictBlockedFromBlends\(/.test(src)
+      })
+      .map((f) => relative(ROOT, f))
     expect(missing).toEqual([])
   })
 
