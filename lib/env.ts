@@ -253,6 +253,8 @@ export function plusGating(): boolean {
  * runs on the Edge; everything else reads it here.
  */
 export function dashboardHost(): string | null {
-  const host = process.env.DASHBOARD_HOST?.trim()
+  // Bare by contract; a scheme or a trailing slash pasted in is forgiven here,
+  // so a link built from it is never "https://https://…" (step 5 review).
+  const host = process.env.DASHBOARD_HOST?.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
   return host ? host : null
 }

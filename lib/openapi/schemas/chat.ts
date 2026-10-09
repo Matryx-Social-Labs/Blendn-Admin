@@ -141,7 +141,10 @@ export const ChatGroupSchema = z
     id: z.string().uuid(),
     name: z.string(),
     type: z.string(),
-    memberCount: z.number(),
+    memberCount: z
+      .number()
+      .nullable()
+      .describe("Members of an event's room. Null for a venue day's room: an exact count there is a differencing channel (D-19)."),
     unreadCount: z.number(),
     mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable(),
@@ -160,6 +163,10 @@ export const ChatGroupSchema = z
       .nullable(),
     event: z.object({
       id: z.string().uuid(),
+      kind: z
+        .enum(["event", "venue_day"])
+        .describe("`venue_day`: a place's room (listed only while your Go Live there is open). Name it by the room's `name`, the place; its `title` is bookkeeping."),
+      venueId: z.string().uuid().nullable().describe("The place, for a venue day's room (\"Go live again\" opens it); null for an event's room."),
       slug: z.string(),
       title: z.string(),
       coverImageUrl: z.string().nullable(),

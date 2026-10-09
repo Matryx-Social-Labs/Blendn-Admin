@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED` (the last three: Go Live, below)
+Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (the last five: Go Live, below)
 
 A refusal that names no specific code carries the one its status stands for:
 401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
@@ -676,8 +676,8 @@ vocabulary, meaning exactly what it means there.
 | `sortBy` | `name` (default) or `distance` |
 
 `floors` is the 3D map's height override for the venue's building, set by its
-owner or an admin on the dashboard (1–200): draw it `floors × 3.66` m tall,
-the OpenMapTiles rule for a building with levels and no height. `null` means
+owner or an admin on the dashboard (1–200): draw it `floors × 3.2` m tall,
+the rule our building tiles are baked with (scripts/map-buildings). `null` means
 the map's own height. The same field is on `GET /venues/:venueId`.
 
 60 a minute per person, then 429 — every row carries a live count, as on the
@@ -757,7 +757,8 @@ for one with no known adult age (as at its door). 60 a minute per person, then
             "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false,
             "venueDayId": "…", "chatGroupId": "…" },
   "tonight": { "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
-               "startTime": "…", "endTime": "…" }
+               "startTime": "…", "endTime": "…" },
+  "claim": { "url": "https://dashboard.blendn.app/claim/venue/…" }
 } }
 ```
 
@@ -768,6 +769,7 @@ for one with no known adult age (as at its door). 60 a minute per person, then
 | `live.liveNow` | `quiet` (fewer than 5, none included), `5-9`, `10-19` or `20+`. **Never a number** (D-19, D-x2): a count that moved from 4 to 5 as you watched would tell you somebody just walked in. Guests only (not the venue's staff), never counting you, read at most once a minute per venue, and slow to fall (it drops a bucket only once one more person would not hold it) |
 | `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
+| `claim` | `{ url }` for an unclaimed venue: the public claim page (`/claim/venue/:venueId`) on the dashboard host, built for the environment the app talks to — open it as given. Null once claimed. As `claim` on `GET /events/:eventId` |
 | `tonight` | The next public event here before the venue's day resets (06:00 local by default), age-filtered for you, or null |
 
 **Not on it:** the check-in area (no payload draws the boundary), and who is
@@ -825,7 +827,9 @@ today (choosing it again does not restart the four hours). Anything else is
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
 | 403 `FORBIDDEN` / `AGE_RESTRICTED` | Not onboarded / no known adult age (an unknown age is refused here) |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
-| 400 `OUT_OF_RANGE` | A fix worse than 150 m, a venue with no check-in area, or a position outside it — "You're not at ‹venue› yet.", never a distance. A refusal writes nothing: no venue day is made for it |
+| 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
+| 400 `NO_CHECK_IN_AREA` | Nobody has drawn this venue's area: no position fixes it |
+| 400 `OUT_OF_RANGE` | A position outside the area — "You're not at ‹venue› yet.", never a distance. Before step 5 this code also covered the two rows above; the event check-in still uses it for all three. A refusal writes nothing: no venue day is made for it |
 | 429 `RATE_LIMITED` | 20 a minute per person; ceilings per address and per venue |
 
 ```json
@@ -952,7 +956,12 @@ the venue's reset (`closesAt` is the reset, not a day later).
 ### GET /chat/groups
 A venue's room (a venue day) is listed only while your Go Live there is open;
 once it ends the room leaves the list — its last message and counts are not
-readable from outside a room you can no longer open.
+readable from outside a room you can no longer open. Its row's `event.kind` is
+`venue_day` (an event's room says `event`): name it by the row's `name`, which
+is the place, not by `event.title` ("Venue day · ‹place› · ‹date›", bookkeeping).
+`event.venueId` is the place ("Go live again" opens it). Its `memberCount` is
+**null**: an exact count of a venue's room, moving as people go live and
+expire, is the differencing the venue's bucket exists to stop (D-19).
 
 Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
 no `check_out_time`, so the room is live for them right now. The app lifts those
@@ -2583,7 +2592,7 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | GET | `/categories` | List all categories |
 | GET | `/amenities` | The amenity vocabulary — what an event can say it offers |
 | GET | `/work-fields` | The eighteen coarse fields of work, as `{ slug, label }` |
-| GET | `/checkins/active` | Get user's active check-ins. Each carries `kind` (`venue_day` is a Go Live: label it by `event.venueName`), `expiresAt` (a Go Live's end; null at an event) and `stay`. A Go Live past its end is never listed, swept or not |
+| GET | `/checkins/active` | Get user's active check-ins. Each carries `kind` (`venue_day` is a Go Live: label it by `event.venueName`), `venueId` (the venue a Go Live is at, to extend or go again; null at an event), `expiresAt` (a Go Live's end; null at an event) and `stay`. A Go Live past its end is never listed, swept or not |
 | POST | `/notifications/token` | Register push token |
 | DELETE | `/notifications/token` | Remove push token |
 | GET | `/notifications` | The notifications centre, newest first |

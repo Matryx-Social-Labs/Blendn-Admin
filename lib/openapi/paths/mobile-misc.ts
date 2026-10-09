@@ -18,6 +18,10 @@ import {
 } from "@/lib/openapi/schemas/profile"
 import { MessageResponseSchema } from "@/lib/openapi/schemas/auth"
 import { CheckinRequestSchema } from "@/lib/openapi/schemas/event"
+import { LIVE_COUNT_BUCKETS, type LiveCountBucket } from "@/lib/disclosure"
+
+/** The live-count buckets, from the one list the routes bucket with — never typed out twice. */
+const LIVE_COUNT_ENUM = LIVE_COUNT_BUCKETS as unknown as [LiveCountBucket, ...LiveCountBucket[]]
 
 const bearerAuth = [{ BearerAuth: [] }]
 const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
@@ -62,7 +66,7 @@ const VenueListItemSchema = z
     floors: z.number().int().min(1).max(200).nullable()
       .describe(
         "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
-          "`floors × 3.66` m tall over the building data's own height. `null`: use the map's height."
+          "`floors × 3.2` m tall over the building data's own height. `null`: use the map's height."
       ),
     distance: z
       .number()
@@ -70,7 +74,7 @@ const VenueListItemSchema = z
       .describe("Kilometres from the supplied lat/lon, or null when either side has no fix."),
     upcomingEventCount: z.number().int(),
     liveNow: z
-      .enum(["quiet", "5-9", "10-19", "20+"])
+      .enum(LIVE_COUNT_ENUM)
       .nullable()
       .describe(
         "How many guests are live here (Go Live), as a bucket and never a number: `quiet` is under 5, " +
@@ -151,10 +155,10 @@ registry.registerPath({
 })
 
 const LiveCountBucketSchema = z
-  .enum(["none", "a_few", "5-9", "10-19", "20+"])
+  .enum(LIVE_COUNT_ENUM)
   .describe(
-    "How many are live here, never as a number (D-19): a count that moved from 4 to 5 as you watched " +
-      "would tell you somebody just walked in. `a_few` is 1 to 4."
+    "How many guests are live here, never as a number (D-19): a count that moved from 4 to 5 as you watched " +
+      "would tell you somebody just walked in. `quiet` is under 5, none included. Never counts the caller."
   )
 
 const VenueDetailSchema = z
@@ -171,7 +175,7 @@ const VenueDetailSchema = z
       floors: z.number().int().min(1).max(200).nullable()
         .describe(
           "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
-            "`floors × 3.66` m tall over the building data's own height. `null`: use the map's height."
+            "`floors × 3.2` m tall over the building data's own height. `null`: use the map's height."
         ),
       claimed: z.boolean().describe("False: the app may offer \"Own this place? Claim it\"."),
     }),
@@ -204,6 +208,13 @@ const VenueDetailSchema = z
       })
       .nullable()
       .describe("The next public event here before the venue's day resets, age-filtered for you."),
+    claim: z
+      .object({ url: z.string().url() })
+      .nullable()
+      .describe(
+        "The public claim page (`/claim/venue/{venueId}`) on the dashboard host, for an unclaimed venue; null once " +
+          "claimed. Open it as given: it is built for the environment the app is talking to."
+      ),
   })
   .openapi("VenueDetail")
 

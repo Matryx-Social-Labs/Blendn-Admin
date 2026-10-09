@@ -38,12 +38,12 @@ import { violatedConstraint } from "@/lib/prisma-errors"
  * anywhere. Below the ceiling, accuracy is no longer a pass/fail gate: it is
  * folded into the distance test (`fenceRefusal`), which is where it belongs.
  */
-export function vagueFixRefusal(gpsAccuracy: number | undefined) {
+export function vagueFixRefusal(gpsAccuracy: number | undefined, code: string = ErrorCode.OUT_OF_RANGE) {
   if (gpsAccuracy === undefined || gpsAccuracy <= MAX_GPS_ACCURACY_METERS) return null
   return errorResponse(
     `GPS signal is too weak (accuracy: ${Math.round(gpsAccuracy)}m). Move to an area with better signal and try again.`,
     400,
-    ErrorCode.OUT_OF_RANGE
+    code
   )
 }
 
@@ -139,6 +139,8 @@ export function fenceRefusal(input: {
    */
   record: { eventId: string; occurrenceId: string } | null
   noFenceMessage: string
+  /** The code for "no area here". The event door keeps `OUT_OF_RANGE`; Go Live says `NO_CHECK_IN_AREA`. */
+  noFenceCode?: string
   /**
    * The words for "outside", when the distance must not be told. A venue's
    * area is drawn by nobody the caller knows, and "you are 40 m away", asked
@@ -151,7 +153,7 @@ export function fenceRefusal(input: {
   if (!input.fence) {
     logger.error("Check-in attempted with no area to check against", { eventId: record?.eventId ?? null })
     if (record) recordRefusal({ eventId: record.eventId, userId: input.userId, reason: "no_geofence" })
-    return errorResponse(input.noFenceMessage, 400, ErrorCode.OUT_OF_RANGE)
+    return errorResponse(input.noFenceMessage, 400, input.noFenceCode ?? ErrorCode.OUT_OF_RANGE)
   }
 
   const verdict = evaluateCheckIn(input.point, input.fence, input.gpsAccuracy)

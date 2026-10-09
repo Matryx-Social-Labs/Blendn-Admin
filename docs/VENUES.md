@@ -227,9 +227,9 @@ this and was corrected rather than the code.
 
 `venues.floors` (1–200, nullable; CHECK `venues_floors_range`) is how many
 floors the venue's building has. The app's 3D map draws the building
-`floors × 3.66` m tall over the building data's own height
-(`lib/venue-floors.ts`; 3.66 m is OpenMapTiles' rule for a building with
-levels and no height). Null leaves the map's height. The venue's owner or an
+`floors × 3.2` m tall over the building data's own height
+(`lib/venue-floors.ts`; 3.2 m a floor is what our own building tiles are
+baked with, scripts/map-buildings). Null leaves the map's height. The venue's owner or an
 admin sets it on the venue page's record; the organisation that only added an
 unclaimed venue corrects the place but not its floors (`updateVenue`). It rides
 on `GET /venues` and `GET /venues/:id` (docs/API.md).
