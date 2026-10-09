@@ -76,13 +76,15 @@ in `blendn/ROADMAP.md`; the journey rows are in `USER_JOURNEY.md`.
 | 0 | **Defects the pricing audit found**, fixed before anything is sold: venue owners' event list and CSV ignore `claimed_at` (privacy, first); the venue check-ins CSV is row-level; the alert log is unreachable after an event ends; sponsor reach is hard-coded null. One SCRUM bug and a failing test each | §14 step 0 | In progress |
 | 1 | **Ledger, founder seeding, claim from the app.** This entry; `scripts/import-venues.ts` (dry run by default, 100 m dedupe, then OSM enrichment); a public `/claim/venue/[venueId]` mirroring `/claim/[eventId]`, which files a claim without an account and grants nothing; the app's "Claim it" links to the dashboard host | §3, §14 step 1 | In progress |
 | 13 | **Dashboard rulings, tokens, the Attendees-tab bug.** R1–R7 into `DESIGN_SYSTEM.md`; the missing tokens (`--destructive-foreground` fixes the nav badge); the event Attendees tab becomes a per-event label roster | §10, §14 step 13 | In progress |
+| 16 | **Analytics, entitlements, Razorpay test mode.** `entitlements` / `payment_events` / `billing_checkouts` and `hasEntitlement()` (the only gate); `/api/webhooks/razorpay`, the only writer of a paid entitlement (HMAC on the raw body, idempotent on the event id, held to the price table); the Plan page (Free / Event Pass / Analytics, GST-inclusive, payments, cancel) and the Analytics page (cross-event comparison, cohorts 30/60/90, pacing against your median, 30/90/all, and per event: stay, arrivals replay, first-time vs returning, app views → RSVPs), every new figure floored; a free organisation gets the static sample and none of its paid figures; admin founding grants. Ticketed, not built: tracking links (SCRUM-551), ticket-link clicks (SCRUM-552), blind re-invites (SCRUM-553, needs a consent purpose), analytics CSVs (SCRUM-554). Test-mode keys on staging are the owner's to add | §9.1b, §9.2, §14 step 16 | In progress |
 
 **Pricing (plan §9.1b, which supersedes §9.1 where they differ).** First bets
 to verify, not research. The dashboard shows prices including GST.
 
 - **Organisers run events free, forever.** Everything already shipped stays
-  free. **Event Pass** ₹499 per event; **Analytics** ₹1,999/mo or ₹19,990/yr —
-  shown as ₹589 and ₹2,359 with GST. The paywall starts 30 days after the
+  free; Analytics sells only what is new (step 16). **Event Pass** ₹499 per
+  event; **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
+  ₹2,359 and ₹23,588 with GST (`lib/billing-plans.ts`, the one price table). The paywall starts 30 days after the
   organisation's first event that clears the privacy floors. Founding grant: 6
   months of Analytics.
 - **Venues pay nothing until venue days are live and a venue has 4 weeks of
@@ -285,7 +287,6 @@ starts. "App" in a row means the work is client-side and tracked in
 |---|---|---|
 | 14 | **Shell and components to the design kit.** Sidebar, top bar with breadcrumbs, `PageHeader` owning the h1, Panel / KpiStrip / Locked (sample data only) / QR | §10 |
 | 15 | **Organiser screens to the kit**, including the QR & link tab — QR does not exist in either repo today | §10, §9.1b |
-| 16 | **Analytics, entitlements, Razorpay test mode.** `entitlements`, `payment_events`, `hasEntitlement()`; Analytics and Plan pages; `/api/webhooks/razorpay`, the only writer of an entitlement; a free organisation's payload carries no paid numbers | §9.1b, §9.2 |
 | 17 | **Venue owner and sponsor screens.** Venue plans (Listed / Pro); a Razorpay payment link per `placement_charges` row, settled by webhook | §9.1b, §10 |
 | 18 | **Admin and public screens to the kit**, including the venue claim page from step 1 | §10 |
 

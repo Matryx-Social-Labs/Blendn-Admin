@@ -1651,6 +1651,18 @@
       "mutation": "M580 mayBuy forced true in billingOrgFor (staff may buy). M581 organizer_org_id dropped from the Event Pass event lookup (any org's event).",
       "observed": "M580: 1 of 11 failing — 'refuses staff, with a sentence naming who can'. M581: 1 of 11 failing — 'refuses another organisation's event as if it were not there, before calling Razorpay'. Reverted green.",
       "date": "2026-10-03"
+    },
+    "previews-use-sample-data.test.ts": {
+      "guards": "Step 16 / TQ-DO08 MN-G02: every `<Locked … sample={…}>` in app/ and components/ passes only SAMPLE_ constants into the components it draws (brace-matched, comments stripped); lib/sample-analytics.ts imports types only; components/dashboard/analytics-panels.tsx imports lib/org-analytics, lib/analytics-access, lib/entitlements and lib/db for types only, so a preview cannot fetch or be handed the organisation's figures.",
+      "mutation": "M582 the Analytics page's locked sample given `view.org ?? SAMPLE_ORG_ANALYTICS`. M583 analytics-panels importing the `orgAnalytics` loader as a value.",
+      "observed": "M582: 1 of 4 failing — 'passes only SAMPLE_ constants into every preview' (\"app/dashboard/analytics/page.tsx: sample gets view.org ?? SAMPLE_ORG_ANALYTICS\"). M583: 1 of 4 failing — 'draws from props alone…'. Both reverted by copying the file back; green.",
+      "date": "2026-10-03"
+    },
+    "analytics-gating.itest.ts": {
+      "guards": "Step 16 / TQ-DO08 MN-I12, DK-I01, first-event-free, floors: an org past its free window (first event of six ended 60 days ago) gets view.org null and the canary event's data null, and neither the view model nor the element tree AnalyticsPage returns carries the canary (median stay 173, 11 app viewers) while the sample is present; the first event that cleared the floor stays open; the locked loaders return null with zero database access (globalThis.prisma wrapped and recorded); an event of four holds back stay, the first-time split and every arrival bucket; the canary's figures through their floors once open; a grant puts the canary in the tree (positive control); an Event Pass for the first free event is refused before Razorpay is called.",
+      "mutation": "M584 the `!access.org` early return removed from orgAnalytics. M585 analyticsPage computing the selected event's figures whether or not it is open. M586 mayOpenEvent ignoring the first free event. M587 `held` returning every count (no floor).",
+      "observed": "M584: 3 of 9 failing (computes nothing paid; renders the sample …; returns null before its first query). M585: 2 of 9 failing (computes nothing paid; renders the sample …). M586: 2 of 9 failing (keeps the first event … open; refuses the first event … before calling Razorpay). M587: 1 of 9 failing (holds back an event of four). Each reverted by copying the file back; green.",
+      "date": "2026-10-03"
     }
   },
   "grandfathered": [

@@ -77,7 +77,6 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
   const view = await planPageData(org)
   const { status } = await searchParams
   const canBuy = view.paymentsOn && org.mayBuy
-  const passable = view.events.filter((e) => !e.hasPass)
 
   return (
     <>
@@ -101,10 +100,12 @@ export default async function PlanPage({ searchParams }: { searchParams: Promise
           </div>
           {view.analytics ? (
             <p className="text-[0.8125rem] text-muted-foreground">Analytics already covers every event.</p>
+          ) : view.free.reason === "free_window" ? (
+            <p className="text-[0.8125rem] text-muted-foreground">Every event is open while Analytics is free.</p>
           ) : (
             <EventPassBuy
               enabled={canBuy}
-              events={passable.map((e) => ({ id: e.id, label: `${e.title} · ${day(e.startsAt)}` }))}
+              events={view.events.map((e) => ({ id: e.id, label: `${e.title} · ${day(e.startsAt)}` }))}
             />
           )}
         </PlanCard>
@@ -163,9 +164,17 @@ function StatusPanel({ view, pending }: { view: PlanPageData; pending: boolean }
   } else if (pending) {
     headline = "Payment sent"
     detail = "Analytics switches on as soon as Razorpay confirms the payment, usually within a minute. Refresh to check."
+  } else if (view.free.reason === "free_window" && view.free.until) {
+    headline = `Free · Analytics open until ${day(view.free.until)}`
+    detail = `Your first event that cleared the privacy floor${view.free.firstEventTitle ? `, ${view.free.firstEventTitle},` : ""} opened every Analytics view for 30 days. That event stays open for good.`
+  } else if (view.free.reason === "free_window") {
+    headline = "Free · Analytics open for now"
+    detail = "Every Analytics view is open until 30 days after your first event with at least 5 people checked in."
   } else {
     headline = "Free"
-    detail = "Every event you run, and the numbers you see for each one, cost nothing."
+    detail = view.free.firstEventTitle
+      ? `Every event you run, and its own numbers, cost nothing. ${view.free.firstEventTitle}'s Analytics stay open for good.`
+      : "Every event you run, and its own numbers, cost nothing."
   }
 
   const mayCancel = view.org.mayBuy && sub && !sub.cancelAtCycleEnd && view.paymentsOn

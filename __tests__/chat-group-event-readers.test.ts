@@ -62,6 +62,7 @@ const READERS: Record<string, string> = {
   // Not rooms: an Event Pass names its event (step 16). These read that column.
   "lib/entitlements.ts#eventPassesFor": "an Event Pass's event; the CHECK makes it non-null on every pass, and a null is dropped, never matched",
   "lib/razorpay-webhook.ts#applyOrderPaid": "an Event Pass order's event; an order without one is refused as unknown_ref before any use",
+  "app/dashboard/analytics/page.tsx#AnalyticsPage": "the `?event=` search param (an event id the loader checks belongs to the org), not a room's event",
 }
 
 interface Read {

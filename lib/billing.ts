@@ -2,7 +2,8 @@ import type { org_role, user_role } from "@prisma/client"
 
 import { BILLING_PLANS, isBillingPlanKey, type BillingPlanKey } from "./billing-plans"
 import { db } from "./db"
-import { liveEntitlement, eventPassesFor, type LiveEntitlement } from "./entitlements"
+import { analyticsAccess, mayOpenEvent, type AccessReason } from "./analytics-access"
+import { liveEntitlement, type LiveEntitlement } from "./entitlements"
 import { realEventsWhere } from "./event-kind"
 import { logger } from "./logger"
 import { activeMembership, HOME_ORG_ORDER } from "./org-membership"
@@ -87,9 +88,12 @@ export interface PaymentLine {
 export interface PlanPageData {
   org: BillingOrg
   paymentsOn: boolean
+  /** Whether the paywall has started, and the first event that cleared the floor (free for good). */
+  free: { reason: AccessReason; until: Date | null; firstEventTitle: string | null }
   analytics: LiveEntitlement | null
   subscription: SubscriptionState | null
-  events: { id: string; title: string; startsAt: Date; hasPass: boolean }[]
+  /** Events whose pass features are still locked: the ones an Event Pass would open. */
+  events: { id: string; title: string; startsAt: Date }[]
   payments: PaymentLine[]
 }
 
@@ -97,7 +101,8 @@ export interface PlanPageData {
 export const OPEN_SUBSCRIPTION_STATUSES = ["authenticated", "active", "pending", "halted"]
 
 export async function planPageData(org: BillingOrg, now: Date = new Date()): Promise<PlanPageData> {
-  const [analytics, subscriptionRow, events, paid] = await Promise.all([
+  const [access, analytics, subscriptionRow, events, paid] = await Promise.all([
+    analyticsAccess(org.orgId, now),
     liveEntitlement({ kind: "org", id: org.orgId }, "analytics", now),
     db.billing_checkouts.findFirst({
       where: { org_id: org.orgId, kind: "subscription", status: { in: OPEN_SUBSCRIPTION_STATUSES } },
@@ -121,11 +126,12 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
       select: { received_at: true, payload: true, checkout: { select: { plan_key: true } } },
     }),
   ])
-  const passes = await eventPassesFor(org.orgId, events.map((e) => e.id), now)
+  const firstFree = access.firstFreeEventId ? events.find((e) => e.id === access.firstFreeEventId) : undefined
 
   return {
     org,
     paymentsOn: paymentsOn(),
+    free: { reason: access.reason, until: access.freeUntil, firstEventTitle: firstFree?.title ?? null },
     analytics,
     subscription:
       subscriptionRow && isBillingPlanKey(subscriptionRow.plan_key)
@@ -137,7 +143,9 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
             cancelAtCycleEnd: subscriptionRow.cancel_at_cycle_end,
           }
         : null,
-    events: events.map((e) => ({ id: e.id, title: e.title, startsAt: e.start_time, hasPass: passes.has(e.id) })),
+    events: events
+      .filter((e) => !mayOpenEvent(access, e.id))
+      .map((e) => ({ id: e.id, title: e.title, startsAt: e.start_time })),
     payments: paid.map((p) => paymentLine(p.received_at, p.payload, p.checkout?.plan_key ?? null)),
   }
 }

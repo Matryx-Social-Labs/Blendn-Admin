@@ -7,7 +7,8 @@ import { getAuth } from "@/lib/auth"
 import { billingOrgFor, OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { BILLING_PLANS, chargeMinor } from "@/lib/billing-plans"
 import { db } from "@/lib/db"
-import { endGrant, grantEntitlement, hasEntitlement, liveEntitlement } from "@/lib/entitlements"
+import { analyticsAccess, mayOpenEvent } from "@/lib/analytics-access"
+import { endGrant, grantEntitlement, liveEntitlement } from "@/lib/entitlements"
 import { realEventsWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import {
@@ -132,12 +133,17 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
     select: { id: true },
   })
   if (!event) throw new Refusal("That event isn't one of your organisation's.")
-  if (await hasEntitlement({ kind: "org", id: org.orgId }, "analytics")) {
-    throw new Refusal("Analytics already covers every event your organisation runs.")
+  // Nothing to sell when it is already open: Analytics, the free window, the
+  // first event that cleared the floor, or a pass already bought.
+  const access = await analyticsAccess(org.orgId)
+  if (access.org) {
+    throw new Refusal(
+      access.reason === "free_window"
+        ? "Every event's analytics are free for now, so there's nothing to buy yet."
+        : "Analytics already covers every event your organisation runs."
+    )
   }
-  if (await hasEntitlement({ kind: "org", id: org.orgId }, "event_pass", { eventId })) {
-    throw new Refusal("That event already has an Event Pass.")
-  }
+  if (mayOpenEvent(access, eventId)) throw new Refusal("That event's analytics are already open to you.")
 
   const plan = BILLING_PLANS.event_pass
   try {

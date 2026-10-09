@@ -2,6 +2,7 @@ import {
   IconBuilding,
   IconBuildingStore,
   IconCategory,
+  IconChartBar,
   IconCreditCard,
   IconDashboard,
   IconFileSpreadsheet,
@@ -130,6 +131,15 @@ export const dashboardNav: DashboardNavItem[] = [
       pathname === "/dashboard/events" ||
       pathname === "/dashboard/events/new" ||
       (pathname.startsWith("/dashboard/events/") && !pathname.endsWith("/messaging")),
+  },
+  {
+    // The kit's third top item. Paid views only (step 16): every figure an
+    // organiser already had stays on Overview, Attendees and the event page.
+    title: "Analytics",
+    description: "Which nights worked, and whether first-timers came back.",
+    url: "/dashboard/analytics",
+    icon: IconChartBar,
+    allowedRoles: ["organizer"],
   },
   {
     title: "Attendees",
