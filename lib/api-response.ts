@@ -63,6 +63,16 @@ export const ErrorCode = {
   EVENT_LIVE_HERE: "EVENT_LIVE_HERE",
   /** "Stay" is Blendn+ once `PLUS_GATING` is on. */
   PLUS_REQUIRED: "PLUS_REQUIRED",
+  /**
+   * Go Live at a venue nobody has drawn an area for. Not `OUT_OF_RANGE`: no
+   * position fixes it, so the app must not offer directions (step 5).
+   */
+  NO_CHECK_IN_AREA: "NO_CHECK_IN_AREA",
+  /**
+   * Go Live with a fix too vague to place anybody (`MAX_GPS_ACCURACY_METERS`).
+   * The remedy is a better fix where you stand, not walking anywhere.
+   */
+  GPS_TOO_VAGUE: "GPS_TOO_VAGUE",
 } as const
 
 /**

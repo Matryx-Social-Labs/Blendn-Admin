@@ -45,7 +45,8 @@ interface RouteParams {
  *   409  `EVENT_LIVE_HERE {eventId}` — a real event has the venue: on now or
  *        starting within the hour (`venueTakeoverWhere`). Before the fence, so
  *        somebody at the door is sent to the event, not told they are outside
- *   400  a fix too vague, no check-in area at this venue, or outside it
+ *   400  `GPS_TOO_VAGUE` a fix too vague; `NO_CHECK_IN_AREA` no area at this
+ *        venue; `OUT_OF_RANGE` outside it
  *
  * Going live again while live extends the window, never shortens it. Going
  * live somewhere else — or checking in to an event — ends this one as a
@@ -124,7 +125,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const gpsAccuracy = input.deviceInfo?.gpsAccuracy
-    const vague = vagueFixRefusal(gpsAccuracy)
+    // Split from OUT_OF_RANGE (step 5): a vague fix and a venue with no area are not fixed by walking.
+    const vague = vagueFixRefusal(gpsAccuracy, ErrorCode.GPS_TOO_VAGUE)
     if (vague) return vague
 
     /*
@@ -151,6 +153,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       userId,
       record: existing && existingOccurrence ? { eventId: existing.id, occurrenceId: existingOccurrence.id } : null,
       noFenceMessage: "This place has no check-in area yet, so you can't go live here.",
+      noFenceCode: ErrorCode.NO_CHECK_IN_AREA,
       // Never the distance: a venue's area is nobody's to map by asking (D-x6).
       outsideMessage: `You're not at ${venue.name} yet.`,
     })

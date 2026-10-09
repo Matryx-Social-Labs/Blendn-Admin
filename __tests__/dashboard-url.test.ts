@@ -25,6 +25,19 @@ describe("dashboardUrl", () => {
     expect(dashboardUrl()).toBe("http://localhost:3100")
   })
 
+  it("forgives a scheme or a trailing slash pasted into DASHBOARD_HOST", () => {
+    process.env.DASHBOARD_HOST = "https://staging-dashboard.blendn.app/"
+    expect(dashboardUrl()).toBe("https://staging-dashboard.blendn.app")
+    process.env.DASHBOARD_HOST = "http://localhost:3100"
+    expect(dashboardUrl()).toBe("http://localhost:3100")
+  })
+
+  it("is the local default with neither variable set", () => {
+    delete process.env.DASHBOARD_HOST
+    delete process.env.NEXTAUTH_URL
+    expect(dashboardUrl()).toBe("http://localhost:3000")
+  })
+
   it("falls back to NEXTAUTH_URL when there is no split", () => {
     process.env.DASHBOARD_HOST = " "
     process.env.NEXTAUTH_URL = "http://localhost:3107/"
