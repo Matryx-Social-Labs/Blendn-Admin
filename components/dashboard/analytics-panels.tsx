@@ -237,7 +237,7 @@ export function EventPassPanels({ data }: { data: EventAnalytics }) {
       </div>
       {stay && stay.softPct !== null ? (
         <p className="text-[0.75rem] text-faint-foreground">
-          {stay.softPct}% of stays ended when their phone went quiet rather than at a check-out, so those are estimates.
+          {`${stay.softPct}% of stays ended when their phone went quiet rather than at a check-out, so those are estimates.`}
         </p>
       ) : null}
       <ArrivalBars arrivals={data.arrivals} />
