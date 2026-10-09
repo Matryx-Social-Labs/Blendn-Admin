@@ -66,7 +66,7 @@ const VenueListItemSchema = z
     floors: z.number().int().min(1).max(200).nullable()
       .describe(
         "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
-          "`floors × 3.66` m tall over the building data's own height. `null`: use the map's height."
+          "`floors × 3.2` m tall over the building data's own height. `null`: use the map's height."
       ),
     distance: z
       .number()
@@ -175,7 +175,7 @@ const VenueDetailSchema = z
       floors: z.number().int().min(1).max(200).nullable()
         .describe(
           "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
-            "`floors × 3.66` m tall over the building data's own height. `null`: use the map's height."
+            "`floors × 3.2` m tall over the building data's own height. `null`: use the map's height."
         ),
       claimed: z.boolean().describe("False: the app may offer \"Own this place? Claim it\"."),
     }),

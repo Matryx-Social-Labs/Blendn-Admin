@@ -676,8 +676,8 @@ vocabulary, meaning exactly what it means there.
 | `sortBy` | `name` (default) or `distance` |
 
 `floors` is the 3D map's height override for the venue's building, set by its
-owner or an admin on the dashboard (1–200): draw it `floors × 3.66` m tall,
-the OpenMapTiles rule for a building with levels and no height. `null` means
+owner or an admin on the dashboard (1–200): draw it `floors × 3.2` m tall,
+the rule our building tiles are baked with (scripts/map-buildings). `null` means
 the map's own height. The same field is on `GET /venues/:venueId`.
 
 60 a minute per person, then 429 — every row carries a live count, as on the
