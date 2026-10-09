@@ -23,6 +23,25 @@ environment's keys (dry run without `--apply`).
 `payment_link.paid` (sponsor payment links) is step 17's and is not handled
 yet: a delivery of it is recorded and changes nothing.
 
+## Venue Pro (step 17)
+
+A venue owner buys Venue Pro per venue on `/dashboard/plan` (₹2,999 a month or
+₹29,990 a year, before GST; `lib/billing-plans.ts`). The purchase is a
+`billing_checkouts` row naming the venue (`venue_id`); the webhook grants the
+**venue** (`entitlements.subject_kind = 'venue'`, product `venue_pro`), never
+the organisation. One open subscription per venue
+(`billing_checkouts_one_open_subscription_per_venue`); an organisation's own
+Analytics keeps its own index.
+
+- **No charge before four weeks of venue-day data.** Checkout refuses until 28
+  days after the first person went live at the venue (`lib/venue-plan.ts`);
+  the Plan page shows each venue's days of data. Nothing to do by hand.
+- **Founding grant: 3 months per claimed Bengaluru venue.** An admin gives it
+  from the venue's page (Venue Pro panel), with a reason; it is audited on the
+  venue. A grant blocks buying until it ends: subscribe after it.
+- `scripts/razorpay-plans.ts --apply` creates the two Venue Pro plans with the
+  others; run it once per environment after this ships.
+
 ## Razorpay's retries, and when it gives up
 
 - The webhook answers 200 for every delivery whose signature verifies,

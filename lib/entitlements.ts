@@ -114,6 +114,22 @@ export async function liveGrant(
   return row ? { id: row.id, source: row.source, startsAt: row.starts_at, expiresAt: row.expires_at } : null
 }
 
+/** One subject's live grant and longest live paid row, apart (the admin's control on a venue). */
+export async function liveGrantAndPaid(
+  subject: Subject,
+  product: Exclude<entitlement_product, "event_pass">,
+  now: Date = new Date()
+): Promise<{ grant: LiveEntitlement | null; paid: LiveEntitlement | null }> {
+  const rows = await db.entitlements.findMany({
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, ...liveAt(now) },
+    select: { id: true, source: true, starts_at: true, expires_at: true },
+    orderBy: { expires_at: { sort: "desc", nulls: "first" } },
+  })
+  const as = (r: (typeof rows)[number] | undefined) =>
+    r ? { id: r.id, source: r.source, startsAt: r.starts_at, expiresAt: r.expires_at } : null
+  return { grant: as(rows.find((r) => r.source === "grant")), paid: as(rows.find((r) => r.source !== "grant")) }
+}
+
 /** For many organisations at once (the admin's list): the live grant and the longest paid row, apart. */
 export async function liveAnalyticsByOrg(
   orgIds: string[],

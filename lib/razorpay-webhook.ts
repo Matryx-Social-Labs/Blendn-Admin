@@ -207,6 +207,8 @@ interface Checkout {
   provider_plan_id: string | null
   org_id: string
   event_id: string | null
+  /** The venue a Venue Pro subscription is for; null for an organisation's own purchase. */
+  venue_id: string | null
   plan_key: string
   amount_minor: number
   currency: string
@@ -219,7 +221,7 @@ interface Checkout {
 async function lockCheckout(tx: Tx, providerRef: string): Promise<Checkout | null> {
   const rows = await tx.$queryRaw<Checkout[]>`
     SELECT id, kind::text AS kind, provider_ref, provider_plan_id, org_id::text AS org_id, event_id::text AS event_id,
-           plan_key, amount_minor, currency, status, status_at, current_end
+           venue_id::text AS venue_id, plan_key, amount_minor, currency, status, status_at, current_end
       FROM billing_checkouts
      WHERE provider = ${PROVIDER} AND provider_ref = ${providerRef}
        FOR UPDATE`
@@ -255,7 +257,13 @@ async function recordPayment(tx: Tx, c: Checkout, payment: Entity, eventAt: Date
   })
 }
 
-const orgOf = (c: Checkout): Subject => ({ kind: "org", id: c.org_id })
+/**
+ * Who a purchase's entitlement belongs to, and what it is, from our own row:
+ * a venue's Venue Pro when the checkout names a venue, else the
+ * organisation's Analytics or Event Pass. Never from the payload.
+ */
+const subjectOf = (c: Checkout): Subject => (c.venue_id ? { kind: "venue", id: c.venue_id } : { kind: "org", id: c.org_id })
+const subscriptionProduct = (c: Checkout): "analytics" | "venue_pro" => (c.venue_id ? "venue_pro" : "analytics")
 
 async function apply(tx: Tx, d: Delivery): Promise<Outcome> {
   if (d.event.startsWith("subscription.")) return applySubscription(tx, d)
@@ -291,8 +299,8 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
     const endedSince = TERMINAL.includes(c.status) && c.status_at !== null && c.status_at >= eventAt
     if (!endedSince) {
       const granted = await recordPaidEntitlement(tx, {
-        subject: orgOf(c),
-        product: "analytics",
+        subject: subjectOf(c),
+        product: subscriptionProduct(c),
         source: "razorpay",
         externalRef: subId,
         startsAt: at(sub.start_at) ?? at(sub.current_start) ?? eventAt,
@@ -302,7 +310,8 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
         action: "entitlement.paid",
         orgId: c.org_id,
         details: {
-          product: "analytics",
+          product: subscriptionProduct(c),
+          ...(c.venue_id ? { venueId: c.venue_id } : {}),
           plan: c.plan_key,
           source: "razorpay",
           externalRef: subId,
@@ -337,7 +346,14 @@ async function endAccess(tx: Tx, out: Outcome, c: Checkout, ref: string, endAt: 
   out.audit.push({
     action: "entitlement.ended",
     orgId: c.org_id,
-    details: { product: c.kind === "order" ? "event_pass" : "analytics", source: "razorpay", externalRef: ref, reason, expiresAt: ended.expiresAt.toISOString() },
+    details: {
+      product: c.kind === "order" ? "event_pass" : subscriptionProduct(c),
+      ...(c.venue_id ? { venueId: c.venue_id } : {}),
+      source: "razorpay",
+      externalRef: ref,
+      reason,
+      expiresAt: ended.expiresAt.toISOString(),
+    },
   })
 }
 
@@ -375,7 +391,7 @@ async function applyOrderPaid(tx: Tx, d: Delivery): Promise<Outcome> {
     })
   } else {
     await recordPaidEntitlement(tx, {
-      subject: orgOf(c),
+      subject: subjectOf(c),
       product: "event_pass",
       eventId: c.event_id,
       source: "razorpay",
@@ -471,8 +487,8 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
       c.kind === "order" ? null : c.current_end ? new Date(c.current_end.getTime() + RENEWAL_GRACE_MS) : null
     if (c.kind === "order" || expiresAt) {
       await recordPaidEntitlement(tx, {
-        subject: orgOf(c),
-        product: c.kind === "order" ? "event_pass" : "analytics",
+        subject: subjectOf(c),
+        product: c.kind === "order" ? "event_pass" : subscriptionProduct(c),
         eventId: c.kind === "order" ? c.event_id : null,
         source: "razorpay",
         externalRef: c.provider_ref,

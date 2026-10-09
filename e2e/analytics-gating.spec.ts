@@ -283,7 +283,9 @@ for (const [who, role] of [
   ["venueOwner", "venue_owner"],
   ["admin", "app_admin"],
 ] as const) {
-  for (const path of ["/dashboard/plan", "/dashboard/analytics"]) {
+  // A venue owner has a Plan page of their own since step 17 (each venue
+  // Listed or on Venue Pro): checked below, and still sent away from Analytics.
+  for (const path of role === "venue_owner" ? ["/dashboard/analytics"] : ["/dashboard/plan", "/dashboard/analytics"]) {
     // In a browser: these pages stream, so the redirect arrives in a 200
     // body, which only a browser follows.
     test(`${role} is sent away from ${path}`, async ({ browser, baseURL }) => {
@@ -299,6 +301,19 @@ for (const [who, role] of [
     })
   }
 }
+
+test("a venue owner's Plan is the venue's, with none of an organiser's figures (step 17)", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, storageState: await session(baseURL!, ids.venueOwner, "venue_owner") })
+  try {
+    const page = await context.newPage()
+    await page.goto("/dashboard/plan")
+    await expect(page).toHaveURL((url) => url.pathname === "/dashboard/plan")
+    await expect(page.getByRole("heading", { name: "Venue Pro" })).toBeVisible()
+    expectNoCanary(await page.content())
+  } finally {
+    await context.close()
+  }
+})
 
 test("the needles are not in the sample (so absence is about the organisation, not the copy)", () => {
   // Read from the module the page draws, not restated here.

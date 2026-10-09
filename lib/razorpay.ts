@@ -184,6 +184,8 @@ export async function createSubscription(input: {
   planId: string
   totalCount: number
   orgId: string
+  /** The venue a Venue Pro subscription is for. */
+  venueId?: string | null
   now?: Date
 }): Promise<RazorpaySubscription> {
   const now = Math.floor((input.now ?? new Date()).getTime() / 1000)
@@ -196,8 +198,8 @@ export async function createSubscription(input: {
     // recent one rather than opening another).
     expire_by: now + SUBSCRIPTION_EXPIRES_AFTER_S,
     // For a person reading the Razorpay dashboard. The webhook never reads
-    // it: the organisation comes from our own `billing_checkouts` row.
-    notes: { org_id: input.orgId },
+    // it: the organisation and venue come from our own `billing_checkouts` row.
+    notes: { org_id: input.orgId, ...(input.venueId ? { venue_id: input.venueId } : {}) },
   })
 }
 

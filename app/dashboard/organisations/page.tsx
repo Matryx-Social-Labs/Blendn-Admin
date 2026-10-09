@@ -90,7 +90,7 @@ export default async function OrganisationsPage() {
               name={org.display_name}
             />
             <OrgAnalyticsGrantControl
-              orgId={org.id}
+              subjectId={org.id}
               name={org.display_name}
               status={org.status}
               grant={org.analytics.grant ? { expiresAt: org.analytics.grant.expiresAt?.toISOString() ?? null } : null}

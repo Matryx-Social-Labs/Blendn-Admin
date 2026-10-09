@@ -118,6 +118,8 @@ describe("visibleNavFor", () => {
       "Team",
       "Reports",
       "Audit log",
+      // Each venue Listed or on Venue Pro (step 17).
+      "Plan",
     ])
   })
 
