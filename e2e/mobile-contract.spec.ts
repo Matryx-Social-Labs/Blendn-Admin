@@ -47,7 +47,6 @@ const ROUTES = [
   "/api/mobile/work-fields",
   "/api/mobile/venues",
   "/api/mobile/conversations",
-  "/api/mobile/chat/groups",
   "/api/mobile/notifications",
   "/api/mobile/message-requests",
   "/api/mobile/users/blocked",
@@ -173,7 +172,9 @@ test.describe("mobile API contract", () => {
         pin: ["messages[]", "pagination"],
       },
       "/api/mobile/profiles/:userId (own)": { url: `/api/mobile/profiles/${user!.id}`, pin: ["profile"] },
-      // A Go Live is an active check-in too: `kind`, `expiresAt` and `stay` say which (step 4).
+      // The room list, one row down (step 5): `memberCount` is null on a venue day's row; `event.kind`/`venueId` say which.
+      "/api/mobile/chat/groups": { url: "/api/mobile/chat/groups", pin: ["groups[]", "groups[].event"] },
+      // A Go Live is an active check-in too: `kind`, `expiresAt`, `stay` and `venueId` say which (step 4, 5).
       "/api/mobile/checkins/active": { url: "/api/mobile/checkins/active", pin: ["checkIns[]"] },
       // Go Live's venue (PL-C02): `venue` must never grow a `geofence`.
       "/api/mobile/venues/:venueId": { url: `/api/mobile/venues/${live!.venue_id}`, pin: ["venue", "live"] },

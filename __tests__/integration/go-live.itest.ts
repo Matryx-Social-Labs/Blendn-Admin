@@ -169,13 +169,29 @@ describe("POST /venues/:id/live", () => {
     expect((await checkInOf(dayId, me.id)).expires_at!.getTime() - Date.now()).toBeGreaterThan(15 * 60_000)
   })
 
-  it("refuses an unfenced venue, and makes no day for the refusal", async () => {
+  it("refuses an unfenced venue as NO_CHECK_IN_AREA, and makes no day for the refusal (step 5)", async () => {
     const v = await venue({ fence: null })
     const me = await person()
     const { status, json } = await goLive(me.token, v)
     expect(status).toBe(400)
-    expect(json.errorCode).toBe("OUT_OF_RANGE")
+    expect(json.errorCode).toBe("NO_CHECK_IN_AREA")
     expect(await db.events.count({ where: { venue_id: v, kind: "venue_day" } })).toBe(0)
+  })
+
+  it("tells a vague fix, no area and outside apart by code (step 5), and keeps the event door's code", async () => {
+    const v = await venue()
+    const me = await person()
+    const vague = await goLive(me.token, v, { minutes: 20, deviceInfo: { gpsAccuracy: 400 } })
+    expect([vague.status, vague.json.errorCode]).toEqual([400, "GPS_TOO_VAGUE"])
+    const outside = await goLive(me.token, v, { minutes: 20 }, OUTSIDE)
+    expect([outside.status, outside.json.errorCode]).toEqual([400, "OUT_OF_RANGE"])
+    // The event check-in is unchanged: an installed app reads OUT_OF_RANGE there for all three.
+    const eventId = await realEvent(await venue(), { startsInMin: -10 })
+    const res = await routes.checkin.POST(
+      req(`/api/mobile/events/${eventId}/checkin`, me.token, "POST", { ...INSIDE, deviceInfo: { gpsAccuracy: 400 } }),
+      eventParams(eventId)
+    )
+    expect(((await res.json()) as { errorCode?: string }).errorCode).toBe("OUT_OF_RANGE")
   })
 
   it("refuses outside the fence without the distance, makes no day, and records only on a day that exists (PL-I19, D-x6)", async () => {
@@ -473,18 +489,38 @@ describe("by-id attendee routes refuse a venue day's id", () => {
 })
 
 describe("the venue's room is for the people live in it (F6, F7, D-5)", () => {
-  it("is listed as a place's room: event.kind venue_day, named for the place (step 5)", async () => {
-    const v = await venue()
+  it("is listed as a place's room: kind venue_day, its venue, named for the place, no exact count (step 5)", async () => {
+    type Row = { id: string; name: string; memberCount: unknown; event: { id: string; kind: string; title: string; venueId: string | null } }
     const me = await person()
+    // An event's room first: its row keeps an exact count and names no venue.
+    const eventId = await realEvent(await venue(), { startsInMin: -10 })
+    expect((await routes.checkin.POST(req(`/api/mobile/events/${eventId}/checkin`, me.token, "POST", INSIDE), eventParams(eventId))).status).toBe(200)
+    const eventRows = ((await (await routes.groups.GET(req("/api/mobile/chat/groups", me.token))).json()).data.groups as Row[])
+    const eventRow = eventRows.find((g) => g.event.id === eventId)
+    expect(eventRow?.event.kind).toBe("event")
+    expect(typeof eventRow?.memberCount).toBe("number")
+    expect(eventRow?.event.venueId).toBeNull()
+
+    // Then a venue's room (going live switches out of the event).
+    const v = await venue()
     const { json } = await goLive(me.token, v)
-    const res = await routes.groups.GET(req("/api/mobile/chat/groups", me.token))
-    const row = ((await res.json()).data.groups as Array<{ id: string; name: string; event: { kind: string; title: string } }>).find(
-      (g) => g.id === json.data.chatGroupId
-    )
+    const rows = ((await (await routes.groups.GET(req("/api/mobile/chat/groups", me.token))).json()).data.groups as Row[])
+    const row = rows.find((g) => g.id === json.data.chatGroupId)
     const place = await db.venues.findUniqueOrThrow({ where: { id: v }, select: { name: true } })
     expect(row?.event.kind).toBe("venue_day")
+    expect(row?.event.venueId).toBe(v)
     expect(row?.name).toBe(place.name)
     expect(row?.event.title).not.toBe(place.name)
+    // An exact count of a venue's room is the differencing the bucket exists to stop (D-19).
+    expect(typeof row?.memberCount).not.toBe("number")
+
+    // /checkins/active names the venue too, so the app can extend or go again from anywhere.
+    const active = (await (await routes.activeCheckins.GET(req("/api/mobile/checkins/active", me.token))).json()).data.checkIns as Array<{
+      eventId: string
+      kind: string
+      venueId: string | null
+    }>
+    expect(active.find((c) => c.eventId === json.data.venueDayId)).toMatchObject({ kind: "venue_day", venueId: v })
   })
 
   it("closes to you when your window ends, on every door, before any sweep and after", async () => {

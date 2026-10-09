@@ -104,6 +104,7 @@ export async function GET(request: NextRequest) {
               select: {
                 id: true,
                 kind: true,
+                venue_id: true,
                 slug: true,
                 title: true,
                 cover_image_url: true,
@@ -273,12 +274,20 @@ export async function GET(request: NextRequest) {
       }
 
       const lastMessage = lastMessageMap.get(membership.chat_group_id)
+      const venueDay = membership.chat_group.event.kind === "venue_day"
+      // The member's own room's place, never an owner's view of events.
+      const venueId = venueDay ? membership.chat_group.event.venue_id : null
 
       return {
         id: membership.chat_group.id,
         name: membership.chat_group.name,
         type: membership.chat_group.type,
-        memberCount: membership.chat_group._count.members,
+        /*
+         * Never for a venue's room: an exact count that moves as people go live
+         * and expire is the differencing the venue's bucket exists to stop
+         * (D-19, F14) — and it counts members whose windows have ended.
+         */
+        memberCount: venueDay ? null : membership.chat_group._count.members,
         unreadCount,
         /** Whether you silenced this room's pushes, and until when (`lib/room-mute.ts`). */
         mute: roomMuteState(membership.notification_preferences),
@@ -315,6 +324,8 @@ export async function GET(request: NextRequest) {
           id: membership.chat_group.event.id,
           /** `venue_day`: a place's room — name it by the room's `name` (the place); its title is bookkeeping. */
           kind: membership.chat_group.event.kind,
+          /** The place, for a venue day's room: "Go live again" opens it. Null for an event's room. */
+          venueId,
           slug: membership.chat_group.event.slug,
           title: membership.chat_group.event.title,
           coverImageUrl: membership.chat_group.event.cover_image_url,

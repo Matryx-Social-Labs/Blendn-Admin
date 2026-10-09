@@ -93,7 +93,34 @@
     "data": [
       "groups",
       "pagination"
-    ]
+    ],
+    "nested": {
+      "groups[]": [
+        "event",
+        "id",
+        "isCheckedIn",
+        "lastMessage",
+        "lastMessageAt",
+        "memberCount",
+        "membership",
+        "mute",
+        "name",
+        "status",
+        "type",
+        "unreadCount"
+      ],
+      "groups[].event": [
+        "coverImageUrl",
+        "endTime",
+        "id",
+        "kind",
+        "slug",
+        "startTime",
+        "status",
+        "title",
+        "venueId"
+      ]
+    }
   },
   "/api/mobile/notifications": {
     "status": 200,
@@ -146,7 +173,8 @@
         "id",
         "kind",
         "revealed",
-        "stay"
+        "stay",
+        "venueId"
       ]
     }
   },
