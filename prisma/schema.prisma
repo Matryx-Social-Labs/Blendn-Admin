@@ -3911,7 +3911,9 @@ model entitlements {
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
   updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
 
-  event events? @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  /// Restrict: a paid pass is the proof somebody paid for that event. Events
+  /// are soft-deleted (deleted_at); nothing in the product hard-deletes one.
+  event events? @relation(fields: [event_id], references: [id], onDelete: Restrict)
 
   @@unique([source, external_ref])
   @@index([subject_kind, subject_id, product])
@@ -3921,13 +3923,19 @@ model entitlements {
 /// Every webhook delivery a payment provider made, as it arrived.
 ///
 /// `provider_event_id` is the provider's id for the delivery (Razorpay's
-/// `x-razorpay-event-id`). The unique pair is the idempotency guarantee: a
-/// replay hits it and does nothing. Kept, not deleted with an account: these
-/// are the tax record (test plan D-17).
+/// `x-razorpay-event-id`, which is NOT covered by the signature) and
+/// `body_sha256` is the hash of the signed body. Either unique key makes a
+/// replay a no-op, so a signed body re-sent under a new event id is a
+/// duplicate too.
+///
+/// `payload` is the delivery after `redactDelivery`: ids, amounts, states and
+/// times, never the payer's email or phone. Kept, not deleted with an
+/// account: these are the tax record (test plan D-17).
 model payment_events {
   id                String    @id @default(uuid()) @db.Uuid
   provider          String
   provider_event_id String
+  body_sha256       String    @unique
   type              String
   payload           Json
   received_at       DateTime  @default(now()) @db.Timestamptz(6)
@@ -3941,8 +3949,7 @@ model payment_events {
   checkout billing_checkouts? @relation(fields: [checkout_id], references: [id], onDelete: SetNull)
 
   @@unique([provider, provider_event_id])
-  @@index([checkout_id])
-  @@index([type, received_at])
+  @@index([checkout_id, received_at])
 }
 
 enum billing_checkout_kind {
@@ -3962,7 +3969,7 @@ model billing_checkouts {
   provider            String                @default("razorpay")
   kind                billing_checkout_kind
   /// `sub_…` or `order_…`.
-  provider_ref        String                @unique
+  provider_ref        String
   /// The Razorpay plan a subscription was created on. Null for an order.
   provider_plan_id    String?
   org_id              String                @db.Uuid
@@ -3985,12 +3992,41 @@ model billing_checkouts {
 
   /// Restrict: a payment record is a tax record, and an organisation that
   /// paid is suspended, never deleted.
-  org            organisations    @relation(fields: [org_id], references: [id], onDelete: Restrict)
+  org            organisations      @relation(fields: [org_id], references: [id], onDelete: Restrict)
   /// SetNull: an event that goes (its creator's account cascades it) keeps
   /// the purchase record and loses only the pointer.
-  event          events?          @relation(fields: [event_id], references: [id], onDelete: SetNull)
+  event          events?            @relation(fields: [event_id], references: [id], onDelete: SetNull)
   payment_events payment_events[]
+  payments       billing_payments[]
 
+  /// Also, in migration SQL only: `billing_checkouts_one_open_subscription_per_org`
+  /// (a partial unique index) and the shape CHECKs.
+  @@unique([provider, provider_ref])
   @@index([org_id, kind, created_at])
   @@index([event_id])
+}
+
+/// One captured payment, with the columns the Plan page and refunds need, so
+/// nothing reads the delivery JSON. `status` moves captured → refunded, or
+/// captured → disputed → dispute_won | dispute_lost.
+model billing_payments {
+  id                  String    @id @default(uuid()) @db.Uuid
+  provider            String    @default("razorpay")
+  provider_payment_id String
+  checkout_id         String    @db.Uuid
+  amount_minor        Int
+  currency            String
+  /// Razorpay Invoices' id, for a subscription charge.
+  invoice_id          String?
+  status              String    @default("captured")
+  /// Razorpay's time for the delivery that recorded the capture.
+  captured_at         DateTime  @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict: a payment is a tax record; its purchase is never deleted.
+  checkout billing_checkouts @relation(fields: [checkout_id], references: [id], onDelete: Restrict)
+
+  @@unique([provider, provider_payment_id])
+  @@index([checkout_id, captured_at])
 }

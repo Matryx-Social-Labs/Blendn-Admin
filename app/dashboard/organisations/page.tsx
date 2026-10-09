@@ -93,11 +93,8 @@ export default async function OrganisationsPage() {
               orgId={org.id}
               name={org.display_name}
               status={org.status}
-              analytics={
-                org.analytics
-                  ? { ...org.analytics, expiresAt: org.analytics.expiresAt?.toISOString() ?? null }
-                  : null
-              }
+              grant={org.analytics.grant ? { expiresAt: org.analytics.grant.expiresAt?.toISOString() ?? null } : null}
+              paid={org.analytics.paid ? { id: org.analytics.paid.id, expiresAt: org.analytics.paid.expiresAt?.toISOString() ?? null } : null}
             />
             <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
           </div>

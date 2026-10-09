@@ -405,8 +405,11 @@ export interface OrgSummary {
   venueCount: number
   domains: { domain: string; verified: boolean }[]
   primaryContact: { name: string | null; email: string } | null
-  /** The live Analytics entitlement, for the admin's grant control. */
-  analytics: { id: string; source: string; expiresAt: Date | null } | null
+  /** The live Analytics grant and paid row, apart, for the admin's control. */
+  analytics: {
+    grant: { id: string; expiresAt: Date | null } | null
+    paid: { id: string; expiresAt: Date | null } | null
+  }
 }
 
 /**
@@ -485,7 +488,8 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
     primaryContact: o.members[0]?.user ?? null,
     analytics: (() => {
       const live = analytics.get(o.id)
-      return live ? { id: live.id, source: live.source, expiresAt: live.expiresAt } : null
+      const pick = (e: { id: string; expiresAt: Date | null } | null | undefined) => (e ? { id: e.id, expiresAt: e.expiresAt } : null)
+      return { grant: pick(live?.grant), paid: pick(live?.paid) }
     })(),
   }))
 }

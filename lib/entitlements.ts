@@ -1,3 +1,5 @@
+import "server-only"
+
 import type {
   entitlement_product,
   entitlement_source,
@@ -18,7 +20,8 @@ import { db } from "./db"
  * Writers:
  *   - `recordPaidEntitlement` / `endPaidEntitlement`: the payment provider's
  *     webhook only (`lib/razorpay-webhook.ts`).
- *   - `grantEntitlement` / `endGrant`: an admin, audited by the caller.
+ *   - `grantEntitlement` / `endGrants` / `revokePaid`: an admin, audited by
+ *     the caller (`lib/billing-actions.ts`).
  */
 
 export interface Subject {
@@ -27,6 +30,7 @@ export interface Subject {
 }
 
 type Tx = Prisma.TransactionClient
+type Client = Tx | typeof db
 
 /** Live at `now`: started, and not yet ended. */
 function liveAt(now: Date) {
@@ -92,43 +96,90 @@ export async function liveEntitlement(
   return { id: best.id, source: best.source, startsAt: best.starts_at, expiresAt: best.expires_at }
 }
 
-/** The same, for many organisations at once (the admin's list). */
+/**
+ * The live grant, if any, whatever else is live. An admin acts on a grant;
+ * a longer paid row beside it must not hide it from them.
+ */
+export async function liveGrant(
+  subject: Subject,
+  product: Exclude<entitlement_product, "event_pass">,
+  now: Date = new Date(),
+  client: Client = db
+): Promise<LiveEntitlement | null> {
+  const row = await client.entitlements.findFirst({
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", ...liveAt(now) },
+    orderBy: { expires_at: { sort: "desc", nulls: "first" } },
+    select: { id: true, source: true, starts_at: true, expires_at: true },
+  })
+  return row ? { id: row.id, source: row.source, startsAt: row.starts_at, expiresAt: row.expires_at } : null
+}
+
+/** For many organisations at once (the admin's list): the live grant and the longest paid row, apart. */
 export async function liveAnalyticsByOrg(
   orgIds: string[],
   now: Date = new Date()
-): Promise<Map<string, LiveEntitlement>> {
+): Promise<Map<string, { grant: LiveEntitlement | null; paid: LiveEntitlement | null }>> {
   if (orgIds.length === 0) return new Map()
   const rows = await db.entitlements.findMany({
     where: { subject_kind: "org", subject_id: { in: orgIds }, product: "analytics", ...liveAt(now) },
     select: { id: true, subject_id: true, source: true, starts_at: true, expires_at: true },
     orderBy: { expires_at: { sort: "desc", nulls: "first" } },
   })
-  const out = new Map<string, LiveEntitlement>()
+  const out = new Map<string, { grant: LiveEntitlement | null; paid: LiveEntitlement | null }>()
   for (const r of rows) {
-    if (out.has(r.subject_id)) continue
-    out.set(r.subject_id, { id: r.id, source: r.source, startsAt: r.starts_at, expiresAt: r.expires_at })
+    const entry = out.get(r.subject_id) ?? { grant: null, paid: null }
+    const live = { id: r.id, source: r.source, startsAt: r.starts_at, expiresAt: r.expires_at }
+    if (r.source === "grant") entry.grant ??= live
+    else entry.paid ??= live
+    out.set(r.subject_id, entry)
   }
   return out
 }
 
-/** Which of these events an organisation holds a live Event Pass for. */
+/** The events an organisation holds a live Event Pass for (all of them, or among `eventIds`). */
 export async function eventPassesFor(
   orgId: string,
-  eventIds: string[],
-  now: Date = new Date()
+  eventIds?: string[],
+  now: Date = new Date(),
+  client: Client = db
 ): Promise<Set<string>> {
-  if (eventIds.length === 0) return new Set()
-  const rows = await db.entitlements.findMany({
+  if (eventIds && eventIds.length === 0) return new Set()
+  const rows = await client.entitlements.findMany({
     where: {
       subject_kind: "org",
       subject_id: orgId,
       product: "event_pass",
-      event_id: { in: eventIds },
+      ...(eventIds ? { event_id: { in: eventIds } } : {}),
       ...liveAt(now),
     },
     select: { event_id: true },
   })
   return new Set(rows.map((r) => r.event_id).filter((id): id is string => id !== null))
+}
+
+/**
+ * Does the organisation already hold a live Event Pass for this event from
+ * another purchase? The webhook asks, inside its transaction, before granting
+ * a second one.
+ */
+export async function passHeldElsewhere(
+  client: Client,
+  orgId: string,
+  eventId: string,
+  exceptRef: string,
+  now: Date
+): Promise<boolean> {
+  const n = await client.entitlements.count({
+    where: {
+      subject_kind: "org",
+      subject_id: orgId,
+      product: "event_pass",
+      event_id: eventId,
+      NOT: { external_ref: exceptRef },
+      ...liveAt(now),
+    },
+  })
+  return n > 0
 }
 
 /* -------------------------------------------------------------------------- */
@@ -209,17 +260,38 @@ export async function endPaidEntitlement(
   return { id: row.id, expiresAt: end }
 }
 
-/** An admin's grant: from now, for `months` calendar months. */
-export async function grantEntitlement(input: {
-  subject: Subject
-  product: Exclude<entitlement_product, "event_pass">
-  months: number
-  now?: Date
-}): Promise<{ id: string; startsAt: Date; expiresAt: Date }> {
+/**
+ * `months` calendar months after `from`, on the same day of the month or the
+ * month's last day: 31 Oct + 6 is 30 Apr, never 1 May (JavaScript's own
+ * setUTCMonth rolls over).
+ */
+export function addMonths(from: Date, months: number): Date {
+  const out = new Date(from)
+  const day = out.getUTCDate()
+  out.setUTCDate(1)
+  out.setUTCMonth(out.getUTCMonth() + months)
+  const last = new Date(Date.UTC(out.getUTCFullYear(), out.getUTCMonth() + 1, 0)).getUTCDate()
+  out.setUTCDate(Math.min(day, last))
+  return out
+}
+
+/**
+ * An admin's grant: from now, for `months` calendar months. The caller holds
+ * the subject's advisory lock in `tx`, so "no live grant" and the insert are
+ * one decision (only one live grant per subject).
+ */
+export async function grantEntitlement(
+  tx: Tx,
+  input: {
+    subject: Subject
+    product: Exclude<entitlement_product, "event_pass">
+    months: number
+    now?: Date
+  }
+): Promise<{ id: string; startsAt: Date; expiresAt: Date }> {
   const startsAt = input.now ?? new Date()
-  const expiresAt = new Date(startsAt)
-  expiresAt.setUTCMonth(expiresAt.getUTCMonth() + input.months)
-  const row = await db.entitlements.create({
+  const expiresAt = addMonths(startsAt, input.months)
+  const row = await tx.entitlements.create({
     data: {
       subject_kind: input.subject.kind,
       subject_id: input.subject.id,
@@ -234,26 +306,47 @@ export async function grantEntitlement(input: {
 }
 
 /**
- * End a live grant now. Only a grant: a paid row is the provider's to end.
- * Null when the id is not a live grant on that subject.
+ * End every live grant on this subject and product, now. Only grants: a paid
+ * row is the provider's to end, or an admin's to revoke (`revokePaid`).
+ * Returns how many ended.
  */
-export async function endGrant(
+export async function endGrants(
+  subject: Subject,
+  product: Exclude<entitlement_product, "event_pass">,
+  now: Date = new Date()
+): Promise<number> {
+  const { count } = await db.entitlements.updateMany({
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", ...liveAt(now) },
+    // A live row has started (liveAt), so `now` is never before starts_at.
+    data: { expires_at: now },
+  })
+  return count
+}
+
+/**
+ * An admin ends a live PAID row now (a refund handled outside Razorpay, a
+ * mistake). Never a grant: that is `endGrants`. Null when the id is not a live
+ * paid row on that subject.
+ */
+export async function revokePaid(
   subject: Subject,
   entitlementId: string,
   now: Date = new Date()
-): Promise<{ id: string; product: entitlement_product; expiresAt: Date } | null> {
-  const row = await db.entitlements.findFirst({
+): Promise<{ id: string; product: entitlement_product; externalRef: string | null } | null> {
+  const { count } = await db.entitlements.updateMany({
     where: {
       id: entitlementId,
       subject_kind: subject.kind,
       subject_id: subject.id,
-      source: "grant",
+      source: { not: "grant" },
       ...liveAt(now),
     },
-    select: { id: true, product: true, starts_at: true },
+    data: { expires_at: now },
   })
-  if (!row) return null
-  const end = now < row.starts_at ? row.starts_at : now
-  await db.entitlements.update({ where: { id: row.id }, data: { expires_at: end } })
-  return { id: row.id, product: row.product, expiresAt: end }
+  if (count === 0) return null
+  const row = await db.entitlements.findUniqueOrThrow({
+    where: { id: entitlementId },
+    select: { id: true, product: true, external_ref: true },
+  })
+  return { id: row.id, product: row.product, externalRef: row.external_ref }
 }

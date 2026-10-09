@@ -7,7 +7,8 @@
  * Run it directly with `npx tsx`, not through `npm run`: npm 11 drops a
  * `--apply` given to `npm run` (memory: npm-run-eats-double-dash-flags).
  *
- * Needs RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in the environment, and holds
+ * Needs RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET in the
+ * environment (as the server does: keys without the secret are "off"), and holds
  * them to the same mode rule as the server: a `rzp_live_` key refuses to run
  * outside RAILWAY_ENVIRONMENT_NAME=production. Prints plan ids and prices,
  * never a key.
@@ -19,14 +20,15 @@
  * plan here.
  */
 import { BILLING_PLANS, chargeMinor, grossRupees, rupees } from "../lib/billing-plans"
-import { createPlan, listPlans, planMatches, razorpayConfig } from "../lib/razorpay"
+import { razorpayKeys } from "../lib/env"
+import { createPlan, listPlans, planMatches } from "../lib/razorpay"
 
 const APPLY = process.argv.includes("--apply") || process.argv.includes("apply")
 
 async function main() {
-  const config = razorpayConfig()
+  const config = razorpayKeys()
   if (!config) {
-    console.error("RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are not set. Nothing to do.")
+    console.error("RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET and RAZORPAY_WEBHOOK_SECRET are not all set. Nothing to do.")
     process.exit(1)
   }
   console.log(`Razorpay ${config.keyId.startsWith("rzp_live_") ? "LIVE" : "test"} mode · ${APPLY ? "applying" : "dry run"}`)

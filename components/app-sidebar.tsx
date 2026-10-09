@@ -66,7 +66,7 @@ export function AppSidebar({
   otherOrgs: number
   badges?: Record<string, number>
   /** The home organisation's plan, organisers only. Null for every other role. */
-  plan?: { analytics: boolean; until: string | null } | null
+  plan?: { analytics: boolean; date: { word: "renews" | "until"; at: string } | null } | null
 }) {
   const groups = groupedNavFor(role)
 
@@ -122,7 +122,7 @@ export function AppSidebar({
         </SidebarContent>
         {plan ? (
           <SidebarFooter className="px-3 pb-4">
-            <PlanCard analytics={plan.analytics} until={plan.until} />
+            <PlanCard analytics={plan.analytics} date={plan.date} />
           </SidebarFooter>
         ) : null}
       </nav>
@@ -132,7 +132,14 @@ export function AppSidebar({
 
 const UNTIL = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
 
-function PlanCard({ analytics, until }: { analytics: boolean; until: string | null }) {
+function PlanCard({
+  analytics,
+  date,
+}: {
+  analytics: boolean
+  /** "renews" for a running subscription (its paid-up date), "until" for a grant or one set to end. */
+  date: { word: "renews" | "until"; at: string } | null
+}) {
   if (analytics) {
     return (
       <Link
@@ -140,7 +147,7 @@ function PlanCard({ analytics, until }: { analytics: boolean; until: string | nu
         className="flex items-center gap-2 rounded-[10px] border border-border px-3 py-2.5 text-[0.78125rem] text-muted-foreground hover:bg-accent/60"
       >
         <ProTag />
-        <span>{until ? `until ${UNTIL.format(new Date(until))}` : "plan active"}</span>
+        <span>{date ? `${date.word} ${UNTIL.format(new Date(date.at))}` : "plan active"}</span>
       </Link>
     )
   }

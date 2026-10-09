@@ -82,7 +82,7 @@ export default async function DashboardLayout({
   const plan =
     user.role === "organizer" && orgs[0]
       ? await planBadgeFor(orgs[0].id)
-          .then((b) => ({ analytics: b.analytics, until: b.until?.toISOString() ?? null }))
+          .then((b) => ({ analytics: b.analytics, date: b.date ? { word: b.date.word, at: b.date.at.toISOString() } : null }))
           .catch((error: unknown) => {
             logger.error("plan badge failed; rendering the nav without the plan card", {
               error: error instanceof Error ? error.message : String(error),

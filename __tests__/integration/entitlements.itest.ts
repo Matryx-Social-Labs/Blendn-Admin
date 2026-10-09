@@ -3,7 +3,7 @@
  * `hasEntitlement` answers, and the shape the migration's CHECKs hold every
  * row to (they exist only in migration SQL; `db push` drops them).
  */
-import { endGrant, grantEntitlement, hasEntitlement, liveEntitlement } from "@/lib/entitlements"
+import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant } from "@/lib/entitlements"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -112,24 +112,32 @@ describe("grants", () => {
   })
 
   it("a six-month grant opens Analytics for six calendar months, and ending it closes it now", async () => {
-    const grant = await grantEntitlement({ subject: { kind: "org", id: orgA }, product: "analytics", months: 6, now })
+    const grant = await db.$transaction((tx) => grantEntitlement(tx, { subject: { kind: "org", id: orgA }, product: "analytics", months: 6, now }))
     expect(grant.expiresAt.toISOString()).toBe("2027-04-03T12:00:00.000Z")
     expect(await hasEntitlement({ kind: "org", id: orgA }, "analytics", {}, now)).toBe(true)
     expect((await liveEntitlement({ kind: "org", id: orgA }, "analytics", now))?.source).toBe("grant")
 
     const later = new Date(now.getTime() + DAY)
-    expect(await endGrant({ kind: "org", id: orgB }, grant.id, later)).toBeNull()
-    const ended = await endGrant({ kind: "org", id: orgA }, grant.id, later)
-    expect(ended?.expiresAt.toISOString()).toBe(later.toISOString())
+    expect(await endGrants({ kind: "org", id: orgB }, "analytics", later)).toBe(0)
+    expect(await endGrants({ kind: "org", id: orgA }, "analytics", later)).toBe(1)
     expect(await hasEntitlement({ kind: "org", id: orgA }, "analytics", {}, later)).toBe(false)
     // The row is kept, ended, not deleted.
     expect(await db.entitlements.count({ where: { id: grant.id } })).toBe(1)
   })
 
-  it("endGrant never ends a paid row", async () => {
-    const paid = await row({ subject_id: orgA, source: "razorpay" })
-    expect(await endGrant({ kind: "org", id: orgA }, paid.id, now)).toBeNull()
+  it("ending ends every live grant at once, and never a paid row", async () => {
+    await row({ subject_id: orgA })
+    await row({ subject_id: orgA })
+    await row({ subject_id: orgA, source: "razorpay" })
+    expect(await endGrants({ kind: "org", id: orgA }, "analytics", now)).toBe(2)
     expect(await hasEntitlement({ kind: "org", id: orgA }, "analytics", {}, now)).toBe(true)
+  })
+
+  it("liveGrant finds a grant a longer paid row would hide from liveEntitlement", async () => {
+    await row({ subject_id: orgA, expires_at: new Date(now.getTime() + DAY) })
+    await row({ subject_id: orgA, source: "razorpay", expires_at: new Date(now.getTime() + 300 * DAY) })
+    expect((await liveEntitlement({ kind: "org", id: orgA }, "analytics", now))?.source).toBe("razorpay")
+    expect((await liveGrant({ kind: "org", id: orgA }, "analytics", now))?.source).toBe("grant")
   })
 })
 
