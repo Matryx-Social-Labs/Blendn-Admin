@@ -5,6 +5,7 @@ import { isUuid } from "@/lib/api-input"
 import { notFoundResponse, serverErrorResponse, successResponse, unauthorizedResponse } from "@/lib/api-response"
 import { personAtTheDoor } from "@/lib/check-in-core"
 import { db } from "@/lib/db"
+import { dashboardUrl } from "@/lib/email"
 import { venueDaysWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -35,6 +36,9 @@ interface RouteParams {
  *   caller's own window, so the app counts down from the server's `expiresAt`
  *   rather than from a tap, and opens the room by id.
  * - `tonight`: the next real event here before the venue's day resets.
+ * - `claim`: the public claim page for an unclaimed venue, on the dashboard
+ *   host (`/claim/venue/[venueId]`), as `GET /events/:id` offers an event's:
+ *   the app opens it as given and hard-codes no environment.
  *
  * The people live here are not on this payload. They are the venue day's
  * roster and grid, which only somebody live here may read (reciprocity,
@@ -130,6 +134,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         venueDayId: mine?.event_id ?? null,
         chatGroupId: room?.id ?? null,
       },
+      claim: claimed ? null : { url: `${dashboardUrl()}/claim/venue/${venue.id}` },
       tonight: tonightRow
         ? {
             id: tonightRow.id,

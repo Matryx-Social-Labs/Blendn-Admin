@@ -751,7 +751,8 @@ for one with no known adult age (as at its door). 60 a minute per person, then
             "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false,
             "venueDayId": "…", "chatGroupId": "…" },
   "tonight": { "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
-               "startTime": "…", "endTime": "…" }
+               "startTime": "…", "endTime": "…" },
+  "claim": { "url": "https://dashboard.blendn.app/claim/venue/…" }
 } }
 ```
 
@@ -762,6 +763,7 @@ for one with no known adult age (as at its door). 60 a minute per person, then
 | `live.liveNow` | `quiet` (fewer than 5, none included), `5-9`, `10-19` or `20+`. **Never a number** (D-19, D-x2): a count that moved from 4 to 5 as you watched would tell you somebody just walked in. Guests only (not the venue's staff), never counting you, read at most once a minute per venue, and slow to fall (it drops a bucket only once one more person would not hold it) |
 | `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
+| `claim` | `{ url }` for an unclaimed venue: the public claim page (`/claim/venue/:venueId`) on the dashboard host, built for the environment the app talks to — open it as given. Null once claimed. As `claim` on `GET /events/:eventId` |
 | `tonight` | The next public event here before the venue's day resets (06:00 local by default), age-filtered for you, or null |
 
 **Not on it:** the check-in area (no payload draws the boundary), and who is
@@ -946,7 +948,9 @@ the venue's reset (`closesAt` is the reset, not a day later).
 ### GET /chat/groups
 A venue's room (a venue day) is listed only while your Go Live there is open;
 once it ends the room leaves the list — its last message and counts are not
-readable from outside a room you can no longer open.
+readable from outside a room you can no longer open. Its row's `event.kind` is
+`venue_day` (an event's room says `event`): name it by the row's `name`, which
+is the place, not by `event.title` ("Venue day · ‹place› · ‹date›", bookkeeping).
 
 Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
 no `check_out_time`, so the room is live for them right now. The app lifts those

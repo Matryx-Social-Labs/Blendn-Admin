@@ -160,6 +160,9 @@ export const ChatGroupSchema = z
       .nullable(),
     event: z.object({
       id: z.string().uuid(),
+      kind: z
+        .enum(["event", "venue_day"])
+        .describe("`venue_day`: a place's room (listed only while your Go Live there is open). Name it by the room's `name`, the place; its `title` is bookkeeping."),
       slug: z.string(),
       title: z.string(),
       coverImageUrl: z.string().nullable(),

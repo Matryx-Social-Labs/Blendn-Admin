@@ -103,6 +103,7 @@ export async function GET(request: NextRequest) {
             event: {
               select: {
                 id: true,
+                kind: true,
                 slug: true,
                 title: true,
                 cover_image_url: true,
@@ -312,6 +313,8 @@ export async function GET(request: NextRequest) {
           : null,
         event: {
           id: membership.chat_group.event.id,
+          /** `venue_day`: a place's room — name it by the room's `name` (the place); its title is bookkeeping. */
+          kind: membership.chat_group.event.kind,
           slug: membership.chat_group.event.slug,
           title: membership.chat_group.event.title,
           coverImageUrl: membership.chat_group.event.cover_image_url,

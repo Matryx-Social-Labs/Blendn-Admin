@@ -146,10 +146,10 @@ registry.registerPath({
 })
 
 const LiveCountBucketSchema = z
-  .enum(["none", "a_few", "5-9", "10-19", "20+"])
+  .enum(["quiet", "5-9", "10-19", "20+"])
   .describe(
-    "How many are live here, never as a number (D-19): a count that moved from 4 to 5 as you watched " +
-      "would tell you somebody just walked in. `a_few` is 1 to 4."
+    "How many guests are live here, never as a number (D-19): a count that moved from 4 to 5 as you watched " +
+      "would tell you somebody just walked in. `quiet` is under 5, none included. Never counts the caller."
   )
 
 const VenueDetailSchema = z
@@ -194,6 +194,13 @@ const VenueDetailSchema = z
       })
       .nullable()
       .describe("The next public event here before the venue's day resets, age-filtered for you."),
+    claim: z
+      .object({ url: z.string().url() })
+      .nullable()
+      .describe(
+        "The public claim page (`/claim/venue/{venueId}`) on the dashboard host, for an unclaimed venue; null once " +
+          "claimed. Open it as given: it is built for the environment the app is talking to."
+      ),
   })
   .openapi("VenueDetail")
 

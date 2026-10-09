@@ -473,6 +473,20 @@ describe("by-id attendee routes refuse a venue day's id", () => {
 })
 
 describe("the venue's room is for the people live in it (F6, F7, D-5)", () => {
+  it("is listed as a place's room: event.kind venue_day, named for the place (step 5)", async () => {
+    const v = await venue()
+    const me = await person()
+    const { json } = await goLive(me.token, v)
+    const res = await routes.groups.GET(req("/api/mobile/chat/groups", me.token))
+    const row = ((await res.json()).data.groups as Array<{ id: string; name: string; event: { kind: string; title: string } }>).find(
+      (g) => g.id === json.data.chatGroupId
+    )
+    const place = await db.venues.findUniqueOrThrow({ where: { id: v }, select: { name: true } })
+    expect(row?.event.kind).toBe("venue_day")
+    expect(row?.name).toBe(place.name)
+    expect(row?.event.title).not.toBe(place.name)
+  })
+
   it("closes to you when your window ends, on every door, before any sweep and after", async () => {
     const v = await venue()
     const me = await person()
@@ -654,6 +668,27 @@ describe("GET /venues/:id (PL-I18, D-19, D-x2)", () => {
     await db.$executeRaw`UPDATE venues SET geofence = NULL WHERE id = ${v}::uuid`
     expect(JSON.parse((await venueDetail(me.token, v)).text).data.live.open).toBe(true)
     expect((await goLive(me.token, v)).status).toBe(200)
+  })
+
+  it("offers the public claim page for an unclaimed venue, on the dashboard host, and none once claimed (step 5)", async () => {
+    const saved = process.env.DASHBOARD_HOST
+    process.env.DASHBOARD_HOST = "staging-dashboard.blendn.app"
+    try {
+      const me = await person()
+      const open = await venue()
+      const claim = JSON.parse((await venueDetail(me.token, open)).text).data.claim
+      expect(claim).toEqual({ url: `https://staging-dashboard.blendn.app/claim/venue/${open}` })
+      // Names the venue and nothing about whoever is looking.
+      expect(claim.url).not.toMatch(/[?#]/)
+
+      const org = await db.organisations.create({ data: { display_name: testId("gl_claimed_org"), kind: "company", status: "verified" } })
+      world.orgs.push(org.id)
+      const claimed = await venue({ ownerOrg: org.id })
+      expect(JSON.parse((await venueDetail(me.token, claimed)).text).data.claim).toBeNull()
+    } finally {
+      if (saved === undefined) delete process.env.DASHBOARD_HOST
+      else process.env.DASHBOARD_HOST = saved
+    }
   })
 
   it("404s an archived venue, and is rate limited", async () => {
