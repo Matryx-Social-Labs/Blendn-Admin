@@ -26,6 +26,8 @@ const config: Config = {
   testPathIgnorePatterns: ["<rootDir>/__tests__/integration/", "<rootDir>/__tests__/support/"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
+    // Next resolves `server-only` itself; plain Node has no such package.
+    "^server-only$": "<rootDir>/__tests__/support/server-only.ts",
   },
   transform: {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: "tsconfig.json" }],

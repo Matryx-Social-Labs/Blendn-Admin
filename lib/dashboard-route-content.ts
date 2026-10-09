@@ -154,6 +154,14 @@ export const routeContent: Record<string, RouteContent> = {
     title: "Audit log",
     description: "Who did what, when. Written automatically and never editable.",
   },
+  "/dashboard/analytics": {
+    title: "Analytics",
+    description: "Which nights worked, and whether the people who came once came back.",
+  },
+  "/dashboard/plan": {
+    title: "Plan",
+    description: "Running events on Blend'n is free. Analytics is for knowing which nights worked, and why.",
+  },
   "/dashboard/settings": {
     title: "Settings",
     description: "Your account, password, and where you are signed in.",

@@ -132,6 +132,12 @@ const STREAMED_OR_UNSEEDED = new Set([
   "/dashboard/sponsor-claims",
   "/dashboard/charges",
   "/dashboard/organisation",
+  // An organisation's own plan and analytics (step 16): there is no other
+  // organisation's row on them to leak, and an admin is sent away from both,
+  // so the positive control below could not see a marker. Who may read whose
+  // figures is held by analytics-gating.itest.ts and billing-actions.itest.ts.
+  "/dashboard/plan",
+  "/dashboard/analytics",
 ])
 
 /**

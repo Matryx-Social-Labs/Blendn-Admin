@@ -2,6 +2,8 @@ import {
   IconBuilding,
   IconBuildingStore,
   IconCategory,
+  IconChartBar,
+  IconCreditCard,
   IconDashboard,
   IconFileSpreadsheet,
   IconFlag,
@@ -129,6 +131,15 @@ export const dashboardNav: DashboardNavItem[] = [
       pathname === "/dashboard/events" ||
       pathname === "/dashboard/events/new" ||
       (pathname.startsWith("/dashboard/events/") && !pathname.endsWith("/messaging")),
+  },
+  {
+    // The kit's third top item. Paid views only (step 16): every figure an
+    // organiser already had stays on Overview, Attendees and the event page.
+    title: "Analytics",
+    description: "Which nights worked, and whether first-timers came back.",
+    url: "/dashboard/analytics",
+    icon: IconChartBar,
+    allowedRoles: ["organizer"],
   },
   {
     title: "Attendees",
@@ -341,6 +352,18 @@ export const dashboardNav: DashboardNavItem[] = [
     icon: IconHistory,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
     group: "record",
+    hostGroup: "organisation",
+  },
+  {
+    // An organiser's plan: Free, an Event Pass, or Analytics (step 16). Every
+    // member sees it; only an owner or admin can change it, which the page and
+    // its actions say and enforce (`lib/billing-actions.ts`). Venue plans are
+    // step 17's, so venue owners do not get this one.
+    title: "Plan",
+    description: "Free, an Event Pass, or Analytics — and what your organisation has paid.",
+    url: "/dashboard/plan",
+    icon: IconCreditCard,
+    allowedRoles: ["organizer"],
     hostGroup: "organisation",
   },
 ]

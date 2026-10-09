@@ -109,6 +109,7 @@ export function PacingChart({
   benchmark,
   windowDays = 21,
   empty,
+  benchmarkHint,
 }: {
   points: PacingPoint[]
   capacity: number | null
@@ -116,6 +117,8 @@ export function PacingChart({
   benchmark?: { title: string; points: PacingPoint[] } | null
   windowDays?: number
   empty?: boolean
+  /** What the grey line is, when it is not "your last event" (Analytics: the median of your last few). */
+  benchmarkHint?: string
 }) {
   // One row per x, both series on it, so the tooltip reads both at a glance.
   const ghost = new Map(benchmark?.points.map((p) => [p.daysOut, p.cumulative]) ?? [])
@@ -128,7 +131,7 @@ export function PacingChart({
   )
   const hint = [
     capacity ? `capacity ${capacity}` : "no capacity set",
-    benchmark ? `grey is your last event, ${benchmark.title}` : null,
+    benchmark ? (benchmarkHint ?? `grey is your last event, ${benchmark.title}`) : null,
   ]
     .filter(Boolean)
     .join(" · ")
