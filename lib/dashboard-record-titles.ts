@@ -2,6 +2,7 @@ import { cache } from "react"
 
 import { getAuth } from "./auth"
 import { db } from "./db"
+import { eventDisplayTitle } from "./event-kind"
 import { activeMembership, actorFor } from "./org-membership"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 
@@ -24,11 +25,13 @@ export const eventTitleFor = cache(async (id: string): Promise<string | null> =>
   if (!session?.user) return null
   const event = await db.events.findFirst({
     where: { id, deleted_at: null },
-    select: { title: true, ...eventPermissionSelect },
+    select: { title: true, venue_name: true, ...eventPermissionSelect },
   })
   if (!event) return null
   const actor = await actorFor(session.user)
-  return eventPermissions(actor, event).canOperate ? event.title : null
+  return eventPermissions(actor, event).canOperate
+    ? eventDisplayTitle({ kind: event.kind, title: event.title, venue_name: event.venue_name })
+    : null
 })
 
 /**
