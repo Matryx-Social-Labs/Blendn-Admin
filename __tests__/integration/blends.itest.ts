@@ -217,9 +217,10 @@ describe("crew ↔ person: the person opts in, the crew has room for one more, d
     expect(blend).toEqual({ a_crew_id: w.C.crewId, b_crew_id: null, b_user_id: w.solo.id })
     const roster = await api.roster(w.solo, back.body.data.blend.chatGroupId)
     expect(roster.body.data.participants).toHaveLength(3)
-    // The crew's line names the person by tonight's pseudonym, never their name.
-    const line = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: w.C.roomId, type: "system" }, select: { content: true } })
-    expect(line.content).toBe(`liked ${w.soloPseudonym} for the crew`)
+    // No line in the crew chat for a like of a person: a line only for a like
+    // that stood would tell the crew what the answer hides (step 8 follow-up).
+    expect(await db.chat_messages.count({ where: { chat_group_id: w.C.roomId, type: "system" } })).toBe(0)
+    void w.soloPseudonym
   })
 
   it("refuses each guardrail: a crew without room for one more, a crew of seven, dating one-sided, a person who did not opt in", async () => {
@@ -258,6 +259,8 @@ describe("crew ↔ person: the person opts in, the crew has room for one more, d
     await db.event_check_ins.updateMany({ where: { event_id: shy.eventId, user_id: shy.solo.id }, data: { status: "checked_out", check_out_time: new Date() } })
     expect(await api.likePerson(shy.crew[0], shy.eventId, roomHandle(shy.eventId, shy.solo.id), shy.C.crewId)).toEqual(nothingTold)
     expect(await db.crew_likes.count({ where: { occurrence_id: { in: [closed.occurrenceId, big.occurrenceId, shy.occurrenceId] } } })).toBe(0)
+    // And the liker's crew chat is as silent after a refused like as after one that stood.
+    expect(await db.chat_messages.count({ where: { chat_group_id: { in: [shy.C.roomId, dating.C.roomId] }, type: "system" } })).toBe(0)
   })
 })
 
@@ -569,6 +572,13 @@ describe("a crew that ends, or is hidden, takes its Blends with it", () => {
     expect((await api.likeCrew(w.b[0], w.eventId, w.A.crewId, w.B.crewId)).status).toBe(404)
     expect((await api.detail(w.a[0], w.A.crewId)).status).toBe(200)
     await db.audit_logs.deleteMany({ where: { user_id: admin.id } })
+  })
+
+  it("a side hidden without its close landing still ends the Blend for everyone (the door reads hidden_at)", async () => {
+    const w = await blendedPair("hid2")
+    await db.crews.update({ where: { id: w.B.crewId }, data: { hidden_at: new Date() } })
+    for (const p of [w.a[0], w.b[0]]) expect(await canJoinChat(p.id, w.roomId)).toBe(false)
+    expect((await api.send(w.a[0], w.roomId)).status).toBe(403)
   })
 
   it("a member who leaves their crew leaves its Blends: out live, refused after", async () => {

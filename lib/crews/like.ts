@@ -32,8 +32,10 @@ import {
  * - **Both sides here now.** A crew is here when two or more of its members
  *   are checked in at the occurrence (`presentMembersAt`); a person when they
  *   are. A like is a thing that happens in a room.
- * - **Any present member likes on the crew's behalf**, and their crew chat
- *   says so ("liked Crew Nebula for the crew") — transparency instead of a
+ * - **Any present member likes on the crew's behalf**, and for a like of a
+ *   crew their crew chat says so ("liked Crew Nebula for the crew") — never
+ *   for a like of a person, where the line would be the oracle the answer
+ *   avoids (C7) — transparency instead of a
  *   vote. Nobody else is told, and nobody learns who liked first: the only
  *   outcome anybody outside the crew sees is a Blend.
  * - **Crew ↔ person has guardrails** (`crewMayMeetSolo`): the person opted in
@@ -197,12 +199,13 @@ export async function likePersonAsCrew(
   if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return { ...NOTHING_TOLD }
   if (blocksExclude(mine.members, [personId], await blocksBetween(mine.members, [personId]))) return { ...NOTHING_TOLD }
 
-  const pseudonym = (
-    await db.chat_group_members.findFirst({
-      where: { chat_group: { event_id: eventId }, user_id: personId },
-      select: { anonymous_name: true },
-    })
-  )?.anonymous_name
+  /*
+   * No line in the crew chat for a like of a person. A line only for a like
+   * that stood would tell the crew everything the answer hides — that the
+   * person is here, opted in, and kept apart from none of them (the step 8
+   * review). A crew's like of a crew keeps its line: every refusal there is
+   * said out loud anyway.
+   */
   const outcome = await like(
     here,
     likerId,
@@ -210,8 +213,8 @@ export async function likePersonAsCrew(
     { userId: personId },
     { a_crew_id: mine.id, b_user_id: personId },
     { a: mine.members, b: [personId] },
-    mine.room,
-    pseudonym ?? "someone here"
+    null,
+    null
   )
   return outcome ?? { ...NOTHING_TOLD }
 }
@@ -247,6 +250,13 @@ async function like(
   const result = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`blend:${here.occurrenceId}:${pairKey}`}, 0))`
     if ((await blocksBetween(sides.a, sides.b, tx)).size > 0) return null
+    // Both crews still standing and not hidden — read under a share lock, so a
+    // dissolve or a moderator's hide in flight finishes first and this sees it
+    // (their close pass would otherwise miss the Blend this is about to make).
+    const crewIds = [pair.a_crew_id, ...(pair.b_crew_id ? [pair.b_crew_id] : [])]
+    const standing = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id::text FROM crews WHERE id = ANY(${crewIds}::uuid[]) AND dissolved_at IS NULL AND hidden_at IS NULL FOR SHARE`
+    if (standing.length !== crewIds.length) return null
 
     const { count: fresh } = await tx.crew_likes.createMany({
       data: [
@@ -283,7 +293,6 @@ async function like(
       select: { id: true },
     })
     // The snapshot (C3): each side's active members checked in here now, and the person.
-    const crewIds = [pair.a_crew_id, ...(pair.b_crew_id ? [pair.b_crew_id] : [])]
     const [present, crews] = await Promise.all([
       tx.crew_members.findMany({
         where: {
