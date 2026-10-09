@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
           select: {
             id: true,
             kind: true,
+            venue_id: true,
             title: true,
             slug: true,
             cover_image_url: true,
@@ -71,6 +72,8 @@ export async function GET(request: NextRequest) {
         checkInTime: c.check_in_time,
         /** `venue_day`: a Go Live at a venue — label it as the place, count down to `expiresAt`. */
         kind: c.event.kind,
+        /** The place a Go Live is at (`venue_day` only), so the app can extend or go again from anywhere. */
+        venueId: c.event.kind === "venue_day" ? c.event.venue_id : null,
         /** When a Go Live ends. Null at an event, which ends with the event or a checkout. */
         expiresAt: c.expires_at,
         stay: c.stay,
