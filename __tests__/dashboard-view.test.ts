@@ -107,6 +107,7 @@ describe("visibleNavFor", () => {
       "Team",
       "Reports",
       "Audit log",
+      "Plan",
     ])
     expect(titles("venue_owner")).toEqual([
       "Overview",

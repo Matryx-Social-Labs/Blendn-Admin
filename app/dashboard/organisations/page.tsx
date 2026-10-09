@@ -8,6 +8,7 @@ import { formatDay } from "@/lib/dashboard-format"
 
 import { OrgStatusControl } from "./status-control"
 import { OrgSponsorControl } from "./sponsor-control"
+import { OrgAnalyticsGrantControl } from "./analytics-grant-control"
 
 import { routeMetadata } from "@/lib/dashboard-route-content"
 
@@ -79,7 +80,7 @@ export default async function OrganisationsPage() {
             </p>
           </div>
 
-          {/* The two controls, small and to the right. Suspending keeps every
+          {/* The controls, small and to the right. Suspending keeps every
               event, check-in and message; the control says so when opened. */}
           <div className="flex shrink-0 flex-wrap items-start gap-2 @3xl/main:flex-col @3xl/main:items-end">
             <OrgSponsorControl
@@ -87,6 +88,13 @@ export default async function OrganisationsPage() {
               maySponsor={org.may_sponsor}
               status={org.status}
               name={org.display_name}
+            />
+            <OrgAnalyticsGrantControl
+              orgId={org.id}
+              name={org.display_name}
+              status={org.status}
+              grant={org.analytics.grant ? { expiresAt: org.analytics.grant.expiresAt?.toISOString() ?? null } : null}
+              paid={org.analytics.paid ? { id: org.analytics.paid.id, expiresAt: org.analytics.paid.expiresAt?.toISOString() ?? null } : null}
             />
             <OrgStatusControl orgId={org.id} status={org.status} name={org.display_name} />
           </div>

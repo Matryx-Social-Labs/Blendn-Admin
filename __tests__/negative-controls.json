@@ -1627,6 +1627,66 @@
       "mutation": "M640 the pair lock removed. M641 the like-back read in the wrong direction (only `from`). M642 the Blend door without presence (crew membership only). M643 the block route without closeBlendsBetween. M644 the reveal ignoring keep_me_anonymous. M645 no blend arm in the chat sweeper. M646 crew ↔ person without the dating rule. M647 blocks checked on the liker only. M648 the Blend's names from its own (empty) rows. M649 the crew pair unordered. Review round: M656 evictBlockedFromBlends taking nobody's sockets out. M659 a Blend's rows for every member of both crews (no snapshot). M660 the reveal taking crewmates not here now. M661 the reveal ignoring keep_me_anonymous. M662 the Blend's people listing somebody kept apart from the viewer. M663 listing show-online-off members. M664 a person-level refusal answered 404. M665 a closed Blend handed back on a like. M667 the purge deleting likes that made a Blend. M668 the sweeper archiving the room without closing the Blend. M669 dissolving without closing Blends. M670 a crew leaver keeping a socket in its Blends. M671 the block route reading a Blend handle as nobody. M672 the block route opening a Blend handle for anybody. M673 the opt-in kept with no end. M674 intentsAt reading a lapsed opt-in (crews.itest.ts). M675 crew likes allowed with crews off. M676 hiding a crew without closing its Blends. M677 the erasure keeping Blend reveals. Follow-up (2026-10-09, review of the merged code): M800 the person like posting its crew-chat line again. M807 the Blend door ignoring a hidden side.",
       "observed": "M640: 1 of 14 failing (a race produced no Blend). M641: 1 of 14. M642: 1 of 14 (the absent member admitted). M643: 1 of 14. M644: 1 of 14 (the anonymous member revealed). M645: 1 of 14 (the room stayed active). M646: 1 of 14. M647: 1 of 14. M648: 1 of 14 (\"Attendee\" for every sender). M649: 2 of 14 (blends_pair_order refused half the pairs: 500). Reverted green (2026-10-02, blendn_step_8). Review round (2026-10-02, blendn_step_8b), each 1 failing of 26 (its own case) and reverted green: M656 (b2's socket stayed), M659 (the late arrival had a row), M660 and M661 (the reveal case), M662 and M663 (the C4 case), M664 (the dating refusal 404), M665 and M668 (the clock case), M667 (the Blend's likes purged — a first version of this mutation broke the SQL and was redone as a valid WHERE false), M669 (the dissolved side's Blend open), M670 (the leaver still in the room), M671 and M672 (the handle case), M673 (the opt-in a year long), M674 (crews.itest.ts: the lapsed opt-in showed crews), M675 (the like stored with crews off), M676 (the hidden crew's Blend open), M677 (the reveal survived the erasure). Follow-up (2026-10-09, review of the merged code): M800: 1 of 27 failing (the line written). M807: 1 of 27 (the hidden side's Blend admitted). Reverted green.",
       "date": "2026-10-02"
+    },
+    "entitlements-boundary.test.ts": {
+      "guards": "Step 16 / TQ-A13 MN-G01, hardened in review (G13): lib/entitlements.ts is the only module that touches `entitlements` by any of three shapes — `<client>.entitlements` (aliases included), raw SQL naming it, or a brace-matched destructuring `{ entitlements } = <client>`; recordPaidEntitlement and endPaidEntitlement are named (any mention: call, alias, import) only in lib/razorpay-webhook.ts; grantEntitlement, endGrants and revokePaid only in lib/billing-actions.ts. In-file fixtures hold each bypass shape and two non-matches.",
+      "mutation": "M572 `export const leak = () => db.entitlements.findMany()` appended to lib/billing.ts. M573 a server action in lib/billing-actions.ts calling recordPaidEntitlement. M811 touchesTable reduced to the accessor regex alone.",
+      "observed": "M572: 'only lib/entitlements.ts touches the table' failing. M573: 'a paid entitlement is written by the webhook and nothing else' failing (2026-10-03). M811: 4 of 13 failing — the raw-SQL read and write, destructured and nested-destructuring fixtures. Each reverted by copying the file back; green.",
+      "date": "2026-10-09"
+    },
+    "entitlements.itest.ts": {
+      "guards": "Step 16 / TQ-A13 MN-U01 on a migrate-deploy database: hasEntitlement inside / at the end of / before the window, expired, not yet started, NULL end, another subject / kind / product, an Event Pass scoped to its one event; a six-month grant (under the caller's transaction) and endGrants ending every live grant and never a paid row; liveGrant finding a grant a longer paid row hides from liveEntitlement (G8); the five CHECKs and one row per (source, external_ref).",
+      "mutation": "M574 the `expires_at` arm removed from liveAt. M812 endGrants ending only the first live grant.",
+      "observed": "M574: 3 of 13 failing (2026-10-03). M812: 1 failing — 'ending ends every live grant at once, and never a paid row'. Reverted green.",
+      "date": "2026-10-09"
+    },
+    "razorpay-webhook.itest.ts": {
+      "guards": "Step 16 / TQ-A15 + TQ-X08 after review (db H1, sec H1–H3/M2–M7, ts H1/H2, G4, G5, G15), through the real route: four spoof shapes and no secret → 401 and no row; non-JSON, no event, no time → 400; over 256 KB → 413; charged → the org's row to current_end + 259200000 ms, a billing_payments row, a redacted delivery (no email or phone) with its body hash, and one audit row in the same transaction; a replay by event id or by body is a duplicate; the same delivery three at once (charged, halted) and order.paid twice at once → one row, one change, no 500; a failure while applying rolls the claim back and the retry applies it; amount/currency/plan held to the checkout (refusals replay as refusals); an old price still renews; unknown refs refused; halt ends it, a newer charge restores it, a late older halt is a no-op, a charge after its activation still applies, same-second order by the rule, cycle-end cancel and completed end at ended_at, a charge older than the cancellation grants nothing, charged ‖ cancelled leaves no access after the end (8 races); order.paid wrong amount / currency / status / amount_paid refused, a second pass flagged entitlement.duplicate_pass, payment.failed never un-pays; full refunds end a pass and a subscription (cancelled at Razorpay), partial ones change nothing; a dispute ends and a win restores; failed signatures alone are rate-limited.",
+      "mutation": "M813 skipDuplicates removed from the claim. M814 the charge held to 235900 instead of the checkout's amount. M815 the 'stale' refusal reinstated. M816 a halt ignoring later charges. M817 the delivery stored unredacted. M818 no duplicate-pass check. M819 partial refunds ending access. M820 the rate limit counting every request. M821 the grace set to two days.",
+      "observed": "M813: 6+ failing (the three concurrency cases, replay, two refusal replays). M814: 1 (an old subscriber's renewal). M815: 2 (charge after activation; charge older than the cancellation). M816: 1 (a late, older halt). M817: 1 (the redaction assertions). M818: 1 (a second paid pass). M819: 1 (the partial refund). M820: 6+ (the flood case and every case after the limit). M821: 6 (every literal 259200000 assertion). Each reverted by copying the file back; 42 green.",
+      "date": "2026-10-09"
+    },
+    "billing-actions.itest.ts": {
+      "guards": "Step 16 / TQ-DO08 + TQ-X08 after review (G7, G8, G10): an owner and an org admin start a subscription (our row, expire_by, no entitlement); a second start resumes the unpaid one, sequentially and two at once; switching period expires the unpaid one; a running one refuses another; the partial unique index holds past the lock; a Razorpay 500 saves nothing; five starts a minute then a refusal; an Event Pass at 58,900 paise, reused while unpaid, refused when Analytics covers or a pass exists, and for another org's event or a malformed id before Razorpay; staff, a venue owner who owns an org, a suspended org's owner and a platform admin refused on every action with no call and no row; no keys, a live key, keys without the webhook secret refused; cancel at cycle end; grants one at a time (also two at once), ended all at once, never hidden behind a paid row, a paid row revoked and a grant not through that door, non-admins and bad inputs refused.",
+      "mutation": "M822 no advisory lock on the subscription start. M823 no resume of a fresh unpaid subscription. M824 the grant check skipped. M825 the checkout rate limit lifted. M826 venue owners allowed by mayManageBilling and billingOrgFor. M827 the 'Analytics already covers' pass refusal dropped.",
+      "observed": "M822: 1 failing (two starts at once). M823: 2 (resume; two at once). M824: 3 (one at a time; two at once; hidden behind a paid row). M825: 1 (five a minute). M826: 1 (the venue owner case). M827: 1 (Analytics already covers). Each reverted by copying the file back; 39 green with entitlements.itest.ts.",
+      "date": "2026-10-09"
+    },
+    "billing-plans.test.ts": {
+      "guards": "Step 16 (G11, G16): the GST-inclusive prices and their split as literals; `listRupees` named in lib/billing-plans.ts and nowhere else in app/, components/, lib/, scripts/ (comments stripped); addMonths landing on the month's last day (31 Oct + 6 → 30 Apr; 31 Aug + 6 → 28 Feb; a leap year) and keeping the day otherwise.",
+      "mutation": "M828 the Plan page's pass card printing BILLING_PLANS.event_pass.listRupees. M829 addMonths back to plain setUTCMonth (rollover).",
+      "observed": "M828: 1 failing — 'is named in lib/billing-plans.ts and nowhere else'. M829: 1 failing — 'lands on the month's last day…'. Reverted green.",
+      "date": "2026-10-09"
+    },
+    "plan-page.itest.ts": {
+      "guards": "Step 16 (G11, G3 for payments): planPageData and the Plan page's element tree carry this organisation's payment (inv_mine_0001) and never another's (inv_theirs_0001, a 777,700-paise canary); every ₹ figure the page prints is ₹0 / ₹589 / ₹2,359 / ₹23,588 or a GST split; ?status=pending with nothing granted is pending and Buy is held back; once granted it is not pending and the card says when it renews.",
+      "mutation": "M830 payments not scoped to the organisation. M831 pending ignoring the entitlement. M828 (shared) the pass card printing the list price.",
+      "observed": "M830: 2 failing (both G3 cases). M831: 1 failing (once granted…). M828: 1 failing (every ₹ figure…). Reverted green.",
+      "date": "2026-10-09"
+    },
+    "plan-prices.test.tsx": {
+      "guards": "Step 16 (G11, review B10/B14): the buy controls print only ₹2,359 / ₹589 and their splits; while a payment is being confirmed Buy says why and is aria-disabled, never `disabled`; the period is a native radio group with a legend.",
+      "mutation": "M833 Analytics' Buy button given `disabled` instead of `aria-disabled`.",
+      "observed": "M833: 1 failing — 'Buy says why it can't be pressed, and stays focusable'. Reverted green.",
+      "date": "2026-10-09"
+    },
+    "csp-report.test.ts": {
+      "guards": "Step 16 (MN-E04, G12): the policy's exact token sets (script-src, frame-src, connect-src, frame-ancestors, default-src, form-action) and that next.config.ts sends exactly contentSecurityPolicy(sentryCspReportUri(...)).",
+      "mutation": "M834 `https:` added to script-src. M835 next.config.ts sending its own variant of the policy.",
+      "observed": "M834: 1 failing (the exact token sets). M835: 1 failing (is the header next.config.ts sends). Reverted green.",
+      "date": "2026-10-09"
+    },
+    "razorpay-signature.test.ts": {
+      "guards": "Step 16 MN-U02 after review: HMAC over the raw bytes (a multi-byte body), the same signature in upper case or with spaces accepted, a re-serialised body, one changed byte, missing, wrong secret, short, long and non-hex refused without throwing; planMatches on key + price + period.",
+      "mutation": "M836 the signature compared without lower-casing or trimming.",
+      "observed": "M836: 1 failing — 'accepts the same signature in upper case and with surrounding space'. Reverted green.",
+      "date": "2026-10-09"
+    },
+    "razorpay-env.test.ts": {
+      "guards": "Step 16 MN-G04 after review: no Razorpay variables boots (staging today); a live key on staging, a test key in production, half a key pair, keys without the webhook secret, a 31-character webhook secret and a 15-character key secret refuse to boot; a 24-character key secret with a 32-character webhook secret boots; razorpayKeys is off without keys or without the secret and refuses a live key outside production at the call.",
+      "mutation": "M837 the webhook-secret requirement removed from both the refinement and razorpayKeys.",
+      "observed": "M837: 2 failing — 'refuses to boot with keys without the webhook secret' and 'is off without keys, and off with keys but no webhook secret'. Reverted green.",
+      "date": "2026-10-09"
     }
   },
   "grandfathered": [

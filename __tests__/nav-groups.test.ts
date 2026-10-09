@@ -60,12 +60,12 @@ describe("the sidebar groups its destinations", () => {
   })
 
   it("lays the organiser's nav out as the kit does", () => {
-    // Analytics and Plan are the kit's too; they join when their pages exist
-    // (step 16), because a nav item to nothing is a 404 with a label.
+    // Plan joined with its page (step 16); Analytics joins with its own,
+    // because a nav item to nothing is a 404 with a label.
     expect(titlesByGroup("organizer")).toEqual([
       [null, ["Overview", "Events"]],
       ["Community", ["Attendees", "Chatrooms"]],
-      ["Organisation", ["Team", "Reports", "Audit log"]],
+      ["Organisation", ["Team", "Reports", "Audit log", "Plan"]],
     ])
   })
 

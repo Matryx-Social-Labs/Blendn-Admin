@@ -18,6 +18,8 @@ const config: Config = {
   testMatch: ["**/*.itest.ts"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/$1",
+    // Next resolves `server-only` itself; plain Node has no such package.
+    "^server-only$": "<rootDir>/__tests__/support/server-only.ts",
     /*
      * `jose` is ESM-only and `transform` covers TypeScript, not `node_modules`,
      * so any suite importing `lib/mobile-auth.ts` for real dies at parse time.
