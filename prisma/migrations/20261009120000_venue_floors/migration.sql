@@ -5,8 +5,12 @@
 -- is a NEW forward migration dropping the constraint and the column (never SQL
 -- by hand against staging or production). A rollback of the CODE alone is
 -- safe: older code reads neither.
-
--- Prisma runs a migration in one transaction, so SET LOCAL ends with it.
+--
+-- `prisma migrate deploy` sends a file statement by statement, outside any
+-- transaction (measured, step 17 review): `SET LOCAL` on its own does
+-- nothing, and a failure half-way leaves the first statements applied. So the
+-- file is its own transaction.
+BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 ALTER TABLE "venues" ADD COLUMN "floors" SMALLINT;
@@ -16,3 +20,5 @@ ALTER TABLE "venues" ADD COLUMN "floors" SMALLINT;
 -- lives here; lib/venue-actions.ts refuses the same range with a sentence.
 ALTER TABLE "venues" ADD CONSTRAINT "venues_floors_range"
   CHECK ("floors" IS NULL OR "floors" BETWEEN 1 AND 200);
+
+COMMIT;

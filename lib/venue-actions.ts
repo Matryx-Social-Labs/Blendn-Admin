@@ -235,6 +235,8 @@ export interface UpdateVenueInput {
   floors?: number | null
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /** The building's floors, as the CHECK `venues_floors_range` allows. */
 const MAX_FLOORS = 200
 
@@ -254,6 +256,8 @@ async function venueForWrite(
   id: string,
   user: { id: string; role: string }
 ): Promise<{ id: string; name: string; owner_org_id: string | null }> {
+  // A server action's argument is whatever the client sent: not a uuid is not found, not a 500.
+  if (!UUID.test(id)) throw new Refusal("Venue not found")
   const venue = await db.venues.findUnique({
     where: { id, deleted_at: null },
     select: { id: true, name: true, owner_org_id: true, created_by_org_id: true },

@@ -63,3 +63,18 @@ export function inRoomWhere(viewerId?: string, now: Date = new Date()) {
  * the database.
  */
 export const SYSTEM_USER_ID = "blendn-system"
+
+/**
+ * What a page calls an event. A venue day is stored as "Venue day · <name> ·
+ * <date>", an internal name no page prints (PL-I16): it is the venue's live
+ * room, "Live at <venue>". Every other event is its own title.
+ */
+export function eventDisplayTitle(event: {
+  kind: string
+  title: string
+  venue?: { name: string } | null
+  venue_name?: string | null
+}): string {
+  if (event.kind !== "venue_day") return event.title
+  return `Live at ${event.venue?.name ?? event.venue_name ?? "the venue"}`
+}

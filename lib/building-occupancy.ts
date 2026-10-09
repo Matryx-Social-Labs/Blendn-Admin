@@ -145,8 +145,24 @@ export async function getBuildingOccupancy(
     // worth seeing, and clamping to 100 makes it unrepresentable. None beside a
     // range: a percentage of the licence is the count again.
     fillPct: anyRanged || capacity === null || capacity <= 0 ? null : Math.round((inside / capacity) * 100),
-    // On the exact total whatever is shown: the licence is the owner's to keep.
-    overCapacity: capacity !== null && capacity > 0 && inside > capacity,
+    /*
+     * From what the reader is shown, never the exact total behind a range.
+     * The owner edits the capacity: a flag on the exact count would let them
+     * walk the capacity up and down until it flipped, and read the count the
+     * ranges exist to hide (SCRUM-516; step 17 review M8). Beside a range it
+     * is the shown lower bound — an exact room's count, a range's floor
+     * (`quiet` is 0) — so it says "over" only when the ranges prove it.
+     */
+    overCapacity:
+      capacity !== null &&
+      capacity > 0 &&
+      (anyRanged ? rooms.reduce((sum, r) => sum + shownLowerBound(r.inside), 0) : inside) > capacity,
     rooms,
   }
+}
+
+/** The least a shown count can be: itself, or a range's lower edge ("quiet" is 0). */
+function shownLowerBound(inside: number | LiveCountBucket): number {
+  if (typeof inside === "number") return inside
+  return inside === "quiet" ? 0 : Number.parseInt(inside, 10)
 }
