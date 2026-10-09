@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import type { Prisma } from "@prisma/client"
 import { z } from "zod"
 
+import { analyticsAccess, mayOpenEvent } from "@/lib/analytics-access"
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor, OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
@@ -207,6 +208,11 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
       if (await hasEntitlement(subject, "event_pass", { eventId: id })) {
         throw new Refusal("That event already has an Event Pass.")
       }
+      // Nothing to sell while it is open anyway: the free window, or the first
+      // event that cleared the floor (lib/analytics-access.ts).
+      const access = await analyticsAccess(org.orgId)
+      if (access.org) throw new Refusal("Every event's analytics are free for now, so there's nothing to buy yet.")
+      if (mayOpenEvent(access, id)) throw new Refusal("That event's analytics are already open to you.")
       // An unpaid order for this event is the one to pay: never a second.
       const open = await tx.billing_checkouts.findFirst({
         where: { org_id: org.orgId, kind: "order", event_id: id, status: "created" },

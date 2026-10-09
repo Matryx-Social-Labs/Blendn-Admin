@@ -2,9 +2,10 @@ import "server-only"
 
 import type { org_role, user_role } from "@prisma/client"
 
+import { analyticsAccess, mayOpenEvent, type AccessReason } from "./analytics-access"
 import { BILLING_PLANS, isBillingPlanKey, type BillingPlanKey } from "./billing-plans"
 import { db } from "./db"
-import { liveEntitlement, eventPassesFor, type LiveEntitlement } from "./entitlements"
+import { liveEntitlement, type LiveEntitlement } from "./entitlements"
 import { razorpayKeys } from "./env"
 import { realEventsWhere } from "./event-kind"
 import { logger } from "./logger"
@@ -132,14 +133,18 @@ export interface PlanPageData {
   paymentsOn: boolean
   analytics: LiveEntitlement | null
   date: PlanDate | null
+  /** Whether the paywall has started, and the first event that cleared the floor (free for good). */
+  free: { reason: AccessReason; until: Date | null; firstEventTitle: string | null }
   /** Every subscription that could still charge, newest first. Normally none or one. */
   subscriptions: SubscriptionState[]
-  events: { id: string; title: string; startsAt: Date; hasPass: boolean }[]
+  /** Events whose pass features are still locked: the ones an Event Pass would open. */
+  events: { id: string; title: string; startsAt: Date }[]
   payments: PaymentLine[]
 }
 
 export async function planPageData(org: BillingOrg, now: Date = new Date()): Promise<PlanPageData> {
-  const [analytics, subscriptionRows, events, paid] = await Promise.all([
+  const [access, analytics, subscriptionRows, events, paid] = await Promise.all([
+    analyticsAccess(org.orgId, now),
     liveEntitlement({ kind: "org", id: org.orgId }, "analytics", now),
     db.billing_checkouts.findMany({
       where: { org_id: org.orgId, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
@@ -167,7 +172,7 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
       },
     }),
   ])
-  const passes = await eventPassesFor(org.orgId, events.map((e) => e.id), now)
+  const firstFree = access.firstFreeEventId ? events.find((e) => e.id === access.firstFreeEventId) : undefined
   const subscriptions = subscriptionRows.flatMap((s) =>
     isBillingPlanKey(s.plan_key)
       ? [
@@ -188,8 +193,11 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
     paymentsOn: paymentsOn(),
     analytics,
     date: planDate(analytics, subscriptionRows[0] ?? null),
+    free: { reason: access.reason, until: access.freeUntil, firstEventTitle: firstFree?.title ?? null },
     subscriptions,
-    events: events.map((e) => ({ id: e.id, title: e.title, startsAt: e.start_time, hasPass: passes.has(e.id) })),
+    events: events
+      .filter((e) => !mayOpenEvent(access, e.id))
+      .map((e) => ({ id: e.id, title: e.title, startsAt: e.start_time })),
     payments: paid.map((p) => ({
       id: p.id,
       at: p.captured_at,
