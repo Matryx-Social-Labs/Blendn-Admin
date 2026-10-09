@@ -85,9 +85,9 @@ gates, the specialists, and a drive, before the next one starts.
 
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
-| `/dashboard` (venue-owner overview) | ✅ ea82077 (mockup `overview-venue-20260911`) | ✅ 2026-09-11 as Fatima Sheikh | `visibleEventsWhere` scope (H2 fixed here); peak cell outlined; notes as text |
-| `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 6e47108 (my venues, mockup skipped — the row pattern) / ✅ 3233c27 (mockup `venue-detail-20260911`) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima | rows with rules; numbers first, record last; no chips |
-| `/dashboard/venues/new`, `/venues/[id]/claim` | ✅ 2026-09-11 (chrome cut; mockups skipped) | ✅ E7; 2026-09-11 | header titles for both routes |
+| `/dashboard` (venue-owner overview) | ✅ ea82077 (mockup `overview-venue-20260911`); step 17 to the kit (mockup: kit `platform/venue-sponsor.jsx` VenueOverview + Building) | ✅ 2026-09-11 as Fatima Sheikh; step 17 local seed as venue.owner@, 1280/768, a venue day live | "In the building · right now" leads only while a room runs (the venue's own live room as a range); Your venues / heatmap / Ratings Panels; tiles as a KpiStrip; next booking's going held back under 5 for another host's night (SCRUM-501); heatmap on the event's clock |
+| `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 6e47108 (my venues, mockup skipped — the row pattern) / ✅ 3233c27 (mockup `venue-detail-20260911`); step 17 to the kit (mockup: kit MyVenues, VenueDetail) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima; step 17 local seed, floors saved and read back | linked events in a Panel (confirm / dispute on the row); a Panel per building; detail: Building, KpiStrip, Events here + Ratings Panels, Venue record Panel with **Floors** (owner + admin; "the app's map draws this building about N m tall") |
+| `/dashboard/venues/new`, `/venues/[id]/claim` | ✅ 2026-09-11 (chrome cut; mockups skipped); step 17 to the kit (mockup: kit VenueNew, VenueClaim) | ✅ E7; 2026-09-11; step 17 local seed | the place in a Panel with "Already listed?" beside it; the claim in a Panel that says pre-claim nights stay closed |
 | `/dashboard/events`, `/events/[id]` | shared | ✅ | canOperate tabs |
 | `/dashboard/chatrooms`, `/organisation` | ✅ shared | ✅ | |
 | `/reports`, `/audit`, `/settings` | — | ✅ | shared |

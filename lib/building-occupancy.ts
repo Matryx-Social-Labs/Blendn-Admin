@@ -2,7 +2,6 @@ import { db } from "@/lib/db"
 import { LIVE_COUNT_BUCKETS, liveCountBucket, type LiveCountBucket } from "@/lib/disclosure"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
-import { realEventsWhere } from "./event-kind"
 
 /**
  * How many people are in the building.
@@ -34,6 +33,8 @@ import { realEventsWhere } from "./event-kind"
 export interface RoomOccupancy {
   eventId: string
   title: string
+  /** The venue's own live room (a venue day) rather than a host's night. */
+  venueDay: boolean
   /** A range when the owner reads a room another host runs (SCRUM-516). */
   inside: number | LiveCountBucket
   /** Null beside a range: the split is two more counts. */
@@ -84,19 +85,19 @@ export async function getBuildingOccupancy(
             venue_id: venueId,
             deleted_at: null,
             /*
-             * Hosts' rooms only, for now. People live at the venue are in the
-             * building too, but this panel lists each room by title; a venue
-             * day joins it when the owner's screens are redesigned (step 17),
-             * its count a range like every room the owner does not run.
+             * any-kind: hosts' nights AND the venue's own live room (step 17).
+             * People live at the venue are in the building too, and the fire
+             * officer counts them. Nobody runs a venue day (its
+             * organizer_org_id is null), so for the owner its count is a range
+             * like every room they do not run; an admin reads it exactly.
              */
-            ...realEventsWhere,
             status: "published",
             // Running right now. An event that ended an hour ago has people in
             // its check-in table and nobody in the building.
             start_time: { lte: now, ...(window ? { gte: window.gte } : {}) },
             end_time: { gte: now },
           },
-          select: { id: true, title: true, organizer_id: true, organizer_org_id: true },
+          select: { id: true, title: true, kind: true, organizer_id: true, organizer_org_id: true },
         })
 
   const capacity = venue?.capacity ?? null
@@ -128,7 +129,10 @@ export async function getBuildingOccupancy(
     })
     .map((r) => ({
       eventId: r.event.id,
-      title: r.event.title,
+      // A venue day's own title is "Venue day · <name> · <date>": the room,
+      // said plainly, and the internal name never sent to a page.
+      title: r.event.kind === "venue_day" ? "Live at the venue" : r.event.title,
+      venueDay: r.event.kind === "venue_day",
       ...(r.ranged
         ? { inside: liveCountBucket(r.inside), guestsInside: null, staffInside: null }
         : { inside: r.inside, guestsInside: r.guestsInside, staffInside: r.inside - r.guestsInside }),

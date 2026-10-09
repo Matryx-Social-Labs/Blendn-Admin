@@ -226,7 +226,17 @@ export interface UpdateVenueInput {
    */
   lat?: number
   lng?: number
+  /**
+   * How many floors the app's map draws the building with (owner, 2026-10-09).
+   * Null clears it. The owner's organisation or an admin only: the organisation
+   * that added an unclaimed venue corrects the place, not how it stands on the
+   * map.
+   */
+  floors?: number | null
 }
+
+/** The building's floors, as the CHECK `venues_floors_range` allows. */
+const MAX_FLOORS = 200
 
 /**
  * Load a live venue the caller is allowed to change, or throw.
@@ -284,6 +294,7 @@ const FORM_FIELD = {
   latitude: "lat",
   longitude: "lng",
   geofence: "geofence",
+  floors: "floors",
 } as const
 
 /** A polygon's corner count, "circle", or null for no outline. */
@@ -302,8 +313,16 @@ function fenceShape(value: unknown): number | "circle" | null {
  */
 export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
   const user = await requireUser()
-  await venueForWrite(id, user)
+  const writable = await venueForWrite(id, user)
   refuseUnknownVenueType(input.venueType)
+  if (input.floors !== undefined) {
+    if (user.role !== "app_admin" && !writable.owner_org_id) {
+      throw new Refusal("Only the venue's owner or an admin sets its floors.")
+    }
+    if (input.floors !== null && (!Number.isInteger(input.floors) || input.floors < 1 || input.floors > MAX_FLOORS)) {
+      throw new Refusal(`Floors is a whole number from 1 to ${MAX_FLOORS}, or empty.`)
+    }
+  }
 
   /*
    * Both or neither, checked before anything is written. Half a coordinate pair
@@ -336,6 +355,7 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
       latitude: true,
       longitude: true,
       geofence: true,
+      floors: true,
     },
   })
 
@@ -378,6 +398,7 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
       : {}),
     ...(geofence ? { geofence: geofence as object } : {}),
     ...(movingPin ? { latitude: input.lat, longitude: input.lng } : {}),
+    ...(input.floors !== undefined ? { floors: input.floors } : {}),
   }
   await db.venues.update({ where: { id }, data })
 

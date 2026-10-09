@@ -421,10 +421,16 @@ describe("the venue's lists", () => {
     as(venueOwner, "venue_owner")
     const venuePage = await VenueDetailPage({ params: Promise.resolve({ id: venues[0] }), searchParams: Promise.resolve({}) })
     const [panel] = find<Panel>(venuePage, BuildingOccupancyPanel)
-    expect(panel.occupancy.rooms).toEqual([
-      expect.objectContaining({ eventId: twelve, inside: "10-19", guestsInside: null, staffInside: null }),
-      expect.objectContaining({ eventId: three, inside: "quiet", guestsInside: null, staffInside: null }),
-    ])
+    // The venue's own live room is in the building too (step 17), and the
+    // owner reads it as a range like every room they do not run.
+    expect(panel.occupancy.rooms).toHaveLength(3)
+    expect(panel.occupancy.rooms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventId: twelve, inside: "10-19", guestsInside: null, staffInside: null }),
+        expect.objectContaining({ eventId: three, inside: "quiet", guestsInside: null, staffInside: null }),
+        expect.objectContaining({ venueDay: true, inside: "quiet", guestsInside: null, staffInside: null }),
+      ])
+    )
     expect(panel.occupancy.inside).toBeNull()
     expect(numericKeys(panel.occupancy)).toEqual(["capacity"])
 
@@ -433,7 +439,10 @@ describe("the venue's lists", () => {
       await VenueDetailPage({ params: Promise.resolve({ id: venues[0] }), searchParams: Promise.resolve({}) }),
       BuildingOccupancyPanel
     )
-    expect(adminPanel.occupancy).toMatchObject({ inside: 15, fillPct: 15 })
+    // The two nights' 15, plus whoever is live in the venue's own room, exactly.
+    const ownRoom = adminPanel.occupancy.rooms.find((r) => (r as { venueDay?: boolean }).venueDay)
+    const live = typeof ownRoom?.inside === "number" ? ownRoom.inside : 0
+    expect(adminPanel.occupancy).toMatchObject({ inside: 15 + live, fillPct: 15 + live })
   })
 
   it("ranges the same rooms on the Chatrooms list, without a total", async () => {

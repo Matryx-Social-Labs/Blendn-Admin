@@ -7,15 +7,15 @@ import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
 import { realEventsWhere } from "@/lib/event-kind"
-import { visibleEventsWhere } from "@/lib/event-visibility"
+import { hostsEvent, visibleEventsScope, visibleEventsWhere } from "@/lib/event-visibility"
+import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { buildPacing, pacingWindowDays } from "@/lib/pacing"
 import { attentionQueues } from "@/lib/attention-queues-query"
 import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
-import { discloseStarsAcross, spreadsByEventId } from "@/lib/disclosure"
-import { actorFor } from "@/lib/org-membership"
+import { discloseStarsAcross, discloseVenueCounts, spreadsByEventId } from "@/lib/disclosure"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
 import { activeSince } from "@/lib/product-events"
@@ -595,18 +595,19 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
 /* Venue owner                                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** Four slots per day, by start hour. */
-function slotFor(date: Date) {
-  const hour = date.getHours()
-  if (hour < 12) return 0
-  if (hour < 17) return 1
-  if (hour < 22) return 2
-  return 3
-}
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-/** Monday-first, matching the heatmap's axis. */
-function dayIndex(date: Date) {
-  return (date.getDay() + 6) % 7
+/**
+ * The heatmap's cell for an event's start: Monday-first day, and one of four
+ * slots by start hour — on the event's own clock. The server's clock is UTC on
+ * Railway, where a 19:00 night in Bengaluru starts at 13:30 and read as an
+ * afternoon.
+ */
+function cellFor(date: Date, timezone: string): { day: number; slot: number } {
+  const clock = eventClock(timezone)
+  const hour = Number(clock.format(date, { hour: "numeric", hourCycle: "h23" }))
+  const day = WEEKDAYS.indexOf(clock.format(date, { weekday: "short" }))
+  return { day: day < 0 ? 0 : day, slot: hour < 12 ? 0 : hour < 17 ? 1 : hour < 22 ? 2 : 3 }
 }
 
 async function buildVenueOverview(userId: string, role: user_role): Promise<VenueOverview> {
@@ -616,7 +617,7 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
    * saw an empty overview, and a venue owner saw only the events they had
    * personally created in their own building -- usually none.
    */
-  const scope = await visibleEventsWhere({ id: userId, role })
+  const { where: scope, actor } = await visibleEventsScope({ id: userId, role })
   const now = new Date()
   const windowStart = new Date(now.getTime() - WINDOW_WEEKS * 7 * DAY_MS)
 
@@ -630,11 +631,14 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
       id: true,
       title: true,
       start_time: true,
+      timezone: true,
       venue_name: true,
       venue_id: true,
       venue: { select: { name: true } },
       max_capacity: true,
       status: true,
+      organizer_id: true,
+      organizer_org_id: true,
       ratings: { select: { rating: true } },
       _count: { select: { rsvps: { where: { status: { in: COMMITTED } } } } },
     },
@@ -738,7 +742,7 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
    * "Nothing booked" line that already exists for it.
    */
   const owned = await db.venues.findMany({
-    where: { owner_org_id: { in: (await actorFor({ id: userId, role })).orgIds } },
+    where: { owner_org_id: { in: actor.orgIds } },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   })
@@ -791,7 +795,11 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
               id: next.id,
               name: next.title,
               startAt: next.start_time.toISOString(),
-              going: next._count.rsvps,
+              // Another host's night, seen as the venue: held back under the
+              // floor, the rule every venue surface shares (SCRUM-501).
+              going: hostsEvent(actor, next)
+                ? next._count.rsvps
+                : discloseVenueCounts({ going: next._count.rsvps, attended: 0, capacity: next.max_capacity }).going,
             }
           : null,
         capacityProxy: venueEvents.reduce<number | null>(
@@ -814,24 +822,40 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
   const utilisation = Array.from({ length: 7 }, () => [0, 0, 0, 0])
   for (const event of events) {
     if (event.start_time < windowStart || event.start_time >= now) continue
-    utilisation[dayIndex(event.start_time)][slotFor(event.start_time)] += 1
+    const { day, slot } = cellFor(event.start_time, event.timezone)
+    utilisation[day][slot] += 1
   }
 
   let peakWindow: string | null = null
   let peakCount = 0
-  const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
   const SLOT_NAMES = ["morning", "afternoon", "evening", "late"]
   utilisation.forEach((slots, di) =>
     slots.forEach((count, si) => {
       if (count > peakCount) {
         peakCount = count
-        peakWindow = `${DAY_NAMES[di]} ${SLOT_NAMES[si]}`
+        peakWindow = `${WEEKDAYS[di]} ${SLOT_NAMES[si]}`
       }
     })
   )
 
+  /*
+   * Who is in each building now, for the venues the organisation owns: the
+   * screen's lead while anything runs, and nothing when the buildings are
+   * dark. One read per owned venue; an owner has a handful.
+   */
+  const buildings = (
+    await Promise.all(
+      owned.map(async (venue) => ({
+        venueId: venue.id,
+        venueName: venue.name,
+        occupancy: await getBuildingOccupancy(venue.id, { asOwner: actor, now }),
+      }))
+    )
+  ).filter((b) => b.occupancy.rooms.length > 0)
+
   return {
     role: "venue_owner",
+    buildings,
     venues,
     utilisation,
     peakWindow,

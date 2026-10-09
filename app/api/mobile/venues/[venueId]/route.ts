@@ -64,6 +64,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         latitude: true,
         longitude: true,
         venue_type: true,
+        floors: true,
         owner_org_id: true,
         geofence: true,
         timezone: true,
@@ -117,6 +118,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         longitude: venue.longitude,
         venueType: venue.venue_type,
         venueTypeLabel: venueTypeLabel(venue.venue_type),
+        // The 3D map's height override: floors × 3.66 m (lib/venue-floors.ts). Null: the map's own.
+        floors: venue.floors,
         claimed,
       },
       live: {

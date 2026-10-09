@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 
+import { Panel } from "@/components/dashboard/kit"
 import { VenueCreateForm } from "@/components/venue-create-form"
 import { getAuth } from "@/lib/auth"
 
@@ -25,16 +26,26 @@ export default async function NewVenuePage() {
   const canOwn = session.user.role === "venue_owner"
   if (!canOwn && session.user.role !== "app_admin") redirect("/dashboard/venues")
 
-  // The site header already says "Add a venue" and what one is; the one
-  // sentence that differs by role is all this page adds above the form.
+  // The layout's header says "Add a venue" and what one is. Beside the form,
+  // the other door: a place already on Blend'n is claimed, not added again.
   return (
-    <div className="flex flex-col gap-5">
-      <p className="text-[0.8125rem] text-muted-foreground">
-        {canOwn
-          ? "It joins your venues straight away — you are describing your own place, so there is nothing to claim."
-          : "Created unclaimed. A venue owner can claim it, and you decide."}
-      </p>
-      <VenueCreateForm canOwn={canOwn} />
+    <div className="grid gap-5 @4xl/main:grid-cols-[minmax(0,1fr)_300px] @4xl/main:items-start">
+      <Panel title="The place">
+        <VenueCreateForm canOwn={canOwn} />
+      </Panel>
+      <Panel title="Already listed?">
+        <p className="text-[0.8125rem] leading-5 text-muted-foreground">
+          {canOwn
+            ? "If your venue is already on Blend'n, claim it instead — that brings the events already held there with it. Place it on the map and the form shows what is listed there, with a claim button."
+            : "Created unclaimed. A venue owner can claim it, and you decide."}
+        </p>
+        {canOwn ? (
+          <p className="text-[0.8125rem] leading-5 text-muted-foreground">
+            Adding it yourself makes it yours straight away: you are describing your own place, so there is nothing
+            to claim.
+          </p>
+        ) : null}
+      </Panel>
     </div>
   )
 }

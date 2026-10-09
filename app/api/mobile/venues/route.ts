@@ -180,6 +180,7 @@ export async function GET(request: NextRequest) {
       longitude: true,
       capacity: true,
       venue_type: true,
+      floors: true,
       _count: { select: { events: { where: upcomingEventFilter } } },
       events: {
         where: upcomingEventFilter,
@@ -294,6 +295,8 @@ export async function GET(request: NextRequest) {
         // The label the dashboard already shows, so the app never ships a
         // second copy of the vocabulary and never renders a raw `pub_bar`.
         venueTypeLabel: venueTypeLabel(venue.venue_type),
+        // The 3D map's height override: floors × 3.66 m (lib/venue-floors.ts). Null: the map's own.
+        floors: venue.floors,
         // Kilometres, or null when either side has no fix. The client formats
         // it — `formatDistance` there already owns km-versus-miles.
         distance,

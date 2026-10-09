@@ -1540,6 +1540,10 @@ model venues {
   day_reset_hour Int          @default(6) @db.SmallInt
   /// IANA zone the venue's day is counted in. CHECK in SQL that Postgres knows it.
   timezone       String       @default("Asia/Kolkata")
+  /// How many floors the building has: the app's 3D map draws it this tall,
+  /// over the building data's own height (owner, 2026-10-09). Null leaves the
+  /// map's height. Set by the venue's owner or an admin; CHECK 1–200 in SQL.
+  floors         Int?         @db.SmallInt
   created_at   DateTime     @default(now()) @db.Timestamptz(6)
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at   DateTime?    @db.Timestamptz(6)

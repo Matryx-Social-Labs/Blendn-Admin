@@ -284,9 +284,24 @@ describe("a venue day never reaches a host's or the platform's numbers (PL-I16)"
 
     for (const [role, id] of [["app_admin", admin], ["organizer", orgOrganiser], ["venue_owner", venueOwner]] as const) {
       as(role, id)
-      const text = JSON.stringify(await getDashboardOverview())
+      const overview = await getDashboardOverview()
+      /*
+       * One exception, by design (step 17; lib/building-occupancy.ts): the
+       * owner's "In the building" lists the venue's own live room, as a range,
+       * so the room can be opened. It is taken out here and checked on its
+       * own; nothing else in the overview may carry the day.
+       */
+      const rooms = overview.role === "venue_owner" ? overview.buildings.flatMap((b) => b.occupancy.rooms) : []
+      const ownRoom = rooms.find((r) => r.eventId === day.id)
+      if (ownRoom) expect(ownRoom).toMatchObject({ venueDay: true, title: "Live at the venue", guestsInside: null, staffInside: null })
+      if (ownRoom) expect(typeof ownRoom.inside).toBe("string")
+      const rest =
+        overview.role === "venue_owner"
+          ? { ...overview, buildings: overview.buildings.map((b) => ({ ...b, occupancy: { ...b.occupancy, rooms: b.occupancy.rooms.filter((r) => r.eventId !== day.id) } })) }
+          : overview
+      const text = JSON.stringify(rest)
       expect(text).not.toContain(day.id)
-      expect(text).not.toContain("Venue day ·")
+      expect(JSON.stringify(overview)).not.toContain("Venue day ·")
     }
   })
 

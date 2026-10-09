@@ -5,7 +5,8 @@ import { DateRangeControl } from "@/components/date-range-control"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { venueTitleFor } from "@/lib/dashboard-record-titles"
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
-import { MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
+import { KpiStrip, Panel } from "@/components/dashboard/kit"
+import { RatingBars } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
 import { VenueManage } from "./venue-manage"
 import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
@@ -81,6 +82,7 @@ export default async function VenueDetailPage({
       longitude: true,
       venue_type: true,
       geofence: true,
+      floors: true,
       created_by_org_id: true,
       owner_org: { select: { id: true, display_name: true } },
     },
@@ -105,6 +107,7 @@ export default async function VenueDetailPage({
     geofence: venue.geofence,
     retired: venue.deleted_at !== null,
     ownerOrg: venue.owner_org?.display_name ?? null,
+    floors: venue.floors,
   }
 
   if (!isAdmin && !(venue.owner_org && (await memberOf(venue.owner_org.id)))) {
@@ -280,38 +283,32 @@ export default async function VenueDetailPage({
           date range someone chose, and this is about right now. */}
       <BuildingOccupancyPanel occupancy={building} />
 
-      <div className="flex flex-wrap gap-1">
-        <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />
-        <MetricTile
-          label="Attended"
-          value={formatNumber(nothingShown ? null : totalAttended)}
-          hint={heldBack ? "GPS check-ins · held-back nights left out" : "GPS check-ins"}
-        />
-        <MetricTile
-          label="Turn-up"
-          value={turnUp === null ? null : formatPct(turnUp)}
-          hint={
-            nothingShown ? "held back" : turnUp === null ? "needs a past event" : "of committed RSVPs"
-          }
-        />
-        <MetricTile
-          label="Returning organisers"
-          value={returning}
-          hint={returning === 0 ? "nobody has come back yet" : "booked here more than once"}
-        />
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Events", value: formatNumber(rows.length), hint: "in this window" },
+          {
+            label: "Attended",
+            value: formatNumber(nothingShown ? null : totalAttended),
+            hint: heldBack ? "GPS check-ins · held-back nights left out" : "GPS check-ins",
+          },
+          {
+            label: "Turn-up",
+            value: turnUp === null ? null : formatPct(turnUp),
+            hint: nothingShown ? "held back" : turnUp === null ? "needs a past event" : "of committed RSVPs",
+          },
+          {
+            label: "Returning organisers",
+            value: returning,
+            hint: returning === 0 ? "nobody has come back yet" : "booked here more than once",
+          },
+        ]}
+      />
 
-      <div className="grid gap-8 @3xl/main:grid-cols-[2fr_1fr] @3xl/main:items-start">
-        <section className="flex flex-col gap-3 border-t border-border pt-5">
-          <SectionTitle hint={rows.length ? `${rows.length} in window` : undefined}>
-            Events here
-          </SectionTitle>
+      <div className="grid gap-5 @3xl/main:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] @3xl/main:items-start">
+        <Panel title="Events here" hint={rows.length ? `${rows.length} in window` : undefined} bodyClassName="px-4 pb-4 pt-3">
           <VenueEventsTable rows={rows} />
-        </section>
-        <section className="flex flex-col gap-3 border-t border-border pt-5">
-          <SectionTitle hint={averageRating === null ? "all-time" : `avg ${averageRating} · all-time`}>
-            Ratings
-          </SectionTitle>
+        </Panel>
+        <Panel title="Ratings" hint={averageRating === null ? "all-time" : `avg ${averageRating} · all-time`}>
           {ratingTotal === 0 ? (
             <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
           ) : averageRating === null ? (
@@ -319,7 +316,7 @@ export default async function VenueDetailPage({
           ) : (
             <RatingBars counts={ratings} />
           )}
-        </section>
+        </Panel>
       </div>
 
       {/* The record last. "Is the pin right" is the third question a venue
