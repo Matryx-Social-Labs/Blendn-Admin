@@ -1,6 +1,8 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { closeConversation } from "@/lib/conversations"
+import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
+import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -145,7 +147,15 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     // Idempotent: closing an already-closed conversation keeps the first close,
     // so a double tap or a client retry never rewrites who left or when.
-    await closeConversation(conversationId, authUser.userId, "unmatch")
+    const otherId = conversation.user1_id === authUser.userId ? conversation.user2_id : conversation.user1_id
+    await db.$transaction(async (tx) => {
+      await closeConversation(conversationId, authUser.userId, "unmatch", tx)
+      // An unmatch keeps the two apart on every crew surface (C6): the crew
+      // invites between them go with it (lib/crews/blocks.ts).
+      await dropCrewInvitesBetween(tx, authUser.userId, otherId)
+    })
+    // And out of any Blend room that now refuses them (the Blend goes on for the rest).
+    await evictBlockedFromBlends(authUser.userId, otherId)
 
     /*
      * Evict both sides from the socket room.

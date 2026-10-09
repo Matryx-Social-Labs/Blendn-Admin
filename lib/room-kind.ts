@@ -150,6 +150,7 @@ function blendSideSelect(viewerIds: string[]) {
   return {
     select: {
       dissolved_at: true,
+      hidden_at: true,
       members: {
         where: {
           user: { suspended_at: null, deletedAt: null },
@@ -204,6 +205,7 @@ interface Blocks {
 }
 interface BlendSide {
   dissolved_at: Date | null
+  hidden_at: Date | null
   members: { user_id: string; user: Blocks }[]
 }
 interface BlendOwner {
@@ -259,6 +261,9 @@ const sideBlocks = (side: BlendSide | null, userId: string) =>
  */
 function blendDenial(blend: BlendOwner | null | undefined, userId: string, now: Date = new Date()): "hidden" | "not_member" | null {
   if (!blend || blend.closed_at || blend.closes_at <= now) return "hidden"
+  // A side dissolved or hidden by a moderator ends it for everyone, whether or
+  // not its close has landed yet (a like racing the close cannot keep it open).
+  if ([blend.a_crew, blend.b_crew].some((side) => side?.dissolved_at || side?.hidden_at)) return "hidden"
   const solo = blend.b_user_id === userId && !!blend.b_user && !blend.b_user.suspended_at && !blend.b_user.deletedAt
   const onA = onSide(blend.a_crew, userId)
   const onB = onSide(blend.b_crew, userId) || solo

@@ -52,6 +52,7 @@ const accountRoute = require("@/app/api/mobile/account/route") as typeof import(
 const reportRoute = require("@/app/api/mobile/crews/[crewId]/report/route") as typeof import("@/app/api/mobile/crews/[crewId]/report/route")
 const blockRoute = require("@/app/api/mobile/users/[userId]/block/route") as typeof import("@/app/api/mobile/users/[userId]/block/route")
 const friendRoute = require("@/app/api/mobile/friends/[userId]/route") as typeof import("@/app/api/mobile/friends/[userId]/route")
+const conversationRoute = require("@/app/api/mobile/conversations/[conversationId]/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 type Handler = (req: NextRequest, ctx: { params: Promise<never> }) => Promise<Response>
@@ -119,6 +120,8 @@ const api = {
     call(reportRoute.POST, `/api/mobile/crews/${crewId}/report`, as, { method: "POST", body, params: { crewId } }),
   block: (as: Person, userId: string) =>
     call(blockRoute.POST, `/api/mobile/users/${userId}/block`, as, { method: "POST", params: { userId } }),
+  unmatch: (as: Person, conversationId: string) =>
+    call(conversationRoute.DELETE, `/api/mobile/conversations/${conversationId}`, as, { method: "DELETE", params: { conversationId } }),
   unfriend: (as: Person, userId: string) =>
     call(friendRoute.DELETE, `/api/mobile/friends/${userId}`, as, { method: "DELETE", params: { userId } }),
   read: (as: Person, g: string) => call(messagesRoute.GET, `/api/mobile/chat/groups/${g}/messages`, as, { params: { chatGroupId: g } }),
@@ -1000,5 +1003,117 @@ describe("the cards a page at a time", () => {
     expect(rest.body.data.crews).toHaveLength(1)
     // A limit past the most is held to it, and garbage is the default — never a 500.
     expect((await api.atEvent(viewer, eventId, "?limit=999&offset=abc")).status).toBe(200)
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Follow-up (review of the merged step 8 code)                                */
+/* -------------------------------------------------------------------------- */
+
+describe("nothing a crew does tells anybody about a friend (step 8 follow-up)", () => {
+  it("answers 409 on the seats asked for, before the silent skips — a skipped friend changes nothing", async () => {
+    const owner = await person("fu-full-owner")
+    const mate = await person("fu-full-mate")
+    const { crewId } = await crewOf(owner, [mate])
+    // Eight more members (fixture rows) and one open invite: 10 + 1 = 11 seats.
+    const fillers = await Promise.all(Array.from({ length: 8 }, (_, i) => person(`fu-full-${i}`)))
+    await db.crew_members.createMany({ data: fillers.map((f) => ({ crew_id: crewId, user_id: f.id, consented_reveal_at: new Date() })) })
+    const pending = await person("fu-full-pending")
+    await db.crew_invites.create({ data: { crew_id: crewId, invited_user_id: pending.id, invited_by: owner.id } })
+    // Two friends asked for: one kept apart from a member (a closed conversation), one not.
+    const apart = await person("fu-full-apart")
+    const fine = await person("fu-full-fine")
+    await befriend(owner, apart, fine)
+    const [user1_id, user2_id] = conversationPair(mate.id, apart.id)
+    await db.private_conversations.create({ data: { user1_id, user2_id, closed_at: new Date(), closed_by: mate.id, closed_reason: "unmatch" } })
+    // 11 + 2 asked > 12: 409 — whether or not one of them would have been skipped.
+    expect((await api.invite(owner, crewId, [apart.id, fine.id])).status).toBe(409)
+    expect(await db.crew_invites.count({ where: { crew_id: crewId, invited_user_id: { in: [apart.id, fine.id] } } })).toBe(0)
+    // One seat asked for: 200 either way, and only the one not kept apart is written.
+    expect((await api.invite(owner, crewId, [apart.id])).body.data).toEqual({ invited: 1 })
+    expect((await api.invite(owner, crewId, [fine.id])).body.data).toEqual({ invited: 1 })
+    expect((await db.crew_invites.findMany({ where: { crew_id: crewId, invited_user_id: { in: [apart.id, fine.id] } }, select: { invited_user_id: true } })).map((i) => i.invited_user_id)).toEqual([fine.id])
+  })
+
+  it("keeps an owner's removal and a friend's decline after the owner erases their account", async () => {
+    const owner = await person("fu-er-owner")
+    const mate = await person("fu-er-mate")
+    const third = await person("fu-er-third")
+    const removed = await person("fu-er-removed", "Rafi Khan")
+    const decliner = await person("fu-er-decliner")
+    const { crewId } = await crewOf(owner, [mate, third, removed])
+    await befriend(owner, decliner)
+    expect((await api.invite(owner, crewId, [decliner.id])).status).toBe(200)
+    expect((await api.decline(decliner, crewId)).status).toBe(200)
+    const ref = (await api.detail(owner, crewId)).body.data.members.find((m: { name: string }) => m.name === "Rafi").userId
+    expect((await api.remove(owner, crewId, ref)).status).toBe(200)
+
+    const erase = await (accountRoute.DELETE as unknown as (r: NextRequest) => Promise<Response>)(
+      new NextRequest("http://localhost/api/mobile/account", { method: "DELETE", headers: { authorization: `Bearer ${owner.token}` } })
+    )
+    expect(erase.status).toBe(200)
+    // The marker and the decline stand: a member's invite (not the new owner's —
+    // `mate` took the crew over) skips both, and nobody is pushed.
+    expect((await inviteRow(crewId, removed.id))?.removed_at).toBeInstanceOf(Date)
+    expect((await inviteRow(crewId, decliner.id))?.declined_at).toBeInstanceOf(Date)
+    expect((await db.crew_members.findFirstOrThrow({ where: { crew_id: crewId, role: "owner" } })).user_id).toBe(mate.id)
+    await befriend(third, removed, decliner)
+    const before = (await crewInvitePushes(removed.id)) + (await crewInvitePushes(decliner.id))
+    expect((await api.invite(third, crewId, [removed.id, decliner.id])).body.data).toEqual({ invited: 2 })
+    expect((await api.join(removed, crewId)).status).toBe(404)
+    expect((await api.join(decliner, crewId)).status).toBe(404)
+    expect((await crewInvitePushes(removed.id)) + (await crewInvitePushes(decliner.id))).toBe(before)
+  })
+
+  it("hands a crew to the longest-standing member who can own another, skipping one who already owns three", async () => {
+    const owner = await person("fu-cap-owner")
+    const busy = await person("fu-cap-busy")
+    const next = await person("fu-cap-next")
+    const { crewId } = await crewOf(owner, [busy, next])
+    for (const n of [1, 2, 3]) expect((await api.create(busy, { name: `Busy ${n}` })).status).toBe(201)
+    expect((await api.remove(owner, crewId, owner.id)).body.data).toEqual({ dissolved: false })
+    const owners = await db.crew_members.findMany({ where: { crew_id: crewId, role: "owner" }, select: { user_id: true } })
+    expect(owners.map((o) => o.user_id)).toEqual([next.id])
+  })
+
+  it("a crew a moderator hid takes nobody new and is not on an invitee's list", async () => {
+    const owner = await person("fu-hid-owner")
+    const mate = await person("fu-hid-mate")
+    const invitee = await person("fu-hid-invitee")
+    const later = await person("fu-hid-later")
+    const { crewId } = await crewOf(owner, [mate])
+    await befriend(owner, invitee, later)
+    expect((await api.invite(owner, crewId, [invitee.id])).status).toBe(200)
+    await db.crews.update({ where: { id: crewId }, data: { hidden_at: new Date() } })
+    expect((await api.mine(invitee)).body.data.invites).toEqual([])
+    expect((await api.join(invitee, crewId)).status).toBe(404)
+    expect((await api.invite(owner, crewId, [later.id])).status).toBe(403)
+    // Its members keep it.
+    expect((await api.detail(mate, crewId)).status).toBe(200)
+  })
+
+  it("an unmatch withdraws the crew invites between the two, as a block does", async () => {
+    const owner = await person("fu-um-owner")
+    const mate = await person("fu-um-mate")
+    const friend = await person("fu-um-friend")
+    const { crewId } = await crewOf(owner, [mate])
+    await befriend(owner, friend)
+    expect((await api.invite(owner, crewId, [friend.id])).status).toBe(200)
+    const [user1_id, user2_id] = conversationPair(owner.id, friend.id)
+    const convo = await db.private_conversations.create({ data: { user1_id, user2_id }, select: { id: true } })
+    expect((await api.unmatch(friend, convo.id)).status).toBe(200)
+    expect(await inviteRow(crewId, friend.id)).toBeNull()
+    expect((await api.mine(friend)).body.data.invites).toEqual([])
+    expect((await api.join(friend, crewId)).status).toBe(404)
+
+    // An invite whose inviter is kept apart from the invitee by a path that
+    // never withdrew it (a row written directly) is still not on the list.
+    const other = await person("fu-um-other")
+    await befriend(mate, other)
+    expect((await api.invite(mate, crewId, [other.id])).status).toBe(200)
+    expect((await api.mine(other)).body.data.invites).toHaveLength(1)
+    const [o1, o2] = conversationPair(mate.id, other.id)
+    await db.private_conversations.create({ data: { user1_id: o1, user2_id: o2, closed_at: new Date(), closed_by: other.id, closed_reason: "unmatch" } })
+    expect((await api.mine(other)).body.data.invites).toEqual([])
   })
 })

@@ -1488,8 +1488,9 @@ messages in a crew chat stay, as in any room.
 
 **No voting.** Any member of a crew that is here (two or more checked in) likes
 on the crew's behalf; the crew chat gets a line, *"liked Crew Nebula for the
-crew"* (or the person's pseudonym), from the member who tapped — transparency
-instead of a quorum. Nobody else is told: no push, no bell row, and the card's
+crew"*, from the member who tapped — transparency instead of a quorum. Only
+for a like of a crew: a like of a person gets no line, because a line only for a
+like that stood would tell the crew what the answer hides. Nobody else is told: no push, no bell row, and the card's
 `youLiked` is only ever about your side. Liking twice is liking once. When the
 host turned crews off, every crew like is 403.
 
