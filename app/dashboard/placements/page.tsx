@@ -147,7 +147,9 @@ export default async function PlacementsPage() {
                 ? overview.reach30dSuppressed
                   ? "under 5 people, not reported"
                   : "nothing has run yet"
-                : "people per night, added up",
+                : overview.reach30dSuppressed
+                  ? "people per night, added up · small nights left out"
+                  : "people per night, added up",
           },
           { label: "Brand", value: overview.brandName, hint: "as attendees see it" },
         ]}
@@ -188,7 +190,7 @@ export default async function PlacementsPage() {
                 </span>
                 <span className="text-[0.8125rem] text-muted-foreground @2xl/main:w-20 @2xl/main:text-right">
                   {/* Em dash for "has not run", never 0. */}
-                  {p.sends === null ? "— sends" : `${p.sends} sends`}
+                  {p.sends === null ? "— sends" : `${p.sends} send${p.sends === 1 ? "" : "s"}`}
                 </span>
                 <span className="text-[0.8125rem] text-muted-foreground @2xl/main:w-36 @2xl/main:text-right">
                   {p.reach !== null
@@ -197,17 +199,18 @@ export default async function PlacementsPage() {
                       ? "held back · under 5"
                       : "— reached"}
                 </span>
-                {p.status === "proposed" ? (
-                  <PlacementDecision placementId={p.id} />
-                ) : p.due ? (
-                  <Button asChild size="sm">
-                    <a href={p.due.payUrl} target="_blank" rel="noopener noreferrer">
-                      Pay {money(p.due.amountMinor, p.due.currency)}
-                    </a>
-                  </Button>
-                ) : (
-                  <span className="hidden @2xl/main:block @2xl/main:w-[150px]" />
-                )}
+                {/* One fixed slot for the row's action, so the columns line up row to row. */}
+                <span className="flex @2xl/main:w-[170px] @2xl/main:justify-end">
+                  {p.status === "proposed" ? (
+                    <PlacementDecision placementId={p.id} />
+                  ) : p.due ? (
+                    <Button asChild size="sm">
+                      <a href={p.due.payUrl} target="_blank" rel="noopener noreferrer">
+                        Pay {money(p.due.amountMinor, p.due.currency)}
+                      </a>
+                    </Button>
+                  ) : null}
+                </span>
               </li>
             ))}
           </ul>
