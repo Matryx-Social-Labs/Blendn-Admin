@@ -123,8 +123,11 @@ uv venv --python 3.13 .venv && uv pip install --python .venv/bin/python -r requi
 | Height rasters (16 GeoTIFFs, 0.8 GB) | 9 min, network-bound; first run only |
 | Zonal heights + tiles | 7 min; peak RSS 1.6 GB |
 
-A rebuild from the same inputs is byte-identical (checked on a central tile). Disk: 0.8 GB of
-rasters and 0.35 GB of GeoJSONSeq, all under `out/`, which git ignores.
+- **Reproducible.** A rebuild from the same inputs is byte-identical; all 256 tiles were compared.
+- **Cache.** Each step's output is reused until `--redo`. The Overture release, raster year,
+  statistic and box are stamped in `out/<city>/inputs.json`, and changing any of them rebuilds
+  from the start.
+- **Disk.** 0.8 GB of rasters and 0.35 GB of GeoJSONSeq, all under `out/`, which git ignores.
 
 **Other cities** are an entry each in `cities.json`: `mumbai`, `delhi-ncr`, `hyderabad`, `pune`.
 Each has its own `id_offset`, so ids never collide under one version prefix. **Keep city boxes from

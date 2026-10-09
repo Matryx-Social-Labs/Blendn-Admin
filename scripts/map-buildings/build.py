@@ -29,7 +29,8 @@ OVERTURE_RELEASE = "2026-09-23.1"
 OVERTURE_URL = f"s3://overturemaps-us-west-2/release/{OVERTURE_RELEASE}/theme=buildings/type={{}}/*"
 HEIGHTS_YEAR = 2023
 GCS = "https://storage.googleapis.com/open-buildings-temporal-data"
-RASTER_RES_M = 2  # the 0.5 m COGs carry a ~4 m signal; their 2 m overview keeps it at 1/16 of the bytes
+RASTER_RES_M = 2  # the 0.5 m COGs carry a ~4 m signal; their 2 m overview keeps it at 1/16 of the bytes.
+# out/<city>/rasters/ is keyed on the GeoTIFF name, which carries the year but not this: delete it after changing it.
 FLOOR_M = 3.2
 DEFAULT_M = 4
 MIN_BAKED_M = 3  # below one storey the raster is saying "no building here", not "a 1 m building"
@@ -133,10 +134,10 @@ def fetch_raster(tile, dest):
 def step_rasters(city, cfg, out):
     tiles = raster_tiles(cfg["bbox"])
     (out / "rasters").mkdir(exist_ok=True)
-    (out / "rasters.json").write_text(json.dumps(tiles, indent=1))
     os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
     with ThreadPoolExecutor(4) as pool:
         list(pool.map(lambda t: fetch_raster(t, out / "rasters" / (t[0].split("/")[-2] + "_" + Path(t[0]).name)), tiles))
+    (out / "rasters.json").write_text(json.dumps(tiles, indent=1))  # last: it marks the step done
     print(f"rasters: {len(tiles)} GeoTIFFs ({HEIGHTS_YEAR}, {RASTER_RES_M} m)")
 
 
@@ -146,7 +147,7 @@ def step_heights(city, cfg, out):
     from exactextract import exact_extract
 
     con = duck()
-    rows = []
+    measured = {}
     for t in json.loads((out / "rasters.json").read_text()):
         url, crs, x0, y0, x1, y1 = t
         path = out / "rasters" / (url.split("/")[-2] + "_" + Path(url).name)
@@ -162,8 +163,12 @@ def step_heights(city, cfg, out):
         geojson = [{"type": "Feature", "id": i, "properties": {}, "geometry": json.loads(g)} for i, g in feats]
         with rasterio.open(path) as r:  # band_1 is height (see fetch_raster); named ops segfault in exactextract 0.3.0
             res = exact_extract(r, geojson, [HEIGHT_STAT], include_cols=["id"])
-        rows += [(f["id"], f["properties"][f"band_1_{HEIGHT_STAT_NAME}"]) for f in res]
+        for f in res:  # S2-cell grids are offset, so tiles can overlap (Mumbai, Delhi): first real reading wins
+            h = f["properties"][f"band_1_{HEIGHT_STAT_NAME}"]
+            if measured.get(f["id"]) is None or math.isnan(measured[f["id"]]):
+                measured[f["id"]] = h
         print(f"  {path.name}: {len(feats)} footprints")
+    rows = list(measured.items())
     with open(out / "baked.csv", "w", newline="") as f:
         csv.writer(f).writerows([("id", "baked_h")] + [(i, "" if h is None or math.isnan(h) else round(h, 2)) for i, h in rows])
     con.execute(f"COPY (FROM read_csv('{out}/baked.csv', columns={{'id': 'VARCHAR', 'baked_h': 'DOUBLE'}}, header=true)) TO '{out}/baked.parquet' (FORMAT parquet)")
@@ -192,21 +197,24 @@ def step_tiles(city, cfg, out):
     con.execute(f"""
       CREATE TABLE ids AS SELECT id, {cfg['id_offset']} + row_number() OVER (
         ORDER BY ST_Hilbert(ST_Centroid(geometry), {{'min_x': {xmin}, 'min_y': {ymin}, 'max_x': {xmax}, 'max_y': {ymax}}}::BOX_2D), id) AS fid FROM b""")
+    if not con.execute("SELECT count(*) = count(DISTINCT id) FROM ids").fetchone()[0]:
+        sys.exit("a building has two ids; check baked.parquet for duplicate footprints")
     con.execute(f"COPY ids TO '{out}/ids.parquet' (FORMAT parquet)")  # GERS id -> tile id, for this build only
     # Parts are extruded alongside their outline, under the outline's id: the union draws a podium and
     # its tower, and lighting the id lights all of it. Same paint, so their shared walls cannot flicker.
     con.execute(f"""
-      CREATE TABLE f AS SELECT fid, geometry, h::INT AS h, least(min_h, h - 1)::INT AS min_h, src FROM (
-        SELECT fid, geometry, h, min_h, height_src AS src FROM b JOIN ids USING (id)
+      CREATE TABLE f AS SELECT fid, part_id, geometry, h::INT AS h, least(min_h, h - 1)::INT AS min_h, src FROM (
+        SELECT fid, NULL AS part_id, geometry, h, min_h, height_src AS src FROM b JOIN ids USING (id)
         UNION ALL
-        SELECT i.fid, p.geometry, ceil(coalesce(p.height, p.num_floors * {FLOOR_M}, b.h)),
+        SELECT i.fid, p.id, p.geometry, ceil(coalesce(p.height, p.num_floors * {FLOOR_M}, b.h)),
                floor(coalesce(p.min_height, p.min_floor * {FLOOR_M}, 0)), 'part'
         FROM '{out}/parts.parquet' p JOIN ids i ON i.id = p.building_id JOIN b ON b.id = p.building_id)""")
     con.execute(f"COPY f TO '{out}/features.parquet' (FORMAT parquet)")  # exactly what the tiles draw; --validate reads it
     seq = out / "buildings.geojsonseq"
     con.execute(f"""
       COPY (SELECT 'Feature' AS type, ST_AsGeoJSON(geometry)::JSON AS geometry,
-              {{'fid': fid, 'render_height': h, 'render_min_height': min_h}} AS properties FROM f ORDER BY fid)
+              {{'fid': fid, 'render_height': h, 'render_min_height': min_h}} AS properties
+            FROM f ORDER BY fid, part_id NULLS FIRST)
       TO '{seq}' (FORMAT json)""")
     tiles = out / "tiles"
     shutil.rmtree(tiles, ignore_errors=True)
@@ -271,6 +279,8 @@ def upload(city, out, version, apply):
     """Every tile to the public bucket under map/buildings/<version>/. Immutable: a rebuild needs a new version."""
     tiles = out / "tiles"
     files = sorted(tiles.rglob("*.pbf"))
+    if not files:
+        sys.exit(f"no tiles under {tiles}; run the build first")
     prefix = f"map/buildings/{version}"
     headers = {"ContentType": "application/x-protobuf", "ContentEncoding": "gzip",
                "CacheControl": "public, max-age=31536000, immutable"}
@@ -341,12 +351,18 @@ def main():
         return upload(a.city, out, a.upload, a.apply)
     if a.validate:
         return validate(a.city, cfg, out)
-    done = {"overture": out / "overture.parquet", "rasters": out / "rasters.json", "heights": out / "baked.parquet", "tiles": out / "report.json"}
-    redo = STEPS[STEPS.index(a.redo):] if a.redo else []
+    done = {"overture": out / "parts.parquet", "rasters": out / "rasters.json", "heights": out / "baked.parquet", "tiles": out / "report.json"}
+    inputs, stamp = {"overture": OVERTURE_RELEASE, "year": HEIGHTS_YEAR, "stat": HEIGHT_STAT, "bbox": cfg["bbox"]}, out / "inputs.json"
+    if stamp.exists() and json.loads(stamp.read_text()) != inputs and not a.redo:
+        print("inputs changed since the last build: rebuilding from overture")
+        a.redo = "overture"
+    for step in STEPS[STEPS.index(a.redo):] if a.redo else []:
+        done[step].unlink(missing_ok=True)  # a failed redo must not leave the old marker behind
     for step in STEPS:
-        if step in redo or not done[step].exists():
+        if not done[step].exists():
             print(f"== {step}")
             globals()[f"step_{step}"](a.city, cfg, out)
+    stamp.write_text(json.dumps(inputs))
 
 
 if __name__ == "__main__":
