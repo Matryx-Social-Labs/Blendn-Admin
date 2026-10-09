@@ -447,6 +447,11 @@ export const ActiveCheckinSchema = z
       .nullable()
       .describe("When a Go Live ends; null at an event. A Go Live past its end is never listed, swept or not."),
     stay: z.boolean().describe("A Go Live on \"stay\": in-fence pings carry `expiresAt` on."),
+    venueId: z
+      .string()
+      .uuid()
+      .nullable()
+      .describe("The venue a Go Live is at (`venue_day` only; null at an event): extend or go again there."),
     /**
      * Whether **you** are named in this room. Never anyone else's state — this
      * endpoint is scoped to the caller. Drives the status chip.
