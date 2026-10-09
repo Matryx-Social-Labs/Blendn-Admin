@@ -1,9 +1,12 @@
+import "server-only"
+
 import { Prisma, type rsvp_status } from "@prisma/client"
 
 import { analyticsAccess, mayOpenEvent, type AnalyticsAccess } from "./analytics-access"
+import { planBadgeFor, type PlanDate } from "./billing"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
-import { discloseFigure, discloseRating, MIN_CELL } from "./disclosure"
+import { discloseBreakdown, discloseRating, MIN_CELL } from "./disclosure"
 import type { PacingPoint } from "./dashboard-types"
 import { realEventsWhere } from "./event-kind"
 import { buildPacing, pacingWindowDays } from "./pacing"
@@ -20,13 +23,22 @@ import { buildPacing, pacingWindowDays } from "./pacing"
  * `lib/sample-analytics.ts`; the organisation's numbers never reach a page,
  * blurred or otherwise (MN-I12).
  *
- * ## Every figure is floored
+ * ## Every new figure is floored, and so is its complement
  *
- * Counts of people use the minimum cell (`MIN_CELL`, 5). A count that is a
- * subset of a known group — first-timers of the people who came, the cohort
- * that came back — goes through `discloseFigure`, so a cell that is everyone or
- * everyone-but-one is held back too. A percentage is shown only when its
- * numerator was. Held back is `null`, and the screen says "held back".
+ * A count of people needs `MIN_CELL` (5). A part of a known group — the
+ * first-timers among the people who came, the share of a cohort that came
+ * back, the people who left early — is shown only when BOTH it and the rest of
+ * the group reach the floor (`heldPart`, through `discloseBreakdown`): "17 of
+ * 20 were first-timers" would otherwise name the 3 who were not. A percentage
+ * is shown only when its part was. Held back is `null`, and the screen says
+ * "held back".
+ *
+ * ## What stays exact, and why
+ *
+ * Going, came and turn-up in the comparison are the organisation's own counts
+ * of its own events, which its free event page already shows exactly
+ * (`lib/event-overview.ts`, `lib/attendance.ts`). Flooring them here would
+ * hide nothing and contradict that page.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -37,6 +49,9 @@ const COMPARISON_LIMIT = 50
 export const PACING_MEDIAN_OF = 5
 /** Leaving more than this before the end counts as leaving early. */
 const LEFT_EARLY_MS = 30 * 60 * 1000
+/** A quartile of fewer than this many stays sits on one or two people's times. */
+const QUARTILE_FLOOR = 8
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000
 
 export type Range = "30d" | "90d" | "all"
 export const RANGES: Range[] = ["30d", "90d", "all"]
@@ -50,12 +65,21 @@ function rangeStart(range: Range, now: Date): Date {
   return new Date(now.getTime() - (range === "30d" ? 30 : 90) * DAY_MS)
 }
 
+/** "2026-08": the IST month an instant falls in. */
+function istMonth(at: Date): string {
+  return new Date(at.getTime() + IST_OFFSET_MS).toISOString().slice(0, 7)
+}
+
 /** A plain count of people, at the minimum cell. */
 export const held = (n: number): number | null => (n >= MIN_CELL ? n : null)
 
-/** A subset of a known group of people, through every disclosure check. */
+/**
+ * A part of a known group, shown only when the part and the rest both reach
+ * the floor. The rest is never shown beside it, so neither can be subtracted
+ * from a total to recover the other.
+ */
 export const heldPart = (part: number, whole: number): number | null =>
-  whole < MIN_CELL ? null : discloseFigure({ count: part, contributors: part, population: whole }).value
+  whole < MIN_CELL ? null : discloseBreakdown([part, whole - part]).cells[0]
 
 const pct = (part: number | null, whole: number): number | null =>
   part === null || whole === 0 ? null : Math.round((part / whole) * 100)
@@ -70,7 +94,7 @@ const attendanceCte = (orgId: string) => Prisma.sql`
        AND e.deleted_at IS NULL
        AND e.kind = 'event'
        AND ci.kind = 'attendee'
-       AND ci.status::text IN (${Prisma.join(ATTENDED)})
+       AND ci.status = ANY(${ATTENDED}::check_in_status[])
   )`
 
 /* -------------------------------------------------------------------------- */
@@ -90,7 +114,7 @@ export interface ComparisonRow {
 }
 
 export interface CohortRow {
-  /** "2026-08": the month of each person's first event here. */
+  /** "2026-08": the IST month of each person's first event here. */
   month: string
   people: number | null
   /** Per window: a percentage, null when held back, "open" while the window has not closed for everyone. */
@@ -108,11 +132,46 @@ export interface PacingVsMedian {
 
 export interface OrgAnalytics {
   range: Range
-  /** The hero: of the people whose first event here was in range, the share back within 90 days. */
-  backWithin90: { pct: number | null; cohort: number | null }
+  /**
+   * The hero: of the first-timers in the monthly cohorts whose 90 days have
+   * closed and whose 90-day cell is shown (under All time), the share back
+   * within 90 days. Built only from cells the grid itself shows, so it can
+   * never be differenced against them to recover a held-back one.
+   */
+  backWithin90: { pct: number | null; cohort: number | null; cohorts: number }
   comparison: ComparisonRow[]
   cohorts: CohortRow[]
   pacing: PacingVsMedian | null
+}
+
+interface RawCohort {
+  month: string
+  people: number
+  e30: number
+  b30: number
+  e60: number
+  b60: number
+  e90: number
+  b90: number
+}
+
+/** One window of one cohort row: open, held back, or a percentage. */
+function cohortCell(people: number, eligible: number, back: number): number | null | "open" {
+  if (eligible < people) return "open"
+  return pct(heldPart(back, eligible), eligible)
+}
+
+function cohortRow(r: RawCohort): CohortRow {
+  const shown = held(r.people)
+  return {
+    month: r.month,
+    people: shown,
+    back: {
+      d30: shown === null ? null : cohortCell(r.people, r.e30, r.b30),
+      d60: shown === null ? null : cohortCell(r.people, r.e60, r.b60),
+      d90: shown === null ? null : cohortCell(r.people, r.e90, r.b90),
+    },
+  }
 }
 
 export async function orgAnalytics(
@@ -124,11 +183,11 @@ export async function orgAnalytics(
   const orgId = access.orgId
   const from = rangeStart(range, now)
 
-  const [comparison, cohortRows, pacing] = await Promise.all([
+  const [comparison, rawCohorts, pacing] = await Promise.all([
     comparisonRows(orgId, from, now),
-    db.$queryRaw<
-      { month: string; people: bigint; e30: bigint; b30: bigint; e60: bigint; b60: bigint; e90: bigint; b90: bigint }[]
-    >`
+    // Every cohort, whatever the range: the range picks WHOLE months below, in
+    // JS, so a boundary month can never be differenced between two ranges.
+    db.$queryRaw<{ month: string; people: bigint; e30: bigint; b30: bigint; e60: bigint; b60: bigint; e90: bigint; b90: bigint }[]>`
       WITH ${attendanceCte(orgId)},
       first_seen AS (SELECT user_id, MIN(start_time) AS first_at FROM att GROUP BY user_id),
       firsts AS (
@@ -145,37 +204,37 @@ export async function orgAnalytics(
              count(*) FILTER (WHERE first_at <= ${new Date(now.getTime() - 90 * DAY_MS)}) AS e90,
              count(*) FILTER (WHERE first_at <= ${new Date(now.getTime() - 90 * DAY_MS)} AND second_at <= first_at + interval '90 days') AS b90
         FROM firsts
-       WHERE first_at >= ${from} AND first_at < ${now}
+       WHERE first_at < ${now}
     GROUP BY 1
     ORDER BY 1 DESC
     `,
     pacingVsMedian(orgId, now),
   ])
 
-  const window = (people: number, eligible: number, back: number): number | null | "open" => {
-    if (eligible < people) return "open"
-    return pct(heldPart(back, eligible), eligible)
-  }
-  const cohorts: CohortRow[] = cohortRows.map((r) => {
-    const people = Number(r.people)
-    return {
-      month: r.month,
-      people: held(people),
-      back: {
-        d30: held(people) === null ? null : window(people, Number(r.e30), Number(r.b30)),
-        d60: held(people) === null ? null : window(people, Number(r.e60), Number(r.b60)),
-        d90: held(people) === null ? null : window(people, Number(r.e90), Number(r.b90)),
-      },
-    }
-  })
+  const all: RawCohort[] = rawCohorts.map((r) => ({
+    month: r.month,
+    people: Number(r.people),
+    e30: Number(r.e30),
+    b30: Number(r.b30),
+    e60: Number(r.e60),
+    b60: Number(r.b60),
+    e90: Number(r.e90),
+    b90: Number(r.b90),
+  }))
+  const firstMonth = istMonth(from)
+  const cohorts = all.filter((r) => range === "all" || r.month >= firstMonth).map(cohortRow)
 
-  // The hero pools every cohort whose 90-day window has closed.
-  const e90 = cohortRows.reduce((n, r) => n + Number(r.e90), 0)
-  const b90 = cohortRows.reduce((n, r) => n + Number(r.b90), 0)
+  // The hero pools the rows the All-time grid shows with a closed, shown 90-day cell.
+  const pooled = all.filter((r) => {
+    const row = cohortRow(r)
+    return typeof row.back.d90 === "number"
+  })
+  const e90 = pooled.reduce((n, r) => n + r.e90, 0)
+  const b90 = pooled.reduce((n, r) => n + r.b90, 0)
 
   return {
     range,
-    backWithin90: { pct: pct(heldPart(b90, e90), e90), cohort: held(e90) },
+    backWithin90: { pct: pooled.length ? pct(b90, e90) : null, cohort: pooled.length ? e90 : null, cohorts: pooled.length },
     comparison,
     cohorts,
     pacing,
@@ -316,21 +375,58 @@ async function pacingVsMedian(orgId: string, now: Date): Promise<PacingVsMedian 
 /* One event (the Event Pass)                                                  */
 /* -------------------------------------------------------------------------- */
 
+/** One bar of the arrivals replay: one or more consecutive 10-minute slots. */
+export interface ArrivalBar {
+  from: string
+  to: string
+  people: number
+}
+
 export interface EventAnalytics {
   eventId: string
   people: number | null
   stay: {
-    p25Min: number
     p50Min: number
-    p75Min: number
+    /** The middle half, shown only from `QUARTILE_FLOOR` stays. */
+    quartiles: { p25Min: number; p75Min: number } | null
     leftEarlyPct: number | null
     softPct: number | null
   } | null
-  /** First arrivals per 10 minutes from 30 minutes before the start; null bars are under the floor. */
-  arrivals: { at: string; people: number | null }[]
+  /**
+   * First arrivals in 10-minute slots, a slot under the floor merged into its
+   * neighbour so every bar reaches 5 and the bars add up to the total. Empty
+   * when fewer than 5 people's arrivals were recorded at all.
+   */
+  arrivals: ArrivalBar[]
   firstTimers: number | null
   returning: number | null
-  funnel: { viewers: number | null; rsvps: number; viewersWhoRsvpd: number | null; conversionPct: number | null }
+  /** App views → RSVPs, counting a view only before that person's RSVP, and nobody of the organisation's own. */
+  funnel: { viewers: number | null; viewersWhoRsvpd: number | null; conversionPct: number | null }
+}
+
+const SLOT_MS = 10 * 60 * 1000
+
+/** Merge consecutive slots until each bar reaches the floor; a short tail joins the last bar. */
+export function mergeArrivals(slots: { at: Date; n: number }[]): ArrivalBar[] {
+  type Bar = { from: number; to: number; people: number }
+  const bars: Bar[] = []
+  let open = null as Bar | null
+  for (const slot of slots) {
+    const at = slot.at.getTime()
+    const next: Bar = open ? { from: open.from, to: at + SLOT_MS, people: open.people + slot.n } : { from: at, to: at + SLOT_MS, people: slot.n }
+    if (next.people >= MIN_CELL) {
+      bars.push(next)
+      open = null
+    } else {
+      open = next
+    }
+  }
+  const tail = open
+  if (tail && bars.length) {
+    const last = bars[bars.length - 1]
+    bars[bars.length - 1] = { from: last.from, to: tail.to, people: last.people + tail.people }
+  }
+  return bars.map((b) => ({ from: new Date(b.from).toISOString(), to: new Date(b.to).toISOString(), people: b.people }))
 }
 
 export async function eventAnalytics(
@@ -345,7 +441,7 @@ export async function eventAnalytics(
   })
   if (!event) return null
 
-  const [stay, arrivals, firsts, viewers, rsvpd, viewedAndRsvpd] = await Promise.all([
+  const [stay, slots, firsts, funnel] = await Promise.all([
     stayByEvent([eventId]),
     db.$queryRaw<{ bucket: Date; n: bigint }[]>`
       WITH first_arrival AS (
@@ -368,17 +464,20 @@ export async function eventAnalytics(
        WHERE a.event_id = ${eventId}::uuid
     `,
     // App views only: signed-in, in the app, kept 180 days (lib/product-events.ts).
-    db.product_events.findMany({
-      where: { name: "event_viewed", entity_id: eventId, user_id: { not: null } },
-      distinct: ["user_id"],
-      select: { user_id: true },
-    }),
-    db.event_rsvps.count({ where: { event_id: eventId, status: { in: COMMITTED } } }),
-    db.$queryRaw<{ n: bigint }[]>`
-      SELECT count(DISTINCT r.user_id) AS n
-        FROM event_rsvps r
-        JOIN product_events pe ON pe.user_id = r.user_id AND pe.entity_id = r.event_id AND pe.name = 'event_viewed'
-       WHERE r.event_id = ${eventId}::uuid AND r.status::text IN ('going', 'maybe')
+    // The organisation's own members are not its audience; a view counts
+    // toward an RSVP only if it came before it.
+    db.$queryRaw<{ viewers: bigint; converted: bigint }[]>`
+      WITH members AS (SELECT user_id FROM organisation_members WHERE org_id = ${orgId}::uuid),
+      views AS (
+        SELECT pe.user_id, MIN(pe.occurred_at) AS first_view
+          FROM product_events pe
+         WHERE pe.entity_id = ${eventId}::uuid AND pe.name = 'event_viewed' AND pe.user_id IS NOT NULL
+           AND pe.user_id NOT IN (SELECT user_id FROM members)
+      GROUP BY pe.user_id
+      )
+      SELECT (SELECT count(*) FROM views) AS viewers,
+             (SELECT count(*) FROM views v JOIN event_rsvps r ON r.user_id = v.user_id AND r.event_id = ${eventId}::uuid
+               WHERE r.status = ANY(${COMMITTED}::rsvp_status[]) AND v.first_view <= r.created_at) AS converted
     `,
   ])
 
@@ -386,9 +485,8 @@ export async function eventAnalytics(
   const stayPeople = s ? Number(s.people) : 0
   const came = Number(firsts[0]?.came ?? 0)
   const firstTimers = Number(firsts[0]?.first_timers ?? 0)
-  const viewerCount = viewers.length
-  const converted = Number(viewedAndRsvpd[0]?.n ?? 0)
-  const convertedHeld = heldPart(converted, viewerCount)
+  const viewers = Number(funnel[0]?.viewers ?? 0)
+  const converted = heldPart(Number(funnel[0]?.converted ?? 0), viewers)
 
   return {
     eventId,
@@ -396,21 +494,19 @@ export async function eventAnalytics(
     stay:
       s && stayPeople >= MIN_CELL
         ? {
-            p25Min: Math.round(Number(s.p25) / 60),
             p50Min: Math.round(Number(s.p50) / 60),
-            p75Min: Math.round(Number(s.p75) / 60),
+            quartiles: stayPeople >= QUARTILE_FLOOR ? { p25Min: Math.round(Number(s.p25) / 60), p75Min: Math.round(Number(s.p75) / 60) } : null,
             leftEarlyPct: pct(heldPart(Number(s.left_early), stayPeople), stayPeople),
             softPct: pct(heldPart(Number(s.soft), stayPeople), stayPeople),
           }
         : null,
-    arrivals: arrivals.map((a) => ({ at: a.bucket.toISOString(), people: held(Number(a.n)) })),
+    arrivals: mergeArrivals(slots.map((a) => ({ at: a.bucket, n: Number(a.n) }))),
     firstTimers: heldPart(firstTimers, came),
     returning: heldPart(came - firstTimers, came),
     funnel: {
-      viewers: held(viewerCount),
-      rsvps: rsvpd,
-      viewersWhoRsvpd: convertedHeld,
-      conversionPct: pct(convertedHeld, viewerCount),
+      viewers: held(viewers),
+      viewersWhoRsvpd: converted,
+      conversionPct: pct(converted, viewers),
     },
   }
 }
@@ -424,7 +520,8 @@ export interface AnalyticsPageView {
     org: boolean
     reason: AnalyticsAccess["reason"]
     freeUntil: string | null
-    paidUntil: string | null
+    /** "renews" a running subscription's paid-up date, or "until" a grant's or a cancelled one's end. */
+    date: { word: PlanDate["word"]; at: string } | null
     firstFreeEvent: { id: string; title: string; endedAt: string } | null
   }
   range: Range
@@ -442,7 +539,7 @@ export async function analyticsPage(
   now: Date = new Date()
 ): Promise<AnalyticsPageView> {
   const access = await analyticsAccess(orgId, now)
-  const [org, ended, firstFree] = await Promise.all([
+  const [org, ended, firstFree, badge] = await Promise.all([
     orgAnalytics(access, opts.range, now),
     db.events.findMany({
       where: { organizer_org_id: orgId, deleted_at: null, end_time: { lt: now }, ...realEventsWhere },
@@ -453,6 +550,7 @@ export async function analyticsPage(
     access.firstFreeEventId
       ? db.events.findUnique({ where: { id: access.firstFreeEventId }, select: { id: true, title: true, end_time: true } })
       : null,
+    planBadgeFor(orgId, now),
   ])
 
   const events = ended.map((e) => ({
@@ -469,7 +567,7 @@ export async function analyticsPage(
       org: access.org,
       reason: access.reason,
       freeUntil: access.freeUntil?.toISOString() ?? null,
-      paidUntil: access.paidUntil?.toISOString() ?? null,
+      date: badge.date ? { word: badge.date.word, at: badge.date.at.toISOString() } : null,
       firstFreeEvent: firstFree ? { id: firstFree.id, title: firstFree.title, endedAt: firstFree.end_time.toISOString() } : null,
     },
     range: opts.range,

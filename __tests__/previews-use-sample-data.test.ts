@@ -63,9 +63,21 @@ function samples(): { file: string; expr: string }[] {
   return out
 }
 
-/** The values handed to a component inside the sample: `data={X}`, `rows={X}`, `pacing={X}`, … */
-const propValues = (expr: string) =>
-  [...expr.matchAll(/\b\w+=\{\s*([^{}\s][^{}]*?)\s*\}/g)].map((m) => m[1])
+/**
+ * Every value a sample expression could carry that is not a SAMPLE_ constant.
+ * Strings, JSX tag names, attribute names, object keys and the constants are
+ * removed; any identifier left is data from somewhere else — a prop, a spread,
+ * a nested object, a variable (G13).
+ */
+export function foreignValues(expr: string): string[] {
+  const rest = expr
+    .replace(/(["'`])(?:\\.|(?!\1).)*\1/g, " ")
+    .replace(/\bSAMPLE_[A-Z_]+(?:\.[A-Za-z_]\w*)*/g, " ")
+    .replace(/<\/?[A-Z][\w.]*/g, " ")
+    .replace(/\b[A-Za-z_]\w*\s*=(?!=)/g, " ")
+    .replace(/\b[A-Za-z_]\w*\s*:/g, " ")
+  return (rest.match(/\b[A-Za-z_$][\w$]*\b/g) ?? []).filter((w) => !["true", "false", "null", "undefined"].includes(w))
+}
 
 describe("locked previews use the static sample", () => {
   const found = samples()
@@ -75,13 +87,22 @@ describe("locked previews use the static sample", () => {
   })
 
   it("passes only SAMPLE_ constants into every preview", () => {
-    const leaks = found.flatMap(({ file, expr }) => {
-      const values = propValues(expr)
-      const bad = values.filter((v) => !/^SAMPLE_[A-Z_]+(\.[\w.]+)?$/.test(v))
-      // A preview with no data prop at all is fine only if it is static markup.
-      return bad.map((v) => `${file}: sample gets ${v}`)
-    })
+    const leaks = found.flatMap(({ file, expr }) => foreignValues(expr).map((v) => `${file}: sample gets ${v}`))
     expect(leaks).toEqual([])
+  })
+
+  it.each([
+    ["a prop", "<OrgPanels data={view.org} />", ["view", "org"]],
+    ["a fallback", "<OrgPanels data={view.org ?? SAMPLE_ORG_ANALYTICS} />", ["view", "org"]],
+    ["a spread", "<OrgPanels {...props} />", ["props"]],
+    ["a nested object", "<OrgPanels data={{ ...SAMPLE_ORG_ANALYTICS, comparison: real.rows }} />", ["real", "rows"]],
+  ])("the detector catches %s (G13)", (_label, expr, words) => {
+    expect(foreignValues(expr)).toEqual(expect.arrayContaining(words))
+  })
+
+  it("the detector passes the sample itself", () => {
+    expect(foreignValues("<OrgPanels data={SAMPLE_ORG_ANALYTICS} />")).toEqual([])
+    expect(foreignValues('<EventPassPanels data={SAMPLE_EVENT_ANALYTICS} label="x" />')).toEqual([])
   })
 
   it("builds the sample from nothing: lib/sample-analytics.ts imports types only", () => {

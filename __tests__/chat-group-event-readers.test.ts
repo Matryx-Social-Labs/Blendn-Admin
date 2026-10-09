@@ -63,6 +63,7 @@ const READERS: Record<string, string> = {
   "lib/entitlements.ts#eventPassesFor": "an Event Pass's event; the CHECK makes it non-null on every pass, and a null is dropped, never matched",
   "lib/razorpay-webhook.ts#applyOrderPaid": "an Event Pass order's event; an order without one is refused as unknown_ref before any use",
   "app/dashboard/analytics/page.tsx#AnalyticsPage": "the `?event=` search param (an event id the loader checks belongs to the org), not a room's event",
+  "lib/razorpay-webhook.ts#applyDispute": "a won dispute restores an Event Pass to its order's event; every pass order is created with its event (lib/billing-actions.ts), and a pass row's CHECK refuses a null",
 }
 
 interface Read {

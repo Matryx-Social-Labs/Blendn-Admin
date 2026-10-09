@@ -222,6 +222,7 @@ function blendRoom(
     closed?: boolean
     blockedBy?: { id: string; side: "a" | "b" | "solo"; how?: "block" | "closed" }
     status?: "active" | "archived" | "locked"
+    hiddenSide?: "a" | "b"
   } = {}
 ) {
   const member = (id: string, side: "a" | "b") => ({
@@ -241,8 +242,8 @@ function blendRoom(
       closed_at: over.closed ? new Date() : null,
       b_user_id: solo,
       occurrence: { check_ins: over.here === false ? [] : [{ user_id: viewer }] },
-      a_crew: { dissolved_at: null, members: sideRows(over.sideA ?? [A1, A2], "a") },
-      b_crew: solo ? null : { dissolved_at: null, members: sideRows(over.sideB ?? [B1], "b") },
+      a_crew: { dissolved_at: null, hidden_at: over.hiddenSide === "a" ? new Date() : null, members: sideRows(over.sideA ?? [A1, A2], "a") },
+      b_crew: solo ? null : { dissolved_at: null, hidden_at: over.hiddenSide === "b" ? new Date() : null, members: sideRows(over.sideB ?? [B1], "b") },
       b_user: solo
         ? {
             suspended_at: null,
@@ -285,6 +286,11 @@ describe("a Blend's room: the people of either side who are here, until it close
     expect(roomReadDenialFor(blendRoom(A1, { solo: SOLO, blockedBy: { id: SOLO, side: "solo" } }), active, A1)).toBe("hidden")
     // A block inside one's own side is not across the sides.
     expect(roomReadDenialFor(blendRoom(A1, { blockedBy: { id: A2, side: "a" } }), active, A1)).toBeNull()
+  })
+
+  it("is gone for everyone once either side is hidden by a moderator, whether or not its close has landed", () => {
+    expect(roomReadDenialFor(blendRoom(A1, { hiddenSide: "b" }), active, A1)).toBe("hidden")
+    expect(roomReadDenialFor(blendRoom(B1, { hiddenSide: "a" }), active, B1)).toBe("hidden")
   })
 
   it("reads a closed conversation across the sides as a block (C6)", () => {

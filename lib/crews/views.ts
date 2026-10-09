@@ -102,9 +102,11 @@ export async function crewsOf(userId: string) {
       orderBy: { created_at: "desc" },
     }),
     db.crew_invites.findMany({
-      where: { invited_user_id: userId, ...openInviteWhere(), crew: { dissolved_at: null } },
+      // Never a crew a moderator hid: the invitee is outside it (C12).
+      where: { invited_user_id: userId, ...openInviteWhere(), crew: { dissolved_at: null, hidden_at: null } },
       select: {
         created_at: true,
+        invited_by: true,
         inviter: { select: { name: true, profile: { select: { name: true } } } },
         crew: {
           select: {
@@ -120,10 +122,15 @@ export async function crewsOf(userId: string) {
       orderBy: { created_at: "desc" },
     }),
   ])
-  const apart = await blocksBetween([userId], [...new Set(crews.flatMap((c) => c.members.map((m) => m.user_id)))])
+  const apart = await blocksBetween(
+    [userId],
+    [...new Set([...crews.flatMap((c) => c.members.map((m) => m.user_id)), ...invites.map((i) => i.invited_by)])]
+  )
   return {
     crews: crews.map((c) => crewView(userId, c, apart)),
-    invites: invites.map((i) => ({
+    // Not an invite from somebody now kept apart from you: the accept would
+    // refuse it, so it is not on the screen either.
+    invites: invites.filter((i) => !apart.has(`${userId}|${i.invited_by}`)).map((i) => ({
       crewId: i.crew.id,
       name: i.crew.name,
       bio: i.crew.bio,

@@ -150,7 +150,8 @@ async function renderedTree(params: Record<string, string> = {}): Promise<string
   })
 }
 
-const CANARY = ['"p50Min":173', '"medianStayMin":173', '"viewers":11']
+// The owner's own view is not counted (an org member): ten viewers.
+const CANARY = ['"p50Min":173', '"medianStayMin":173', '"viewers":10']
 
 describe("the paywall's clock", () => {
   it("has started: the first event that cleared the floor ended 60 days ago", async () => {
@@ -207,6 +208,25 @@ describe("the server refuses, not the component (DK-I01)", () => {
     }
     expect({ org, one, touched }).toEqual({ org: null, one: null, touched: [] })
   })
+
+  it("and the same probe does see the database when access is open (the positive control)", async () => {
+    const access = { ...(await analyticsAccess(orgId, now)), org: true }
+    await appDb.$queryRaw`SELECT 1`
+    const real = globalThis.prisma!
+    const touched: string[] = []
+    globalThis.prisma = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (typeof prop === "string" && prop !== "then") touched.push(prop)
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+    try {
+      expect(await eventAnalytics(access, canaryEventId)).not.toBeNull()
+    } finally {
+      globalThis.prisma = real
+    }
+    expect(touched.length).toBeGreaterThan(0)
+  })
 })
 
 describe("floors on every new figure", () => {
@@ -214,20 +234,40 @@ describe("floors on every new figure", () => {
     const access = { ...(await analyticsAccess(orgId, now)), org: true }
     const small = await eventAnalytics(access, smallEventId)
     expect(small).toMatchObject({ people: null, stay: null, firstTimers: null, returning: null })
-    expect(small!.arrivals.every((a) => a.people === null)).toBe(true)
+    expect(small!.arrivals).toEqual([])
   })
 
   it("shows the canary's figures, each through its floor, once open", async () => {
     const access = { ...(await analyticsAccess(orgId, now)), org: true }
     const canary = await eventAnalytics(access, canaryEventId)
     expect(canary!.people).toBe(7)
-    expect(canary!.stay).toMatchObject({ p25Min: 173, p50Min: 173, p75Min: 173, leftEarlyPct: null, softPct: null })
+    // Seven stays: the median, never the quartiles (they need eight).
+    expect(canary!.stay).toMatchObject({ p50Min: 173, quartiles: null, leftEarlyPct: null, softPct: null })
     // Four of the seven had been before (people 2–5), three had not: both parts are under the floor.
     expect(canary!.returning).toBeNull()
     expect(canary!.firstTimers).toBeNull()
-    expect(canary!.funnel.viewers).toBe(11)
+    expect(canary!.funnel.viewers).toBe(10)
     // Seven arrived in one 10-minute bucket at the door.
-    expect(canary!.arrivals).toEqual([{ at: expect.any(String), people: 7 }])
+    expect(canary!.arrivals).toEqual([{ from: expect.any(String), to: expect.any(String), people: 7 }])
+  })
+})
+
+describe("an Event Pass opens exactly one event (G2)", () => {
+  afterAll(async () => {
+    await db.entitlements.deleteMany({ where: { subject_id: orgId, product: "event_pass" } })
+  })
+
+  it("the canary opens with its pass; the other locked event stays locked; nothing cross-event opens", async () => {
+    await db.entitlements.create({
+      data: { subject_kind: "org", subject_id: orgId, product: "event_pass", event_id: canaryEventId, source: "razorpay", external_ref: `order_${randomUUID()}`, starts_at: new Date(now.getTime() - 60_000) },
+    })
+    const view = await analyticsPage(orgId, { range: "90d", eventId: canaryEventId }, now)
+    expect(view.org).toBeNull()
+    expect(view.selected).toMatchObject({ id: canaryEventId, open: true })
+    expect(view.selected?.data?.stay?.p50Min).toBe(173)
+    expect(view.events.find((e) => e.id === smallEventId)?.open).toBe(false)
+    const other = await analyticsPage(orgId, { range: "90d", eventId: smallEventId }, now)
+    expect(other.selected).toMatchObject({ id: smallEventId, open: false, data: null })
   })
 })
 
@@ -237,7 +277,7 @@ describe("Analytics, granted, opens the same figures (the positive control)", ()
   })
 
   it("carries the canary once the organisation may see it", async () => {
-    await grantEntitlement({ subject: { kind: "org", id: orgId }, product: "analytics", months: 6 })
+    await db.$transaction((tx) => grantEntitlement(tx, { subject: { kind: "org", id: orgId }, product: "analytics", months: 6 }))
     const view = await analyticsPage(orgId, { range: "90d", eventId: canaryEventId }, new Date())
     expect(view.access.reason).toBe("grant")
     expect(view.org?.comparison.find((r) => r.eventId === canaryEventId)?.medianStayMin).toBe(173)
@@ -249,11 +289,13 @@ describe("Analytics, granted, opens the same figures (the positive control)", ()
 describe("an Event Pass is not sold for what is already open", () => {
   beforeEach(() => {
     process.env.RAZORPAY_KEY_ID = "rzp_test_itestkey"
-    process.env.RAZORPAY_KEY_SECRET = "itest_key_secret_value"
+    process.env.RAZORPAY_KEY_SECRET = "itest_key_secret_value_24"
+    process.env.RAZORPAY_WEBHOOK_SECRET = "whsec_itest_analytics_gating_0123456789"
   })
   afterEach(() => {
     delete process.env.RAZORPAY_KEY_ID
     delete process.env.RAZORPAY_KEY_SECRET
+    delete process.env.RAZORPAY_WEBHOOK_SECRET
   })
 
   it("refuses the first event that cleared the floor, before calling Razorpay", async () => {

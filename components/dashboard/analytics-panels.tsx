@@ -41,15 +41,16 @@ export function ComparisonTable({ rows }: { rows: ComparisonRow[] }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-[0.8125rem]">
+            <caption className="sr-only">Past events in range, side by side</caption>
             <thead>
               <tr className="text-left text-[0.75rem] text-faint-foreground">
-                <th className="pb-2 font-medium">Event</th>
-                <th className="pb-2 text-right font-medium">Going</th>
-                <th className="pb-2 text-right font-medium">Came</th>
-                <th className="pb-2 text-right font-medium">Turn-up</th>
-                <th className="pb-2 text-right font-medium">First-time</th>
-                <th className="pb-2 text-right font-medium">Median stay</th>
-                <th className="pb-2 text-right font-medium">Rating</th>
+                <th scope="col" className="pb-2 font-medium">Event</th>
+                <th scope="col" className="pb-2 text-right font-medium">Going</th>
+                <th scope="col" className="pb-2 text-right font-medium">Came</th>
+                <th scope="col" className="pb-2 text-right font-medium">Turn-up</th>
+                <th scope="col" className="pb-2 text-right font-medium">First-time</th>
+                <th scope="col" className="pb-2 text-right font-medium">Median stay</th>
+                <th scope="col" className="pb-2 text-right font-medium">Rating</th>
               </tr>
             </thead>
             <tbody className="tabular-nums">
@@ -86,13 +87,14 @@ export function CohortGrid({ rows }: { rows: CohortRow[] }) {
         <p className="text-[0.8125rem] text-muted-foreground">Nobody had a first event here in this range.</p>
       ) : (
         <table className="w-full text-[0.8125rem]">
+          <caption className="sr-only">Share of each month&apos;s first-timers who came back within 30, 60 and 90 days</caption>
           <thead>
             <tr className="text-left text-[0.75rem] text-faint-foreground">
-              <th className="pb-2 font-medium">First event</th>
-              <th className="pb-2 text-right font-medium">People</th>
-              <th className="pb-2 text-right font-medium">30 days</th>
-              <th className="pb-2 text-right font-medium">60 days</th>
-              <th className="pb-2 text-right font-medium">90 days</th>
+              <th scope="col" className="pb-2 font-medium">First event</th>
+              <th scope="col" className="pb-2 text-right font-medium">People</th>
+              <th scope="col" className="pb-2 text-right font-medium">30 days</th>
+              <th scope="col" className="pb-2 text-right font-medium">60 days</th>
+              <th scope="col" className="pb-2 text-right font-medium">90 days</th>
             </tr>
           </thead>
           <tbody className="tabular-nums">
@@ -160,36 +162,35 @@ function Stat({ label, value, note }: { label: string; value: React.ReactNode; n
 
 export function ArrivalBars({ arrivals }: { arrivals: EventAnalytics["arrivals"] }) {
   if (arrivals.length === 0) {
-    return <p className="text-[0.8125rem] text-muted-foreground">No arrival was recorded for this event.</p>
+    return <p className="text-[0.8125rem] text-muted-foreground">Fewer than 5 people&apos;s arrivals were recorded for this event.</p>
   }
-  const peak = Math.max(...arrivals.map((a) => a.people ?? 0), 5)
+  const slots = (b: (typeof arrivals)[number]) => Math.max(1, Math.round((Date.parse(b.to) - Date.parse(b.from)) / 600_000))
+  // Height is arrivals per 10 minutes, so a merged bar is drawn at its rate, not its total.
+  const peak = Math.max(...arrivals.map((b) => b.people / slots(b)), 1)
+  const total = arrivals.reduce((n, b) => n + b.people, 0)
+  const busiest = arrivals.reduce((a, b) => (b.people / slots(b) > a.people / slots(a) ? b : a))
+  const summary = `${total} first arrivals from ${TIME.format(new Date(arrivals[0].from))} to ${TIME.format(
+    new Date(arrivals[arrivals.length - 1].to)
+  )}; busiest ${TIME.format(new Date(busiest.from))}–${TIME.format(new Date(busiest.to))} with ${busiest.people}.`
   return (
     <figure className="flex flex-col gap-1.5">
       <figcaption className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
         Arrivals, every 10 minutes
       </figcaption>
-      <div className="flex h-[120px] items-end gap-1 border-b border-chart-grid">
-        {arrivals.map((a) =>
-          a.people === null ? (
-            <div
-              key={a.at}
-              title={`${TIME.format(new Date(a.at))}: fewer than 5, held back`}
-              className="h-2.5 flex-1 rounded-t border border-dashed border-border-strong"
-            />
-          ) : (
-            <div
-              key={a.at}
-              title={`${TIME.format(new Date(a.at))}: ${a.people}`}
-              className="flex-1 rounded-t bg-chart-1"
-              style={{ height: `${Math.max(4, (a.people / peak) * 100)}%` }}
-            />
-          )
-        )}
+      <div role="img" aria-label={summary} className="flex h-[120px] items-end gap-1 border-b border-chart-grid">
+        {arrivals.map((b) => (
+          <div
+            key={b.from}
+            title={`${TIME.format(new Date(b.from))}–${TIME.format(new Date(b.to))}: ${b.people}`}
+            className="rounded-t bg-chart-1"
+            style={{ flexGrow: slots(b), flexBasis: 0, height: `${Math.max(4, (b.people / slots(b) / peak) * 100)}%` }}
+          />
+        ))}
       </div>
       <div className="flex justify-between text-[0.6875rem] text-faint-foreground">
-        <span>{TIME.format(new Date(arrivals[0].at))}</span>
-        <span>dashed: fewer than 5, held back</span>
-        <span>{TIME.format(new Date(arrivals[arrivals.length - 1].at))}</span>
+        <span>{TIME.format(new Date(arrivals[0].from))}</span>
+        <span>a quiet stretch is merged into the bar beside it until it holds 5</span>
+        <span>{TIME.format(new Date(arrivals[arrivals.length - 1].to))}</span>
       </div>
     </figure>
   )
@@ -204,7 +205,13 @@ export function EventPassPanels({ data }: { data: EventAnalytics }) {
         <Stat
           label="Median stay"
           value={stay ? minutes(stay.p50Min) : <HeldBack />}
-          note={stay ? `middle half ${minutes(stay.p25Min)} – ${minutes(stay.p75Min)}` : "fewer than 5 people's stays"}
+          note={
+            !stay
+              ? "fewer than 5 people's stays"
+              : stay.quartiles
+                ? `middle half ${minutes(stay.quartiles.p25Min)} – ${minutes(stay.quartiles.p75Min)}`
+                : "middle half shown from 8 stays"
+          }
         />
         <Stat
           label="Left early"
@@ -222,7 +229,9 @@ export function EventPassPanels({ data }: { data: EventAnalytics }) {
           note={
             funnel.viewers === null
               ? "fewer than 5 people looked · app views only"
-              : `${funnel.viewersWhoRsvpd ?? "<5"} of ${funnel.viewers} who looked · app views only`
+              : funnel.viewersWhoRsvpd === null
+                ? `of ${funnel.viewers} who looked; the split is held back · app views only`
+                : `${funnel.viewersWhoRsvpd} of ${funnel.viewers} who looked · app views only`
           }
         />
       </div>

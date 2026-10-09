@@ -1,7 +1,9 @@
+import "server-only"
+
 import { distinctAttendeeCounts } from "./attendee-counts"
 import { db } from "./db"
 import { MIN_CELL } from "./disclosure"
-import { eventPassesFor, hasEntitlement, liveEntitlement } from "./entitlements"
+import { eventPassesFor, liveEntitlement } from "./entitlements"
 import { realEventsWhere } from "./event-kind"
 
 /**
@@ -16,7 +18,10 @@ import { realEventsWhere } from "./event-kind"
  *    (at least `MIN_CELL` people checked in). An organisation whose events have
  *    all been too small to show anything has nothing to pay for yet, so the
  *    clock has not started (audit §5.1: a first event of six shows held-back
- *    tiles and sells nothing).
+ *    tiles and sells nothing). Once found, the date and the event are written
+ *    to the organisation ONCE (`analytics_free_until`, `first_free_event_id`)
+ *    and never re-derived, so soft-deleting that event, or a check-in fixed
+ *    later, cannot restart the 30 days.
  * 3. **That first event's analytics stay free for good.**
  * 4. **An Event Pass** opens one event's pass features.
  *
@@ -48,12 +53,11 @@ export interface AnalyticsAccess {
 /** The decision itself, from facts already loaded. Pure, for DK-U01. */
 export function decideAccess(input: {
   entitled: "analytics" | "grant" | null
-  qualifyingEventEnd: Date | null
+  /** The written-once end of the free window; null while no event has cleared the floor. */
+  freeUntil: Date | null
   now: Date
 }): { org: boolean; reason: AccessReason; freeUntil: Date | null } {
-  const freeUntil = input.qualifyingEventEnd
-    ? new Date(input.qualifyingEventEnd.getTime() + FREE_WINDOW_DAYS * DAY_MS)
-    : null
+  const { freeUntil } = input
   if (input.entitled) return { org: true, reason: input.entitled, freeUntil }
   if (freeUntil === null || input.now < freeUntil) return { org: true, reason: "free_window", freeUntil }
   return { org: false, reason: "free", freeUntil }
@@ -86,28 +90,49 @@ async function firstQualifyingEvent(orgId: string, now: Date): Promise<{ id: str
   }
 }
 
+/**
+ * The organisation's free window, from its row once written; otherwise found
+ * now and written once (a concurrent first read writes the same answer, and
+ * only the first write lands).
+ */
+async function freeWindow(orgId: string, now: Date): Promise<{ until: Date; eventId: string } | null> {
+  const org = await db.organisations.findUnique({
+    where: { id: orgId },
+    select: { analytics_free_until: true, first_free_event_id: true },
+  })
+  if (org?.analytics_free_until && org.first_free_event_id) {
+    return { until: org.analytics_free_until, eventId: org.first_free_event_id }
+  }
+  const first = await firstQualifyingEvent(orgId, now)
+  if (!first) return null
+  const until = new Date(first.end.getTime() + FREE_WINDOW_DAYS * DAY_MS)
+  await db.organisations.updateMany({
+    where: { id: orgId, analytics_free_until: null },
+    data: { analytics_free_until: until, first_free_event_id: first.id },
+  })
+  const kept = await db.organisations.findUnique({
+    where: { id: orgId },
+    select: { analytics_free_until: true, first_free_event_id: true },
+  })
+  return kept?.analytics_free_until && kept.first_free_event_id
+    ? { until: kept.analytics_free_until, eventId: kept.first_free_event_id }
+    : { until, eventId: first.id }
+}
+
 export async function analyticsAccess(orgId: string, now: Date = new Date()): Promise<AnalyticsAccess> {
   const subject = { kind: "org" as const, id: orgId }
-  const [entitled, live, qualifying, events] = await Promise.all([
-    hasEntitlement(subject, "analytics", {}, now),
-    liveEntitlement(subject, "analytics", now),
-    firstQualifyingEvent(orgId, now),
-    db.events.findMany({
-      where: { organizer_org_id: orgId, deleted_at: null, ...realEventsWhere },
-      select: { id: true },
-    }),
-  ])
+  const [live, window] = await Promise.all([liveEntitlement(subject, "analytics", now), freeWindow(orgId, now)])
   const decision = decideAccess({
-    entitled: entitled ? (live?.source === "grant" ? "grant" : "analytics") : null,
-    qualifyingEventEnd: qualifying?.end ?? null,
+    entitled: live ? (live.source === "grant" ? "grant" : "analytics") : null,
+    freeUntil: window?.until ?? null,
     now,
   })
-  const passes = decision.org ? new Set<string>() : await eventPassesFor(orgId, events.map((e) => e.id), now)
+  const passes = decision.org ? new Set<string>() : await eventPassesFor(orgId, undefined, now)
   return {
     orgId,
     ...decision,
-    paidUntil: entitled ? (live?.expiresAt ?? null) : null,
-    firstFreeEventId: qualifying?.id ?? null,
+    paidUntil: live?.expiresAt ?? null,
+    firstFreeEventId: window?.eventId ?? null,
     passEventIds: [...passes],
   }
 }

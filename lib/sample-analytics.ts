@@ -15,7 +15,7 @@ export const SAMPLE_MARKER = "SAMPLE_"
 
 export const SAMPLE_ORG_ANALYTICS: OrgAnalytics = {
   range: "90d",
-  backWithin90: { pct: 38, cohort: 120 },
+  backWithin90: { pct: 38, cohort: 120, cohorts: 3 },
   comparison: [
     { eventId: "SAMPLE_1", title: "Sample: Rooftop social", startsAt: "2026-01-24T14:30:00.000Z", going: 64, came: 51, turnUpPct: 80, firstTimePct: 41, medianStayMin: 104, rating: 4.4 },
     { eventId: "SAMPLE_2", title: "Sample: Board games night", startsAt: "2026-01-10T13:00:00.000Z", going: 40, came: 27, turnUpPct: 68, firstTimePct: 52, medianStayMin: 86, rating: 4.1 },
@@ -40,12 +40,15 @@ export const SAMPLE_ORG_ANALYTICS: OrgAnalytics = {
 export const SAMPLE_EVENT_ANALYTICS: EventAnalytics = {
   eventId: "SAMPLE_1",
   people: 51,
-  stay: { p25Min: 62, p50Min: 104, p75Min: 141, leftEarlyPct: 22, softPct: 12 },
-  arrivals: [6, 9, 14, 11, 8, 0, 5].map((people, i) => ({
-    at: new Date(Date.UTC(2026, 0, 24, 14, i * 10)).toISOString(),
-    people: people >= 5 ? people : null,
-  })),
+  stay: { p50Min: 104, quartiles: { p25Min: 62, p75Min: 141 }, leftEarlyPct: 22, softPct: 12 },
+  arrivals: [
+    { from: "2026-01-24T14:00:00.000Z", to: "2026-01-24T14:10:00.000Z", people: 6 },
+    { from: "2026-01-24T14:10:00.000Z", to: "2026-01-24T14:20:00.000Z", people: 9 },
+    { from: "2026-01-24T14:20:00.000Z", to: "2026-01-24T14:30:00.000Z", people: 14 },
+    { from: "2026-01-24T14:30:00.000Z", to: "2026-01-24T14:40:00.000Z", people: 11 },
+    { from: "2026-01-24T14:40:00.000Z", to: "2026-01-24T15:10:00.000Z", people: 11 },
+  ],
   firstTimers: 21,
   returning: 30,
-  funnel: { viewers: 212, rsvps: 64, viewersWhoRsvpd: 58, conversionPct: 27 },
+  funnel: { viewers: 212, viewersWhoRsvpd: 58, conversionPct: 27 },
 }

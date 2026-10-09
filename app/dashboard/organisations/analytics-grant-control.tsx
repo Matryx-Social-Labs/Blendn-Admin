@@ -5,7 +5,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { endAnalyticsGrant, grantAnalytics } from "@/lib/billing-actions"
+import { endAnalyticsGrant, grantAnalytics, revokePaidEntitlement } from "@/lib/billing-actions"
 import { refusalMessage } from "@/lib/refusal"
 
 /**
@@ -13,43 +13,43 @@ import { refusalMessage } from "@/lib/refusal"
  * six months (plan v2 §9.1b). Shaped after `OrgSponsorControl`, because both
  * hand a paid capability over and must record why.
  *
- * The confirm states the end date before anything is pressed. A paid
- * subscription is Razorpay's to end, so this control only ever ends a grant.
+ * A grant and a paid row are shown apart, so a longer paid row never hides a
+ * grant an admin needs to end. Ending a grant ends every live grant on the
+ * organisation. A paid row can be revoked (a refund made outside Razorpay, a
+ * mistake); cancelling at Razorpay is done in Razorpay's dashboard.
+ *
+ * The confirmation names the end date the server returned, not one this
+ * browser's clock worked out.
  */
 
 const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
 const MONTHS = [6, 3, 12] as const
-
-function endsAfter(months: number): string {
-  const end = new Date()
-  end.setUTCMonth(end.getUTCMonth() + months)
-  return DAY.format(end)
-}
+type Mode = null | "grant" | "end" | "revoke"
 
 export function OrgAnalyticsGrantControl({
   orgId,
   name,
   status,
-  analytics,
+  grant,
+  paid,
 }: {
   orgId: string
   name: string
   status: string
-  analytics: { id: string; source: string; expiresAt: string | null } | null
+  grant: { expiresAt: string | null } | null
+  paid: { id: string; expiresAt: string | null } | null
 }) {
-  const [confirming, setConfirming] = useState(false)
+  const [mode, setMode] = useState<Mode>(null)
   const [months, setMonths] = useState<number>(6)
   const [reason, setReason] = useState("")
   const [pending, start] = useTransition()
+  const day = (iso: string | null) => (iso ? DAY.format(new Date(iso)) : null)
 
-  const until = analytics?.expiresAt ? DAY.format(new Date(analytics.expiresAt)) : null
-
-  function run(work: () => Promise<unknown>, done: string) {
+  function run(work: () => Promise<string>) {
     start(async () => {
       try {
-        await work()
-        toast.success(done)
-        setConfirming(false)
+        toast.success(await work())
+        setMode(null)
         setReason("")
       } catch (err) {
         toast.error(refusalMessage(err, "Could not change Analytics"))
@@ -57,47 +57,53 @@ export function OrgAnalyticsGrantControl({
     })
   }
 
-  // Paid: nothing for an admin to do here, and saying so beats a disabled button.
-  if (analytics && analytics.source !== "grant") {
+  if (mode === null) {
+    if (status === "suspended" && !grant && !paid) return null
     return (
-      <p className="self-start text-[0.8125rem] text-muted-foreground">
-        Analytics, paid{until ? ` until ${until}` : ""}
-      </p>
-    )
-  }
-
-  if (status === "suspended" && !analytics) return null
-
-  if (!confirming) {
-    return analytics ? (
-      <div className="flex items-center gap-2 self-start text-[0.8125rem] text-muted-foreground">
-        <span>Analytics, granted{until ? ` until ${until}` : ""}</span>
-        <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
-          End grant
-        </Button>
+      <div className="flex flex-col items-start gap-1 self-start text-[0.8125rem] text-muted-foreground @3xl/main:items-end">
+        {paid ? (
+          <span className="flex items-center gap-2">
+            Analytics, paid{paid.expiresAt ? ` (row ends ${day(paid.expiresAt)})` : ""}
+            <Button size="sm" variant="ghost" onClick={() => setMode("revoke")}>
+              Revoke
+            </Button>
+          </span>
+        ) : null}
+        {grant ? (
+          <span className="flex items-center gap-2">
+            Analytics, granted{grant.expiresAt ? ` until ${day(grant.expiresAt)}` : ""}
+            <Button size="sm" variant="ghost" onClick={() => setMode("end")}>
+              End grant
+            </Button>
+          </span>
+        ) : status !== "suspended" ? (
+          <Button size="sm" variant="ghost" onClick={() => setMode("grant")}>
+            Grant Analytics
+          </Button>
+        ) : null}
       </div>
-    ) : (
-      <Button size="sm" variant="ghost" className="self-start" onClick={() => setConfirming(true)}>
-        Grant Analytics
-      </Button>
     )
   }
 
-  const granting = !analytics
+  const sentence =
+    mode === "grant" ? (
+      <>
+        {name} gets <strong>Analytics for {months} months</strong>, at no charge. Record why.
+      </>
+    ) : mode === "end" ? (
+      <>
+        {name} loses its Analytics grant <strong>now</strong>. Why?
+      </>
+    ) : (
+      <>
+        {name} loses its <strong>paid</strong> Analytics now. This does not cancel or refund anything at Razorpay. Why?
+      </>
+    )
+
   return (
     <div className="flex max-w-prose flex-col gap-2 border-l-2 border-border-strong pl-3">
-      <p className="text-[0.8125rem] leading-6">
-        {granting ? (
-          <>
-            {name} gets <strong>Analytics until {endsAfter(months)}</strong> ({months} months), at no charge. Record why.
-          </>
-        ) : (
-          <>
-            {name} loses Analytics <strong>now</strong>, not on {until ?? "its end date"}. Why?
-          </>
-        )}
-      </p>
-      {granting ? (
+      <p className="text-[0.8125rem] leading-6">{sentence}</p>
+      {mode === "grant" ? (
         <label className="flex w-fit flex-col gap-1 text-[0.75rem] text-muted-foreground">
           Length
           <select
@@ -114,27 +120,37 @@ export function OrgAnalyticsGrantControl({
         </label>
       ) : null}
       <Textarea
-        aria-label={granting ? "Why this organisation gets Analytics" : "Why the grant ends"}
+        aria-label={mode === "grant" ? "Why this organisation gets Analytics" : "Why it ends"}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={2}
+        maxLength={500}
         className="rounded-lg"
-        placeholder={granting ? "Founding organiser, Bengaluru season one" : "Granted to the wrong organisation"}
+        placeholder={mode === "grant" ? "Founding organiser, Bengaluru season one" : "Granted to the wrong organisation"}
       />
       <div className="flex gap-2">
         <Button
           size="sm"
-          variant={granting ? "default" : "destructive"}
+          variant={mode === "grant" ? "default" : "destructive"}
           disabled={pending || reason.trim().length < 10}
           onClick={() =>
-            granting
-              ? run(() => grantAnalytics(orgId, months, reason), `${name} has Analytics until ${endsAfter(months)}`)
-              : run(() => endAnalyticsGrant(orgId, analytics.id, reason), `${name}'s Analytics grant has ended`)
+            run(async () => {
+              if (mode === "grant") {
+                const { expiresAt } = await grantAnalytics(orgId, months, reason)
+                return `${name} has Analytics until ${day(expiresAt)}`
+              }
+              if (mode === "end") {
+                await endAnalyticsGrant(orgId, reason)
+                return `${name}'s Analytics grant has ended`
+              }
+              await revokePaidEntitlement(orgId, paid!.id, reason)
+              return `${name}'s paid Analytics has been revoked`
+            })
           }
         >
-          {granting ? "Grant" : "End grant"}
+          {mode === "grant" ? "Grant" : mode === "end" ? "End grant" : "Revoke"}
         </Button>
-        <Button size="sm" variant="ghost" disabled={pending} onClick={() => setConfirming(false)}>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={() => setMode(null)}>
           Cancel
         </Button>
       </div>

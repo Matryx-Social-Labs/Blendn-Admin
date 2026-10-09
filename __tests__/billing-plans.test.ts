@@ -1,4 +1,12 @@
+import { readFileSync, readdirSync, statSync } from "fs"
+import { join, relative } from "path"
+
 import { BILLING_PLANS, chargeMinor, grossRupees, gstSplit, isBillingPlanKey, rupees } from "@/lib/billing-plans"
+import { addMonths } from "@/lib/entitlements"
+
+import { stripComments } from "./support/strip-comments"
+
+jest.mock("@/lib/db", () => ({ db: {} }))
 
 /*
  * The one price table (plan v2 §9.1b): list prices before 18% GST, shown and
@@ -27,5 +35,43 @@ describe("the price table", () => {
     expect(isBillingPlanKey("event_pass")).toBe(true)
     expect(isBillingPlanKey("toString")).toBe(false)
     expect(isBillingPlanKey("plus")).toBe(false)
+  })
+})
+
+/*
+ * G11: a price is never worked out anywhere but the table. Every screen,
+ * action and script reads `grossRupees` / `chargeMinor` / `gstSplit`; a
+ * second file reading `listRupees` (the pre-GST figure) is how a page ends up
+ * showing ₹1,999 beside a ₹2,359 charge.
+ */
+
+describe("listRupees is read by the price table alone", () => {
+  const root = join(__dirname, "..")
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((e) => {
+      if (e === "node_modules" || e === ".next") return []
+      const full = join(dir, e)
+      return statSync(full).isDirectory() ? walk(full) : /\.(ts|tsx)$/.test(e) ? [full] : []
+    })
+
+  it("is named in lib/billing-plans.ts and nowhere else in the product", () => {
+    const naming = ["app", "components", "lib", "scripts"]
+      .flatMap((d) => walk(join(root, d)))
+      .filter((f) => /\blistRupees\b/.test(stripComments(readFileSync(f, "utf8"))))
+      .map((f) => relative(root, f))
+    expect(naming).toEqual(["lib/billing-plans.ts"])
+  })
+})
+
+describe("addMonths (G16): a grant ends on a real calendar day", () => {
+  it("lands on the month's last day when the day does not exist there", () => {
+    expect(addMonths(new Date("2026-10-31T12:00:00Z"), 6).toISOString()).toBe("2027-04-30T12:00:00.000Z")
+    expect(addMonths(new Date("2026-08-31T12:00:00Z"), 6).toISOString()).toBe("2027-02-28T12:00:00.000Z")
+    expect(addMonths(new Date("2027-08-31T12:00:00Z"), 6).toISOString()).toBe("2028-02-29T12:00:00.000Z")
+  })
+
+  it("keeps the day otherwise, across a year", () => {
+    expect(addMonths(new Date("2026-10-03T12:00:00Z"), 6).toISOString()).toBe("2027-04-03T12:00:00.000Z")
+    expect(addMonths(new Date("2026-01-15T00:00:00Z"), 24).toISOString()).toBe("2028-01-15T00:00:00.000Z")
   })
 })

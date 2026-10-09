@@ -68,16 +68,25 @@ export default async function AnalyticsPage({
           <PillTabs
             label="Range"
             active={view.range}
-            tabs={RANGES.map((r) => ({ key: r, label: RANGE_LABEL[r], href: `/dashboard/analytics?range=${r}` }))}
+            tabs={RANGES.map((r) => ({
+              key: r,
+              label: RANGE_LABEL[r],
+              // The range is for the cross-event views; the event chosen below stays chosen.
+              href: `/dashboard/analytics?range=${r}${view.selected ? `&event=${view.selected.id}` : ""}`,
+            }))}
           />
           <HeroMetric
             eyebrow="Came back within 90 days"
             value={view.org.backWithin90.pct === null ? "Held back" : `${view.org.backWithin90.pct}%`}
-            unit={view.org.backWithin90.cohort === null ? undefined : `of ${view.org.backWithin90.cohort} first-timers`}
+            unit={
+              view.org.backWithin90.cohort === null
+                ? undefined
+                : `of ${view.org.backWithin90.cohort} first-timers, in the ${view.org.backWithin90.cohorts} cohort${view.org.backWithin90.cohorts === 1 ? "" : "s"} shown`
+            }
             description={
               view.org.backWithin90.pct === null
-                ? "Shown once at least 5 people's first event here was 90 days ago or more, and the share that came back is not everyone or nearly everyone."
-                : "People whose first event here was at least 90 days ago and who came to another within 90 days."
+                ? "Shown once a month's first-timers have had 90 days to come back and that month's share is shown below (All time)."
+                : "Pooled over the monthly cohorts whose 90 days have closed and whose share is shown under All time."
             }
           />
           <OrgPanels data={view.org} />
@@ -106,11 +115,12 @@ function AccessLine({ view }: { view: AnalyticsPageView }) {
   const first = access.firstFreeEvent
   let headline: string
   let detail: string
+  const dated = access.date ? `${access.date.word} ${day(access.date.at)}` : null
   if (access.reason === "grant") {
-    headline = access.paidUntil ? `Founding grant until ${day(access.paidUntil)}` : "Founding grant"
+    headline = dated ? `Founding grant, ${dated}` : "Founding grant"
     detail = "Blend'n has given your organisation Analytics. Nothing is charged."
   } else if (access.reason === "analytics") {
-    headline = access.paidUntil ? `Analytics until ${day(access.paidUntil)}` : "Analytics"
+    headline = dated ? `Analytics, ${dated}` : "Analytics"
     detail = "Every view, for every event."
   } else if (access.reason === "free_window" && access.freeUntil && first) {
     headline = `Free until ${day(access.freeUntil)}`
@@ -177,7 +187,15 @@ function EventSection({ view, pass }: { view: AnalyticsPageView; pass: string })
   )
   const hint = `${day(selected.startsAt)}${isFirstFree && !view.access.org ? " · free for good: your first event that cleared the floor" : ""}`
 
-  if (selected.data) {
+  if (selected.open) {
+    if (!selected.data) {
+      return (
+        <Panel title={selected.title} hint={hint}>
+          {picker}
+          <p className="text-[0.8125rem] text-muted-foreground">This event&apos;s figures couldn&apos;t be read just now.</p>
+        </Panel>
+      )
+    }
     return (
       <Panel title={selected.title} hint={hint}>
         {picker}

@@ -171,7 +171,7 @@ describe("deleting an account scrubs the matching inputs", () => {
     // Out of every crew, every crew invite either way gone; the crews are
     // settled after the commit (one left alone dissolves, D-15).
     expect(mockDb.crew_invites.deleteMany).toHaveBeenCalledWith({
-      where: { OR: [{ invited_user_id: USER }, { invited_by: USER }] },
+      where: { OR: [{ invited_user_id: USER }, { invited_by: USER, removed_at: null, declined_at: null }] },
     })
     // The crews are read INSIDE the erasure — the DELETE returns the rows it
     // took — and locked before any room row is touched (crew row first).

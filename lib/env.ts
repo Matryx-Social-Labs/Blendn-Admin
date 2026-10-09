@@ -94,8 +94,10 @@ const envSchema = z.object({
    * test key cannot hand out free Analytics in production.
    */
   RAZORPAY_KEY_ID: z.string().regex(/^rzp_(test|live)_[A-Za-z0-9]+$/, "RAZORPAY_KEY_ID must look like rzp_test_… or rzp_live_…").optional(),
-  RAZORPAY_KEY_SECRET: z.string().min(8).optional(),
-  RAZORPAY_WEBHOOK_SECRET: z.string().min(8).optional(),
+  /** Razorpay generates this one (24 characters today), so the floor is theirs, not 32. */
+  RAZORPAY_KEY_SECRET: z.string().min(16, "RAZORPAY_KEY_SECRET is shorter than any Razorpay key secret").optional(),
+  /** We choose this one, in the Razorpay dashboard: a shared HMAC secret, so 32 or more. */
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(32, "RAZORPAY_WEBHOOK_SECRET must be at least 32 characters").optional(),
   /** Railway's name for the environment; "production" is the only one where a live key belongs. */
   RAILWAY_ENVIRONMENT_NAME: z.string().optional(),
 
@@ -137,7 +139,42 @@ const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
       message: "set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET together, or neither",
     })
   }
+  // Keys without the webhook secret take money and grant nothing: the
+  // entitlement is written only by the signed webhook.
+  if (env.RAZORPAY_KEY_ID && !env.RAZORPAY_WEBHOOK_SECRET) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["RAZORPAY_WEBHOOK_SECRET"],
+      message: "RAZORPAY_WEBHOOK_SECRET is required once RAZORPAY_KEY_ID is set: without it a payment is taken and never granted",
+    })
+  }
 })
+
+export interface RazorpayKeys {
+  keyId: string
+  keySecret: string
+}
+
+/**
+ * The Razorpay API keys, or null when payments are off here. Off includes
+ * "keys set, webhook secret missing", for the reason above. Throws on a key in
+ * the wrong mode, so a script or route that never ran `validateEnv` is still
+ * held to it. The one reader of these variables (with the secret below).
+ */
+export function razorpayKeys(): RazorpayKeys | null {
+  const keyId = process.env.RAZORPAY_KEY_ID?.trim()
+  const keySecret = process.env.RAZORPAY_KEY_SECRET?.trim()
+  if (!keyId || !keySecret || !razorpayWebhookSecret()) return null
+  const problem = razorpayKeyModeProblem(keyId, process.env.RAILWAY_ENVIRONMENT_NAME)
+  if (problem) throw new Error(problem)
+  return { keyId, keySecret }
+}
+
+/** The webhook's shared secret, or null when the webhook is off (unset or too short to be ours). */
+export function razorpayWebhookSecret(): string | null {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim()
+  return secret && secret.length >= 32 ? secret : null
+}
 
 export type Env = z.infer<typeof envSchema>
 
