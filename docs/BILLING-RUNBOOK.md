@@ -15,13 +15,38 @@ Register the webhook at `https://<api host>/api/webhooks/razorpay` with these
 events: `subscription.activated`, `subscription.charged`,
 `subscription.pending`, `subscription.halted`, `subscription.cancelled`,
 `subscription.completed`, `subscription.paused`, `subscription.resumed`,
-`payment.captured`, `payment.failed`, `order.paid`, `refund.processed`,
-`payment.dispute.created`, `payment.dispute.lost`, `payment.dispute.won`.
+`payment.captured`, `payment.failed`, `order.paid`, `payment_link.paid`,
+`refund.processed`, `payment.dispute.created`, `payment.dispute.lost`,
+`payment.dispute.won`.
 Then run `npx tsx scripts/razorpay-plans.ts --apply` once with that
 environment's keys (dry run without `--apply`).
 
-`payment_link.paid` (sponsor payment links) is step 17's and is not handled
-yet: a delivery of it is recorded and changes nothing.
+## Sponsor payment links (step 17)
+
+On Charges, an **agreed** charge for a claimed brand gets "Send payment link":
+a Razorpay Payment Link in the charge's own amount, emailed by Razorpay to the
+sponsor organisation's primary contact and shown on the sponsor's Placements
+page as "Pay ₹…". Our record of it is a `billing_checkouts` row (kind
+`payment_link`, the sponsor's organisation, `charge_id`, `pay_url`), and the
+charge's `external_ref` becomes the link's id (the audit row
+`charge.link_sent` keeps the pricing note it replaced). A second click returns
+the open link; links expire after 14 days, after which a new one can be sent.
+
+`payment_link.paid` settles the charge, once, against that row: the amount,
+currency and "paid" status must match it and the charge. `notes` are never
+read. Then, by case:
+
+- **Already settled:** a replay changes nothing.
+- **Voided:** a charge voided before the payment landed stays void. The
+  webhook writes `charge.paid_after_void` and logs an error. **Refund it from
+  the Razorpay dashboard.**
+- **Refunded:** a full refund (`refund.processed`) voids the charge, with the
+  refund id as the reason.
+- **Disputed:** a dispute marks the payment and leaves the charge for an admin
+  to decide.
+
+Money that arrives any other way is still settled by hand with "Payment
+received" and its reference.
 
 ## Venue Pro (step 17)
 

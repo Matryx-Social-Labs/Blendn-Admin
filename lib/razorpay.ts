@@ -231,5 +231,53 @@ export async function createEventPassOrder(input: {
   })
 }
 
+/* -------------------------------------------------------------------------- */
+/* Payment Links (sponsor charges, step 17)                                     */
+/* -------------------------------------------------------------------------- */
+
+/** How long a sponsor has to pay a link before Razorpay expires it. */
+const PAYMENT_LINK_DAYS = 14
+
+const paymentLinkSchema = z.object({
+  id: z.string().min(1),
+  short_url: z.string().url(),
+  status: z.string(),
+  amount: z.number(),
+  currency: z.string(),
+})
+export type RazorpayPaymentLink = z.infer<typeof paymentLinkSchema>
+
+/**
+ * A Razorpay Payment Link for one placement charge, in the charge's own
+ * amount. Razorpay emails it to `customer.email` when there is one; the
+ * sponsor's Placements page carries it too. `notes` are for a person reading
+ * the Razorpay dashboard: the webhook resolves the charge from our own
+ * `billing_checkouts` row, never from them.
+ */
+export async function createPaymentLink(input: {
+  chargeId: string
+  orgId: string
+  amountMinor: number
+  description: string
+  customer: { name: string | null; email: string } | null
+  now?: Date
+}): Promise<RazorpayPaymentLink> {
+  const now = input.now ?? new Date()
+  return call(paymentLinkSchema, "POST", "/payment_links", {
+    amount: input.amountMinor,
+    currency: "INR",
+    accept_partial: false,
+    description: input.description.slice(0, 2048),
+    // Unique per link, ≤ 40 characters: a second link after the first expired needs its own.
+    reference_id: `chg_${input.chargeId.slice(0, 13)}_${now.getTime().toString(36)}`,
+    expire_by: Math.floor(now.getTime() / 1000) + PAYMENT_LINK_DAYS * 24 * 60 * 60,
+    ...(input.customer
+      ? { customer: { email: input.customer.email, ...(input.customer.name ? { name: input.customer.name } : {}) }, notify: { email: true, sms: false } }
+      : {}),
+    reminder_enable: true,
+    notes: { org_id: input.orgId, charge_id: input.chargeId },
+  })
+}
+
 /** How long Razorpay lets a created subscription wait, for our own "still open" rule. */
 export const CREATED_CHECKOUT_LIFETIME_MS = SUBSCRIPTION_EXPIRES_AFTER_S * 1000

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 
+import { Panel } from "@/components/dashboard/kit"
 import { ClaimBrand } from "@/components/claim-brand"
 import { getAuth } from "@/lib/auth"
 import { mayReachRoute } from "@/lib/dashboard-nav"
@@ -34,14 +35,8 @@ export default async function BrandPage() {
   const claimPending = !brand && claims.some((c) => c.status === "pending")
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-4">
-        {/* The header says attendees see this. The non-obvious part is that they
-            see nothing else named, which is why it is worth getting right. */}
-        <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-          The room is pseudonymous — attendees are shown a nickname, so your brand is
-          the only named participant in it.
-        </p>
+    <div className="grid gap-5 @3xl/main:grid-cols-[minmax(0,1fr)_340px] @3xl/main:items-start">
+      <div className="flex min-w-0 flex-col gap-5">
         {/*
           Claim first, create second. An organiser may already have added this
           brand while setting up an event, and creating a second row splits its
@@ -56,6 +51,28 @@ export default async function BrandPage() {
         */}
         {claimPending ? null : <BrandForm brand={brand} />}
       </div>
+
+      {/* The screen's memorable detail: the brand as an attendee reads it. The
+          room is pseudonymous, so it is the only named participant there. */}
+      <Panel title="How it appears">
+        <div className="flex items-start gap-2.5">
+          <span
+            aria-hidden="true"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-[0.6875rem] font-bold"
+          >
+            {(brand?.name ?? "Brand").slice(0, 2).toUpperCase()}
+          </span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-[0.71875rem] text-faint-foreground">Sponsored · {brand?.name ?? "Your brand"}</span>
+            <span className="rounded-xl border border-[color-mix(in_oklch,var(--chart-3)_40%,transparent)] bg-[color-mix(in_oklch,var(--chart-3)_18%,var(--card))] px-3 py-2 text-[0.84375rem] leading-5">
+              Your approved message, in the room&apos;s chat.
+            </span>
+          </div>
+        </div>
+        <p className="text-[0.75rem] leading-5 text-muted-foreground">
+          Attendees are shown nicknames, so your brand is the only named participant in the room.
+        </p>
+      </Panel>
     </div>
   )
 }

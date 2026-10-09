@@ -6,6 +6,8 @@
  */
 
 const mockDb = {
+  // Reach (lib/sponsor-reach.ts): nothing sent in these fixtures.
+  $queryRaw: jest.fn().mockResolvedValue([]),
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },
   placement_charges: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
 }
@@ -189,8 +191,11 @@ describe("the status walk", () => {
 })
 
 describe("the ledger", () => {
-  function placements(rows: unknown[]) {
-    mockDb.event_sponsors.findMany.mockResolvedValue(rows)
+  function placements(rows: Array<Record<string, unknown> & { charges: object[] }>) {
+    // Every charge as the query selects it: with its payment links (step 17), none here.
+    mockDb.event_sponsors.findMany.mockResolvedValue(
+      rows.map((r) => ({ ...r, charges: r.charges.map((c) => ({ payment_links: [], ...c })) }))
+    )
   }
 
   const base = {

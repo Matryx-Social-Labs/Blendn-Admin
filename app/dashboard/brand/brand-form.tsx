@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
 
+import { Panel } from "@/components/dashboard/kit"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -41,18 +42,18 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
   }
 
   return (
-    <div className="flex max-w-xl flex-col gap-5">
-      <div className="flex items-center justify-between gap-3">
-        {/* h2 — the layout's PageHeader owns the page's only h1. */}
-        <h2 className="text-[length:var(--text-h2)] font-bold">
-          {brand ? "Your brand" : "Set up your brand"}
-        </h2>
-        {brand?.claimed_at ? (
+    // The Panel's title is an h2: the layout's PageHeader owns the page's only h1.
+    <Panel
+      title={brand ? "Your brand" : "Set up your brand"}
+      action={
+        brand?.claimed_at ? (
           <Badge variant="outline" className="rounded-full">
             Claimed
           </Badge>
-        ) : null}
-      </div>
+        ) : undefined
+      }
+      bodyClassName="gap-5"
+    >
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="brand-name">Name</Label>
@@ -112,6 +113,6 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
       >
         {brand ? "Save changes" : "Create brand"}
       </Button>
-    </div>
+    </Panel>
   )
 }

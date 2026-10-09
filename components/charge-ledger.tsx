@@ -11,15 +11,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
+import { KpiStrip, Panel } from "@/components/dashboard/kit"
+import { EmptyState } from "@/components/dashboard/primitives"
 import { cn } from "@/lib/utils"
 import {
   advanceCharge,
   pricePlacement,
+  sendPaymentLink,
   type ChargeablePlacement,
   type ChargeLedger,
 } from "@/lib/charge-actions"
-import { formatDay } from "@/lib/dashboard-format"
+import { formatDay, formatNumber } from "@/lib/dashboard-format"
 import { refusalMessage } from "@/lib/refusal"
 
 /**
@@ -43,46 +45,51 @@ export function ChargeLedgerView({ ledger }: { ledger: ChargeLedger }) {
   const unbilled = ledger.placements.filter((p) => !p.charge)
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap gap-1">
-        {ledger.totals.map((t) => (
+    <div className="flex flex-col gap-5">
+      <KpiStrip
+        items={[
           /*
            * One tile per currency, never a combined figure. Summing minor
            * units across currencies yields a number in no currency at all.
            */
-          <MetricTile
-            key={t.currency}
-            label={`${t.currency} settled`}
-            value={money(t.settledMinor, t.currency)}
-            hint={`${money(t.agreedMinor, t.currency)} agreed, not yet paid`}
-          />
-        ))}
-        {/*
-          The reason this screen lists placements rather than charges. A list
-          of charges answers "what have we billed"; the gap is what loses money.
-        */}
-        <MetricTile
-          label="Unbilled"
-          value={unbilled.length}
-          hint="placements running with no price on them"
-        />
-      </div>
+          ...ledger.totals.map((t) => ({
+            label: `${t.currency} settled`,
+            value: money(t.settledMinor, t.currency),
+            hint: `${money(t.agreedMinor, t.currency)} agreed, not yet paid`,
+          })),
+          /*
+            The reason this screen lists placements rather than charges. A list
+            of charges answers "what have we billed"; the gap is what loses money.
+          */
+          { label: "Unbilled", value: unbilled.length, hint: "placements running with no price on them" },
+        ]}
+      />
 
-      {ledger.placements.length === 0 ? (
-        <EmptyState
-          icon={<IconReceipt />}
-          title="Nothing to bill yet"
-          description="Approved placements appear here as soon as an organiser attaches a brand to an event."
-        />
-      ) : (
-        <ul className="flex flex-col divide-y divide-border">
-          {ledger.placements.map((p) => (
-            <li key={p.placementId} className="py-4">
-              <PlacementCharge placement={p} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <Panel title="Placements" hint="the row that matters is the one that ran unpriced" bodyClassName="gap-0 px-0 pb-0 pt-3">
+        {ledger.placements.length === 0 ? (
+          <div className="px-5 pb-5">
+            <EmptyState
+              icon={<IconReceipt />}
+              title="Nothing to bill yet"
+              description="Approved placements appear here as soon as an organiser attaches a brand to an event."
+            />
+          </div>
+        ) : (
+          <ul className="flex flex-col">
+            {ledger.placements.map((p) => (
+              <li key={p.placementId} className="border-t border-border px-5 py-4">
+                <PlacementCharge placement={p} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
+      <p className="text-[0.75rem] text-faint-foreground">
+        Sends are exposures, not reach: the same person recurs once per send. Reach is distinct people, held back under 5,
+        and its band is what a placement is priced by. A payment link is settled by Razorpay&apos;s webhook; money that
+        arrives any other way needs its payment reference.
+      </p>
     </div>
   )
 }
@@ -106,6 +113,18 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
         router.refresh()
       } catch (err) {
         toast.error(refusalMessage(err, "Could not price that"))
+      }
+    })
+  }
+
+  function sendLink() {
+    start(async () => {
+      try {
+        const out = await sendPaymentLink(placement.charge!.id)
+        toast.success(out.reused ? "A link is already out for this charge." : "Payment link sent to the sponsor.")
+        router.refresh()
+      } catch (err) {
+        toast.error(refusalMessage(err, "Could not send a payment link"))
       }
     })
   }
@@ -163,15 +182,23 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
             · {formatDay(placement.eventStart.toISOString())}
           </span>
         </div>
-        <span className="shrink-0 text-[0.8125rem] text-muted-foreground">
+        <span className="flex shrink-0 flex-col items-end text-[0.8125rem] text-muted-foreground">
           {/*
-            Exposures, not reach. The same person recurs once per interval, so
-            summing sends across a night counts the regulars many times — the
-            column comment on `sponsored_message_sends.members` says the same.
+            Sends are exposures, not reach. The same person recurs once per
+            interval; reach is the distinct people (lib/sponsor-reach.ts).
           */}
-          {placement.sends === 0
-            ? "Nothing sent yet"
-            : `${placement.sends} send${placement.sends === 1 ? "" : "s"}`}
+          <span>
+            {placement.sends === 0
+              ? "Nothing sent yet"
+              : `${placement.sends} send${placement.sends === 1 ? "" : "s"}`}
+          </span>
+          {placement.reach ? (
+            <span>
+              {placement.reach.reach === null
+                ? "reach held back · under 5"
+                : `${formatNumber(placement.reach.reach)} reached${placement.band ? ` · band ${placement.band.label}` : ""}`}
+            </span>
+          ) : null}
         </span>
       </div>
 
@@ -182,7 +209,13 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
           </span>
           <span className="text-[0.8125rem] text-muted-foreground">
             priced by {charge.pricedByName ?? "someone since deleted"}
-            {charge.externalRef ? ` · ${charge.externalRef}` : ""}
+            {/* The charge's life, left to right: a link, then its payment. */}
+            {charge.link
+              ? ` · ${charge.link.status === "paid" ? "paid by link" : `link ${charge.link.status === "created" ? "sent" : charge.link.status}`} ${charge.link.id}`
+              : charge.externalRef
+                ? ` · ${charge.externalRef}`
+                : ""}
+            {charge.status === "settled" && charge.settledAt ? ` · settled ${formatDay(charge.settledAt.toISOString())}` : ""}
           </span>
 
           {voiding ? (
@@ -261,8 +294,21 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
                   Sponsor accepted
                 </Button>
               ) : null}
+              {charge.status === "agreed" && !(charge.link && charge.link.status !== "expired" && charge.link.status !== "cancelled") ? (
+                <Button size="sm" disabled={pending} onClick={sendLink}>
+                  {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}
+                  Send payment link
+                </Button>
+              ) : null}
+              {charge.status === "agreed" && charge.link?.payUrl && charge.link.status !== "paid" ? (
+                <Button asChild size="sm" variant="ghost">
+                  <a href={charge.link.payUrl} target="_blank" rel="noopener noreferrer">
+                    Open link
+                  </a>
+                </Button>
+              ) : null}
               {charge.status === "agreed" ? (
-                <Button size="sm" disabled={pending} onClick={() => setSettling(true)}>
+                <Button size="sm" variant="outline" disabled={pending} onClick={() => setSettling(true)}>
                   Payment received
                 </Button>
               ) : null}
