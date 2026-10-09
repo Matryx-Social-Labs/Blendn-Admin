@@ -101,7 +101,7 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
   },
   crew_invites: {
     how: "DELETED",
-    why: "Invites to them and from them: an invite from an erased account would put a ghost's name on somebody's screen, and one to them can never be accepted.",
+    why: "Invites to them, and the open invites from them: an invite from an erased account would put a ghost's name on somebody's screen, and one to them can never be accepted. A removal marker or a decline they wrote about somebody else stays — it is that person's protection (the owner's word that they are out; their 30 days of quiet), and erasing the owner must not lift it.",
   },
   crew_likes: {
     how: "RETAINED",

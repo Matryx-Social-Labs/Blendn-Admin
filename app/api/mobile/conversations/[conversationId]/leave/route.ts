@@ -193,9 +193,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * that is still open. Repeating it is harmless.
      */
     closeConversationRoom(conversationId)
-    // A block also takes the pair out of any Blend room that now refuses them;
+    // Either way the pair is kept apart now (a closed conversation is a block
+    // on every crew surface, C6): out of any Blend room that now refuses them;
     // the Blend goes on for everyone else (D-9).
-    if (action === "block") await evictBlockedFromBlends(authUser.userId, otherId)
+    await evictBlockedFromBlends(authUser.userId, otherId)
 
     return successResponse({
       closed: true,

@@ -617,7 +617,7 @@ registry.registerPath({
     "\"Room for one more\" on and 6 or fewer active members (403). About the person, nothing is said: if they are not here now, not opted in " +
     "to crews tonight, kept apart from anybody in the crew (a block or a closed conversation), or — when your crew is out for dating — not " +
     "out for dating too, the answer is `{ liked: true, blend: null }`, exactly as for a like that stood, and nothing is stored. " +
-    "Answers `{ liked: true, blend }`: `blend` is the Blend room when they had liked your crew. Your crew chat says you liked them for the crew.",
+    "Answers `{ liked: true, blend }`: `blend` is the Blend room when they had liked your crew. Nothing is said in your crew chat: a line only for a like that stood would tell the crew what the answer hides.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
