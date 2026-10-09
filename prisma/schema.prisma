@@ -541,6 +541,8 @@ model events {
   sponsors           event_sponsors[]
   rsvps              event_rsvps[]
   feedback           event_feedback[]
+  entitlements       entitlements[]
+  billing_checkouts  billing_checkouts[]
   venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
   organizer_org      organisations?             @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
   eventClaims        event_claims[]
@@ -1596,6 +1598,14 @@ model organisations {
   /// somebody paid; if everyone who can announce can also mark a message
   /// sponsored, the label stops meaning anything and becomes a styling choice.
   may_sponsor  Boolean             @default(false)
+  /// When Analytics stops being free for this organisation: 30 days after the
+  /// end of its first event with at least 5 people checked in, and that event
+  /// (step 16, lib/analytics-access.ts). Written ONCE, by the first read that
+  /// finds such an event, and never moved: soft-deleting the event, or a
+  /// later re-count, cannot restart the 30 days. A plain id, no foreign key:
+  /// it is a record of a decision, kept if the event goes.
+  analytics_free_until DateTime? @db.Timestamptz(6)
+  first_free_event_id  String?   @db.Uuid
   verified_at  DateTime?           @db.Timestamptz(6)
   verified_by  String?
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
@@ -1614,6 +1624,7 @@ model organisations {
   sponsors       sponsors[]
   sponsor_claims sponsor_claims[]
   upload_grants  upload_grants[]
+  billing_checkouts billing_checkouts[]
 
   @@index([status])
 }
@@ -3818,6 +3829,9 @@ model product_events {
   user User? @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   /// DAU, WAU and MAU: one name over a date range.
+  /// Also, in migration SQL only: `product_events_event_viewed_by_entity`, a
+  /// partial covering index (entity_id, name) INCLUDE (user_id) WHERE
+  /// entity_id IS NOT NULL, for an event's views → RSVPs (lib/org-analytics.ts).
   @@index([name, occurred_at])
   /// One person's activity, for cohorts and retention curves.
   @@index([user_id, occurred_at])
@@ -3850,4 +3864,180 @@ model domain_email_tokens {
   domain organisation_domains @relation(fields: [domain_id], references: [id], onDelete: Cascade)
 
   @@index([domain_id])
+}
+
+// ---------------------------------------------------------------------------
+// Money (step 16, plan v2 §9). Who may use what they paid for, what the
+// payment provider told us, and what this server started there.
+// ---------------------------------------------------------------------------
+
+enum entitlement_subject {
+  user
+  org
+  venue
+}
+
+enum entitlement_product {
+  analytics
+  event_pass
+  venue_pro
+  plus
+  night_pass
+}
+
+enum entitlement_source {
+  razorpay
+  apple
+  google
+  grant
+}
+
+/// What a subject may use, from when until when. `hasEntitlement` in
+/// `lib/entitlements.ts` is the only reader and the only gate
+/// (`__tests__/entitlements-boundary.test.ts`).
+///
+/// A paid row is written by a provider's webhook only, never by a browser
+/// redirect. A grant is written by an admin, with an audit row saying why.
+///
+/// `subject_id` has no foreign key because it names one of three tables
+/// (`subject_kind`). The migration's CHECKs, which `schema.prisma` cannot
+/// express and `db push` drops, hold the shape: which product belongs to
+/// which kind of subject, an Event Pass and only an Event Pass names its
+/// event, Blendn+ is never sold through Razorpay, a paid row names its
+/// provider reference, and a row never ends before it starts.
+model entitlements {
+  id           String              @id @default(uuid()) @db.Uuid
+  subject_kind entitlement_subject
+  subject_id   String
+  product      entitlement_product
+  /// The event an Event Pass unlocks. Null for every other product.
+  event_id     String?             @db.Uuid
+  source       entitlement_source
+  starts_at    DateTime            @db.Timestamptz(6)
+  /// Null never ends (an Event Pass). Ending a row early sets this to now.
+  expires_at   DateTime?           @db.Timestamptz(6)
+  /// The provider's id: a Razorpay subscription or order. One row per id, so
+  /// a renewal extends the row and a replayed payment finds it already there.
+  external_ref String?
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict: a paid pass is the proof somebody paid for that event. Events
+  /// are soft-deleted (deleted_at); nothing in the product hard-deletes one.
+  event events? @relation(fields: [event_id], references: [id], onDelete: Restrict)
+
+  @@unique([source, external_ref])
+  @@index([subject_kind, subject_id, product])
+  @@index([event_id])
+}
+
+/// Every webhook delivery a payment provider made, as it arrived.
+///
+/// `provider_event_id` is the provider's id for the delivery (Razorpay's
+/// `x-razorpay-event-id`, which is NOT covered by the signature) and
+/// `body_sha256` is the hash of the signed body. Either unique key makes a
+/// replay a no-op, so a signed body re-sent under a new event id is a
+/// duplicate too.
+///
+/// `payload` is the delivery after `redactDelivery`: ids, amounts, states and
+/// times, never the payer's email or phone. Kept, not deleted with an
+/// account: these are the tax record (test plan D-17).
+model payment_events {
+  id                String    @id @default(uuid()) @db.Uuid
+  provider          String
+  provider_event_id String
+  body_sha256       String    @unique
+  type              String
+  payload           Json
+  received_at       DateTime  @default(now()) @db.Timestamptz(6)
+  /// Set once the delivery has been applied. Null with `error` set means it
+  /// was refused or failed; null with neither means a retry may apply it.
+  processed_at      DateTime? @db.Timestamptz(6)
+  error             String?
+  /// The purchase it was about, once resolved from our own record.
+  checkout_id       String?   @db.Uuid
+
+  checkout billing_checkouts? @relation(fields: [checkout_id], references: [id], onDelete: SetNull)
+
+  @@unique([provider, provider_event_id])
+  @@index([checkout_id, received_at])
+}
+
+enum billing_checkout_kind {
+  subscription
+  order
+}
+
+/// A purchase this server started at the provider, so a webhook resolves the
+/// organisation from our own row and never from the payload's `notes`.
+///
+/// `status` follows the provider's word for it (created, active, halted,
+/// cancelled, completed, paid, failed). `status_at` is the provider's time
+/// for the event that set it, so an older delivery arriving late changes
+/// nothing (out-of-order webhooks).
+model billing_checkouts {
+  id                  String                @id @default(uuid()) @db.Uuid
+  provider            String                @default("razorpay")
+  kind                billing_checkout_kind
+  /// `sub_…` or `order_…`.
+  provider_ref        String
+  /// The Razorpay plan a subscription was created on. Null for an order.
+  provider_plan_id    String?
+  org_id              String                @db.Uuid
+  /// The event an Event Pass order is for.
+  event_id            String?               @db.Uuid
+  /// A key of `BILLING_PLANS` (lib/billing-plans.ts).
+  plan_key            String
+  /// What the provider must charge, GST included, in paise.
+  amount_minor        Int
+  currency            String                @default("INR")
+  status              String                @default("created")
+  status_at           DateTime?             @db.Timestamptz(6)
+  current_end         DateTime?             @db.Timestamptz(6)
+  cancel_at_cycle_end Boolean               @default(false)
+  /// Who started it. A user id without a foreign key, like
+  /// `organisations.verified_by`: the purchase outlives the person.
+  created_by          String?
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict: a payment record is a tax record, and an organisation that
+  /// paid is suspended, never deleted.
+  org            organisations      @relation(fields: [org_id], references: [id], onDelete: Restrict)
+  /// SetNull: an event that goes (its creator's account cascades it) keeps
+  /// the purchase record and loses only the pointer.
+  event          events?            @relation(fields: [event_id], references: [id], onDelete: SetNull)
+  payment_events payment_events[]
+  payments       billing_payments[]
+
+  /// Also, in migration SQL only: `billing_checkouts_one_open_subscription_per_org`
+  /// (a partial unique index) and the shape CHECKs.
+  @@unique([provider, provider_ref])
+  @@index([org_id, kind, created_at])
+  @@index([event_id])
+}
+
+/// One captured payment, with the columns the Plan page and refunds need, so
+/// nothing reads the delivery JSON. `status` moves captured → refunded, or
+/// captured → disputed → dispute_won | dispute_lost.
+model billing_payments {
+  id                  String    @id @default(uuid()) @db.Uuid
+  provider            String    @default("razorpay")
+  provider_payment_id String
+  checkout_id         String    @db.Uuid
+  amount_minor        Int
+  currency            String
+  /// Razorpay Invoices' id, for a subscription charge.
+  invoice_id          String?
+  status              String    @default("captured")
+  /// Razorpay's time for the delivery that recorded the capture.
+  captured_at         DateTime  @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict: a payment is a tax record; its purchase is never deleted.
+  checkout billing_checkouts @relation(fields: [checkout_id], references: [id], onDelete: Restrict)
+
+  @@unique([provider, provider_payment_id])
+  @@index([checkout_id, captured_at])
 }

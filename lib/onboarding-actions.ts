@@ -18,6 +18,7 @@ import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { notifyEventUpdate } from "@/lib/push-notifications"
 import { realEventsWhere } from "./event-kind"
+import { liveAnalyticsByOrg } from "./entitlements"
 
 /**
  * Reviewing host applications.
@@ -404,6 +405,11 @@ export interface OrgSummary {
   venueCount: number
   domains: { domain: string; verified: boolean }[]
   primaryContact: { name: string | null; email: string } | null
+  /** The live Analytics grant and paid row, apart, for the admin's control. */
+  analytics: {
+    grant: { id: string; expiresAt: Date | null } | null
+    paid: { id: string; expiresAt: Date | null } | null
+  }
 }
 
 /**
@@ -462,6 +468,8 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
     },
   })
 
+  const analytics = await liveAnalyticsByOrg(orgs.map((o) => o.id))
+
   return orgs.map((o) => ({
     id: o.id,
     kind: o.kind,
@@ -478,6 +486,11 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
     venueCount: o._count.venues,
     domains: o.domains.map((d) => ({ domain: d.domain, verified: !!d.verified_at })),
     primaryContact: o.members[0]?.user ?? null,
+    analytics: (() => {
+      const live = analytics.get(o.id)
+      const pick = (e: { id: string; expiresAt: Date | null } | null | undefined) => (e ? { id: e.id, expiresAt: e.expiresAt } : null)
+      return { grant: pick(live?.grant), paid: pick(live?.paid) }
+    })(),
   }))
 }
 

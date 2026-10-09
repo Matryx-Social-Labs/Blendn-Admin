@@ -102,11 +102,13 @@ describe("visibleNavFor", () => {
     expect(titles("organizer")).toEqual([
       "Overview",
       "Events",
+      "Analytics",
       "Attendees",
       "Chatrooms",
       "Team",
       "Reports",
       "Audit log",
+      "Plan",
     ])
     expect(titles("venue_owner")).toEqual([
       "Overview",
