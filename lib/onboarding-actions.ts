@@ -18,6 +18,7 @@ import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { notifyEventUpdate } from "@/lib/push-notifications"
 import { realEventsWhere } from "./event-kind"
+import { liveAnalyticsByOrg } from "./entitlements"
 
 /**
  * Reviewing host applications.
@@ -404,6 +405,8 @@ export interface OrgSummary {
   venueCount: number
   domains: { domain: string; verified: boolean }[]
   primaryContact: { name: string | null; email: string } | null
+  /** The live Analytics entitlement, for the admin's grant control. */
+  analytics: { id: string; source: string; expiresAt: Date | null } | null
 }
 
 /**
@@ -462,6 +465,8 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
     },
   })
 
+  const analytics = await liveAnalyticsByOrg(orgs.map((o) => o.id))
+
   return orgs.map((o) => ({
     id: o.id,
     kind: o.kind,
@@ -478,6 +483,10 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
     venueCount: o._count.venues,
     domains: o.domains.map((d) => ({ domain: d.domain, verified: !!d.verified_at })),
     primaryContact: o.members[0]?.user ?? null,
+    analytics: (() => {
+      const live = analytics.get(o.id)
+      return live ? { id: live.id, source: live.source, expiresAt: live.expiresAt } : null
+    })(),
   }))
 }
 

@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect } from "react"
+import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 import { BrandLogo } from "@/components/brand-logo"
 import { NavMain } from "@/components/nav-main"
-import { Sidebar, SidebarContent, SidebarHeader, useSidebar } from "@/components/ui/sidebar"
+import { ProTag } from "@/components/dashboard/kit"
+import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, useSidebar } from "@/components/ui/sidebar"
 import { groupedNavFor } from "@/lib/dashboard-nav"
 
 const ROLE_LABELS: Record<string, string> = {
@@ -39,7 +41,11 @@ function initialsOf(name: string): string {
  * others there are. A switcher arrives with a current-organisation model, not
  * before.
  *
- * No plan card yet: the free/Analytics split lands in step 16.
+ * ## The plan card (kit `shell.jsx`, R4)
+ *
+ * An organiser's organisation on the free plan gets the card, with the one
+ * gradient stripe every screen may carry besides its own. On Analytics it is
+ * a single quiet line. Other roles have no plan here (venue plans are step 17).
  *
  * Role, organisation and badges all come from the server layout, so the nav is
  * right on first paint; `useSession` has no session on its first render. Still
@@ -51,6 +57,7 @@ export function AppSidebar({
   org,
   otherOrgs,
   badges,
+  plan,
 }: {
   role: string
   /** Who this person acts for: the home organisation, Blend'n for an admin. */
@@ -58,6 +65,8 @@ export function AppSidebar({
   /** How many further live organisations this person belongs to. */
   otherOrgs: number
   badges?: Record<string, number>
+  /** The home organisation's plan, organisers only. Null for every other role. */
+  plan?: { analytics: boolean; until: string | null } | null
 }) {
   const groups = groupedNavFor(role)
 
@@ -111,7 +120,43 @@ export function AppSidebar({
             />
           ))}
         </SidebarContent>
+        {plan ? (
+          <SidebarFooter className="px-3 pb-4">
+            <PlanCard analytics={plan.analytics} until={plan.until} />
+          </SidebarFooter>
+        ) : null}
       </nav>
     </Sidebar>
+  )
+}
+
+const UNTIL = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
+
+function PlanCard({ analytics, until }: { analytics: boolean; until: string | null }) {
+  if (analytics) {
+    return (
+      <Link
+        href="/dashboard/plan"
+        className="flex items-center gap-2 rounded-[10px] border border-border px-3 py-2.5 text-[0.78125rem] text-muted-foreground hover:bg-accent/60"
+      >
+        <ProTag />
+        <span>{until ? `until ${UNTIL.format(new Date(until))}` : "plan active"}</span>
+      </Link>
+    )
+  }
+  return (
+    <div data-slot="plan-card" className="relative flex flex-col gap-2 overflow-hidden rounded-panel border border-border bg-card p-3.5">
+      <div aria-hidden="true" className="absolute inset-x-0 top-0 h-[3px] bg-[image:var(--gradient-brand)]" />
+      <p className="text-[0.8125rem] font-bold">Free plan</p>
+      <p className="text-[0.75rem] leading-[18px] text-muted-foreground">
+        Events, check-in, live headcount and the room cost nothing. Analytics shows which nights worked.
+      </p>
+      <Link
+        href="/dashboard/plan"
+        className="inline-flex h-8 items-center justify-center rounded-md bg-secondary px-3 text-[0.8125rem] font-medium text-secondary-foreground hover:bg-secondary/80"
+      >
+        See plans
+      </Link>
+    </div>
   )
 }

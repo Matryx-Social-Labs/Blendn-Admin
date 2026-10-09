@@ -1,6 +1,6 @@
 import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
-import { sentryCspReportUri } from "./lib/csp-report";
+import { contentSecurityPolicy, sentryCspReportUri } from "./lib/csp-report";
 
 // Where the report-only CSP reports to. See lib/csp-report.ts and the policy below.
 const cspReportUri = sentryCspReportUri(
@@ -82,18 +82,9 @@ const nextConfig: NextConfig = {
              * before.
              */
             key: "Content-Security-Policy-Report-Only",
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob: https:",
-              "font-src 'self' data:",
-              "connect-src 'self' https: wss:",
-              "frame-ancestors 'none'",
-              "base-uri 'self'",
-              "form-action 'self'",
-              ...(cspReportUri ? [`report-uri ${cspReportUri}`] : []),
-            ].join("; "),
+            // Razorpay Checkout's script and frames are allowed (step 16);
+            // the directives live in lib/csp-report.ts so a test reads them.
+            value: contentSecurityPolicy(cspReportUri),
           },
         ],
       },

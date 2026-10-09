@@ -6,6 +6,7 @@ import { OrgSuspendedNotice } from "@/components/org-suspended-notice"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { attentionQueues } from "@/lib/attention-queues-query"
+import { planBadgeFor } from "@/lib/billing"
 import { queueBadges } from "@/lib/attention-queues"
 import { getAuth } from "@/lib/auth"
 import { mayCreateEventsWith } from "@/lib/event-ownership"
@@ -75,6 +76,20 @@ export default async function DashboardLayout({
   // Who this person acts for, said once for the card and the first crumb. A
   // member only of a suspended organisation still belongs to it — the notice
   // below says why the controls are gone — and someone in none is told so.
+  // The sidebar's plan card: organisers only, for the home organisation the
+  // card above it names (venue plans are step 17's).
+  // Decoration like the badges: a failure logs and drops the card, never the shell.
+  const plan =
+    user.role === "organizer" && orgs[0]
+      ? await planBadgeFor(orgs[0].id)
+          .then((b) => ({ analytics: b.analytics, until: b.until?.toISOString() ?? null }))
+          .catch((error: unknown) => {
+            logger.error("plan badge failed; rendering the nav without the plan card", {
+              error: error instanceof Error ? error.message : String(error),
+            })
+            return null
+          })
+      : null
   const actingFor = isAdmin
     ? "Blend'n"
     : (orgs[0]?.display_name ?? suspended[0]?.display_name ?? "No organisation")
@@ -97,6 +112,7 @@ export default async function DashboardLayout({
         org={actingFor}
         otherOrgs={Math.max(orgs.length - 1, 0)}
         badges={badges}
+        plan={plan}
       />
       {/*
         `overflow-x-clip`, not `overflow-hidden`: hidden makes this column a

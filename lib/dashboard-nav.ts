@@ -2,6 +2,7 @@ import {
   IconBuilding,
   IconBuildingStore,
   IconCategory,
+  IconCreditCard,
   IconDashboard,
   IconFileSpreadsheet,
   IconFlag,
@@ -341,6 +342,18 @@ export const dashboardNav: DashboardNavItem[] = [
     icon: IconHistory,
     allowedRoles: ["app_admin", "organizer", "venue_owner"],
     group: "record",
+    hostGroup: "organisation",
+  },
+  {
+    // An organiser's plan: Free, an Event Pass, or Analytics (step 16). Every
+    // member sees it; only an owner or admin can change it, which the page and
+    // its actions say and enforce (`lib/billing-actions.ts`). Venue plans are
+    // step 17's, so venue owners do not get this one.
+    title: "Plan",
+    description: "Free, an Event Pass, or Analytics — and what your organisation has paid.",
+    url: "/dashboard/plan",
+    icon: IconCreditCard,
+    allowedRoles: ["organizer"],
     hostGroup: "organisation",
   },
 ]

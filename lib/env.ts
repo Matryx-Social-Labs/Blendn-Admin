@@ -86,9 +86,57 @@ const envSchema = z.object({
    */
   PLUS_GATING: z.enum(["true", "false"]).optional(),
 
+  /**
+   * Razorpay (plan v2 §9.2). All optional: unset, the Plan page says payments
+   * are off and the webhook refuses everything. A key id names its mode
+   * (`rzp_test_…` / `rzp_live_…`), and the refinement below holds each mode to
+   * its environment, so a live key cannot charge real money from staging and a
+   * test key cannot hand out free Analytics in production.
+   */
+  RAZORPAY_KEY_ID: z.string().regex(/^rzp_(test|live)_[A-Za-z0-9]+$/, "RAZORPAY_KEY_ID must look like rzp_test_… or rzp_live_…").optional(),
+  RAZORPAY_KEY_SECRET: z.string().min(8).optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(8).optional(),
+  /** Railway's name for the environment; "production" is the only one where a live key belongs. */
+  RAILWAY_ENVIRONMENT_NAME: z.string().optional(),
+
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.string().default("3000"),
+})
+
+/**
+ * Why this Razorpay key id does not belong in this environment, or null.
+ *
+ * Pure, so `lib/razorpay.ts` refuses the same thing at the moment of a call —
+ * a script or a route that never ran `validateEnv` is still held to it.
+ */
+export function razorpayKeyModeProblem(
+  keyId: string | undefined,
+  environmentName: string | undefined
+): string | null {
+  if (!keyId) return null
+  const production = environmentName === "production"
+  if (production && !keyId.startsWith("rzp_live_")) {
+    return "RAZORPAY_KEY_ID is a test key in production: payments would grant Analytics for test money"
+  }
+  if (!production && !keyId.startsWith("rzp_test_")) {
+    return `RAZORPAY_KEY_ID is a live key outside production (${environmentName ?? "no Railway environment"}): it would charge real money`
+  }
+  return null
+}
+
+const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
+  const mode = razorpayKeyModeProblem(env.RAZORPAY_KEY_ID, env.RAILWAY_ENVIRONMENT_NAME)
+  if (mode) ctx.addIssue({ code: "custom", path: ["RAZORPAY_KEY_ID"], message: mode })
+  // Half a key pair is a mistake, not a policy: checkout would fail on the
+  // first click with nothing at boot to say why.
+  if (Boolean(env.RAZORPAY_KEY_ID) !== Boolean(env.RAZORPAY_KEY_SECRET)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["RAZORPAY_KEY_SECRET"],
+      message: "set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET together, or neither",
+    })
+  }
 })
 
 export type Env = z.infer<typeof envSchema>
@@ -98,7 +146,7 @@ export type Env = z.infer<typeof envSchema>
  * Call this at application startup
  */
 export function validateEnv(): Env {
-  const parsed = envSchema.safeParse(process.env)
+  const parsed = refinedEnvSchema.safeParse(process.env)
 
   if (!parsed.success) {
     logger.error("Invalid environment variables", {

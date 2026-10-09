@@ -59,6 +59,9 @@ const READERS: Record<string, string> = {
   "lib/room-delivery.ts#deliverToRoom": "a venue day's liveness for the reply push, asked only when there is an event; the door runs first",
   "lib/crews/blends.ts#blendsOf":
     "tonight's pseudonyms, read from the event rooms its where selects by event id (so the id is there); a Blend room has no event and is never asked for one",
+  // Not rooms: an Event Pass names its event (step 16). These read that column.
+  "lib/entitlements.ts#eventPassesFor": "an Event Pass's event; the CHECK makes it non-null on every pass, and a null is dropped, never matched",
+  "lib/razorpay-webhook.ts#applyOrderPaid": "an Event Pass order's event; an order without one is refused as unknown_ref before any use",
 }
 
 interface Read {
