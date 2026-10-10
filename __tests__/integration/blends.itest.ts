@@ -773,13 +773,21 @@ describe("crew and Blend rooms in the chat list (step 9 review, S5)", () => {
     // The owner, in no block, sees y's line.
     const os = pick(await rooms(owner), C.roomId)!
     expect(os.lastMessage).toMatchObject({ content: "y later", user: { name: "Yamini" } })
-    expect(os.unreadCount).toBe(all)
+    // Their own line is never unread to them.
+    expect(os.unreadCount).toBe(await db.chat_messages.count({ where: { chat_group_id: C.roomId, deleted_at: null, user_id: { not: owner.id } } }))
+    expect(os.unreadCount).toBeLessThan(all)
 
     // Read up to the owner's line: y's lines after it are not unread for x, the owner's next one is.
     await db.chat_group_members.update({ where: { chat_group_id_user_id: { chat_group_id: C.roomId, user_id: x.id } }, data: { last_read_message_id: first.id } })
     expect((await api.send(y, C.roomId, "y again")).status).toBe(201)
     expect(pick(await rooms(x), C.roomId)!.unreadCount).toBe(0)
     expect((await api.send(owner, C.roomId, "owner again")).status).toBe(201)
+    expect(pick(await rooms(x), C.roomId)!.unreadCount).toBe(1)
+
+    // Reading the room's newest page marks it read: the row counts nothing until the next line.
+    expect((await api.read(x, C.roomId)).status).toBe(200)
+    expect(pick(await rooms(x), C.roomId)!.unreadCount).toBe(0)
+    expect((await api.send(owner, C.roomId, "owner once more")).status).toBe(201)
     expect(pick(await rooms(x), C.roomId)!.unreadCount).toBe(1)
 
     // An event's room, the same: a blocked person's line is neither the preview nor counted.
