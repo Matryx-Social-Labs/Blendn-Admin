@@ -1,5 +1,6 @@
 // Type-only, so neither module's `db` import survives into a client bundle.
 import type { AttentionQueue } from "@/lib/attention-queues"
+import type { BuildingOccupancy } from "@/lib/building-occupancy"
 import type { RefusalBreakdown } from "@/lib/check-in-refusals"
 import type { EventRowData } from "@/lib/event-row"
 import type { SetupFacts } from "@/lib/setup-checklist"
@@ -239,7 +240,8 @@ export interface VenueRow {
   ratings: RatingCounts
   /** How many ratings there are, withheld or not, so "none" and "too few" read differently. */
   ratingCount: number
-  nextBooking: { id: string; name: string; startAt: string; going: number } | null
+  /** `going` is null when it is another host's night and under the floor (SCRUM-501). */
+  nextBooking: { id: string; name: string; startAt: string; going: number | null } | null
   capacityProxy: number | null
   tone: "success" | "neutral" | "destructive"
   note: string
@@ -247,6 +249,8 @@ export interface VenueRow {
 
 export interface VenueOverview {
   role: "venue_owner"
+  /** The owned venues with a room running now, each as `getBuildingOccupancy` reads it for the owner. */
+  buildings: { venueId: string; venueName: string; occupancy: BuildingOccupancy }[]
   venues: VenueRow[]
   /** counts[dayIndex][slotIndex], Monday-first, four slots per day. */
   utilisation: number[][]

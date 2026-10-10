@@ -47,7 +47,7 @@ beforeEach(() => {
   mockDb.venues.create.mockResolvedValue({ id: "venue_new" })
   mockDb.$queryRaw.mockResolvedValue([])
   mockDb.venues.findUnique.mockResolvedValue({
-    id: "venue_1",
+    id: "11111111-1111-4111-8111-111111111111",
     name: "Toit",
     owner_org_id: MY_ORG,
   })
@@ -258,18 +258,18 @@ describe("assignVenueOwner", () => {
 
   it("refuses to reassign an owned venue — that is a dispute", async () => {
     mockDb.venues.findUnique.mockResolvedValue({ name: "Toit", owner_org_id: "org_other" })
-    await expect(assignVenueOwner("venue_1", MY_ORG)).rejects.toThrow(/already has an owner/i)
+    await expect(assignVenueOwner("11111111-1111-4111-8111-111111111111", MY_ORG)).rejects.toThrow(/already has an owner/i)
     expect(mockDb.venues.update).not.toHaveBeenCalled()
   })
 
   it("is idempotent when the same org is assigned again", async () => {
     mockDb.venues.findUnique.mockResolvedValue({ name: "Toit", owner_org_id: MY_ORG })
-    await expect(assignVenueOwner("venue_1", MY_ORG)).resolves.toBeUndefined()
+    await expect(assignVenueOwner("11111111-1111-4111-8111-111111111111", MY_ORG)).resolves.toBeUndefined()
   })
 
   it("refuses a non-admin", async () => {
     signIn("venue_owner")
-    await expect(assignVenueOwner("venue_1", MY_ORG)).rejects.toThrow(/forbidden/i)
+    await expect(assignVenueOwner("11111111-1111-4111-8111-111111111111", MY_ORG)).rejects.toThrow(/forbidden/i)
   })
 })
 
@@ -288,14 +288,14 @@ describe("retiring a venue", () => {
     signIn("app_admin")
     mockDb.events.count.mockResolvedValue(2)
 
-    await expect(retireVenue("venue_1")).rejects.toThrow(/still booked/)
+    await expect(retireVenue("11111111-1111-4111-8111-111111111111")).rejects.toThrow(/still booked/)
     expect(mockDb.venues.updateMany).not.toHaveBeenCalled()
   })
 
   it("counts only events that have not finished", async () => {
     // Past events at a retired venue are its history, not a reason to refuse.
     signIn("app_admin")
-    await retireVenue("venue_1")
+    await retireVenue("11111111-1111-4111-8111-111111111111")
 
     const where = mockDb.events.count.mock.calls[0][0].where
     expect(where.end_time).toEqual({ gte: expect.any(Date) })
@@ -306,7 +306,7 @@ describe("retiring a venue", () => {
 
   it("writes both columns, because one without the other is a contradiction", async () => {
     signIn("app_admin")
-    await retireVenue("venue_1")
+    await retireVenue("11111111-1111-4111-8111-111111111111")
 
     const call = mockDb.venues.updateMany.mock.calls[0][0]
     expect(call.data.status).toBe("archived")
@@ -318,18 +318,18 @@ describe("retiring a venue", () => {
   it("tells the second click the truth rather than rewriting the first", async () => {
     signIn("app_admin")
     mockDb.venues.updateMany.mockResolvedValue({ count: 0 })
-    await expect(retireVenue("venue_1")).rejects.toThrow(/already retired/)
+    await expect(retireVenue("11111111-1111-4111-8111-111111111111")).rejects.toThrow(/already retired/)
   })
 
   it("lets an owner retire their own", async () => {
     signIn("venue_owner")
-    await expect(retireVenue("venue_1")).resolves.toBeUndefined()
+    await expect(retireVenue("11111111-1111-4111-8111-111111111111")).resolves.toBeUndefined()
   })
 
   it("refuses a stranger", async () => {
     signIn("venue_owner")
     mockDb.organisation_members.findFirst.mockResolvedValue(null)
-    await expect(retireVenue("venue_1")).rejects.toThrow(/Forbidden/)
+    await expect(retireVenue("11111111-1111-4111-8111-111111111111")).rejects.toThrow(/Forbidden/)
   })
 })
 
@@ -341,10 +341,10 @@ describe("restoring a venue", () => {
      * what the product offers, not about one organisation.
      */
     signIn("venue_owner")
-    await expect(restoreVenue("venue_1")).rejects.toThrow(/Forbidden/)
+    await expect(restoreVenue("11111111-1111-4111-8111-111111111111")).rejects.toThrow(/Forbidden/)
 
     signIn("app_admin")
-    await expect(restoreVenue("venue_1")).resolves.toBeUndefined()
+    await expect(restoreVenue("11111111-1111-4111-8111-111111111111")).resolves.toBeUndefined()
     expect(mockDb.venues.updateMany.mock.calls[0][0].where.deleted_at).toEqual({ not: null })
   })
 })
@@ -362,7 +362,7 @@ describe("a venue type outside the vocabulary (security review, SCRUM-353c)", ()
 
   it("is refused on edit", async () => {
     signIn("app_admin")
-    await expect(updateVenue("venue_1", { venueType: "dungeon" as never })).rejects.toThrow(/not a venue type/i)
+    await expect(updateVenue("11111111-1111-4111-8111-111111111111", { venueType: "dungeon" as never })).rejects.toThrow(/not a venue type/i)
     expect(mockDb.venues.update).not.toHaveBeenCalled()
   })
 })
@@ -374,20 +374,20 @@ describe("correcting the pin", () => {
      * rather than failing — a wrong answer that looks like a working save.
      */
     signIn("app_admin")
-    await expect(updateVenue("venue_1", { lat: 12.97 })).rejects.toThrow(/both/)
-    await expect(updateVenue("venue_1", { lng: 77.59 })).rejects.toThrow(/both/)
+    await expect(updateVenue("11111111-1111-4111-8111-111111111111", { lat: 12.97 })).rejects.toThrow(/both/)
+    await expect(updateVenue("11111111-1111-4111-8111-111111111111", { lng: 77.59 })).rejects.toThrow(/both/)
     expect(mockDb.venues.update).not.toHaveBeenCalled()
   })
 
   it("refuses coordinates off the globe", async () => {
     signIn("app_admin")
-    await expect(updateVenue("venue_1", { lat: 91, lng: 0 })).rejects.toThrow(/Latitude/)
-    await expect(updateVenue("venue_1", { lat: 0, lng: 181 })).rejects.toThrow(/Longitude/)
+    await expect(updateVenue("11111111-1111-4111-8111-111111111111", { lat: 91, lng: 0 })).rejects.toThrow(/Latitude/)
+    await expect(updateVenue("11111111-1111-4111-8111-111111111111", { lat: 0, lng: 181 })).rejects.toThrow(/Longitude/)
   })
 
   it("writes both when both are given", async () => {
     signIn("app_admin")
-    await updateVenue("venue_1", { lat: 19.076, lng: 72.877 })
+    await updateVenue("11111111-1111-4111-8111-111111111111", { lat: 19.076, lng: 72.877 })
 
     const data = mockDb.venues.update.mock.calls[0][0].data
     expect(data.latitude).toBe(19.076)
@@ -404,13 +404,13 @@ describe("correcting the pin", () => {
     mockDb.venues.findUniqueOrThrow.mockResolvedValue({
       geofence: { type: "circle", lat: LAT, lng: LNG, radius: 30, buffer: 20 },
     })
-    await expect(updateVenue("venue_1", { lat: 19.076, lng: 72.877 })).rejects.toThrow(
+    await expect(updateVenue("11111111-1111-4111-8111-111111111111", { lat: 19.076, lng: 72.877 })).rejects.toThrow(
       /check-in area is \d+ m from the venue's pin/i
     )
     expect(mockDb.venues.update).not.toHaveBeenCalled()
 
     // 40 m along the street is a correction, not a move to another city.
-    await updateVenue("venue_1", { lat: LAT + 0.0004, lng: LNG })
+    await updateVenue("11111111-1111-4111-8111-111111111111", { lat: LAT + 0.0004, lng: LNG })
     expect(mockDb.venues.update).toHaveBeenCalled()
   })
 
@@ -420,13 +420,13 @@ describe("correcting the pin", () => {
     it("judges it against the pin as it will be after the save", async () => {
       signIn("app_admin")
       // Pin and area moved together to Mumbai: consistent, so accepted.
-      await updateVenue("venue_1", { lat: 19.076, lng: 72.877, geofence: circleAt(19.076, 72.877) })
+      await updateVenue("11111111-1111-4111-8111-111111111111", { lat: 19.076, lng: 72.877, geofence: circleAt(19.076, 72.877) })
       expect(mockDb.venues.update).toHaveBeenCalled()
 
       // Pin to Mumbai, area left at Toit: refused.
       mockDb.venues.update.mockClear()
       await expect(
-        updateVenue("venue_1", { lat: 19.076, lng: 72.877, geofence: circleAt(LAT, LNG) })
+        updateVenue("11111111-1111-4111-8111-111111111111", { lat: 19.076, lng: 72.877, geofence: circleAt(LAT, LNG) })
       ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
       expect(mockDb.venues.update).not.toHaveBeenCalled()
     })
@@ -443,7 +443,7 @@ describe("correcting the pin", () => {
       signIn("venue_owner")
       mockDb.venues.findUniqueOrThrow.mockResolvedValue({ latitude: LAT, longitude: LNG })
       await expect(
-        updateVenue("venue_1", { name: "Toit Brewpub", geofence: circleAt(LAT + 0.011, LNG) })
+        updateVenue("11111111-1111-4111-8111-111111111111", { name: "Toit Brewpub", geofence: circleAt(LAT + 0.011, LNG) })
       ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
       expect(mockDb.venues.update).not.toHaveBeenCalled()
     })
@@ -452,12 +452,12 @@ describe("correcting the pin", () => {
       // Trace outline with no corners yet, Save: what staging showed as
       // "Check-in area is not valid (ring_too_short)."
       signIn("venue_owner")
-      const empty = updateVenue("venue_1", { geofence: { type: "polygon", buffer: 20, ring: [] } })
+      const empty = updateVenue("11111111-1111-4111-8111-111111111111", { geofence: { type: "polygon", buffer: 20, ring: [] } })
       await expect(empty).rejects.toThrow("A polygon geofence needs at least three points.")
       await expect(empty).rejects.not.toThrow(/ring_too_short/)
 
       // A figure-of-eight: the editor warns, the save must say the same thing.
-      const bowtie = updateVenue("venue_1", {
+      const bowtie = updateVenue("11111111-1111-4111-8111-111111111111", {
         geofence: { type: "polygon", buffer: 20, ring: [
           [LAT, LNG], [LAT + 0.0005, LNG + 0.0005], [LAT + 0.0005, LNG], [LAT, LNG + 0.0005],
         ] },
@@ -469,14 +469,14 @@ describe("correcting the pin", () => {
     it("accepts any area on a venue that has no pin yet", async () => {
       signIn("app_admin")
       mockDb.venues.findUniqueOrThrow.mockResolvedValue({ latitude: null, longitude: null })
-      await updateVenue("venue_1", { geofence: circleAt(19.076, 72.877) })
+      await updateVenue("11111111-1111-4111-8111-111111111111", { geofence: circleAt(19.076, 72.877) })
       expect(mockDb.venues.update.mock.calls[0][0].data.geofence).toMatchObject({ type: "circle" })
     })
   })
 
   it("leaves the pin alone when neither is given", async () => {
     signIn("app_admin")
-    await updateVenue("venue_1", { name: "New name" })
+    await updateVenue("11111111-1111-4111-8111-111111111111", { name: "New name" })
 
     const data = mockDb.venues.update.mock.calls[0][0].data
     expect(data).not.toHaveProperty("latitude")

@@ -107,6 +107,8 @@ export function VenueClaimForm({
         <ul className="flex flex-col gap-1.5 text-[0.8125rem] text-muted-foreground">
           <li>· Events another organiser holds at {venueName} link to you automatically.</li>
           <li>· You see the attendee count, the chatroom and the feedback for those events.</li>
+          {/* Owner's ruling 1 (2026-09-27): a claim never opens the venue's past. */}
+          <li>· Nights before your claim stay with whoever ran them. Their history reaches you only as totals, never people.</li>
           <li>· Organisers can unlink an event from your venue at any time, with a reason.</li>
         </ul>
         <p className="text-[0.75rem] text-faint-foreground">

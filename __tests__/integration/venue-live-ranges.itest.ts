@@ -421,10 +421,16 @@ describe("the venue's lists", () => {
     as(venueOwner, "venue_owner")
     const venuePage = await VenueDetailPage({ params: Promise.resolve({ id: venues[0] }), searchParams: Promise.resolve({}) })
     const [panel] = find<Panel>(venuePage, BuildingOccupancyPanel)
-    expect(panel.occupancy.rooms).toEqual([
-      expect.objectContaining({ eventId: twelve, inside: "10-19", guestsInside: null, staffInside: null }),
-      expect.objectContaining({ eventId: three, inside: "quiet", guestsInside: null, staffInside: null }),
-    ])
+    // The venue's own live room is in the building too (step 17), and the
+    // owner reads it as a range like every room they do not run.
+    expect(panel.occupancy.rooms).toHaveLength(3)
+    expect(panel.occupancy.rooms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventId: twelve, inside: "10-19", guestsInside: null, staffInside: null }),
+        expect.objectContaining({ eventId: three, inside: "quiet", guestsInside: null, staffInside: null }),
+        expect.objectContaining({ venueDay: true, inside: "quiet", guestsInside: null, staffInside: null }),
+      ])
+    )
     expect(panel.occupancy.inside).toBeNull()
     expect(numericKeys(panel.occupancy)).toEqual(["capacity"])
 
@@ -433,7 +439,10 @@ describe("the venue's lists", () => {
       await VenueDetailPage({ params: Promise.resolve({ id: venues[0] }), searchParams: Promise.resolve({}) }),
       BuildingOccupancyPanel
     )
-    expect(adminPanel.occupancy).toMatchObject({ inside: 15, fillPct: 15 })
+    // The two nights' 15, plus whoever is live in the venue's own room, exactly.
+    const ownRoom = adminPanel.occupancy.rooms.find((r) => (r as { venueDay?: boolean }).venueDay)
+    const live = typeof ownRoom?.inside === "number" ? ownRoom.inside : 0
+    expect(adminPanel.occupancy).toMatchObject({ inside: 15 + live, fillPct: 15 + live })
   })
 
   it("ranges the same rooms on the Chatrooms list, without a total", async () => {
@@ -511,7 +520,7 @@ describe("the venue's lists", () => {
     expect(cell(await buildReport("events", "organizer", host, range), twelve, "Attended")).toBe("12")
   })
 
-  it("orders ranged rooms by what is shown, and flags a building over its licence without a total", async () => {
+  it("orders ranged rooms by what is shown, and flags a building over its licence only from what is shown", async () => {
     // Two rooms the owner reads as "Under 5": exact order would put BBB (4) first.
     const small = await db.venues.create({
       data: { name: testId("vlr-small"), city: "Bengaluru", capacity: 3, owner_org_id: (await db.venues.findUniqueOrThrow({ where: { id: venues[0] } })).owner_org_id, claimed_at: new Date(Date.now() - 30 * DAY) },
@@ -531,7 +540,10 @@ describe("the venue's lists", () => {
       [rooms["AAA room"], "quiet"],
       [rooms["BBB room"], "quiet"],
     ])
-    expect(owner).toMatchObject({ inside: null, fillPct: null, overCapacity: true })
+    // Two "quiet" rooms prove nothing about a capacity of 3: the flag reads
+    // what is shown, or the owner could walk the capacity they set until it
+    // flipped and read the exact five (step 17 review M8). An admin's is exact.
+    expect(owner).toMatchObject({ inside: null, fillPct: null, overCapacity: false })
 
     const exact = await getBuildingOccupancy(small.id)
     expect(exact.rooms.map((r) => r.eventId)).toEqual([rooms["BBB room"], rooms["AAA room"]])
