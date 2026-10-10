@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation"
-import { IconMicrophone2 } from "@tabler/icons-react"
+import { IconMicrophone2, IconSpeakerphone } from "@tabler/icons-react"
 
-import { Badge } from "@/components/ui/badge"
+import { KpiStrip, LiveDot, Panel } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
-import { EmptyState, HeroMetric, MetricTile } from "@/components/dashboard/primitives"
+import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
+import { formatNumber } from "@/lib/dashboard-format"
+import { cn } from "@/lib/utils"
 import { getAuth } from "@/lib/auth"
 import { mayReachRoute } from "@/lib/dashboard-nav"
 import { eventClock } from "@/lib/event-phase"
@@ -89,12 +91,15 @@ export default async function PlacementsPage() {
     )
   }
 
+  const money = (minor: number, currency: string) =>
+    new Intl.NumberFormat("en-IN", { style: "currency", currency, maximumFractionDigits: 2 }).format(minor / 100)
+
   return (
     <div className="flex flex-col gap-5">
-      <div>
+      <div className={overview.nextCreative ? "grid gap-5 @3xl/main:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]" : "grid gap-5"}>
         {overview.next ? (
           <HeroMetric
-            eyebrow="Next placement"
+            eyebrow={`Next placement${overview.next.ready ? "" : " · blocked"}`}
             value={overview.next.ready ? until(overview.next.startTime, now) : "Blocked"}
             description={
               overview.next.ready
@@ -111,73 +116,112 @@ export default async function PlacementsPage() {
             tone="muted"
           />
         )}
+        {overview.nextCreative ? (
+          // The approved copy as the room shows it: a sponsored message, never a banner.
+          <Panel title="Room preview">
+            <div className="flex flex-col gap-1.5 rounded-[10px] border border-[color-mix(in_oklch,var(--chart-3)_40%,transparent)] bg-[color-mix(in_oklch,var(--chart-3)_12%,var(--card))] px-3.5 py-3">
+              <span className="inline-flex items-center gap-1.5 text-[0.71875rem] font-bold uppercase tracking-[0.06em] text-muted-foreground">
+                <IconSpeakerphone aria-hidden className="size-3.5" />
+                Sponsored · {overview.brandName}
+              </span>
+              <span className="text-[0.84375rem] leading-5">{overview.nextCreative}</span>
+            </div>
+            <span className="text-[0.75rem] text-faint-foreground">Approved by creative review · as attendees see it</span>
+          </Panel>
+        ) : null}
       </div>
 
-      {/*
-        Container queries, not viewport breakpoints. The sidebar is 288px and
-        collapsible, so viewport and content width differ by a changing amount —
-        `DESIGN_SYSTEM.md:89` records two grids falling visibly out of step when
-        one used `md:` and the other did not.
-      */}
-      <div className="grid gap-6  @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
-        <MetricTile label="Live now" value={overview.liveNow} />
-        <MetricTile
-          label="Awaiting you"
-          value={overview.awaitingYou}
-          hint={overview.awaitingYou > 0 ? "needs a decision" : undefined}
-        />
-        {/*
-          `null`, not `0`. Nothing has run yet, and "Reach 0" reads as failure
-          where an em dash reads as "not yet" — the distinction MetricTile was
-          built to carry.
-        */}
-        <MetricTile
-          label="Reach (30d)"
-          value={overview.reach30d}
-          hint={overview.reach30dSuppressed ? "fewer than 5 people" : "distinct people"}
-        />
-        <MetricTile label="Brand" value={overview.brandName} />
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Live now", value: overview.liveNow, hint: "campaigns in a room" },
+          {
+            label: "Awaiting you",
+            value: overview.awaitingYou,
+            hint: overview.awaitingYou > 0 ? "needs a decision" : "nothing to decide",
+          },
+          {
+            label: "Reach (30d)",
+            value: overview.reach30d === null ? null : formatNumber(overview.reach30d),
+            hint:
+              overview.reach30d === null
+                ? overview.reach30dSuppressed
+                  ? "under 5 people, not reported"
+                  : "nothing has run yet"
+                : overview.reach30dSuppressed
+                  ? "people per night, added up · small nights left out"
+                  : "people per night, added up",
+          },
+          { label: "Brand", value: overview.brandName, hint: "as attendees see it" },
+        ]}
+      />
 
-      <section className="flex flex-col gap-3">
-        {/* h2, not h1 — the layout's PageHeader owns the page's only h1. */}
-        <h2 className="text-[length:var(--text-h2)] font-bold">Placements</h2>
-
+      <Panel title="All placements" bodyClassName="gap-0 px-0 pb-0 pt-3">
         {overview.placements.length === 0 ? (
-          <EmptyState
-            description="No placements yet. When an organiser adds your brand to an event, it appears here — you will be asked to accept before anything runs."
-            compact
-          />
+          <div className="px-5 pb-5">
+            <EmptyState
+              description="No placements yet. When an organiser adds your brand to an event, it appears here — you will be asked to accept before anything runs."
+              compact
+            />
+          </div>
         ) : (
-          <div className="flex flex-col divide-y rounded-xl border bg-card">
+          <ul className="flex flex-col">
             {overview.placements.map((p) => (
-              <div
+              <li
                 key={p.id}
-                className="flex flex-col gap-2 p-4 @2xl/main:flex-row @2xl/main:items-center @2xl/main:justify-between"
+                className="flex flex-col gap-2 border-t border-border px-5 py-3.5 @2xl/main:flex-row @2xl/main:items-center @2xl/main:gap-4"
               >
-                <div className="flex flex-col gap-1">
-                  <span className="font-medium">{p.eventTitle}</span>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-[0.875rem] font-medium">{p.eventTitle}</span>
                   <span className="text-[0.8125rem] text-muted-foreground">
                     {/* The event's clock, not the server's (SCRUM-496). */}
                     {eventClock(p.timezone).dateTime(p.startTime)}
-                    {p.blocker ? ` · ${p.blocker}` : ""}
+                    {p.blocker ? <span className="text-warning"> · {p.blocker}</span> : null}
                   </span>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Badge variant={p.phase === "live" ? "secondary" : "outline"}>
-                    {PHASE_LABEL[p.phase] ?? p.phase}
-                  </Badge>
-                  <span className="text-[0.8125rem] text-muted-foreground">
-                    {/* Em dash for "has not run", never 0. */}
-                    {p.sends === null ? "— sends" : `${p.sends} sends`}
-                  </span>
-                  {p.status === "proposed" ? <PlacementDecision placementId={p.id} /> : null}
-                </div>
-              </div>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 text-[0.8125rem]",
+                    (p.phase === "proposed" || p.phase === "live") && "font-bold",
+                    p.phase === "proposed" && "text-primary"
+                  )}
+                >
+                  {p.phase === "live" ? <LiveDot /> : null}
+                  {PHASE_LABEL[p.phase] ?? p.phase}
+                </span>
+                <span className="text-[0.8125rem] text-muted-foreground @2xl/main:w-20 @2xl/main:text-right">
+                  {/* Em dash for "has not run", never 0. */}
+                  {p.sends === null ? "— sends" : `${p.sends} send${p.sends === 1 ? "" : "s"}`}
+                </span>
+                <span className="text-[0.8125rem] text-muted-foreground @2xl/main:w-36 @2xl/main:text-right">
+                  {p.reach !== null
+                    ? `${formatNumber(p.reach)} reached`
+                    : p.reachSuppressed
+                      ? "held back · under 5"
+                      : "— reached"}
+                </span>
+                {/* One fixed slot for the row's action, so the columns line up row to row. */}
+                <span className="flex @2xl/main:w-[170px] @2xl/main:justify-end">
+                  {p.status === "proposed" ? (
+                    <PlacementDecision placementId={p.id} />
+                  ) : p.due ? (
+                    <Button asChild size="sm">
+                      <a href={p.due.payUrl} target="_blank" rel="noopener noreferrer">
+                        Pay {money(p.due.amountMinor, p.due.currency)}
+                      </a>
+                    </Button>
+                  ) : null}
+                </span>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-      </section>
+      </Panel>
+
+      <p className="text-[0.75rem] text-faint-foreground">
+        Reach is distinct people your sends reached, withheld below 5 so a small room can&apos;t be identified. A
+        placement is priced by the reach it delivers; the organiser and Blend&apos;n agree the price before anything runs,
+        and you pay it by the link on the row.
+      </p>
     </div>
   )
 }

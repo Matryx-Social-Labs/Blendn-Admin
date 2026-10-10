@@ -10,10 +10,17 @@ const compactFormat = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,
 })
+/**
+ * India's day, on the server and in every browser alike. With no time zone a
+ * server component formatted in the host's zone (UTC on Railway) and the
+ * client re-rendered in the viewer's: a charge settled at 01:30 IST read as
+ * the day before, and the two disagreed in hydration (final review D3).
+ */
 const dayFormat = new Intl.DateTimeFormat("en-US", {
   weekday: "short",
   day: "numeric",
   month: "short",
+  timeZone: "Asia/Kolkata",
 })
 
 export function formatNumber(value: number | null) {

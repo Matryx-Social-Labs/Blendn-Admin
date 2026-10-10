@@ -15,13 +15,62 @@ Register the webhook at `https://<api host>/api/webhooks/razorpay` with these
 events: `subscription.activated`, `subscription.charged`,
 `subscription.pending`, `subscription.halted`, `subscription.cancelled`,
 `subscription.completed`, `subscription.paused`, `subscription.resumed`,
-`payment.captured`, `payment.failed`, `order.paid`, `refund.processed`,
+`payment.captured`, `payment.failed`, `order.paid`, `payment_link.paid`,
+`payment_link.expired`, `payment_link.cancelled`, `refund.processed`,
 `payment.dispute.created`, `payment.dispute.lost`, `payment.dispute.won`.
+**Owner action (step 17):** add `payment_link.expired` and
+`payment_link.cancelled` to an already-registered webhook; without them a link
+closed at Razorpay stays "open" here until a new send expires it.
 Then run `npx tsx scripts/razorpay-plans.ts --apply` once with that
 environment's keys (dry run without `--apply`).
 
-`payment_link.paid` (sponsor payment links) is step 17's and is not handled
-yet: a delivery of it is recorded and changes nothing.
+## Sponsor payment links (step 17)
+
+On Charges, an **agreed** charge for a claimed brand gets "Send payment link":
+a Razorpay Payment Link in the charge's own amount, emailed by Razorpay to the
+sponsor organisation's primary contact and shown on the sponsor's Placements
+page as "Pay ₹…". Our record of it is a `billing_checkouts` row (kind
+`payment_link`, the sponsor's organisation, `charge_id`, `pay_url`); the
+charge keeps its pricing note in `external_ref` until the link settles it.
+The link is created silent and emailed only once our record is committed; if
+our side fails after Razorpay made it, it is cancelled at Razorpay and the id
+logged (`orphanProviderRef`). A second click returns the open link; links
+expire after 14 days, after which a new one can be sent (a stale one is
+marked expired then, even if `payment_link.expired` never arrived). Ten sends
+a minute per admin.
+
+**Void and "Payment received" close the link first.** Razorpay cancels it,
+then our row says so, then the charge moves, in one transaction with its
+audit row (`closedLinks`). If money already came through the link (paid or
+partly paid, here or at Razorpay) the change is refused: let the webhook
+settle it, or refund at Razorpay. If Razorpay will not cancel, nothing
+changes; try again. If Razorpay cancelled and our side then failed, the log
+names the link (`paymentLinkIds`) and the next attempt goes through. Sends,
+voids and settlements on one charge run one at a time; thirty moves a minute
+per admin.
+
+`payment_link.paid` settles the charge, once, against that row: the amount,
+currency and "paid" status must match it and the charge. `notes` are never
+read. Then, by case:
+
+- **Already settled by this link:** a replay changes nothing.
+- **Settled some other way** (by hand, a bank transfer): the sponsor paid
+  twice. `charge.paid_twice` and an error log. **Refund the link's payment
+  from the Razorpay dashboard**; its refund leaves the hand settlement alone.
+- **Voided:** a charge voided before the payment landed stays void. The
+  webhook writes `charge.paid_after_void` and logs an error. **Refund it from
+  the Razorpay dashboard.**
+- **Refunded:** a full refund (`refund.processed`) voids the charge this link
+  settled, with the refund id as the reason — also when Razorpay delivered the
+  refund before the payment.
+- **Disputed:** `charge.disputed` and an error log; answer it at Razorpay. A
+  dispute lost voids the charge this link settled.
+- **Any other state** (a link is only sent for an agreed charge):
+  `charge.paid_unexpected` and an error log; the payment is recorded and the
+  charge left as it is. Reconcile it by hand.
+
+Money that arrives any other way is still settled by hand with "Payment
+received" and its reference.
 
 ## Venue Pro (step 17)
 

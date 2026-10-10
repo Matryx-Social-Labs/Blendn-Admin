@@ -97,6 +97,28 @@ export function grossRupees(plan: BillingPlan): number {
   return Math.round((plan.listRupees * (100 + GST_RATE_PERCENT)) / 100)
 }
 
+/**
+ * Sponsor placements are priced by the reach they delivered (plan v2 §9.1b,
+ * audit §6.3): distinct people, from `lib/sponsor-reach.ts`. These are the
+ * bands; what each costs is the owner's to set, so until then the Charges page
+ * shows a placement's band and the admin prices it by hand. Under 5 has no
+ * band: the reach is held back.
+ */
+export const SPONSOR_REACH_BANDS = [
+  { key: "5-49", min: 5, label: "5–49 people" },
+  { key: "50-149", min: 50, label: "50–149 people" },
+  { key: "150-399", min: 150, label: "150–399 people" },
+  { key: "400+", min: 400, label: "400+ people" },
+] as const
+
+export type SponsorReachBand = (typeof SPONSOR_REACH_BANDS)[number]
+
+/** The band a delivered reach falls in, or null when it is held back or nothing ran. */
+export function reachBand(reach: number | null): SponsorReachBand | null {
+  if (reach === null) return null
+  return [...SPONSOR_REACH_BANDS].reverse().find((b) => reach >= b.min) ?? null
+}
+
 /** What Razorpay must charge, in paise. The webhook holds every payment to this. */
 export function chargeMinor(plan: BillingPlan): number {
   return grossRupees(plan) * 100

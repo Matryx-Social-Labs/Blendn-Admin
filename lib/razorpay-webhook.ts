@@ -88,6 +88,8 @@ const KEEP: Record<string, readonly string[]> = {
   order: ["id", "amount", "amount_paid", "amount_due", "currency", "receipt", "status", "attempts", "created_at"],
   refund: ["id", "payment_id", "amount", "currency", "status", "created_at"],
   dispute: ["id", "payment_id", "amount", "currency", "status", "phase", "reason_code", "created_at"],
+  payment_link: ["id", "amount", "amount_paid", "currency", "status", "reference_id", "created_at", "updated_at"],
+  // Kept for an early refund to be found again by its payment (applyEarlyRefund).
 }
 
 export function redactDelivery(d: Delivery): Prisma.InputJsonValue {
@@ -106,7 +108,7 @@ interface Audit {
   action: string
   orgId: string
   details: Prisma.InputJsonValue
-  /** What the row is about, when not the organisation: a venue (Venue Pro). */
+  /** What the row is about, when not the organisation: a venue (Venue Pro) or a placement charge. */
   resource?: { kind: string; id: string }
 }
 
@@ -171,8 +173,11 @@ export async function recordRazorpayDelivery(
 
   const { outcome } = result
   if (outcome.refused) {
-    const money = /^(subscription\.charged|order\.paid)$/.test(delivery.event)
-    ;(money || outcome.refused !== "unknown_ref" ? logger.error : logger.warn)("Razorpay delivery refused", {
+    // An unknown order.paid is, in practice, the order Razorpay makes behind
+    // every payment link: the link's own payment_link.paid is what settles it.
+    const linkOrder = delivery.event === "order.paid" && outcome.refused === "unknown_ref"
+    const money = /^(subscription\.charged|order\.paid|payment_link\.paid)$/.test(delivery.event)
+    ;(linkOrder ? logger.info : money || outcome.refused !== "unknown_ref" ? logger.error : logger.warn)("Razorpay delivery refused", {
       eventId,
       type: delivery.event,
       refused: outcome.refused,
@@ -200,6 +205,7 @@ function providerRefOf(d: Delivery): string | null {
   return (
     str(entityOf(d, "subscription")?.id) ??
     str(entityOf(d, "order")?.id) ??
+    str(entityOf(d, "payment_link")?.id) ??
     str(entityOf(d, "payment")?.id) ??
     str(entityOf(d, "refund")?.payment_id) ??
     str(entityOf(d, "dispute")?.payment_id)
@@ -210,13 +216,15 @@ function providerRefOf(d: Delivery): string | null {
 
 interface Checkout {
   id: string
-  kind: "subscription" | "order"
+  kind: "subscription" | "order" | "payment_link"
   provider_ref: string
   provider_plan_id: string | null
   org_id: string
   event_id: string | null
   /** The venue a Venue Pro subscription is for; null for an organisation's own purchase. */
   venue_id: string | null
+  /** The placement charge a payment link is for. */
+  charge_id: string | null
   plan_key: string
   amount_minor: number
   currency: string
@@ -229,7 +237,7 @@ interface Checkout {
 async function lockCheckout(tx: Tx, providerRef: string): Promise<Checkout | null> {
   const rows = await tx.$queryRaw<Checkout[]>`
     SELECT id, kind::text AS kind, provider_ref, provider_plan_id, org_id::text AS org_id, event_id::text AS event_id,
-           venue_id::text AS venue_id, plan_key, amount_minor, currency, status, status_at, current_end
+           venue_id::text AS venue_id, charge_id::text AS charge_id, plan_key, amount_minor, currency, status, status_at, current_end
       FROM billing_checkouts
      WHERE provider = ${PROVIDER} AND provider_ref = ${providerRef}
        FOR UPDATE`
@@ -278,6 +286,8 @@ const auditResource = (c: Checkout) => (c.venue_id ? { resource: { kind: "venue"
 async function apply(tx: Tx, d: Delivery): Promise<Outcome> {
   if (d.event.startsWith("subscription.")) return applySubscription(tx, d)
   if (d.event === "order.paid") return applyOrderPaid(tx, d)
+  if (d.event === "payment_link.paid") return applyPaymentLinkPaid(tx, d)
+  if (d.event === "payment_link.expired" || d.event === "payment_link.cancelled") return applyPaymentLinkClosed(tx, d)
   if (d.event === "payment.failed") return applyPaymentFailed(tx, d)
   if (d.event === "refund.processed") return applyRefund(tx, d)
   if (d.event.startsWith("payment.dispute.")) return applyDispute(tx, d)
@@ -529,6 +539,11 @@ async function applyRefund(tx: Tx, d: Delivery): Promise<Outcome> {
   if (amount < payment.amount_minor) return out
 
   await tx.billing_payments.update({ where: { id: payment.id }, data: { status: "refunded" } })
+  if (c.kind === "payment_link") {
+    // The money went back: the charge it settled is void, with the refund as the reason.
+    await voidRefundedCharge(tx, out, c, str(refund.id), eventAt)
+    return out
+  }
   await endAccess(tx, out, c, c.provider_ref, eventAt, d.event)
   if (c.kind === "subscription" && !TERMINAL.includes(c.status)) {
     const ref = c.provider_ref
@@ -557,6 +572,12 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
       where: { id: payment.id },
       data: { status: d.event === "payment.dispute.lost" ? "dispute_lost" : "disputed" },
     })
+    if (c.kind === "payment_link") {
+      // A sponsor disputed a placement payment: say so, and on losing it the
+      // money is gone, so the charge it settled is void (review M5, db M1).
+      await disputedLinkPayment(tx, out, c, paymentId, d.event, eventAt)
+      return out
+    }
     await endAccess(tx, out, c, c.provider_ref, eventAt, d.event)
     return out
   }
@@ -564,7 +585,8 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
     await tx.billing_payments.update({ where: { id: payment.id }, data: { status: "dispute_won" } })
     const expiresAt =
       c.kind === "order" ? null : c.current_end ? new Date(c.current_end.getTime() + RENEWAL_GRACE_MS) : null
-    if (c.kind === "order" || expiresAt) {
+    // A payment link bought no entitlement; its charge is the admin's to settle again.
+    if (c.kind !== "payment_link" && (c.kind === "order" || expiresAt)) {
       await recordPaidEntitlement(tx, {
         subject: subjectOf(c),
         product: c.kind === "order" ? "event_pass" : subscriptionProduct(c),
@@ -584,4 +606,192 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
     return out
   }
   return nothing(c.id)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Sponsor payment links (step 17, SCRUM-560)                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface LockedCharge {
+  id: string
+  status: "draft" | "agreed" | "settled" | "void"
+  amount_minor: number
+  currency: string
+  external_ref: string | null
+}
+
+/**
+ * The charge's row, locked until the transaction ends. The webhook takes it
+ * after the link's `billing_checkouts` row, and so does every admin action on
+ * a charge (`lib/charge-actions.ts`): one order, so the two never deadlock.
+ */
+export async function lockCharge(tx: Tx, id: string): Promise<LockedCharge | null> {
+  const rows = await tx.$queryRaw<LockedCharge[]>`
+    SELECT id::text AS id, status::text AS status, amount_minor, currency::text AS currency, external_ref
+      FROM placement_charges
+     WHERE id = ${id}::uuid
+       FOR UPDATE`
+  return rows[0] ?? null
+}
+
+/**
+ * A sponsor paid a placement's link: the charge is settled, once.
+ *
+ * Resolved from our own `billing_checkouts` row by the link's id: the charge
+ * and the organisation are what this server recorded when it sent the link,
+ * never the delivery's notes. Held to that row's amount and to the charge's,
+ * in rupees, with Razorpay saying "paid" and a payment to record. Then, by
+ * the charge's state (locked):
+ *
+ *   - `agreed`: settled, its reference the link's id;
+ *   - `settled` by this link: a replay, nothing more;
+ *   - `settled` some other way (by hand, a bank transfer): the sponsor paid
+ *     twice — `charge.paid_twice`, logged for a refund (review H3);
+ *   - `void`: never resurrected — `charge.paid_after_void`, for a refund.
+ *
+ * A refund Razorpay delivered before this payment (it was refused then as an
+ * unknown payment) is applied now that the payment exists (db M2).
+ */
+async function applyPaymentLinkPaid(tx: Tx, d: Delivery): Promise<Outcome> {
+  const link = entityOf(d, "payment_link")
+  const payment = entityOf(d, "payment")
+  const linkId = str(link?.id)
+  const paymentId = str(payment?.id)
+  const eventAt = at(d.created_at)
+  if (!link || !linkId || !payment || !paymentId || !eventAt) return refuse("malformed")
+
+  const c = await lockCheckout(tx, linkId)
+  if (!c || c.kind !== "payment_link" || !c.charge_id) return refuse("unknown_ref")
+  const amount = num(link.amount)
+  const paid = num(link.amount_paid)
+  if (amount !== c.amount_minor || paid === null || paid < c.amount_minor || str(link.currency) !== c.currency || str(link.status) !== "paid") {
+    return refuse("amount_mismatch", c.id)
+  }
+  const charge = await lockCharge(tx, c.charge_id)
+  if (!charge) return refuse("unknown_ref", c.id)
+  if (charge.amount_minor !== c.amount_minor || charge.currency !== c.currency) return refuse("amount_mismatch", c.id)
+
+  await recordPayment(tx, c, payment, eventAt)
+  const out: Outcome = { applied: true, checkoutId: c.id, audit: [], after: [] }
+  const resource = { kind: "placement_charges", id: charge.id }
+  const details = { paymentLinkId: linkId, paymentId, amountMinor: charge.amount_minor, currency: charge.currency }
+
+  if (charge.status === "agreed") {
+    await tx.placement_charges.update({
+      where: { id: charge.id },
+      data: { status: "settled", settled_at: eventAt, external_ref: linkId },
+    })
+    out.audit.push({ action: "charge.settled", orgId: c.org_id, resource, details: { from: "agreed", source: "razorpay", ...details } })
+    charge.status = "settled"
+    charge.external_ref = linkId
+  } else if (charge.status === "settled" && charge.external_ref !== linkId) {
+    logger.error("A placement charge settled another way was also paid by its link; refund one from the Razorpay dashboard", {
+      chargeId: charge.id,
+      settledRef: charge.external_ref,
+      ...details,
+    })
+    out.audit.push({ action: "charge.paid_twice", orgId: c.org_id, resource, details: { settledRef: charge.external_ref, ...details } })
+  } else if (charge.status === "void") {
+    logger.error("A voided placement charge was paid by its link; refund it from the Razorpay dashboard", { chargeId: charge.id, ...details })
+    out.audit.push({ action: "charge.paid_after_void", orgId: c.org_id, resource, details })
+  } else if (charge.status !== "settled") {
+    // A link is only ever sent for an agreed charge; any other state is a
+    // payment nothing here accounts for. Recorded above, and said.
+    logger.error("A placement charge in an unexpected state was paid by its link; reconcile it by hand", {
+      chargeId: charge.id,
+      chargeStatus: charge.status,
+      ...details,
+    })
+    out.audit.push({ action: "charge.paid_unexpected", orgId: c.org_id, resource, details: { chargeStatus: charge.status, ...details } })
+  }
+  await advance(tx, c, eventAt, "paid")
+  await applyEarlyRefund(tx, out, c, paymentId)
+  return out
+}
+
+/**
+ * A full refund of this payment that arrived before it (refused then as
+ * `unknown_ref`), applied now: the payment is refunded and the charge it
+ * settled is void. The earlier delivery is marked processed.
+ */
+async function applyEarlyRefund(tx: Tx, out: Outcome, c: Checkout, paymentId: string) {
+  const early = await tx.payment_events.findMany({
+    where: {
+      provider: PROVIDER,
+      type: "refund.processed",
+      error: "unknown_ref",
+      payload: { path: ["payload", "refund", "entity", "payment_id"], equals: paymentId },
+    },
+    orderBy: { received_at: "asc" },
+    select: { id: true, payload: true },
+  })
+  for (const e of early) {
+    const refund = (e.payload as { payload?: { refund?: { entity?: Entity } }; created_at?: number }).payload?.refund?.entity
+    const amount = num(refund?.amount)
+    const refundAt = at((e.payload as { created_at?: number }).created_at)
+    if (amount === null || amount < c.amount_minor || !refundAt) continue
+    await tx.billing_payments.updateMany({
+      where: { provider: PROVIDER, provider_payment_id: paymentId },
+      data: { status: "refunded" },
+    })
+    await voidRefundedCharge(tx, out, c, str(refund?.id), refundAt)
+    await tx.payment_events.update({ where: { id: e.id }, data: { error: null, processed_at: new Date(), checkout_id: c.id } })
+  }
+}
+
+/** A link Razorpay expired or cancelled: no longer open, so a new one can be sent. */
+async function applyPaymentLinkClosed(tx: Tx, d: Delivery): Promise<Outcome> {
+  const linkId = str(entityOf(d, "payment_link")?.id)
+  const eventAt = at(d.created_at)
+  if (!linkId || !eventAt) return refuse("malformed")
+  const c = await lockCheckout(tx, linkId)
+  if (!c || c.kind !== "payment_link") return refuse("unknown_ref")
+  // Never over a payment: a paid link stays paid.
+  if (c.status === "paid") return nothing(c.id)
+  await advance(tx, c, eventAt, d.event === "payment_link.expired" ? "expired" : "cancelled")
+  return { applied: true, checkoutId: c.id, audit: [], after: [] }
+}
+
+/** A dispute on a link's payment: audited and logged; lost, the charge this link settled is void. */
+async function disputedLinkPayment(tx: Tx, out: Outcome, c: Checkout, paymentId: string, event: string, eventAt: Date) {
+  if (!c.charge_id) return
+  const charge = await lockCharge(tx, c.charge_id)
+  if (!charge) return
+  const resource = { kind: "placement_charges", id: charge.id }
+  logger.error("A sponsor disputed a placement payment; answer it from the Razorpay dashboard", {
+    chargeId: charge.id,
+    paymentLinkId: c.provider_ref,
+    paymentId,
+    event,
+  })
+  out.audit.push({ action: "charge.disputed", orgId: c.org_id, resource, details: { paymentLinkId: c.provider_ref, paymentId, event } })
+  if (event === "payment.dispute.lost" && charge.status === "settled" && charge.external_ref === c.provider_ref) {
+    await tx.placement_charges.update({
+      where: { id: charge.id },
+      data: { status: "void", voided_at: eventAt, voided_by: null, void_reason: `Dispute lost at Razorpay (${paymentId})` },
+    })
+    out.audit.push({ action: "charge.void", orgId: c.org_id, resource, details: { from: "settled", source: "razorpay", reason: event, paymentId } })
+  }
+}
+
+/**
+ * A full refund of a link's payment voids the charge, with the refund as the
+ * reason — only when this link is what settled it. A refund of the second
+ * payment on a charge settled another way leaves the valid settlement alone
+ * (review H3).
+ */
+async function voidRefundedCharge(tx: Tx, out: Outcome, c: Checkout, refundId: string | null, eventAt: Date) {
+  if (!c.charge_id) return
+  const charge = await lockCharge(tx, c.charge_id)
+  if (!charge || charge.status !== "settled" || charge.external_ref !== c.provider_ref) return
+  await tx.placement_charges.update({
+    where: { id: charge.id },
+    data: { status: "void", voided_at: eventAt, voided_by: null, void_reason: `Refunded at Razorpay${refundId ? ` (${refundId})` : ""}` },
+  })
+  out.audit.push({
+    action: "charge.void",
+    orgId: c.org_id,
+    resource: { kind: "placement_charges", id: charge.id },
+    details: { from: charge.status, source: "razorpay", reason: "refund.processed", refundId, amountMinor: charge.amount_minor },
+  })
 }

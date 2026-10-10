@@ -5,12 +5,30 @@
  * reconciliation somebody has to do by hand months later.
  */
 
+const mockAuth = jest.fn()
+
 const mockDb = {
+  /*
+   * Raw SQL: the charge's row lock (lockCharge) answers with the charge
+   * `findUnique` last returned; the payment-link lock and reach (nothing sent
+   * in these fixtures) answer with nothing.
+   */
+  $queryRaw: jest.fn(async (sql: TemplateStringsArray): Promise<unknown[]> => {
+    if (!/FROM placement_charges[\s\S]*FOR UPDATE/.test(sql.join("?"))) return []
+    const charge = (await mockDb.placement_charges.findUnique.mock.results.at(-1)?.value) as Record<string, unknown> | null
+    return charge ? [charge] : []
+  }),
+  // The one-at-a-time lock on a charge.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+  // A transaction runs its callback against the same client.
+  $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>): Promise<unknown> => cb(mockDb)),
+  // The role is read from the database (lib/current-user.ts): here, the session's own.
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null })) },
+  audit_logs: { create: jest.fn() },
+  billing_checkouts: { update: jest.fn() },
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },
   placement_charges: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
 }
-
-const mockAuth = jest.fn()
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
@@ -62,10 +80,15 @@ describe("pricing", () => {
     expect(data.priced_by).toBe(ADMIN)
   })
 
-  it("rounds at the boundary, once", async () => {
-    // A person typed this. Every read from here on is an integer.
-    await pricePlacement(PLACEMENT, { amount: 0.015 })
-    expect(mockDb.placement_charges.create.mock.calls[0][0].data.amount_minor).toBe(2)
+  it("refuses less than ₹1 and fractions of a paisa, writing nothing (final review D4)", async () => {
+    // 0.015 used to be rounded to 2 paise and stored; a price is whole paise.
+    await expect(pricePlacement(PLACEMENT, { amount: 0.5 })).rejects.toThrow("at least ₹1")
+    await expect(pricePlacement(PLACEMENT, { amount: 0.015 })).rejects.toThrow("at least ₹1")
+    await expect(pricePlacement(PLACEMENT, { amount: 12.345 })).rejects.toThrow("two decimals")
+    await expect(pricePlacement("not-a-uuid", { amount: 100 })).rejects.toThrow("Placement not found")
+    expect(mockDb.placement_charges.create).not.toHaveBeenCalled()
+    await pricePlacement(PLACEMENT, { amount: 1 })
+    expect(mockDb.placement_charges.create.mock.calls[0][0].data.amount_minor).toBe(100)
   })
 
   it("refuses a second live charge on the same placement", async () => {
@@ -180,17 +203,19 @@ describe("the status walk", () => {
   it("writes only from the status it read, and audits nothing when that moved underneath", async () => {
     charge("settled")
     mockDb.placement_charges.updateMany.mockResolvedValue({ count: 0 })
-    const { auditLog } = jest.requireMock("@/lib/audit-log")
 
     await expect(advanceCharge(CHARGE, "void", undefined, "duplicate invoice, re-raised")).rejects.toThrow(/someone else/i)
     expect(mockDb.placement_charges.updateMany.mock.calls[0][0].where).toEqual({ id: CHARGE, status: "settled" })
-    expect(auditLog).not.toHaveBeenCalled()
+    expect(mockDb.audit_logs.create).not.toHaveBeenCalled()
   })
 })
 
 describe("the ledger", () => {
-  function placements(rows: unknown[]) {
-    mockDb.event_sponsors.findMany.mockResolvedValue(rows)
+  function placements(rows: Array<Record<string, unknown> & { charges: object[] }>) {
+    // Every charge as the query selects it: with its payment links (step 17), none here.
+    mockDb.event_sponsors.findMany.mockResolvedValue(
+      rows.map((r) => ({ ...r, charges: r.charges.map((c) => ({ payment_links: [], ...c })) }))
+    )
   }
 
   const base = {
