@@ -329,9 +329,10 @@ export async function grantEntitlement(
 export async function endGrants(
   subject: Subject,
   product: Exclude<entitlement_product, "event_pass">,
-  now: Date = new Date()
+  now: Date = new Date(),
+  client: Client = db
 ): Promise<number> {
-  const { count } = await db.entitlements.updateMany({
+  const { count } = await client.entitlements.updateMany({
     where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", ...liveAt(now) },
     // A live row has started (liveAt), so `now` is never before starts_at.
     data: { expires_at: now },
@@ -347,9 +348,10 @@ export async function endGrants(
 export async function revokePaid(
   subject: Subject,
   entitlementId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  client: Client = db
 ): Promise<{ id: string; product: entitlement_product; externalRef: string | null } | null> {
-  const { count } = await db.entitlements.updateMany({
+  const { count } = await client.entitlements.updateMany({
     where: {
       id: entitlementId,
       subject_kind: subject.kind,
@@ -360,7 +362,7 @@ export async function revokePaid(
     data: { expires_at: now },
   })
   if (count === 0) return null
-  const row = await db.entitlements.findUniqueOrThrow({
+  const row = await client.entitlements.findUniqueOrThrow({
     where: { id: entitlementId },
     select: { id: true, product: true, external_ref: true },
   })
@@ -376,15 +378,16 @@ export async function revokePaidByRefs(
   subject: Subject,
   product: Exclude<entitlement_product, "event_pass">,
   refs: string[],
-  now: Date = new Date()
+  now: Date = new Date(),
+  client: Client = db
 ): Promise<{ id: string }[]> {
   if (refs.length === 0) return []
-  const rows = await db.entitlements.findMany({
+  const rows = await client.entitlements.findMany({
     where: { subject_kind: subject.kind, subject_id: subject.id, product, source: { not: "grant" }, external_ref: { in: refs }, ...liveAt(now) },
     select: { id: true },
   })
   if (rows.length) {
-    await db.entitlements.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { expires_at: now } })
+    await client.entitlements.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { expires_at: now } })
   }
   return rows
 }
