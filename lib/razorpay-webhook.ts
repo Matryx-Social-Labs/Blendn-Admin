@@ -317,7 +317,27 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
     }
     await recordPayment(tx, c, payment, eventAt)
     const endedSince = TERMINAL.includes(c.status) && c.status_at !== null && c.status_at >= eventAt
-    if (!endedSince) {
+    // A venue's Pro is paid for by its owner. A mandate that charges after the
+    // venue changed hands (its cancel failed, review M7) grants the new owner
+    // nothing: flagged for a refund and cancelled after the commit.
+    const payerOwnsVenue =
+      !c.venue_id ||
+      (await tx.venues.findFirst({ where: { id: c.venue_id, owner_org_id: c.org_id }, select: { id: true } })) !== null
+    if (!payerOwnsVenue) {
+      logger.error("A Venue Pro mandate charged after its venue changed hands; refund it from the Razorpay dashboard", {
+        providerRef: subId,
+        venueId: c.venue_id,
+        payerOrgId: c.org_id,
+      })
+      out.audit.push({
+        action: "billing.payer_not_owner",
+        orgId: c.org_id,
+        ...auditResource(c),
+        details: { providerRef: subId, paymentId: str(payment.id), payerOrgId: c.org_id },
+      })
+      if (!TERMINAL.includes(c.status)) out.after.push(() => cancelSubscription(subId, false))
+    }
+    if (!endedSince && payerOwnsVenue) {
       const granted = await recordPaidEntitlement(tx, {
         subject: subjectOf(c),
         product: subscriptionProduct(c),

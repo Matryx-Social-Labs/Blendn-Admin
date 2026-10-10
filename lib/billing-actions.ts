@@ -86,8 +86,14 @@ async function requireBuyer() {
   return { user: session.user, org, keyId: await payable(org.orgId) }
 }
 
-/** Razorpay's publishable key id, when payments are on here and this buyer is under the rate. */
+/**
+ * Razorpay's publishable key id, when payments are on here and this buyer is
+ * under the rate. Called after authorisation and before any Razorpay call, so
+ * a refused attempt still counts; a missing key refuses rather than sharing
+ * one counter between everybody.
+ */
 async function payable(rateKey: string): Promise<string> {
+  if (!rateKey) throw new Refusal(PAYMENTS_OFF)
   let keys: ReturnType<typeof razorpayKeys> = null
   try {
     keys = razorpayKeys()
@@ -446,9 +452,16 @@ async function cancelOpen(
 /* Platform admin: founding grants and revocations                             */
 /* -------------------------------------------------------------------------- */
 
+/** An admin's money actions: grants, ends, revokes and the transfer's cancels, per admin. */
+const ADMIN_ACTIONS = { max: 30, windowMs: 60_000 }
+
 async function requireAdmin() {
   const session = await getAuth()
   if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  // Counted before the action runs, refusals included: a script holding an
+  // admin session cannot loop grants or Razorpay cancels.
+  const { count } = await hit(`billing:admin:${session.user.id}`, ADMIN_ACTIONS.windowMs)
+  if (count > ADMIN_ACTIONS.max) throw new Refusal("Too many changes in a minute. Wait a moment and try again.")
   return session.user
 }
 
@@ -614,8 +627,10 @@ export async function revokeVenueProPaid(venueId: string, entitlementId: string,
  * cycle at Razorpay, and the Venue Pro it paid for ends now, audited on the
  * venue. A grant stays: an admin gave it to the venue and ends it there.
  *
- * Never throws for Razorpay: the venue has already moved, so a failed cancel
- * is logged for an operator to do by hand in Razorpay's dashboard.
+ * Never throws for Razorpay: the venue has already moved. A cancel Razorpay
+ * refused is NOT recorded as cancelled — the mandate may still charge — and
+ * is logged and audited for an operator to do by hand; if it does charge, the
+ * webhook grants nothing to a venue its payer no longer owns.
  */
 export async function endVenueProForNewOwner(venueId: string, newOwnerOrgId: string): Promise<void> {
   const admin = await requireAdmin()
@@ -624,15 +639,18 @@ export async function endVenueProForNewOwner(venueId: string, newOwnerOrgId: str
     where: { venue_id: id, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] }, org_id: { not: newOwnerOrgId } },
     select: { id: true, provider_ref: true, status: true, org_id: true },
   })
+  const failed: string[] = []
   for (const sub of subs) {
     try {
       await cancelSubscription(sub.provider_ref, sub.status === "active")
     } catch (err) {
+      failed.push(sub.provider_ref)
       logger.error("Cancelling the previous owner's Venue Pro at Razorpay failed; cancel it from the Razorpay dashboard", {
         venueId: id,
         providerRef: sub.provider_ref,
         error: err instanceof Error ? err.message : String(err),
       })
+      continue
     }
     await db.billing_checkouts.update({
       where: { id: sub.id },
@@ -647,7 +665,12 @@ export async function endVenueProForNewOwner(venueId: string, newOwnerOrgId: str
         action: "entitlement.ended_on_transfer",
         resource: "venue",
         resource_id: id,
-        details: { newOwnerOrgId, cancelled: subs.map((s) => s.provider_ref), ended: ended.length },
+        details: {
+          newOwnerOrgId,
+          cancelled: subs.map((s) => s.provider_ref).filter((ref) => !failed.includes(ref)),
+          cancelFailed: failed,
+          ended: ended.length,
+        },
       },
     })
   }

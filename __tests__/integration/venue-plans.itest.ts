@@ -80,6 +80,7 @@ let orgId = ""
 
 const calls: { method: string; url: string; body: Record<string, unknown> | undefined }[] = []
 const realFetch = global.fetch
+let failCancel = false
 
 function stubRazorpay() {
   global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -96,6 +97,10 @@ function stubRazorpay() {
       })
     }
     if (url.endsWith("/subscriptions")) return json(200, { id: `sub_${randomUUID().slice(0, 12)}`, plan_id: body?.plan_id, status: "created" })
+    if (url.endsWith("/cancel")) {
+      if (failCancel) return json(500, { error: { description: "Razorpay is having a bad day" } })
+      return json(200, { id: url.split("/").at(-2), plan_id: "plan_vp_month", status: "cancelled" })
+    }
     return json(404, { error: { description: "not stubbed" } })
   }) as typeof fetch
 }
@@ -198,6 +203,7 @@ beforeAll(async () => {
 beforeEach(() => {
   resetMemoryStore()
   calls.length = 0
+  failCancel = false
   process.env.RAZORPAY_KEY_ID = "rzp_test_itestkey"
   process.env.RAZORPAY_KEY_SECRET = "itest_key_secret_value_24"
   process.env.RAZORPAY_WEBHOOK_SECRET = SECRET
@@ -416,6 +422,12 @@ describe("a venue changing hands (review M7)", () => {
     await db.entitlements.create({
       data: { subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 23 * DAY) },
     })
+    const checkoutRow = await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })
+    const invoice = `inv_${randomUUID().slice(0, 10)}`
+    const payId = `pay_${randomUUID().slice(0, 10)}`
+    await db.billing_payments.create({
+      data: { provider_payment_id: payId, checkout_id: checkoutRow.id, amount_minor: 353_900, currency: "INR", invoice_id: invoice, captured_at: new Date(Date.now() - DAY) },
+    })
     const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: newOrg, filed_by: newOwner, status: "pending", is_dispute: true } })
 
     as(admin, "app_admin")
@@ -427,12 +439,75 @@ describe("a venue changing hands (review M7)", () => {
     expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
     expect(await db.audit_logs.count({ where: { action: "entitlement.ended_on_transfer", resource_id: v } })).toBe(1)
 
-    // The new owner sees the venue, and none of the previous owner's mandate.
+    // The new owner sees the venue, and none of the previous owner's mandate:
+    // no subscription, no payment row, no reference, invoice or amount anywhere.
     const asNew = await venuePlanPage({ id: newOwner, role: "venue_owner" })
     expect(asNew.venues.find((r) => r.venueId === v)).toMatchObject({ owned: true, subscriptions: [] })
-    // The payer still sees what it pays for, as no longer its own.
+    expect(asNew.payments).toEqual([])
+    const page = JSON.stringify(asNew)
+    for (const needle of [ref, invoice, payId, "353900"]) expect(page).not.toContain(needle)
+    // The payer still sees what it pays for, as no longer its own — and
+    // nothing of the new owner's: not its name, its plan or its data.
     const asPayer = await venuePlanPage({ id: payerOwner, role: "venue_owner" })
-    expect(asPayer.venues.find((r) => r.venueId === v)).toMatchObject({ owned: false, mayCancel: true, mayBuy: false })
+    expect(asPayer.venues.find((r) => r.venueId === v)).toMatchObject({
+      owned: false,
+      mayCancel: true,
+      mayBuy: false,
+      orgName: "",
+      pro: null,
+      date: null,
+      readiness: { dataSince: null, dataDays: 0 },
+    })
+    expect(asPayer.payments.map((p) => p.reference)).toContain(invoice)
+  })
+
+  it("a cancel Razorpay refused is not recorded as cancelled, and is audited for an operator", async () => {
+    const v = await venue("vp-cancelfail", { org: payerOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active" },
+    })
+    await db.venues.update({ where: { id: v }, data: { owner_org_id: newOrg } })
+    failCancel = true
+    as(admin, "app_admin")
+    await actions.endVenueProForNewOwner(v, newOrg)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+    const audit = await db.audit_logs.findFirstOrThrow({ where: { action: "entitlement.ended_on_transfer", resource_id: v } })
+    expect(audit.details).toMatchObject({ cancelFailed: [ref], cancelled: [] })
+  })
+
+  it("a mandate that charges after its venue changed hands grants the new owner nothing", async () => {
+    const v = await venue("vp-afterhands", { org: newOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active" },
+    })
+    const T = Math.floor(Date.now() / 1000) - 120
+    const body = {
+      event: "subscription.charged",
+      created_at: T,
+      payload: {
+        subscription: { entity: { id: ref, plan_id: "plan_vp_month", status: "active", start_at: T, current_start: T, current_end: T + 30 * 86_400 } },
+        payment: { entity: { id: `pay_${randomUUID().slice(0, 10)}`, amount: 353_900, currency: "INR", status: "captured" } },
+      },
+    }
+    const raw = JSON.stringify(body)
+    const res = await route.POST(
+      new NextRequest("http://localhost/api/webhooks/razorpay", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-real-ip": "203.0.113.11",
+          "x-razorpay-signature": createHmac("sha256", SECRET).update(raw).digest("hex"),
+          "x-razorpay-event-id": `itest_vp_${randomUUID()}`,
+        },
+        body: raw,
+      })
+    )
+    expect(res.status).toBe(200)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+    expect(await db.audit_logs.count({ where: { action: "billing.payer_not_owner", resource_id: v } })).toBe(1)
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
   })
 
   it("cancelling is the payer's: the new owner finds nothing of theirs to cancel", async () => {
@@ -444,8 +519,9 @@ describe("a venue changing hands (review M7)", () => {
     as(newOwner, "venue_owner")
     await expect(actions.cancelVenuePro(v)).rejects.toThrow("no subscription to cancel")
     as(payerOwner, "venue_owner")
-    await actions.cancelVenuePro(v).catch(() => undefined) // Razorpay's cancel is stubbed out; the row is what is read
+    await actions.cancelVenuePro(v)
     expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(true)
   })
 })
 
@@ -460,6 +536,17 @@ describe("founding grants (admin)", () => {
     expect(audit).toMatchObject({ resource: "venue", user_id: admin })
     await expect(actions.grantVenuePro(v, 3, "Founding venue, a second time")).rejects.toThrow("already has a grant")
     await actions.endVenueProGrant(v, "Granted to the wrong venue")
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+  })
+
+  it("limits an admin's money actions, refusals included (30 a minute)", async () => {
+    const v = await venue("vp-rate")
+    as(admin, "app_admin")
+    for (let i = 0; i < 30; i++) {
+      await expect(actions.endVenueProGrant(v, "Granted to the wrong venue")).rejects.toThrow("already ended")
+    }
+    await expect(actions.endVenueProGrant(v, "Granted to the wrong venue")).rejects.toThrow("Too many changes in a minute")
+    await expect(actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")).rejects.toThrow("Too many changes in a minute")
     expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
   })
 
