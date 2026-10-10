@@ -28,7 +28,10 @@ const WIDTH = {
 
 export function PublicFrame({ children, width = "wide" }: { children: ReactNode; width?: keyof typeof WIDTH }) {
   return (
-    <main className="apply-light apply-gradient flex min-h-screen items-start justify-center px-4 py-10 sm:px-6 md:items-center">
+    // `text-foreground` here, not inherited: <body> computed its colour from the
+    // dark tokens, and a value already computed does not follow the override, so
+    // every heading and label without its own class came out white on white.
+    <main className="apply-light apply-gradient flex min-h-screen items-start justify-center px-4 py-10 text-foreground sm:px-6 md:items-center">
       <div className={cn("apply-card w-full overflow-hidden rounded-3xl border border-border bg-card", WIDTH[width])}>
         {children}
       </div>

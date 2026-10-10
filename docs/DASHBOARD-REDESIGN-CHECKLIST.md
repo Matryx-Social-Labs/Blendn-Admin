@@ -89,6 +89,7 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 6e47108 (my venues, mockup skipped — the row pattern) / ✅ 3233c27 (mockup `venue-detail-20260911`); step 17 to the kit (mockup: kit MyVenues, VenueDetail) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima; step 17 local seed, floors saved and read back | linked events in a Panel (confirm / dispute on the row); a Panel per building; detail: Building, KpiStrip, Events here + Ratings Panels, Venue record Panel with **Floors** (owner + admin; "the app's map draws this building about N m tall") |
 | `/dashboard/venues/new`, `/venues/[id]/claim` | ✅ 2026-09-11 (chrome cut; mockups skipped); step 17 to the kit (mockup: kit VenueNew, VenueClaim) | ✅ E7; 2026-09-11; step 17 local seed | the place in a Panel with "Already listed?" beside it; the claim in a Panel that says pre-claim nights stay closed |
 | `/dashboard/plan` (venue owner) | ✅ step 17 (mockup: organiser kit `screens-org.jsx` Plan cards; the step 16 Plan page) | ✅ step 17 local seed, before and after an admin's founding grant | each venue Listed or Venue Pro with "N of 28 days of data" toward the no-charge rule; Listed vs Venue Pro cards (the plan-card stripe on Pro); buy/cancel only when allowed; payments |
+| `/dashboard/venues/[id]` — "Open on Blendn" (D-13) | ✅ step 18 (questions + direction in the PR; mockup `~/.gstack/projects/Matryx-Social-Labs-Blendn-Admin/designs/open-on-blendn-20261010/`) | ✅ step 18 local seed as venue.owner@: off → `open_on_blendn = f` + `venue.closed_on_blendn` audit row, `GET /venues` without it, its events still on `GET /events`; on → back | an "In the app" Panel before the record, claimed venues only; the switch saves on its own; the line under it says the consequence in the app's words, on and off |
 | `/dashboard/venues/[id]` insights | ✅ step 17 (mockup: kit VenueDetail + organiser `ui.jsx` Locked) | ✅ step 17 local seed, Listed and Pro | "Who comes, and when" (guests by day × slot, regulars, returning share; floors, complement held); "Before you claimed it" totals on Pro; Locked previews from samples; Regulars & offers placeholder; admin Venue Pro grant panel |
 | `/dashboard/events`, `/events/[id]` | shared | ✅ | canOperate tabs |
 | `/dashboard/chatrooms`, `/organisation` | ✅ shared | ✅ | |
@@ -102,6 +103,20 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/brand` | ✅ same; step 17 to the kit (mockup: kit BrandPage) | ✅ E6; step 17 local seed | the form in a Panel; "How it appears" beside it |
 | `/dashboard/placements` | ✅ same; step 17 to the kit (mockup: kit SponsorHome) | ✅ E6; step 17 local seed | room preview of the approved creative; rows end in reach (held back under 5 in words) and "Pay ₹X" when a link is due |
 | `/dashboard/organisation`, `/settings` | — | ✅ | shared |
+
+## public
+
+The pages outside the dashboard, on the platform kit's two frames (`public.jsx`): `PublicFrame` (light, the landing page's band) and `AuthFrame` (the dashboard's dark, one card under the monogram). `components/public-frame.tsx`.
+
+| Route | Chain | Driven | Notes |
+|---|---|---|---|
+| `/login` | ✅ step 18 (mockup: kit `public.jsx` AuthCard) | ✅ step 18 local, 1280/768; `e2e/public-pages.spec.ts` 375/768/1440 | the card's gradient stripe is the one gradient; "Not a host yet? Apply" under the card |
+| `/forgot-password`, `/reset-password` | ✅ step 18 (kit Forgot, Reset) | ✅ step 18 local; e2e at three widths | the sent state is a success callout with the same words whether or not the address has an account; "Your phones are signed out when the password changes" before the reset (the route revokes every mobile refresh token) |
+| `/invite` | ✅ step 18 (kit Invite) | ✅ step 18 local (signed out); e2e at three widths | accepting still needs a signed-in account (the kit's set-a-password variant would create accounts from an invite — not built); once joined, the organisation and the role in words |
+| `/verify-domain` | ✅ step 18 (AuthCard) | ✅ e2e at three widths | |
+| `/apply`, `/apply/verify` | ✅ step 18 (kit Apply) | ✅ step 18 local 1280/768; e2e at three widths | "Free while we're in development" replaced by the Free / Analytics lines (NOTES-2); still person-reviewed (R6); the personal-address rule as a callout |
+| `/claim/[eventId]` | ✅ step 18 (kit ClaimPublic) | ✅ step 18 local: a claim filed, `event_claims` row `pending` read back; e2e at three widths | light now, like Apply: the listing's title is the h1 under "Listed by Blend'n"; "A person reads it. Nothing is automatic." beside the button |
+| `/claim/venue/[venueId]` | ✅ step 18 (kit ClaimPublic, for a place) | ✅ step 18 local 768; e2e at three widths | "a claim never opens the nights before it" in the opening line |
 
 ## The queue, in order
 
