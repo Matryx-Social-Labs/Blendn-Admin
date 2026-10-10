@@ -119,6 +119,13 @@ describe("entitlements are read and written in one place", () => {
     expect(naming("transferStoreEntitlements")).toEqual(["lib/revenuecat-webhook.ts"])
   })
 
+  it("no app route reaches a provider's writer: the webhooks and the admin's actions are not imported under app/api/mobile", () => {
+    const mobile = files.filter((f) => f.rel.startsWith("app/api/mobile/"))
+    expect(mobile.length).toBeGreaterThan(20)
+    const reaching = mobile.filter((f) => /from\s+["']@\/lib\/(revenuecat-webhook|razorpay-webhook|billing-actions)["']/.test(f.code))
+    expect(reaching.map((f) => f.rel)).toEqual([])
+  })
+
   it("Blendn+'s own grants come only from lib/plus.ts, and a person's rows go only with their account", () => {
     expect(naming("grantPlusOnce")).toEqual(["lib/plus.ts"])
     expect(naming("eraseUserEntitlements")).toEqual(["app/api/mobile/account/route.ts"])

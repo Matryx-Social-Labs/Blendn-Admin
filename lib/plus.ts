@@ -30,10 +30,14 @@ import { plusGatedAnywhere, plusGatedIn } from "./env"
  *     plan's "when the gate flips, active users get a 14-day trial", taken
  *     lazily: nobody has to run anything on the day a city flips, an inactive
  *     person gets none, and each person's 14 days start when they first use it.
- *   - **the referral month**: once 3 people who first joined through your
- *     invite link have checked in somewhere after joining. Banked until then.
+ *   - **the referral month**: once 3 people who signed up through your invite
+ *     link (a new account, onboarded and 18+ — the friend-request route's own
+ *     gate) have checked in somewhere after joining. Banked until then. A
+ *     request sent or accepted earns nothing; a check-in at a real place does,
+ *     and only once per person, ever, for one inviter.
  * Both are rows with a fixed `external_ref` per person, so a second attempt —
- * or two at once — grants nothing more.
+ * or two at once — grants nothing more, and each is audited in the same
+ * transaction as its row (a refused audit takes the grant with it).
  */
 export const PLUS = {
   /** Nights of history everyone keeps; older ones are Plus. */
@@ -45,6 +49,12 @@ export const PLUS = {
   TRIAL_ACTIVE_DAYS: 90,
   REFERRAL_FRIENDS: 3,
   REFERRAL_MONTHS: 1,
+  /**
+   * A referral is a new signup: the invitee's account is at most this many
+   * days old when they first use the link. Somebody already on Blendn tapping
+   * a friend's link is a friend request, not a referral.
+   */
+  REFERRAL_NEW_ACCOUNT_DAYS: 7,
   /**
    * How the stores' purchases are told apart (docs/IAP-SETUP.md). Plus is
    * RevenueCat's entitlement `plus`, attached to the three subscriptions. The
@@ -93,17 +103,55 @@ export async function referredFriendsWhoCameOut(inviterId: string): Promise<numb
   return row?.n ?? 0
 }
 
+/** One of our own grants, once per `ref`, with its audit row in the same transaction. True when this call granted it. */
+async function grantAudited(
+  userId: string,
+  ref: string,
+  startsAt: Date,
+  expiresAt: Date,
+  action: "entitlement.trial" | "entitlement.referral",
+  details: Record<string, number> = {}
+): Promise<boolean> {
+  return db.$transaction(async (tx) => {
+    if (!(await grantPlusOnce(tx, { userId, ref, startsAt, expiresAt }))) return false
+    await tx.audit_logs.create({
+      data: {
+        action: action,
+        resource: "user",
+        resource_id: userId,
+        details: { product: "plus", ref: ref, expiresAt: expiresAt.toISOString(), ...details },
+      },
+    })
+    return true
+  })
+}
+
 /** Grant whatever this person is owed and has not had: the trial first, then the referral month (banked until the trial is over). */
 async function grantOwed(userId: string, now: Date): Promise<boolean> {
   if (await cameOutSince(userId, new Date(now.getTime() - PLUS.TRIAL_ACTIVE_DAYS * DAY_MS))) {
-    const trial = { userId, ref: trialRef(userId), startsAt: now, expiresAt: new Date(now.getTime() + PLUS.TRIAL_DAYS * DAY_MS) }
-    if (await grantPlusOnce(db, trial)) return true
+    const until = new Date(now.getTime() + PLUS.TRIAL_DAYS * DAY_MS)
+    if (await grantAudited(userId, trialRef(userId), now, until, "entitlement.trial")) return true
   }
-  if ((await referredFriendsWhoCameOut(userId)) >= PLUS.REFERRAL_FRIENDS) {
-    const month = { userId, ref: referralRef(userId), startsAt: now, expiresAt: addMonths(now, PLUS.REFERRAL_MONTHS) }
-    if (await grantPlusOnce(db, month)) return true
+  const friends = await referredFriendsWhoCameOut(userId)
+  if (friends >= PLUS.REFERRAL_FRIENDS) {
+    const until = addMonths(now, PLUS.REFERRAL_MONTHS)
+    if (await grantAudited(userId, referralRef(userId), now, until, "entitlement.referral", { friends })) return true
   }
   return false
+}
+
+/**
+ * Does this person hold Blendn+ now: the subscription (or one of our grants),
+ * or a live Night Pass — 24 hours of Plus. The rule that a pass counts as Plus
+ * lives here and only here; `hasEntitlement` answers for exactly the product it
+ * is asked about.
+ */
+export async function hasPlus(userId: string, now: Date = new Date()): Promise<boolean> {
+  const [plus, pass] = await Promise.all([
+    hasEntitlement(user(userId), "plus", {}, now),
+    hasEntitlement(user(userId), "night_pass", {}, now),
+  ])
+  return plus || pass
 }
 
 /**
@@ -118,9 +166,9 @@ async function grantOwed(userId: string, now: Date): Promise<boolean> {
  */
 export async function plusRequired(userId: string, city: string | null, now: Date = new Date()): Promise<boolean> {
   if (!plusGatedIn(city)) return false
-  if (await hasEntitlement(user(userId), "plus", {}, now)) return false
+  if (await hasPlus(userId, now)) return false
   await grantOwed(userId, now)
-  return !(await hasEntitlement(user(userId), "plus", {}, now))
+  return !(await hasPlus(userId, now))
 }
 
 /**
@@ -137,10 +185,17 @@ export async function lockedNights(userId: string, totalNights: number, now: Dat
 }
 
 /**
- * Remember who brought this person: the first invite link they ever used.
- * Never themselves; a second link changes nothing.
+ * Remember who brought this person: the first invite link they used, when
+ * they are new to Blendn (`REFERRAL_NEW_ACCOUNT_DAYS`). Never themselves; a
+ * second link changes nothing. The caller has already held them to the
+ * participation gate (onboarded, 18+). This records; it grants nothing.
  */
-export async function recordReferral(inviteeId: string, inviterId: string): Promise<void> {
+export async function recordReferral(inviteeId: string, inviterId: string, now: Date = new Date()): Promise<void> {
   if (inviteeId === inviterId) return
+  const newcomer = await db.user.findFirst({
+    where: { id: inviteeId, deletedAt: null, createdAt: { gte: new Date(now.getTime() - PLUS.REFERRAL_NEW_ACCOUNT_DAYS * DAY_MS) } },
+    select: { id: true },
+  })
+  if (!newcomer) return
   await db.referrals.createMany({ data: [{ invitee_id: inviteeId, inviter_id: inviterId }], skipDuplicates: true })
 }

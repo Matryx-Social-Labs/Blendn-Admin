@@ -203,6 +203,15 @@ Needs step 4 first (a build with Play Billing on the internal track).
    first loses it; RevenueCat sends `TRANSFER` and our server moves the grant.
    The app calls `Purchases.logIn(<our user id>)` at sign-in, `logOut` at
    sign-out, and never sells while anonymous.
+   **What this decides:** whoever signs in to Blendn on a phone using the
+   Apple ID or Google account that paid can move Blendn+ to their account by
+   restoring. That is the stores' rule (the purchase belongs to the store
+   account) and RevenueCat's documented default. The server moves it only
+   between two of our real accounts named in a verified webhook — never to an
+   anonymous or deleted one — and writes an `entitlement.transferred` audit row
+   for every move. The alternative, **Keep with original App User ID**, stops
+   the move but leaves a person who changes Blendn account unable to restore
+   what they paid for; it is the owner's call, and the default is recommended.
 
 ([projects](https://www.revenuecat.com/docs/projects/overview), [connect a store](https://www.revenuecat.com/docs/projects/connect-a-store), [API keys](https://www.revenuecat.com/docs/projects/authentication), [products](https://www.revenuecat.com/docs/offerings/products-overview), [entitlements](https://www.revenuecat.com/docs/getting-started/entitlements), [non-subscriptions](https://www.revenuecat.com/docs/platform-resources/non-subscriptions), [offerings](https://www.revenuecat.com/docs/offerings/overview), [restore behaviour](https://www.revenuecat.com/docs/projects/restore-behavior))
 

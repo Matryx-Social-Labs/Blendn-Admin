@@ -37,13 +37,6 @@ export interface Subject {
 type Tx = Prisma.TransactionClient
 type Client = Tx | typeof db
 
-/**
- * A Night Pass is 24 hours of Blendn+, so asking for Plus finds either. Every
- * Plus gate asks for `plus` and never needs to know a pass exists.
- */
-const productWhere = (product: entitlement_product) =>
-  product === "plus" ? { in: ["plus", "night_pass"] as entitlement_product[] } : product
-
 /** Live at `now`: started, and not yet ended. */
 function liveAt(now: Date) {
   return {
@@ -71,7 +64,7 @@ export async function hasEntitlement(
     where: {
       subject_kind: subject.kind,
       subject_id: subject.id,
-      product: productWhere(product),
+      product,
       ...(product === "event_pass" ? { event_id: opts.eventId } : {}),
       ...liveAt(now),
     },

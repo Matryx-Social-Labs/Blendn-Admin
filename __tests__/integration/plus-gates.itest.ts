@@ -8,11 +8,12 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
+import { hasEntitlement } from "@/lib/entitlements"
 import { inviteTokenFor } from "@/lib/friends"
-import { plusRequired, referralRef, trialRef } from "@/lib/plus"
+import { hasPlus, plusRequired, referralRef, trialRef } from "@/lib/plus"
 import { flushProductEvents } from "@/lib/product-events"
 
-import { closeDb, db, makeEvent, makeUser, occurrenceOf, testId } from "./helpers"
+import { closeDb, db, makeEvent, makeUser, occurrenceOf, refusingWrites, testId } from "./helpers"
 import { checkInOf, cleanupWorld, eventParams, goLive, INSIDE, person, req, routes, venue, world } from "./go-live-world"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -92,6 +93,9 @@ async function nightsOut(userId: string, n: number, o: { city?: string; daysAgo?
     })
   }
 }
+
+const audits = (userId: string) =>
+  db.audit_logs.findMany({ where: { resource: "user", resource_id: userId }, select: { action: true, user_id: true, details: true } })
 
 const grants = (userId: string) =>
   db.entitlements.findMany({ where: { subject_kind: "user", subject_id: userId, source: "grant" }, orderBy: { created_at: "asc" } })
@@ -188,6 +192,9 @@ describe("the trial and the referral month: once each, at the gate (MN-I08, MN-I
     expect(trial).toMatchObject({ product: "plus", external_ref: trialRef(regular.id) })
     expect(trial.expires_at!.getTime() - trial.starts_at.getTime()).toBe(1_209_600_000)
     expect(trial.starts_at.getTime()).toBeGreaterThanOrEqual(before)
+    expect(await audits(regular.id)).toEqual([
+      { action: "entitlement.trial", user_id: null, details: expect.objectContaining({ ref: trialRef(regular.id), product: "plus" }) },
+    ])
 
     // Over: no second one, however it is asked, or how many at once.
     await db.entitlements.update({ where: { id: trial.id }, data: { starts_at: new Date(Date.now() - 20 * DAY), expires_at: new Date(Date.now() - 6 * DAY) } })
@@ -248,6 +255,9 @@ describe("the trial and the referral month: once each, at the gate (MN-I08, MN-I
     expect(await plusRequired(inviter.id, "Bengaluru")).toBe(false)
     const [month] = await grants(inviter.id)
     expect(month.external_ref).toBe(referralRef(inviter.id))
+    expect(await audits(inviter.id)).toEqual([
+      { action: "entitlement.referral", user_id: null, details: expect.objectContaining({ ref: referralRef(inviter.id), friends: 3 }) },
+    ])
     const start = month.starts_at
     const oneMonthOn = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))
     oneMonthOn.setUTCDate(Math.min(start.getUTCDate(), new Date(Date.UTC(oneMonthOn.getUTCFullYear(), oneMonthOn.getUTCMonth() + 1, 0)).getUTCDate()))
@@ -256,6 +266,27 @@ describe("the trial and the referral month: once each, at the gate (MN-I08, MN-I
     await db.entitlements.update({ where: { id: month.id }, data: { expires_at: new Date(Date.now() - 1000), starts_at: new Date(Date.now() - 2000) } })
     expect(await plusRequired(inviter.id, "Bengaluru")).toBe(true)
     expect(await grants(inviter.id)).toHaveLength(1)
+  })
+
+  it("counts only a new signup: somebody already on Blendn using a link is a friend request, not a referral", async () => {
+    const inviter = await person()
+    const regular = await person()
+    await db.user.update({ where: { id: regular.id }, data: { createdAt: new Date(Date.now() - 8 * DAY) } })
+    const res = await friendRequests.POST(req("/api/mobile/friends/requests", regular.token, "POST", { token: await inviteTokenFor(inviter.id) }))
+    expect(res.status).toBe(200)
+    expect(await db.referrals.count({ where: { invitee_id: regular.id } })).toBe(0)
+  })
+
+  it("takes the grant back with a refused audit row: no Plus without its audit", async () => {
+    process.env.PLUS_GATING = "Bengaluru"
+    const regular = await person()
+    await nightsOut(regular.id, 1)
+    await refusingWrites("audit_logs", "INSERT", `NEW.resource_id = '${regular.id}'`, async () => {
+      await expect(plusRequired(regular.id, "Bengaluru")).rejects.toThrow()
+    })
+    expect(await grants(regular.id)).toHaveLength(0)
+    expect(await plusRequired(regular.id, "Bengaluru")).toBe(false)
+    expect(await grants(regular.id)).toHaveLength(1)
   })
 
   it("never counts a person for two inviters, or anyone for themselves", async () => {
@@ -267,6 +298,21 @@ describe("the trial and the referral month: once each, at the gate (MN-I08, MN-I
     const self = await friendRequests.POST(req("/api/mobile/friends/requests", a.token, "POST", { token: await inviteTokenFor(a.id) }))
     expect(self.status).toBe(400)
     expect(await db.referrals.count({ where: { inviter_id: a.id, invitee_id: a.id } })).toBe(0)
+  })
+})
+
+describe("hasEntitlement answers for exactly what it is asked (no widening)", () => {
+  it("a Night Pass is a Night Pass, not Plus; only lib/plus.ts counts it as Plus; a person's row never answers for an org or a venue", async () => {
+    const me = await person()
+    await plus(me.id, { product: "night_pass", until: Date.now() + 3_600_000 })
+    expect(await hasEntitlement({ kind: "user", id: me.id }, "night_pass")).toBe(true)
+    expect(await hasEntitlement({ kind: "user", id: me.id }, "plus")).toBe(false)
+    expect(await hasPlus(me.id)).toBe(true)
+    await plus(me.id)
+    expect(await hasEntitlement({ kind: "org", id: me.id }, "analytics")).toBe(false)
+    expect(await hasEntitlement({ kind: "org", id: me.id }, "plus")).toBe(false)
+    expect(await hasEntitlement({ kind: "venue", id: me.id }, "venue_pro")).toBe(false)
+    expect(await hasEntitlement({ kind: "user", id: me.id }, "analytics")).toBe(false)
   })
 })
 

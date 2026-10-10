@@ -261,19 +261,41 @@ async function applyPurchase(tx: Tx, e: RevenuecatEvent, now: Date): Promise<Out
   return done === "stale" ? refuse("stale") : done === "no_owner" ? refuse("unknown_user") : applied
 }
 
+/**
+ * A TRANSFER moves what was bought from the accounts it names to the ONE
+ * account it names — both ours, from the verified event, never a guess:
+ * a receiving list that is not exactly one of our people (anonymous, deleted,
+ * unknown, or several) moves nothing and is recorded for the operator. Only
+ * rows that exist move, so it never creates access nobody paid for. Every
+ * move is audited in this transaction.
+ *
+ * RevenueCat sends one when somebody restores purchases while signed in as a
+ * different account ("Transfer to new App User ID", the project's restore
+ * behaviour): the Apple ID or Google account that paid decides who holds it,
+ * as the stores intend (docs/IAP-SETUP.md).
+ */
 async function applyTransfer(tx: Tx, e: RevenuecatEvent): Promise<Outcome> {
   if (e.store && !SOURCE[e.store]) return nothing
-  let to: string | null = null
-  for (const id of e.transferred_to ?? []) {
-    to = await personOf(tx, id)
-    if (to) break
-  }
+  const receiving = e.transferred_to ?? []
+  const to = receiving.length === 1 ? await personOf(tx, receiving[0]) : null
   if (!to) return refuse("unknown_user")
+  const named = [...new Set((e.transferred_from ?? []).filter((id) => id !== to))]
+  const from = (await tx.user.findMany({ where: { id: { in: named } }, select: { id: true } })).map((u) => u.id)
+  if (from.length === 0) return refuse("unknown_user")
   const moved = await transferStoreEntitlements(tx, {
-    from: (e.transferred_from ?? []).filter((id) => id !== to),
+    from,
     to,
     sources: e.store ? [SOURCE[e.store]] : ["apple", "google"],
     at: new Date(e.event_timestamp_ms),
   })
-  return moved > 0 ? applied : nothing
+  if (moved === 0) return nothing
+  await tx.audit_logs.create({
+    data: {
+      action: "entitlement.transferred",
+      resource: "user",
+      resource_id: to,
+      details: { from: from, moved: moved, store: e.store ?? null, eventId: e.id },
+    },
+  })
+  return applied
 }

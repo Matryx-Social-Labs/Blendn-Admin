@@ -10,7 +10,7 @@
 import { randomUUID } from "crypto"
 import { NextRequest } from "next/server"
 
-import { hasEntitlement } from "@/lib/entitlements"
+import { hasPlus } from "@/lib/plus"
 import { authorised } from "@/lib/revenuecat-webhook"
 
 import { cleanup, closeDb, db, makeUser, refusingWrites } from "./helpers"
@@ -137,7 +137,9 @@ const rowsFor = (txn: string) => db.entitlements.findMany({ where: { external_re
 const rowOf = async (txn: string) => (await rowsFor(txn))[0]
 const deliveryOf = (body: { event: { id: string } }) =>
   db.payment_events.findMany({ where: { provider: "revenuecat", provider_event_id: body.event.id } })
-const plusAt = (user: string, at: number) => hasEntitlement({ kind: "user", id: user }, "plus", {}, new Date(at))
+const plusAt = (user: string, at: number) => hasPlus(user, new Date(at))
+const transferAudits = (to: string) =>
+  db.audit_logs.findMany({ where: { action: "entitlement.transferred", resource_id: to }, select: { details: true } })
 
 describe("authorisation (MN-U03, SEC-13)", () => {
   it("accepts exactly the configured header and nothing near it", () => {
@@ -345,8 +347,12 @@ describe("who it belongs to", () => {
     users.push(dan, erin)
     const txn = newTxn()
     await post(rc("INITIAL_PURCHASE", { txn, at: T0, user: dan }))
+    // Forged, it moves nothing.
+    expect((await post(transfer([dan], [erin], T0 + 2 * DAY), "Bearer rc_forged_0123456789abcdef0123456789")).status).toBe(401)
+    expect((await rowOf(txn)).subject_id).toBe(dan)
     expect((await post(transfer([dan], [erin], T0 + 2 * DAY))).json.applied).toBe(true)
     expect((await rowOf(txn)).subject_id).toBe(erin)
+    expect(await transferAudits(erin)).toEqual([{ details: expect.objectContaining({ from: [dan], moved: 1, store: "APP_STORE" }) }])
     expect(await plusAt(dan, T0 + 3 * DAY)).toBe(false)
     expect(await plusAt(erin, T0 + 3 * DAY)).toBe(true)
 
@@ -370,8 +376,23 @@ describe("who it belongs to", () => {
       expect(await rowsFor(txn)).toHaveLength(0)
       expect((await deliveryOf(body))[0].error).toBe("unknown_user")
     }
-    // A transfer to nobody we know moves nothing.
-    expect((await post(transfer([alice], ["$RCAnonymousID:itest9"], T0))).json).toMatchObject({ refused: "unknown_user" })
+    // A transfer moves only between our people, to exactly one of them: never to an
+    // anonymous id, never a pick among several, never from nobody we know.
+    const fay = await fresh("rc-fay")
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn, at: T0, user: fay }))
+    for (const [from, to] of [
+      [[fay], ["$RCAnonymousID:itest9"]],
+      [[fay], ["$RCAnonymousID:itest9", bob]],
+      [[fay], [bob, alice]],
+      [[fay], [gone]],
+      [["$RCAnonymousID:itest8"], [bob]],
+      [[], [bob]],
+    ] as const) {
+      expect((await post(transfer([...from], [...to], T0 + DAY))).json).toMatchObject({ applied: false, refused: "unknown_user" })
+    }
+    expect((await rowOf(txn)).subject_id).toBe(fay)
+    expect(await transferAudits(bob)).toEqual([])
   })
 
   it("SUBSCRIBER_ALIAS and TEST are recorded and change nothing", async () => {
