@@ -120,6 +120,9 @@ model User {
   sent_friend_requests     friend_requests[] @relation("FriendRequestSender")
   received_friend_requests friend_requests[] @relation("FriendRequestRecipient")
   friend_invite            friend_invites?
+  /// Blendn+ referrals (step 11): whose link brought them, and whom theirs brought.
+  referred_by              referrals?        @relation("ReferralInvitee")
+  referrals_made           referrals[]       @relation("ReferralInviter")
 
   // Crews — see `crews`
   crews_created            crews[]           @relation("CrewCreator")
@@ -3940,6 +3943,15 @@ model entitlements {
   /// The provider's id: a Razorpay subscription or order. One row per id, so
   /// a renewal extends the row and a replayed payment finds it already there.
   external_ref String?
+  /// The store's time (RevenueCat `event_timestamp_ms`) of the event that last
+  /// set this row's window, and of the one that last set its owner. An older
+  /// delivery never moves either (step 11). Null on rows the store's webhook
+  /// did not write.
+  window_event_at DateTime?        @db.Timestamptz(6)
+  owner_event_at  DateTime?        @db.Timestamptz(6)
+  /// The store transaction behind the current window (the latest renewal).
+  /// A refund of an older period ends nothing; a TRANSFER matches by it.
+  window_transaction_id String?
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
   updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
 
@@ -3950,6 +3962,24 @@ model entitlements {
   @@unique([source, external_ref])
   @@index([subject_kind, subject_id, product])
   @@index([event_id])
+}
+
+/// Who brought whom to Blendn: the first invite link a person used (plan v2
+/// §9.3, "3 friends who check in = 1 month of Blendn+"). One row per invitee,
+/// ever, so a friend counts once and for one inviter. The CHECK that nobody
+/// refers themselves lives in the migration (`db push` drops it).
+model referrals {
+  invitee_id String   @id
+  inviter_id String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  /// When this invitee counted toward a referral month, and which: once each.
+  rewarded_at  DateTime? @db.Timestamptz(6)
+  rewarded_ref String?
+
+  invitee User @relation("ReferralInvitee", fields: [invitee_id], references: [id], onDelete: Cascade)
+  inviter User @relation("ReferralInviter", fields: [inviter_id], references: [id], onDelete: Cascade)
+
+  @@index([inviter_id])
 }
 
 /// Every webhook delivery a payment provider made, as it arrived.

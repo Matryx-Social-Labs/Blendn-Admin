@@ -10,7 +10,7 @@ import { billingOrgFor, ONE_OPEN_PER_ORG, ONE_OPEN_PER_VENUE, OPEN_SUBSCRIPTION_
 import { BILLING_PLANS, chargeMinor, type BillingPlanKey } from "@/lib/billing-plans"
 import { currentUser, requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
-import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, revokePaid } from "@/lib/entitlements"
+import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, livePlus, revokePaid } from "@/lib/entitlements"
 import { razorpayKeys } from "@/lib/env"
 import { realEventsWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
@@ -477,13 +477,13 @@ async function requireAdminWithinLimit() {
   return user
 }
 
-const RESOURCE = { org: "organisation", venue: "venue" } as const
+const RESOURCE = { org: "organisation", venue: "venue", user: "user" } as const
 
 /** End the subject's live grants and audit it, in one transaction: neither happens alone. */
 async function endGrantAudited(
   adminId: string,
-  subject: { kind: "org" | "venue"; id: string },
-  product: "analytics" | "venue_pro",
+  subject: { kind: "org" | "venue" | "user"; id: string },
+  product: "analytics" | "venue_pro" | "plus",
   reason: string
 ): Promise<void> {
   await db.$transaction(async (tx) => {
@@ -645,3 +645,77 @@ export async function revokeVenueProPaid(venueId: string, entitlementId: string,
   await revokePaidAudited(admin.id, { kind: "venue", id }, ent, why)
   revalidatePath(`/dashboard/venues/${id}`)
 }
+
+/* -------------------------------------------------------------------------- */
+/* Platform admin: a person's Blendn+ (SCRUM-583)                               */
+/* -------------------------------------------------------------------------- */
+
+/** User ids are cuids, not uuids. */
+const userIdSchema = z.string().trim().min(1).max(64)
+
+/**
+ * A person's Blendn+, for the admin's control on the Users page: the live
+ * admin grant (theirs to end), and what the person holds now, from wherever
+ * (a store, a trial, a referral month) — shown, never ended here: a store's
+ * purchase is the store's.
+ */
+export async function personPlus(userId: string): Promise<{
+  grant: { expiresAt: string | null } | null
+  held: { product: string; source: string; expiresAt: string | null } | null
+}> {
+  await requireAdmin()
+  const id = parse(userIdSchema, userId, "Person not found")
+  const subject = { kind: "user" as const, id }
+  const [grant, held] = await Promise.all([liveGrant(subject, "plus"), livePlus(id)])
+  return {
+    grant: grant ? { expiresAt: grant.expiresAt?.toISOString() ?? null } : null,
+    held: held ? { product: held.product, source: held.source, expiresAt: held.expiresAt?.toISOString() ?? null } : null,
+  }
+}
+
+/**
+ * Blendn+ at no charge, for 1–24 months: the App Review account (Apple's
+ * reviewers buy in the sandbox, which production never grants), a Night Pass
+ * whose delivery was lost, goodwill. One live admin grant per person; the
+ * grant and its audit row are one transaction.
+ */
+export async function grantPlus(userId: string, months: number, reason: string): Promise<{ expiresAt: string }> {
+  const admin = await requireAdmin()
+  const id = parse(userIdSchema, userId, "Person not found")
+  const length = parse(monthsSchema, months, "A grant runs between 1 and 24 months.")
+  const why = parse(reasonSchema, reason, "Record why this person is being given Blendn+ (10 to 500 characters).")
+
+  const person = await db.user.findFirst({ where: { id, deletedAt: null }, select: { id: true, email: true, suspended_at: true } })
+  if (!person) throw new Refusal("Person not found")
+  if (person.suspended_at) throw new Refusal("A suspended account can't be given Blendn+.")
+
+  const grant = await db.$transaction(async (tx) => {
+    await lockOrg(tx, "grant-user", id)
+    if (await liveGrant({ kind: "user", id }, "plus", new Date(), tx)) {
+      throw new Refusal("This person already has a grant. End it before giving a new one.")
+    }
+    const made = await grantEntitlement(tx, { subject: { kind: "user", id }, product: "plus", months: length })
+    await tx.audit_logs.create({
+      data: {
+        user_id: admin.id,
+        action: "entitlement.granted",
+        resource: "user",
+        resource_id: id,
+        details: { product: "plus", months: length, expiresAt: made.expiresAt.toISOString(), reason: why },
+      },
+    })
+    return made
+  })
+  revalidatePath("/dashboard/users")
+  return { expiresAt: grant.expiresAt.toISOString() }
+}
+
+/** End the person's live admin grant of Blendn+, now. Never a store purchase, a trial or a referral month. */
+export async function endPlusGrant(userId: string, reason: string): Promise<void> {
+  const admin = await requireAdmin()
+  const id = parse(userIdSchema, userId, "Person not found")
+  const why = parse(reasonSchema, reason, "Give a reason for ending this grant (10 to 500 characters).")
+  await endGrantAudited(admin.id, { kind: "user", id }, "plus", why)
+  revalidatePath("/dashboard/users")
+}
+

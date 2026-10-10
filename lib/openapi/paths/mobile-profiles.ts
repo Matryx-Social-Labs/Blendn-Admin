@@ -120,10 +120,12 @@ registry.registerPath({
   summary: "The events the authenticated user has attended",
   description:
     "One entry per event, however many days of it they turned up for, most recently attended " +
-    "first. `attendedAt` is the first check-in for that event. `pagination.totalCount` is the " +
-    "same figure shown as `stats.eventsAttended` on a profile — the two share one predicate so " +
-    "the list and the number cannot disagree. Working an event as staff is not attending it. " +
-    "Places you went live at are included, with `kind: venue_day`.",
+    "first. `attendedAt` is the first check-in for that event. `pagination.totalCount` plus " +
+    "`lockedCount` is the figure shown as `stats.eventsAttended` on a profile — they share one " +
+    "predicate so the list and the number cannot disagree. Working an event as staff is not " +
+    "attending it. Places you went live at are included, with `kind: venue_day`. Where Blendn+ is " +
+    "gated (the city of your latest night) and you have none, the list stops at your latest 3 " +
+    "nights and `lockedCount` says how many more there are (Blendn+ unlocks them).",
   security: bearerAuth,
   request: {
     query: z.object({
@@ -157,6 +159,7 @@ registry.registerPath({
                 })
               ),
               pagination: PaginationMetaSchema,
+              lockedCount: z.number().int().min(0).describe("Older nights behind Blendn+. 0 when nothing is locked."),
             })
           ),
         },

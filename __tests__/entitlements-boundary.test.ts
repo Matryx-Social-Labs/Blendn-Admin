@@ -102,6 +102,7 @@ describe("entitlements are read and written in one place", () => {
     const rels = files.map((f) => f.rel)
     expect(rels).toContain("lib/entitlements.ts")
     expect(rels).toContain("lib/razorpay-webhook.ts")
+    expect(rels).toContain("lib/revenuecat-webhook.ts")
   })
 
   it("only lib/entitlements.ts touches the table", () => {
@@ -111,6 +112,23 @@ describe("entitlements are read and written in one place", () => {
   it("a paid entitlement is written by the webhook and nothing else", () => {
     expect(naming("recordPaidEntitlement")).toEqual(["lib/razorpay-webhook.ts"])
     expect(naming("endPaidEntitlement")).toEqual(["lib/razorpay-webhook.ts"])
+  })
+
+  it("a store-bought Blendn+ is written by the RevenueCat webhook and nothing else (step 11)", () => {
+    expect(naming("applyStoreWindow")).toEqual(["lib/revenuecat-webhook.ts"])
+    expect(naming("transferStoreEntitlements")).toEqual(["lib/revenuecat-webhook.ts"])
+  })
+
+  it("no app route reaches a provider's writer: the webhooks and the admin's actions are not imported under app/api/mobile", () => {
+    const mobile = files.filter((f) => f.rel.startsWith("app/api/mobile/"))
+    expect(mobile.length).toBeGreaterThan(20)
+    const reaching = mobile.filter((f) => /from\s+["']@\/lib\/(revenuecat-webhook|razorpay-webhook|billing-actions)["']/.test(f.code))
+    expect(reaching.map((f) => f.rel)).toEqual([])
+  })
+
+  it("Blendn+'s own grants come only from lib/plus.ts, and a person's rows go only with their account", () => {
+    expect(naming("grantPlusOnce")).toEqual(["lib/plus.ts"])
+    expect(naming("eraseUserEntitlements")).toEqual(["app/api/mobile/account/route.ts"])
   })
 
   it("grants, their ending and an admin's revocation come only from the admin's actions; a transfer's end only from the transfer", () => {

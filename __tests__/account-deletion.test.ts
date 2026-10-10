@@ -32,6 +32,9 @@ const mockDb = {
   friendships: { deleteMany: jest.fn() },
   friend_requests: { deleteMany: jest.fn() },
   friend_invites: { deleteMany: jest.fn() },
+  // Blendn+ (step 11): who brought whom, and their entitlements (D-17).
+  referrals: { deleteMany: jest.fn() },
+  entitlements: { deleteMany: jest.fn() },
   // Their crews: locked and left INSIDE the transaction (raw SQL, below), settled after.
   crew_invites: { deleteMany: jest.fn() },
   blend_reveals: { deleteMany: jest.fn() },
@@ -168,6 +171,12 @@ describe("deleting an account scrubs the matching inputs", () => {
       where: { OR: [{ sender_id: USER }, { recipient_id: USER }] },
     })
     expect(mockDb.friend_invites.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // Out of every referral either way, and their Blendn+ rows gone (D-17);
+    // the store's deliveries in payment_events stay (no personal data).
+    expect(mockDb.referrals.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ invitee_id: USER }, { inviter_id: USER }] },
+    })
+    expect(mockDb.entitlements.deleteMany).toHaveBeenCalledWith({ where: { subject_kind: "user", subject_id: USER } })
     // Out of every crew, every crew invite either way gone; the crews are
     // settled after the commit (one left alone dissolves, D-15).
     expect(mockDb.crew_invites.deleteMany).toHaveBeenCalledWith({
@@ -275,7 +284,11 @@ describe("deleting an account scrubs the matching inputs", () => {
     await del()
     const batch = mockDb.$transaction.mock.calls[0][0] as Array<{ sql?: string; values?: unknown[] }>
     const at = batch.findIndex((op) => op?.sql?.includes("INSERT INTO deleted_account_records"))
-    expect(at).toBe(0)
+    // Second only to the person's RevenueCat lock (review M2): a purchase being
+    // granted finishes first and is erased with the rest.
+    expect(batch[0]?.sql).toContain("pg_advisory_xact_lock")
+    expect(batch[0]?.values).toEqual([`revenuecat:${USER}`])
+    expect(at).toBe(1)
     expect(batch.indexOf(mockDb.user.update.mock.results[0].value)).toBeGreaterThan(at)
 
     const [deletedAt, purgeAfter, userId] = batch[at].values as [Date, Date, string]
