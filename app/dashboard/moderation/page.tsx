@@ -1,11 +1,10 @@
-import Link from "next/link"
 import { redirect } from "next/navigation"
 import type { moderation_status_type } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { PillTabs } from "@/components/dashboard/kit"
 import { unmoderatedPhotos } from "@/lib/photo-checks"
-import { cn } from "@/lib/utils"
 
 import { getModerationQueue } from "./actions"
 import { ModerationTable } from "./moderation-table"
@@ -44,12 +43,14 @@ export default async function ModerationPage({
     photoBacklog,
   ] = await Promise.all([
     getModerationQueue(active),
-    // Two cheap counts rather than the whole reports query: this page only
-    // needs the number on the tab.
+    // Cheap counts rather than the whole reports query: this page only needs
+    // the number on the tab. All three tables, as the reports page counts
+    // them — the tab reads the same on both pages.
     Promise.all([
       db.user_reports.count({ where: { status: "pending" } }),
       db.message_reports.count({ where: { status: "pending" } }),
-    ]).then(([u, m]) => u + m),
+      db.event_reports.count({ where: { status: "pending" } }),
+    ]).then(([u, m, e]) => u + m + e),
     /*
      * A count, not the list. The decision this drives is "is photo moderation
      * running", which is a number; the images themselves are somebody's face
@@ -60,30 +61,21 @@ export default async function ModerationPage({
 
   return (
     <div className="flex flex-col gap-5">
-      <QueueSwitch active="flags" reportCount={pendingReports} />
+      <QueueSwitch active="flags" flagCount={counts.pending ?? 0} reportCount={pendingReports} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav className="flex gap-1.5" aria-label="Moderation status">
-          {TABS.map((tab) => (
-            <Link
-              key={tab.value}
-              href={`/dashboard/moderation?status=${tab.value}`}
-              aria-current={tab.value === active ? "page" : undefined}
-              className={cn(
-                "rounded-full border border-border px-3 py-1.5 text-[0.8125rem] transition-colors",
-                tab.value === active
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )}
-            >
-              {tab.label}
-              {counts[tab.value] ? ` ${counts[tab.value]}` : ""}
-            </Link>
-          ))}
-        </nav>
-        <div className="flex items-center gap-3">
+        <PillTabs
+          label="Moderation status"
+          active={active}
+          tabs={TABS.map((tab) => ({
+            key: tab.value,
+            href: `/dashboard/moderation?status=${tab.value}`,
+            label: counts[tab.value] ? `${tab.label} · ${counts[tab.value]}` : tab.label,
+          }))}
+        />
+        <div className="flex flex-wrap items-center gap-3">
           {active === "pending" && highConfidence > 0 ? (
-            <span className="text-[0.75rem] text-destructive">
+            <span className="text-[0.8125rem] text-destructive">
               {highConfidence} at or above 0.9 confidence
             </span>
           ) : null}

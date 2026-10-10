@@ -68,7 +68,7 @@ export function AttentionStrip({ queues, now }: { queues: AttentionQueue[]; now:
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
+      <div className="overflow-hidden rounded-panel border border-border bg-card">
         {ordered.map((queue, index) => {
           const age = queueAgeLabel(queue, now)
           const breached = queueBreached(queue, now)

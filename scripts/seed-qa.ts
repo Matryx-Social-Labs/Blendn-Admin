@@ -1150,7 +1150,7 @@ async function main() {
 
   const eventClaimSpecs = [
     { eventId: openId, email: "events@toit.in", status: "pending" as const,
-      flags: ["domain_matches_source"], note: "We run this every Sunday." },
+      flags: ["email_matches_source"], note: "We run this every Sunday." },
     { eventId: openId, email: "bookings@in.bookmyshow.com", status: "pending" as const,
       flags: ["source_is_aggregator", "no_organisation_yet"], note: "Listing is ours." },
     { eventId: claimedId, email: "hello@permitroom.in", status: "approved" as const,
