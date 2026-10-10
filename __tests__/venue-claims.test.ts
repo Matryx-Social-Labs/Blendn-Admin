@@ -2,7 +2,11 @@ const mockDb = {
   venues: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   venue_claims: { upsert: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   organisation_members: { findFirst: jest.fn() },
-  user: { findMany: jest.fn() },
+  // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
+  user: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(async () => ({ role: (await mockAuth())?.user?.role, suspended_at: null, deletedAt: null })),
+  },
   $transaction: jest.fn(),
 }
 
