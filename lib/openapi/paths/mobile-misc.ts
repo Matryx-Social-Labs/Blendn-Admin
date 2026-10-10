@@ -116,7 +116,9 @@ registry.registerPath({
     "event at it starts until that event ends (per day of a multi-day run), when its link is confirmed " +
     "or its area is at the venue, and never for a disputed link, a venue's own Go Live day, or an event " +
     "the caller is too young for. The event's card on `GET /api/mobile/events` names the venue instead " +
-    "(`venue`). Each item's `liveNow` is a bucket, never a count, or null for a caller who may not go live. " +
+    "(`venue`). **A claimed venue its owner took off Blendn** (\"Open on Blendn\" switched off, D-13) is " +
+    "left out too; its events still show on `GET /api/mobile/events`. An unclaimed venue is always listed. " +
+    "Each item's `liveNow` is a bucket, never a count, or null for a caller who may not go live. " +
     "Ordered by name then id, so equal names keep one order across pages. 60 reads a minute per person.\n\n" +
     "`radius` has no default: sending coordinates means *sort by distance*, never *hide " +
     "anything further than N km*. `sortBy` offers `name` and `distance` only — ranking by " +

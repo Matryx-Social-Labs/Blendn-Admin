@@ -698,6 +698,12 @@ does not hide its venue from a 19-year-old. A venue's own Go Live day never
 hides it (F3). One rule, `lib/venue-visibility.ts`, for this list, the venue
 page and the door.
 
+**A claimed venue its owner took off Blendn is not listed** (D-13, step 18).
+The venue's owner (or an admin) can switch "Open on Blendn" off on the
+dashboard; the venue then leaves this list, and so Places and the home map. Its
+events are untouched: they stay on `GET /events` and still name the venue. An
+unclaimed venue is always listed. `GET /venues/:id` and Go Live are unchanged.
+
 **`liveNow` is a bucket, never a number** — `quiet` (fewer than 5, none
 included), `5-9`, `10-19` or `20+`: the same figure as `live.liveNow` on
 `GET /venues/:venueId` (both count through `liveGuestIds`: distinct guests,
