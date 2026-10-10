@@ -59,7 +59,8 @@ describe("Tier B is written in one place (H1)", () => {
     // The upsert's update branch — what an existing row gets — names no Tier B column.
     const update = route.slice(route.indexOf("update: {", route.indexOf("db.profiles.upsert(")), route.indexOf("updated_at: new Date()"))
     expect(update.length).toBeGreaterThan(200)
-    expect(update).not.toMatch(TIER_B)
+    // Any mention at all, shorthand included (`{ home_state }`): the branch has no business naming one.
+    expect(update).not.toMatch(/\b(languages|home_state|sun_sign|sign_system|work_field|tier_b_changed_at|tier_b_changes)\b/)
     expect(update).not.toMatch(/firstAnswers/)
   })
 })
