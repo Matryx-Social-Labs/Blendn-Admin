@@ -324,7 +324,7 @@ function PlacementCharge({ placement }: { placement: ChargeablePlacement }) {
         <div className="flex flex-wrap items-center gap-2">
           <Input
             type="number"
-            min="0"
+            min="1"
             step="0.01"
             inputMode="decimal"
             value={amount}

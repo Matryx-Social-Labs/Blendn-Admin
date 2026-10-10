@@ -65,6 +65,9 @@ read. Then, by case:
   refund before the payment.
 - **Disputed:** `charge.disputed` and an error log; answer it at Razorpay. A
   dispute lost voids the charge this link settled.
+- **Any other state** (a link is only sent for an agreed charge):
+  `charge.paid_unexpected` and an error log; the payment is recorded and the
+  charge left as it is. Reconcile it by hand.
 
 Money that arrives any other way is still settled by hand with "Payment
 received" and its reference.

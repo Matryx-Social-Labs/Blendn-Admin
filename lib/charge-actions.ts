@@ -59,14 +59,25 @@ import { lockCharge } from "@/lib/razorpay-webhook"
  */
 
 const priceSchema = z.object({
-  /** Rupees as typed by a person; converted to paise here, once. */
-  amount: z.number().positive().max(10_000_000),
+  /**
+   * Rupees as typed by a person; converted to paise here, once. At least ₹1
+   * (Razorpay's smallest payment) and whole paise: 0.015 was stored as 2 paise
+   * and 0.50 accepted (final review D4).
+   */
+  amount: z
+    .number()
+    .min(1, "A charge is at least ₹1.")
+    .max(10_000_000)
+    .multipleOf(0.01, "Rupees and paise: two decimals at most."),
   currency: z.literal("INR").default("INR"),
   note: z.string().trim().max(500).optional(),
 })
 
 /** Moves of a charge per admin a minute: a void or a settle may call Razorpay. */
 const CHARGE_MOVES = { max: 30, windowMs: 60_000 }
+
+/** A UTR is 22 characters, a cheque number fewer; this is room to spare, not a free-text field. */
+const MAX_PAYMENT_REF = 100
 
 /** The shortest void reason that can say anything, as for a suspension. */
 const MIN_VOID_REASON = 10
@@ -286,6 +297,7 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
 /** Raise a draft charge against a placement. */
 export async function pricePlacement(placementId: string, input: unknown): Promise<void> {
   const admin = await requireAdmin()
+  if (!z.uuid().safeParse(placementId).success) throw new Refusal("Placement not found")
 
   const parsed = priceSchema.safeParse(input)
   if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "Invalid amount")
@@ -387,6 +399,7 @@ export async function advanceCharge(
   if (to === "settled" && ref.length < 3) {
     throw new Refusal("Record the payment reference — it is what makes this checkable.")
   }
+  if (ref.length > MAX_PAYMENT_REF) throw new Refusal(`Keep the payment reference under ${MAX_PAYMENT_REF} characters.`)
 
   /*
    * A void can undo money that arrived, and it cannot be undone (SCRUM-173). It

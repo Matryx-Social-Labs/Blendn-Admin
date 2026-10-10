@@ -694,6 +694,15 @@ async function applyPaymentLinkPaid(tx: Tx, d: Delivery): Promise<Outcome> {
   } else if (charge.status === "void") {
     logger.error("A voided placement charge was paid by its link; refund it from the Razorpay dashboard", { chargeId: charge.id, ...details })
     out.audit.push({ action: "charge.paid_after_void", orgId: c.org_id, resource, details })
+  } else if (charge.status !== "settled") {
+    // A link is only ever sent for an agreed charge; any other state is a
+    // payment nothing here accounts for. Recorded above, and said.
+    logger.error("A placement charge in an unexpected state was paid by its link; reconcile it by hand", {
+      chargeId: charge.id,
+      chargeStatus: charge.status,
+      ...details,
+    })
+    out.audit.push({ action: "charge.paid_unexpected", orgId: c.org_id, resource, details: { chargeStatus: charge.status, ...details } })
   }
   await advance(tx, c, eventAt, "paid")
   await applyEarlyRefund(tx, out, c, paymentId)

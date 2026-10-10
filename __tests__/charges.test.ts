@@ -80,10 +80,15 @@ describe("pricing", () => {
     expect(data.priced_by).toBe(ADMIN)
   })
 
-  it("rounds at the boundary, once", async () => {
-    // A person typed this. Every read from here on is an integer.
-    await pricePlacement(PLACEMENT, { amount: 0.015 })
-    expect(mockDb.placement_charges.create.mock.calls[0][0].data.amount_minor).toBe(2)
+  it("refuses less than ₹1 and fractions of a paisa, writing nothing (final review D4)", async () => {
+    // 0.015 used to be rounded to 2 paise and stored; a price is whole paise.
+    await expect(pricePlacement(PLACEMENT, { amount: 0.5 })).rejects.toThrow("at least ₹1")
+    await expect(pricePlacement(PLACEMENT, { amount: 0.015 })).rejects.toThrow("at least ₹1")
+    await expect(pricePlacement(PLACEMENT, { amount: 12.345 })).rejects.toThrow("two decimals")
+    await expect(pricePlacement("not-a-uuid", { amount: 100 })).rejects.toThrow("Placement not found")
+    expect(mockDb.placement_charges.create).not.toHaveBeenCalled()
+    await pricePlacement(PLACEMENT, { amount: 1 })
+    expect(mockDb.placement_charges.create.mock.calls[0][0].data.amount_minor).toBe(100)
   })
 
   it("refuses a second live charge on the same placement", async () => {
