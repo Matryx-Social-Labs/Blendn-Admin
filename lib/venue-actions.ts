@@ -4,9 +4,8 @@ import { isDeepStrictEqual } from "node:util"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
-import { auditLog } from "@/lib/audit-log"
 import { currentUser } from "@/lib/current-user"
+import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
 import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
@@ -71,10 +70,11 @@ import { realEventsWhere } from "@/lib/event-kind"
  * undoable.
  */
 
+/** The caller, with the role the database holds now (step 18): an admin's branch here touches any venue. */
 async function requireUser() {
-  const session = await getAuth()
-  if (!session?.user) throw new Refusal("Unauthorized")
-  return session.user
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
+  return user
 }
 
 /**
