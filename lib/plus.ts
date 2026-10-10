@@ -1,5 +1,6 @@
 import "server-only"
 
+import { auditInTx } from "./audit-log"
 import { Prisma } from "@prisma/client"
 
 import { attendedEventIds } from "./attendee-counts"
@@ -217,14 +218,12 @@ async function audit(
   expiresAt: Date,
   details: Record<string, string | number>
 ) {
-  await tx.audit_logs.create({
-    data: {
+  await auditInTx(tx, {
       action: action,
       resource: "user",
-      resource_id: userId,
+      resourceId: userId,
       details: { product: "plus", ref: ref, expiresAt: expiresAt.toISOString(), ...details },
-    },
-  })
+    })
 }
 
 /**

@@ -1,5 +1,6 @@
 import "server-only"
 
+import { auditInTx } from "./audit-log"
 import { createHash, timingSafeEqual } from "crypto"
 
 import { Prisma } from "@prisma/client"
@@ -317,14 +318,12 @@ async function applyPurchase(tx: Tx, e: RevenuecatEvent, now: Date): Promise<Out
   // A refund of an older period of a subscription that has since renewed ends
   // nothing: the period it refunds is over, and the one running was paid for.
   if (refund && product === "plus" && existing?.windowTransactionId && e.transaction_id && e.transaction_id !== existing.windowTransactionId) {
-    await tx.audit_logs.create({
-      data: {
+    await auditInTx(tx, {
         action: "entitlement.refund_old_period",
         resource: "user",
-        resource_id: existing.subjectId,
+        resourceId: existing.subjectId,
         details: { ref: ref, refunded: e.transaction_id, current: existing.windowTransactionId, eventId: e.id },
-      },
-    })
+      })
     return refuse("old_period_refund")
   }
 
@@ -391,13 +390,11 @@ async function applyTransfer(tx: Tx, e: RevenuecatEvent, confirmed: Set<string> 
     confirmed: [...confirmed],
   })
   if (moved === 0) return nothing
-  await tx.audit_logs.create({
-    data: {
+  await auditInTx(tx, {
       action: "entitlement.transferred",
       resource: "user",
-      resource_id: to,
+      resourceId: to,
       details: { from: from, moved: moved, store: e.store ?? null, eventId: e.id, reconciled: true },
-    },
-  })
+    })
   return applied
 }

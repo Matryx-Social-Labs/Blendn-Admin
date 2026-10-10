@@ -695,15 +695,13 @@ export async function grantPlus(userId: string, months: number, reason: string):
       throw new Refusal("This person already has a grant. End it before giving a new one.")
     }
     const made = await grantEntitlement(tx, { subject: { kind: "user", id }, product: "plus", months: length })
-    await tx.audit_logs.create({
-      data: {
-        user_id: admin.id,
+    await auditInTx(tx, {
+        userId: admin.id,
         action: "entitlement.granted",
         resource: "user",
-        resource_id: id,
+        resourceId: id,
         details: { product: "plus", months: length, expiresAt: made.expiresAt.toISOString(), reason: why },
-      },
-    })
+      })
     return made
   })
   revalidatePath("/dashboard/users")
