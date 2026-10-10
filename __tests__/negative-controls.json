@@ -1762,14 +1762,14 @@
     },
     "admin-gate-reads-database.test.ts": {
       "guards": "Step 18 (PR A): no 'use server' file keeps its own requireAdmin or gates an admin action on the session's role claim; every file that calls requireAdmin imports the one in lib/current-user.ts, which reads the caller's row.",
-      "mutation": "M1040 a local session-gated requireAdmin put back in lib/amenity-actions.ts. M1041 getCreativeQueue gated on `session?.user?.role !== \"app_admin\"` again. M1042 requireAdmin reads the session's claim instead of currentUser().",
-      "observed": "M1040: 3 of 5 failing (own requireAdmin, session claim, import). M1041: 1 of 5 failing (session claim, naming lib/creative-review-actions.ts). M1042: 1 of 5 failing (reads the caller's row). Each restored with git checkout from the committed tree; 5 of 5 green after.",
+      "mutation": "M1100 a local session-gated requireAdmin put back in lib/amenity-actions.ts. M1101 getCreativeQueue gated on `session?.user?.role !== \"app_admin\"` again. M1102 requireAdmin reads the session's claim instead of currentUser().",
+      "observed": "M1100: 3 of 5 failing (own requireAdmin, session claim, import). M1101: 1 of 5 failing (session claim, naming lib/creative-review-actions.ts). M1102: 1 of 5 failing (reads the caller's row). Each restored with git checkout from the committed tree; 5 of 5 green after.",
       "date": "2026-10-10"
     },
     "admin-gate-reads-database.itest.ts": {
       "guards": "Step 18 (PR A), behavioural: a session claiming app_admin over an organiser row or a suspended admin row is refused by createAmenity, createCategory, updateUserRole, setOrganisationMaySponsor (Forbidden) and curateEvent ({ ok: false }), and the tables read back unchanged with no audit row; an admin row's calls write.",
-      "mutation": "M1042 requireAdmin reads the session's claim. M1043 currentUser lets a suspended account through (suspended_at not checked).",
-      "observed": "M1042: 2 of 3 failing (both refused cases wrote). M1043: 1 of 3 failing (the suspended admin). Restored; 3 of 3 green.",
+      "mutation": "M1102 requireAdmin reads the session's claim. M1103 currentUser lets a suspended account through (suspended_at not checked).",
+      "observed": "M1102: 2 of 3 failing (both refused cases wrote). M1103: 1 of 3 failing (the suspended admin). Restored; 3 of 3 green.",
       "date": "2026-10-10"
     }
   },
