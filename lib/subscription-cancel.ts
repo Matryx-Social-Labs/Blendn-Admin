@@ -126,6 +126,21 @@ export async function cancelPreviousOwnersMandates(
   newOwnerOrgId: string,
   adminId: string
 ): Promise<{ cancelled: string[]; failed: string[] }> {
+  try {
+    return await cancelEach(venueId, newOwnerOrgId, adminId)
+  } catch (err) {
+    // The venue has moved and its Pro has ended; only the mandates are left
+    // open. Said here, never thrown into the approval that already committed.
+    logger.error("Cancelling the previous owner's Venue Pro mandates failed; cancel them from the Razorpay dashboard", {
+      venueId,
+      newOwnerOrgId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return { cancelled: [], failed: [] }
+  }
+}
+
+async function cancelEach(venueId: string, newOwnerOrgId: string, adminId: string): Promise<{ cancelled: string[]; failed: string[] }> {
   const open = await db.billing_checkouts.findMany({
     where: {
       venue_id: venueId,

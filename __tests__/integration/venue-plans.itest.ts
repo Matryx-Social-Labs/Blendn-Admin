@@ -27,6 +27,8 @@ jest.mock("@/app/dashboard/venues/[id]/venue-manage", () => ({ VenueManage: () =
  * which windows were asked for. The real client does the work.
  */
 const mockRawCalls: unknown[][] = []
+/** While set, `billing_checkouts.findMany` through the app's client fails, as a dropped connection would. */
+const mockFail = { checkoutReads: false }
 jest.mock("@/lib/db", () => {
   const actual = jest.requireActual("@/lib/db")
   const real = actual.db
@@ -39,6 +41,11 @@ jest.mock("@/lib/db", () => {
         }
       }
       const value = Reflect.get(target, prop)
+      if (prop === "billing_checkouts" && mockFail.checkoutReads) {
+        return new Proxy(value, {
+          get: (d, k) => (k === "findMany" ? () => Promise.reject(new Error("itest: read refused")) : Reflect.get(d, k)),
+        })
+      }
       return typeof value === "function" ? value.bind(target) : value
     },
   })
@@ -510,6 +517,21 @@ describe("a venue changing hands (review M7)", () => {
       expect(logged(ref)).toBe(true)
     })
 
+    it("reading the mandates fails after the transfer committed: the approval stands, the Pro has ended, and it is logged", async () => {
+      const { v, ref, claim } = await paidVenueUnderDispute("vp-readfail")
+      as(admin, "app_admin")
+      mockFail.checkoutReads = true
+      try {
+        await decideVenueClaim(claim, "approve")
+      } finally {
+        mockFail.checkoutReads = false
+      }
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+      expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+      expect(calls.some((c) => c.url.includes(ref))).toBe(false)
+      expect(errors.mock.calls.some(([, meta]) => (meta as Record<string, unknown> | undefined)?.venueId === v)).toBe(true)
+    })
+
     it("the database fails inside the transfer: nothing moves, the Pro stays with its payer, Razorpay is never asked", async () => {
       const { v, ref, ent, claim } = await paidVenueUnderDispute("vp-transferfail")
       as(admin, "app_admin")
@@ -733,10 +755,12 @@ describe("insights by plan", () => {
 
   it("ends at the start of the venue's current day: nobody who came in today moves a figure (review M9)", async () => {
     const today = await venue("vp-today", { claimedDaysAgo: 40 })
-    const now = new Date()
+    // A fixed "now", six hours into a venue day that has ended: a wall clock just past 06:00 UTC
+    // would put "a minute after the day began" in the future.
+    const now = new Date(venueDayBounds("UTC", 6, new Date()).start.getTime() - 18 * 3600_000)
     const dayStart = venueDayBounds("UTC", 6, now).start
     await night(today, new Date(dayStart.getTime() - 2 * 3600_000), await guests(6, "vp-yday"))
-    await night(today, new Date(Math.min(now.getTime() - 60_000, dayStart.getTime() + 60_000)), await guests(7, "vp-tday"))
+    await night(today, new Date(dayStart.getTime() + 60_000), await guests(7, "vp-tday"))
     const view = (await venueInsights(today, now))!
     expect(view.recent.to).toBe(dayStart.toISOString())
     expect(view.recent.regulars.visitors).toBe(6)
@@ -766,5 +790,156 @@ describe("the venue owner's Plan page", () => {
     expect(asStaff.venues.find((r) => r.venueId === v)?.mayBuy).toBe(false)
     const asStranger = await venuePlanPage({ id: stranger, role: "venue_owner" })
     expect(asStranger.venues.find((r) => r.venueId === v)).toBeUndefined()
+  })
+})
+/* ------------------------------------------------------------------ */
+/* REVIEW GAP TESTS                                                    */
+/* ------------------------------------------------------------------ */
+describe("GAP insights: the venue's own clock (IST)", () => {
+  async function guestsAt(venueId: string, at: Date, n: number, kind: "attendee" | "staff" = "attendee") {
+    const id = await makeEvent(owner)
+    events.push(id)
+    await db.events.update({ where: { id }, data: { venue_id: venueId, start_time: at, end_time: new Date(at.getTime() + 3 * 3600_000), title: testId("vp-gap-night") } })
+    const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: id } })
+    for (let i = 0; i < n; i++) {
+      const u = await makeUser(testId(`gap${i}`))
+      users.push(u)
+      await db.event_check_ins.create({ data: { event_id: id, occurrence_id: occ.id, user_id: u, status: "checked_in", kind, check_in_time: at } })
+    }
+  }
+
+  it("GAP-Y01..Y03 puts each check-in in the right day and slot: the 06:00 night, and the 12/17/22 edges", async () => {
+    const v = await venue("vp-gap-ist", { claimedAt: new Date("2026-09-01T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    // [instant (IST), expected [dow Monday=0, slot morning/afternoon/evening/late = 0..3]]
+    const cases: [string, [number, number]][] = [
+      ["2026-10-05T05:59:00+05:30", [6, 3]], // Mon 05:59 is still SUNDAY's night, late
+      ["2026-10-06T06:00:00+05:30", [1, 0]], // Tue 06:00 starts Tuesday, morning
+      ["2026-10-08T11:59:00+05:30", [3, 0]], // Thu 11:59 is still morning
+      ["2026-10-07T12:00:00+05:30", [2, 1]], // Wed 12:00 is afternoon
+      ["2026-10-09T16:59:00+05:30", [4, 1]], // Fri 16:59 is still afternoon
+      ["2026-10-10T17:00:00+05:30", [5, 2]], // Sat 17:00 is evening
+      ["2026-10-04T21:59:00+05:30", [6, 2]], // Sun 21:59 is still evening
+      ["2026-10-05T22:00:00+05:30", [0, 3]], // Mon 22:00 is late
+    ]
+    for (const [at] of cases) await guestsAt(v, new Date(at), 5)
+    const view = (await venueInsights(v, new Date("2026-10-12T20:00:00+05:30")))!
+    const lit: string[] = []
+    view.recent.people.forEach((day, d) => day.forEach((n, s) => n && lit.push(`${d}/${s}:${n}`)))
+    expect(lit.sort()).toEqual(cases.map(([, [d, s]]) => `${d}/${s}:5`).sort())
+  })
+
+  it("GAP-X21 staff who went live are not guests in the grid or the headline", async () => {
+    const v = await venue("vp-gap-staff", { claimedAt: new Date("2026-09-01T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    await guestsAt(v, new Date("2026-10-07T20:00:00+05:30"), 6, "staff")
+    const view = (await venueInsights(v, new Date("2026-10-12T20:00:00+05:30")))!
+    expect(view.recent.people.flat().every((n) => n === 0)).toBe(true)
+    expect(view.recent.regulars.visitors).toBeNull()
+  })
+
+  it("GAP-X22 staff before the claim are not pre-claim guests", async () => {
+    const v = await venue("vp-gap-staff2", { claimedAt: new Date("2026-09-20T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    await guestsAt(v, new Date("2026-09-05T20:00:00+05:30"), 6, "staff")
+    as(admin, "app_admin")
+    await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
+    const view = (await venueInsights(v, new Date("2026-10-12T20:00:00+05:30")))!
+    expect(view.preClaim).toEqual({ nights: 0, people: 0, since: null })
+  })
+})
+
+describe("GAP venue Pro authority", () => {
+  let payerOrg = ""
+  let payerOwner = ""
+  let payerStaff = ""
+  beforeAll(async () => {
+    payerOwner = await makeUser(testId("vp-gap-payer"), "organizer")
+    payerStaff = await makeUser(testId("vp-gap-pstaff"), "organizer")
+    users.push(payerOwner, payerStaff)
+    for (const id of [payerOwner, payerStaff]) await db.user.update({ where: { id }, data: { role: "venue_owner" } })
+    const p = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-gap-payer-org"), status: "verified" } })
+    orgs.push(p.id)
+    payerOrg = p.id
+    await db.organisation_members.createMany({
+      data: [
+        { org_id: p.id, user_id: payerOwner, role: "owner" },
+        { org_id: p.id, user_id: payerStaff, role: "staff" },
+      ],
+    })
+  })
+
+  async function paidPro(label: string) {
+    const v = await venue(label, { org: payerOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active", current_end: new Date(Date.now() + 20 * DAY) },
+    })
+    await db.entitlements.create({
+      data: { subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 23 * DAY) },
+    })
+    return { v, ref }
+  }
+
+  it("GAP-Y09 a staff member of the paying organisation cannot cancel its Venue Pro", async () => {
+    const { v, ref } = await paidPro("vp-gap-cancel")
+    as(payerStaff, "venue_owner")
+    await expect(actions.cancelVenuePro(v)).rejects.toThrow("Only an owner or admin")
+    expect(calls.some((c) => c.url.endsWith("/cancel"))).toBe(false)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+  })
+
+  it("GAP-X04/X05 approving a claim by the organisation that already owns the venue leaves its own Pro and mandate", async () => {
+    const { v, ref } = await paidPro("vp-gap-self")
+    const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: payerOrg, filed_by: payerOwner, status: "pending", is_dispute: false } })
+    as(admin, "app_admin")
+    await decideVenueClaim(claim.id, "approve")
+    expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(payerOrg)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(true)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(false)
+  })
+})
+
+describe("GAP clearOpenConflicts only runs for a subscription becoming open", () => {
+  function post(body: unknown) {
+    const raw = JSON.stringify(body)
+    return route.POST(
+      new NextRequest("http://localhost/api/webhooks/razorpay", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-real-ip": "203.0.113.11",
+          "x-razorpay-signature": createHmac("sha256", SECRET).update(raw).digest("hex"),
+          "x-razorpay-event-id": `itest_vp_${randomUUID()}`,
+        },
+        body: raw,
+      })
+    )
+  }
+  const T0 = Math.floor(Date.now() / 1000) - 3600
+  const event = (type: string, id: string, at: number, status: string, extra: Record<string, unknown> = {}) => ({
+    event: type,
+    created_at: at,
+    payload: {
+      subscription: { entity: { id, plan_id: "plan_vp_month", status, start_at: T0, current_start: at, current_end: at + 30 * 86_400, ...extra } },
+      payment: { entity: { id: `pay_${randomUUID().slice(0, 10)}`, amount: 353_900, currency: "INR", status: "captured" } },
+    },
+  })
+
+  it("GAP-X08 the cancel of a superseded mandate settles it without a second audit or a second cancel call", async () => {
+    const v = await venue("vp-gap-super")
+    const live = `sub_${randomUUID().slice(0, 12)}`
+    const second = `sub_${randomUUID().slice(0, 12)}`
+    for (const [ref, status] of [[live, "active"], [second, "expired"]] as const) {
+      await db.billing_checkouts.create({
+        data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: orgId, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status },
+      })
+    }
+    expect((await post(event("subscription.charged", second, T0 + 7, "active"))).status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: second } })).status).toBe("superseded")
+    const cancelsBefore = calls.filter((c) => c.url.endsWith(`/subscriptions/${second}/cancel`)).length
+    // Razorpay confirms the cancel we asked for.
+    expect((await post(event("subscription.cancelled", second, T0 + 30, "cancelled", { ended_at: T0 + 30 }))).status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: second } })).status).toBe("cancelled")
+    expect(await db.audit_logs.count({ where: { action: "billing.duplicate_subscription", resource_id: v } })).toBe(1)
+    expect(calls.filter((c) => c.url.endsWith(`/subscriptions/${second}/cancel`)).length).toBe(cancelsBefore)
   })
 })

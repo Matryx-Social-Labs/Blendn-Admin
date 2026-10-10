@@ -73,10 +73,14 @@ export default async function PlanPage({
   // A venue owner's plan is each venue's (step 17).
   if (session.user.role === "venue_owner") {
     const params = await searchParams
-    const pending = params.status === "pending" && params.for === "venue"
+    const view = await venuePlanPage({ id: session.user.id, role: session.user.role })
+    // Waiting until the webhook has moved the subscription Checkout came back
+    // with past `created`; then the plan is on the page and nothing waits.
+    const arrived = view.venues.some((v) => v.subscriptions.some((s) => s.providerRef === params.ref && s.status !== "created"))
+    const pending = params.status === "pending" && params.for === "venue" && !arrived
     return (
       <>
-        <VenuePlan view={await venuePlanPage({ id: session.user.id, role: session.user.role })} pending={pending} />
+        <VenuePlan view={view} pending={pending} />
         {pending ? <PendingWatcher reference={params.ref ?? null} /> : null}
       </>
     )

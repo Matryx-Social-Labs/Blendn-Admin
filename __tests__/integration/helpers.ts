@@ -51,6 +51,8 @@ export async function refusingWrites(
   await db.$executeRawUnsafe(
     `CREATE OR REPLACE FUNCTION itest_refuse_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'itest: write refused'; END $$`
   )
+  // A run that died inside `run` left its trigger behind: drop it first, or every later write here fails.
+  await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS itest_refuse ON ${table}`)
   await db.$executeRawUnsafe(`CREATE TRIGGER itest_refuse BEFORE ${op} ON ${table} FOR EACH ROW WHEN (${when}) EXECUTE FUNCTION itest_refuse_write()`)
   try {
     await run()
