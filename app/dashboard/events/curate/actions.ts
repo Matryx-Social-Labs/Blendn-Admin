@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
+import { Refusal } from "@/lib/refusal"
 import { curatedDescription, curatedFence } from "@/lib/curation"
 import { sourceDomain } from "@/lib/curation-sources"
 import { db } from "@/lib/db"
@@ -58,16 +59,18 @@ export type CurateInput = z.infer<typeof curateSchema>
 export async function curateEvent(
   input: CurateInput
 ): Promise<{ ok: true; eventId: string; slug: string } | { ok: false; error: string }> {
-  const session = await getAuth()
   /*
    * Founders run curation. Not `canAccessDashboard`: an organiser adding events
    * "on behalf of" somebody else is exactly the confusion the claim funnel
    * exists to resolve, and it would let them mint an event another organiser
-   * could then be offered.
+   * could then be offered. This action answers with a result rather than a
+   * throw, so the refusal is caught and said in its own words.
    */
-  if (session?.user?.role !== "app_admin") {
-    return { ok: false, error: "Only platform admins can curate events" }
-  }
+  const admin = await requireAdmin().catch((error: unknown) => {
+    if (error instanceof Refusal) return null
+    throw error
+  })
+  if (!admin) return { ok: false, error: "Only platform admins can curate events" }
 
   const parsed = curateSchema.safeParse(input)
   if (!parsed.success) {
@@ -131,7 +134,7 @@ export async function curateEvent(
          * `eventPermissions` short-circuits app_admin, so the platform can
          * operate it, and a claim fills it in with one write.
          */
-        organizer_id: session.user.id,
+        organizer_id: admin.id,
         organizer_org_id: null,
         ...(v.category_ids?.length
           ? { categories: { create: v.category_ids.map((id) => ({ category_id: id })) } }
@@ -162,7 +165,7 @@ export async function curateEvent(
     await syncOccurrences(event.id, start, end, v.timezone)
 
     auditLog({
-      userId: session.user.id,
+      userId: admin.id,
       action: "event.curated",
       resource: "event",
       resourceId: event.id,

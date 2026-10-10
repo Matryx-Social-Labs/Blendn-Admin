@@ -6,6 +6,7 @@ import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { gstinMessage, validateGstin } from "@/lib/gstin"
 import { actorFor } from "@/lib/org-membership"
@@ -232,8 +233,7 @@ export interface SponsorClaimQueueRow {
 }
 
 export async function getSponsorClaimQueue(): Promise<SponsorClaimQueueRow[]> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const claims = await db.sponsor_claims.findMany({
     where: { status: "pending" },
@@ -343,9 +343,7 @@ export async function decideSponsorClaim(
   decision: "approve" | "reject",
   note?: string
 ): Promise<{ notified: boolean }> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  const admin = session.user
+  const admin = await requireAdmin()
 
   const claim = await db.sponsor_claims.findUnique({
     where: { id: claimId },

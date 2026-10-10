@@ -4,7 +4,7 @@ import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 
 import { auditLog } from "@/lib/audit-log"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 
 /**
@@ -56,8 +56,7 @@ export interface CreativeQueueRow {
 }
 
 export async function getCreativeQueue(): Promise<CreativeQueueRow[]> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const rows = await db.sponsored_creatives.findMany({
     where: { moderation_status: "pending" },
@@ -116,9 +115,7 @@ export async function decideCreative(
   decision: "approve" | "reject",
   note?: string
 ): Promise<void> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  const admin = session.user
+  const admin = await requireAdmin()
 
   const trimmed = note?.trim() ?? ""
   // A refusal with no reason produces an identical resubmission, and the queue

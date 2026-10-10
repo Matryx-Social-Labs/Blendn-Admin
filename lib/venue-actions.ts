@@ -5,6 +5,7 @@ import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
@@ -515,8 +516,7 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
  * catalogue rather than about one organisation.
  */
 export async function restoreVenue(id: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const { count } = await db.venues.updateMany({
     where: { id, deleted_at: { not: null } },
@@ -542,8 +542,7 @@ export async function restoreVenue(id: string): Promise<void> {
  * that is a dispute, and a dispute has a person in it.
  */
 export async function assignVenueOwner(venueId: string, orgId: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const venue = await db.venues.findUnique({
     where: { id: venueId, deleted_at: null },

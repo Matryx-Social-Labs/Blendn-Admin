@@ -6,6 +6,7 @@ import type { rsvp_status } from "@prisma/client"
 import type { user_role } from "@prisma/client"
 
 import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { realEventsWhere } from "@/lib/event-kind"
 import { hostsEvent, visibleEventsScope, visibleEventsWhere } from "@/lib/event-visibility"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
@@ -1007,8 +1008,7 @@ export async function getDashboardOverview(range: DateRange = resolveRange({})) 
 export async function getVenueRecords(
   q = ""
 ): Promise<{ venues: VenueRecordRow[]; total: number }> {
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   // Name or city. Server-side because the list is a page: a search over the
   // 200 rows the client holds cannot find the 201st, and used to say nothing.

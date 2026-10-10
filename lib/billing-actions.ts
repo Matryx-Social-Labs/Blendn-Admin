@@ -7,7 +7,7 @@ import { z } from "zod"
 import { analyticsAccess, mayOpenEvent } from "@/lib/analytics-access"
 import { billingOrgFor, ONE_OPEN_PER_ORG, ONE_OPEN_PER_VENUE, OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { BILLING_PLANS, chargeMinor, type BillingPlanKey } from "@/lib/billing-plans"
-import { currentUser } from "@/lib/current-user"
+import { currentUser, requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, revokePaid } from "@/lib/entitlements"
 import { razorpayKeys } from "@/lib/env"
@@ -467,9 +467,9 @@ async function cancelOpen(
 /** An admin's money actions: grants, ends and revokes, per admin. */
 const ADMIN_ACTIONS = { max: 30, windowMs: 60_000 }
 
-async function requireAdmin() {
-  const user = await currentUser()
-  if (!user || user.role !== "app_admin") throw new Refusal("Forbidden")
+/** `requireAdmin`, then the admin's own limit on money changes. */
+async function requireAdminWithinLimit() {
+  const user = await requireAdmin()
   // Counted before the action runs, refusals included: a script holding an
   // admin session cannot loop grants.
   const { count } = await hit(`billing:admin:${user.id}`, ADMIN_ACTIONS.windowMs)
@@ -525,7 +525,7 @@ async function revokePaidAudited(
 
 /** The founding grant is six months (plan v2 §9.1b); an admin may choose 1–24. */
 export async function grantAnalytics(orgId: string, months: number, reason: string): Promise<{ expiresAt: string }> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, orgId, "Organisation not found")
   const length = parse(monthsSchema, months, "A grant runs between 1 and 24 months.")
   const why = parse(reasonSchema, reason, "Record why this organisation is being given Analytics (10 to 500 characters).")
@@ -558,7 +558,7 @@ export async function grantAnalytics(orgId: string, months: number, reason: stri
 
 /** End every live Analytics grant on the organisation, now. */
 export async function endAnalyticsGrant(orgId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, orgId, "Organisation not found")
   const why = parse(reasonSchema, reason, "Give a reason for ending this grant (10 to 500 characters).")
   await endGrantAudited(admin.id, { kind: "org", id }, "analytics", why)
@@ -571,7 +571,7 @@ export async function endAnalyticsGrant(orgId: string, reason: string): Promise<
  * Razorpay's dashboard, and the reason says so.
  */
 export async function revokePaidEntitlement(orgId: string, entitlementId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, orgId, "Organisation not found")
   const ent = parse(idSchema, entitlementId, "That entitlement isn't live.")
   const why = parse(reasonSchema, reason, "Give a reason for revoking it (10 to 500 characters).")
@@ -589,7 +589,7 @@ export async function revokePaidEntitlement(orgId: string, entitlementId: string
  * venue: Pro is for the owner, and an unclaimed venue has none.
  */
 export async function grantVenuePro(venueId: string, months: number, reason: string): Promise<{ expiresAt: string }> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, venueId, "Venue not found")
   const length = parse(monthsSchema, months, "A grant runs between 1 and 24 months.")
   const why = parse(reasonSchema, reason, "Record why this venue is being given Venue Pro (10 to 500 characters).")
@@ -629,7 +629,7 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
 
 /** End every live Venue Pro grant on the venue, now. */
 export async function endVenueProGrant(venueId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, venueId, "Venue not found")
   const why = parse(reasonSchema, reason, "Give a reason for ending this grant (10 to 500 characters).")
   await endGrantAudited(admin.id, { kind: "venue", id }, "venue_pro", why)
@@ -638,7 +638,7 @@ export async function endVenueProGrant(venueId: string, reason: string): Promise
 
 /** End a venue's live PAID Venue Pro now (as `revokePaidEntitlement`). Nothing is cancelled at Razorpay. */
 export async function revokeVenueProPaid(venueId: string, entitlementId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, venueId, "Venue not found")
   const ent = parse(idSchema, entitlementId, "That entitlement isn't live.")
   const why = parse(reasonSchema, reason, "Give a reason for revoking it (10 to 500 characters).")

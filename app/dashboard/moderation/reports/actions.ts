@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache"
 import type { report_status } from "@prisma/client"
 
 import { auditLog } from "@/lib/audit-log"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
 import { closePostRooms, closeRoomSockets } from "@/lib/room-close"
@@ -117,8 +117,7 @@ export async function getReportQueue(status: report_status = "pending") {
   // view, not this function. A server action is a POST endpoint dispatched by
   // action id with no page component in the path, and this one returns private
   // message content beside real names and email addresses.
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
+  await requireAdmin()
 
   const now = Date.now()
 
@@ -482,10 +481,7 @@ export async function resolveReport(
   reportId: string,
   decision: ReportDecision
 ) {
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") {
-    throw new Refusal("Only platform admins can resolve reports")
-  }
+  const admin = await requireAdmin()
 
   const report =
     kind === "user"
@@ -557,7 +553,7 @@ export async function resolveReport(
 
   const reviewed = {
     status: OUTCOME[decision === "reinstate" ? "dismiss" : decision],
-    reviewed_by: session.user.id,
+    reviewed_by: admin.id,
     reviewed_at: new Date(),
   }
 
@@ -621,7 +617,7 @@ export async function resolveReport(
     } else if (decision === "remove_message") {
       await tx.chat_messages.update({
         where: { id: (report as { message_id: string }).message_id },
-        data: { deleted_at: new Date(), deleted_by: session.user.id },
+        data: { deleted_at: new Date(), deleted_by: admin.id },
       })
     }
 
@@ -671,7 +667,7 @@ export async function resolveReport(
     }
 
     if (decision === "suspend" && subjectId) {
-      await applySuspension(tx, subjectId, session.user.id)
+      await applySuspension(tx, subjectId, admin.id)
     }
 
     if (decision === "reinstate" && subjectId) {
@@ -705,7 +701,7 @@ export async function resolveReport(
   // committed, so a failed audit write must not make the admin think their
   // action failed.
   auditLog({
-    userId: session.user.id,
+    userId: admin.id,
     action: `report.${decision}`,
     resource: kind === "user" ? "user_report" : kind === "event" ? "event_report" : "message_report",
     resourceId: reportId,

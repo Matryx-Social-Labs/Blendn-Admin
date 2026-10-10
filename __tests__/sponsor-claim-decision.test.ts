@@ -6,7 +6,8 @@
 const mockDb = {
   sponsor_claims: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   sponsors: { findFirst: jest.fn(), update: jest.fn() },
-  user: { findMany: jest.fn() },
+  // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
+  user: { findMany: jest.fn(), findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
   $transaction: jest.fn(),
 }
 mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise<void>) => fn(mockDb))

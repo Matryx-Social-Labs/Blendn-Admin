@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { paymentsOn } from "@/lib/billing"
-import { currentUser } from "@/lib/current-user"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
 import { reachBand, type SponsorReachBand } from "@/lib/billing-plans"
@@ -83,13 +83,6 @@ const MAX_PAYMENT_REF = 100
 const MIN_VOID_REASON = 10
 /** As long as a pricing note; it is copied into the audit row as well. */
 const MAX_VOID_REASON = 500
-
-/** A platform admin, on the role the database holds now (review LOW 18). */
-async function requireAdmin() {
-  const user = await currentUser()
-  if (!user || user.role !== "app_admin") throw new Refusal("Forbidden")
-  return user
-}
 
 export interface ChargeRow {
   id: string

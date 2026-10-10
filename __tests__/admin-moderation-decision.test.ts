@@ -7,6 +7,8 @@
  * decision now does too.
  */
 const mockDb = {
+  // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
+  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
   moderation_flags: { findUnique: jest.fn(), update: jest.fn() },
   chat_messages: { update: jest.fn() },
   $transaction: jest.fn(),

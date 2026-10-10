@@ -11,6 +11,8 @@
  * claim's, at filing and again here.
  */
 const mockDb = {
+  // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
+  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
   event_claims: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   organiser_onboarding_requests: { findUnique: jest.fn() },
   events: { update: jest.fn() },

@@ -4,6 +4,7 @@ import { Refusal } from "./refusal"
 
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
 import { CLAIM_PAGE, claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
 import { overClaimLimit } from "@/lib/claim-limit"
@@ -225,9 +226,7 @@ export async function decideEventClaim(
   decision: "approve" | "decline",
   note?: string
 ): Promise<{ notified: boolean }> {
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Refusal("Forbidden")
-  const admin = session.user
+  const admin = await requireAdmin()
 
   const claim = await db.event_claims.findUnique({
     where: { id: claimId },
@@ -405,7 +404,6 @@ export interface EventClaimRow {
  * who have been waiting longest.
  */
 export async function getEventClaimQueue(): Promise<{ rows: EventClaimRow[]; total: number }> {
-  const session = await getAuth()
   /*
    * The read half is gated too, not only the decide half.
    *
@@ -414,7 +412,7 @@ export async function getEventClaimQueue(): Promise<{ rows: EventClaimRow[]; tot
    * redirected non-admins and the action that returned the sensitive data did
    * not -- and it is the half that actually serves the data.
    */
-  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
+  await requireAdmin()
 
   // The total alongside the page, so a capped queue can say it is capped.
   const total = await db.event_claims.count({ where: { status: "pending" } })

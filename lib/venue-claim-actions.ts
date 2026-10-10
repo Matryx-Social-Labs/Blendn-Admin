@@ -7,6 +7,7 @@ import { z } from "zod"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { venueTypeLabel } from "@/lib/venue-types"
@@ -346,8 +347,7 @@ function noAccountFlags(contactEmail: string | null, website: string | null, gst
 }
 
 export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const claims = await db.venue_claims.findMany({
     where: { status: "pending" },
@@ -459,9 +459,7 @@ export async function decideVenueClaim(
   decision: "approve" | "decline",
   note?: string
 ): Promise<{ notified: boolean }> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  const admin = session.user
+  const admin = await requireAdmin()
 
   const claim = await db.venue_claims.findUnique({
     where: { id: claimId },

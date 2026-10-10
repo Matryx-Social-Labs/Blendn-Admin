@@ -6,7 +6,7 @@ import type { moderation_status_type } from "@prisma/client"
 
 import { auditLog } from "@/lib/audit-log"
 import { emitChatMessageHidden } from "@/lib/socket-server"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { trustSignalsFor } from "@/lib/trust"
 
@@ -66,8 +66,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
   // data: private chat message content paired with the author's real name and
   // email, for every flagged message on the platform. The page's redirect
   // guards the view, not this endpoint.
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
+  await requireAdmin()
 
   const now = Date.now()
 
@@ -209,10 +208,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
  * other people can see, so it needs to be attributable after the fact.
  */
 export async function resolveFlag(flagId: string, decision: "approve" | "remove") {
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") {
-    throw new Refusal("Only platform admins can resolve moderation flags")
-  }
+  const admin = await requireAdmin()
 
   const flag = await db.moderation_flags.findUnique({
     where: { id: flagId },
@@ -231,7 +227,7 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
       where: { id: flagId },
       data: {
         status: reviewedStatus,
-        reviewed_by: session.user.id,
+        reviewed_by: admin.id,
         reviewed_at: new Date(),
       },
     })
@@ -277,7 +273,7 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
   // committed, so a failed audit write logs and moves on rather than making the
   // admin think their action failed.
   auditLog({
-    userId: session.user.id,
+    userId: admin.id,
     action: decision === "approve" ? "moderation.flag_approved" : "moderation.message_removed",
     resource: "moderation_flag",
     resourceId: flagId,

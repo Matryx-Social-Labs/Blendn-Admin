@@ -19,6 +19,8 @@ const tx = {
 }
 
 const mockDb = {
+  // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null })) },
   user_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   message_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   event_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
@@ -68,7 +70,7 @@ describe("getReportQueue", () => {
     // component nowhere in the path — the page's redirect guards the view, not
     // this. And this returns private message content beside real names.
     mockAuth.mockResolvedValue({ user: { id: "o1", role: "organizer" } })
-    await expect(getReportQueue()).rejects.toThrow(/not authorised/i)
+    await expect(getReportQueue()).rejects.toThrow(/forbidden/i)
     expect(mockDb.user_reports.findMany).not.toHaveBeenCalled()
   })
 
@@ -279,7 +281,7 @@ describe("resolveReport", () => {
 
   it("refuses anyone who is not a platform admin", async () => {
     mockAuth.mockResolvedValue({ user: { id: "o1", role: "organizer" } })
-    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/only platform admins/i)
+    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/forbidden/i)
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })
 

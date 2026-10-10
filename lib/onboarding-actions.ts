@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache"
 // and a type import is erased.
 import type { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { logger } from "@/lib/logger"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
@@ -29,7 +29,7 @@ import { liveAnalyticsByOrg } from "./entitlements"
  * resolves on membership), and an org with no members is unreachable.
  *
  * `createRoleUser` in admin-role-actions.ts is deliberately not reused. It
- * exists for an admin adding a host by hand and does its own session check,
+ * exists for an admin adding a host by hand and does its own admin check,
  * revalidation, and nothing about organisations; calling it from here would
  * mean a user created outside the transaction that creates the org, which is
  * exactly the half-state to avoid.
@@ -49,12 +49,6 @@ const SET_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000
 
 function undisclosedPassword(): string {
   return crypto.randomBytes(32).toString("base64url")
-}
-
-async function requireAdmin() {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  return session.user
 }
 
 export interface OnboardingRow {
