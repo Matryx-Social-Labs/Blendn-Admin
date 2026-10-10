@@ -2,7 +2,7 @@
 
 import { Refusal } from "./refusal"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { currentUser } from "@/lib/current-user"
 import type { Prisma } from "@prisma/client"
 import { activeMembership } from "@/lib/org-membership"
 import { isUuid } from "@/lib/api-input"
@@ -55,10 +55,11 @@ export interface AuditPage {
 const PAGE_SIZE = 100
 
 export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage> {
-  const session = await getAuth()
-  if (!session?.user) throw new Refusal("Unauthorized")
+  // The role the database holds now (step 18): an admin sees the platform's log, everyone else their organisations'.
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
 
-  const isAdmin = session.user.role === "app_admin"
+  const isAdmin = user.role === "app_admin"
 
   /*
    * The tenant scope is an invariant, not a default.
@@ -84,7 +85,7 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
     // org admin auditing their own company must not be able to read another
     // company's suspensions out of the same table.
     const myOrgs = await db.organisation_members.findMany({
-      where: { user_id: session.user.id, ...activeMembership },
+      where: { user_id: user.id, ...activeMembership },
       select: { org_id: true, role: true },
     })
     const manageable = myOrgs.filter((m) => m.role === "owner" || m.role === "admin")
@@ -141,7 +142,7 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
       id: r.id,
       action: r.action,
       resource: r.resource,
-      resourceId: isAdmin ? r.resource_id : hostResourceId(session.user.id, r),
+      resourceId: isAdmin ? r.resource_id : hostResourceId(user.id, r),
       createdAt: r.created_at,
       actor: r.user_id ? (actorMap.get(r.user_id) ?? null) : null,
       details: r.details,

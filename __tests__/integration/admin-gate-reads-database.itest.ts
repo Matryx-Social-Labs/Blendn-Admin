@@ -9,7 +9,9 @@
  *
  * One action from each of five files: amenity, category, users, onboarding
  * (an organisation's may-sponsor grant) and curation, which answers with
- * `{ ok: false }` rather than a throw and must keep doing so.
+ * `{ ok: false }` rather than a throw and must keep doing so. And the reads
+ * whose admin branch is the whole platform: `actorFor` (every permission
+ * check), the audit log and the overview.
  */
 let session: { user: { id: string; role: "app_admin" } } | null = null
 jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
@@ -21,6 +23,10 @@ import { curateEvent, type CurateInput } from "@/app/dashboard/events/curate/act
 import { createAmenity } from "@/lib/amenity-actions"
 import { createCategory } from "@/lib/category-actions"
 import { setOrganisationMaySponsor } from "@/lib/onboarding-actions"
+import { getDashboardOverview } from "@/app/dashboard/actions"
+import { getAuditLog } from "@/lib/audit-actions"
+import { actorFor } from "@/lib/org-membership"
+import { updateVenue } from "@/lib/venue-actions"
 
 import { db, closeDb, makeUser, testId } from "./helpers"
 
@@ -51,6 +57,7 @@ afterAll(async () => {
   await db.categories.deleteMany({ where: { name: { startsWith: `Gate ${tag}` } } })
   await db.audit_logs.deleteMany({ where: { user_id: { in: users } } })
   if (orgs.length) await db.organisations.deleteMany({ where: { id: { in: orgs } } })
+  await db.venues.deleteMany({ where: { name: { startsWith: `Gate ${tag}` } } })
   await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
 })
@@ -100,5 +107,43 @@ describe("the same calls from an admin's row", () => {
     expect(await db.categories.count({ where: { name } })).toBe(1)
     expect((await db.organisations.findUniqueOrThrow({ where: { id: org }, select: { may_sponsor: true } })).may_sponsor).toBe(true)
     expect((await db.user.findUniqueOrThrow({ where: { id: target }, select: { role: true } })).role).toBe("organizer")
+  })
+})
+
+describe("the reads whose admin branch is the whole platform", () => {
+  it("build the actor from the row: an organiser's role and orgs, a suspended admin nobody", async () => {
+    // What callers pass is a session's user; the claim says app_admin.
+    expect(await actorFor({ id: demoted, role: "app_admin" })).toEqual({ id: demoted, role: "organizer", orgIds: [] })
+    expect(await actorFor({ id: suspended, role: "app_admin" })).toEqual({ id: suspended, role: "attendee", orgIds: [] })
+    expect(await actorFor({ id: admin, role: "organizer" })).toEqual({ id: admin, role: "app_admin", orgIds: [] })
+  })
+
+  it("scope the audit log to the caller's organisations unless the row is an admin's", async () => {
+    // An organiser who manages no organisation reads nothing, never the platform's log.
+    as(demoted)
+    await expect(getAuditLog()).rejects.toThrow("Forbidden")
+    as(suspended)
+    await expect(getAuditLog()).rejects.toThrow("Unauthorized")
+    as(admin)
+    expect((await getAuditLog()).scopedToOrg).toBe(false)
+  })
+
+  it("answer the overview for the row's role, never the platform's for a demoted admin", async () => {
+    as(demoted)
+    expect((await getDashboardOverview()).role).toBe("organizer")
+    as(suspended)
+    await expect(getDashboardOverview()).rejects.toThrow("Not authorised")
+  })
+})
+
+describe("a venue's admin branch", () => {
+  it("is the row's: a demoted admin cannot edit a venue their organisation does not own", async () => {
+    const venue = await db.venues.create({ data: { name: `Gate ${tag} venue`, city: "Bengaluru", latitude: 12.97, longitude: 77.6 } })
+    as(demoted)
+    await expect(updateVenue(venue.id, { name: `Gate ${tag} renamed` })).rejects.toThrow("Forbidden")
+    expect((await db.venues.findUniqueOrThrow({ where: { id: venue.id }, select: { name: true } })).name).toBe(`Gate ${tag} venue`)
+    as(admin)
+    await updateVenue(venue.id, { name: `Gate ${tag} renamed` })
+    expect((await db.venues.findUniqueOrThrow({ where: { id: venue.id }, select: { name: true } })).name).toBe(`Gate ${tag} renamed`)
   })
 })

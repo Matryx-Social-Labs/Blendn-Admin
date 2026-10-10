@@ -79,14 +79,25 @@ export async function actorFor(user: {
   id: string
   role: user_role
 }): Promise<PermissionActor> {
-  if (user.role === "app_admin") return { id: user.id, role: user.role, orgIds: [] }
+  /*
+   * The role the database holds now, not the one the caller passed (step 18).
+   * Callers hand in a session's user, whose role is a claim; the admin
+   * short-circuit below grants everything, so it is decided on the row. A
+   * deleted or suspended account is nobody: no role worth the name, no orgs.
+   */
+  const row = await db.user.findUnique({
+    where: { id: user.id },
+    select: { role: true, suspended_at: true, deletedAt: true },
+  })
+  if (!row || row.deletedAt || row.suspended_at) return { id: user.id, role: "attendee", orgIds: [] }
+  if (row.role === "app_admin") return { id: user.id, role: row.role, orgIds: [] }
 
   const memberships = await db.organisation_members.findMany({
     where: { user_id: user.id, ...activeMembership },
     select: { org_id: true },
   })
 
-  return { id: user.id, role: user.role, orgIds: memberships.map((m) => m.org_id) }
+  return { id: user.id, role: row.role, orgIds: memberships.map((m) => m.org_id) }
 }
 
 /**

@@ -8,6 +8,13 @@
  */
 
 const mockDb = {
+  // actorFor reads the caller's role from their row (step 18): here, the role the session names.
+  user: {
+    findUnique: jest.fn(async () => {
+      const s = await mockAuth()
+      return s?.user ? { role: s.user.role, suspended_at: null, deletedAt: null } : null
+    }),
+  },
   events: { findUnique: jest.fn() },
   organisation_members: { findMany: jest.fn() },
   organisations: { findFirst: jest.fn() },

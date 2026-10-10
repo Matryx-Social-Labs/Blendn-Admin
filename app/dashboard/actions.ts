@@ -5,8 +5,7 @@ import type { rsvp_status } from "@prisma/client"
 
 import type { user_role } from "@prisma/client"
 
-import { getAuth } from "@/lib/auth"
-import { requireAdmin } from "@/lib/current-user"
+import { currentUser, requireAdmin } from "@/lib/current-user"
 import { realEventsWhere } from "@/lib/event-kind"
 import { hostsEvent, visibleEventsScope, visibleEventsWhere } from "@/lib/event-visibility"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
@@ -906,12 +905,11 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
  * and not the data, so they never applied here.
  */
 async function dashboardActor(): Promise<{ role: DashboardRole; userId: string }> {
-  const session = await getAuth()
-  const role = session?.user?.role as DashboardRole | undefined
-  if (!session?.user?.id || !role || !canAccessDashboard(role as user_role)) {
-    throw new Refusal("Not authorised")
-  }
-  return { role, userId: session.user.id }
+  // The role the database holds now (step 18), not the session's claim: the
+  // admin's overview is the whole platform.
+  const user = await currentUser()
+  if (!user || !canAccessDashboard(user.role)) throw new Refusal("Not authorised")
+  return { role: user.role as DashboardRole, userId: user.id }
 }
 
 
