@@ -46,10 +46,19 @@ Analytics keeps its own index.
   venue today, and the Plan page lists only the caller's organisation's
   subscriptions and payments.
 - **A venue changing hands** (an approved dispute) ends the previous owner's
-  paid Venue Pro at once and cancels its mandate at the end of the paid cycle
-  (`entitlement.ended_on_transfer` on the venue). A Razorpay failure there is
-  logged: cancel it from the Razorpay dashboard. Grants stay; end them on the
-  venue page.
+  paid Venue Pro in the same transaction as the transfer
+  (`entitlement.ended_on_transfer` on the venue), then cancels its mandate at
+  the end of the paid cycle. A cancel Razorpay refused is audited
+  `billing.subscription.cancel_failed` on the venue: **cancel it from the
+  Razorpay dashboard**. If it charges anyway the webhook grants nothing
+  (`billing.payer_not_owner`) and cancels it; refund that payment. Grants
+  stay; end them on the venue page.
+- **Cancels: Razorpay first, then us.** A cancel Razorpay refused changes
+  nothing here and the user is told so. One Razorpay confirmed whose record
+  here failed is logged (`providerRef`) and refused; Razorpay's
+  `subscription.cancelled` settles the row and the entitlement. Every state
+  change and its audit row are one transaction; the money actions read the
+  role from the database, not the session.
 - **`superseded`** on a subscription is ours: a second mandate paid late
   beside a live one. The webhook cancels it at Razorpay and writes
   `billing.duplicate_subscription`; **refund that payment** from the Razorpay
