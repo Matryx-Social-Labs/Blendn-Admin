@@ -1544,6 +1544,11 @@ model venues {
   /// over the building data's own height (owner, 2026-10-09). Null leaves the
   /// map's height. Set by the venue's owner or an admin; CHECK 1–200 in SQL.
   floors         Int?         @db.SmallInt
+  /// "Open on Blendn" (D-13): false takes a CLAIMED venue out of the app's
+  /// Places and home map; its events still show. Set by the owner's
+  /// organisation or an admin, audited. Ignored on an unclaimed venue, which is
+  /// always listed (`openOnBlendnWhere` in lib/venue-visibility.ts).
+  open_on_blendn Boolean      @default(true)
   created_at   DateTime     @default(now()) @db.Timestamptz(6)
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at   DateTime?    @db.Timestamptz(6)
