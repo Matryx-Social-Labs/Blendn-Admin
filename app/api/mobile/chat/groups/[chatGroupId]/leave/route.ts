@@ -77,7 +77,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (count === 1) {
       // Null when blocks cannot be read: then only the eviction runs (see the emitter).
-      const blocked = await blockCounterparties(authUser.userId).catch(() => null)
+      const blocked = await blockCounterparties(authUser.userId).catch((err: unknown) => {
+        logger.error("Leave room: blocks could not be read, so nobody is told", {
+          chatGroupId: room.group.id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return null
+      })
       emitChatMemberLeft(room.group.id, authUser.userId, blocked, roomScope(room.group))
       logger.info("Left room", { chatGroupId: room.group.id })
     }
