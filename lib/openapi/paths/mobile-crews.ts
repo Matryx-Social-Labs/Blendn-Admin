@@ -31,6 +31,7 @@ const Tag = z.object({ slug: z.string(), label: z.string() }).openapi("CrewTag")
 const CrewMemberSchema = z
   .object({
     userId: z.string().describe("Yours is your own id; anyone else's is their handle in the crew's room"),
+    isFriend: z.boolean().describe("One of your friends — an invite picker leaves them out. Never true for you"),
     name: z.string().describe("First name only"),
     photo: z.string().nullable(),
     role: z.enum(["owner", "member"]),
@@ -49,7 +50,7 @@ const CrewSchema = z
     openToSolo: z.boolean().describe("\"Room for one more tonight\""),
     createdAt: z.string(),
     chatGroupId: z.string().uuid().nullable().describe("The crew chat: `/chat/groups/{chatGroupId}/…`"),
-    size: z.number().int(),
+    size: z.number().int().describe("Its active members you are shown: one kept apart from you is neither listed nor counted"),
     you: z.object({ role: z.enum(["owner", "member"]), keepMeAnonymous: z.boolean() }).nullable(),
     members: z.array(CrewMemberSchema),
   })
@@ -62,7 +63,7 @@ const CrewInviteSchema = z
     bio: z.string().nullable(),
     emblemSeed: z.string(),
     tags: z.array(Tag),
-    size: z.number().int(),
+    size: z.number().int().describe("Its active members"),
     invitedBy: z.string().describe("The friend who invited you, by first name"),
     invitedAt: z.string(),
   })
@@ -353,13 +354,14 @@ registry.registerPath({
     "One tap, in an open Blend I am in: each member of my crew who is checked in now and in this Blend's room, except anybody who has " +
     "switched on \"keep me anonymous\" (read again as it is written) — consent was taken when they joined. The matched person in a crew ↔ " +
     "person Blend reveals only themselves. Shown to this Blend's people, by first name and one photo, and to nobody else: not the event's " +
-    "room or its deck, not a DM, not another Blend. Never un-revealed by anything later (D-10). 404 for a Blend that is not open or not mine.",
+    "room or its deck, not a DM, not another Blend. Never un-revealed by anything later (D-10). 404 for a Blend that is not open or not mine. " +
+    "No count comes back: who of your crew revealed and who kept private is never told to your own crew.",
   security: bearerAuth,
   request: { params: z.object({ blendId: z.string().uuid() }) },
   responses: {
     200: {
       description: "Revealed",
-      ...json(wrap(z.object({ revealed: z.number().int(), keptPrivate: z.number().int() }))),
+      ...json(wrap(z.object({ revealed: z.literal(true) }))),
     },
     ...standardErrors,
   },
@@ -382,7 +384,9 @@ registry.registerPath({
   description:
     "Each Blend I am let into now: its room (`chatGroupId`, a room of kind `blend`), when it closes (the occurrence's end + 12 h, or earlier " +
     "when a side's crew dissolves or is hidden), and its two sides — the people who were here when it matched, by tonight's pseudonym, " +
-    "named only when revealed in this Blend (or recognised in the event's room), with \"N revealed · M keep it private\" per crew. Never " +
+    "named only when revealed in this Blend (or recognised in the event's room), with \"N revealed · M keep it private\" for THEIR crew. " +
+    "My own side is a count and me (`mine: true`, `people` = me alone, `revealed`/`keptPrivate` null): which crewmate revealed and " +
+    "which kept private is never told to the crew. Never " +
     "somebody kept apart from me (a block or a closed conversation), nor anybody who turned \"show online\" off. A block across the " +
     "sides takes that pair out of the Blend; it goes on for everyone else. Anyone may leave it on their own " +
     "(`POST /chat/groups/{chatGroupId}/leave`).",
@@ -405,9 +409,11 @@ registry.registerPath({
                     crewId: z.string().uuid().nullable(),
                     name: z.string().nullable(),
                     emblemSeed: z.string().nullable(),
-                    revealed: z.number().int(),
-                    keptPrivate: z.number().int(),
-                    people: z.array(BlendPersonSchema),
+                    mine: z.boolean().describe("My own side"),
+                    count: z.number().int().describe("How many on this side are shown to me (me included, on mine)"),
+                    revealed: z.number().int().nullable().describe("Their side only; null on mine"),
+                    keptPrivate: z.number().int().nullable().describe("Their side only; null on mine"),
+                    people: z.array(BlendPersonSchema).describe("Their side: each person. Mine: me alone"),
                   })
                 ),
               })
