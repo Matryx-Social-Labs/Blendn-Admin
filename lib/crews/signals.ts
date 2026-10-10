@@ -8,6 +8,7 @@ import {
   NO_TRAITS,
   personKeys,
   sizeBalance,
+  viewerTierB,
   type Badge,
   type DisplayTraits,
   type MemberTraits,
@@ -53,6 +54,7 @@ interface CrewIn {
 /** Interests (expanded to their parents) and display traits for these people. */
 async function membersTraits(userIds: readonly string[]): Promise<{
   of: (id: string) => MemberTraits
+  changedAt: (id: string) => Date | null
   parentOf: Map<string, string>
   categoryName: Map<string, string>
   iplTeams: Map<string, string>
@@ -64,7 +66,7 @@ async function membersTraits(userIds: readonly string[]): Promise<{
     ids.length
       ? db.profiles.findMany({
           where: { id: { in: ids } },
-          select: { id: true, languages: true, home_state: true },
+          select: { id: true, languages: true, home_state: true, tier_b_changed_at: true },
         })
       : [],
     ids.length
@@ -89,38 +91,64 @@ async function membersTraits(userIds: readonly string[]): Promise<{
 
   const of = (id: string): MemberTraits => {
     const p = profileOf.get(id)
-    // Signs are not crew signals: no line here reads them.
+    // Signs and work fields are not crew signals: no line here reads them.
     const traits: DisplayTraits = p
-      ? { answers: answersOf.get(id) ?? {}, languages: p.languages, homeState: p.home_state, sign: null }
+      ? { answers: answersOf.get(id) ?? {}, languages: p.languages, homeState: p.home_state, sign: null, workField: null }
       : { ...NO_TRAITS, answers: answersOf.get(id) ?? {} }
     return { interestIds: [...(interestsOf.get(id) ?? [])], traits }
   }
-  return { of, parentOf, categoryName, iplTeams }
+  const changedAt = (id: string) => profileOf.get(id)?.tier_b_changed_at ?? null
+  return { of, changedAt, parentOf, categoryName, iplTeams }
 }
 
+/** How far back "nights out together" counts (step 10 review M6). */
+export const NIGHTS_TOGETHER_DAYS = 180
+/** How long one crew's count is reused before it is read again. */
+const NIGHTS_CACHE_MS = 60_000
+const nightsCache = new Map<string, { nights: number; at: number }>()
+
 /**
- * Nights each crew has been out together: occurrences where two or more of
- * its members checked in, counting only check-ins after each member joined —
- * a crew's history starts when it does.
+ * Nights each crew has been out together in the last `NIGHTS_TOGETHER_DAYS`:
+ * occurrences where two or more of its members checked in, counting only
+ * check-ins after each member joined — a crew's history starts when it does.
+ *
+ * ponytail: a per-process cache, a minute long — every card on a busy night
+ * would otherwise re-count every crew's history. Each replica keeps its own;
+ * a count a minute stale says nothing new. Move it to Redis if replicas must
+ * agree.
  */
-export async function nightsTogether(crewIds: readonly string[]): Promise<Map<string, number>> {
-  if (crewIds.length === 0) return new Map()
+export async function nightsTogether(crewIds: readonly string[], now: number = Date.now()): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const missing: string[] = []
+  for (const id of crewIds) {
+    const hit = nightsCache.get(id)
+    if (hit && now - hit.at < NIGHTS_CACHE_MS) out.set(id, hit.nights)
+    else missing.push(id)
+  }
+  if (missing.length === 0) return out
+  const since = new Date(now - NIGHTS_TOGETHER_DAYS * 24 * 60 * 60 * 1000)
   const rows = await db.$queryRaw<{ crew_id: string; nights: bigint }[]>`
     SELECT t.crew_id, COUNT(*) AS nights
       FROM (
         SELECT m.crew_id, ci.occurrence_id
           FROM crew_members m
           JOIN event_check_ins ci ON ci.user_id = m.user_id
-         WHERE m.crew_id = ANY(${[...crewIds]}::uuid[])
+         WHERE m.crew_id = ANY(${missing}::uuid[])
            AND ci.kind = 'attendee'
-           AND ci.check_in_time IS NOT NULL
+           AND ci.check_in_time >= ${since}
            AND ci.check_in_time >= m.joined_at
       GROUP BY m.crew_id, ci.occurrence_id
         HAVING COUNT(DISTINCT m.user_id) >= 2
       ) t
   GROUP BY t.crew_id
   `
-  return new Map(rows.map((r) => [r.crew_id, Number(r.nights)]))
+  const counted = new Map(rows.map((r) => [r.crew_id, Number(r.nights)]))
+  for (const id of missing) {
+    const nights = counted.get(id) ?? 0
+    nightsCache.set(id, { nights, at: now })
+    out.set(id, nights)
+  }
+  return out
 }
 
 export function crewBadges(nights: number): Badge[] {
@@ -143,20 +171,33 @@ export interface RankedCrew {
  */
 export async function rankCrewsFor(input: {
   viewerId: string
+  /** When the viewer checked in here: their own Tier B counts only if set before it (H1). */
+  viewerCheckedInAt: Date | null
   /** The viewer's crew here, or null when they are here alone. */
-  mine: (CrewIn & { present: readonly string[] }) | null
+  mine: (CrewIn & { present: readonly string[]; members: readonly string[] }) | null
   /** The viewer's intents here, for a solo viewer. */
   viewerIntents: readonly string[]
-  crews: readonly (CrewIn & { present: readonly string[] })[]
+  /**
+   * `members`: every active member — what the crew holds (step 10 review M7).
+   * Held over who is here, a crew's lines changed as each member walked in,
+   * and that change named the one who did; and with two here, "held" meant
+   * both. `present`: who is here — the size balance and the Tier B gate.
+   */
+  crews: readonly (CrewIn & { present: readonly string[]; members: readonly string[] })[]
   /** People checked in at the occurrence: the room the Tier B floor reads. */
   roomSize: number
 }): Promise<Map<string, RankedCrew>> {
   const { mine, crews } = input
-  const people = [input.viewerId, ...(mine?.present ?? []), ...crews.flatMap((c) => c.present)]
+  const people = [input.viewerId, ...(mine?.members ?? []), ...crews.flatMap((c) => c.members)]
   const t = await membersTraits(people)
+  // The viewer's own Tier B only if it predates their check-in, on either side (H1).
+  const traitsOf = (id: string): MemberTraits => {
+    const m = t.of(id)
+    return id === input.viewerId ? { ...m, traits: viewerTierB(m.traits, t.changedAt(id), input.viewerCheckedInAt) } : m
+  }
 
-  const heldOf = new Map(crews.map((c) => [c.id, crewHeld(c.present.map(t.of))]))
-  const mySide = mine ? crewHeld(mine.present.map(t.of)) : personKeys(t.of(input.viewerId))
+  const heldOf = new Map(crews.map((c) => [c.id, crewHeld(c.members.map(traitsOf))]))
+  const mySide = mine ? crewHeld(mine.members.map(traitsOf)) : personKeys(traitsOf(input.viewerId))
 
   // How many sides here hold each key: rarity across the crews.
   const holders = new Map<string, number>()

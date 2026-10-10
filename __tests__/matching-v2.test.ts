@@ -18,11 +18,11 @@ import {
   crewOverlaps,
   NO_TRAITS,
   personKeys,
-  personOverlaps,
+  personCard,
   roomTeam,
-  signChip,
   sizeBalance,
   traitHolders,
+  viewerTierB,
   type DisplayTraits,
 } from "@/lib/overlaps"
 import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
@@ -94,25 +94,31 @@ describe("Both CSK — in RCB country outranks Both RCB (MV-U01)", () => {
       ["csk", "CSK"],
       ["rcb", "RCB"],
     ])
-    const lead = roomTeam(iplTeams, holders)
+    const lead = roomTeam(iplTeams, holders, true)
     expect(lead).toBe("RCB")
     const line = (them: string[]) =>
-      personOverlaps(
+      personCard(
         { traits: NO_TRAITS, interestIds: ["csk", "rcb", "ipl"] },
         { traits: NO_TRAITS, interestIds: them },
         { holders: new Map(), interestHolders: holders, population: room.length, iplTeams, roomTeam: lead },
         { max: 2, tierB: 0 }
-      )
+      ).overlaps
     expect(line(["csk", "ipl"])).toEqual([{ kind: "ipl", text: "Both CSK — in RCB country 💛" }])
     expect(line(["rcb", "ipl"])).toEqual([{ kind: "ipl", text: "Both RCB fans ❤️" }])
   })
 
-  it("names no room team on a tie", () => {
+  it("names a room team only in a big room, with three fans and more than twice the runner-up (M2)", () => {
     const iplTeams = new Map([
       ["csk", "CSK"],
       ["rcb", "RCB"],
     ])
-    expect(roomTeam(iplTeams, new Map([["csk", 3], ["rcb", 3]]))).toBeNull()
+    const team = (rcb: number, csk: number, big = true) => roomTeam(iplTeams, new Map([["rcb", rcb], ["csk", csk]]), big)
+    expect(team(3, 3)).toBeNull() // a tie
+    expect(team(3, 1)).toBe("RCB")
+    expect(team(4, 2)).toBeNull() // twice is not more than twice
+    expect(team(5, 2)).toBe("RCB")
+    expect(team(2, 0)).toBeNull() // two fans are not a country
+    expect(team(9, 0, false)).toBeNull() // below the floor, no room team at all
   })
 })
 
@@ -133,13 +139,14 @@ describe("the Tier B budget in orderLabels (MV-U02)", () => {
     homeState: "kerala",
     sign: { slug: "leo", system: "western" },
   })
-  const lines = (budget: { max: number; tierB: number }) =>
-    personOverlaps(
-      { traits: me, interestIds: [] },
-      { traits: them, interestIds: [] },
-      { holders: traitHolders([them]), interestHolders: new Map(), population: 9, iplTeams: new Map(), roomTeam: null },
+  const cardFor = (budget: { max: number; tierB: number }, a: DisplayTraits = me, b: DisplayTraits = them) =>
+    personCard(
+      { traits: a, interestIds: [] },
+      { traits: b, interestIds: [] },
+      { holders: traitHolders([b]), interestHolders: new Map(), population: 9, iplTeams: new Map(), roomTeam: null },
       budget
     )
+  const lines = (budget: { max: number; tierB: number }) => cardFor(budget).overlaps
   const tierB = (ls: { kind: string }[]) => ls.filter((l) => ["language", "home_state", "sign"].includes(l.kind))
 
   it("a room of seven: no Tier B line, and no sign chip", () => {
@@ -148,7 +155,7 @@ describe("the Tier B budget in orderLabels (MV-U02)", () => {
     expect(tierB(ls)).toEqual([])
     // Tier A still prints.
     expect(ls).toEqual([{ kind: "this_or_that", text: "You both picked filter coffee over chai" }])
-    expect(signChip(them, ls, budget)).toBeNull()
+    expect(cardFor(budget).sign).toBeNull()
   })
 
   it("a room of eight or more: exactly one Tier B line", () => {
@@ -172,6 +179,16 @@ describe("the Tier B budget in orderLabels (MV-U02)", () => {
     expect(budgetAt(3, true)).toEqual({ max: 4, tierB: Number.POSITIVE_INFINITY })
   })
 
+  it("the floor counts who is inside now plus the viewer, not the whole deck (M1)", () => {
+    const deck = Array.from({ length: 20 }, (_, i) => candidate(`p${i}`, [], i))
+    const at = (peopleInside: number) =>
+      rankMatches(viewer([]), deck, { interestHolders: new Map(), population: deck.length, peopleInside })[0]
+    // Twenty in the deck, two still inside with the viewer: no Tier B, no work field.
+    expect(at(3).labelBudget.tierB).toBe(0)
+    expect(at(3).roomIsBigEnough).toBe(false)
+    expect(at(8).labelBudget.tierB).toBe(1)
+  })
+
   it("orderLabels skips Tier B past the budget and keeps filling with Tier A", () => {
     const got = orderLabels(
       [
@@ -185,11 +202,43 @@ describe("the Tier B budget in orderLabels (MV-U02)", () => {
   })
 
   it("the sign chip shows only when Tier B is left, and not beside a sign line", () => {
+    const one = { max: 2, tierB: 1 }
     const leo = traits({ sign: { slug: "leo", system: "rashi" } })
-    expect(signChip(leo, [], { tierB: 1 })).toBe("Simha ♌")
-    expect(signChip(leo, [{ kind: "home_state", text: "Both from Kerala" }], { tierB: 1 })).toBeNull()
-    expect(signChip(leo, [{ kind: "sign", text: "x" }], { tierB: 4 })).toBeNull()
-    expect(signChip(traits(), [], { tierB: 1 })).toBeNull()
+    expect(cardFor(one, traits(), leo).sign).toBe("Simha ♌")
+    expect(cardFor(one, traits({ homeState: "kerala" }), { ...leo, homeState: "kerala" }).sign).toBeNull()
+    expect(cardFor({ max: 4, tierB: 4 }, traits({ sign: { slug: "leo", system: "western" } }), leo).sign).toBeNull()
+    expect(cardFor(one, traits(), traits()).sign).toBeNull()
+  })
+
+  it("the work field is Tier B: one slot, whichever fact takes it (M3)", () => {
+    const one = { max: 2, tierB: 1 }
+    const designer = (t: Partial<DisplayTraits> = {}) => traits({ workField: "design", ...t })
+    // A shared language takes the slot: their field and their sign stay off the card.
+    const lang = cardFor(one, designer({ languages: ["tulu"] }), designer({ languages: ["tulu"], workField: "finance", sign: { slug: "leo", system: "western" } }))
+    expect(lang.overlaps.map((o) => o.kind)).toEqual(["language"])
+    expect(lang.showWorkField).toBe(false)
+    expect(lang.sign).toBeNull()
+    // Nothing shared: their field in the header takes the slot, so no sign chip beside it.
+    const header = cardFor(one, traits(), designer({ sign: { slug: "leo", system: "western" } }))
+    expect(header.showWorkField).toBe(true)
+    expect(header.sign).toBeNull()
+    // A shared field is a line of its own kind, carried by `sharedWorkField`, never printed twice.
+    const shared = cardFor(one, designer(), designer())
+    expect(shared.showWorkField).toBe(true)
+    expect(shared.overlaps).toEqual([])
+    // No slot at all below the floor.
+    expect(cardFor({ max: 2, tierB: 0 }, designer(), designer()).showWorkField).toBe(false)
+  })
+
+  it("a viewer's own Tier B counts only if set before their check-in (H1)", () => {
+    const mine = traits({ languages: ["tulu"], homeState: "kerala", sign: { slug: "leo", system: "western" }, workField: "design", answers: { coffee_or_chai: "a" } })
+    const checkedIn = new Date("2026-10-10T20:00:00Z")
+    expect(viewerTierB(mine, null, checkedIn)).toBe(mine)
+    expect(viewerTierB(mine, new Date("2026-10-10T19:00:00Z"), checkedIn)).toBe(mine)
+    const after = viewerTierB(mine, new Date("2026-10-10T20:05:00Z"), checkedIn)
+    expect([after.languages, after.homeState, after.sign, after.workField]).toEqual([[], null, null, null])
+    // Tier A untouched: their this-or-that still prints.
+    expect(after.answers).toEqual({ coffee_or_chai: "a" })
   })
 })
 
@@ -199,12 +248,12 @@ describe("the Tier B budget in orderLabels (MV-U02)", () => {
 
 describe("what a card says (MV-U03)", () => {
   const say = (a: Partial<DisplayTraits>, b: Partial<DisplayTraits>) =>
-    personOverlaps(
+    personCard(
       { traits: traits(a), interestIds: [] },
       { traits: traits(b), interestIds: [] },
       { holders: new Map(), interestHolders: new Map(), population: 10, iplTeams: new Map(), roomTeam: null },
       { max: 4, tierB: 4 }
-    ).map((l) => l.text)
+    ).overlaps.map((l) => l.text)
 
   it("signs: same sign, two calendars, an element — never a mismatch", () => {
     expect(say({ sign: { slug: "leo", system: "western" } }, { sign: { slug: "leo", system: "western" } })).toEqual([
@@ -389,5 +438,21 @@ describe("the profile accepts only the curated values (MV-U06)", () => {
     expect(signPairRefusal({ sun_sign: null, sign_system: null })).toBeNull()
     expect(signPairRefusal({ sun_sign: "leo", sign_system: "western" })).toBeNull()
     expect(signPairRefusal({})).toBeNull()
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* L2 · the board seating reads inside its own transaction                    */
+/* -------------------------------------------------------------------------- */
+
+describe("seatBoardRoom never leaves its transaction (step 10 review L2)", () => {
+  // A second pool connection taken from inside a transaction can wait on the
+  // pool the transaction holds; every read in the seating goes through `tx`.
+  const src = readFileSync(join(__dirname, "..", "lib", "board-access.ts"), "utf8")
+  const body = src.slice(src.indexOf("export async function seatBoardRoom"))
+  it("passes tx to the pseudonyms and the kept-apart read", () => {
+    expect(body).toMatch(/boardPseudonyms\(post\.event_id, seats, tx\)/)
+    expect(body).toMatch(/blocksBetween\(people, people, tx\)/)
+    expect(body).not.toMatch(/\bdb\./)
   })
 })

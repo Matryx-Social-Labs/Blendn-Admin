@@ -12,7 +12,7 @@ import {
 } from "@/lib/matching"
 import type { Gender } from "@/lib/dating"
 import { ageFrom } from "@/lib/age"
-import { workFieldLabel } from "@/lib/work-fields"
+import { MIN_ROOM_FOR_WORK_FIELD, workFieldLabel } from "@/lib/work-fields"
 import { roomHandle } from "@/lib/room-handle"
 import { visibleInRoom } from "@/lib/identity"
 import { IPL_PARENT_SLUG } from "@/lib/about-you"
@@ -20,12 +20,12 @@ import {
   badgesFor,
   NIGHTS_OUT_DAYS,
   NO_TRAITS,
-  personOverlaps,
+  personCard,
   REGULAR_HERE_DAYS,
   roomTeam,
   SHOWS_UP_DAYS,
-  signChip,
   traitHolders,
+  viewerTierB,
   type Badge,
   type DisplayTraits,
   type Overlap,
@@ -105,6 +105,7 @@ export interface TraitProfile {
   home_state: string | null
   sun_sign: string | null
   sign_system: string | null
+  work_field: string | null
 }
 
 export async function displayTraitsOf(
@@ -130,6 +131,7 @@ export async function displayTraitsOf(
               languages: p.languages ?? [],
               homeState: p.home_state ?? null,
               sign: p.sun_sign && p.sign_system ? { slug: p.sun_sign, system: p.sign_system } : null,
+              workField: p.work_field ?? null,
             }
           : { ...NO_TRAITS, answers: answersOf.get(id) ?? {} },
       ]
@@ -138,7 +140,7 @@ export async function displayTraitsOf(
 }
 
 /** Display traits, as `displayTraitsOf` reads them from a profile. */
-const traitColumns = { languages: true, home_state: true, sun_sign: true, sign_system: true } as const
+const traitColumns = { languages: true, home_state: true, sun_sign: true, sign_system: true, work_field: true } as const
 
 /**
  * Child → parent, for the whole interest taxonomy. Two levels, ~80 rows.
@@ -197,7 +199,9 @@ export async function matchesForEvent(
     // query returns an arbitrary one of their check-in rows.
     // At a venue day, only while live (`inRoomWhere`): the grid is reciprocal.
     where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null }, ...inRoomWhere(viewerId) },
-    select: { id: true },
+    // Their latest: whether their own Tier B predates it (`viewerTierB`, step 10 review H1).
+    select: { id: true, check_in_time: true },
+    orderBy: { check_in_time: "desc" },
   })
   if (!viewerCheckIn) return null
 
@@ -205,7 +209,7 @@ export async function matchesForEvent(
     await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
-      select: { intent_default: true, work_field: true, gender: true, interested_in: true, ...traitColumns },
+      select: { intent_default: true, gender: true, interested_in: true, tier_b_changed_at: true, ...traitColumns },
     }),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
     db.event_check_ins.findMany({
@@ -231,7 +235,7 @@ export async function matchesForEvent(
               select: {
                 intent_default: true,
                 photos: true,
-                work_field: true,
+                // `work_field` comes with `traitColumns` below.
                 // "Show online status" off: in the room, counted, not listed
                 // (SCRUM-141). Read here and filtered below rather than in the
                 // `where`, so a person with no profile row is not dropped by a
@@ -255,6 +259,7 @@ export async function matchesForEvent(
                 // Display only (lib/overlaps.ts): printed when shared, never scored.
                 ...traitColumns,
                 shows_up_badge: true,
+                show_badges: true,
               },
             },
             user_interests: { select: { category_id: true } },
@@ -491,7 +496,7 @@ export async function matchesForEvent(
    * traits for the room, the IPL leaves, and the badges check-ins earned.
    * Read once for the whole room, like everything above.
    */
-  const [traits, iplTeams, badgeFacts] = await Promise.all([
+  const [traits, iplTeams] = await Promise.all([
     displayTraitsOf(
       new Map<string, TraitProfile | null | undefined>([
         [viewerId, viewerProfile],
@@ -499,15 +504,18 @@ export async function matchesForEvent(
       ])
     ),
     iplTeamIds(),
-    badgeFactsFor(
-      eventId,
-      candidateIds,
-      eligible.filter((c) => c.user.profile?.shows_up_badge).map((c) => c.user_id)
-    ),
   ])
   const traitsOf = (id: string) => traits.get(id) ?? NO_TRAITS
+  // The viewer's own Tier B only if it predates this check-in (H1).
+  const viewerTraits = viewerTierB(traitsOf(viewerId), viewerProfile?.tier_b_changed_at, viewerCheckIn.check_in_time)
   const holders = traitHolders(eligible.map((c) => traitsOf(c.user_id)))
-  const leadTeam = roomTeam(iplTeams, interestHolders)
+  /*
+   * The floor counts who is inside NOW, plus the viewer (step 10 review M1):
+   * the deck keeps people who went home, and two people left in a room of
+   * twenty are two, whatever the deck says. Rarity keeps the whole deck.
+   */
+  const peopleInside = eligible.filter((c) => c.status === "checked_in").length + 1
+  const leadTeam = roomTeam(iplTeams, interestHolders, peopleInside >= MIN_ROOM_FOR_WORK_FIELD)
   const viewerInterestIds = expand(viewerInterests.map((i) => i.category_id))
 
   const candidates: MatchCandidate[] = eligible.map((c) => ({
@@ -560,7 +568,7 @@ export async function matchesForEvent(
       },
     },
     candidates,
-    { interestHolders, parentOf, population: eligible.length, limit }
+    { interestHolders, parentOf, population: eligible.length, peopleInside, limit }
   )
 
   // Category names, resolved once for the whole page rather than per card.
@@ -593,10 +601,22 @@ export async function matchesForEvent(
   ).catch(() => {})
 
   const interestsOf = new Map(candidates.map((c) => [c.userId, c.interestIds]))
+  const profileOf = new Map(eligible.map((c) => [c.user_id, c.user.profile]))
+
+  /*
+   * Badges for the page that is returned, never the whole room (step 10
+   * review M6): two set-based reads over at most `limit` people. Only for those
+   * who did not turn badges off, and "Shows up" only for those who turned it on.
+   */
+  const badgeFacts = await badgeFactsFor(
+    eventId,
+    ranked.filter((m) => m.roomIsBigEnough && profileOf.get(m.userId)?.show_badges !== false).map((m) => m.userId),
+    ranked.filter((m) => profileOf.get(m.userId)?.shows_up_badge).map((m) => m.userId)
+  )
 
   return ranked.map((m) => {
-    const overlaps = personOverlaps(
-      { traits: traitsOf(viewerId), interestIds: viewerInterestIds },
+    const card = personCard(
+      { traits: viewerTraits, interestIds: viewerInterestIds },
       { traits: traitsOf(m.userId), interestIds: interestsOf.get(m.userId) ?? [] },
       { holders, interestHolders, population: eligible.length, iplTeams, roomTeam: leadTeam },
       m.labelBudget
@@ -613,20 +633,21 @@ export async function matchesForEvent(
       photo: m.photo,
       sharedInterests: m.sharedInterestIds.map((id) => nameOf.get(id) ?? id),
       sharedIntents: m.sharedIntents,
-      // `rankMatches` has already applied the small-room floor; this only turns
-      // the surviving slug into something a person can read.
-      workField: workFieldLabel(m.workField),
-      sharedWorkField: m.sharedWorkField,
+      // `rankMatches` has applied the small-room floor; the card's Tier B slot
+      // decides whether the field shows at all (`personCard`, step 10 review M3).
+      workField: card.showWorkField ? workFieldLabel(m.workField) : null,
+      sharedWorkField: card.showWorkField && m.sharedWorkField,
       age: m.age,
       insideNow: m.insideNow,
       // Already floored by `rankMatches` — this only carries it to the card.
       sharedEvents: m.sharedEvents,
       sharedPlans: m.sharedPlans,
       youLiked: liked.has(m.userId),
-      overlaps,
-      sign: signChip(traitsOf(m.userId), overlaps, m.labelBudget),
-      // Attendance facts, so the attendance floor (`roomIsBigEnough`).
-      badges: m.roomIsBigEnough ? badgesFor(badgeFacts(m.userId)) : [],
+      overlaps: card.overlaps,
+      sign: card.sign,
+      // Attendance facts, so the attendance floor (`roomIsBigEnough`), and only if they show badges.
+      badges:
+        m.roomIsBigEnough && profileOf.get(m.userId)?.show_badges !== false ? badgesFor(badgeFacts(m.userId)) : [],
     }
   })
 }

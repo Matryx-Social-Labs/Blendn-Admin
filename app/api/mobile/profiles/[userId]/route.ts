@@ -21,7 +21,7 @@ import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { overUserLimit, rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   validationErrorResponse,
@@ -30,6 +30,7 @@ import {
   errorResponse,
   notFoundResponse,
   serverErrorResponse,
+  ErrorCode,
 } from "@/lib/api-response"
 import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
 import { homeStateLabel, languageLabels, signLabel, westernSignFor } from "@/lib/about-you"
@@ -292,7 +293,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
       push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
-      languages, home_state, sun_sign, sign_system, shows_up_badge,
+      languages, home_state, sun_sign, sign_system, shows_up_badge, show_badges,
     } = parsed.data
     const signRefusal = signPairRefusal(parsed.data)
     if (signRefusal) return errorResponse(signRefusal, 400, "VALIDATION_ERROR")
@@ -365,6 +366,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * own -- that is the whole case `pruneExpertise` exists for.
      */
     const touchesExpertise = work_field !== undefined || expertise !== undefined
+    // Tier B facts: a change is stamped and rate-limited (step 10 review H1).
+    const touchesTierB =
+      languages !== undefined || home_state !== undefined || sun_sign !== undefined || work_field !== undefined
     // Finishing onboarding is gated on age (SCRUM-330), and needs to know whether it already happened.
     const finishesOnboarding = onboarded === true
     const existing =
@@ -372,6 +376,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       touchesDating ||
       touchesOrientationGate ||
       touchesExpertise ||
+      touchesTierB ||
       finishesOnboarding ||
       photos !== undefined ||
       blur_photo !== undefined
@@ -390,9 +395,38 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               blur_photo: true,
               work_field: true,
               expertise: true,
+              languages: true,
+              home_state: true,
+              sun_sign: true,
+              sign_system: true,
             },
           })
         : null
+
+    /*
+     * Tier B, changed (step 10 review H1). A viewer's own languages, state,
+     * sign and work field print a line on every card that shares them, so
+     * changing them again and again would read which cards hold which —
+     * the one-line budget defeated from the viewer's side. So a real change is
+     * stamped (`tier_b_changed_at`: the room ignores a viewer's Tier B set after
+     * their check-in, lib/overlaps.ts `viewerTierB`) and limited to three a
+     * day once onboarded. Onboarding's first answers are not counted: nobody
+     * is in a room before it.
+     */
+    const tierBChanged =
+      touchesTierB &&
+      ((languages !== undefined && JSON.stringify(languages) !== JSON.stringify(existing?.languages ?? [])) ||
+        (home_state !== undefined && home_state !== (existing?.home_state ?? null)) ||
+        (sun_sign !== undefined &&
+          (sun_sign !== (existing?.sun_sign ?? null) || sign_system !== (existing?.sign_system ?? null))) ||
+        (work_field !== undefined && work_field !== (existing?.work_field ?? null)))
+    if (tierBChanged && existing?.onboarded && (await overUserLimit("tierB", "tier-b-change", userId))) {
+      return errorResponse(
+        "You can change your languages, home state, sign or field of work three times a day. Try again tomorrow.",
+        429,
+        ErrorCode.RATE_LIMITED
+      )
+    }
 
     /*
      * Specialisms, against the field they will sit under.
@@ -625,6 +659,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       ...(home_state !== undefined && { home_state }),
       ...(sun_sign !== undefined && { sun_sign, sign_system }),
       ...(shows_up_badge !== undefined && { shows_up_badge }),
+      ...(show_badges !== undefined && { show_badges }),
+      ...(tierBChanged && { tier_b_changed_at: new Date() }),
     }
 
     // Update or create profile

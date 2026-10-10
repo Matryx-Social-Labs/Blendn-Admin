@@ -206,3 +206,21 @@ describe("preferences are read per event, not per check-in", () => {
     expect(mockDb.event_check_ins.findMany).not.toHaveBeenCalled()
   })
 })
+
+describe("badges are read for the page returned, never the whole room (step 10 review M6)", () => {
+  it("asks for the nights of the returned cards only", async () => {
+    // A room of ten inside now: big enough for badges.
+    mockDb.event_check_ins.findMany.mockResolvedValue(
+      Array.from({ length: 10 }, (_, i) => checkIn(`p${i}`, new Date(DAY1.getTime() + i * 60_000)))
+    )
+    mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "viewer-checkin", check_in_time: DAY1 })
+    await matchesForEvent(EVENT, VIEWER, 2)
+
+    const nights = mockDb.$queryRaw.mock.calls.find(([strings]) =>
+      (strings as readonly string[]).join("?").includes("nights_out")
+    )
+    expect(nights).toBeDefined()
+    const ids = nights!.slice(1).find((v) => Array.isArray(v)) as string[]
+    expect(ids).toHaveLength(2)
+  })
+})

@@ -446,12 +446,14 @@
         "read_receipts",
         "reveal_by_default",
         "share_location",
+        "show_badges",
         "show_online",
         "show_orientation",
         "shows_up_badge",
         "sign_system",
         "suggested_sun_sign",
         "sun_sign",
+        "tier_b_changed_at",
         "updated_at",
         "work_field"
       ]

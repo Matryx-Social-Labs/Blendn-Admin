@@ -230,14 +230,32 @@ export async function crewsAtEvent(
    * page boundary never moves between two reads of the same room.
    */
   const myCrew = [...mine].sort((a, b) => presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1))[0]
+  const side = (c: { id: string; intent: string[] }) => ({
+    id: c.id,
+    intent: c.intent,
+    present: present.get(c.id) ?? [],
+    members: members.get(c.id) ?? [],
+  })
+  const [roomSize, viewerHere] =
+    visible.length > 0
+      ? await Promise.all([
+          db.event_check_ins.count({ where: { ...hereNowAt(occurrenceId), kind: "attendee" } }),
+          db.event_check_ins.findFirst({
+            where: { ...hereNowAt(occurrenceId), user_id: viewerId },
+            select: { check_in_time: true },
+            orderBy: { check_in_time: "desc" },
+          }),
+        ])
+      : [0, null]
   const ranked =
     visible.length > 0
       ? await rankCrewsFor({
           viewerId,
-          mine: myCrew ? { id: myCrew.id, intent: myCrew.intent, present: present.get(myCrew.id) ?? [] } : null,
+          viewerCheckedInAt: viewerHere?.check_in_time ?? null,
+          mine: myCrew ? side(myCrew) : null,
           viewerIntents,
-          crews: visible.map((c) => ({ id: c.id, intent: c.intent, present: present.get(c.id) ?? [] })),
-          roomSize: await db.event_check_ins.count({ where: { ...hereNowAt(occurrenceId), kind: "attendee" } }),
+          crews: visible.map(side),
+          roomSize,
         })
       : new Map<string, RankedCrew>()
   const scoreOf = (id: string) => ranked.get(id)?.score ?? 0

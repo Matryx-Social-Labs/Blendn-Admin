@@ -272,6 +272,8 @@ export const updateProfileSchema = z.object({
   sign_system: z.enum(SIGN_SYSTEMS as [string, ...string[]]).optional().nullable(),
   /** "Shows up" on your card. Off unless turned on. */
   shows_up_badge: z.boolean().optional(),
+  /** Every badge from check-ins on your card. On unless turned off. */
+  show_badges: z.boolean().optional(),
 })
 
 /**

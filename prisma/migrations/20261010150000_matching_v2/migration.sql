@@ -1,5 +1,5 @@
 -- Matching v2 (plan v2 §8, step 10): the "about you" fields, this-or-that
--- answers, and the IPL teams and cuisine loves as interest leaves.
+-- answers, and the IPL teams and food-and-drink loves as interest leaves.
 --
 -- Display only, every column here: languages, home state and sign are printed
 -- as named overlaps and never scored (lib/overlaps.ts). Nothing here is, or may
@@ -24,9 +24,20 @@ ALTER TABLE "profiles" ADD COLUMN "home_state" TEXT;
 ALTER TABLE "profiles" ADD COLUMN "sun_sign" TEXT;
 ALTER TABLE "profiles" ADD COLUMN "sign_system" TEXT;
 ALTER TABLE "profiles" ADD COLUMN "shows_up_badge" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "profiles" ADD COLUMN "show_badges" BOOLEAN NOT NULL DEFAULT true;
+-- When the Tier B facts last changed (step 10 review H1): a viewer's own are
+-- used for overlap lines only if set before their check-in.
+ALTER TABLE "profiles" ADD COLUMN "tier_b_changed_at" TIMESTAMPTZ(6);
 
 -- A sign is picked in one calendar or not at all: both or neither, and only
 -- the two calendars the editor offers. Every existing row is (NULL, NULL).
+-- Validated in place: the columns were added above as NULL, so the scan finds
+-- nothing to refuse and holds the lock only for one pass over `profiles`
+-- (staging: a few thousand rows). On a table too big for that, add it NOT
+-- VALID and VALIDATE in a second statement. The slugs themselves (which
+-- language, which state, which sign) are checked by the app against
+-- lib/about-you.ts, not here: the lists change by deploy, a CHECK would need a
+-- migration each time.
 ALTER TABLE "profiles" ADD CONSTRAINT "profiles_sign_shape" CHECK (
   ("sun_sign" IS NULL) = ("sign_system" IS NULL)
   AND ("sign_system" IS NULL OR "sign_system" IN ('western', 'rashi'))
@@ -71,16 +82,20 @@ ON CONFLICT ("slug") DO NOTHING;
 INSERT INTO "categories" ("id", "name", "slug", "parent_id")
 SELECT gen_random_uuid(), v.name, v.slug, p.id
   FROM (VALUES
-  ('Biryani', 'food-drink-biryani'),
-  ('Dosa', 'food-drink-dosa'),
-  ('Chaat', 'food-drink-chaat'),
-  ('Momos', 'food-drink-momos'),
+  ('Cafe hopping', 'food-drink-cafe-hopping'),
   ('Street food', 'food-drink-street-food'),
   ('Desserts', 'food-drink-desserts'),
-  ('Indo-Chinese', 'food-drink-indo-chinese'),
-  ('Pizza', 'food-drink-pizza')
+  ('Bakeries', 'food-drink-bakeries'),
+  ('Italian', 'food-drink-italian'),
+  ('Pan-Asian', 'food-drink-pan-asian')
   ) AS v(name, slug)
   JOIN "categories" p ON p.slug = 'food-drink'
 ON CONFLICT ("slug") DO NOTHING;
+
+-- One person's nights, newest first (step 10 review M6): match-card badges
+-- and a crew's nights together. A plain CREATE INDEX — it holds a SHARE lock
+-- on event_check_ins (writes wait, reads go on) for the build, which on
+-- staging is seconds; lock_timeout above bounds the wait to acquire it.
+CREATE INDEX "event_check_ins_user_id_check_in_time_idx" ON "event_check_ins"("user_id", "check_in_time");
 
 COMMIT;

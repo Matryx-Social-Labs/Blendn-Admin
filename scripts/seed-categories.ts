@@ -99,7 +99,7 @@ export const TAXONOMY: Record<string, string[]> = {
     "Cocktails and mixology",
     "Coffee",
     // Cuisine loves (matching v2, §8.3): tastes as interest leaves, never a
-    // diet. The migration 20261010120000_matching_v2 writes the same rows.
+    // diet. The migration 20261010150000_matching_v2 writes the same rows.
     ...CUISINE_LOVES,
   ],
   /*

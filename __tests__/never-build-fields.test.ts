@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "fs"
 import { join, relative } from "path"
 
 import { CUISINE_LOVES, HOME_STATES, IPL_TEAMS, LANGUAGES, SIGNS } from "@/lib/about-you"
+import { NEVER_BUILD, neverBuildHits, tokens } from "@/lib/never-build"
 import { THIS_OR_THAT } from "@/lib/this-or-that"
 
 /**
@@ -17,35 +18,8 @@ import { THIS_OR_THAT } from "@/lib/this-or-that"
  * the same guard over its own source (`__tests__/neverBuildFields.test.ts`).
  */
 
-/** Whole tokens of an identifier, split on `_`, `-` and camel case. */
-const tokens = (id: string): string[] =>
-  id
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-
-const NEVER = new Set([
-  "kundli",
-  "kundali",
-  "guna",
-  "manglik",
-  "nakshatra",
-  "varna",
-  "caste",
-  "jati",
-  "gotra",
-  "religion",
-  "religious",
-  "surname",
-  "skin",
-  "veg",
-  "vegetarian",
-  "nonveg",
-  "eggetarian",
-  "diet",
-  "dietary",
-])
+/** One list, the runtime's own (`lib/never-build.ts`): the guard cannot drift from what a category refuses. */
+const NEVER = NEVER_BUILD
 /** Identifiers only: "community" is a word in strings ("community guidelines"), never a field. */
 const NEVER_AS_FIELD = new Set([...NEVER, "community"])
 
@@ -56,8 +30,21 @@ const NEVER_AS_FIELD = new Set([...NEVER, "community"])
  */
 const PLACES_NOT_PEOPLE = new Set(["religious_venue", "community_hall", "community_centre"])
 
-const offending = (ids: Iterable<string>, banned: Set<string>) =>
-  [...new Set(ids)].filter((id) => !PLACES_NOT_PEOPLE.has(id) && tokens(id).some((t) => banned.has(t)))
+/**
+ * Words that are about a box or a building in one file, never a person:
+ * the layout of an email and an error page, and "college" as a kind of venue.
+ * Per file, so the same word as a profile field anywhere else still fails.
+ */
+const NOT_ABOUT_PEOPLE: Record<string, string[]> = {
+  "lib/email-html.ts": ["height"],
+  "app/global-error.tsx": ["minHeight", "lineHeight"],
+  "lib/venue-types.ts": ["college"],
+  // The list itself.
+  "lib/never-build.ts": [...NEVER_BUILD],
+}
+
+const offending = (ids: Iterable<string>, banned: ReadonlySet<string>) =>
+  [...new Set(ids)].filter((id) => !PLACES_NOT_PEOPLE.has(id) && neverBuildHits(id, banned).length > 0)
 
 const ROOT = join(__dirname, "..")
 
@@ -116,8 +103,9 @@ describe("never build: caste, kundli, veg and their kin (MV-G01)", () => {
     const found: string[] = []
     for (const file of files) {
       const { keys, literals } = sourceIdentifiers(readFileSync(file, "utf8"))
+      const allowed = new Set(NOT_ABOUT_PEOPLE[relative(ROOT, file)] ?? [])
       for (const id of [...offending(keys, NEVER_AS_FIELD), ...offending(literals, NEVER)]) {
-        found.push(`${relative(ROOT, file)} -> ${id}`)
+        if (!allowed.has(id)) found.push(`${relative(ROOT, file)} -> ${id}`)
       }
     }
     expect(found).toEqual([])
@@ -140,5 +128,18 @@ describe("never build: caste, kundli, veg and their kin (MV-G01)", () => {
       ...["temple", "church", "mosque", "gurdwara", "puja", "namaz", "fast", "fasting"],
     ])
     expect(words.filter((w) => tokens(w).some((t) => proxy.has(t)))).toEqual([])
+  })
+
+  it("no neighbourhood and no named dish (step 10 review M5, L5)", () => {
+    // Where you walk at 2am is where you live (Tier C); a named dish reads as a
+    // diet or a community. Neither belongs in a question or an interest.
+    const words = [
+      ...THIS_OR_THAT.flatMap((q) => [q.a.label, q.a.phrase, q.b.label, q.b.phrase]),
+      ...CUISINE_LOVES,
+    ]
+    const places = ["koramangala", "indiranagar", "hsr", "jayanagar", "whitefield", "malleshwaram", "basavanagudi", "btm", "marathahalli"]
+    const dishes = ["biryani", "dosa", "chaat", "idli", "kebab", "momos", "thali", "paneer"]
+    const banned = new Set([...places, ...dishes])
+    expect(words.filter((w) => tokens(w).some((t) => banned.has(t)))).toEqual([])
   })
 })

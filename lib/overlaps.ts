@@ -47,9 +47,28 @@ export interface DisplayTraits {
   homeState: string | null
   /** Their pick, or null — never derived. */
   sign: { slug: string; system: SignSystem | string } | null
+  /**
+   * Their coarse field of work (a slug). Tier B too (§8.5, step 10 review M3):
+   * a shared field competes for the card's one origin-like slot, and their own
+   * field in the header takes the slot when no shared line did.
+   */
+  workField: string | null
 }
 
-export const NO_TRAITS: DisplayTraits = { answers: {}, languages: [], homeState: null, sign: null }
+export const NO_TRAITS: DisplayTraits = { answers: {}, languages: [], homeState: null, sign: null, workField: null }
+
+/**
+ * A viewer's own Tier B, as the room may use it (step 10 review H1): only if
+ * it was set before they checked in. Otherwise somebody could edit their home
+ * state, sign or languages mid-event and read which cards light up — learning
+ * every card's Tier B one edit at a time, which is the budget defeated from the
+ * viewer's side. Their Tier A (this-or-that) and their interests are untouched.
+ */
+export function viewerTierB(traits: DisplayTraits, changedAt: Date | null | undefined, checkedInAt: Date | null | undefined): DisplayTraits {
+  if (!changedAt) return traits
+  if (checkedInAt && changedAt < checkedInAt) return traits
+  return { ...traits, languages: [], homeState: null, sign: null, workField: null }
+}
 
 /** `interest` is for crew cards only: a person card already lists shared interests as chips. */
 export type OverlapKind = "interest" | "ipl" | "this_or_that" | "language" | "home_state" | "sign"
@@ -66,6 +85,7 @@ export function traitKeys(t: DisplayTraits): string[] {
   for (const [q, c] of Object.entries(t.answers)) keys.add(`tot:${answerKey(q, c)}`)
   for (const l of t.languages) keys.add(`lang:${l}`)
   if (t.homeState) keys.add(`state:${t.homeState}`)
+  if (t.workField) keys.add(`work:${t.workField}`)
   const sign = signOf(t.sign?.slug)
   if (sign) {
     keys.add(`sign:${sign.slug}`)
@@ -99,22 +119,29 @@ const WESTERN_PLURAL: Record<string, string> = {
   pisces: "Pisceans",
 }
 
-/** The IPL team most people in the room hold, if one leads outright. */
+/** "In RCB country" needs this many fans of the leading team, at least. */
+export const ROOM_TEAM_MIN = 3
+/** …and more than this many times the runner-up's. */
+export const ROOM_TEAM_LEAD = 2
+
+/**
+ * The IPL team the room is "country" of, or null (step 10 review M2): only in
+ * a room big enough for the floor, only when the leader has at least
+ * `ROOM_TEAM_MIN` fans and more than twice the runner-up's. A lead of one
+ * flips as people come and go, and the line flipping would tell you who did.
+ */
 export function roomTeam(
   iplTeams: ReadonlyMap<string, string>,
-  interestHolders: ReadonlyMap<string, number>
+  interestHolders: ReadonlyMap<string, number>,
+  roomIsBigEnough: boolean
 ): string | null {
-  let best: { code: string; n: number } | null = null
-  let tied = false
-  for (const [id, code] of iplTeams) {
-    const n = interestHolders.get(id) ?? 0
-    if (n === 0) continue
-    if (!best || n > best.n) {
-      best = { code, n }
-      tied = false
-    } else if (n === best.n) tied = true
-  }
-  return best && !tied ? best.code : null
+  if (!roomIsBigEnough) return null
+  const counts = [...iplTeams]
+    .map(([id, code]) => ({ code, n: interestHolders.get(id) ?? 0 }))
+    .sort((a, b) => b.n - a.n)
+  const [lead, next] = counts
+  if (!lead || lead.n < ROOM_TEAM_MIN) return null
+  return lead.n > ROOM_TEAM_LEAD * (next?.n ?? 0) ? lead.code : null
 }
 
 /** "Both CSK — in RCB country 💛", or "Both RCB fans ❤️" when the team is the room's own. */
@@ -142,17 +169,33 @@ function signLine(viewer: DisplayTraits["sign"], them: DisplayTraits["sign"]): {
 }
 
 interface Candidate extends Label {
-  kind: OverlapKind
+  /** `work_field` competes for the budget and is carried by `sharedWorkField`, never as a line. */
+  kind: OverlapKind | "work_field"
   text: string
 }
 
+/** What one card may print beyond the score, once the budget is spent. */
+export interface PersonCardDisplay {
+  overlaps: Overlap[]
+  /** Their work field in the header (and "You both work in…" when shared). */
+  showWorkField: boolean
+  /** Their own sign chip, "Leo ♌" / "Simha ♌", or null. */
+  sign: string | null
+}
+
 /**
- * The display lines one card may print about two people, ordered and budgeted.
+ * The display lines one card may print about two people, ordered and
+ * budgeted, and where the card's one Tier B slot goes.
  *
- * `max` lines in all; `tierB` of them origin-like (`tierBBudget`). Ordered by
- * rarity in the room, so the line that tells you most about this pair leads.
+ * `max` lines in all, `tierB` of them origin-like (`tierBBudget`), rarest in
+ * the room first, so the line that tells you most about this pair leads. The
+ * work field is Tier B (§8.5): a shared field competes for the slot with a
+ * shared language, state or sign; when no shared line took it, their own field
+ * in the header does; only then their sign chip. Before a reveal that is one
+ * origin-like fact per card, whichever it is — never "Design, from Kerala, a
+ * Leo" beside an age.
  */
-export function personOverlaps(
+export function personCard(
   viewer: { traits: DisplayTraits; interestIds: readonly string[] },
   them: { traits: DisplayTraits; interestIds: readonly string[] },
   room: {
@@ -164,7 +207,7 @@ export function personOverlaps(
     roomTeam: string | null
   },
   budget: { max: number; tierB: number }
-): Overlap[] {
+): PersonCardDisplay {
   const w = (key: string) => interestWeight(key, room.holders, room.population)
   const lines: Candidate[] = []
 
@@ -218,25 +261,29 @@ export function personOverlaps(
   const sign = signLine(viewer.traits.sign, them.traits.sign)
   if (sign) lines.push({ kind: "sign", tier: "B", weight: w(sign.key), text: sign.text })
 
-  return orderLabels(lines, budget).map(({ kind, text }) => ({ kind, text }))
+  const field = them.traits.workField
+  if (field && field === viewer.traits.workField) {
+    lines.push({ kind: "work_field", tier: "B", weight: w(`work:${field}`), text: "" })
+  }
+
+  const chosen = orderLabels(lines, budget)
+  let tierBUsed = chosen.filter((l) => l.tier === "B").length
+  const sharedField = chosen.some((l) => l.kind === "work_field")
+  // Their field in the header takes the slot when no shared line did.
+  const showWorkField = !!field && (sharedField || tierBUsed < budget.tierB)
+  if (showWorkField && !sharedField) tierBUsed += 1
+
+  return {
+    overlaps: chosen.flatMap(({ kind, text }) => (kind === "work_field" ? [] : [{ kind, text }])),
+    showWorkField,
+    sign: !chosen.some((l) => l.kind === "sign") && tierBUsed < budget.tierB ? signLabelOf(them.traits.sign) : null,
+  }
 }
 
-/**
- * Their own sign as a chip — "Leo ♌" — when they chose to show one and the
- * card has Tier B left after its overlap lines. Not when a sign line already
- * said it, and never in a room the budget keeps origin-like facts out of: a
- * sign beside an age narrows a birthday to a month (§2.2 of the research).
- */
-export function signChip(
-  them: DisplayTraits,
-  overlaps: readonly Overlap[],
-  budget: { tierB: number }
-): string | null {
-  const sign = signOf(them.sign?.slug)
-  if (!sign) return null
-  const tierBUsed = overlaps.filter((o) => o.kind === "language" || o.kind === "home_state" || o.kind === "sign")
-  if (tierBUsed.some((o) => o.kind === "sign") || tierBUsed.length >= budget.tierB) return null
-  return `${them.sign?.system === "rashi" ? sign.rashi : sign.western} ${sign.symbol}`
+/** "Leo ♌" or "Simha ♌", in the calendar its owner picked; null for none. */
+function signLabelOf(s: DisplayTraits["sign"]): string | null {
+  const sign = signOf(s?.slug)
+  return sign ? `${s?.system === "rashi" ? sign.rashi : sign.western} ${sign.symbol}` : null
 }
 
 /* -------------------------------------------------------------------------- */
@@ -448,6 +495,8 @@ export function crewOverlaps(
     }
   }
 
-  const overlaps = orderLabels(lines, { max: 2, tierB: room.tierBAllowed ? 1 : 0 }).map(({ kind, text }) => ({ kind, text }))
+  const overlaps = orderLabels(lines, { max: 2, tierB: room.tierBAllowed ? 1 : 0 }).flatMap(({ kind, text }) =>
+    kind === "work_field" ? [] : [{ kind, text }]
+  )
   return { overlaps, interestScore }
 }

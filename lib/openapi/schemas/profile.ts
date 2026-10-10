@@ -171,6 +171,7 @@ export const UpdateProfileRequestSchema = z
       .describe("Opt-in. A sign slug (`leo`), sent with `sign_system`; both null takes the sign off. One without the other is 400."),
     sign_system: z.enum(["western", "rashi"]).optional().nullable().describe("Which calendar the sign is in: `western` or `rashi`."),
     shows_up_badge: z.boolean().optional().describe("Show \"Shows up\" on your card. Off unless turned on."),
+    show_badges: z.boolean().optional().describe("Show the badges your check-ins earned on your card. On unless turned off."),
   })
   .openapi("UpdateProfileRequest")
 
@@ -268,6 +269,13 @@ export const ProfileResponseSchema = z
       sun_sign: z.string().nullable().optional(),
       sign_system: z.enum(["western", "rashi"]).nullable().optional(),
       shows_up_badge: z.boolean().optional(),
+      show_badges: z.boolean().optional(),
+      tier_b_changed_at: z
+        .string()
+        .datetime()
+        .nullable()
+        .optional()
+        .describe("Your own profile: when languages, home state, sign or work field last changed. A change after you check in is not used for that room's lines."),
       suggested_sun_sign: z.string().nullable().optional(),
       sign: z.string().nullable().optional().describe("Their sign as a label, \"Leo ♌\" — others' profiles, when identified."),
     }).nullable().describe(

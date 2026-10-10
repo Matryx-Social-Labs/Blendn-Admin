@@ -481,6 +481,14 @@ export function rankMatches(
     parentOf?: ReadonlyMap<string, string>
     /** People in the room — the denominator for rarity. */
     population: number
+    /**
+     * People inside the room NOW, counting the viewer — the floor's count
+     * (step 10 review M1). The deck keeps everyone who came, so `population`
+     * counts people who have gone home; an anonymity set is the people a card
+     * could be standing beside you, and two left in a room of twenty is two.
+     * Absent: `population`, as before.
+     */
+    peopleInside?: number
     limit?: number
   }
 ): Match[] {
@@ -589,13 +597,14 @@ export function rankMatches(
    * fintech, into techno and board games" is one specific person in a room of
    * eight — at which point the pseudonym is doing nothing.
    *
-   * `population` is the room, not the page, so paging cannot shrink it into
-   * suppression. It counts everyone but the viewer, which is the right set:
-   * the anonymity set is the people a card *could* be, and the reader is not
-   * one of them. Same number and reasoning as the organiser metrics floor; a
-   * test asserts the two constants are equal.
+   * The count is the people inside now plus the viewer (`peopleInside`, step
+   * 10 review M1), not everyone who ever checked in: the anonymity set is who
+   * a card could be, here, tonight. It is the room, not the page, so paging
+   * cannot shrink it into suppression. Same number and reasoning as the
+   * organiser metrics floor; a test asserts the two constants are equal.
+   * Rarity keeps the whole deck (`population`).
    */
-  const roomIsBigEnough = opts.population >= MIN_ROOM_FOR_WORK_FIELD
+  const roomIsBigEnough = (opts.peopleInside ?? opts.population) >= MIN_ROOM_FOR_WORK_FIELD
 
   return scored.slice(0, opts.limit ?? scored.length).map(({ candidate, sharedInterestIds, sharedIntents }) => ({
     userId: candidate.userId,

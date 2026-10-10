@@ -5,7 +5,7 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
-import { blockCounterparties } from "./conversations"
+import { keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
@@ -496,7 +496,8 @@ export async function emitChatTyping(
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
     // room, so a blocker watched the person they blocked type (SCRUM-338).
-    const hidden = await blockCounterparties(socket.data.userId)
+    // A board post's room hides a closed conversation's pair too (`keptApartIn`).
+    const hidden = await keptApartIn(socket.data.userId, membership.chat_group.kind)
     // A crew's room calls its members by first name, a Blend's by tonight's
     // pseudonym (`namesInRoom`); an event's by the pseudonym on the row.
     const userName =

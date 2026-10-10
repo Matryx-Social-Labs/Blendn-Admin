@@ -195,6 +195,8 @@ export async function DELETE(request: NextRequest) {
           sun_sign: null,
           sign_system: null,
           shows_up_badge: false,
+          show_badges: true,
+          tier_b_changed_at: null,
           onboarded: false,
         },
       }),

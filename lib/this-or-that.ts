@@ -34,7 +34,8 @@ export const THIS_OR_THAT: readonly ThisOrThat[] = [
   {
     slug: "sunrise_or_late_walk",
     a: { label: "Nandi Hills sunrise", phrase: "a Nandi Hills sunrise" },
-    b: { label: "2am Koramangala walk", phrase: "a 2am Koramangala walk" },
+    // Never a neighbourhood: where you walk at 2am is where you live (Tier C, step 10 review L5).
+    b: { label: "2am city walk", phrase: "a 2am walk through the city" },
   },
   { slug: "metro_or_auto", a: { label: "Metro", phrase: "the metro" }, b: { label: "Auto", phrase: "an auto" } },
   { slug: "plan_or_wing_it", a: { label: "Plan everything", phrase: "planning everything" }, b: { label: "Wing it", phrase: "winging it" } },

@@ -249,17 +249,17 @@ export const IPL_TEAMS: readonly { code: string; name: string; heart: string }[]
 export const IPL_PARENT_SLUG = "ipl"
 
 /**
- * Cuisine loves, as interest leaves under the existing "Food & Drink" parent.
- * Tastes, never diets: nothing here says or implies veg or non-veg, which in
- * India is a caste proxy (§8.4). Every one has a version for everybody.
+ * Food-and-drink loves, as interest leaves under the existing "Food & Drink"
+ * parent. Ways of going out to eat, never a dish or a diet: a named dish
+ * (biryani, dosa, chaat) reads as a diet or a community in India, and veg /
+ * non-veg is a caste proxy (§8.4, step 10 review M5). No alcohol either — not
+ * drinking is a faith for many. Every one of these has a version for anybody.
  */
 export const CUISINE_LOVES: readonly string[] = [
-  "Biryani",
-  "Dosa",
-  "Chaat",
-  "Momos",
+  "Cafe hopping",
   "Street food",
   "Desserts",
-  "Indo-Chinese",
-  "Pizza",
+  "Bakeries",
+  "Italian",
+  "Pan-Asian",
 ] as const
