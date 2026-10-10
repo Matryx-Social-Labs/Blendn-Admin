@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 
 import { serverErrorResponse, successResponse, unauthorizedResponse } from "@/lib/api-response"
 import { livePlus } from "@/lib/entitlements"
+import { plusGatedForPerson } from "@/lib/plus"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -10,6 +11,10 @@ export const dynamic = "force-dynamic"
 
 /**
  * GET /api/mobile/me/plus — do I have Blendn+, and until when (step 11).
+ *
+ * `gated`: whether Blendn+ is for sale to this person at all (the city of
+ * their latest night; an open check-in is the latest). False in a launch
+ * season: the app then sells nothing and says Plus is free there.
  *
  * The app's one answer to "is Plus unlocked": after a purchase it polls this
  * until the store's webhook has granted it, because the app saying "bought"
@@ -25,9 +30,10 @@ export async function GET(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("read", "me-plus", authUser.userId))
     if (limited) return limited
 
-    const live = await livePlus(authUser.userId)
+    const [live, gated] = await Promise.all([livePlus(authUser.userId), plusGatedForPerson(authUser.userId)])
     const res = await successResponse({
       active: live !== null,
+      gated,
       product: live?.product ?? null,
       source: live?.source ?? null,
       expiresAt: live?.expiresAt?.toISOString() ?? null,

@@ -40,7 +40,7 @@ const files = [...SEARCH.flatMap((d) => walk(join(ROOT, d))), join(ROOT, "server
 }))
 
 export const asksForPlus = (code: string) =>
-  /\b(plusRequired|lockedNights|livePlus)\b/.test(code) ||
+  /\b(plusRequired|plusRequiredForPing|plusGatedForPerson|lockedNights|livePlus)\b/.test(code) ||
   /\bhasEntitlement\s*\([^;]*?["'](plus|night_pass)["']/.test(code)
 
 /** Every place Blendn+ is asked about, and what it gates there. */

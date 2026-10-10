@@ -332,6 +332,11 @@ export function plusGateFor(city: string | null | undefined): PlusGate {
   return { gated: false, flippedAt: null }
 }
 
+/** Is Blendn+ gated everywhere (`*`, or `true`)? */
+export function plusGatedEverywhere(): boolean {
+  return gatingEntries().has("*")
+}
+
 /** Is Blendn+ gated anywhere at all? False in a launch season everywhere, so a gate can skip its queries. */
 export function plusGatedAnywhere(): boolean {
   return gatingEntries().size > 0

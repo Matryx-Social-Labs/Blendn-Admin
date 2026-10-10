@@ -15,7 +15,8 @@ jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) 
 import { endPlusGrant, grantPlus, personPlus } from "@/lib/billing-actions"
 import { hasEntitlement } from "@/lib/entitlements"
 import { inviteTokenFor } from "@/lib/friends"
-import { hasPlus, plusRequired, threeOnDistinctEvents, trialRef } from "@/lib/plus"
+import * as entitlementsModule from "@/lib/entitlements"
+import { hasPlus, plusRequired, plusRequiredForPing, threeOnDistinctEvents, trialRef } from "@/lib/plus"
 import { flushProductEvents } from "@/lib/product-events"
 
 import { closeDb, db, makeEvent, makeUser, occurrenceOf, refusingWrites, testId } from "./helpers"
@@ -493,9 +494,42 @@ describe("GET /me/plus and the paywall's events (MN-C01)", () => {
     const [none, sub, pass] = [await person(), await person(), await person()]
     await plus(sub.id, { until: Date.parse("2036-01-01T00:00:00Z") })
     await plus(pass.id, { product: "night_pass", until: Date.now() + 3_600_000 })
-    expect(await status(none.token)).toEqual({ active: false, product: null, source: null, expiresAt: null })
-    expect(await status(sub.token)).toEqual({ active: true, product: "plus", source: "apple", expiresAt: "2036-01-01T00:00:00.000Z" })
+    expect(await status(none.token)).toEqual({ active: false, gated: false, product: null, source: null, expiresAt: null })
+    expect(await status(sub.token)).toEqual({ active: true, gated: false, product: "plus", source: "apple", expiresAt: "2036-01-01T00:00:00.000Z" })
     expect(await status(pass.token)).toMatchObject({ active: true, product: "night_pass" })
+  })
+
+  it("says whether Plus is for sale here at all: where they go out, or where they are now (review H2)", async () => {
+    const [bengaluru, mumbai, newcomer] = [await person(), await person(), await person()]
+    await nightsOut(bengaluru.id, 1)
+    await nightsOut(mumbai.id, 1, { city: "Mumbai" })
+    expect((await status(bengaluru.token)).gated).toBe(false) // launch season everywhere
+
+    process.env.PLUS_GATING = `Bengaluru:${TODAY}`
+    expect((await status(bengaluru.token)).gated).toBe(true)
+    expect((await status(mumbai.token)).gated).toBe(false)
+    expect((await status(newcomer.token)).gated).toBe(false)
+    // Out in Mumbai before, live at a Bengaluru venue now.
+    await goLive(mumbai.token, await venue(), { minutes: 20 })
+    expect((await status(mumbai.token)).gated).toBe(true)
+
+    process.env.PLUS_GATING = `*:${TODAY}`
+    expect((await status(newcomer.token)).gated).toBe(true)
+  })
+
+  it("asks the gate once per person per ping interval for a running stay (review LOW 10)", async () => {
+    process.env.PLUS_GATING = "Bengaluru"
+    const me = await person()
+    const asked = jest.spyOn(entitlementsModule, "hasEntitlement")
+    const at = new Date()
+    expect(await plusRequiredForPing(me.id, "Bengaluru", at)).toBe(true)
+    const once = asked.mock.calls.length
+    expect(once).toBeGreaterThan(0)
+    expect(await plusRequiredForPing(me.id, "Bengaluru", new Date(at.getTime() + 4 * 60_000))).toBe(true)
+    expect(asked.mock.calls.length).toBe(once)
+    await plusRequiredForPing(me.id, "Bengaluru", new Date(at.getTime() + 6 * 60_000))
+    expect(asked.mock.calls.length).toBeGreaterThan(once)
+    asked.mockRestore()
   })
 
   it("records each step once a day per trigger, and refuses anything off the list", async () => {

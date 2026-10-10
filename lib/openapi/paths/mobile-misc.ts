@@ -910,6 +910,11 @@ registry.registerPath({
 const PlusStatusSchema = z
   .object({
     active: z.boolean().describe("Blendn+ is unlocked now: a subscription, a live Night Pass, the trial or a referral month."),
+    gated: z
+      .boolean()
+      .describe(
+        "Blendn+ is for sale to this person: gated in the city of their latest night (an open check-in is the latest). False in a launch season — sell nothing, say Plus is free there."
+      ),
     product: z.enum(["plus", "night_pass"]).nullable(),
     source: z
       .enum(["apple", "google", "grant"])

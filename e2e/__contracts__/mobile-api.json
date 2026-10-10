@@ -221,6 +221,7 @@
     "data": [
       "active",
       "expiresAt",
+      "gated",
       "product",
       "source"
     ]

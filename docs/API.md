@@ -2816,12 +2816,17 @@ others there earn a month (each friend counts once; at most 3 a year).
 ```json
 { "success": true, "data": {
   "active": true,
+  "gated": true,
   "product": "plus",
   "source": "apple",
   "expiresAt": "2026-11-10T09:00:00.000Z"
 } }
 ```
 
+`gated` says whether Blendn+ is for sale to this person at all: gated in the
+city of their latest night (where they are checked in now counts as that). When it is false
+(a launch season) the app sells nothing and says Plus is free there; plans
+show only after `PLUS_REQUIRED`, a `lockedCount`, or `gated: true`.
 `product` is `plus` or `night_pass`; `source` is `apple`, `google` or `grant`
 (the trial, a referral month). `expiresAt` is when the row that lasts longest
 ends. `no-store`: never cache it; 60 a minute per person (the paywall polls every 3 s for a minute at most). It is not a gate — every Plus feature is

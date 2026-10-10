@@ -16,7 +16,7 @@ import {
 } from "@/lib/presence"
 import { isUuid } from "@/lib/api-input"
 import { stayExtension } from "@/lib/go-live"
-import { plusRequired } from "@/lib/plus"
+import { plusRequiredForPing } from "@/lib/plus"
 import { scheduleLiveEnd } from "@/lib/live-timers"
 
 export const dynamic = "force-dynamic"
@@ -185,7 +185,7 @@ export async function POST(
     inside && checkIn.expires_at
       ? stayExtension({ expiresAt: checkIn.expires_at, stay: checkIn.stay, stayUntil: checkIn.stay_until }, now)
       : null
-  const proposed = carried && !(await plusRequired(authUser.userId, checkIn.event.city, now)) ? carried : null
+  const proposed = carried && !(await plusRequiredForPing(authUser.userId, checkIn.event.city, now)) ? carried : null
   let extended: Date | null = null
   if (proposed && checkIn.expires_at) {
     /*

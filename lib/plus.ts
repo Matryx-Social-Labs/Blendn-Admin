@@ -6,7 +6,8 @@ import { attendedEventIds } from "./attendee-counts"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
 import { addMonths, grantPlusOnce, hasEntitlement, plusGrantsSince } from "./entitlements"
-import { plusGateFor, plusGatedAnywhere } from "./env"
+import { plusGateFor, plusGatedAnywhere, plusGatedEverywhere } from "./env"
+import { PING_INTERVAL_MINUTES } from "./presence"
 
 /**
  * Blendn+ for attendees (plan v2 §9.3), configured here and nowhere else.
@@ -242,6 +243,43 @@ export async function plusRequired(userId: string, city: string | null, now: Dat
   if (await hasPlus(userId, now)) return false
   await grantOwed(userId, gate.flippedAt, now)
   return !(await hasPlus(userId, now))
+}
+
+/**
+ * `plusRequired` for the presence ping, which comes every few minutes for as
+ * long as a stay runs: the answer is kept per person and city for one ping
+ * interval, so a stay costs the gate once per interval rather than once per
+ * ping (review LOW 10). Per process; a Plus bought mid-stay is seen within
+ * one interval, inside the window's own 20-minute margin.
+ * ponytail: per-process Map; move it to Redis if pings ever spread across replicas unevenly.
+ */
+const pingAnswers = new Map<string, { required: boolean; until: number }>()
+const PING_CACHE_MS = PING_INTERVAL_MINUTES * 60_000
+const PING_CACHE_MAX = 10_000
+
+export async function plusRequiredForPing(userId: string, city: string | null, now: Date = new Date()): Promise<boolean> {
+  const key = `${userId}|${city ?? ""}`
+  const kept = pingAnswers.get(key)
+  if (kept && kept.until > now.getTime()) return kept.required
+  const required = await plusRequired(userId, city, now)
+  if (pingAnswers.size >= PING_CACHE_MAX) pingAnswers.clear()
+  pingAnswers.set(key, { required, until: now.getTime() + PING_CACHE_MS })
+  return required
+}
+
+/**
+ * Is Blendn+ for sale to this person at all — gated in the city of their
+ * latest night? (Where they are checked in now IS their latest night: an open
+ * check-in counts.) The app shows plans only when it is; in a launch season
+ * it says Plus is free there (review H2). With no night yet: only when
+ * everywhere is gated. Not a gate.
+ */
+export async function plusGatedForPerson(userId: string): Promise<boolean> {
+  if (!plusGatedAnywhere()) return false
+  const [latest] = await attendedEventIds(userId, { limit: 1, skip: 0 })
+  if (!latest) return plusGatedEverywhere()
+  const event = await db.events.findUnique({ where: { id: latest.event_id }, select: { city: true } })
+  return plusGateFor(event?.city ?? null).gated
 }
 
 /**
