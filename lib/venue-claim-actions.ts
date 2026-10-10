@@ -1,7 +1,7 @@
 "use server"
 
 import { Refusal } from "./refusal"
-import { endVenueProForNewOwner } from "./billing-actions"
+import { cancelPreviousOwnersMandates, endPreviousOwnersPro } from "./subscription-cancel"
 import { z } from "zod"
 
 import { revalidatePath } from "next/cache"
@@ -557,6 +557,9 @@ export async function decideVenueClaim(
         data: { owner_org_id: orgId, claimed_at: new Date() },
       })
       if (handed.count !== 1) throw new Refusal(OWNER_SINCE_FILING)
+      // Whoever paid for Pro here before does not hand it over with the venue:
+      // it ends in this transaction, with the transfer or not at all (review M7).
+      await endPreviousOwnersPro(tx, claim.venue.id, orgId, admin.id)
 
       // One owner per venue, so every other request for it is now moot.
       await tx.venue_claims.updateMany({
@@ -575,10 +578,8 @@ export async function decideVenueClaim(
     throw error
   }
 
-  // The venue changed hands: the previous owner's Venue Pro stops with it (review M7).
-  if (decision === "approve" && orgId && claim.venue.owner_org_id && claim.venue.owner_org_id !== orgId) {
-    await endVenueProForNewOwner(claim.venue.id, orgId)
-  }
+  // And their mandate stops at Razorpay, now the transfer has committed.
+  if (decision === "approve" && orgId) await cancelPreviousOwnersMandates(claim.venue.id, orgId, admin.id)
 
   const notified = await tellVenueClaimants(
     { ...claim, verified: Boolean(request?.email_verified_at) },

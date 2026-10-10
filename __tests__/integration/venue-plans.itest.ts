@@ -50,13 +50,14 @@ import { NextRequest } from "next/server"
 import { isValidElement, type ReactElement } from "react"
 
 import { hasEntitlement } from "@/lib/entitlements"
+import { logger } from "@/lib/logger"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { venueDayBounds, venueDayFor } from "@/lib/venue-day"
 import { decideVenueClaim } from "@/lib/venue-claim-actions"
 import { venueInsights } from "@/lib/venue-insights"
 import { venuePlanPage, venueReadiness } from "@/lib/venue-plan"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, refusingWrites, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const actions = require("@/lib/billing-actions") as typeof import("@/lib/billing-actions")
@@ -461,19 +462,65 @@ describe("a venue changing hands (review M7)", () => {
     expect(asPayer.payments.map((p) => p.reference)).toContain(invoice)
   })
 
-  it("a cancel Razorpay refused is not recorded as cancelled, and is audited for an operator", async () => {
-    const v = await venue("vp-cancelfail", { org: payerOrg })
+  /** A venue the payer owns and pays Pro on, live, and the new owner's pending dispute for it. */
+  async function paidVenueUnderDispute(label: string) {
+    const v = await venue(label, { org: payerOrg })
     const ref = `sub_${randomUUID().slice(0, 12)}`
     await db.billing_checkouts.create({
       data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active" },
     })
-    await db.venues.update({ where: { id: v }, data: { owner_org_id: newOrg } })
-    failCancel = true
-    as(admin, "app_admin")
-    await actions.endVenueProForNewOwner(v, newOrg)
-    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
-    const audit = await db.audit_logs.findFirstOrThrow({ where: { action: "entitlement.ended_on_transfer", resource_id: v } })
-    expect(audit.details).toMatchObject({ cancelFailed: [ref], cancelled: [] })
+    const ent = await db.entitlements.create({
+      data: { subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 23 * DAY) },
+    })
+    const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: newOrg, filed_by: newOwner, status: "pending", is_dispute: true } })
+    return { v, ref, ent, claim: claim.id }
+  }
+  const markedCancelled = async (ref: string) => (await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end
+
+  describe("when one side fails (scan 3)", () => {
+    let errors: jest.SpyInstance
+    beforeEach(() => {
+      errors = jest.spyOn(logger, "error").mockImplementation(() => undefined)
+    })
+    afterEach(() => errors.mockRestore())
+    const logged = (ref: string) => errors.mock.calls.some(([, meta]) => (meta as Record<string, unknown> | undefined)?.providerRef === ref)
+
+    it("Razorpay refuses the cancel: the venue moves, the Pro still ends, the mandate stays open here and is audited", async () => {
+      const { v, ref, claim } = await paidVenueUnderDispute("vp-cancelfail")
+      failCancel = true
+      as(admin, "app_admin")
+      await decideVenueClaim(claim, "approve")
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+      expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+      expect(await markedCancelled(ref)).toBe(false)
+      const audit = await db.audit_logs.findFirstOrThrow({ where: { action: "billing.subscription.cancel_failed", resource_id: v } })
+      expect(audit.details).toMatchObject({ providerRef: ref, orgId: payerOrg })
+      expect(logged(ref)).toBe(true)
+    })
+
+    it("the database refuses the record after Razorpay cancelled: the venue moves, the Pro ends, the id is logged", async () => {
+      const { v, ref, claim } = await paidVenueUnderDispute("vp-recordfail")
+      as(admin, "app_admin")
+      await refusingWrites("billing_checkouts", "UPDATE", `NEW.provider_ref = '${ref}'`, () => decideVenueClaim(claim, "approve"))
+      expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+      expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+      expect(await markedCancelled(ref)).toBe(false)
+      expect(await db.audit_logs.count({ where: { action: "billing.subscription.cancelled", resource_id: v } })).toBe(0)
+      expect(logged(ref)).toBe(true)
+    })
+
+    it("the database fails inside the transfer: nothing moves, the Pro stays with its payer, Razorpay is never asked", async () => {
+      const { v, ref, ent, claim } = await paidVenueUnderDispute("vp-transferfail")
+      as(admin, "app_admin")
+      await refusingWrites("audit_logs", "INSERT", `NEW.action = 'entitlement.ended_on_transfer' AND NEW.resource_id = '${v}'`, () =>
+        expect(decideVenueClaim(claim, "approve")).rejects.toThrow()
+      )
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(payerOrg)
+      expect((await db.venue_claims.findUniqueOrThrow({ where: { id: claim } })).status).toBe("pending")
+      expect((await db.entitlements.findUniqueOrThrow({ where: { id: ent.id } })).expires_at).toEqual(ent.expires_at)
+      expect(calls.some((c) => c.url.includes(ref))).toBe(false)
+    })
   })
 
   it("a mandate that charges after its venue changed hands grants the new owner nothing", async () => {

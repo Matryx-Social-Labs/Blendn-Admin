@@ -113,10 +113,10 @@ describe("entitlements are read and written in one place", () => {
     expect(naming("endPaidEntitlement")).toEqual(["lib/razorpay-webhook.ts"])
   })
 
-  it("grants, their ending and an admin's revocation come only from the admin's actions", () => {
+  it("grants, their ending and an admin's revocation come only from the admin's actions; a transfer's end only from the transfer", () => {
     expect(naming("grantEntitlement")).toEqual(["lib/billing-actions.ts"])
     expect(naming("endGrants")).toEqual(["lib/billing-actions.ts"])
     expect(naming("revokePaid")).toEqual(["lib/billing-actions.ts"])
-    expect(naming("revokePaidByRefs")).toEqual(["lib/billing-actions.ts"])
+    expect(naming("revokePaidByRefs")).toEqual(["lib/subscription-cancel.ts"])
   })
 })

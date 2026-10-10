@@ -193,7 +193,7 @@ const VENUE_ID_READS_ALLOWED = new Map([
   ["lib/live-count.ts", "who is live at an attendee's venues, kept as a bucket; nothing per person, nothing to an owner"],
   ["lib/billing.ts", "an organisation's own purchases (`billing_checkouts.venue_id: null`), not events"],
   ["lib/venue-plan.ts", "a venue's purchases (`billing_checkouts.venue_id`), not events"],
-  ["lib/billing-actions.ts", "a venue's purchases ended when it changes hands (`billing_checkouts.venue_id`), not events"],
+  ["lib/subscription-cancel.ts", "a venue's purchases ended when it changes hands (`billing_checkouts.venue_id`), not events"],
 ])
 
 describe("a venue owner's view starts at the claim", () => {
