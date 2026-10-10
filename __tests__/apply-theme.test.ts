@@ -78,10 +78,27 @@ describe("the override stays in its subtree", () => {
     }
     for (const dir of ["app", "components", "lib"]) walk(join(ROOT, dir))
 
-    expect(hits.sort()).toEqual([
-      "app/apply/page.tsx",
-      "app/apply/verify/page.tsx",
-      "app/globals.css",
-    ])
+    // One component carries the class since step 18 (the kit's PublicFrame),
+    // and the test below holds who may render it.
+    expect(hits.sort()).toEqual(["app/globals.css", "components/public-frame.tsx"])
+  })
+
+  it("is rendered only by the public funnel's pages", () => {
+    // PublicFrame is the light theme; a dashboard page that reached for it
+    // would go light. The apply and claim pages are the funnel (step 18).
+    const users: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        if (entry === "node_modules" || entry.startsWith(".")) continue
+        const full = join(dir, entry)
+        if (statSync(full).isDirectory()) walk(full)
+        else if (/\.tsx?$/.test(entry) && /import \{[^}]*\bPublicFrame\b[^}]*\} from "@\/components\/public-frame"/.test(readFileSync(full, "utf8"))) {
+          users.push(relative(ROOT, full))
+        }
+      }
+    }
+    for (const dir of ["app", "components", "lib"]) walk(join(ROOT, dir))
+    expect(users.length).toBeGreaterThan(0)
+    expect(users.filter((f) => !/^app\/(apply|claim)\//.test(f))).toEqual([])
   })
 })

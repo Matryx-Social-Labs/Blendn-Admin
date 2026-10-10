@@ -9,8 +9,9 @@ import { cn } from "@/lib/utils"
  * - `PublicFrame` — light, on the landing page's orange band: the pages a
  *   stranger reaches from the marketing site or the app (Apply, the claim
  *   pages). Light because they are the last step of a funnel that is light
- *   everywhere else; `.apply-light` re-declares `:root`'s values
- *   (`apply-theme.test.ts`), and this file is the one place that uses it.
+ *   everywhere else; the light override in globals.css re-declares
+ *   `:root`'s values (`apply-theme.test.ts`), and this file is the one place
+ *   that uses it.
  * - `AuthFrame` — the dashboard's own dark, one centred card under the
  *   gradient monogram: sign in, invite, forgotten and reset password. The
  *   card's 3px gradient stripe is the screen's one gradient element.
