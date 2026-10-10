@@ -612,7 +612,7 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
 /* Sponsor payment links (step 17, SCRUM-560)                                   */
 /* -------------------------------------------------------------------------- */
 
-interface LockedCharge {
+export interface LockedCharge {
   id: string
   status: "draft" | "agreed" | "settled" | "void"
   amount_minor: number
@@ -620,7 +620,12 @@ interface LockedCharge {
   external_ref: string | null
 }
 
-async function lockCharge(tx: Tx, id: string): Promise<LockedCharge | null> {
+/**
+ * The charge's row, locked until the transaction ends. The webhook takes it
+ * after the link's `billing_checkouts` row, and so does every admin action on
+ * a charge (`lib/charge-actions.ts`): one order, so the two never deadlock.
+ */
+export async function lockCharge(tx: Tx, id: string): Promise<LockedCharge | null> {
   const rows = await tx.$queryRaw<LockedCharge[]>`
     SELECT id::text AS id, status::text AS status, amount_minor, currency::text AS currency, external_ref
       FROM placement_charges

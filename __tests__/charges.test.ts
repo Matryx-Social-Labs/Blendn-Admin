@@ -5,14 +5,30 @@
  * reconciliation somebody has to do by hand months later.
  */
 
+const mockAuth = jest.fn()
+
 const mockDb = {
-  // Reach (lib/sponsor-reach.ts): nothing sent in these fixtures.
-  $queryRaw: jest.fn().mockResolvedValue([]),
+  /*
+   * Raw SQL: the charge's row lock (lockCharge) answers with the charge
+   * `findUnique` last returned; the payment-link lock and reach (nothing sent
+   * in these fixtures) answer with nothing.
+   */
+  $queryRaw: jest.fn(async (sql: TemplateStringsArray): Promise<unknown[]> => {
+    if (!/FROM placement_charges[\s\S]*FOR UPDATE/.test(sql.join("?"))) return []
+    const charge = (await mockDb.placement_charges.findUnique.mock.results.at(-1)?.value) as Record<string, unknown> | null
+    return charge ? [charge] : []
+  }),
+  // The one-at-a-time lock on a charge.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+  // A transaction runs its callback against the same client.
+  $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>): Promise<unknown> => cb(mockDb)),
+  // The role is read from the database (lib/current-user.ts): here, the session's own.
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null })) },
+  audit_logs: { create: jest.fn() },
+  billing_checkouts: { update: jest.fn() },
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },
   placement_charges: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
 }
-
-const mockAuth = jest.fn()
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
@@ -182,11 +198,10 @@ describe("the status walk", () => {
   it("writes only from the status it read, and audits nothing when that moved underneath", async () => {
     charge("settled")
     mockDb.placement_charges.updateMany.mockResolvedValue({ count: 0 })
-    const { auditLog } = jest.requireMock("@/lib/audit-log")
 
     await expect(advanceCharge(CHARGE, "void", undefined, "duplicate invoice, re-raised")).rejects.toThrow(/someone else/i)
     expect(mockDb.placement_charges.updateMany.mock.calls[0][0].where).toEqual({ id: CHARGE, status: "settled" })
-    expect(auditLog).not.toHaveBeenCalled()
+    expect(mockDb.audit_logs.create).not.toHaveBeenCalled()
   })
 })
 

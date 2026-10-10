@@ -4,13 +4,12 @@ import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
-import { auditLog } from "@/lib/audit-log"
-import { getAuth } from "@/lib/auth"
+import { paymentsOn } from "@/lib/billing"
+import { currentUser } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
 import { reachBand, type SponsorReachBand } from "@/lib/billing-plans"
 import { placementReach, reachKey, type PlacementReach } from "@/lib/sponsor-reach"
-import { razorpayKeys } from "@/lib/env"
 import { logger } from "@/lib/logger"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { hit } from "@/lib/rate-limit-store"
@@ -19,8 +18,10 @@ import {
   createPaymentLink,
   notifyPaymentLink,
   PAYMENT_LINK_LIFETIME_MS,
+  paymentLinkStatus,
   RazorpayError,
 } from "@/lib/razorpay"
+import { lockCharge } from "@/lib/razorpay-webhook"
 
 /**
  * What a placement costs, and whether it has been paid.
@@ -69,10 +70,11 @@ const MIN_VOID_REASON = 10
 /** As long as a pricing note; it is copied into the audit row as well. */
 const MAX_VOID_REASON = 500
 
+/** A platform admin, on the role the database holds now (review LOW 18). */
 async function requireAdmin() {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  return session.user
+  const user = await currentUser()
+  if (!user || user.role !== "app_admin") throw new Refusal("Forbidden")
+  return user
 }
 
 export interface ChargeRow {
@@ -310,30 +312,28 @@ export async function pricePlacement(placementId: string, input: unknown): Promi
   // stored. Every read from now on is an integer.
   const amountMinor = Math.round(amount * 100)
 
-  const charge = await db.placement_charges.create({
-    data: {
-      placement_id: placementId,
-      amount_minor: amountMinor,
-      currency,
-      status: "draft",
-      priced_by: admin.id,
-      external_ref: note || null,
-    },
-    select: { id: true },
-  })
-
-  auditLog({
-    userId: admin.id,
-    action: "charge.priced",
-    resource: "placement_charges",
-    resourceId: charge.id,
-    details: {
-      placementId,
-      eventId: placement.event_id,
-      sponsorId: placement.sponsor_id,
-      amountMinor,
-      currency,
-    },
+  // The price and its audit row, together or not at all.
+  await db.$transaction(async (tx) => {
+    const charge = await tx.placement_charges.create({
+      data: {
+        placement_id: placementId,
+        amount_minor: amountMinor,
+        currency: currency,
+        status: "draft",
+        priced_by: admin.id,
+        external_ref: note || null,
+      },
+      select: { id: true },
+    })
+    await tx.audit_logs.create({
+      data: {
+        user_id: admin.id,
+        action: "charge.priced",
+        resource: "placement_charges",
+        resource_id: charge.id,
+        details: { placementId, eventId: placement.event_id, sponsorId: placement.sponsor_id, amountMinor, currency },
+      },
+    })
   })
 
   revalidatePath("/dashboard/charges")
@@ -392,58 +392,79 @@ export async function advanceCharge(
   }
   if (why.length > MAX_VOID_REASON) throw new Refusal(`Keep the reason under ${MAX_VOID_REASON} characters.`)
 
-  await db.$transaction(
-    async (tx) => {
-      /*
-       * A settle by hand or a void first closes any payment link still open
-       * for the charge, at Razorpay, so a sponsor cannot pay a voided or
-       * already-paid charge through it (review H1). Locked in the webhook's
-       * order — the link's row, then the charge — so the two decide one after
-       * the other. A link with money coming through it, or one Razorpay will
-       * not cancel, stops the change: nothing is written.
-       */
-      if (to === "settled" || to === "void") await closeOpenLinks(tx, chargeId)
-      await tx.$queryRaw`SELECT id FROM placement_charges WHERE id = ${chargeId}::uuid FOR UPDATE`
+  // Links Razorpay closed during this attempt, named if our side then fails.
+  const closed: string[] = []
+  try {
+    await db.$transaction(
+      async (tx) => {
+        /*
+         * One admin action on this charge at a time: a void waits for a send in
+         * flight, then closes the link it made (review H1).
+         *
+         * A settle by hand or a void first closes any payment link still open
+         * for the charge, at Razorpay, so a sponsor cannot pay a voided or
+         * already-paid charge through it. Locked in the webhook's order — the
+         * link's row, then the charge — so the two decide one after the other.
+         * A link with money coming through it, or one Razorpay will not cancel,
+         * stops the change: nothing is written.
+         */
+        await oneAtATime(tx, chargeId)
+        if (to === "settled" || to === "void") await closeOpenLinks(tx, chargeId, closed)
+        const locked = await lockCharge(tx, chargeId)
+        if (!locked || locked.status !== charge.status) throw new Refusal(CHANGED_JUST_NOW)
 
-      /*
-       * Only from the status read above. Two voids at once both passed that
-       * check, and the second overwrote the first one's who and why.
-       */
-      const { count } = await tx.placement_charges.updateMany({
-        where: { id: chargeId, status: charge.status },
-        data: {
-          status: to,
-          ...(to === "agreed" ? { agreed_at: new Date() } : {}),
-          ...(to === "settled" ? { settled_at: new Date() } : {}),
-          ...(to === "void" ? { voided_at: new Date(), voided_by: admin.id, void_reason: why } : {}),
-          ...(ref ? { external_ref: ref } : {}),
-        },
-      })
-      if (count !== 1) throw new Refusal("Someone else changed that charge just now. Reload and look again.")
-
-      // In the transaction: a change to money is never without its record.
-      await tx.audit_logs.create({
-        data: {
-          user_id: admin.id,
-          action: `charge.${to}`,
-          resource: "placement_charges",
-          resource_id: chargeId,
-          details: {
-            placementId: charge.placement_id,
-            from: charge.status,
-            amountMinor: charge.amount_minor,
-            currency: charge.currency,
-            // The reference the charge carries, not only one passed in now: a void
-            // arrives with none, and "which payment was undone" is its whole point.
-            // Before settlement `external_ref` is the pricing note, not a payment.
-            externalRef: ref || (charge.status === "settled" ? charge.external_ref : null) || null,
-            ...(to === "void" ? { reason: why } : {}),
+        /*
+         * Only from the status read above. Two voids at once both passed that
+         * check, and the second overwrote the first one's who and why.
+         */
+        const { count } = await tx.placement_charges.updateMany({
+          where: { id: chargeId, status: charge.status },
+          data: {
+            status: to,
+            ...(to === "agreed" ? { agreed_at: new Date() } : {}),
+            ...(to === "settled" ? { settled_at: new Date() } : {}),
+            ...(to === "void" ? { voided_at: new Date(), voided_by: admin.id, void_reason: why } : {}),
+            ...(ref ? { external_ref: ref } : {}),
           },
-        },
+        })
+        if (count !== 1) throw new Refusal(CHANGED_JUST_NOW)
+
+        // In the transaction: a change to money is never without its record.
+        await tx.audit_logs.create({
+          data: {
+            user_id: admin.id,
+            action: CHARGE_ACTION[to],
+            resource: "placement_charges",
+            resource_id: chargeId,
+            details: {
+              placementId: charge.placement_id,
+              from: charge.status,
+              amountMinor: charge.amount_minor,
+              currency: charge.currency,
+              // The reference the charge carries, not only one passed in now: a void
+              // arrives with none, and "which payment was undone" is its whole point.
+              // Before settlement `external_ref` is the pricing note, not a payment.
+              externalRef: ref || (charge.status === "settled" ? charge.external_ref : null) || null,
+              ...(to === "void" ? { reason: why } : {}),
+              ...(closed.length ? { closedLinks: closed } : {}),
+            },
+          },
+        })
+      },
+      { maxWait: 10_000, timeout: 30_000 }
+    )
+  } catch (err) {
+    // Closed at Razorpay and not here: payment_link.cancelled records it, and
+    // the next attempt finds it closed (closeAtRazorpay).
+    if (closed.length) {
+      logger.error("Payment links were cancelled at Razorpay but the charge was not changed", {
+        chargeId,
+        paymentLinkIds: closed,
+        error: err instanceof Error ? err.message : String(err),
       })
-    },
-    { maxWait: 10_000, timeout: 30_000 }
-  )
+    }
+    throw err
+  }
 
   revalidatePath("/dashboard/charges")
   revalidatePath("/dashboard/placements")
@@ -452,6 +473,10 @@ export async function advanceCharge(
 /* -------------------------------------------------------------------------- */
 /* Payment links (step 17, SCRUM-560)                                          */
 /* -------------------------------------------------------------------------- */
+
+const CHARGE_ACTION = { agreed: "charge.agreed", settled: "charge.settled", void: "charge.void" } as const
+const CHANGED_JUST_NOW = "Someone else changed that charge just now. Reload and look again."
+const PAID_THROUGH_LINK = "A payment came through this charge's link. Let it settle, or refund it at Razorpay first."
 
 /** Razorpay's statuses for a link that can still be paid, or was. */
 const LIVE_LINK = ["created", "issued", "partially_paid", "paid"]
@@ -464,11 +489,22 @@ const LINK_SENDS = { max: 10, windowMs: 60_000 }
 type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0]
 
 /**
- * Close every payment link still open for a charge, at Razorpay first, and
- * mark ours cancelled. Refuses — writing nothing — when money is coming
- * through a link (paid or partly paid) or Razorpay will not cancel it.
+ * Admin actions on one charge, one at a time, until the transaction ends.
+ * Taken before any row lock, and the webhook never takes it, so the row locks
+ * keep the webhook's order (link, then charge) and cannot deadlock with it.
  */
-async function closeOpenLinks(tx: Tx, chargeId: string): Promise<void> {
+async function oneAtATime(tx: Tx, chargeId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`charge:${chargeId}`}, 0))`
+}
+
+/**
+ * Close every payment link still open for a charge, at Razorpay first, and
+ * only then mark ours closed. Refuses — writing nothing — when money is
+ * coming through a link (paid or partly paid) or Razorpay will not cancel it.
+ * Each link Razorpay closed goes into `closed` at once, so a failure after it
+ * can name it.
+ */
+async function closeOpenLinks(tx: Tx, chargeId: string, closed: string[]): Promise<void> {
   const links = await tx.$queryRaw<{ id: string; provider_ref: string; status: string }[]>`
     SELECT id::text AS id, provider_ref, status
       FROM billing_checkouts
@@ -476,20 +512,34 @@ async function closeOpenLinks(tx: Tx, chargeId: string): Promise<void> {
        AND status IN ('created', 'issued', 'partially_paid', 'paid')
        FOR UPDATE`
   for (const link of links) {
-    if (!UNPAID_LINK.includes(link.status)) {
-      throw new Refusal("A payment came through this charge's link. Let it settle, or refund it at Razorpay first.")
-    }
-    try {
-      await cancelPaymentLink(link.provider_ref)
-    } catch (err) {
-      logger.error("Razorpay would not cancel a payment link; the charge was left as it was", {
-        chargeId,
-        paymentLinkId: link.provider_ref,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      throw new Refusal("Razorpay wouldn't cancel this charge's payment link, so nothing was changed. Try again in a minute.")
-    }
-    await tx.billing_checkouts.update({ where: { id: link.id }, data: { status: "cancelled", status_at: new Date() } })
+    if (!UNPAID_LINK.includes(link.status)) throw new Refusal(PAID_THROUGH_LINK)
+    const status = await closeAtRazorpay(chargeId, link.provider_ref)
+    closed.push(link.provider_ref)
+    await tx.billing_checkouts.update({ where: { id: link.id }, data: { status: status, status_at: new Date() } })
+  }
+}
+
+/**
+ * Cancel a link at Razorpay. One Razorpay had already closed — an earlier
+ * attempt that cancelled it and then failed here, or its expiry — counts as
+ * closed, so a second attempt goes through rather than refusing for ever.
+ * One that was paid is the paid refusal.
+ */
+async function closeAtRazorpay(chargeId: string, linkId: string): Promise<string> {
+  try {
+    await cancelPaymentLink(linkId)
+    return "cancelled"
+  } catch (err) {
+    const now = await paymentLinkStatus(linkId).catch(() => null)
+    if (now && (now.status === "cancelled" || now.status === "expired")) return now.status
+    logger.error("Razorpay would not cancel a payment link; the charge was left as it was", {
+      chargeId,
+      paymentLinkId: linkId,
+      razorpayStatus: now?.status ?? null,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    if (now && !UNPAID_LINK.includes(now.status)) throw new Refusal(PAID_THROUGH_LINK)
+    throw new Refusal("Razorpay wouldn't cancel this charge's payment link, so nothing was changed. Try again in a minute.")
   }
 }
 
@@ -515,13 +565,7 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
   // After authorisation, before any Razorpay call; refusals count too.
   const { count: sends } = await hit(`charges:link:${admin.id}`, LINK_SENDS.windowMs)
   if (sends > LINK_SENDS.max) throw new Refusal("Too many payment links in a minute. Wait a moment and try again.")
-  let paymentsOn = false
-  try {
-    paymentsOn = razorpayKeys() !== null
-  } catch {
-    paymentsOn = false
-  }
-  if (!paymentsOn) throw new Refusal("Payments aren't switched on here yet. Settle this one by hand.")
+  if (!paymentsOn()) throw new Refusal("Payments aren't switched on here yet. Settle this one by hand.")
 
   const charge = await db.placement_charges.findUnique({
     where: { id: chargeId },
@@ -570,13 +614,21 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
   try {
     const result = await db.$transaction(
       async (tx) => {
-        // The links, then the charge: the webhook's order, and the void's.
+        // After any other admin action on this charge; then the links, then
+        // the charge: the webhook's order, and the void's.
+        await oneAtATime(tx, chargeId)
         await tx.$queryRaw`SELECT id FROM billing_checkouts WHERE charge_id = ${chargeId}::uuid FOR UPDATE`
-        const [locked] = await tx.$queryRaw<{ status: string; amount_minor: number }[]>`
-          SELECT status::text AS status, amount_minor FROM placement_charges WHERE id = ${chargeId}::uuid FOR UPDATE`
-        if (!locked || locked.status !== "agreed" || locked.amount_minor !== charge.amount_minor) {
-          throw new Refusal("Someone else changed that charge just now. Reload and look again.")
+        const locked = await lockCharge(tx, chargeId)
+        if (!locked || locked.status !== "agreed" || locked.amount_minor !== charge.amount_minor || locked.currency !== "INR") {
+          throw new Refusal(CHANGED_JUST_NOW)
         }
+        // And the brand, under the lock: still the organisation read above, not suspended.
+        const brandNow = await tx.placement_charges.findUnique({
+          where: { id: chargeId },
+          select: { placement: { select: { sponsor: { select: { org_id: true, org: { select: { status: true } } } } } } },
+        })
+        const sponsorNow = brandNow?.placement.sponsor
+        if (!sponsorNow || sponsorNow.org_id !== orgId || sponsorNow.org?.status === "suspended") throw new Refusal(CHANGED_JUST_NOW)
         // A link Razorpay has already expired (it lives 14 days) is not open,
         // even when its expiry event never reached us.
         await tx.billing_checkouts.updateMany({
@@ -652,6 +704,11 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
     if (orphan) {
       // Razorpay made a link our side did not keep: close it, never leave it payable.
       const ref = orphan
+      logger.error("A payment link Razorpay made was not kept here; cancelling it", {
+        chargeId,
+        orphanProviderRef: ref,
+        error: err instanceof Error ? err.message : String(err),
+      })
       await cancelPaymentLink(ref).catch((cancelErr: unknown) =>
         logger.error("An orphan payment link could not be cancelled; cancel it from the Razorpay dashboard", {
           chargeId,

@@ -299,9 +299,16 @@ export async function notifyPaymentLink(id: string): Promise<void> {
   await call(z.object({}).passthrough(), "POST", `/payment_links/${encodeURIComponent(id)}/notify_by/email`, {})
 }
 
+const linkStatusSchema = z.object({ id: z.string().min(1), status: z.string() })
+
 /** Close a link so it can no longer be paid: a void, a hand settlement, an orphan. */
-export async function cancelPaymentLink(id: string): Promise<RazorpayPaymentLink> {
-  return call(paymentLinkSchema, "POST", `/payment_links/${encodeURIComponent(id)}/cancel`, {})
+export async function cancelPaymentLink(id: string): Promise<{ id: string; status: string }> {
+  return call(linkStatusSchema, "POST", `/payment_links/${encodeURIComponent(id)}/cancel`, {})
+}
+
+/** Where Razorpay says a link is now: after a cancel it refused, was it already closed, or paid? */
+export async function paymentLinkStatus(id: string): Promise<{ id: string; status: string }> {
+  return call(linkStatusSchema, "GET", `/payment_links/${encodeURIComponent(id)}`)
 }
 
 /** How long a link lives at Razorpay (`expire_by`), for our own "still open" rule. */

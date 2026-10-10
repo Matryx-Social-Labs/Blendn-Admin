@@ -9,7 +9,10 @@
 -- a tax record. A rollback of the CODE alone is safe: older code reads no
 -- `charge_id` and records a `payment_link.paid` without applying it.
 
--- Prisma runs a migration in one transaction, so SET LOCAL ends with it.
+-- `prisma migrate deploy` sends a file statement by statement, outside any
+-- transaction (measured, step 17 review), so this file is its own: SET LOCAL
+-- holds only inside it, and a failure part-way leaves nothing half-applied.
+BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 -- RESTRICT: a charge with a payment behind it is never deleted (voided, kept).
@@ -33,3 +36,5 @@ ALTER TABLE "billing_checkouts" ADD CONSTRAINT "billing_checkouts_charge_shape" 
 -- closed: a new link may follow one. Statuses are Razorpay's.
 CREATE UNIQUE INDEX "billing_checkouts_one_link_per_charge" ON "billing_checkouts" ("charge_id")
   WHERE "charge_id" IS NOT NULL AND "status" IN ('created', 'issued', 'partially_paid', 'paid');
+
+COMMIT;

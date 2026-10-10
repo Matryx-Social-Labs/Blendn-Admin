@@ -13,6 +13,12 @@
  *   - Reach: distinct people from the per-campaign hashes, the larger campaign
  *     on a two-campaign placement, held back under 5 with its exposures, and
  *     the sponsor's 30 days summing only what is shown.
+ *   - Review pass 2 and scans 3–4: the link created silent and emailed after
+ *     the commit; an orphan cancelled; a void or a settle closes the link at
+ *     Razorpay first; paid twice, refunds, early refunds, disputes, expiry;
+ *     and four races run at once (send ∥ void, send ∥ send, void ∥ paid,
+ *     settle ∥ paid), each ending with no payable link on a closed charge and
+ *     no payment lost or unflagged. Stored reach survives its sweep.
  *
  * Razorpay's API is a stub `fetch`; signatures are computed here.
  */
@@ -24,11 +30,15 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import { createHmac, randomUUID } from "crypto"
 import { NextRequest } from "next/server"
 
+import { planPageData } from "@/lib/billing"
 import { advanceCharge, getChargeLedger, sendPaymentLink } from "@/lib/charge-actions"
+import { logger } from "@/lib/logger"
+import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { placementReach, reachKey } from "@/lib/sponsor-reach"
+import { materialiseEndedReach } from "@/lib/sponsored-scheduler"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, refusingWrites, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const route = require("@/app/api/webhooks/razorpay/route") as typeof import("@/app/api/webhooks/razorpay/route")
@@ -51,21 +61,67 @@ let brand = ""
 const calls: { method: string; url: string; body: Record<string, unknown> | undefined }[] = []
 const realFetch = global.fetch
 
+/** Razorpay's own view of each link it made: what GET answers, and what a second cancel refuses. */
+const atRazorpay = new Map<string, string>()
+const fail = { create: false, cancel: false, notify: false }
+let payHost = "rzp.io"
+/** A call held at Razorpay until released (`hold`), so a test can run something beside it. */
+const gates: Partial<Record<"create" | "cancel", Promise<void>>> = {}
+const arrivals: Partial<Record<"create" | "cancel", () => void>> = {}
+
+function hold(kind: "create" | "cancel") {
+  let release = () => {}
+  gates[kind] = new Promise<void>((r) => (release = r))
+  const arrived = new Promise<void>((r) => (arrivals[kind] = r))
+  return {
+    arrived,
+    release: () => {
+      delete gates[kind]
+      release()
+    },
+  }
+}
+
 function stubRazorpay() {
   global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    const method = init?.method ?? "GET"
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
-    calls.push({ method: init?.method ?? "GET", url, body })
-    if (url.endsWith("/payment_links")) {
-      const id = `plink_${randomUUID().slice(0, 12)}`
-      return new Response(
-        JSON.stringify({ id, short_url: `https://rzp.io/i/${id.slice(6)}`, status: "created", amount: body?.amount, currency: "INR" }),
-        { status: 200 }
-      )
+    calls.push({ method, url, body })
+    const json = (status: number, data: unknown) => new Response(JSON.stringify(data), { status })
+    const id = decodeURIComponent(url.split("/payment_links/")[1]?.split("/")[0] ?? "")
+    if (url.endsWith("/payment_links") && method === "POST") {
+      arrivals.create?.()
+      if (gates.create) await gates.create
+      if (fail.create) return json(500, { error: { description: "Razorpay is having a bad day" } })
+      const made = `plink_${randomUUID().slice(0, 12)}`
+      atRazorpay.set(made, "created")
+      return json(200, { id: made, short_url: `https://${payHost}/i/${made.slice(6)}`, status: "created", amount: body?.amount, currency: "INR" })
     }
-    return new Response(JSON.stringify({ error: { description: "not stubbed" } }), { status: 404 })
+    if (url.endsWith("/cancel")) {
+      arrivals.cancel?.()
+      if (gates.cancel) await gates.cancel
+      if (fail.cancel) return json(500, { error: { description: "Razorpay is having a bad day" } })
+      if (atRazorpay.get(id) !== "created") return json(400, { error: { description: "Payment link cannot be cancelled" } })
+      atRazorpay.set(id, "cancelled")
+      return json(200, { id, status: "cancelled" })
+    }
+    if (url.includes("/notify_by/")) return fail.notify ? json(500, { error: { description: "no" } }) : json(200, { success: true })
+    if (method === "GET" && id) return json(200, { id, status: atRazorpay.get(id) ?? "created" })
+    return json(404, { error: { description: "not stubbed" } })
   }) as typeof fetch
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+let errors: jest.SpyInstance
+const loggedWith = (key: string, value: unknown) =>
+  errors.mock.calls.some(([, meta]) => {
+    const v = (meta as Record<string, unknown> | undefined)?.[key]
+    return Array.isArray(v) ? v.includes(value) : v === value
+  })
+/** Links a sponsor could still pay through. */
+const payable = (chargeId: string) => db.billing_checkouts.count({ where: { charge_id: chargeId, status: { in: ["created", "issued", "partially_paid"] } } })
+const auditCount = (chargeId: string, action: string) => db.audit_logs.count({ where: { resource_id: chargeId, action } })
 
 const as = (id: string, role: "app_admin" | "organizer" | "sponsor") => mockGetAuth.mockResolvedValue({ user: { id, role } })
 
@@ -164,6 +220,10 @@ beforeAll(async () => {
 
 beforeEach(() => {
   calls.length = 0
+  resetMemoryStore()
+  fail.create = fail.cancel = fail.notify = false
+  payHost = "rzp.io"
+  errors = jest.spyOn(logger, "error").mockImplementation(() => undefined)
   process.env.RAZORPAY_KEY_ID = "rzp_test_itestkey"
   process.env.RAZORPAY_KEY_SECRET = "itest_key_secret_value_24"
   process.env.RAZORPAY_WEBHOOK_SECRET = SECRET
@@ -171,6 +231,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  errors.mockRestore()
   global.fetch = realFetch
   delete process.env.RAZORPAY_KEY_ID
   delete process.env.RAZORPAY_KEY_SECRET
@@ -205,9 +266,13 @@ describe("Send payment link", () => {
     const checkout = await db.billing_checkouts.findFirstOrThrow({ where: { charge_id: c.chargeId } })
     expect(checkout).toMatchObject({ kind: "payment_link", provider_ref: out.linkId, org_id: sponsorOrg, amount_minor: 312_500, currency: "INR", status: "created" })
     expect(checkout.pay_url).toMatch(/^https:\/\/rzp\.io\//)
-    expect((await chargeRow(c.chargeId)).external_ref).toBe(out.linkId)
+    // The pricing note stays; the link is tied by charge_id, and settling names it.
+    expect((await chargeRow(c.chargeId)).external_ref).toBe("Pricing note: two nights")
     const create = calls.find((x) => x.url.endsWith("/payment_links"))
     expect(create?.body).toMatchObject({ amount: 312_500, currency: "INR", accept_partial: false, notes: { org_id: sponsorOrg, charge_id: c.chargeId } })
+    // Created silent; emailed only after our record committed.
+    expect(create?.body?.notify).toEqual({ email: false, sms: false })
+    expect(calls.map((x) => x.url.replace(/^.*\/v1/, ""))).toEqual(["/payment_links", `/payment_links/${out.linkId}/notify_by/email`])
     expect((create?.body?.customer as { email: string }).email).toBe(`${sponsorUser}@itest.invalid`)
     // A second click returns the first link and asks Razorpay for nothing.
     const again = await sendPaymentLink(c.chargeId)
@@ -355,11 +420,12 @@ describe("reach (F8)", () => {
       { eventId: small.eventId, sponsorId: brand },
     ])
     // 7 distinct in the first campaign, 6 in the second: the larger, never 13.
+    // Frequency is that campaign's own, 13 / 7, never all 19 exposures over 7 (db M6).
     expect(reach.get(reachKey(big.eventId, brand))).toEqual({
       reach: 7,
       suppressed: false,
       exposures: 19,
-      frequency: 2.7,
+      frequency: 1.9,
       liveSharePct: Math.round((12 / 19) * 100),
       sends: 4,
     })
@@ -396,5 +462,315 @@ describe("reach (F8)", () => {
     await post(linkPaid(linkId, { amount: 180_000 }))
     as(sponsorUser, "sponsor")
     expect((await getSponsorOverview()).placements.find((p) => p.eventId === eventId)?.due).toBeNull()
+  })
+})
+
+describe("Send payment link: when one side fails (review H4; scans 3 and 4)", () => {
+  it("Razorpay refuses: no row, no audit, nothing to cancel", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    fail.create = true
+    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Razorpay didn't accept that just now")
+    expect(await db.billing_checkouts.count({ where: { charge_id: c.chargeId } })).toBe(0)
+    expect(await auditCount(c.chargeId, "charge.link_sent")).toBe(0)
+    expect(calls.some((x) => x.url.endsWith("/cancel"))).toBe(false)
+  })
+
+  it("the database refuses after Razorpay made the link: no row, nobody emailed, the link cancelled and logged", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    await refusingWrites("billing_checkouts", "INSERT", `NEW.charge_id = '${c.chargeId}'`, () =>
+      expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Something went wrong on our side")
+    )
+    const [orphan] = [...atRazorpay.entries()].at(-1)!
+    expect(await db.billing_checkouts.count({ where: { charge_id: c.chargeId } })).toBe(0)
+    expect(atRazorpay.get(orphan)).toBe("cancelled")
+    expect(calls.some((x) => x.url.includes("/notify_by/"))).toBe(false)
+    expect(loggedWith("orphanProviderRef", orphan)).toBe(true)
+    expect(await auditCount(c.chargeId, "charge.link_sent")).toBe(0)
+  })
+
+  it("Razorpay not emailing it afterwards is logged, and the link stands", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    fail.notify = true
+    const out = await sendPaymentLink(c.chargeId)
+    expect(await payable(c.chargeId)).toBe(1)
+    expect(loggedWith("paymentLinkId", out.linkId)).toBe(true)
+  })
+
+  it("a pay URL that is not Razorpay's is never stored", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    payHost = "rzp.io.evil.example"
+    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Razorpay didn't accept that just now")
+    expect(await db.billing_checkouts.count({ where: { charge_id: c.chargeId } })).toBe(0)
+  })
+
+  it("refuses a suspended brand's organisation, and more than ten sends a minute, refusals included", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    await db.organisations.update({ where: { id: sponsorOrg }, data: { status: "suspended" } })
+    try {
+      await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("suspended")
+    } finally {
+      await db.organisations.update({ where: { id: sponsorOrg }, data: { status: "verified" } })
+    }
+    for (let i = 0; i < 9; i++) await expect(sendPaymentLink(randomUUID())).rejects.toThrow("Charge not found")
+    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Too many payment links")
+    expect(calls).toHaveLength(0)
+  })
+
+  it("a link older than Razorpay keeps is expired, and a new one sent", async () => {
+    const { chargeId, linkId } = await sentLink()
+    await db.billing_checkouts.updateMany({ where: { provider_ref: linkId }, data: { created_at: new Date(Date.now() - 16 * DAY) } })
+    as(admin, "app_admin")
+    const again = await sendPaymentLink(chargeId)
+    expect(again.reused).toBe(false)
+    expect(again.linkId).not.toBe(linkId)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: linkId } })).status).toBe("expired")
+    expect(await payable(chargeId)).toBe(1)
+  })
+
+  it("the role is the database's: a session claiming app_admin for an organiser sends nothing", async () => {
+    const c = await charge()
+    as(host, "app_admin")
+    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Forbidden")
+    await expect(advanceCharge(c.chargeId, "void", undefined, "a forged admin claim")).rejects.toThrow("Forbidden")
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("a void or a hand settlement closes the link first (review H1)", () => {
+  it("void: cancelled at Razorpay, then here, then the charge, audited with the link", async () => {
+    const { chargeId, linkId } = await sentLink()
+    as(admin, "app_admin")
+    await advanceCharge(chargeId, "void", undefined, "Sponsor pulled out before the night")
+    expect(atRazorpay.get(linkId)).toBe("cancelled")
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: linkId } })).status).toBe("cancelled")
+    expect((await chargeRow(chargeId)).status).toBe("void")
+    const audit = await db.audit_logs.findFirstOrThrow({ where: { resource_id: chargeId, action: "charge.void" } })
+    expect(audit.details).toMatchObject({ closedLinks: [linkId] })
+  })
+
+  it("refuses while money came through the link: paid here, or paid at Razorpay", async () => {
+    const paidHere = await sentLink()
+    await post(linkPaid(paidHere.linkId))
+    as(admin, "app_admin")
+    await expect(advanceCharge(paidHere.chargeId, "void", undefined, "Trying to void a link-paid charge")).rejects.toThrow("A payment came through")
+    expect((await chargeRow(paidHere.chargeId)).status).toBe("settled")
+
+    const paidThere = await sentLink()
+    atRazorpay.set(paidThere.linkId, "paid")
+    await expect(advanceCharge(paidThere.chargeId, "settled", "NEFT-UTR-445566")).rejects.toThrow("A payment came through")
+    expect((await chargeRow(paidThere.chargeId)).status).toBe("agreed")
+  })
+
+  it("Razorpay refuses the cancel: nothing changes, the link stays open, logged", async () => {
+    const { chargeId, linkId } = await sentLink()
+    as(admin, "app_admin")
+    fail.cancel = true
+    await expect(advanceCharge(chargeId, "void", undefined, "Sponsor pulled out before the night")).rejects.toThrow("wouldn't cancel")
+    expect((await chargeRow(chargeId)).status).toBe("agreed")
+    expect(await payable(chargeId)).toBe(1)
+    expect(await auditCount(chargeId, "charge.void")).toBe(0)
+    expect(loggedWith("paymentLinkId", linkId)).toBe(true)
+  })
+
+  it("the database fails after Razorpay cancelled: refused and logged; the next attempt finds it closed and goes through", async () => {
+    const { chargeId, linkId } = await sentLink()
+    as(admin, "app_admin")
+    await refusingWrites("audit_logs", "INSERT", `NEW.action = 'charge.void' AND NEW.resource_id = '${chargeId}'`, () =>
+      expect(advanceCharge(chargeId, "void", undefined, "Sponsor pulled out before the night")).rejects.toThrow()
+    )
+    expect(atRazorpay.get(linkId)).toBe("cancelled")
+    expect((await chargeRow(chargeId)).status).toBe("agreed")
+    expect(loggedWith("paymentLinkIds", linkId)).toBe(true)
+    // Razorpay refuses a second cancel; it says the link is closed, so the void goes through.
+    await advanceCharge(chargeId, "void", undefined, "Sponsor pulled out before the night")
+    expect((await chargeRow(chargeId)).status).toBe("void")
+    expect(await payable(chargeId)).toBe(0)
+  })
+})
+
+describe("the webhook, against our rows (review H3, M2, M5; db M1, M2)", () => {
+  it("a charge settled by hand and then paid by its link is flagged paid twice; refunding that payment leaves the settlement", async () => {
+    const { chargeId, linkId } = await sentLink()
+    atRazorpay.set(linkId, "paid") // the sponsor paid at Razorpay before the hand settlement closed it
+    await db.placement_charges.update({ where: { id: chargeId }, data: { status: "settled", settled_at: new Date(), external_ref: "NEFT-UTR-998877" } })
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(linkPaid(linkId, { paymentId }))
+    expect(await auditCount(chargeId, "charge.paid_twice")).toBe(1)
+    expect(loggedWith("settledRef", "NEFT-UTR-998877")).toBe(true)
+    await post({
+      entity: "event",
+      event: "refund.processed",
+      created_at: T0 + 60,
+      payload: { refund: { entity: { id: `rfnd_${randomUUID().slice(0, 8)}`, payment_id: paymentId, amount: 250_000, currency: "INR", status: "processed" } } },
+    })
+    expect(await chargeRow(chargeId)).toMatchObject({ status: "settled", external_ref: "NEFT-UTR-998877" })
+  })
+
+  it("a refund that arrives before the payment is applied once the payment lands", async () => {
+    const { chargeId, linkId } = await sentLink()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    const refundEvent = `itest_pl_${randomUUID()}`
+    await post(
+      {
+        entity: "event",
+        event: "refund.processed",
+        created_at: T0 + 60,
+        payload: { refund: { entity: { id: `rfnd_${randomUUID().slice(0, 8)}`, payment_id: paymentId, amount: 250_000, currency: "INR", status: "processed" } } },
+      },
+      refundEvent
+    )
+    expect((await db.payment_events.findFirstOrThrow({ where: { provider_event_id: refundEvent } })).error).toBe("unknown_ref")
+    await post(linkPaid(linkId, { paymentId }))
+    expect((await chargeRow(chargeId)).status).toBe("void")
+    expect((await db.payment_events.findFirstOrThrow({ where: { provider_event_id: refundEvent } })).error).toBeNull()
+  })
+
+  it("a dispute is flagged; lost, the charge this link settled is void", async () => {
+    const { chargeId, linkId } = await sentLink()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(linkPaid(linkId, { paymentId }))
+    const dispute = (event: string, at: number) => ({
+      entity: "event",
+      event,
+      created_at: at,
+      payload: { dispute: { entity: { id: `disp_${randomUUID().slice(0, 8)}`, payment_id: paymentId, amount: 250_000, currency: "INR" } } },
+    })
+    await post(dispute("payment.dispute.created", T0 + 60))
+    expect(await auditCount(chargeId, "charge.disputed")).toBe(1)
+    expect((await chargeRow(chargeId)).status).toBe("settled")
+    await post(dispute("payment.dispute.lost", T0 + 120))
+    expect((await chargeRow(chargeId)).status).toBe("void")
+  })
+
+  it("payment_link.expired and .cancelled close the link here; a paid link stays paid", async () => {
+    const expiring = await sentLink()
+    const closed = (linkId: string, event: string) => ({ entity: "event", event, created_at: T0 + 30, payload: { payment_link: { entity: { id: linkId, status: event.split(".")[1] } } } })
+    await post(closed(expiring.linkId, "payment_link.expired"))
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: expiring.linkId } })).status).toBe("expired")
+    const cancelling = await sentLink()
+    await post(closed(cancelling.linkId, "payment_link.cancelled"))
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: cancelling.linkId } })).status).toBe("cancelled")
+    const paid = await sentLink()
+    await post(linkPaid(paid.linkId))
+    await post(closed(paid.linkId, "payment_link.expired"))
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: paid.linkId } })).status).toBe("paid")
+  })
+
+  it("the organisation's Plan page never lists a sponsor link payment (review 16, db M3)", async () => {
+    const { linkId } = await sentLink(420_000)
+    await post(linkPaid(linkId, { amount: 420_000 }))
+    const page = await planPageData({ orgId: sponsorOrg, orgName: "x", memberRole: "owner", mayBuy: true })
+    expect(page.payments).toEqual([])
+  })
+})
+
+describe("races, run at once (scan 4)", () => {
+  /** The end every race must reach: no link to pay on a closed charge, and every payment recorded. */
+  async function settledState(chargeId: string) {
+    const row = await chargeRow(chargeId)
+    if (row.status === "void" || row.status === "settled") expect(await payable(chargeId)).toBe(0)
+    return row
+  }
+
+  it("send ∥ void: the void waits for the send, then closes the link it made", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    const making = hold("create")
+    const send = sendPaymentLink(c.chargeId)
+    await making.arrived // the send holds the charge while Razorpay makes the link
+    const voiding = advanceCharge(c.chargeId, "void", undefined, "Sponsor pulled out mid-send")
+    await sleep(300)
+    making.release()
+    const [sent] = await Promise.all([send, voiding])
+    expect((await settledState(c.chargeId)).status).toBe("void")
+    expect(atRazorpay.get(sent.linkId)).toBe("cancelled")
+  })
+
+  it("send ∥ send: one link, both callers given it, one Razorpay call", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    const making = hold("create")
+    const first = sendPaymentLink(c.chargeId)
+    await making.arrived
+    const second = sendPaymentLink(c.chargeId)
+    await sleep(300)
+    making.release()
+    const [a, b] = await Promise.all([first, second])
+    expect(b).toMatchObject({ linkId: a.linkId, reused: true })
+    expect(calls.filter((x) => x.url.endsWith("/payment_links"))).toHaveLength(1)
+    expect(await payable(c.chargeId)).toBe(1)
+  })
+
+  it("void ∥ payment_link.paid: the void closes the link first; the payment is recorded and flagged for a refund", async () => {
+    const { chargeId, linkId } = await sentLink()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    as(admin, "app_admin")
+    const cancelling = hold("cancel")
+    const voiding = advanceCharge(chargeId, "void", undefined, "Sponsor pulled out as they paid")
+    await cancelling.arrived // the void holds the link's row
+    const paying = post(linkPaid(linkId, { paymentId }))
+    await sleep(300)
+    cancelling.release()
+    const [, res] = await Promise.all([voiding, paying])
+    expect(res.status).toBe(200)
+    expect((await settledState(chargeId)).status).toBe("void")
+    expect(await db.billing_payments.count({ where: { provider_payment_id: paymentId } })).toBe(1)
+    expect(await auditCount(chargeId, "charge.paid_after_void")).toBe(1)
+  })
+
+  it("hand settle ∥ payment_link.paid: settled by hand; the link's payment is recorded and flagged paid twice", async () => {
+    const { chargeId, linkId } = await sentLink()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    as(admin, "app_admin")
+    const cancelling = hold("cancel")
+    const settling = advanceCharge(chargeId, "settled", "NEFT-UTR-112233")
+    await cancelling.arrived
+    const paying = post(linkPaid(linkId, { paymentId }))
+    await sleep(300)
+    cancelling.release()
+    const [, res] = await Promise.all([settling, paying])
+    expect(res.status).toBe(200)
+    expect(await settledState(chargeId)).toMatchObject({ status: "settled", external_ref: "NEFT-UTR-112233" })
+    expect(await db.billing_payments.count({ where: { provider_payment_id: paymentId } })).toBe(1)
+    expect(await auditCount(chargeId, "charge.paid_twice")).toBe(1)
+  })
+})
+
+describe("stored reach (db H5)", () => {
+  it("stores each ended campaign's reach once, empties its hashes, and reads the same figure after", async () => {
+    const ended = await charge({ start: new Date(Date.now() - 2 * DAY) })
+    const m = await db.event_sponsored_messages.create({ data: { event_id: ended.eventId, sponsor_id: brand, content: "Sample sponsored message" } })
+    const creative = await db.sponsored_creatives.create({ data: { message_id: m.id, content: "Sample sponsored message", moderation_status: "approved" } })
+    const hashes = Array.from({ length: 6 }, (_, i) => `stored${i}_${randomUUID().slice(0, 6)}`)
+    for (const [i, room] of [hashes.slice(0, 4), hashes.slice(2, 6)].entries()) {
+      await db.sponsored_message_sends.create({
+        data: { sponsored_message_id: m.id, creative_id: creative.id, scheduled_for: new Date(Date.now() - 2 * DAY + i * 60_000), members: room.length, live_connected: 0, recipient_hashes: room },
+      })
+    }
+    const before = (await placementReach([{ eventId: ended.eventId, sponsorId: brand }])).get(reachKey(ended.eventId, brand))
+    expect(before?.reach).toBe(6)
+
+    expect(await materialiseEndedReach()).toBeGreaterThanOrEqual(1)
+    expect(await db.event_sponsored_messages.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ reach: 6 })
+    const sends = await db.sponsored_message_sends.findMany({ where: { sponsored_message_id: m.id }, select: { recipient_hashes: true } })
+    expect(sends.every((s) => s.recipient_hashes.length === 0)).toBe(true)
+    expect((await placementReach([{ eventId: ended.eventId, sponsorId: brand }])).get(reachKey(ended.eventId, brand))).toEqual(before)
+
+    // Again: nothing counted twice, nothing changed.
+    const stamped = (await db.event_sponsored_messages.findUniqueOrThrow({ where: { id: m.id } })).reach_materialised_at
+    await materialiseEndedReach()
+    expect((await db.event_sponsored_messages.findUniqueOrThrow({ where: { id: m.id } })).reach_materialised_at).toEqual(stamped)
+  })
+
+  it("leaves a campaign whose event has not ended counting live", async () => {
+    const running = await charge({ start: new Date(Date.now() - 60 * 60_000) })
+    const m = await db.event_sponsored_messages.create({ data: { event_id: running.eventId, sponsor_id: brand, content: "Sample sponsored message" } })
+    await materialiseEndedReach()
+    expect(await db.event_sponsored_messages.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ reach: null, reach_materialised_at: null })
   })
 })

@@ -2848,6 +2848,12 @@ model event_sponsored_messages {
   /// SAME update that writes the new content, so there is no window where the
   /// words are new and the verdict is old.
   moderation_status    moderation_status_type @default(pending)
+  /// Distinct people the campaign reached, counted once from its sends'
+  /// `recipient_hashes` after the event ended; the hashes are then emptied
+  /// (`materialiseEndedReach`, lib/sponsor-reach.ts). Null until then, when
+  /// reach is counted live. Both columns or neither (CHECK in the migration).
+  reach                 Int?
+  reach_materialised_at DateTime?              @db.Timestamptz(6)
 
   event     events                    @relation(fields: [event_id], references: [id], onDelete: Cascade)
   sponsor   sponsors?                 @relation(fields: [sponsor_id], references: [id], onDelete: SetNull)
@@ -2933,7 +2939,8 @@ model sponsored_message_sends {
   /// the report needs — while making the array useless for cross-campaign
   /// intersection and non-reversible without `NEXTAUTH_SECRET`.
   ///
-  /// Emptied at event end, once reach is materialised onto the campaign. A
+  /// Emptied after the event ends, once reach is materialised onto the
+  /// campaign (`event_sponsored_messages.reach`, lib/sponsor-reach.ts). A
   /// campaign that ended has a number and no roster.
   ///
   /// **Never serialised to any client, export or CSV.**
