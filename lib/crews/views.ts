@@ -2,6 +2,7 @@
 import { firstName, UNNAMED } from "../conversation-identity"
 import { db } from "../db"
 import { idForViewer } from "../room-handle"
+import { friendIdsOf } from "../friends"
 import { blocksBetween } from "./blocks"
 import { CREW_TAGS, openInviteWhere, type CrewTag } from "./crews"
 
@@ -16,8 +17,13 @@ import { CREW_TAGS, openInviteWhere, type CrewTag } from "./crews"
  * a crew you are not in is the same 404 as one that does not exist.
  *
  * Two members kept apart (a block or a closed conversation either way, C5)
- * are not listed to each other; `size` still counts everybody active, because
- * it is the crew's size, not a list of who.
+ * are not listed to each other, and not counted to each other either: a
+ * `size` one bigger than the list would say a crewmate is hiding from you
+ * (step 9 review, H4). Each viewer's crew is the people they can see.
+ *
+ * `isFriend` on a member says they are one of the viewer's friends — what an
+ * invite picker needs to leave out somebody already in, without ever handing
+ * the client another person's account id (step 9 review, M5).
  */
 
 const memberSelect = {
@@ -67,9 +73,10 @@ type CrewRow = {
 const tagsOf = (tags: string[]) =>
   tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] }))
 
-function crewView(viewerId: string, crew: CrewRow, apart: ReadonlySet<string>) {
+function crewView(viewerId: string, crew: CrewRow, apart: ReadonlySet<string>, friends: ReadonlySet<string>) {
   const roomId = crew.room?.id
   const me = crew.members.find((m) => m.user_id === viewerId)
+  const shown = crew.members.filter((m) => !apart.has(`${viewerId}|${m.user_id}`))
   return {
     crewId: crew.id,
     name: crew.name,
@@ -80,11 +87,12 @@ function crewView(viewerId: string, crew: CrewRow, apart: ReadonlySet<string>) {
     openToSolo: crew.open_to_solo,
     createdAt: crew.created_at,
     chatGroupId: roomId ?? null,
-    size: crew.members.length,
+    size: shown.length,
     you: me ? { role: me.role, keepMeAnonymous: me.keep_me_anonymous } : null,
-    members: crew.members.filter((m) => !apart.has(`${viewerId}|${m.user_id}`)).map((m) => ({
+    members: shown.map((m) => ({
       // Yours real; everyone else's as their handle in the crew's room.
       userId: roomId ? idForViewer(viewerId, { kind: "crew", groupId: roomId }, m.user_id) : m.user_id,
+      isFriend: friends.has(m.user_id),
       name: firstName(m.user.profile?.name || m.user.name || UNNAMED),
       photo: m.user.profile?.photos?.[0] ?? null,
       role: m.role,
@@ -115,28 +123,44 @@ export async function crewsOf(userId: string) {
             bio: true,
             emblem_seed: true,
             tags: true,
-            _count: { select: { members: { where: { user: { suspended_at: null, deletedAt: null } } } } },
+            members: { where: { user: { suspended_at: null, deletedAt: null } }, select: { user_id: true } },
           },
         },
       },
       orderBy: { created_at: "desc" },
     }),
   ])
-  const apart = await blocksBetween(
-    [userId],
-    [...new Set([...crews.flatMap((c) => c.members.map((m) => m.user_id)), ...invites.map((i) => i.invited_by)])]
-  )
+  const [apart, friends] = await Promise.all([
+    blocksBetween(
+      [userId],
+      [
+        ...new Set([
+          ...crews.flatMap((c) => c.members.map((m) => m.user_id)),
+          ...invites.flatMap((i) => [i.invited_by, ...i.crew.members.map((m) => m.user_id)]),
+        ]),
+      ]
+    ),
+    friendIdsOf(userId).then((ids) => new Set(ids)),
+  ])
+  /*
+   * Only an invite the accept would take (`acceptCrewInvite`, step 9 review
+   * H4): whoever sent it still in the crew and still your friend, and nobody
+   * in it kept apart from you. One the accept would refuse is not on the
+   * screen — listed and then refused, it told you a block was there.
+   */
+  const acceptable = invites.filter((i) => {
+    const active = i.crew.members.map((m) => m.user_id)
+    return active.includes(i.invited_by) && friends.has(i.invited_by) && !active.some((id) => apart.has(`${userId}|${id}`))
+  })
   return {
-    crews: crews.map((c) => crewView(userId, c, apart)),
-    // Not an invite from somebody now kept apart from you: the accept would
-    // refuse it, so it is not on the screen either.
-    invites: invites.filter((i) => !apart.has(`${userId}|${i.invited_by}`)).map((i) => ({
+    crews: crews.map((c) => crewView(userId, c, apart, friends)),
+    invites: acceptable.map((i) => ({
       crewId: i.crew.id,
       name: i.crew.name,
       bio: i.crew.bio,
       emblemSeed: i.crew.emblem_seed,
       tags: tagsOf(i.crew.tags),
-      size: i.crew._count.members,
+      size: i.crew.members.length,
       // A friend asked them in: their first name, the friend-surface rule.
       invitedBy: firstName(i.inviter.profile?.name || i.inviter.name || UNNAMED),
       invitedAt: i.created_at,
@@ -151,5 +175,9 @@ export async function crewDetail(userId: string, crewId: string) {
     select: crewSelect,
   })
   if (!crew) return null
-  return crewView(userId, crew, await blocksBetween([userId], crew.members.map((m) => m.user_id)))
+  const [apart, friends] = await Promise.all([
+    blocksBetween([userId], crew.members.map((m) => m.user_id)),
+    friendIdsOf(userId).then((ids) => new Set(ids)),
+  ])
+  return crewView(userId, crew, apart, friends)
 }
