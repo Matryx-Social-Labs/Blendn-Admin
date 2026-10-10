@@ -83,22 +83,35 @@ describe("the override stays in its subtree", () => {
     expect(hits.sort()).toEqual(["app/globals.css", "components/public-frame.tsx"])
   })
 
-  it("is rendered only by the public funnel's pages", () => {
-    // PublicFrame is the light theme; a dashboard page that reached for it
-    // would go light. The apply and claim pages are the funnel (step 18).
+  /** Every file that imports `name` from the public frames. */
+  const importersOf = (name: string) => {
     const users: string[] = []
+    const pattern = new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from "@/components/public-frame"`)
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir)) {
         if (entry === "node_modules" || entry.startsWith(".")) continue
         const full = join(dir, entry)
         if (statSync(full).isDirectory()) walk(full)
-        else if (/\.tsx?$/.test(entry) && /import \{[^}]*\bPublicFrame\b[^}]*\} from "@\/components\/public-frame"/.test(readFileSync(full, "utf8"))) {
-          users.push(relative(ROOT, full))
-        }
+        else if (/\.tsx?$/.test(entry) && pattern.test(readFileSync(full, "utf8"))) users.push(relative(ROOT, full))
       }
     }
     for (const dir of ["app", "components", "lib"]) walk(join(ROOT, dir))
+    return users
+  }
+
+  it("is rendered only by the public funnel's pages", () => {
+    // PublicFrame is the light theme; a dashboard page that reached for it
+    // would go light. The apply and claim pages are the funnel (step 18).
+    const users = importersOf("PublicFrame")
     expect(users.length).toBeGreaterThan(0)
     expect(users.filter((f) => !/^app\/(apply|claim)\//.test(f))).toEqual([])
+  })
+
+  it("keeps the public pages' other frame out of the dashboard too", () => {
+    // AuthFrame draws its page's h1, which `dashboard-header-title.test.ts`
+    // allows only because nothing in the dashboard renders it.
+    const users = importersOf("AuthFrame")
+    expect(users.length).toBeGreaterThan(0)
+    expect(users.filter((f) => /^(app\/dashboard|components)\//.test(f))).toEqual([])
   })
 })

@@ -1748,6 +1748,12 @@
       "observed": "M999: 2 of 14 failing (settled_at moved on a later delivery; a voided charge settled). M1000: 4 of 14 (each mismatch settled). M1001: 1 of 14. M1002: 1 of 14 (a second link; the partial unique index refused it). M1003: 1 of 14. M1004: 1 of 14 (reach 13). M1005: 1 of 14 (reach 3 shown). M1006: 1 of 14. M1007: 1 of 14 (payer@example.com kept). Reverted, 14 of 14. M912–M914, M916–M927, M929–M938: 1 failing each, the test named for it. M915: 2 (the settle race; paid twice). M928: 1 (the hand settlement voided). Each restored from a saved copy; 36 green. M939: 1 failing (the 31st move went through). M940: 1 (the committed link was cancelled at Razorpay). Restored; 39 green. M964–M968, M970–M979: 1 failing each, the test named for it. Each restored; 51 green.",
       "date": "2026-10-10"
     },
+    "apply-theme.test.ts": {
+      "guards": "the light override (.apply-light) re-declares :root's values verbatim and never the brand colours; since step 18 one component carries it (components/public-frame.tsx), PublicFrame is imported only under app/apply/** and app/claim/**, and AuthFrame (which draws its page's h1) by nothing under app/dashboard/** or components/** — the reason dashboard-header-title.test.ts may allow that h1",
+      "mutation": "Step 18, clearing the grandfathered entry. M1086 `import { PublicFrame } from \"@/components/public-frame\"` added to app/dashboard/settings/page.tsx. M1087 `apply-light` removed from PublicFrame's <main> className. M1088 `import { AuthFrame } from \"@/components/public-frame\"` added to app/dashboard/settings/page.tsx.",
+      "observed": "M1086: 1 failing of 6 ('is rendered only by the public funnel's pages'). M1087: 1 failing of 6 ('is used only by the apply funnel': the file left the list). M1088: 1 failing of 6 ('keeps the public pages' other frame out of the dashboard too'). Restored, 6 of 6.",
+      "date": "2026-10-10"
+    },
     "server-boot-imports.test.ts": {
       "guards": "Step 17 final review: nothing in server.ts's runtime import graph (relative and @/ imports, type-only skipped) imports \"server-only\", which throws under plain Node and kills the custom server at boot; the graph is checked to include the socket server and the sponsored scheduler.",
       "mutation": "M969 lib/sponsored-scheduler.ts imports lib/sponsor-reach.ts.",
@@ -1764,7 +1770,6 @@
   "grandfathered": [
     "account-deletion.test.ts",
     "amenities.test.ts",
-    "apply-theme.test.ts",
     "authz-scoping-boundary.test.ts",
     "block-reaches-the-room.test.ts",
     "blur-derivative.test.ts",
