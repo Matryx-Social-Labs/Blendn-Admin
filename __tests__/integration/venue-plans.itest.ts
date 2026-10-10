@@ -51,7 +51,8 @@ import { isValidElement, type ReactElement } from "react"
 
 import { hasEntitlement } from "@/lib/entitlements"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
-import { venueDayFor } from "@/lib/venue-day"
+import { venueDayBounds, venueDayFor } from "@/lib/venue-day"
+import { decideVenueClaim } from "@/lib/venue-claim-actions"
 import { venueInsights } from "@/lib/venue-insights"
 import { venuePlanPage, venueReadiness } from "@/lib/venue-plan"
 
@@ -101,7 +102,7 @@ function stubRazorpay() {
 
 const as = (id: string, role: "organizer" | "app_admin" | "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role } })
 
-async function venue(label: string, opts: { org?: string | null; claimedDaysAgo?: number } = {}) {
+async function venue(label: string, opts: { org?: string | null; claimedDaysAgo?: number; claimedAt?: Date; timezone?: string } = {}) {
   const org = opts.org === undefined ? orgId : opts.org
   const v = await db.venues.create({
     data: {
@@ -109,10 +110,10 @@ async function venue(label: string, opts: { org?: string | null; claimedDaysAgo?
       city: "Bengaluru",
       latitude: 12.97,
       longitude: 77.64,
-      timezone: "UTC",
+      timezone: opts.timezone ?? "UTC",
       day_reset_hour: 6,
       owner_org_id: org,
-      claimed_at: org ? new Date(Date.now() - (opts.claimedDaysAgo ?? 100) * DAY) : null,
+      claimed_at: org ? (opts.claimedAt ?? new Date(Date.now() - (opts.claimedDaysAgo ?? 100) * DAY)) : null,
     },
   })
   venues.push(v.id)
@@ -120,7 +121,7 @@ async function venue(label: string, opts: { org?: string | null; claimedDaysAgo?
 }
 
 /** Somebody went live at the venue `daysAgo` days ago: its venue-day data starts then. */
-async function liveSince(venueId: string, daysAgo: number) {
+async function liveSince(venueId: string, daysAgo: number, kind: "attendee" | "staff" = "attendee") {
   const day = await venueDayFor(venueId)
   if (!day) throw new Error("no venue day")
   events.push(day.id)
@@ -132,6 +133,7 @@ async function liveSince(venueId: string, daysAgo: number) {
       occurrence_id: day.occurrenceId,
       user_id: person,
       status: "checked_in",
+      kind,
       check_in_time: new Date(Date.now() - daysAgo * DAY),
     },
   })
@@ -242,6 +244,14 @@ describe("no charge before four weeks of venue-day data", () => {
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
   })
 
+  it("counts guests only: a staff member going live does not start the clock (review M4)", async () => {
+    const v = await venue("vp-staffclock")
+    await liveSince(v, 40, "staff")
+    expect(await venueReadiness(v)).toMatchObject({ dataSince: null, chargeable: false })
+    await liveSince(v, 10)
+    expect(await venueReadiness(v)).toMatchObject({ chargeable: false, dataDays: 10 })
+  })
+
   it("refuses a venue nobody has gone live at yet", async () => {
     const empty = await venue("vp-empty")
     as(owner, "venue_owner")
@@ -333,9 +343,109 @@ describe("the webhook settles a venue's Venue Pro onto the venue (MN-I05)", () =
     const row = await db.entitlements.findFirstOrThrow({ where: { external_ref: ref } })
     expect(row).toMatchObject({ subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay" })
 
+    // Audited on the venue, where its page and its log read it.
+    expect(await db.audit_logs.count({ where: { action: "entitlement.paid", resource: "venue", resource_id: v } })).toBe(1)
+
     expect((await post(sub("subscription.halted", ref, T0 + 60, { status: "halted" }))).status).toBe(200)
     expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
     expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).status).toBe("halted")
+  })
+
+  const checkout = (v: string, ref: string, status: string) =>
+    db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: orgId, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status },
+    })
+
+  it("a checkout paid after we expired it takes its place: 200, not a 500 Razorpay retries for a day (review M6)", async () => {
+    const v = await venue("vp-late")
+    const late = `sub_${randomUUID().slice(0, 12)}`
+    const newer = `sub_${randomUUID().slice(0, 12)}`
+    await checkout(v, late, "expired")
+    await checkout(v, newer, "created")
+    const res = await post(sub("subscription.charged", late, T0 + 5))
+    expect(res.status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: late } })).status).toBe("active")
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: newer } })).status).toBe("expired")
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${newer}/cancel`))).toBe(true)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(true)
+  })
+
+  it("a second mandate paid beside a live one is superseded, cancelled and flagged, still 200", async () => {
+    const v = await venue("vp-dup")
+    const live = `sub_${randomUUID().slice(0, 12)}`
+    const second = `sub_${randomUUID().slice(0, 12)}`
+    await checkout(v, live, "active")
+    await checkout(v, second, "expired")
+    expect((await post(sub("subscription.charged", second, T0 + 7))).status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: second } })).status).toBe("superseded")
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: live } })).status).toBe("active")
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${second}/cancel`))).toBe(true)
+    expect(await db.audit_logs.count({ where: { action: "billing.duplicate_subscription", resource_id: v } })).toBe(1)
+  })
+})
+
+describe("a venue changing hands (review M7)", () => {
+  let payerOwner = ""
+  let payerOrg = ""
+  let newOrg = ""
+  let newOwner = ""
+  beforeAll(async () => {
+    payerOwner = await makeUser(testId("vp-payer"), "organizer")
+    newOwner = await makeUser(testId("vp-newowner"), "organizer")
+    users.push(payerOwner, newOwner)
+    for (const id of [payerOwner, newOwner]) await db.user.update({ where: { id }, data: { role: "venue_owner" } })
+    const p = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-payer-org"), status: "verified" } })
+    const n = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-new-org"), status: "verified" } })
+    orgs.push(p.id, n.id)
+    payerOrg = p.id
+    newOrg = n.id
+    await db.organisation_members.createMany({
+      data: [
+        { org_id: p.id, user_id: payerOwner, role: "owner" },
+        { org_id: n.id, user_id: newOwner, role: "owner" },
+      ],
+    })
+  })
+
+  it("an approved dispute stops the previous owner's Venue Pro; only the payer sees or cancels its mandate", async () => {
+    const v = await venue("vp-transfer", { org: payerOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active", current_end: new Date(Date.now() + 20 * DAY) },
+    })
+    await db.entitlements.create({
+      data: { subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 23 * DAY) },
+    })
+    const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: newOrg, filed_by: newOwner, status: "pending", is_dispute: true } })
+
+    as(admin, "app_admin")
+    await decideVenueClaim(claim.id, "approve")
+    expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+    // The new owner does not inherit the paid Pro; the mandate stops at its cycle's end.
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(true)
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+    expect(await db.audit_logs.count({ where: { action: "entitlement.ended_on_transfer", resource_id: v } })).toBe(1)
+
+    // The new owner sees the venue, and none of the previous owner's mandate.
+    const asNew = await venuePlanPage({ id: newOwner, role: "venue_owner" })
+    expect(asNew.venues.find((r) => r.venueId === v)).toMatchObject({ owned: true, subscriptions: [] })
+    // The payer still sees what it pays for, as no longer its own.
+    const asPayer = await venuePlanPage({ id: payerOwner, role: "venue_owner" })
+    expect(asPayer.venues.find((r) => r.venueId === v)).toMatchObject({ owned: false, mayCancel: true, mayBuy: false })
+  })
+
+  it("cancelling is the payer's: the new owner finds nothing of theirs to cancel", async () => {
+    const v = await venue("vp-cancel", { org: newOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active" },
+    })
+    as(newOwner, "venue_owner")
+    await expect(actions.cancelVenuePro(v)).rejects.toThrow("no subscription to cancel")
+    as(payerOwner, "venue_owner")
+    await actions.cancelVenuePro(v).catch(() => undefined) // Razorpay's cancel is stubbed out; the row is what is read
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
   })
 })
 
@@ -469,6 +579,41 @@ describe("insights by plan", () => {
     expect(view!.recent.regulars).toEqual({ visitors: 7, regulars: null, oneTimers: null, sharePct: null })
     expect(view!.recent.people[1][0]).toBeNull()
     expect(view!.recent.people[4][2]).toBe(7)
+  })
+
+  it("never lets the headline give a held-back cell back (review C1: 12 / 3 / 9)", async () => {
+    // The review's repro, on the venue's own clock: Friday 19:00 (12), Friday
+    // 22:15 (3, held), Saturday 19:00 (9). Counted over every row, guests
+    // were 24, and 24 − (12 + 9) = 3.
+    const ist = await venue("vp-c1", { claimedAt: new Date("2026-10-07T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    await night(ist, new Date("2026-10-09T19:00:00+05:30"), await guests(12, "vp-c1a"))
+    await night(ist, new Date("2026-10-09T22:15:00+05:30"), await guests(3, "vp-c1b"))
+    await night(ist, new Date("2026-10-10T19:00:00+05:30"), await guests(9, "vp-c1c"))
+    const view = (await venueInsights(ist, new Date("2026-10-11T20:00:00+05:30")))!
+    const shown = view.recent.people.flat().filter((n): n is number => n !== null && n > 0)
+    expect(shown.sort((a, b) => a - b)).toEqual([9, 12])
+    expect(view.recent.people.flat().filter((n) => n === null)).toHaveLength(1)
+    expect(view.recent.regulars.visitors).toBe(21)
+    expect((view.recent.regulars.visitors ?? 0) - shown.reduce((a, b) => a + b, 0)).toBe(0)
+  })
+
+  it("ends at the start of the venue's current day: nobody who came in today moves a figure (review M9)", async () => {
+    const today = await venue("vp-today", { claimedDaysAgo: 40 })
+    const now = new Date()
+    const dayStart = venueDayBounds("UTC", 6, now).start
+    await night(today, new Date(dayStart.getTime() - 2 * 3600_000), await guests(6, "vp-yday"))
+    await night(today, new Date(Math.min(now.getTime() - 60_000, dayStart.getTime() + 60_000)), await guests(7, "vp-tday"))
+    const view = (await venueInsights(today, now))!
+    expect(view.recent.to).toBe(dayStart.toISOString())
+    expect(view.recent.regulars.visitors).toBe(6)
+  })
+
+  it("withholds the pre-claim nights and month with its guests when they are under 5", async () => {
+    const few = await venue("vp-fewbefore", { claimedDaysAgo: 10 })
+    await night(few, new Date(Date.now() - 20 * DAY), await guests(3, "vp-few"))
+    as(admin, "app_admin")
+    await actions.grantVenuePro(few, 3, "Founding venue, claimed in Bengaluru")
+    expect((await venueInsights(few))!.preClaim).toEqual({ nights: null, people: null, since: null })
   })
 
   it("is nobody's for an unclaimed venue", async () => {

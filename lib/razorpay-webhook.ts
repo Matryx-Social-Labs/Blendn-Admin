@@ -6,6 +6,7 @@ import { z } from "zod"
 import { db } from "./db"
 import { endPaidEntitlement, passHeldElsewhere, recordPaidEntitlement, type Subject } from "./entitlements"
 import { logger } from "./logger"
+import { OPEN_SUBSCRIPTION_STATUSES } from "./billing"
 import { cancelSubscription } from "./razorpay"
 
 /**
@@ -105,6 +106,8 @@ interface Audit {
   action: string
   orgId: string
   details: Prisma.InputJsonValue
+  /** What the row is about, when not the organisation: a venue (Venue Pro). */
+  resource?: { kind: string; id: string }
 }
 
 interface Outcome {
@@ -153,7 +156,12 @@ export async function recordRazorpayDelivery(
       })
       for (const a of outcome.audit) {
         await tx.audit_logs.create({
-          data: { action: a.action, resource: "organisation", resource_id: a.orgId, details: a.details },
+          data: {
+            action: a.action,
+            resource: a.resource?.kind ?? "organisation",
+            resource_id: a.resource?.id ?? a.orgId,
+            details: a.details,
+          },
         })
       }
       return { duplicate: false, outcome }
@@ -264,6 +272,8 @@ async function recordPayment(tx: Tx, c: Checkout, payment: Entity, eventAt: Date
  */
 const subjectOf = (c: Checkout): Subject => (c.venue_id ? { kind: "venue", id: c.venue_id } : { kind: "org", id: c.org_id })
 const subscriptionProduct = (c: Checkout): "analytics" | "venue_pro" => (c.venue_id ? "venue_pro" : "analytics")
+/** A venue's purchase is audited on the venue, where its page reads it; an organisation's on the organisation. */
+const auditResource = (c: Checkout) => (c.venue_id ? { resource: { kind: "venue", id: c.venue_id } } : {})
 
 async function apply(tx: Tx, d: Delivery): Promise<Outcome> {
   if (d.event.startsWith("subscription.")) return applySubscription(tx, d)
@@ -309,6 +319,7 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
       out.audit.push({
         action: "entitlement.paid",
         orgId: c.org_id,
+        ...auditResource(c),
         details: {
           product: subscriptionProduct(c),
           ...(c.venue_id ? { venueId: c.venue_id } : {}),
@@ -336,8 +347,55 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
     await endAccess(tx, out, c, subId, at(sub.ended_at) ?? eventAt, d.event)
   }
 
-  await advance(tx, c, eventAt, status, currentEnd)
+  await advance(tx, c, eventAt, await clearOpenConflicts(tx, out, c, subId, status), currentEnd)
   return out
+}
+
+/**
+ * Before a subscription becomes open, make room for it in its scope (the
+ * organisation's own plan, or one venue): one open subscription is a unique
+ * index, and a violation here was a 500 that Razorpay retried for a day
+ * (review M6) — a checkout abandoned and marked expired here, paid late at
+ * Razorpay, while a newer one waited.
+ *
+ *   - Another row still only `created` (never paid) is expired, and cancelled
+ *     at Razorpay after the commit so it cannot charge.
+ *   - Another row already live (a mandate that charged) wins: this one is
+ *     `superseded` — our word, not Razorpay's — cancelled at Razorpay, audited
+ *     and logged for a refund. Never a 500.
+ */
+async function clearOpenConflicts(tx: Tx, out: Outcome, c: Checkout, subId: string, status: string): Promise<string> {
+  if (!(OPEN_SUBSCRIPTION_STATUSES as readonly string[]).includes(status)) return status
+  const others = await tx.billing_checkouts.findMany({
+    where: {
+      id: { not: c.id },
+      kind: "subscription",
+      status: { in: [...OPEN_SUBSCRIPTION_STATUSES] },
+      ...(c.venue_id ? { venue_id: c.venue_id } : { org_id: c.org_id, venue_id: null }),
+    },
+    select: { id: true, provider_ref: true, status: true },
+  })
+  const unpaid = others.filter((o) => o.status === "created")
+  if (unpaid.length) {
+    await tx.billing_checkouts.updateMany({ where: { id: { in: unpaid.map((o) => o.id) } }, data: { status: "expired" } })
+    for (const o of unpaid) out.after.push(() => cancelSubscription(o.provider_ref, false))
+  }
+  const live = others.filter((o) => o.status !== "created")
+  if (live.length === 0) return status
+  logger.error("A second subscription was paid for one plan; it is cancelled, refund it from the Razorpay dashboard", {
+    providerRef: subId,
+    keptRef: live[0].provider_ref,
+    orgId: c.org_id,
+    venueId: c.venue_id,
+  })
+  out.audit.push({
+    action: "billing.duplicate_subscription",
+    orgId: c.org_id,
+    ...auditResource(c),
+    details: { providerRef: subId, keptRef: live[0].provider_ref, plan: c.plan_key },
+  })
+  out.after.push(() => cancelSubscription(subId, false))
+  return "superseded"
 }
 
 async function endAccess(tx: Tx, out: Outcome, c: Checkout, ref: string, endAt: Date, reason: string) {
@@ -346,6 +404,7 @@ async function endAccess(tx: Tx, out: Outcome, c: Checkout, ref: string, endAt: 
   out.audit.push({
     action: "entitlement.ended",
     orgId: c.org_id,
+    ...auditResource(c),
     details: {
       product: c.kind === "order" ? "event_pass" : subscriptionProduct(c),
       ...(c.venue_id ? { venueId: c.venue_id } : {}),
@@ -498,6 +557,7 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
       out.audit.push({
         action: "entitlement.restored",
         orgId: c.org_id,
+        ...auditResource(c),
         details: { source: "razorpay", externalRef: c.provider_ref, reason: d.event },
       })
     }

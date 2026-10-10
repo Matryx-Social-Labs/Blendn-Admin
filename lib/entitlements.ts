@@ -366,3 +366,25 @@ export async function revokePaid(
   })
   return { id: row.id, product: row.product, externalRef: row.external_ref }
 }
+
+/**
+ * End now every live PAID row on this subject and product that one of these
+ * provider references paid for (a venue changing hands, `billing-actions`).
+ * Never a grant. Returns the rows ended.
+ */
+export async function revokePaidByRefs(
+  subject: Subject,
+  product: Exclude<entitlement_product, "event_pass">,
+  refs: string[],
+  now: Date = new Date()
+): Promise<{ id: string }[]> {
+  if (refs.length === 0) return []
+  const rows = await db.entitlements.findMany({
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: { not: "grant" }, external_ref: { in: refs }, ...liveAt(now) },
+    select: { id: true },
+  })
+  if (rows.length) {
+    await db.entitlements.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { expires_at: now } })
+  }
+  return rows
+}

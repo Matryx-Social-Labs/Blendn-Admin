@@ -8,7 +8,10 @@
 -- venue purchase has landed: it is a tax record. A rollback of the CODE alone
 -- is safe while no venue purchase exists: older code reads no `venue_id`.
 
--- Prisma runs a migration in one transaction, so SET LOCAL ends with it.
+-- `prisma migrate deploy` sends a file statement by statement, outside any
+-- transaction (measured, step 17 review), so this file is its own: SET LOCAL
+-- applies, and the index is never dropped without its two replacements.
+BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 -- RESTRICT: a purchase is a tax record, and venues are retired (deleted_at),
@@ -26,7 +29,7 @@ ALTER TABLE "billing_checkouts" ADD CONSTRAINT "billing_checkouts_venue_shape" C
 -- One subscription that could still charge per organisation (Analytics) and,
 -- separately, per venue (Venue Pro): an organisation owning two venues may
 -- have Pro on both, and never two mandates for one. Same statuses as before
--- (lib/billing.ts OPEN_SUBSCRIPTION_STATUSES).
+-- (lib/billing.ts OPEN_SUBSCRIPTION_STATUSES; __tests__/open-subscription-statuses.test.ts).
 DROP INDEX "billing_checkouts_one_open_subscription_per_org";
 CREATE UNIQUE INDEX "billing_checkouts_one_open_subscription_per_org" ON "billing_checkouts" ("org_id")
   WHERE kind = 'subscription' AND venue_id IS NULL
@@ -34,3 +37,5 @@ CREATE UNIQUE INDEX "billing_checkouts_one_open_subscription_per_org" ON "billin
 CREATE UNIQUE INDEX "billing_checkouts_one_open_subscription_per_venue" ON "billing_checkouts" ("venue_id")
   WHERE kind = 'subscription' AND venue_id IS NOT NULL
     AND status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused');
+
+COMMIT;

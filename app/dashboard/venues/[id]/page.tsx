@@ -384,7 +384,8 @@ function VenueInsights({ insights, isAdmin }: { insights: VenueInsightsView; isA
     <>
       <Panel
         title="Who comes, and when"
-        hint={`${pro ? "last 12 months" : "last 30 days"} · since ${SINCE.format(new Date(insights.recent.from))} · guests only, never who`}
+        // Whole nights: the window ends where today began, so the figures move once a day.
+        hint={`${pro ? "last 12 months" : "last 30 days"} · ${SINCE.format(new Date(insights.recent.from))} – ${SINCE.format(new Date(insights.recent.to))} · guests only, never who`}
         action={pro ? <ProTag plan="Venue Pro" /> : <span className="text-[0.75rem] text-faint-foreground">Listed</span>}
       >
         <VenueInsightBody insight={insights.recent} />

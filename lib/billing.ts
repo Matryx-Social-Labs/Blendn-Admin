@@ -167,7 +167,9 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
       select: { id: true, title: true, start_time: true },
     }),
     db.billing_payments.findMany({
-      where: { checkout: { org_id: org.orgId, venue_id: null } },
+      // The organisation's own plan only: a venue's Venue Pro is on the venue's
+      // plan, and a sponsor payment link is a placement charge, not a plan.
+      where: { checkout: { org_id: org.orgId, venue_id: null, kind: { in: ["subscription", "order"] } } },
       orderBy: { captured_at: "desc" },
       take: 24,
       select: {
