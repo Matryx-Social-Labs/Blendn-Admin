@@ -156,6 +156,21 @@ export const UpdateProfileRequestSchema = z
     share_location: z.boolean().optional(),
     // Off by default: friends are pseudonyms in a room unless this is on.
     friends_see_me_in_rooms: z.boolean().optional(),
+
+    // Matching v2 (plan v2 §8), display only — slugs from GET /profile-options.
+    languages: z
+      .array(z.string())
+      .max(5)
+      .optional()
+      .describe("Languages besides English, at most five distinct slugs. An unknown slug refuses the request."),
+    home_state: z.string().optional().nullable().describe("A state or union territory slug, or `abroad`. Null clears it."),
+    sun_sign: z
+      .string()
+      .optional()
+      .nullable()
+      .describe("Opt-in. A sign slug (`leo`), sent with `sign_system`; both null takes the sign off. One without the other is 400."),
+    sign_system: z.enum(["western", "rashi"]).optional().nullable().describe("Which calendar the sign is in: `western` or `rashi`."),
+    shows_up_badge: z.boolean().optional().describe("Show \"Shows up\" on your card. Off unless turned on."),
   })
   .openapi("UpdateProfileRequest")
 
@@ -240,6 +255,21 @@ export const ProfileResponseSchema = z
       read_receipts: z.boolean(),
       share_location: z.boolean(),
       friends_see_me_in_rooms: z.boolean(),
+
+      /*
+       * Matching v2. Your own profile: the stored slugs, plus
+       * `suggested_sun_sign` (the Western sign of your birth date, for the
+       * editor's prefill — never stored until you pick it). Anybody else's:
+       * LABELS, and only when you can see who they are (`languages`,
+       * `home_state`, `sign`); before that they are Tier B (§8.5).
+       */
+      languages: z.array(z.string()).optional(),
+      home_state: z.string().nullable().optional(),
+      sun_sign: z.string().nullable().optional(),
+      sign_system: z.enum(["western", "rashi"]).nullable().optional(),
+      shows_up_badge: z.boolean().optional(),
+      suggested_sun_sign: z.string().nullable().optional(),
+      sign: z.string().nullable().optional().describe("Their sign as a label, \"Leo ♌\" — others' profiles, when identified."),
     }).nullable().describe(
       "Your own profile: every column but `date_of_birth`, with `age` derived. Anybody else's is a subset: " +
         "`id, age, onboarded, location, interests, work_field, expertise`, plus `bio, occupation, education, photos` " +
@@ -282,6 +312,9 @@ export const UserPublicProfileSchema = z
       .nullable()
       .optional()
       .describe("A stored blurred derivative, present only when `identityVisible` is false and the ref is not a room handle (SCRUM-458). Never the real photo."),
+    languages: z.array(z.string()).optional().describe("Language labels. Present only when `identityVisible` is true (Tier B, plan v2 §8.5)."),
+    homeState: z.string().nullable().optional().describe("Home state label. Present only when `identityVisible` is true."),
+    sign: z.string().nullable().optional().describe("\"Leo ♌\" when they chose to show a sign. Present only when `identityVisible` is true."),
     interests: z
       .array(InterestSchema)
       .optional()

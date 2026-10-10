@@ -6,6 +6,7 @@ import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { identityForRef } from "@/lib/identity"
 import { ageFrom } from "@/lib/age"
+import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
@@ -67,6 +68,10 @@ export async function GET(
             photos: true,
             work_field: true,
             blur_photo: true,
+            languages: true,
+            home_state: true,
+            sun_sign: true,
+            sign_system: true,
           },
         },
         user_interests: {
@@ -187,6 +192,10 @@ export async function GET(
             bio: user.profile?.bio || null,
             occupation: user.profile?.occupation || null,
             education: user.profile?.education || null,
+            // Tier B (plan v2 §8.5): the whole set only once they are known to you.
+            languages: languageLabels(user.profile?.languages),
+            homeState: homeStateLabel(user.profile?.home_state),
+            sign: signLabel(user.profile?.sun_sign, user.profile?.sign_system),
           }
         : {
             /*

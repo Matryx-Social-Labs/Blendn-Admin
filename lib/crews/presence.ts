@@ -10,6 +10,8 @@ import { deliverToRoom } from "../room-delivery"
 import { isRoomMuted } from "../room-mute"
 import { blocksBetween, blocksExclude } from "./blocks"
 import { CREW_TAGS, NO_CREW, type CrewRefusal, type CrewTag } from "./crews"
+import { crewBadges, nightsTogether, rankCrewsFor, type RankedCrew } from "./signals"
+import type { Badge, Overlap } from "../overlaps"
 
 /**
  * A crew at an event: presence, the crew cards, "We're here" (plan v2 §6).
@@ -129,6 +131,14 @@ export interface CrewCard {
   intent: string[]
   /** Whether your side has liked them tonight. Never whether they liked you. */
   youLiked: boolean
+  /**
+   * Up to two lines of what the crew holds in common with your side — "Both
+   * crews are into techno", "Two RCB crews" — crew-held only, never a member
+   * or a count (lib/crews/signals.ts).
+   */
+  overlaps: Overlap[]
+  /** "6 nights out together", from its members' check-ins. */
+  badges: Badge[]
 }
 
 /**
@@ -204,16 +214,38 @@ export async function crewsAtEvent(
   const blocked = await blocksBetween(mySide, [...new Set(others.flatMap((c) => members.get(c.id) ?? []))])
   let visible = others.filter((c) => !blocksExclude(mySide, members.get(c.id) ?? [], blocked))
 
+  let viewerIntents: string[] = []
   if (mine.length === 0) {
     const me = await intentsAt(eventId, viewerId)
+    viewerIntents = me.intents
     visible = me.openToCrews
       ? visible.filter((c) => crewMayMeetSolo(c, members.get(c.id)?.length ?? 0, me.intents))
       : []
   }
 
   const presentCount = (id: string) => present.get(id)?.length ?? 0
-  visible.sort((a, b) => presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1))
+  /*
+   * Ranked from the viewer's side (lib/crews/signals.ts): crew-held interests
+   * and intent, damped for a size mismatch; then most here, then id, so a
+   * page boundary never moves between two reads of the same room.
+   */
+  const myCrew = [...mine].sort((a, b) => presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1))[0]
+  const ranked =
+    visible.length > 0
+      ? await rankCrewsFor({
+          viewerId,
+          mine: myCrew ? { id: myCrew.id, intent: myCrew.intent, present: present.get(myCrew.id) ?? [] } : null,
+          viewerIntents,
+          crews: visible.map((c) => ({ id: c.id, intent: c.intent, present: present.get(c.id) ?? [] })),
+          roomSize: await db.event_check_ins.count({ where: { ...hereNowAt(occurrenceId), kind: "attendee" } }),
+        })
+      : new Map<string, RankedCrew>()
+  const scoreOf = (id: string) => ranked.get(id)?.score ?? 0
+  visible.sort(
+    (a, b) => scoreOf(b.id) - scoreOf(a.id) || presentCount(b.id) - presentCount(a.id) || (a.id < b.id ? -1 : 1)
+  )
   const shown = visible.slice(page.offset, page.offset + page.limit)
+  const nights = await nightsTogether(shown.map((c) => c.id))
 
   // What your side liked tonight, of this page: your crews here, or you.
   const liked = new Set(
@@ -241,6 +273,8 @@ export async function crewsAtEvent(
       tags: c.tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] })),
       intent: c.intent,
       youLiked: liked.has(c.id),
+      overlaps: ranked.get(c.id)?.overlaps ?? [],
+      badges: crewBadges(nights.get(c.id) ?? 0),
     })),
     myCrews: mine.map((c) => ({ crewId: c.id, name: c.name, presentCount: presentCount(c.id) })),
     total: visible.length,

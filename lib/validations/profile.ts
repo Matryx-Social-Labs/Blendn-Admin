@@ -4,6 +4,7 @@ import { ACCOUNT_MIN_AGE, ADULTS_ONLY, parseDateOfBirth } from "@/lib/age"
 import { isOrientation, orientationsAreCoherent } from "@/lib/dating"
 import { isExpertise, MAX_EXPERTISE } from "@/lib/expertise"
 import { isWorkField } from "@/lib/work-fields"
+import { isHomeState, isLanguage, isSign, MAX_LANGUAGES, SIGN_SYSTEMS } from "@/lib/about-you"
 
 /** Mirrors the `connection_intent` enum in prisma/schema.prisma. */
 export const CONNECTION_INTENTS = ["dating", "networking", "friendship", "just_here"] as const
@@ -242,7 +243,49 @@ export const updateProfileSchema = z.object({
   share_location: z.boolean().optional(),
   /** Off unless they turn it on: friends are pseudonyms in a room by default. */
   friends_see_me_in_rooms: z.boolean().optional(),
+
+  /*
+   * Matching v2, display only (lib/about-you.ts). Curated slugs, refused when
+   * unknown rather than dropped: a save that silently stores nothing is the
+   * failure `work_field` above was written to avoid.
+   */
+  languages: z
+    .array(z.string().refine(isLanguage, { message: "Not a recognised language" }))
+    .max(MAX_LANGUAGES, `Pick at most ${MAX_LANGUAGES}`)
+    .refine((l) => new Set(l).size === l.length, { message: "Each language once" })
+    .optional(),
+  home_state: z
+    .string()
+    .refine(isHomeState, { message: "Not a recognised state or territory" })
+    .optional()
+    .nullable(),
+  /*
+   * Opt-in: both or neither. `null` for both is how a person takes their sign
+   * off; a sign without its calendar is refused, because "Leo" and "Simha"
+   * are the same slug and only `sign_system` says which one they meant.
+   */
+  sun_sign: z
+    .string()
+    .refine(isSign, { message: "Not a recognised sign" })
+    .optional()
+    .nullable(),
+  sign_system: z.enum(SIGN_SYSTEMS as [string, ...string[]]).optional().nullable(),
+  /** "Shows up" on your card. Off unless turned on. */
+  shows_up_badge: z.boolean().optional(),
 })
+
+/**
+ * A sign and its calendar travel together: both set, both null, or neither
+ * sent. Checked by the route (a refine here would hide `.shape`, which the
+ * OpenAPI coverage test reads); `profiles_sign_shape` holds it in the table.
+ */
+export function signPairRefusal(p: { sun_sign?: string | null; sign_system?: string | null }): string | null {
+  const sent = (v: unknown) => v !== undefined
+  if (sent(p.sun_sign) !== sent(p.sign_system) || (p.sun_sign == null) !== (p.sign_system == null)) {
+    return "Send sun_sign and sign_system together: both set, or both null to take your sign off"
+  }
+  return null
+}
 
 export const addInterestsSchema = z.object({
   categoryIds: z.array(z.string().uuid("Invalid category ID")).min(1, "At least one category is required"),

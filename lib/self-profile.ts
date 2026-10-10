@@ -1,4 +1,5 @@
 import { ageFrom } from "@/lib/age"
+import { westernSignFor } from "@/lib/about-you"
 import { normalizeLocationToCity } from "@/lib/location"
 
 /**
@@ -30,7 +31,9 @@ export function profileForSelfResponse<
   const { date_of_birth: _dob, ...rest } = profile
   // Derived, so the number is true today rather than on the day they signed up.
   // A stale `age` here would disagree with every other route in the API.
-  return { ...rest, age: ageFrom(profile) }
+  // The sign is the editor's prefill — derived for the owner only, stored only
+  // when they pick it (lib/about-you.ts).
+  return { ...rest, age: ageFrom(profile), suggested_sun_sign: westernSignFor(profile.date_of_birth) }
 }
 
 /**

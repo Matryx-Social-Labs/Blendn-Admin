@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -333,6 +333,84 @@ registry.registerPath({
         },
       },
     },
+    ...standardErrors,
+  },
+})
+
+// GET /api/mobile/profile-options
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/profile-options",
+  tags: ["Mobile Categories"],
+  summary: "The matching v2 profile vocabulary",
+  description:
+    "What the profile editor picks from (plan v2 §8): `languages` besides English (at most `maxLanguages`), `homeStates` " +
+    "(states, union territories and `abroad`), the twelve `signs` with their Western and rashi names, and the twelve " +
+    "`thisOrThat` questions (answer `a` or `b` through PUT /me/this-or-that). Every one is display only — printed as a " +
+    "shared line, never used to rank. Identical for every caller, cached for an hour.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "The vocabulary",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              languages: z.array(z.object({ slug: z.string(), label: z.string() })),
+              maxLanguages: z.number().int(),
+              homeStates: z.array(z.object({ slug: z.string(), label: z.string() })),
+              signs: z.array(z.object({ slug: z.string(), western: z.string(), rashi: z.string(), symbol: z.string() })),
+              thisOrThat: z.array(z.object({ slug: z.string(), a: z.string(), b: z.string() })),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+const ThisOrThatAnswers = z
+  .record(z.string(), z.enum(["a", "b"]))
+  .describe("Question slug → `a` or `b`, for the questions still asked")
+
+// GET /api/mobile/me/this-or-that
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/this-or-that",
+  tags: ["Mobile Profiles"],
+  summary: "Your this-or-that answers",
+  description: "Yours only — `/me`, no id. Display only: \"you both picked filter coffee over chai\" on a card when shared.",
+  security: bearerAuth,
+  responses: {
+    200: { description: "Your answers", content: { "application/json": { schema: wrap(z.object({ answers: ThisOrThatAnswers })) } } },
+    ...standardErrors,
+  },
+})
+
+// PUT /api/mobile/me/this-or-that
+registry.registerPath({
+  method: "put",
+  path: "/api/mobile/me/this-or-that",
+  tags: ["Mobile Profiles"],
+  summary: "Answer, change or take back this-or-that answers",
+  description:
+    "`{ answers: { [question]: \"a\" | \"b\" | null } }`: a choice sets it, `null` takes it back, a question not sent is " +
+    "left alone. An unknown question or choice refuses the whole request (400) — nothing is half saved. 409 " +
+    "`PROFILE_REQUIRED` before the account has a profile. Rate limited per user. Answers with every answer you now hold.",
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ answers: z.record(z.string(), z.enum(["a", "b"]).nullable()) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Saved", content: { "application/json": { schema: wrap(z.object({ answers: ThisOrThatAnswers })) } } },
+    409: { description: "No profile yet", content: { "application/json": { schema: ErrorResponseSchema } } },
     ...standardErrors,
   },
 })
