@@ -54,10 +54,9 @@ export async function GET(request: NextRequest) {
      * were still talking (step 9 review of the chat list).
      */
     const blockedIds = await blockCounterparties(authUser.userId)
-    const visibleMessages = {
-      deleted_at: null,
-      ...(blockedIds.length > 0 && { user_id: { notIn: blockedIds } }),
-    }
+    // What can be unread: never a blocked person's line, nor your own.
+    const notUnread = [...blockedIds, authUser.userId]
+    const unreadMessages = { deleted_at: null, user_id: { notIn: notUnread } }
 
     // Get total count of user's chat groups
     const totalCount = await db.chat_group_members.count({
@@ -132,7 +131,7 @@ export async function GET(request: NextRequest) {
             _count: {
               select: {
                 messages: {
-                  where: visibleMessages,
+                  where: unreadMessages,
                 },
                 members: {
                   where: { status: "active" },
@@ -196,7 +195,7 @@ export async function GET(request: NextRequest) {
             crew_id: true,
             blend_id: true,
             ...ownerDoor(authUser.userId),
-            _count: { select: { messages: { where: visibleMessages } } },
+            _count: { select: { messages: { where: unreadMessages } } },
           },
         },
       },
@@ -280,7 +279,7 @@ export async function GET(request: NextRequest) {
         SELECT chat_group_id, COUNT(*) as unread_count
         FROM chat_messages
         WHERE deleted_at IS NULL
-          AND NOT (user_id = ANY(${blockedIds}::text[]))
+          AND NOT (user_id = ANY(${notUnread}::text[]))
           AND (${Prisma.join(conditions, " OR ")})
         GROUP BY chat_group_id
       `

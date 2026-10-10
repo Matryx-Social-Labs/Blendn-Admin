@@ -167,6 +167,19 @@ export async function GET(
     const hasMore = messages.length > limit
     const messagesToReturn = hasMore ? messages.slice(0, limit) : messages
 
+    /*
+     * Reading the newest page is reading the room: the read marker the event
+     * chat route writes (`GET /events/:eventId/chat`), here for every kind —
+     * a crew's or a Blend's room is read only through this route, and its row
+     * in `GET /chat/groups` counted everything as unread for ever without it.
+     */
+    if (!before && membership && messagesToReturn.length > 0) {
+      await db.chat_group_members.update({
+        where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
+        data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
+      })
+    }
+
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()
 

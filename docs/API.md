@@ -899,7 +899,9 @@ chat (C12) — while a Blend with a hidden side is gone for everyone.
 `groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
 from anybody you blocked or who blocked you — the same filter the room's
 history applies — so a blocked person's line is never previewed, named or
-counted. On `rooms`, `lastMessageAt` is the time of the newest message you can
+counted. Your own messages are never unread. Reading a room's newest page
+(`GET /chat/groups/:chatGroupId/messages` without `before`) marks it read, as
+`GET /events/:eventId/chat` does for an event's room. On `rooms`, `lastMessageAt` is the time of the newest message you can
 see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the
 paging order, are still the room's own last message.)
 
