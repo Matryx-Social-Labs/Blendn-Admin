@@ -1,11 +1,12 @@
 "use server"
 
+import { auditInTx } from "./audit-log"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { paymentsOn } from "@/lib/billing"
-import { currentUser } from "@/lib/current-user"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
 import { reachBand, type SponsorReachBand } from "@/lib/billing-plans"
@@ -83,13 +84,6 @@ const MAX_PAYMENT_REF = 100
 const MIN_VOID_REASON = 10
 /** As long as a pricing note; it is copied into the audit row as well. */
 const MAX_VOID_REASON = 500
-
-/** A platform admin, on the role the database holds now (review LOW 18). */
-async function requireAdmin() {
-  const user = await currentUser()
-  if (!user || user.role !== "app_admin") throw new Refusal("Forbidden")
-  return user
-}
 
 export interface ChargeRow {
   id: string
@@ -340,15 +334,13 @@ export async function pricePlacement(placementId: string, input: unknown): Promi
       },
       select: { id: true },
     })
-    await tx.audit_logs.create({
-      data: {
-        user_id: admin.id,
+    await auditInTx(tx, {
+        userId: admin.id,
         action: "charge.priced",
         resource: "placement_charges",
-        resource_id: charge.id,
+        resourceId: charge.id,
         details: { placementId, eventId: placement.event_id, sponsorId: placement.sponsor_id, amountMinor, currency },
-      },
-    })
+      })
   })
 
   revalidatePath("/dashboard/charges")
@@ -450,12 +442,11 @@ export async function advanceCharge(
         if (count !== 1) throw new Refusal(CHANGED_JUST_NOW)
 
         // In the transaction: a change to money is never without its record.
-        await tx.audit_logs.create({
-          data: {
-            user_id: admin.id,
+        await auditInTx(tx, {
+            userId: admin.id,
             action: CHARGE_ACTION[to],
             resource: "placement_charges",
-            resource_id: chargeId,
+            resourceId: chargeId,
             details: {
               placementId: charge.placement_id,
               from: charge.status,
@@ -468,8 +459,7 @@ export async function advanceCharge(
               ...(to === "void" ? { reason: why } : {}),
               ...(closed.length ? { closedLinks: closed } : {}),
             },
-          },
-        })
+          })
       },
       { maxWait: 10_000, timeout: 30_000 }
     )
@@ -689,20 +679,18 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
             created_by: admin.id,
           },
         })
-        await tx.audit_logs.create({
-          data: {
-            user_id: admin.id,
+        await auditInTx(tx, {
+            userId: admin.id,
             action: "charge.link_sent",
             resource: "placement_charges",
-            resource_id: chargeId,
+            resourceId: chargeId,
             details: {
               paymentLinkId: link.id,
               amountMinor: charge.amount_minor,
               currency: charge.currency,
               emailed: Boolean(contact?.email),
             },
-          },
-        })
+          })
         return { linkId: link.id, payUrl: link.short_url, reused: false }
       },
       { maxWait: 10_000, timeout: 30_000 }

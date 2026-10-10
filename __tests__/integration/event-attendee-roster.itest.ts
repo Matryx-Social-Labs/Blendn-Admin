@@ -159,6 +159,8 @@ describe("an event's attendee roster", () => {
     hostB = await makeUser("hostB", "organizer")
     admin = await makeUser("admin", "app_admin")
     venueOwner = await makeUser("venueOwner")
+    // actorFor reads the role from the row (step 18): the row says venue owner.
+    await db.user.update({ where: { id: venueOwner }, data: { role: "venue_owner" } })
     users.push(hostA, colleague, dual, leaver, hostB, admin, venueOwner)
     ;[priya, gina, gus, nora, wally, wanda, nina, rahul, mia, stan, pat, olga] = await Promise.all(
       ["priya", "gina", "gus", "nora", "wally", "wanda", "nina", "rahul", "mia", "stan", "pat", "olga"].map(person)

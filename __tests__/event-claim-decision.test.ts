@@ -11,15 +11,17 @@
  * claim's, at filing and again here.
  */
 const mockDb = {
-  event_claims: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+  // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
+  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
+  event_claims: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   organiser_onboarding_requests: { findUnique: jest.fn() },
-  events: { update: jest.fn() },
+  events: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   $transaction: jest.fn(),
 }
 mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise<void>) => fn(mockDb))
 const auditLog = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/audit-log", () => ({ auditLog }))
+jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry: unknown) => auditLog(entry) }))
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))
 jest.mock("next/headers", () => ({ headers: jest.fn().mockResolvedValue({ get: () => "203.0.113.9" }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
@@ -90,13 +92,13 @@ describe("handing over a claim filed without an account", () => {
 
     await decideEventClaim("c1", "approve")
 
-    expect(mockDb.event_claims.update).toHaveBeenCalledWith(
+    expect(mockDb.event_claims.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "approved", org_id: "org9", onboarding_id: null }),
       })
     )
-    expect(mockDb.events.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "e1" }, data: expect.objectContaining({ organizer_org_id: "org9" }) })
+    expect(mockDb.events.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "e1", claimed_at: null }, data: expect.objectContaining({ organizer_org_id: "org9" }) })
     )
     expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "event_claim.approved", details: expect.objectContaining({ orgId: "org9" }) }))
   })
@@ -113,14 +115,14 @@ describe("handing over a claim filed without an account", () => {
     noAccountClaim({ contact_email: "evil@example.com" })
     mockDb.organiser_onboarding_requests.findUnique.mockResolvedValue({ org_id: "org9", contact_email: "events@toit.in" })
     await expect(decideEventClaim("c1", "approve")).rejects.toThrow("different email address")
-    expect(mockDb.events.update).not.toHaveBeenCalled()
+    expect(mockDb.events.updateMany).not.toHaveBeenCalled()
   })
 
   it("matches the email case-insensitively", async () => {
     noAccountClaim({ contact_email: "Events@Toit.in" })
     mockDb.organiser_onboarding_requests.findUnique.mockResolvedValue({ org_id: "org9", contact_email: "events@toit.in" })
     await decideEventClaim("c1", "approve")
-    expect(mockDb.events.update).toHaveBeenCalled()
+    expect(mockDb.events.updateMany).toHaveBeenCalled()
   })
 })
 
@@ -131,10 +133,10 @@ describe("a claim that already has an organisation", () => {
     })
     await decideEventClaim("c2", "approve")
     expect(mockDb.organiser_onboarding_requests.findUnique).not.toHaveBeenCalled()
-    expect(mockDb.event_claims.update).toHaveBeenCalledWith(
+    expect(mockDb.event_claims.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.not.objectContaining({ org_id: expect.anything() }) })
     )
-    expect(mockDb.events.update).toHaveBeenCalledWith(
+    expect(mockDb.events.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ organizer_org_id: "org2" }) })
     )
   })
@@ -149,7 +151,8 @@ describe("the claimant hears the decision (SCRUM-117)", () => {
       expect.objectContaining({ to: "events@toit.in", subject: "About your claim on the event Indie Sundowner" }),
     ])
     expect(sent[0].text).toContain("The listing is not yours to run.")
-    expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ details: expect.objectContaining({ emailSent: true }) }))
+    // The record is the decision, written with it; whether the email went is what `notified` says.
+    expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "event_claim.declined" }))
   })
 
   it("an approval reaches them with a link to the event", async () => {

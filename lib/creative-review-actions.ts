@@ -3,8 +3,9 @@
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 
-import { auditLog } from "@/lib/audit-log"
-import { getAuth } from "@/lib/auth"
+import { auditInTx } from "@/lib/audit-log"
+import { ALREADY_DECIDED, decisionFrom, reasonFrom, refuseUnlessDecided } from "@/lib/decision"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 
 /**
@@ -56,8 +57,7 @@ export interface CreativeQueueRow {
 }
 
 export async function getCreativeQueue(): Promise<CreativeQueueRow[]> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const rows = await db.sponsored_creatives.findMany({
     where: { moderation_status: "pending" },
@@ -113,19 +113,15 @@ export async function getCreativeQueue(): Promise<CreativeQueueRow[]> {
 
 export async function decideCreative(
   creativeId: string,
-  decision: "approve" | "reject",
+  decisionInput: "approve" | "reject",
   note?: string
 ): Promise<void> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  const admin = session.user
-
-  const trimmed = note?.trim() ?? ""
+  const admin = await requireAdmin()
+  // Before anything else: a word this queue does not take is refused (M2).
+  const decision = decisionFrom(["approve", "reject"], decisionInput)
   // A refusal with no reason produces an identical resubmission, and the queue
   // gets the same words again.
-  if (decision === "reject" && trimmed.length < 10) {
-    throw new Refusal("Give a reason — the organiser has to know what to change.")
-  }
+  const trimmed = reasonFrom(note, decision === "reject", "Give a reason — the organiser has to know what to change.") ?? ""
 
   const creative = await db.sponsored_creatives.findUnique({
     where: { id: creativeId },
@@ -143,20 +139,35 @@ export async function decideCreative(
     },
   })
   if (!creative) throw new Refusal("Creative not found")
-  if (creative.moderation_status !== "pending") {
-    throw new Refusal("This creative has already been reviewed.")
-  }
+  if (creative.moderation_status !== "pending") throw new Refusal(ALREADY_DECIDED)
 
   const isLatest = creative.message.creatives[0]?.id === creative.id
   const status = decision === "approve" ? "approved" : "rejected"
 
   await db.$transaction(async (tx) => {
-    await tx.sponsored_creatives.update({
-      where: { id: creativeId },
+    // Conditional on still pending: of two reviews racing, one writes and the
+    // other is refused, so an approved creative is never also rejected (H1).
+    const decided = await tx.sponsored_creatives.updateMany({
+      where: { id: creativeId, moderation_status: "pending" },
       data: {
         moderation_status: status,
         approved_by: decision === "approve" ? admin.id : null,
         approved_at: decision === "approve" ? new Date() : null,
+      },
+    })
+    refuseUnlessDecided(decided.count)
+
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: decision === "approve" ? "creative.approved" : "creative.rejected",
+      resource: "sponsored_creatives",
+      resourceId: creativeId,
+      details: {
+        campaignId: creative.message.id,
+        eventId: creative.message.event_id,
+        sponsorId: creative.message.sponsor_id,
+        wasLatest: isLatest,
+        note: trimmed || null,
       },
     })
 
@@ -182,20 +193,6 @@ export async function decideCreative(
           : {}),
       },
     })
-  })
-
-  auditLog({
-    userId: admin.id,
-    action: decision === "approve" ? "creative.approved" : "creative.rejected",
-    resource: "sponsored_creatives",
-    resourceId: creativeId,
-    details: {
-      campaignId: creative.message.id,
-      eventId: creative.message.event_id,
-      sponsorId: creative.message.sponsor_id,
-      wasLatest: isLatest,
-      note: trimmed || null,
-    },
   })
 
   revalidatePath("/dashboard/creative-review")

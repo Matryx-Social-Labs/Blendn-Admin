@@ -67,7 +67,7 @@ describe("host-facing chat routes return handles, not account ids", () => {
 
   it("maps a chat member's audit row to a handle for anybody but the admin", () => {
     const src = stripComments(readFileSync(join(ROOT, "lib", "audit-actions.ts"), "utf8"))
-    expect(src).toMatch(/resourceId: isAdmin \? r\.resource_id : hostResourceId\(session\.user\.id, r\)/)
+    expect(src).toMatch(/resourceId: isAdmin \? r\.resource_id : hostResourceId\(user\.id, r\)/)
   })
 
   // Negative controls: the rule sees the shapes it exists for, and not the fix.

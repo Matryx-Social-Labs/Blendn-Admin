@@ -22,9 +22,12 @@ const mockAuth = getAuth as jest.MockedFunction<typeof getAuth>
 const users: string[] = []
 const events: string[] = []
 
-beforeAll(() => {
+beforeAll(async () => {
+  // A real admin row: requireAdmin reads the caller's role from the database (step 18).
+  const admin = await makeUser(testId("supply_admin"), "app_admin")
+  users.push(admin)
   mockAuth.mockResolvedValue({
-    user: { id: "admin", role: "app_admin", email: "a@b.c" },
+    user: { id: admin, role: "app_admin", email: "a@b.c" },
   } as unknown as Awaited<ReturnType<typeof getAuth>>)
 })
 

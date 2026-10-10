@@ -7,6 +7,8 @@ import { z } from "zod"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
+import { ALREADY_DECIDED, decisionFrom, reasonFrom } from "@/lib/decision"
 import { auditLog } from "@/lib/audit-log"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { venueTypeLabel } from "@/lib/venue-types"
@@ -170,6 +172,9 @@ export async function fileVenueClaim(
     resource: "venue",
     resourceId: venue.id,
     details: { claimId: claim.id, orgId: membership.org_id, venue: venue.name },
+    // The claimant's, never the venue's owner: a dispute filed against an owner
+    // is not the owner's to read in its log (step 18, M3).
+    orgId: membership.org_id,
   })
 
   revalidatePath("/dashboard/venues")
@@ -277,6 +282,8 @@ export async function filePublicVenueClaim(
       resource: "venue",
       resourceId: venue.id,
       details: { claimId: claim.id, onboardingId: input.onboardingId, withoutAccount: true },
+      // No organisation yet: the platform's alone.
+      orgId: null,
     })
     return { ok: true, claimId: claim.id }
   } catch (error) {
@@ -346,8 +353,7 @@ function noAccountFlags(contactEmail: string | null, website: string | null, gst
 }
 
 export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const claims = await db.venue_claims.findMany({
     where: { status: "pending" },
@@ -456,12 +462,12 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
  */
 export async function decideVenueClaim(
   claimId: string,
-  decision: "approve" | "decline",
+  decisionInput: "approve" | "decline",
   note?: string
 ): Promise<{ notified: boolean }> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  const admin = session.user
+  const admin = await requireAdmin()
+  // Before anything else: a word this queue does not take is refused (M2).
+  const decision = decisionFrom(["approve", "decline"], decisionInput)
 
   const claim = await db.venue_claims.findUnique({
     where: { id: claimId },
@@ -481,10 +487,7 @@ export async function decideVenueClaim(
 
   // A decline that reaches the claimant with no reason produces an identical
   // re-file, and the queue gets the same row again.
-  const trimmed = note?.trim() ?? ""
-  if (decision === "decline" && trimmed.length < 10) {
-    throw new Refusal("Give a reason — it is sent to the claimant.")
-  }
+  const trimmed = reasonFrom(note, decision === "decline", "Give a reason — it is sent to the claimant.") ?? ""
 
   /*
    * A claim filed with no account carries its application, not an
@@ -601,6 +604,8 @@ export async function decideVenueClaim(
       note: trimmed || null,
       emailSent: notified,
     },
+    // The claimant's (the organisation it was decided for), never the venue's owner.
+    orgId,
   })
 
   revalidatePath("/dashboard/venue-owners")
@@ -608,7 +613,6 @@ export async function decideVenueClaim(
   return { notified }
 }
 
-const ALREADY_DECIDED = "This claim has already been decided."
 const OWNER_SINCE_FILING =
   "This venue has been given an owner since the claim was filed. Decline it, or have them dispute it from the dashboard."
 const ORG_ALREADY_CLAIMED =

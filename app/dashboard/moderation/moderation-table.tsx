@@ -89,17 +89,21 @@ export function ModerationTable({
       key: "eventTitle",
       label: "Event",
       secondary: true,
-      render: (row) =>
-        row.eventId ? (
-          <Link
-            href={`/dashboard/events/${row.eventId}/messaging`}
-            className="hover:text-primary hover:underline"
-          >
-            {row.eventTitle}
-          </Link>
-        ) : (
-          row.eventTitle
-        ),
+      // Wraps, as the kit's does: a long title in one line pushed Remove off a 1280 window.
+      render: (row) => (
+        <span className="block max-w-[170px] whitespace-normal">
+          {row.eventId ? (
+            <Link
+              href={`/dashboard/events/${row.eventId}/messaging`}
+              className="hover:text-primary hover:underline"
+            >
+              {row.eventTitle}
+            </Link>
+          ) : (
+            row.eventTitle
+          )}
+        </span>
+      ),
     },
     {
       key: "category",
@@ -147,7 +151,8 @@ export function ModerationTable({
     { key: "source", label: "Source", secondary: true, sortType: "string" },
     {
       key: "confidence",
-      label: "Confidence",
+      // The kit's short label, for the same reason the event title wraps.
+      label: "Conf.",
       align: "right",
       secondary: true,
       sortType: "number",
@@ -222,7 +227,7 @@ export function ModerationTable({
             {rows.length} {status}
             {status === "pending" ? " · oldest first, age is the SLA" : ""}
           </span>
-          <span>decisions write to audit_logs</span>
+          <span>decisions write to the audit log</span>
         </>
       }
     />

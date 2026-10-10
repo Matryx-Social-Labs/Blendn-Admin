@@ -255,7 +255,13 @@ describe("filing a venue claim with no account", () => {
 })
 
 describe("deciding a no-account venue claim", () => {
-  const asAdmin = () => mockGetAuth.mockResolvedValue({ user: { id: "itest-admin", role: "app_admin" } })
+  // A real admin row: requireAdmin reads the caller's role from the database (step 18).
+  let adminId = ""
+  beforeAll(async () => {
+    adminId = await makeUser(testId("cfa_admin"), "app_admin")
+    users.push(adminId)
+  })
+  const asAdmin = () => mockGetAuth.mockResolvedValue({ user: { id: adminId, role: "app_admin" } })
 
   /** The applicant clicked the link we sent. */
   const confirm = (requestId: string) =>
@@ -408,7 +414,7 @@ describe("deciding a no-account venue claim", () => {
     asAdmin()
     await expect(
       decidedWhileReading(claimId, () => db.venue_claims.update({ where: { id: claimId }, data: { status: "declined" } }))
-    ).rejects.toThrow(/already been decided/)
+    ).rejects.toThrow(/Someone else decided this/)
     expect(await ownerOf(venueId)).toBeNull()
   })
 

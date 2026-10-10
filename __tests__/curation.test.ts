@@ -235,7 +235,9 @@ describe("the curation write path", () => {
      * the claim funnel exists to resolve — and it would let them mint an event
      * another organiser could then be offered.
      */
-    expect(code).toMatch(/role !== "app_admin"/)
+    // requireAdmin: the role the database holds, refused into `{ ok: false }`.
+    expect(code).toMatch(/const admin = await requireAdmin\(\)\.catch\(/)
+    expect(code).toMatch(/if \(!admin\) return \{ ok: false, error: "Only platform admins can curate events" \}/)
     expect(code).not.toMatch(/canAccessDashboard/)
   })
 

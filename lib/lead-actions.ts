@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache"
 import type { lead_status } from "@prisma/client"
 
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { CLOSED_LEAD_STATUSES, openKey, openKeyFor } from "@/lib/leads"
 
@@ -19,12 +19,6 @@ import { CLOSED_LEAD_STATUSES, openKey, openKeyFor } from "@/lib/leads"
  * Admin-only throughout. A lead carries a stranger's name, email, IP and user
  * agent; it is marketing PII, and organisers have no business in it.
  */
-
-async function requireAdmin() {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  return session.user
-}
 
 /** Statuses reachable from each status. Enforced server-side, not just in the UI. */
 const TRANSITIONS: Record<lead_status, lead_status[]> = {

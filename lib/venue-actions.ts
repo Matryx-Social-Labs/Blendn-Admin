@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { currentUser, requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
@@ -70,10 +70,11 @@ import { realEventsWhere } from "@/lib/event-kind"
  * undoable.
  */
 
+/** The caller, with the role the database holds now (step 18): an admin's branch here touches any venue. */
 async function requireUser() {
-  const session = await getAuth()
-  if (!session?.user) throw new Refusal("Unauthorized")
-  return session.user
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
+  return user
 }
 
 /**
@@ -515,8 +516,7 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
  * catalogue rather than about one organisation.
  */
 export async function restoreVenue(id: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const { count } = await db.venues.updateMany({
     where: { id, deleted_at: { not: null } },
@@ -542,8 +542,7 @@ export async function restoreVenue(id: string): Promise<void> {
  * that is a dispute, and a dispute has a person in it.
  */
 export async function assignVenueOwner(venueId: string, orgId: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const venue = await db.venues.findUnique({
     where: { id: venueId, deleted_at: null },

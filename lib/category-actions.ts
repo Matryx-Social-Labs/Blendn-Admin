@@ -4,7 +4,7 @@ import { Refusal } from "./refusal"
 import { likeLiteral } from "./like-literal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 
 /**
@@ -19,12 +19,6 @@ import { auditLog } from "@/lib/audit-log"
  * with a parent cannot itself become a parent, or the mobile client's filter
  * (which expands one level) silently stops matching the grandchildren.
  */
-
-async function requireAdmin() {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  return session.user
-}
 
 export interface CategoryRow {
   id: string

@@ -3101,11 +3101,16 @@ model audit_logs {
   details     Json?
   ip_address  String?
   created_at  DateTime @default(now()) @db.Timestamptz(6)
+  /// The organisation whose data the action changed, whoever acted
+  /// (lib/audit-log.ts ORG_RESOURCES); an organisation's log reads by it
+  /// (step 18, M3). Null: the platform's alone.
+  org_id      String?  @db.Uuid
 
   @@index([user_id])
   @@index([action])
   @@index([resource])
   @@index([created_at])
+  @@index([org_id, created_at])
 }
 
 /// What a person registered with, kept for 180 days after they delete their

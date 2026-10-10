@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client"
 
+import { auditInTx } from "./audit-log"
 import { OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { db } from "@/lib/db"
 import { revokePaidByRefs } from "@/lib/entitlements"
@@ -50,21 +51,21 @@ export async function cancelThenRecord(
     return "razorpay_refused"
   }
   try {
-    await db.$transaction([
-      db.billing_checkouts.update({
+    await db.$transaction(async (tx) => {
+      await tx.billing_checkouts.update({
         where: { id: sub.id },
         data: { cancel_at_cycle_end: true, ...(sub.status === "created" ? { status: "expired" } : {}) },
-      }),
-      db.audit_logs.create({
-        data: {
-          user_id: audit.userId,
-          action: "billing.subscription.cancelled",
-          resource: audit.resource,
-          resource_id: audit.resourceId,
-          details: { providerRef: sub.provider_ref, atCycleEnd, orgId: sub.org_id, ...(audit.reason ? { reason: audit.reason } : {}) },
-        },
-      }),
-    ])
+      })
+      await auditInTx(tx, {
+        userId: audit.userId,
+        action: "billing.subscription.cancelled",
+        resource: audit.resource,
+        resourceId: audit.resourceId,
+        details: { providerRef: sub.provider_ref, atCycleEnd, orgId: sub.org_id, ...(audit.reason ? { reason: audit.reason } : {}) },
+        // The payer's, whatever the venue's owner is now (step 18, M3).
+        orgId: sub.org_id,
+      })
+    })
   } catch (err) {
     logger.error("Razorpay cancelled a subscription but recording it here failed; its subscription.cancelled webhook settles it", {
       providerRef: sub.provider_ref,
@@ -95,22 +96,41 @@ export async function endPreviousOwnersPro(
 ): Promise<number> {
   const paidByOthers = await tx.billing_checkouts.findMany({
     where: { venue_id: venueId, kind: "subscription", org_id: { not: newOwnerOrgId } },
-    select: { provider_ref: true },
+    select: { provider_ref: true, org_id: true },
   })
-  const refs = paidByOthers.map((c) => c.provider_ref)
-  const ended = await revokePaidByRefs({ kind: "venue", id: venueId }, "venue_pro", refs, new Date(), tx)
-  if (ended.length) {
-    await tx.audit_logs.create({
-      data: {
-        user_id: adminId,
-        action: "entitlement.ended_on_transfer",
-        resource: "venue",
-        resource_id: venueId,
-        details: { newOwnerOrgId, ended: ended.length, entitlementIds: ended.map((e) => e.id) },
-      },
+  /*
+   * Audited to each payer, with its own entitlements, and to nobody else (step
+   * 18, M3): what one organisation paid for is in its log, never the new
+   * owner's. The new owner gets one row that says it happened, with nothing of
+   * the previous payer's in it.
+   */
+  const byPayer = new Map<string, string[]>()
+  for (const c of paidByOthers) byPayer.set(c.org_id, [...(byPayer.get(c.org_id) ?? []), c.provider_ref])
+  let total = 0
+  for (const [payer, refs] of byPayer) {
+    const ended = await revokePaidByRefs({ kind: "venue", id: venueId }, "venue_pro", refs, new Date(), tx)
+    if (ended.length === 0) continue
+    total += ended.length
+    await auditInTx(tx, {
+      userId: adminId,
+      action: "entitlement.ended_on_transfer",
+      resource: "venue",
+      resourceId: venueId,
+      details: { ended: ended.length, entitlementIds: ended.map((e) => e.id) },
+      orgId: payer,
     })
   }
-  return ended.length
+  if (total > 0) {
+    await auditInTx(tx, {
+      userId: adminId,
+      action: "entitlement.previous_owner_pro_ended",
+      resource: "venue",
+      resourceId: venueId,
+      details: { note: "Venue Pro from the previous owner ended at transfer" },
+      orgId: newOwnerOrgId,
+    })
+  }
+  return total
 }
 
 /**
@@ -161,22 +181,21 @@ async function cancelEach(venueId: string, newOwnerOrgId: string, adminId: strin
     }
     failed.push(sub.provider_ref)
     if (outcome === "razorpay_refused") {
-      await db.audit_logs
-        .create({
-          data: {
-            user_id: adminId,
-            action: "billing.subscription.cancel_failed",
-            resource: "venue",
-            resource_id: venueId,
-            details: { providerRef: sub.provider_ref, orgId: sub.org_id, newOwnerOrgId, todo: "cancel it from the Razorpay dashboard" },
-          },
+      // Awaited and never thrown: a failed write of this row is logged, and the cancel loop carries on.
+      await auditInTx(db, {
+        userId: adminId,
+        action: "billing.subscription.cancel_failed",
+        resource: "venue",
+        resourceId: venueId,
+        details: { providerRef: sub.provider_ref, orgId: sub.org_id, newOwnerOrgId, todo: "cancel it from the Razorpay dashboard" },
+        // The payer's; it names the new owner, which only the payer and the platform may read.
+        orgId: sub.org_id,
+      }).catch((err: unknown) =>
+        logger.error("Auditing a refused Venue Pro cancel failed", {
+          providerRef: sub.provider_ref,
+          error: err instanceof Error ? err.message : String(err),
         })
-        .catch((err: unknown) =>
-          logger.error("Auditing a refused Venue Pro cancel failed", {
-            providerRef: sub.provider_ref,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        )
+      )
     }
   }
   return { cancelled, failed }

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { IconInbox } from "@tabler/icons-react"
 
+import { Callout, Panel } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { getAuth } from "@/lib/auth"
 import { getOnboardingRequests } from "@/lib/onboarding-actions"
@@ -56,13 +57,12 @@ export default async function OnboardingPage() {
         domain is a warning, and the two are no longer the same colour.
       */}
       {!emailConfigured() ? (
-        <div className="rounded-lg border border-warning/40 bg-warning/5 p-4 text-[0.8125rem] leading-6">
-          <strong className="font-semibold">Email is not configured.</strong> Applicants cannot
-          confirm their address, and approving one will not send them their sign-in details — the
-          password is shown to you once instead, to pass on yourself. Set{" "}
+        <Callout title="Email is not configured.">
+          Applicants cannot confirm their address, and approving one will not send them their sign-in details — a
+          one-time link is shown to you instead, to pass on yourself. Set{" "}
           <code className="rounded bg-muted px-1">RESEND_API_KEY</code> and{" "}
           <code className="rounded bg-muted px-1">EMAIL_FROM</code> to turn this on.
-        </div>
+        </Callout>
       ) : null}
 
       {pending.rows.length === 0 ? (
@@ -85,25 +85,27 @@ export default async function OnboardingPage() {
       )}
 
       {decided.rows.length > 0 ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-[length:var(--text-h2)] font-bold">Declined</h2>
-          <div className="flex flex-col gap-2">
+        <Panel
+          title="Declined"
+          hint={
+            decided.total > DECLINED_SHOWN
+              ? `showing ${Math.min(DECLINED_SHOWN, decided.rows.length)} of ${decided.total}`
+              : "most recent first"
+          }
+          bodyClassName="gap-0 px-0 pb-0 pt-3"
+        >
+          <ul>
             {decided.rows.slice(0, DECLINED_SHOWN).map((r) => (
-              <div
+              <li
                 key={r.id}
-                className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg border border-border bg-card px-4 py-3 text-[0.8125rem]"
+                className="flex flex-wrap items-baseline justify-between gap-2 border-t border-border px-5 py-3 text-[0.8125rem]"
               >
                 <span className="font-medium">{r.display_name}</span>
                 <span className="text-muted-foreground">{r.contact_email}</span>
-              </div>
+              </li>
             ))}
-          </div>
-          {decided.total > DECLINED_SHOWN ? (
-            <p className="text-[0.8125rem] text-muted-foreground">
-              Showing {Math.min(DECLINED_SHOWN, decided.rows.length)} of {decided.total}.
-            </p>
-          ) : null}
-        </section>
+          </ul>
+        </Panel>
       ) : null}
     </div>
   )

@@ -3,12 +3,14 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { IconCheck, IconExternalLink, IconGavel } from "@tabler/icons-react"
+import { IconAlertTriangle, IconCircleCheck, IconExternalLink, IconGavel } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { Callout, Panel } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { FLAG_COPY } from "@/lib/claim-flags"
 import { cn } from "@/lib/utils"
 
@@ -19,7 +21,7 @@ import { refusalMessage } from "@/lib/refusal"
 const SLA_HOURS = 48
 
 /**
- * Deciding whether an event belongs to somebody.
+ * Deciding whether an event belongs to somebody — one bordered card per claim.
  *
  * ## Not a `DataTable`
  *
@@ -81,35 +83,32 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
   }
 
   return (
-    <ul className="flex flex-col divide-y divide-border border-t border-border">
+    <div className="flex flex-col gap-3.5">
       {rows.map((row) => {
         const overdue = row.ageHours >= SLA_HOURS
         const busy = pending && acting === row.id
         return (
-          <li
-            key={row.id}
-            className="flex flex-col gap-3 py-5"
-          >
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="text-sm font-bold">
-                <Link href={`/dashboard/events/${row.eventId}`} className="hover:underline">
+          <Panel key={row.id}>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <h2 className="text-[0.9375rem] font-bold">
+                <Link href={`/dashboard/events/${row.eventId}`} className="underline-offset-4 hover:underline">
                   {row.eventTitle}
                 </Link>
                 {row.eventCity ? (
                   <span className="ml-2 font-normal text-muted-foreground">{row.eventCity}</span>
                 ) : null}
-              </h3>
+              </h2>
               <span
                 className={cn(
-                  "text-[0.75rem] tabular-nums",
-                  overdue ? "font-medium text-destructive" : "text-muted-foreground"
+                  "text-[0.8125rem] tabular-nums",
+                  overdue ? "font-bold text-destructive" : "text-muted-foreground"
                 )}
               >
                 waiting {row.ageHours}h
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-[0.8125rem]">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.8125rem]">
               <b className="font-medium">{row.orgName ?? "No account yet"}</b>
               <span className="text-muted-foreground">{row.contactEmail}</span>
               {row.claimNumber > 1 ? (
@@ -129,36 +128,40 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
                   rel="noreferrer noopener"
                   className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
                 >
-                  source <IconExternalLink className="size-3.5" />
+                  source <IconExternalLink aria-hidden className="size-3.5" />
                 </a>
               ) : null}
             </div>
 
-            {row.note ? (
-              <p className="text-sm leading-relaxed text-muted-foreground">{row.note}</p>
-            ) : null}
+            {row.note ? <p className="text-[0.84375rem] leading-[21px] text-muted-foreground">{row.note}</p> : null}
 
             {row.flags.length > 0 ? (
-              <ul className="flex flex-col gap-1">
-                {row.flags.map((flag) => (
-                  <li
-                    key={flag}
-                    className={cn(
-                      "text-[0.75rem]",
-                      // The one that invalidates everything under it.
-                      flag === "source_is_aggregator"
-                        ? "font-medium text-destructive"
-                        : flag === "domain_verified_for_org"
-                          ? "text-success"
-                          : "text-muted-foreground"
-                    )}
-                  >
-                    {FLAG_COPY[flag]}
-                  </li>
-                ))}
+              <ul className="flex flex-col gap-1.5">
+                {row.flags.map((flag) => {
+                  // The one that invalidates everything under it, and the one credential.
+                  const against = flag === "source_is_aggregator"
+                  const verified = flag === "domain_verified_for_org"
+                  const Icon = verified ? IconCircleCheck : IconAlertTriangle
+                  return (
+                    <li
+                      key={flag}
+                      className={cn(
+                        "flex items-start gap-2 text-[0.8125rem]",
+                        against ? "font-medium text-destructive" : verified ? "text-success" : "text-muted-foreground"
+                      )}
+                    >
+                      <Icon
+                        aria-hidden
+                        className={cn("mt-0.5 size-3.5 shrink-0", !against && !verified && "text-warning")}
+                      />
+                      {/* A stored key this build has no sentence for reads as itself, never as a blank line. */}
+                      {FLAG_COPY[flag] ?? flag}
+                    </li>
+                  )
+                })}
               </ul>
             ) : (
-              <p className="text-[0.75rem] text-faint-foreground">
+              <p className="text-[0.8125rem] text-faint-foreground">
                 No automatic signals either way — decide on the note and the source.
               </p>
             )}
@@ -171,15 +174,21 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
                * terrible way to learn it. A reviewer should see that a row
                * cannot be actioned before they read it.
                */
-              <p className="rounded border border-border bg-surface-raised px-3 py-2 text-[0.75rem] text-muted-foreground">
+              <Callout>
                 {row.blocked === "room_open"
                   ? "This event is running. Decide once the room has closed — approving now would hand over the attendee list for people currently in the building."
                   : "Somebody else's claim was approved first. Decline this one."}
-              </p>
+              </Callout>
             ) : null}
 
+            {/*
+              The reason field stays open rather than behind Decline, unlike the
+              venue and brand queues: a note written on a hand-over reaches the
+              claimant in the approval email and is kept as the claim's
+              `decision_note`, so it is not only a decline's.
+            */}
             <div className="flex flex-wrap items-center gap-2">
-              <input
+              <Input
                 value={notes[row.id] ?? ""}
                 onChange={(e) => setNotes((n) => ({ ...n, [row.id]: e.target.value }))}
                 placeholder="Reason — sent to the claimant, required to decline"
@@ -193,16 +202,8 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
                  * that governs this control (required to decline), so truncating
                  * it hides the rule.
                  */
-                className="min-w-[15rem] flex-1 rounded border border-border bg-background px-2.5 py-1.5 text-[0.8125rem]"
+                className="h-9 min-w-[15rem] flex-1"
               />
-              <Button
-                size="sm"
-                disabled={busy || row.blocked !== null}
-                onClick={() => decide(row.id, "approve")}
-              >
-                <IconCheck className="size-4" />
-                Hand over
-              </Button>
               <Button
                 size="sm"
                 variant="outline"
@@ -211,10 +212,17 @@ export function EventClaimsTable({ rows }: { rows: EventClaimRow[] }) {
               >
                 Decline
               </Button>
+              <Button
+                size="sm"
+                disabled={busy || row.blocked !== null}
+                onClick={() => decide(row.id, "approve")}
+              >
+                Hand over
+              </Button>
             </div>
-          </li>
+          </Panel>
         )
       })}
-    </ul>
+    </div>
   )
 }

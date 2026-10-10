@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import type { venue_type } from "@prisma/client"
 
+import { auditInTx } from "../lib/audit-log"
 import { parseCsvRows } from "../lib/csv"
 import { closeDb, db } from "../lib/db"
 import { haversineDistanceMeters } from "../lib/geo"
@@ -349,13 +350,11 @@ async function main() {
           },
           select: { id: true },
         })
-        await tx.audit_logs.create({
-          data: {
-            action: "venue.created",
-            resource: "venue",
-            resource_id: created.id,
-            details: { name: row.name, venueType: row.venueType, claimed: false, source: "scripts/import-venues.ts", line: row.line },
-          },
+        await auditInTx(tx, {
+          action: "venue.created",
+          resource: "venue",
+          resourceId: created.id,
+          details: { name: row.name, venueType: row.venueType, claimed: false, source: "scripts/import-venues.ts", line: row.line },
         })
         ids.push(created.id)
       }
