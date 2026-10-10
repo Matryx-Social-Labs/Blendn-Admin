@@ -30,7 +30,9 @@ export function PeopleHeatmap({ people }: { people: PeopleGrid }) {
         <div key={slot} className="contents">
           <span className="self-center">{slot}</span>
           {DAYS.map((day, di) => {
-            const n = people[di]?.[si] ?? 0
+            // null is a held-back cell (1–4 people), never 0: only a missing cell is empty.
+            const cell = people[di]?.[si]
+            const n = cell === undefined ? 0 : cell
             return (
               <div
                 key={day}

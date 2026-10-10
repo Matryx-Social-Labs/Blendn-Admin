@@ -593,3 +593,31 @@ describe("when one side fails (scan 3)", () => {
     })
   })
 })
+
+describe("GAP cancelling an unpaid checkout", () => {
+  it("GAP-X01/X03 stops it now, not at a cycle end it has not reached, and a restart gets a new subscription", async () => {
+    as(owner, "organizer")
+    const first = await actions.startAnalyticsCheckout("monthly")
+    calls.length = 0
+    await actions.cancelAnalytics()
+    expect(calls.find((c) => c.url.includes("/cancel"))?.body).toEqual({ cancel_at_cycle_end: 0 })
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: first.subscriptionId } })).status).toBe("expired")
+    const second = await actions.startAnalyticsCheckout("monthly")
+    expect(second.subscriptionId).not.toBe(first.subscriptionId)
+  })
+})
+
+describe("GAP a deleted buyer", () => {
+  it("GAP-X16 buys nothing", async () => {
+    const gone = await makeUser(testId("bill-deleted"), "organizer")
+    users.push(gone)
+    await db.organisation_members.create({ data: { org_id: orgId, user_id: gone, role: "owner" } })
+    await db.user.update({ where: { id: gone }, data: { deletedAt: new Date() } })
+    as(gone, "organizer")
+    calls.length = 0
+    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Unauthorized")
+    expect(calls).toHaveLength(0)
+    await db.organisation_members.deleteMany({ where: { user_id: gone } })
+  })
+})
+

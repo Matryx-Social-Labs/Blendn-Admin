@@ -18,7 +18,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { randomUUID } from "crypto"
 
-import { billingOrgFor, planPageData } from "@/lib/billing"
+import { billingOrgFor, planBadgeFor, planPageData } from "@/lib/billing"
 
 import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 
@@ -121,5 +121,75 @@ describe("after Checkout (?status=pending)", () => {
     const t = await tree({ status: "pending", for: "analytics", ref: subA })
     expect(t).toMatch(/"pending":false,"pendingFor":"analytics"/)
     expect(t).toContain("On, renews 3 Nov 2026.")
+  })
+})
+
+describe("GAP the venue owner's Plan page after Checkout", () => {
+  it("GAP-PENDING stops waiting once the Venue Pro it waited for is live", async () => {
+    const vo = await makeUser(testId("plan-vo"), "organizer")
+    users.push(vo)
+    await db.user.update({ where: { id: vo }, data: { role: "venue_owner" } })
+    const org = await db.organisations.create({ data: { kind: "company", display_name: testId("plan-vo-org"), status: "verified" } })
+    orgs.push(org.id)
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: vo, role: "owner" } })
+    const venue = await db.venues.create({
+      data: { name: testId("plan-vo-venue"), city: "Bengaluru", latitude: 12.97, longitude: 77.64, timezone: "Asia/Kolkata", owner_org_id: org.id, claimed_at: new Date(Date.now() - 100 * 86_400_000) },
+    })
+    const ref = `sub_${randomUUID().slice(0, 10)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp", org_id: org.id, venue_id: venue.id, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "created" },
+    })
+    mockGetAuth.mockResolvedValue({ user: { id: vo, role: "venue_owner" } })
+    try {
+      // Back from Checkout, the webhook not yet delivered: waiting is right.
+      const waiting = await tree({ status: "pending", for: "venue", ref })
+      expect(waiting).toContain('"pending":true')
+      // The webhook arrives: the entitlement is live. The page must stop waiting.
+      await db.billing_checkouts.updateMany({ where: { provider_ref: ref }, data: { status: "active", current_end: new Date(Date.now() + 20 * 86_400_000) } })
+      await db.entitlements.create({
+        data: { subject_kind: "venue", subject_id: venue.id, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - 1000), expires_at: new Date(Date.now() + 20 * 86_400_000) },
+      })
+      const live = await tree({ status: "pending", for: "venue", ref })
+      expect(live).not.toContain('"pending":true')
+      expect(live).not.toContain(`"reference":"${ref}"`) // no PendingWatcher left polling, and no "taking longer" after 90 s
+    } finally {
+      mockGetAuth.mockResolvedValue({ user: { id: owner, role: "organizer" } })
+      await db.entitlements.deleteMany({ where: { subject_id: venue.id } })
+      await db.billing_checkouts.deleteMany({ where: { venue_id: venue.id } })
+      await db.venues.delete({ where: { id: venue.id } })
+    }
+  })
+})
+
+describe("GAP an organisation that also pays Venue Pro", () => {
+  it("GAP-Z06..Z08 shows its Analytics subscription, date and payments, and none of the venue's", async () => {
+    const venue = await db.venues.create({
+      data: { name: testId("plan-both-venue"), city: "Bengaluru", latitude: 12.97, longitude: 77.64, timezone: "Asia/Kolkata", owner_org_id: orgA, claimed_at: new Date(Date.now() - 100 * 86_400_000) },
+    })
+    const venueRef = `sub_${randomUUID().slice(0, 10)}`
+    const venuePro = await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: venueRef, provider_plan_id: "plan_vp", org_id: orgA, venue_id: venue.id, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active", current_end: new Date("2026-12-24T10:00:00Z") },
+    })
+    await db.billing_payments.create({
+      data: { provider_payment_id: `pay_${randomUUID().slice(0, 8)}`, checkout_id: venuePro.id, amount_minor: 353_900, currency: "INR", invoice_id: "inv_venue_0001", captured_at: new Date("2026-10-05T10:00:00Z") },
+    })
+    // The pending test above leaves subA's entitlement behind; one row per ref.
+    await db.entitlements.deleteMany({ where: { subject_id: orgA } })
+    await db.entitlements.create({
+      data: { subject_kind: "org", subject_id: orgA, product: "analytics", source: "razorpay", external_ref: subA, starts_at: new Date(Date.now() - 1000), expires_at: new Date(Date.now() + 40 * 86_400_000) },
+    })
+    try {
+      const org = await billingOrgFor({ id: owner, role: "organizer" })
+      const view = await planPageData(org!)
+      expect(view.subscriptions.map((x) => x.providerRef)).toEqual([subA])
+      expect(view.payments.map((x) => x.reference)).toEqual(["inv_mine_0001"])
+      // The Analytics date is its own subscription's, not the newer venue mandate's.
+      expect((await planBadgeFor(orgA)).date).toEqual({ word: "renews", at: new Date("2026-11-03T10:00:00Z") })
+    } finally {
+      await db.entitlements.deleteMany({ where: { subject_id: orgA } })
+      await db.billing_payments.deleteMany({ where: { checkout_id: venuePro.id } })
+      await db.billing_checkouts.deleteMany({ where: { id: venuePro.id } })
+      await db.venues.delete({ where: { id: venue.id } })
+    }
   })
 })
