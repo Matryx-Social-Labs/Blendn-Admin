@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { matchesForEvent, type MatchCard } from "@/lib/matches"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { resolveUserRef } from "@/lib/room-handle"
+import { resetMemoryStore } from "@/lib/rate-limit-store"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
 
@@ -65,9 +66,18 @@ const cardOf = (cards: MatchCard[], userId: string) => cards.find((c) => resolve
 const order = (cards: MatchCard[]) => cards.map((c) => resolveUserRef(c.userId)?.userId)
 const TIER_B = ["language", "home_state", "sign"]
 
-/** A room of `others` people beside the viewer: fillers who share nothing. */
-async function fill(r: { eventId: string; occurrenceId: string }, n: number) {
-  for (let i = 0; i < n; i++) await arrive(r, await adult(`mv-fill-${i}`), 90 + i)
+/**
+ * `n` more people who share nothing. The floor counts who is inside now plus
+ * the viewer (step 10 review M1), so "a room of seven" is the viewer and six
+ * others inside. `gone` fillers checked in and went home: in the deck, not in
+ * the count.
+ */
+async function fill(r: { eventId: string; occurrenceId: string }, n: number, gone = false) {
+  for (let i = 0; i < n; i++) {
+    const id = await adult(`mv-fill-${i}`)
+    await arrive(r, id, 90 + i)
+    if (gone) await db.event_check_ins.updateMany({ where: { event_id: r.eventId, user_id: id }, data: { status: "checked_out", check_out_time: new Date() } })
+  }
 }
 
 describe("Both CSK — in RCB country outranks Both RCB (MV-I01)", () => {
@@ -111,14 +121,16 @@ describe("the Tier B budget, at seven and at eight (MV-I02)", () => {
     })
     await arrive(r, me)
     await arrive(r, them)
-    await fill(r, 6) // seven others
+    await fill(r, 5) // seven inside, counting the viewer
+    // Ten more came and went home: in the deck, never in the count (M1).
+    await fill(r, 10, true)
 
     const seven = cardOf((await matchesForEvent(r.eventId, me))!, them)
     expect(seven.overlaps.filter((o) => TIER_B.includes(o.kind))).toEqual([])
     expect(seven.overlaps).toEqual([{ kind: "this_or_that", text: "You both picked filter coffee over chai" }])
     expect(seven.sign).toBeNull()
 
-    await fill(r, 1) // eight others
+    await fill(r, 1) // eight inside
     const eight = cardOf((await matchesForEvent(r.eventId, me))!, them)
     expect(eight.overlaps.filter((o) => TIER_B.includes(o.kind))).toHaveLength(1)
     // The budget is spent on the line, so no sign chip beside it.
@@ -199,18 +211,40 @@ describe("badges from check-ins (MV-I04)", () => {
     await arrive(r, me)
     await arrive(r, regular)
     await arrive(r, keen)
-    await fill(r, 5) // seven others
+    await fill(r, 4) // seven inside, counting the viewer
 
     const small = (await matchesForEvent(r.eventId, me))!
     expect(cardOf(small, regular).badges).toEqual([])
 
-    await fill(r, 1) // eight others
+    await fill(r, 1) // eight inside
     const cards = (await matchesForEvent(r.eventId, me))!
     expect(cardOf(cards, regular).badges.map((b) => b.label)).toEqual(["Regular here", "5+ nights this month"])
     expect(cardOf(cards, keen).badges.map((b) => b.kind)).toEqual(["shows_up"])
 
     await db.profiles.update({ where: { id: keen }, data: { shows_up_badge: false } })
     expect(cardOf((await matchesForEvent(r.eventId, me))!, keen).badges).toEqual([])
+
+    // "Show my badges" off (M3): none at all, earned or not.
+    await db.profiles.update({ where: { id: regular }, data: { show_badges: false } })
+    expect(cardOf((await matchesForEvent(r.eventId, me))!, regular).badges).toEqual([])
+  })
+})
+
+describe("the work field spends the Tier B slot (step 10 review M3)", () => {
+  it("a shared language takes the slot from their field; with nothing shared, their field takes it", async () => {
+    const r = await room()
+    const me = await adult("mv-w-me")
+    const speaker = await adult("mv-w-speaker")
+    const other = await adult("mv-w-other")
+    await db.profiles.updateMany({ where: { id: { in: [me, speaker] } }, data: { languages: ["tulu"] } })
+    await db.profiles.updateMany({ where: { id: { in: [speaker, other] } }, data: { work_field: "design" } })
+    for (const id of [me, speaker, other]) await arrive(r, id)
+    await fill(r, 6)
+
+    const cards = (await matchesForEvent(r.eventId, me))!
+    expect(cardOf(cards, speaker).overlaps.map((o) => o.kind)).toEqual(["language"])
+    expect(cardOf(cards, speaker).workField).toBeNull()
+    expect(cardOf(cards, other).workField).toBe("Design")
   })
 })
 
@@ -290,6 +324,102 @@ describe("the about-you fields on the profile (MV-I05)", () => {
   })
 })
 
+describe("the Tier B oracle is closed (step 10 review H1)", () => {
+  it("a viewer who edits their home state mid-event sees no new line, and the fourth change in a day is refused", async () => {
+    const r = await room()
+    const me = await who("mv-o-me")
+    const them = await adult("mv-o-them")
+    await db.profiles.update({ where: { id: them }, data: { home_state: "kerala" } })
+    await arrive(r, me.id)
+    await arrive(r, them)
+    await fill(r, 7)
+
+    // Before: nothing shared.
+    expect(cardOf((await matchesForEvent(r.eventId, me.id))!, them).overlaps).toEqual([])
+
+    // Mid-event, the viewer becomes "from Kerala": the room ignores it.
+    expect((await put(me, { home_state: "kerala" })).status).toBe(200)
+    const stamped = await db.profiles.findUnique({ where: { id: me.id }, select: { tier_b_changed_at: true } })
+    expect(stamped?.tier_b_changed_at).toBeInstanceOf(Date)
+    expect(cardOf((await matchesForEvent(r.eventId, me.id))!, them).overlaps).toEqual([])
+
+  })
+
+  it("a change made before checking in counts", async () => {
+    const r = await room()
+    const me = await adult("mv-o2-me")
+    const them = await adult("mv-o2-them")
+    await db.profiles.updateMany({ where: { id: { in: [me, them] } }, data: { home_state: "kerala" } })
+    await db.profiles.update({ where: { id: me }, data: { tier_b_changed_at: new Date(Date.now() - 3600_000) } })
+    await arrive(r, me, 10)
+    await arrive(r, them)
+    await fill(r, 7)
+    expect(cardOf((await matchesForEvent(r.eventId, me))!, them).overlaps).toEqual([{ kind: "home_state", text: "Both from Kerala" }])
+  })
+})
+
+describe("the Tier B cooldown cannot be sidestepped (H1, the rate-limit scan)", () => {
+  const changes = async (id: string) =>
+    (await db.profiles.findUniqueOrThrow({ where: { id }, select: { tier_b_changes: true } })).tier_b_changes.length
+
+  it("counts changes per person, split or together; a no-op is not one; the fourth is refused with a sentence", async () => {
+    const me = await who("mv-cd-me")
+    // One request changing two facts is one change.
+    expect((await put(me, { home_state: "kerala", languages: ["tulu"] })).status).toBe(200)
+    expect(await changes(me.id)).toBe(1)
+    // Re-saving the same values changes nothing, so it is neither counted nor refused — now or later.
+    expect((await put(me, { home_state: "kerala", languages: ["tulu"] })).status).toBe(200)
+    expect(await changes(me.id)).toBe(1)
+    // The calendar alone, the same sign: a change.
+    expect((await put(me, { sun_sign: "leo", sign_system: "western" })).status).toBe(200)
+    expect((await put(me, { sun_sign: "leo", sign_system: "rashi" })).status).toBe(200)
+    expect(await changes(me.id)).toBe(3)
+    // Split across requests, the fourth is refused whichever field it is.
+    for (const body of [{ work_field: "design" }, { home_state: "goa" }, { sun_sign: null, sign_system: null }]) {
+      const refused = await put(me, body)
+      expect(refused.status).toBe(429)
+      expect(refused.body.error).toBe("You can change your languages, home state, sign or field of work three times a day. Try again tomorrow.")
+    }
+    // Refused means unwritten.
+    expect(await db.profiles.findUniqueOrThrow({ where: { id: me.id }, select: { home_state: true, work_field: true } })).toEqual({
+      home_state: "kerala",
+      work_field: null,
+    })
+    // Still a no-op: allowed after the limit too.
+    expect((await put(me, { home_state: "kerala" })).status).toBe(200)
+
+    // Per person: somebody else's day is their own.
+    const other = await who("mv-cd-other")
+    expect((await put(other, { home_state: "goa" })).status).toBe(200)
+  })
+
+  it("is counted in the database: clearing the in-process limiter (as a Redis outage would) changes nothing", async () => {
+    const me = await who("mv-cd-db")
+    for (const state of ["kerala", "goa", "assam"]) expect((await put(me, { home_state: state })).status).toBe(200)
+    resetMemoryStore()
+    expect((await put(me, { home_state: "punjab" })).status).toBe(429)
+  })
+
+  it("two changes at once cannot both take the last one", async () => {
+    const me = await who("mv-cd-race")
+    for (const state of ["kerala", "goa"]) expect((await put(me, { home_state: state })).status).toBe(200)
+    const both = await Promise.all([put(me, { languages: ["tulu"] }), put(me, { work_field: "design" })])
+    expect(both.map((r) => r.status).sort()).toEqual([200, 429])
+    expect(await changes(me.id)).toBe(3)
+  })
+
+  it("every effective change is stamped server-side, onboarding's first answers too", async () => {
+    const id = await makeUser(testId("mv-cd-new"))
+    users.push(id)
+    const fresh = { id, token: signAccessToken(id, `${id}@itest.invalid`) }
+    expect((await put(fresh, { home_state: "kerala" })).status).toBe(200)
+    const row = await db.profiles.findUniqueOrThrow({ where: { id }, select: { tier_b_changed_at: true, tier_b_changes: true } })
+    expect(row.tier_b_changed_at).toBeInstanceOf(Date)
+    // Not onboarded: not counted (nobody is in a room yet), still stamped.
+    expect(row.tier_b_changes).toEqual([])
+  })
+})
+
 describe("this-or-that answers (MV-I06)", () => {
   it("sets, takes back, and refuses the whole request on an unknown question", async () => {
     const me = await who("mv-t-me")
@@ -318,5 +448,13 @@ describe("this-or-that answers (MV-I06)", () => {
     expect(res.body.data.thisOrThat).toHaveLength(12)
     expect(res.body.data.signs).toContainEqual({ slug: "leo", western: "Leo", rashi: "Simha", symbol: "♌" })
     expect(res.body.data.maxLanguages).toBe(5)
+  })
+})
+
+describe("one person's nights are indexed (step 10 review M6)", () => {
+  it("event_check_ins has (user_id, check_in_time)", async () => {
+    const rows = await db.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes WHERE tablename = 'event_check_ins' AND indexname = 'event_check_ins_user_id_check_in_time_idx'`
+    expect(rows.map((r) => r.indexdef.replace(/.*USING btree /, ""))).toEqual(["(user_id, check_in_time)"])
   })
 })

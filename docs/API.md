@@ -507,10 +507,19 @@ people chose and did; display what they are."
   language, a home state or a sign (`Both from Kerala`, `Both Leos ♌ — the
   stars approve`, `Leo and Simha — same sign, two calendars ♌`). Language,
   state, sign and this-or-that are **never scored**: the room ranks the same
-  whatever they are. Before a reveal: at most two lines, **at most one Tier B,
-  and no Tier B at all in a room below eight people** (the same floor as
-  `workField`). After a reveal (`visibleInRoom`), up to four, unbudgeted.
-  Positive only: never a mismatch.
+  whatever they are. Before a reveal: at most two lines, **at most one Tier B
+  fact per card, and none in a room below eight people**. The work field is
+  Tier B too: a shared field competes for the slot (shown as `sharedWorkField`,
+  not a line), and when no shared line took it their own `workField` does;
+  only then the sign chip — so a card carries one of language / home state /
+  sign / work field before a reveal, never two. The floor counts the people
+  **inside now plus you**, not everyone who came. After a reveal
+  (`visibleInRoom`), up to four, unbudgeted. Positive only: never a mismatch.
+  "In RCB country" only in a room past the floor, when the leading team has at
+  least three fans and more than twice the runner-up's; otherwise "Both CSK
+  fans". **Your own** languages, home state, sign and work field count only if
+  you set them before you checked in (`tier_b_changed_at`): editing them
+  mid-event changes no card in that room.
 - `sign` is their own sign, `"Leo ♌"` or `"Simha ♌"`, only if they chose to
   show one, and only when the card has Tier B left — never beside a Tier B
   line before a reveal, never below eight people.
@@ -518,7 +527,8 @@ people chose and did; display what they are."
   this event's venue in 60 days, only at that venue), `Shows up` (80% of RSVPs
   in 90 days attended, at least 3 — only if they turned on `shows_up_badge`),
   `5+ nights this month` (a tier, never a count). Attendance facts, so empty
-  below the eight-person floor, like `sharedEvents`.
+  below the eight-person floor, like `sharedEvents`; none for anyone who turned
+  off `show_badges`. Computed for the page returned only.
 
 `POST .../likes` takes `{ "userId": "<this event's room handle>" }` — the card's
 own `userId` — and returns
@@ -908,7 +918,12 @@ accept that brings its second asker in (`PATCH /board/requests/:id`
 `accept`, step 10): the room and a member row for the author and every
 accepted asker, under the event room's pseudonyms, in the accept's own
 transaction; each later accept adds its asker, and a row somebody left or was
-banned from is never put back. In a board post's room the roster (`/participants`) lists only the
+banned from is never put back. **Nobody is seated beside somebody they are kept
+apart from** — a block either way or a closed conversation, between any two
+people in it: in accept order, such an asker is accepted 1:1 as usual and
+silently not seated. A suspended or erased asker is not seated. In a board
+post's room the history, live delivery, typing and roster also leave out
+anybody you closed a conversation with, as they do anybody in a block. In a board post's room the roster (`/participants`) lists only the
 people its owner admits, an asker in a block with the author is out, writes
 stop 12 hours after the event ends (`CHAT_CLOSED`), and a withdrawn or
 taken-down post closes the room (404). To block or report somebody there, use
@@ -1558,7 +1573,8 @@ card is the emblem seed, name, bio, `size` ("Crew of N", active members),
 id or pseudonym of anybody on it (a list of pseudonyms beside a crew that later
 reveals would single out the ones who stayed anonymous). Matching v2 adds
 `overlaps` and `badges`: up to two lines of what the crew **holds** (at least
-two members and a third of the crew) in common with your crew here or, alone,
+two of its active members and a third of the crew — members, not only those
+here, so a line does not change as each one walks in) in common with your crew here or, alone,
 with you — `Both crews are into Techno`, `Two RCB crews ❤️`, `This crew picks
 chai over filter coffee, like you` — never a member and never a count;
 languages and home states only between crews of four or more here in a room of
@@ -1681,6 +1697,16 @@ reveal already made is not undone. Deleting your account deletes your reveals.
 | `home_state` | a state / union territory slug, or `abroad` | the same |
 | `sun_sign` + `sign_system` | opt-in: a sign slug and `western` or `rashi`, **both or neither** (400 otherwise; `profiles_sign_shape` in the table). Null both to take it off | the same, plus your own `sign` chip on cards |
 | `shows_up_badge` | boolean, default false | turns on the "Shows up" badge |
+| `show_badges` | boolean, default true | off: no badges on your card at all |
+
+**Changing them is limited.** A real change to `languages`, `home_state`,
+`sun_sign`/`sign_system` or `work_field` (once onboarded) is allowed three
+times a day — the fourth is 429 `RATE_LIMITED`, "You can change your languages,
+home state, sign or field of work three times a day. Try again tomorrow." —
+and stamps `tier_b_changed_at`: in a room you checked into before the change,
+your new values print no shared line. Otherwise a viewer could edit their own
+facts and read which cards light up, learning every card's Tier B one edit at
+a time.
 
 **Display only, never ranked (plan v2 §8.1).** Languages, home state and sign
 are printed when two people share them and never enter a score: ranking by
@@ -1698,10 +1724,13 @@ a choice sets, `null` takes back, an unknown question or choice refuses the
 whole request (400), 409 `PROFILE_REQUIRED` before a profile exists.
 
 **Interest leaves.** The ten IPL teams are leaves under `IPL` (`ipl-csk` …,
-named by code) and cuisine loves (Biryani, Dosa, Chaat, Momos, Street food,
-Desserts, Indo-Chinese, Pizza — tastes, never diets) under `Food & Drink`.
-They are ordinary interests: picked through `/profiles/:id/interests`, ranked
-by rarity, filterable as event categories.
+named by code) and food-and-drink loves (Cafe hopping, Street food, Desserts,
+Bakeries, Italian, Pan-Asian — ways of going out, never a named dish, a diet or
+alcohol) under `Food & Drink`. They are ordinary interests: picked through
+`/profiles/:id/interests`, ranked by rarity, filterable as event categories.
+The dashboard refuses to create or rename a category into a diet, faith,
+caste, community, income, height, college or neighbourhood word
+(`lib/never-build.ts`).
 
 `intent_default` is the person-level default; the per-event override lives in
 `event_match_preferences`, written by

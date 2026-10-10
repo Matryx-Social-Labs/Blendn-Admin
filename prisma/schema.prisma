@@ -402,6 +402,10 @@ model profiles {
   /// current check-in, so editing it mid-event to see which cards light up
   /// learns nothing (step 10 review H1). Null: never changed since this existed.
   tier_b_changed_at DateTime? @db.Timestamptz(6)
+  /// The times of the last Tier B changes, for "three a day" (lib/tier-b.ts).
+  /// In the database rather than the Redis limiter, so the limit holds across
+  /// replicas and restarts and fails closed.
+  tier_b_changes    DateTime[] @default([]) @db.Timestamptz(6)
 
   this_or_that   this_or_that_answers[]
   // push_token and push_platform removed — use push_tokens table instead

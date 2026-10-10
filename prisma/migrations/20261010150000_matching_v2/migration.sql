@@ -28,6 +28,9 @@ ALTER TABLE "profiles" ADD COLUMN "show_badges" BOOLEAN NOT NULL DEFAULT true;
 -- When the Tier B facts last changed (step 10 review H1): a viewer's own are
 -- used for overlap lines only if set before their check-in.
 ALTER TABLE "profiles" ADD COLUMN "tier_b_changed_at" TIMESTAMPTZ(6);
+-- The last changes' times, for three a day (lib/tier-b.ts): counted in the
+-- database so the limit holds across replicas and fails closed.
+ALTER TABLE "profiles" ADD COLUMN "tier_b_changes" TIMESTAMPTZ(6)[] NOT NULL DEFAULT ARRAY[]::TIMESTAMPTZ(6)[];
 
 -- A sign is picked in one calendar or not at all: both or neither, and only
 -- the two calendars the editor offers. Every existing row is (NULL, NULL).

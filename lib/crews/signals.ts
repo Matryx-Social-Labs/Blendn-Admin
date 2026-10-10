@@ -111,6 +111,8 @@ const nightsCache = new Map<string, { nights: number; at: number }>()
  * Nights each crew has been out together in the last `NIGHTS_TOGETHER_DAYS`:
  * occurrences where two or more of its members checked in, counting only
  * check-ins after each member joined — a crew's history starts when it does.
+ * A member who turned off "Show my badges", or is suspended or erased, adds
+ * nothing to it: the badge is made of their nights.
  *
  * ponytail: a per-process cache, a minute long — every card on a busy night
  * would otherwise re-count every crew's history. Each replica keeps its own;
@@ -132,6 +134,9 @@ export async function nightsTogether(crewIds: readonly string[], now: number = D
       FROM (
         SELECT m.crew_id, ci.occurrence_id
           FROM crew_members m
+          -- Only members who show badges, and who are still here at all.
+          JOIN profiles p ON p.id = m.user_id AND p.show_badges
+          JOIN "User" u ON u.id = m.user_id AND u.suspended_at IS NULL AND u."deletedAt" IS NULL
           JOIN event_check_ins ci ON ci.user_id = m.user_id
          WHERE m.crew_id = ANY(${missing}::uuid[])
            AND ci.kind = 'attendee'
@@ -189,15 +194,37 @@ export async function rankCrewsFor(input: {
 }): Promise<Map<string, RankedCrew>> {
   const { mine, crews } = input
   const people = [input.viewerId, ...(mine?.members ?? []), ...crews.flatMap((c) => c.members)]
-  const t = await membersTraits(people)
-  // The viewer's own Tier B only if it predates their check-in, on either side (H1).
-  const traitsOf = (id: string): MemberTraits => {
+  const crewIds = [...(mine ? [mine.id] : []), ...crews.map((c) => c.id)]
+  const [t, anonymous] = await Promise.all([
+    membersTraits(people),
+    db.crew_members.findMany({
+      where: { crew_id: { in: crewIds }, keep_me_anonymous: true },
+      select: { crew_id: true, user_id: true },
+    }),
+  ])
+  const keepsAnonymous = new Set(anonymous.map((a) => `${a.crew_id}|${a.user_id}`))
+
+  /*
+   * Each member's own controls, before anything is held (the commit scan):
+   *
+   * - **Keep me anonymous** — they contribute nothing to their crew's lines.
+   *   They still count toward the crew's size, so their silence cannot lower
+   *   the bar for the rest (`crewHoldsAt` reads every member).
+   * - **Tier B set after the viewer checked in** — not used, for anybody (the
+   *   H1 rule, per member): a crewmate cannot edit their way into probing the
+   *   room on the viewer's behalf.
+   * - Suspended and erased members are not members here (`membersOf`), and a
+   *   crew with anyone kept apart from the viewer's side is not listed at all
+   *   (`crewsAtEvent`).
+   */
+  const traitsIn = (crewId: string | null, id: string): MemberTraits => {
+    if (crewId && keepsAnonymous.has(`${crewId}|${id}`)) return { interestIds: [], traits: NO_TRAITS }
     const m = t.of(id)
-    return id === input.viewerId ? { ...m, traits: viewerTierB(m.traits, t.changedAt(id), input.viewerCheckedInAt) } : m
+    return { ...m, traits: viewerTierB(m.traits, t.changedAt(id), input.viewerCheckedInAt) }
   }
 
-  const heldOf = new Map(crews.map((c) => [c.id, crewHeld(c.members.map(traitsOf))]))
-  const mySide = mine ? crewHeld(mine.members.map(traitsOf)) : personKeys(traitsOf(input.viewerId))
+  const heldOf = new Map(crews.map((c) => [c.id, crewHeld(c.members.map((id) => traitsIn(c.id, id)))]))
+  const mySide = mine ? crewHeld(mine.members.map((id) => traitsIn(mine.id, id))) : personKeys(traitsIn(null, input.viewerId))
 
   // How many sides here hold each key: rarity across the crews.
   const holders = new Map<string, number>()

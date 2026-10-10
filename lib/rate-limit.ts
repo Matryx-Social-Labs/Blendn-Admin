@@ -197,13 +197,6 @@ const USER_POLICIES = {
   write: { windowMs: 60 * 1000, maxRequests: 30 },
   /** Creating or destroying whole objects. */
   heavy: { windowMs: 60 * 1000, maxRequests: 10 },
-  /**
-   * Changing your languages, home state, sign or work field (step 10 review
-   * H1). Each is a Tier B fact a card may print when shared; changing them over
-   * and over is how a viewer would probe which cards share which. Three a day
-   * is room to fix a typo, never room to sweep a list.
-   */
-  tierB: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 3 },
 } as const
 
 export type UserRateLimitPolicy = keyof typeof USER_POLICIES

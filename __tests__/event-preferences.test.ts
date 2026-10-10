@@ -220,7 +220,7 @@ describe("badges are read for the page returned, never the whole room (step 10 r
       (strings as readonly string[]).join("?").includes("nights_out")
     )
     expect(nights).toBeDefined()
-    const ids = nights!.slice(1).find((v) => Array.isArray(v)) as string[]
+    const ids = nights!.slice(1).find((v: unknown) => Array.isArray(v)) as string[]
     expect(ids).toHaveLength(2)
   })
 })

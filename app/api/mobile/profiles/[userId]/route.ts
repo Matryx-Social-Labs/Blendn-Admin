@@ -21,7 +21,8 @@ import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
-import { overUserLimit, rateLimit, userLimit } from "@/lib/rate-limit"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { changesTierB, claimTierBChange, TIER_B_REFUSAL } from "@/lib/tier-b"
 import {
   successResponse,
   validationErrorResponse,
@@ -404,29 +405,21 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         : null
 
     /*
-     * Tier B, changed (step 10 review H1). A viewer's own languages, state,
-     * sign and work field print a line on every card that shares them, so
-     * changing them again and again would read which cards hold which —
-     * the one-line budget defeated from the viewer's side. So a real change is
-     * stamped (`tier_b_changed_at`: the room ignores a viewer's Tier B set after
-     * their check-in, lib/overlaps.ts `viewerTierB`) and limited to three a
-     * day once onboarded. Onboarding's first answers are not counted: nobody
-     * is in a room before it.
+     * Tier B, changed (step 10 review H1; lib/tier-b.ts): a real change is
+     * stamped and counted — three a day once onboarded, in the database, per
+     * person. Onboarding's first answers are not counted: nobody is in a room
+     * before it. The count is taken right before the write, below, so a save
+     * refused for anything else never spends one.
      */
     const tierBChanged =
       touchesTierB &&
-      ((languages !== undefined && JSON.stringify(languages) !== JSON.stringify(existing?.languages ?? [])) ||
-        (home_state !== undefined && home_state !== (existing?.home_state ?? null)) ||
-        (sun_sign !== undefined &&
-          (sun_sign !== (existing?.sun_sign ?? null) || sign_system !== (existing?.sign_system ?? null))) ||
-        (work_field !== undefined && work_field !== (existing?.work_field ?? null)))
-    if (tierBChanged && existing?.onboarded && (await overUserLimit("tierB", "tier-b-change", userId))) {
-      return errorResponse(
-        "You can change your languages, home state, sign or field of work three times a day. Try again tomorrow.",
-        429,
-        ErrorCode.RATE_LIMITED
-      )
-    }
+      changesTierB({ languages, home_state, sun_sign, sign_system, work_field }, existing && {
+        languages: existing.languages,
+        home_state: existing.home_state,
+        sun_sign: existing.sun_sign,
+        sign_system: existing.sign_system,
+        work_field: existing.work_field,
+      })
 
     /*
      * Specialisms, against the field they will sit under.
@@ -629,6 +622,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const storedPhotos = photos?.map((u: string) => sealedFor.get(u) ?? u)
 
 
+    // The day's Tier B changes, claimed atomically; refused when spent (lib/tier-b.ts).
+    if (tierBChanged && existing?.onboarded && !(await claimTierBChange(userId))) {
+      return errorResponse(TIER_B_REFUSAL, 429, ErrorCode.RATE_LIMITED)
+    }
+
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
     if (name !== undefined) userUpdate.name = name
@@ -660,6 +658,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       ...(sun_sign !== undefined && { sun_sign, sign_system }),
       ...(shows_up_badge !== undefined && { shows_up_badge }),
       ...(show_badges !== undefined && { show_badges }),
+      // Stamped on every effective change, counted or not (`claimTierBChange` also stamps).
       ...(tierBChanged && { tier_b_changed_at: new Date() }),
     }
 
