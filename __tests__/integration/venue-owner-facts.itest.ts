@@ -37,8 +37,8 @@ afterAll(async () => {
 })
 
 it("names the home org, counts live venues through live memberships, and the person's pending claims", async () => {
-  const owner = await makeUser(testId("facts_owner"), "venue_owner")
-  const nobody = await makeUser(testId("facts_none"), "venue_owner")
+  const owner = await makeUser(testId("facts_owner"), "organizer")
+  const nobody = await makeUser(testId("facts_none"), "organizer")
   users.push(owner, nobody)
 
   const home = await org("Facts Home")
