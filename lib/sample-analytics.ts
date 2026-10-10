@@ -61,6 +61,7 @@ export const SAMPLE_EVENT_ANALYTICS: EventAnalytics = {
 export const SAMPLE_VENUE_INSIGHTS: VenueInsight = {
   window: "12m",
   from: "2025-02-01T00:00:00.000Z",
+  to: "2026-02-01T00:30:00.000Z",
   people: [
     [0, 6, 18, 9],
     [0, 7, 22, 11],

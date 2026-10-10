@@ -51,6 +51,9 @@ export async function venueDataSince(venueIds: string[]): Promise<Map<string, Da
       FROM event_check_ins c
       JOIN events e ON e.id = c.event_id
      WHERE e.kind = 'venue_day' AND e.venue_id = ANY(${venueIds}::uuid[])
+       -- Guests who checked in, as every count here: a staff member or an
+       -- unconfirmed check-in does not start the clock (review M4).
+       AND c.kind = 'attendee' AND c.status IN ('checked_in', 'checked_out')
      GROUP BY e.venue_id`
   return new Map(rows.map((r) => [r.venue_id, r.first]))
 }
@@ -64,12 +67,16 @@ export interface VenuePlanRow {
   name: string
   city: string | null
   orgName: string
+  /** Owned by one of the person's organisations now; false for a venue it only still pays for. */
+  owned: boolean
   /** The owner or an admin of the venue's organisation. */
   mayBuy: boolean
+  /** An owner or admin of the organisation paying an open subscription here. */
+  mayCancel: boolean
   pro: LiveEntitlement | null
   date: PlanDate | null
   readiness: VenueReadiness
-  /** Every Venue Pro subscription that could still charge for this venue. */
+  /** Every Venue Pro subscription this person's organisations pay for here that could still charge. */
   subscriptions: SubscriptionState[]
 }
 
@@ -80,8 +87,12 @@ export interface VenuePlanPage {
 }
 
 /**
- * The venues this person's organisations own, each with its plan. A venue is
- * owned through its organisation (`owner_org_id`), never `owner_id`.
+ * The venues this person's organisations own, each with its plan, and any
+ * venue they no longer own but still pay Venue Pro for (so they can stop it).
+ * A venue is owned through its organisation (`owner_org_id`), never
+ * `owner_id`. Subscriptions and payments are the ones this person's
+ * organisations pay for: after a venue changes hands, the new owner never
+ * sees the previous owner's (review M7).
  */
 export async function venuePlanPage(user: { id: string; role: user_role }, now: Date = new Date()): Promise<VenuePlanPage> {
   if (user.role !== "venue_owner") return { paymentsOn: paymentsOn(), venues: [], payments: [] }
@@ -90,8 +101,15 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
     select: { org_id: true, role: true },
   })
   const roleIn = new Map(memberships.map((m) => [m.org_id, m.role]))
+  const orgIds = [...roleIn.keys()]
   const venues = await db.venues.findMany({
-    where: { owner_org_id: { in: [...roleIn.keys()] }, deleted_at: null },
+    where: {
+      deleted_at: null,
+      OR: [
+        { owner_org_id: { in: orgIds } },
+        { billing_checkouts: { some: { org_id: { in: orgIds }, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } } } },
+      ],
+    },
     orderBy: { name: "asc" },
     select: { id: true, name: true, city: true, owner_org_id: true, owner_org: { select: { display_name: true } } },
   })
@@ -100,14 +118,14 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
     venueDataSince(ids),
     ids.length
       ? db.billing_checkouts.findMany({
-          where: { venue_id: { in: ids }, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
+          where: { venue_id: { in: ids }, org_id: { in: orgIds }, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
           orderBy: { created_at: "desc" },
-          select: { venue_id: true, provider_ref: true, plan_key: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
+          select: { venue_id: true, org_id: true, provider_ref: true, plan_key: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
         })
       : [],
     ids.length
       ? db.billing_payments.findMany({
-          where: { checkout: { venue_id: { in: ids } } },
+          where: { checkout: { venue_id: { in: ids }, org_id: { in: orgIds } } },
           orderBy: { captured_at: "desc" },
           take: 24,
           select: {
@@ -134,12 +152,15 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
           : []
       )
       const memberRole = v.owner_org_id ? roleIn.get(v.owner_org_id) : undefined
+      const payerRoles = mine.map((s) => roleIn.get(s.org_id))
       return {
         venueId: v.id,
         name: v.name,
         city: v.city,
         orgName: v.owner_org?.display_name ?? "",
+        owned: memberRole !== undefined,
         mayBuy: memberRole ? mayManageVenueBilling(user.role, memberRole) : false,
+        mayCancel: payerRoles.some((r) => r !== undefined && mayManageVenueBilling(user.role, r)),
         pro: pros[i],
         date: planDate(pros[i], mine[0] ?? null),
         readiness: readinessFrom(since.get(v.id) ?? null, now),

@@ -1,6 +1,7 @@
 "use server"
 
 import { Refusal } from "./refusal"
+import { endVenueProForNewOwner } from "./billing-actions"
 import { z } from "zod"
 
 import { revalidatePath } from "next/cache"
@@ -572,6 +573,11 @@ export async function decideVenueClaim(
     // The pre-check above, lost to a concurrent filing.
     if (violatedConstraint(error, "venue_claims_venue_id_org_id_key")) throw new Refusal(ORG_ALREADY_CLAIMED)
     throw error
+  }
+
+  // The venue changed hands: the previous owner's Venue Pro stops with it (review M7).
+  if (decision === "approve" && orgId && claim.venue.owner_org_id && claim.venue.owner_org_id !== orgId) {
+    await endVenueProForNewOwner(claim.venue.id, orgId)
   }
 
   const notified = await tellVenueClaimants(

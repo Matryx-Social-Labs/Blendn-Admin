@@ -520,7 +520,7 @@ describe("the venue's lists", () => {
     expect(cell(await buildReport("events", "organizer", host, range), twelve, "Attended")).toBe("12")
   })
 
-  it("orders ranged rooms by what is shown, and flags a building over its licence without a total", async () => {
+  it("orders ranged rooms by what is shown, and flags a building over its licence only from what is shown", async () => {
     // Two rooms the owner reads as "Under 5": exact order would put BBB (4) first.
     const small = await db.venues.create({
       data: { name: testId("vlr-small"), city: "Bengaluru", capacity: 3, owner_org_id: (await db.venues.findUniqueOrThrow({ where: { id: venues[0] } })).owner_org_id, claimed_at: new Date(Date.now() - 30 * DAY) },
@@ -540,7 +540,10 @@ describe("the venue's lists", () => {
       [rooms["AAA room"], "quiet"],
       [rooms["BBB room"], "quiet"],
     ])
-    expect(owner).toMatchObject({ inside: null, fillPct: null, overCapacity: true })
+    // Two "quiet" rooms prove nothing about a capacity of 3: the flag reads
+    // what is shown, or the owner could walk the capacity they set until it
+    // flipped and read the exact five (step 17 review M8). An admin's is exact.
+    expect(owner).toMatchObject({ inside: null, fillPct: null, overCapacity: false })
 
     const exact = await getBuildingOccupancy(small.id)
     expect(exact.rooms.map((r) => r.eventId)).toEqual([rooms["BBB room"], rooms["AAA room"]])

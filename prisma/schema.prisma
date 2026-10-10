@@ -3983,7 +3983,9 @@ enum billing_checkout_kind {
 /// organisation from our own row and never from the payload's `notes`.
 ///
 /// `status` follows the provider's word for it (created, active, halted,
-/// cancelled, completed, paid, failed). `status_at` is the provider's time
+/// cancelled, completed, paid, failed), plus two of ours: `expired` (an unpaid
+/// checkout we stopped counting as open) and `superseded` (a second mandate,
+/// paid late beside a live one, cancelled; lib/razorpay-webhook.ts). `status_at` is the provider's time
 /// for the event that set it, so an older delivery arriving late changes
 /// nothing (out-of-order webhooks).
 model billing_checkouts {

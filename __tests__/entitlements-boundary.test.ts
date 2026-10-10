@@ -117,5 +117,6 @@ describe("entitlements are read and written in one place", () => {
     expect(naming("grantEntitlement")).toEqual(["lib/billing-actions.ts"])
     expect(naming("endGrants")).toEqual(["lib/billing-actions.ts"])
     expect(naming("revokePaid")).toEqual(["lib/billing-actions.ts"])
+    expect(naming("revokePaidByRefs")).toEqual(["lib/billing-actions.ts"])
   })
 })

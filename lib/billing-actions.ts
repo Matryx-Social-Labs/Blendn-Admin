@@ -10,7 +10,15 @@ import { getAuth } from "@/lib/auth"
 import { billingOrgFor, ONE_OPEN_PER_ORG, ONE_OPEN_PER_VENUE, OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { BILLING_PLANS, chargeMinor, type BillingPlanKey } from "@/lib/billing-plans"
 import { db } from "@/lib/db"
-import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, revokePaid } from "@/lib/entitlements"
+import {
+  endGrants,
+  grantEntitlement,
+  hasEntitlement,
+  liveEntitlement,
+  liveGrant,
+  revokePaid,
+  revokePaidByRefs,
+} from "@/lib/entitlements"
 import { razorpayKeys } from "@/lib/env"
 import { realEventsWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
@@ -370,22 +378,46 @@ export async function cancelAnalytics(): Promise<void> {
   await cancelOpen(user.id, { orgId: org.orgId, venueId: null })
 }
 
-/** Stop every Venue Pro subscription on one venue that could still charge (as `cancelAnalytics`). */
+/**
+ * Stop the Venue Pro subscriptions on one venue that the caller's
+ * organisation pays for (as `cancelAnalytics`).
+ *
+ * Authorised on who PAYS (`billing_checkouts.org_id`), not on who owns the
+ * venue today (review M7): after the venue changes hands, the organisation
+ * still paying can stop its own mandate, and the new owner can neither see
+ * nor cancel it (`endVenueProForNewOwner` ends it on the transfer).
+ */
 export async function cancelVenuePro(venueId: string): Promise<void> {
   const id = parse(idSchema, venueId, NOT_YOUR_VENUE)
-  const { user, orgId } = await requireVenueBuyer(id)
-  await cancelOpen(user.id, { orgId, venueId: id })
+  const session = await getAuth()
+  if (!session?.user) throw new Refusal("Unauthorized")
+  const payers = (
+    await db.organisation_members.findMany({
+      where: { user_id: session.user.id, ...activeMembership },
+      select: { org_id: true, role: true },
+    })
+  )
+    .filter((m) => mayManageVenueBilling(session.user.role, m.role))
+    .map((m) => m.org_id)
+  if (payers.length === 0) throw new Refusal("Only an owner or admin of the organisation that pays can cancel Venue Pro.")
+  await payable(`venue:${id}`)
+  await cancelOpen(session.user.id, { orgId: payers[0], venueId: id, payerOrgIds: payers })
 }
 
-async function cancelOpen(userId: string, scope: { orgId: string; venueId: string | null }): Promise<void> {
+async function cancelOpen(
+  userId: string,
+  scope: { orgId: string; venueId: string | null; payerOrgIds?: string[] }
+): Promise<void> {
   const open = await db.billing_checkouts.findMany({
     where: {
-      ...(scope.venueId ? { venue_id: scope.venueId } : { org_id: scope.orgId, venue_id: null }),
+      ...(scope.venueId
+        ? { venue_id: scope.venueId, org_id: { in: scope.payerOrgIds ?? [scope.orgId] } }
+        : { org_id: scope.orgId, venue_id: null }),
       kind: "subscription",
       status: { in: [...OPEN_SUBSCRIPTION_STATUSES] },
       cancel_at_cycle_end: false,
     },
-    select: { id: true, provider_ref: true, status: true },
+    select: { id: true, provider_ref: true, status: true, org_id: true },
   })
   if (open.length === 0) throw new Refusal("There's no subscription to cancel, or it's already set to end.")
   for (const sub of open) {
@@ -404,7 +436,7 @@ async function cancelOpen(userId: string, scope: { orgId: string; venueId: strin
       action: "billing.subscription.cancelled",
       resource: scope.venueId ? "venue" : "organisation",
       resourceId: scope.venueId ?? scope.orgId,
-      details: { providerRef: sub.provider_ref, atCycleEnd, orgId: scope.orgId },
+      details: { providerRef: sub.provider_ref, atCycleEnd, orgId: sub.org_id },
     })
   }
   revalidatePath("/dashboard/plan")
@@ -573,4 +605,50 @@ export async function revokeVenueProPaid(venueId: string, entitlementId: string,
     details: { product: revoked.product, externalRef: revoked.externalRef, entitlementId: revoked.id, reason: why },
   })
   revalidatePath(`/dashboard/venues/${id}`)
+}
+
+/**
+ * A venue changed hands (an approved dispute, `decideVenueClaim`): the
+ * previous owner's Venue Pro does not come with it (review M7). Every open
+ * subscription another organisation pays for stops at the end of its paid
+ * cycle at Razorpay, and the Venue Pro it paid for ends now, audited on the
+ * venue. A grant stays: an admin gave it to the venue and ends it there.
+ *
+ * Never throws for Razorpay: the venue has already moved, so a failed cancel
+ * is logged for an operator to do by hand in Razorpay's dashboard.
+ */
+export async function endVenueProForNewOwner(venueId: string, newOwnerOrgId: string): Promise<void> {
+  const admin = await requireAdmin()
+  const id = parse(idSchema, venueId, "Venue not found")
+  const subs = await db.billing_checkouts.findMany({
+    where: { venue_id: id, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] }, org_id: { not: newOwnerOrgId } },
+    select: { id: true, provider_ref: true, status: true, org_id: true },
+  })
+  for (const sub of subs) {
+    try {
+      await cancelSubscription(sub.provider_ref, sub.status === "active")
+    } catch (err) {
+      logger.error("Cancelling the previous owner's Venue Pro at Razorpay failed; cancel it from the Razorpay dashboard", {
+        venueId: id,
+        providerRef: sub.provider_ref,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+    await db.billing_checkouts.update({
+      where: { id: sub.id },
+      data: { cancel_at_cycle_end: true, ...(sub.status === "created" ? { status: "expired" } : {}) },
+    })
+  }
+  const ended = await revokePaidByRefs({ kind: "venue", id }, "venue_pro", subs.map((s) => s.provider_ref))
+  if (subs.length || ended.length) {
+    await db.audit_logs.create({
+      data: {
+        user_id: admin.id,
+        action: "entitlement.ended_on_transfer",
+        resource: "venue",
+        resource_id: id,
+        details: { newOwnerOrgId, cancelled: subs.map((s) => s.provider_ref), ended: ended.length },
+      },
+    })
+  }
 }

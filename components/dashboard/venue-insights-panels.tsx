@@ -59,7 +59,8 @@ export function PeopleHeatmap({ people }: { people: PeopleGrid }) {
 /** Guests, regulars and the returning share, each held back on its own terms. */
 export function RegularsFigures({ regulars }: { regulars: VenueInsight["regulars"] }) {
   const items = [
-    { label: "Guests", value: regulars.visitors, hint: "distinct people" },
+    // Counted in the slots the grid shows, so the total never gives a held one back.
+    { label: "Guests", value: regulars.visitors, hint: "in the slots shown" },
     { label: "Regulars", value: regulars.regulars, hint: "came on 2+ nights" },
     { label: "Returning share", value: regulars.sharePct === null ? null : `${regulars.sharePct}%`, hint: "of guests" },
   ]
@@ -97,7 +98,7 @@ export function PreClaimFigures({ history }: { history: PreClaimHistory }) {
     <dl className="grid grid-cols-3 gap-3">
       <div className="flex flex-col gap-0.5">
         <dt className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">Nights</dt>
-        <dd className="text-[1.375rem] font-bold tabular-nums">{formatNumber(history.nights)}</dd>
+        <dd className="text-[1.375rem] font-bold tabular-nums">{history.nights === null ? "—" : formatNumber(history.nights)}</dd>
       </div>
       <div className="flex flex-col gap-0.5">
         <dt className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">Guests</dt>

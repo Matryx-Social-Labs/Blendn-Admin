@@ -66,6 +66,20 @@ Analytics keeps its own index.
   venue. A grant blocks buying until it ends: subscribe after it.
 - `scripts/razorpay-plans.ts --apply` creates the two Venue Pro plans with the
   others; run it once per environment after this ships.
+- **The payer controls its mandate.** Cancelling is authorised on the
+  organisation that pays (`billing_checkouts.org_id`), not on who owns the
+  venue today, and the Plan page lists only the caller's organisation's
+  subscriptions and payments.
+- **A venue changing hands** (an approved dispute) ends the previous owner's
+  paid Venue Pro at once and cancels its mandate at the end of the paid cycle
+  (`entitlement.ended_on_transfer` on the venue). A Razorpay failure there is
+  logged: cancel it from the Razorpay dashboard. Grants stay; end them on the
+  venue page.
+- **`superseded`** on a subscription is ours: a second mandate paid late
+  beside a live one. The webhook cancels it at Razorpay and writes
+  `billing.duplicate_subscription`; **refund that payment** from the Razorpay
+  dashboard. A checkout we had expired and the customer paid anyway takes the
+  open slot, and the unpaid one beside it is cancelled.
 
 ## Razorpay's retries, and when it gives up
 

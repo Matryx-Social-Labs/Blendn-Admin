@@ -597,17 +597,42 @@ async function buildAdminOverview(range: DateRange): Promise<AdminOverview> {
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+/** A venue's night starts at its day reset (06:00 by default, lib/venue-day.ts). */
+const NIGHT_RESET_HOUR = 6
+
+/** One pair of formatters per zone, not one per event (review: cache Intl formatters). */
+const CELL_FORMAT = new Map<string, { hour: Intl.DateTimeFormat; weekday: Intl.DateTimeFormat }>()
+
+function cellFormat(timezone: string) {
+  let f = CELL_FORMAT.get(timezone)
+  if (!f) {
+    const zone = eventClock(timezone).zone
+    f = {
+      hour: new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "numeric", hourCycle: "h23" }),
+      weekday: new Intl.DateTimeFormat("en-GB", { timeZone: zone, weekday: "short" }),
+    }
+    CELL_FORMAT.set(timezone, f)
+  }
+  return f
+}
+
 /**
  * The heatmap's cell for an event's start: Monday-first day, and one of four
  * slots by start hour — on the event's own clock. The server's clock is UTC on
  * Railway, where a 19:00 night in Bengaluru starts at 13:30 and read as an
  * afternoon.
+ *
+ * The day is the night's, as a venue's day is: it starts at 06:00, so a
+ * 01:00 start is Friday's late slot, not Saturday's morning (the same
+ * boundary as the venue's insights, lib/venue-insights.ts).
  */
 function cellFor(date: Date, timezone: string): { day: number; slot: number } {
-  const clock = eventClock(timezone)
-  const hour = Number(clock.format(date, { hour: "numeric", hourCycle: "h23" }))
-  const day = WEEKDAYS.indexOf(clock.format(date, { weekday: "short" }))
-  return { day: day < 0 ? 0 : day, slot: hour < 12 ? 0 : hour < 17 ? 1 : hour < 22 ? 2 : 3 }
+  const f = cellFormat(timezone)
+  const hour = Number(f.hour.format(date))
+  const nightOf = new Date(date.getTime() - NIGHT_RESET_HOUR * 60 * 60 * 1000)
+  const day = WEEKDAYS.indexOf(f.weekday.format(nightOf))
+  const slot = hour < NIGHT_RESET_HOUR ? 3 : hour < 12 ? 0 : hour < 17 ? 1 : hour < 22 ? 2 : 3
+  return { day: day < 0 ? 0 : day, slot }
 }
 
 async function buildVenueOverview(userId: string, role: user_role): Promise<VenueOverview> {

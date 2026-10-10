@@ -125,7 +125,9 @@ export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boo
 function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; paymentsOn: boolean; pending: boolean }) {
   const { readiness, pro } = venue
   const halted = venue.subscriptions.some((s) => s.status === "halted")
-  const state = halted
+  const state = !venue.owned
+    ? "no longer your organisation's · the Venue Pro you pay for here ends with its cycle"
+    : halted
     ? "Venue Pro · paused: Razorpay couldn't take the last payment"
     : pro?.source === "grant"
       ? `Venue Pro · founding grant${pro.expiresAt ? ` until ${day(pro.expiresAt)}` : ""}`
@@ -143,14 +145,14 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
           </Link>
           <span className="font-normal text-muted-foreground"> · {state}</span>
         </p>
-        <DataMeter venue={venue} />
-        {!venue.mayBuy ? (
+        {venue.owned ? <DataMeter venue={venue} /> : null}
+        {venue.owned && !venue.mayBuy ? (
           <p className="text-[0.75rem] text-faint-foreground">Only an owner or admin of {venue.orgName} can change this venue&apos;s plan.</p>
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col gap-2 @3xl/main:w-[300px]">
-        {pro ? (
-          cancellable.length > 0 && venue.mayBuy && paymentsOn ? (
+        {pro || !venue.owned ? (
+          cancellable.length > 0 && venue.mayCancel && paymentsOn ? (
             <CancelAnalytics running={cancellable.some((s) => s.status === "active")} venueId={venue.venueId} />
           ) : null
         ) : readiness.chargeable && venue.mayBuy && paymentsOn ? (

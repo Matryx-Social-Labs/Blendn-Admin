@@ -10,6 +10,8 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { getDashboardOverview } from "@/app/dashboard/actions"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
+import { eventTitleFor } from "@/lib/dashboard-record-titles"
+import { loadEventPage } from "@/lib/event-page"
 import { updateVenue } from "@/lib/venue-actions"
 
 import { closeDb, db, makeUser, testId } from "./helpers"
@@ -73,11 +75,13 @@ describe("venues.floors", () => {
     as(ownerUser, "venue_owner")
     await updateVenue(id, { floors: 4 })
     expect(await floorsOf(id)).toBe(4)
-    const audit = await db.audit_logs.findFirstOrThrow({
-      where: { action: "venue.updated", resource_id: id },
-      orderBy: { created_at: "desc" },
-    })
-    expect((audit.details as { fields: string[] }).fields).toEqual(["floors"])
+    // `auditLog` writes after the action returns: polled, never a fixed sleep.
+    let audit = null
+    for (let i = 0; i < 50 && !audit; i++) {
+      audit = await db.audit_logs.findFirst({ where: { action: "venue.updated", resource_id: id }, orderBy: { created_at: "desc" } })
+      if (!audit) await new Promise((r) => setTimeout(r, 40))
+    }
+    expect((audit?.details as { fields: string[] } | undefined)?.fields).toEqual(["floors"])
   })
 
   it("is set by an admin, and cleared with null", async () => {
@@ -104,6 +108,11 @@ describe("venues.floors", () => {
     as(ownerUser, "venue_owner")
     await expect(updateVenue(id, { floors: n })).rejects.toThrow("Floors is a whole number from 1 to 200")
     expect(await floorsOf(id)).toBeNull()
+  })
+
+  it("refuses an id that is not a venue's, as not found", async () => {
+    as(admin, "app_admin")
+    await expect(updateVenue("not-a-uuid", { floors: 3 })).rejects.toThrow("Venue not found")
   })
 
   it("is held to 1–200 by the database too (venues_floors_range)", async () => {
@@ -148,6 +157,42 @@ describe("In the building counts the venue's own live room", () => {
     const forAdmin = await getBuildingOccupancy(id)
     expect(forAdmin.rooms[0]).toMatchObject({ venueDay: true, inside: 6 })
     expect(forAdmin.inside).toBe(6)
+
+    // The room's link opens the event page, which names it as the venue's
+    // live room and never by its internal "Venue day ·" title (PL-I16).
+    as(ownerUser, "venue_owner")
+    const page = await loadEventPage(forOwner.rooms[0].eventId)
+    const name = (await db.venues.findUniqueOrThrow({ where: { id }, select: { name: true } })).name
+    expect(page.event.title).toBe(`Live at ${name}`)
+    expect(await eventTitleFor(forOwner.rooms[0].eventId)).toBe(`Live at ${name}`)
+  })
+})
+
+describe("over licence says only what the ranges prove (review M8)", () => {
+  it("never flips on the exact count behind a range, whatever capacity the owner types", async () => {
+    const id = await venue({ ownerOrg })
+    // Another host's night with twelve inside: the owner reads "10-19".
+    const night = await realEvent(id, { startsInMin: -30, link: "confirmed" })
+    const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: night } })
+    for (let i = 0; i < 12; i++) {
+      const p = await person(`vo_lic${i}`)
+      await db.presence_sessions.create({
+        data: { event_id: night, occurrence_id: occ.id, user_id: p.id, arrived_at: new Date(Date.now() - 10 * 60_000) },
+      })
+    }
+    const asOwner = { asOwner: { id: ownerUser, orgIds: [ownerOrg] } }
+    const flagAt = async (capacity: number, opts = asOwner) => {
+      await db.venues.update({ where: { id }, data: { capacity } })
+      return (await getBuildingOccupancy(id, opts)).overCapacity
+    }
+    // Walking the capacity from 10 to 19 would find the 12 if the flag read it.
+    const flags = []
+    for (let c = 10; c <= 19; c++) flags.push(await flagAt(c))
+    expect(flags.every((f) => f === false)).toBe(true)
+    // Below the range's floor the range itself proves it.
+    expect(await flagAt(9)).toBe(true)
+    // An admin reads the exact figure, and its flag.
+    expect(await flagAt(11, {} as typeof asOwner)).toBe(true)
   })
 })
 
@@ -209,5 +254,15 @@ describe("the venue owner's overview", () => {
     expect(o.utilisation[2][2]).toBe(1)
     expect(o.utilisation[2][1]).toBe(0)
     expect(o.peakWindow).toBe("Wed evening")
+
+    // 01:00 IST on the Thursday after is Wednesday night's late slot (the 06:00
+    // reset), not Thursday morning.
+    const late = new Date(d.getTime() + 6 * 3_600_000) // Wed 13:30Z + 6h = Wed 19:30Z = Thu 01:00 IST
+    const ev2 = await realEvent(id, { startsInMin: Math.round((late.getTime() - Date.now()) / 60_000), link: "confirmed" })
+    await db.events.update({ where: { id: ev2 }, data: { timezone: "Asia/Kolkata", organizer_org_id: tzOrg } })
+    const o2 = await getDashboardOverview()
+    if (o2.role !== "venue_owner") throw new Error("expected the venue overview")
+    expect(o2.utilisation[2][3]).toBe(1)
+    expect(o2.utilisation[3][0]).toBe(0)
   })
 })
