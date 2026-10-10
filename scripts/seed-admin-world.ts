@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client"
 import { emailRoot, openKeyFor } from "../lib/leads"
 import { slugify, TAXONOMY } from "./seed-categories"
 import { MATRIX_MARKERS } from "./seed-matrix-markers"
+import { environmentRefusal } from "./test-accounts"
 
 /*
  * The rows the admin screens show, so the access matrix can tell a page that
@@ -25,6 +26,18 @@ import { MATRIX_MARKERS } from "./seed-matrix-markers"
  */
 
 type Db = PrismaClient
+type Env = Record<string, string | undefined>
+
+/**
+ * Each writer here asks for itself whether this database may be seeded (step
+ * 18 security review, L6), rather than trusting that seed-qa asked first: a
+ * second caller, or a reordered seed-qa, must not write fixtures into
+ * production. The environment comes in as an argument so a test can pass one.
+ */
+function refuseUnlessSeedable(env: Env): void {
+  const refusal = environmentRefusal(env)
+  if (refusal) throw new Error(`seed-admin-world: ${refusal}`)
+}
 
 /**
  * The taxonomy `seed-qa`'s events are tagged with.
@@ -35,7 +48,8 @@ type Db = PrismaClient
  * environment that already has the taxonomy (staging) keeps every rename an
  * admin made.
  */
-export async function seedTaxonomy(db: Db): Promise<void> {
+export async function seedTaxonomy(db: Db, env: Env = process.env): Promise<void> {
+  refuseUnlessSeedable(env)
   for (const [parentName, childNames] of Object.entries(TAXONOMY)) {
     const parent = await db.categories.upsert({
       where: { slug: slugify(parentName) },
@@ -55,8 +69,10 @@ export async function seedTaxonomy(db: Db): Promise<void> {
 
 export async function seedMatrixMarkers(
   db: Db,
-  ids: { admin: string; attendees: string[]; brandId: string }
+  ids: { admin: string; attendees: string[]; brandId: string },
+  env: Env = process.env
 ): Promise<void> {
+  refuseUnlessSeedable(env)
   await seedLead(db, ids.admin)
   await seedDecidedFlag(db, ids.admin)
   await seedReviewedReport(db, ids)
