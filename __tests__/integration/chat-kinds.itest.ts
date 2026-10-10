@@ -32,6 +32,7 @@ import {
   emitChatMessage,
   initSocketServer,
 } from "@/lib/socket-server"
+import { logger } from "@/lib/logger"
 import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import { canJoinChat } from "@/lib/socket-auth"
 import { resolveUserRef, roomHandle, roomMemberFromRef, type RoomScope } from "@/lib/room-handle"
@@ -466,8 +467,16 @@ describe("every caller × every operation on a board post's room (SEC-01)", () =
   it("leaves and rejoins as an accepted asker, and tells the room by a handle scoped to it", async () => {
     const author = await online(w.people.author)
     expect(await joins(author, w.groupId)).toBe(true)
-    expect((await o.leave(w.people.accepted)).status).toBe(200)
-    expect(await until(() => author.heard.left.length > 0)).toBe(true)
+    // The leave tells nobody when it cannot read blocks; if that happens, fail with its own error.
+    const errors = jest.spyOn(logger, "error").mockImplementation(() => undefined)
+    try {
+      expect((await o.leave(w.people.accepted)).status).toBe(200)
+      const told = await until(() => author.heard.left.length > 0, 10_000)
+      expect(errors.mock.calls).toEqual([])
+      expect(told).toBe(true)
+    } finally {
+      errors.mockRestore()
+    }
     const ref = author.heard.left[0].userId
     expect(roomMemberFromRef(w.scope, ref, w.people.author.id)).toBe(w.people.accepted.id)
     expect(roomMemberFromRef(w.eventId, ref, w.people.author.id)).toBeNull()

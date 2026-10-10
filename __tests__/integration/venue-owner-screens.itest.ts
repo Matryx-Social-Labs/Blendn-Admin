@@ -266,3 +266,26 @@ describe("the venue owner's overview", () => {
     expect(o2.utilisation[3][0]).toBe(0)
   })
 })
+
+describe("GAP over licence with a quiet room beside a busy one", () => {
+  it("GAP-X18 says over licence when one range's floor proves it, even with a room under 5 in the building", async () => {
+    const id = await venue({ ownerOrg })
+    const fill = async (n: number) => {
+      const night = await realEvent(id, { startsInMin: -30, link: "confirmed" })
+      const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: night } })
+      for (let i = 0; i < n; i++) {
+        const p = await person(`vo_gapq${i}`)
+        await db.presence_sessions.create({ data: { event_id: night, occurrence_id: occ.id, user_id: p.id, arrived_at: new Date(Date.now() - 10 * 60_000) } })
+      }
+    }
+    await fill(22) // reads "20+"
+    await fill(2) // reads "quiet"
+    const asOwner = { asOwner: { id: ownerUser, orgIds: [ownerOrg] } }
+    await db.venues.update({ where: { id }, data: { capacity: 15 } })
+    const flagged = await getBuildingOccupancy(id, asOwner)
+    expect(flagged.rooms.map((r) => r.inside).sort()).toEqual(["20+", "quiet"])
+    expect(flagged.overCapacity).toBe(true) // 20 is shown, and 20 > 15
+    await db.venues.update({ where: { id }, data: { capacity: 20 } })
+    expect((await getBuildingOccupancy(id, asOwner)).overCapacity).toBe(false) // 20 is not over 20
+  })
+})
