@@ -18,7 +18,8 @@ interface RouteParams {
  * this Blend's room, except anybody keeping themselves anonymous. The matched
  * person in a crew ↔ person Blend reveals only themselves. Shown to this
  * Blend's people and nobody else — not the event's room, its deck or a DM.
- * `{ revealed, keptPrivate }`. 404 for a Blend that is not open or not mine.
+ * `{ revealed: true }` — never a count: who on your own crew kept anonymous is
+ * not told to your crew. 404 for a Blend that is not open or not mine.
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {

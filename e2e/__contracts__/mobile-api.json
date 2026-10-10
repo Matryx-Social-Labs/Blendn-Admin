@@ -92,13 +92,15 @@
     ],
     "data": [
       "groups",
-      "pagination"
+      "pagination",
+      "rooms"
     ],
     "nested": {
       "groups[]": [
         "event",
         "id",
         "isCheckedIn",
+        "kind",
         "lastMessage",
         "lastMessageAt",
         "memberCount",
