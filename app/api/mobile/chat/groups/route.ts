@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { inRoomWhere, realEventsWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { blockCounterparties } from "@/lib/conversations"
 import { PAGINATION } from "@/lib/constants"
 import { namesInRoom } from "@/lib/identity"
 import { idForViewer } from "@/lib/room-handle"
@@ -43,6 +44,19 @@ export async function GET(request: NextRequest) {
     const now = new Date()
     const liveRoomsOnly = {
       AND: [{ OR: [{ chat_group: { event: realEventsWhere } }, { last_allowed_at: { gt: now } }] }],
+    }
+
+    /*
+     * A row says only what the room's history would show this viewer: no
+     * preview, sender or unread count from somebody in a block with them,
+     * either way — the history route's own filter (`blockCounterparties`).
+     * Counted, or previewed, a blocked person's message told the blocker they
+     * were still talking (step 9 review of the chat list).
+     */
+    const blockedIds = await blockCounterparties(authUser.userId)
+    const visibleMessages = {
+      deleted_at: null,
+      ...(blockedIds.length > 0 && { user_id: { notIn: blockedIds } }),
     }
 
     // Get total count of user's chat groups
@@ -118,7 +132,7 @@ export async function GET(request: NextRequest) {
             _count: {
               select: {
                 messages: {
-                  where: { deleted_at: null },
+                  where: visibleMessages,
                 },
                 members: {
                   where: { status: "active" },
@@ -155,10 +169,12 @@ export async function GET(request: NextRequest) {
       where: {
         user_id: authUser.userId,
         status: { in: ["active", "muted"] },
+        // Who is let in — a crew dissolved or a Blend closed, on its clock or
+        // early, a block across it — is the door's below, the one rule.
         chat_group: {
           OR: [
-            { kind: "crew", status: { in: ["active", "locked"] }, crew: { dissolved_at: null } },
-            { kind: "blend", status: "active", blend: { closed_at: null, closes_at: { gt: now } } },
+            { kind: "crew", status: { in: ["active", "locked"] } },
+            { kind: "blend", status: "active" },
           ],
         },
       },
@@ -179,11 +195,10 @@ export async function GET(request: NextRequest) {
             crew_id: true,
             blend_id: true,
             ...ownerDoor(authUser.userId),
-            _count: { select: { messages: { where: { deleted_at: null } } } },
+            _count: { select: { messages: { where: visibleMessages } } },
           },
         },
       },
-      orderBy: { chat_group: { last_message_at: "desc" } },
     })
     const others = otherRows.filter((m) => roomOwnerDenial({ ...m.chat_group, event: null }, authUser.userId) === null)
 
@@ -228,6 +243,7 @@ export async function GET(request: NextRequest) {
             ON cm.user_id = cgm.user_id AND cm.chat_group_id = cgm.chat_group_id
           WHERE cm.chat_group_id = ANY(${chatGroupIds}::uuid[])
             AND cm.deleted_at IS NULL
+            AND NOT (cm.user_id = ANY(${blockedIds}::text[]))
           ORDER BY cm.chat_group_id, cm.created_at DESC
         `
       : []
@@ -263,6 +279,7 @@ export async function GET(request: NextRequest) {
         SELECT chat_group_id, COUNT(*) as unread_count
         FROM chat_messages
         WHERE deleted_at IS NULL
+          AND NOT (user_id = ANY(${blockedIds}::text[]))
           AND (${Prisma.join(conditions, " OR ")})
         GROUP BY chat_group_id
       `
@@ -429,7 +446,9 @@ export async function GET(request: NextRequest) {
         closesAt: room.blend?.closes_at ?? null,
         unreadCount: lastReadAt ? unreadCountMap.get(room.id) || 0 : room._count.messages,
         mute: roomMuteState(m.notification_preferences),
-        lastMessageAt: room.last_message_at,
+        // The newest message this viewer can see — a blocked person's later
+        // line moves the room's own `last_message_at`, not this.
+        lastMessageAt: lastMessage?.created_at ?? null,
         lastMessage: lastMessage
           ? {
               id: lastMessage.id,
@@ -445,6 +464,8 @@ export async function GET(request: NextRequest) {
         status: room.status,
       }
     })
+    // Newest visible message first, then rooms with none yet.
+    rooms.sort((a, b) => (b.lastMessageAt?.getTime() ?? 0) - (a.lastMessageAt?.getTime() ?? 0))
 
     return successResponse({
       /** Event and venue-day rooms, paged. Each says `kind: "event"`. */

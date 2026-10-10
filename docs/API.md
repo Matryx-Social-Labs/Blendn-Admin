@@ -883,7 +883,17 @@ then, sweeper or not) and never to two people a block across it parted.
 `lastMessage.user` is named as that room names people: a crewmate's first
 name; in a Blend, tonight's pseudonym unless revealed there. Own list rather
 than more `groups` rows because an installed app reads `event` off every
-`groups` row, and these rooms have none.
+`groups` row, and these rooms have none. A hidden crew's chat stays listed to
+its members — hiding takes a crew off every surface outside it, not its own
+chat (C12) — while a Blend with a hidden side is gone for everyone.
+
+**Nothing in a row comes from somebody in a block with you.** On every row,
+`groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
+from anybody you blocked or who blocked you — the same filter the room's
+history applies — so a blocked person's line is never previewed, named or
+counted. On `rooms`, `lastMessageAt` is the time of the newest message you can
+see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the
+paging order, are still the room's own last message.)
 
 ### POST /message-requests
 **`message` is required.** A request with no message is indistinguishable from a
