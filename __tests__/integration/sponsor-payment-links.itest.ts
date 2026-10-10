@@ -490,6 +490,19 @@ describe("Send payment link: when one side fails (review H4; scans 3 and 4)", ()
     expect(await auditCount(c.chargeId, "charge.link_sent")).toBe(0)
   })
 
+  it("a failure after the commit never cancels the link it committed", async () => {
+    const c = await charge()
+    as(admin, "app_admin")
+    const { revalidatePath } = jest.requireMock("next/cache") as { revalidatePath: jest.Mock }
+    revalidatePath.mockImplementationOnce(() => {
+      throw new Error("revalidate failed")
+    })
+    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow()
+    const row = await db.billing_checkouts.findFirstOrThrow({ where: { charge_id: c.chargeId } })
+    expect(atRazorpay.get(row.provider_ref)).toBe("created")
+    expect(await payable(c.chargeId)).toBe(1)
+  })
+
   it("Razorpay not emailing it afterwards is logged, and the link stands", async () => {
     const c = await charge()
     as(admin, "app_admin")
@@ -564,6 +577,16 @@ describe("a void or a hand settlement closes the link first (review H1)", () => 
     atRazorpay.set(paidThere.linkId, "paid")
     await expect(advanceCharge(paidThere.chargeId, "settled", "NEFT-UTR-445566")).rejects.toThrow("A payment came through")
     expect((await chargeRow(paidThere.chargeId)).status).toBe("agreed")
+  })
+
+  it("thirty moves a minute per admin, refusals included, before any Razorpay call", async () => {
+    const { chargeId } = await sentLink()
+    as(admin, "app_admin")
+    calls.length = 0
+    for (let i = 0; i < 30; i++) await expect(advanceCharge(randomUUID(), "void", undefined, "Not a charge at all, refused")).rejects.toThrow("Charge not found")
+    await expect(advanceCharge(chargeId, "void", undefined, "Sponsor pulled out before the night")).rejects.toThrow("Too many changes in a minute")
+    expect(calls).toHaveLength(0)
+    expect((await chargeRow(chargeId)).status).toBe("agreed")
   })
 
   it("Razorpay refuses the cancel: nothing changes, the link stays open, logged", async () => {
@@ -738,6 +761,30 @@ describe("races, run at once (scan 4)", () => {
     expect(await settledState(chargeId)).toMatchObject({ status: "settled", external_ref: "NEFT-UTR-112233" })
     expect(await db.billing_payments.count({ where: { provider_payment_id: paymentId } })).toBe(1)
     expect(await auditCount(chargeId, "charge.paid_twice")).toBe(1)
+  })
+})
+
+describe("void ∥ payment_link.paid, unordered, twenty times (the database review's trial)", () => {
+  it("whichever wins: never a payment lost, never void unflagged, never settled and voided", async () => {
+    const outcomes = new Set<string>()
+    for (let i = 0; i < 20; i++) {
+      resetMemoryStore() // one admin, forty actions: the per-minute limits are not what this tests
+      const { chargeId, linkId } = await sentLink()
+      const paymentId = `pay_${randomUUID().slice(0, 10)}`
+      as(admin, "app_admin")
+      const [voided] = await Promise.allSettled([
+        advanceCharge(chargeId, "void", undefined, "Voiding in a race, reason long enough"),
+        post(linkPaid(linkId, { paymentId })),
+      ])
+      const row = await chargeRow(chargeId)
+      outcomes.add(`${row.status}/${voided.status}`)
+      expect(await db.billing_payments.count({ where: { provider_payment_id: paymentId } })).toBe(1)
+      expect(await payable(chargeId)).toBe(0)
+      if (row.status === "void") expect(await auditCount(chargeId, "charge.paid_after_void")).toBe(1)
+      if (row.status === "settled") expect(await auditCount(chargeId, "charge.void")).toBe(0)
+      expect(["void/fulfilled", "settled/rejected"]).toContain(`${row.status}/${voided.status}`)
+    }
+    expect(outcomes.size).toBeGreaterThan(0)
   })
 })
 

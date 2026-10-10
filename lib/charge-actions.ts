@@ -65,6 +65,9 @@ const priceSchema = z.object({
   note: z.string().trim().max(500).optional(),
 })
 
+/** Moves of a charge per admin a minute: a void or a settle may call Razorpay. */
+const CHARGE_MOVES = { max: 30, windowMs: 60_000 }
+
 /** The shortest void reason that can say anything, as for a suspension. */
 const MIN_VOID_REASON = 10
 /** As long as a pricing note; it is copied into the audit row as well. */
@@ -353,6 +356,10 @@ export async function advanceCharge(
   reason?: string
 ): Promise<void> {
   const admin = await requireAdmin()
+  if (!z.uuid().safeParse(chargeId).success) throw new Refusal("Charge not found")
+  // After authorisation, before any Razorpay call (a void or settle cancels a link); refusals count too.
+  const { count: moves } = await hit(`charges:advance:${admin.id}`, CHARGE_MOVES.windowMs)
+  if (moves > CHARGE_MOVES.max) throw new Refusal("Too many changes in a minute. Wait a moment and try again.")
 
   const charge = await db.placement_charges.findUnique({
     where: { id: chargeId },
@@ -687,6 +694,8 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
       },
       { maxWait: 10_000, timeout: 30_000 }
     )
+    // Committed: the link is ours now, and nothing below may cancel it.
+    orphan = null
     if (!result.reused && contact?.email) {
       // Only now, with our record committed, is the sponsor told.
       await notifyPaymentLink(result.linkId).catch((err: unknown) =>

@@ -46,7 +46,8 @@ partly paid, here or at Razorpay) the change is refused: let the webhook
 settle it, or refund at Razorpay. If Razorpay will not cancel, nothing
 changes; try again. If Razorpay cancelled and our side then failed, the log
 names the link (`paymentLinkIds`) and the next attempt goes through. Sends,
-voids and settlements on one charge run one at a time.
+voids and settlements on one charge run one at a time; thirty moves a minute
+per admin.
 
 `payment_link.paid` settles the charge, once, against that row: the amount,
 currency and "paid" status must match it and the charge. `notes` are never
