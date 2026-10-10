@@ -45,26 +45,26 @@ SELECT e.id, e.organizer_org_id AS org, e.claimed_at FROM "events" e WHERE e.org
 
 UPDATE "audit_logs" a SET org_id = o.id
 FROM audit_org_backfill b JOIN "organisations" o ON o.id = b.rid
-WHERE a.id = b.id AND b.resource = 'organisation';
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'organisation';
 
 UPDATE "audit_logs" a SET org_id = c.org_id
 FROM audit_org_backfill b JOIN "event_claims" c ON c.id = b.rid
-WHERE a.id = b.id AND b.resource = 'event_claim' AND c.org_id IS NOT NULL;
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'event_claim' AND c.org_id IS NOT NULL;
 
 UPDATE "audit_logs" a SET org_id = r.org_id
 FROM audit_org_backfill b JOIN "organiser_onboarding_requests" r ON r.id = b.rid
-WHERE a.id = b.id AND b.resource = 'organiser_onboarding_request' AND r.org_id IS NOT NULL;
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'organiser_onboarding_request' AND r.org_id IS NOT NULL;
 
 UPDATE "audit_logs" a SET org_id = h.org
 FROM audit_org_backfill b JOIN audit_event_host h ON h.id = b.rid
-WHERE a.id = b.id AND b.resource = 'event' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'event' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
 
 UPDATE "audit_logs" a SET org_id = h.org
 FROM audit_org_backfill b
   JOIN "moderation_flags" f ON f.id = b.rid
   JOIN "chat_groups" g ON g.id = f.chat_group_id
   JOIN audit_event_host h ON h.id = g.event_id
-WHERE a.id = b.id AND b.resource = 'moderation_flag' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'moderation_flag' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
 
 UPDATE "audit_logs" a SET org_id = h.org
 FROM audit_org_backfill b
@@ -72,35 +72,35 @@ FROM audit_org_backfill b
   JOIN "chat_messages" m ON m.id = p.message_id
   JOIN "chat_groups" g ON g.id = m.chat_group_id
   JOIN audit_event_host h ON h.id = g.event_id
-WHERE a.id = b.id AND b.resource = 'chat_polls' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'chat_polls' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
 
 UPDATE "audit_logs" a SET org_id = h.org
 FROM audit_org_backfill b JOIN "event_feedback" f ON f.id = b.rid JOIN audit_event_host h ON h.id = f.event_id
-WHERE a.id = b.id AND b.resource = 'event_feedback' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'event_feedback' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
 
 UPDATE "audit_logs" a SET org_id = h.org
 FROM audit_org_backfill b JOIN audit_event_host h ON h.id = b.detail_event
-WHERE a.id = b.id AND b.resource = 'chat_group_member' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'chat_group_member' AND (h.claimed_at IS NULL OR b.created_at >= h.claimed_at);
 
 -- Claims, billing and entitlements on a venue or a brand: the organisation the
 -- row itself recorded (the claimant, the payer, the grantee), and no other.
 UPDATE "audit_logs" a SET org_id = b.detail_org
 FROM audit_org_backfill b
-WHERE a.id = b.id AND b.resource IN ('venue', 'sponsors') AND b.detail_org IS NOT NULL
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource IN ('venue', 'sponsors') AND b.detail_org IS NOT NULL
   AND (b.action LIKE 'venue.claim.%' OR b.action LIKE 'sponsor.claim.%' OR b.action LIKE 'billing.%' OR b.action LIKE 'entitlement.%');
 
 -- Everything else on a venue or a brand: its owner, for a row written since
 -- that owner had it — never a claim's, a payer's or an entitlement's row.
 UPDATE "audit_logs" a SET org_id = COALESCE(v.owner_org_id, v.created_by_org_id)
 FROM audit_org_backfill b JOIN "venues" v ON v.id = b.rid
-WHERE a.id = b.id AND b.resource = 'venue'
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'venue'
   AND b.action NOT LIKE 'venue.claim.%' AND b.action NOT LIKE 'billing.%' AND b.action NOT LIKE 'entitlement.%'
   AND COALESCE(v.owner_org_id, v.created_by_org_id) IS NOT NULL
   AND (v.claimed_at IS NULL OR b.created_at >= v.claimed_at);
 
 UPDATE "audit_logs" a SET org_id = s.org_id
 FROM audit_org_backfill b JOIN "sponsors" s ON s.id = b.rid
-WHERE a.id = b.id AND b.resource = 'sponsors'
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'sponsors'
   AND b.action NOT LIKE 'sponsor.claim.%'
   AND s.org_id IS NOT NULL AND (s.claimed_at IS NULL OR b.created_at >= s.claimed_at);
 
@@ -110,7 +110,7 @@ FROM audit_org_backfill b
   JOIN "placement_charges" ch ON ch.id = b.rid
   JOIN "event_sponsors" p ON p.id = ch.placement_id
   JOIN "sponsors" s ON s.id = p.sponsor_id
-WHERE a.id = b.id AND b.resource = 'placement_charges'
+WHERE a.org_id IS NULL AND a.id = b.id AND b.resource = 'placement_charges'
   AND s.org_id IS NOT NULL AND (s.claimed_at IS NULL OR b.created_at >= s.claimed_at);
 
 COMMIT;

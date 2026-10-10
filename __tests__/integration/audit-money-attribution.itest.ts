@@ -214,6 +214,9 @@ it("the backfill gives a transferred venue's old rows the organisation of their 
   await db.audit_logs.updateMany({ where: { action: `${tag}.billing.checkout.started` }, data: { action: "billing.checkout.started" } })
   await legacy("venue.updated-in-A-era", before)
   await legacy("venue.updated-in-B-era", after)
+  // The end of A's Venue Pro at the transfer, from before rows named their payer: no organisation in its details.
+  await legacy("ended-at-transfer", after)
+  await db.audit_logs.updateMany({ where: { action: `${tag}.ended-at-transfer` }, data: { action: "entitlement.ended_on_transfer" } })
 
   const sql = readFileSync(join(process.cwd(), "prisma/migrations/20261010130100_audit_logs_org_backfill/migration.sql"), "utf8")
   const statements = sql
@@ -232,6 +235,8 @@ it("the backfill gives a transferred venue's old rows the organisation of their 
   expect(await orgOf({ action: `${tag}.venue.updated-in-A-era` })).toBeNull()
   // From B's era: B's.
   expect(await orgOf({ action: `${tag}.venue.updated-in-B-era` })).toBe(orgB)
+  // Money with no payer on the row: nobody's, never the owner's today.
+  expect(await orgOf({ action: "entitlement.ended_on_transfer" })).toBeNull()
 
   const b = await logOf(ownerB)
   expect(b.text).not.toContain("sub_old_A")
