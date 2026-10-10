@@ -44,7 +44,7 @@ async function person(label: string): Promise<Person> {
   return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
 }
 
-async function offer(author: Person, spaces = 4) {
+async function offer(author: Person, spaces: number | null = 4) {
   return (
     await db.board_posts.create({
       data: { event_id: eventId, author_id: author.id, kind: "offer", body: `Car from Indiranagar ${testId("p")}`, spaces_left: spaces },
@@ -114,7 +114,8 @@ describe("the board post's room (CR-I16)", () => {
   it("two accepts at once make one room, everybody seated once", async () => {
     const author = await person("brw-race-author")
     const [a1, a2, a3] = await Promise.all([person("brw-r1"), person("brw-r2"), person("brw-r3")])
-    const post = await offer(author)
+    // No seat count: nothing else on the post's row queues the two accepts.
+    const post = await offer(author, null)
     const r1 = await ask(a1, author, post)
     expect((await accept(author, r1)).status).toBe(200)
     const [r2, r3] = [await ask(a2, author, post), await ask(a3, author, post)]

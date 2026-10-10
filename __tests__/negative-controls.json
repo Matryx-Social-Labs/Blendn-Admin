@@ -1759,6 +1759,18 @@
       "mutation": "M963 dayFormat without timeZone (the shipped defect).",
       "observed": "M963: 2 of 4 failing (both zones read Fri, Oct 9). Restored.",
       "date": "2026-10-10"
+    },
+    "matching-v2.test.ts": {
+      "guards": "Step 10 / matching v2 (plan v2 §8), MV-U01..U06 and the structural MV-G02: a rare shared IPL team outranks a common one (Both CSK — in RCB country over Both RCB) and says so; the Tier B budget in orderLabels — no language/home-state/sign line and no sign chip in a room of seven, exactly one at eight, unbudgeted after a reveal, decided by rankMatches on the work-field floor; the lines are positive only (same sign, two calendars, an element, never a mismatch); badges from check-ins at their thresholds; what a crew holds (two members and a third, a this-or-that only as a majority), crew lines never name a member or a count, origin-like crew lines only where allowed, size balance past 2:1; the profile's curated values and the sign/calendar pair. MV-G02 reads lib/matching.ts (comments stripped) and fails if it names a display trait (languages, home_state, sun_sign, sign_system, traits, answers, this_or_that, overlaps).",
+      "mutation": "M1200 interestWeight returns 1 (no rarity). M1201 tierBBudget returns 1 below the floor. M1202 orderLabels spends no Tier B budget. M1203 signChip ignores the budget. M1205 MatchCandidate gains `sun_sign` (the ranking module reads a display trait). M1209 crewHoldsAt returns 1. M1210 sizeBalance never damps. M1218 signPairRefusal never refuses. M1219 a sign line for any two signs. M1220 a tie still names a room team.",
+      "observed": "M1200: 1 of 33 failing (the rare team first). M1201: 2 of 33 (room of seven; rankMatches budget). M1202: 3 of 33 (room of seven; orderLabels skip; crew origin line once). M1203: 2 of 33. M1205: 1 of 33 (MV-G02, sun_sign). M1209: 1 of 33. M1210: 1 of 33. M1218: 1 of 33. M1219: 1 of 33 (never a mismatch). M1220: 1 of 33. Each reverted, 33 of 33.",
+      "date": "2026-10-10"
+    },
+    "never-build-fields.test.ts": {
+      "guards": "MV-G01 (plan v2 §8.4, the owner's ruling): no caste, community, religion, gotra, surname, kundli/guna/manglik/nakshatra/varna, skin tone, veg/non-veg/eggetarian or diet — as a schema column or enum value, as an object key or identifier-shaped string literal anywhere in lib/ or app/ (comments stripped, so the prose explaining the ruling is not a field), or as a word in the matching vocabulary (languages, states, signs, this-or-that, IPL teams, cuisine loves — no meat, alcohol or worship either). Venue types that are kinds of PLACE (religious_venue, community_hall, community_centre) are listed with the reason. A control asserts the extractors see a planted column, key and enum value.",
+      "mutation": "M1206 `diet String?` on profiles in schema.prisma. M1207 \"Butter chicken\" added to CUISINE_LOVES. M1208 `non_veg: z.boolean().optional()` on updateProfileSchema.",
+      "observed": "M1206: 1 of 4 failing (the schema). M1207: 1 of 4 (the vocabulary). M1208: 1 of 4 (lib/ and app/). Reverted, 4 of 4.",
+      "date": "2026-10-10"
     }
   },
   "grandfathered": [
