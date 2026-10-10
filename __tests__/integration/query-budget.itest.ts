@@ -321,11 +321,14 @@ describe("cost does not grow with the room", () => {
     const large = await room(12, 2)
     const { calls } = await measure(() => readRoom(large.groupId, large.people[0].token))
 
-    const memberReads = calls.filter((c) => c.startsWith("chat_group_members."))
+    const memberReads = calls.filter((c) => c.startsWith("chat_group_members.") && c !== "chat_group_members.update")
     expect({ memberReads, hint: "" }).toEqual({
       memberReads: ["chat_group_members.findMany"],
       hint: "",
     })
+    // And one write: the reader's own read marker, which the newest page sets
+    // (step 9) — one row, whatever the room size.
+    expect(calls.filter((c) => c === "chat_group_members.update")).toEqual(["chat_group_members.update"])
   })
 })
 
