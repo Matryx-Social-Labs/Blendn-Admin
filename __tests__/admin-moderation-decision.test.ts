@@ -9,7 +9,7 @@
 const mockDb = {
   // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
   user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
-  moderation_flags: { findUnique: jest.fn(), update: jest.fn() },
+  moderation_flags: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   chat_messages: { update: jest.fn() },
   $transaction: jest.fn(),
 }
@@ -18,7 +18,7 @@ mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise
 const auditLog = jest.fn()
 const emitChatMessageHidden = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/audit-log", () => ({ auditLog }))
+jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry: unknown) => auditLog(entry) }))
 jest.mock("@/lib/socket-server", () => ({ emitChatMessageHidden }))
 jest.mock("@/lib/trust", () => ({ trustSignalsFor: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))

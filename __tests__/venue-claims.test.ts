@@ -222,7 +222,7 @@ describe("deciding a claim", () => {
       venue: { id: VENUE, name: "Toit", owner_org_id: null },
     })
     await expect(decideVenueClaim("claim_1", "decline", "a good long reason")).rejects.toThrow(
-      /already been decided/i
+      /Someone else decided this/
     )
   })
 

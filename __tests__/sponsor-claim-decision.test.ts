@@ -4,7 +4,7 @@
  * "it is sent to the claimant" while nothing sent it.
  */
 const mockDb = {
-  sponsor_claims: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+  sponsor_claims: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   sponsors: { findFirst: jest.fn(), update: jest.fn() },
   // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
   user: { findMany: jest.fn(), findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
@@ -13,7 +13,7 @@ const mockDb = {
 mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise<void>) => fn(mockDb))
 const auditLog = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/audit-log", () => ({ auditLog }))
+jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry: unknown) => auditLog(entry) }))
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
@@ -57,7 +57,8 @@ it("a rejection reaches the claimant with the reason, and the toast can say so",
   expect(notified).toBe(true)
   expect(sent).toEqual([expect.objectContaining({ to: "meera@bluetokai.test", subject: "About your claim on the brand Third Wave" })])
   expect(sent[0].text).toContain("merge instead")
-  expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ details: expect.objectContaining({ emailSent: true }) }))
+  // The record is the decision, written with it; whether the email went is what `notified` says.
+  expect(auditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "sponsor.claim.rejected" }))
 })
 
 it("an approval tells the winner and the displaced claimant", async () => {

@@ -2,7 +2,8 @@
 
 import { Refusal } from "./refusal"
 
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx } from "@/lib/audit-log"
+import { ALREADY_DECIDED, decisionFrom, isWriteConflict, reasonFrom, refuseUnlessDecided } from "@/lib/decision"
 import { getAuth } from "@/lib/auth"
 import { requireAdmin } from "@/lib/current-user"
 import { claimFlags, type ClaimFlag } from "@/lib/claim-flags"
@@ -223,10 +224,15 @@ export async function fileEventClaim(
  */
 export async function decideEventClaim(
   claimId: string,
-  decision: "approve" | "decline",
+  decisionInput: "approve" | "decline",
   note?: string
 ): Promise<{ notified: boolean }> {
   const admin = await requireAdmin()
+  // Before anything else: a word this queue does not take is refused, never read as the other outcome (M2).
+  const decision = decisionFrom(["approve", "decline"], decisionInput)
+  // A decline with no reason produces an identical re-file, and the queue gets
+  // the same row again. Same rule as the venue queue.
+  const trimmed = reasonFrom(note, decision === "decline", "Give a reason — it is sent to the claimant.") ?? ""
 
   const claim = await db.event_claims.findUnique({
     where: { id: claimId },
@@ -240,7 +246,7 @@ export async function decideEventClaim(
     },
   })
   if (!claim) throw new Refusal("Claim not found")
-  if (claim.status !== "pending") throw new Refusal("This claim has already been decided.")
+  if (claim.status !== "pending") throw new Refusal(ALREADY_DECIDED)
 
   /*
    * A claim filed without an account carries `onboarding_id` and no `org_id`;
@@ -265,13 +271,6 @@ export async function decideEventClaim(
     throw new Refusal("The application on this claim belongs to a different email address.")
   }
   const orgId = claim.org_id ?? request?.org_id ?? null
-
-  // A decline with no reason produces an identical re-file, and the queue gets
-  // the same row again. Same rule as the venue queue.
-  const trimmed = note?.trim() ?? ""
-  if (decision === "decline" && trimmed.length < 10) {
-    throw new Refusal("Give a reason — it is sent to the claimant.")
-  }
 
   if (decision === "approve") {
     if (!orgId) {
@@ -309,8 +308,21 @@ export async function decideEventClaim(
    */
   try {
     await db.$transaction(async (tx) => {
-      await tx.event_claims.update({
-        where: { id: claimId },
+      // The event first, for an approval: its row is the lock every approval of
+      // this event takes, in the same order, so two approvals of two claims
+      // queue rather than deadlock — and the second finds it handed over (H1).
+      if (decision === "approve") {
+        const handed = await tx.events.updateMany({
+          where: { id: claim.event.id, claimed_at: null },
+          data: { organizer_org_id: orgId, claimed_at: new Date() },
+        })
+        if (handed.count !== 1) throw new Refusal("Somebody else's claim was approved first.")
+      }
+
+      // Conditional on still pending: of two decisions racing, one writes and
+      // the other is refused (H1). The read above is not a lock.
+      const decided = await tx.event_claims.updateMany({
+        where: { id: claimId, status: "pending" },
         data: {
           status: decision === "approve" ? "approved" : "declined",
           reviewed_by: admin.id,
@@ -324,14 +336,17 @@ export async function decideEventClaim(
             : {}),
         },
       })
+      refuseUnlessDecided(decided.count)
+
+      await auditInTx(tx, {
+        userId: admin.id,
+        action: decision === "approve" ? "event_claim.approved" : "event_claim.declined",
+        resource: "event_claim",
+        resourceId: claimId,
+        details: { eventId: claim.event.id, title: claim.event.title, orgId },
+      })
 
       if (decision !== "approve") return
-
-      // The one write that unlocks every screen.
-      await tx.events.update({
-        where: { id: claim.event.id },
-        data: { organizer_org_id: orgId, claimed_at: new Date() },
-      })
 
       /*
        * Everyone else who asked is superseded, not declined.
@@ -349,6 +364,8 @@ export async function decideEventClaim(
     if (violatedConstraint(error, "event_claims_one_approved_per_event")) {
       throw new Refusal("Somebody else's claim was approved first.")
     }
+    // Postgres chose this transaction to lose a lock cycle: somebody else's decision went first.
+    if (isWriteConflict(error)) throw new Refusal(ALREADY_DECIDED)
     throw error
   }
 
@@ -363,13 +380,6 @@ export async function decideEventClaim(
     link: decision === "approve" ? `${appUrl()}/dashboard/events/${claim.event.id}` : null,
   })
 
-  auditLog({
-    userId: admin.id,
-    action: decision === "approve" ? "event_claim.approved" : "event_claim.declined",
-    resource: "event_claim",
-    resourceId: claimId,
-    details: { eventId: claim.event.id, title: claim.event.title, orgId, emailSent: notified },
-  })
   return { notified }
 }
 

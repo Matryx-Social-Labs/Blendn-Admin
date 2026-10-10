@@ -4,7 +4,8 @@ import { Refusal } from "@/lib/refusal"
 import { revalidatePath } from "next/cache"
 import type { moderation_status_type } from "@prisma/client"
 
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx } from "@/lib/audit-log"
+import { ALREADY_DECIDED, decisionFrom, refuseUnlessDecided } from "@/lib/decision"
 import { emitChatMessageHidden } from "@/lib/socket-server"
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
@@ -207,29 +208,39 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
  * message. Both write to `audit_logs` — a moderation decision changes what
  * other people can see, so it needs to be attributable after the fact.
  */
-export async function resolveFlag(flagId: string, decision: "approve" | "remove") {
+export async function resolveFlag(flagId: string, decisionInput: "approve" | "remove") {
   const admin = await requireAdmin()
+  // Before anything else: "bogus" used to fall through to "keep" and restore the message (M2).
+  const decision = decisionFrom(["approve", "remove"], decisionInput)
 
   const flag = await db.moderation_flags.findUnique({
     where: { id: flagId },
     select: { id: true, message_id: true, status: true, chat_group_id: true, user_id: true },
   })
   if (!flag) throw new Refusal("Flag not found")
-  if (flag.status !== "pending") {
-    // Two admins working the queue at once would otherwise double-action it.
-    throw new Refusal("This flag has already been reviewed")
-  }
+  if (flag.status !== "pending") throw new Refusal(ALREADY_DECIDED)
 
   const reviewedStatus: moderation_status_type = decision === "approve" ? "approved" : "rejected"
 
   await db.$transaction(async (tx) => {
-    await tx.moderation_flags.update({
-      where: { id: flagId },
+    // Conditional on still pending: two admins working the queue at once would
+    // otherwise both act — one removing the message, the other restoring it (H1).
+    const decided = await tx.moderation_flags.updateMany({
+      where: { id: flagId, status: "pending" },
       data: {
         status: reviewedStatus,
         reviewed_by: admin.id,
         reviewed_at: new Date(),
       },
+    })
+    refuseUnlessDecided(decided.count)
+
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: decision === "approve" ? "moderation.flag_approved" : "moderation.message_removed",
+      resource: "moderation_flag",
+      resourceId: flagId,
+      details: { messageId: flag.message_id },
     })
     if (decision === "remove") {
       await tx.chat_messages.update({
@@ -268,17 +279,6 @@ export async function resolveFlag(flagId: string, decision: "approve" | "remove"
   if (decision === "remove") {
     emitChatMessageHidden(flag.chat_group_id, flag.message_id, flag.user_id)
   }
-
-  // Fire-and-forget by design (see lib/audit-log.ts): the decision is already
-  // committed, so a failed audit write logs and moves on rather than making the
-  // admin think their action failed.
-  auditLog({
-    userId: admin.id,
-    action: decision === "approve" ? "moderation.flag_approved" : "moderation.message_removed",
-    resource: "moderation_flag",
-    resourceId: flagId,
-    details: { messageId: flag.message_id },
-  })
 
   revalidatePath("/dashboard/moderation")
   revalidatePath("/dashboard")

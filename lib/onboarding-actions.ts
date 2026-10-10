@@ -9,7 +9,8 @@ import { revalidatePath } from "next/cache"
 import type { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
 import { requireAdmin } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
+import { reasonFrom, refuseUnlessDecided } from "@/lib/decision"
 import { logger } from "@/lib/logger"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { isAggregatorDomain } from "@/lib/curation-sources"
@@ -184,6 +185,9 @@ export interface ApprovalResult {
   orgId: string
 }
 
+/** An application nobody has decided: waiting on its address, or on us. */
+const UNDECIDED: Array<"pending" | "email_pending"> = ["pending", "email_pending"]
+
 export async function approveOnboardingRequest(
   requestId: string,
   note?: string
@@ -208,6 +212,19 @@ export async function approveOnboardingRequest(
   const hashed = await bcrypt.hash(undisclosedPassword(), 12)
 
   const { orgId, userId } = await db.$transaction(async (tx) => {
+    /*
+     * The guard, first (M1): the application goes from undecided to approved
+     * here or the transaction ends. Two approvals racing used to each create
+     * an organisation — or the second died on the unique email — because the
+     * status check above is a read. `org_id` is written at the end, once the
+     * organisation exists.
+     */
+    const claimed = await tx.organiser_onboarding_requests.updateMany({
+      where: { id: requestId, status: { in: UNDECIDED } },
+      data: { status: "approved", reviewed_by: admin.id, reviewed_at: new Date(), review_note: note?.trim() || null },
+    })
+    refuseUnlessDecided(claimed.count)
+
     const org = await tx.organisations.create({
       data: {
         kind: request.kind,
@@ -281,14 +298,18 @@ export async function approveOnboardingRequest(
       }
     }
 
-    await tx.organiser_onboarding_requests.update({
-      where: { id: requestId },
-      data: {
-        status: "approved",
-        reviewed_by: admin.id,
-        reviewed_at: new Date(),
-        review_note: note?.trim() || null,
-        org_id: org.id,
+    await tx.organiser_onboarding_requests.update({ where: { id: requestId }, data: { org_id: org.id } })
+
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: "onboarding.approved",
+      resource: "organiser_onboarding_request",
+      resourceId: requestId,
+      details: {
+        orgId: org.id,
+        role: request.requested_role,
+        promotedExisting: !!existing,
+        note: note?.trim() || null,
       },
     })
 
@@ -309,20 +330,6 @@ export async function approveOnboardingRequest(
     }
   }
 
-  auditLog({
-    userId: admin.id,
-    action: "onboarding.approved",
-    resource: "organiser_onboarding_request",
-    resourceId: requestId,
-    details: {
-      orgId,
-      role: request.requested_role,
-      promotedExisting: !!existing,
-      emailSent,
-      note: note?.trim() || null,
-    },
-  })
-
   revalidatePath("/dashboard/onboarding")
   revalidatePath("/dashboard/organisations")
   revalidatePath("/dashboard/organisers")
@@ -342,8 +349,7 @@ export async function declineOnboardingRequest(requestId: string, reason: string
 
   // A decline that reaches the applicant with no reason is worse than none —
   // they reapply identically and the queue gets the same row again.
-  const trimmed = reason.trim()
-  if (trimmed.length < 10) throw new Refusal("Give a reason — it's sent to the applicant.")
+  const trimmed = reasonFrom(reason, true, "Give a reason — it's sent to the applicant.") ?? ""
 
   const request = await db.organiser_onboarding_requests.findUnique({
     where: { id: requestId },
@@ -352,14 +358,21 @@ export async function declineOnboardingRequest(requestId: string, reason: string
   if (!request) throw new Refusal("Application not found")
   if (request.status === "approved") throw new Refusal("Already approved — suspend the org instead")
 
-  await db.organiser_onboarding_requests.update({
-    where: { id: requestId },
-    data: {
-      status: "declined",
-      decline_reason: trimmed,
-      reviewed_by: admin.id,
-      reviewed_at: new Date(),
-    },
+  // Conditional on still undecided, with its record (H1): a decline racing an
+  // approval, or another decline, is refused and sends no second email.
+  await db.$transaction(async (tx) => {
+    const decided = await tx.organiser_onboarding_requests.updateMany({
+      where: { id: requestId, status: { in: UNDECIDED } },
+      data: { status: "declined", decline_reason: trimmed, reviewed_by: admin.id, reviewed_at: new Date() },
+    })
+    refuseUnlessDecided(decided.count)
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: "onboarding.declined",
+      resource: "organiser_onboarding_request",
+      resourceId: requestId,
+      details: { reason: trimmed },
+    })
   })
 
   if (emailConfigured()) {
@@ -369,14 +382,6 @@ export async function declineOnboardingRequest(requestId: string, reason: string
     })
     if (!result.sent) logger.error("Decline email failed", { requestId, reason: result.reason })
   }
-
-  auditLog({
-    userId: admin.id,
-    action: "onboarding.declined",
-    resource: "organiser_onboarding_request",
-    resourceId: requestId,
-    details: { reason: trimmed },
-  })
 
   revalidatePath("/dashboard/onboarding")
 }

@@ -8,9 +8,9 @@
  * and which ones a row is even allowed to offer.
  */
 const tx = {
-  user_reports: { update: jest.fn() },
-  message_reports: { update: jest.fn() },
-  event_reports: { update: jest.fn() },
+  user_reports: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+  message_reports: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+  event_reports: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   chat_messages: { update: jest.fn() },
   user: { update: jest.fn() },
   mobile_refresh_tokens: { updateMany: jest.fn() },
@@ -38,7 +38,10 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 const mockAuditLog = jest.fn()
-jest.mock("@/lib/audit-log", () => ({ auditLog: (...a: unknown[]) => mockAuditLog(...a) }))
+jest.mock("@/lib/audit-log", () => ({
+  auditLog: (...a: unknown[]) => mockAuditLog(...a),
+  auditInTx: (_tx: unknown, entry: unknown) => mockAuditLog(entry),
+}))
 
 const emitChatMessageHidden = jest.fn()
 const evictUserSockets = jest.fn()
@@ -289,7 +292,7 @@ describe("resolveReport", () => {
     // Two people working the queue at once would otherwise both act on it, and
     // the second click would suspend an account for a report already dismissed.
     mockDb.user_reports.findUnique.mockResolvedValue({ ...pendingUserReport, status: "resolved" })
-    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/already been reviewed/i)
+    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/Someone else decided this/)
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })
 
@@ -337,7 +340,7 @@ describe("resolveReport", () => {
     mockDb.user_reports.findUnique.mockResolvedValue(pendingUserReport)
     await resolveReport("user", "ur1", "dismiss")
 
-    expect(tx.user_reports.update).toHaveBeenCalledWith(
+    expect(tx.user_reports.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "reviewed", reviewed_by: "admin1" }),
       })
@@ -350,7 +353,7 @@ describe("resolveReport", () => {
     // and "we removed it" — the question that gets asked six weeks later.
     mockDb.message_reports.findUnique.mockResolvedValue(pendingGroupReport)
     await resolveReport("message", "mr1", "remove_message")
-    expect(tx.message_reports.update).toHaveBeenCalledWith(
+    expect(tx.message_reports.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "resolved" }) })
     )
     expect(tx.chat_messages.update).toHaveBeenCalledWith(
@@ -419,7 +422,7 @@ describe("resolveReport", () => {
       data: { suspended_at: null, suspended_by: null },
     })
     // The report's own verdict stands; only the suspension is lifted.
-    expect(tx.user_reports.update).not.toHaveBeenCalled()
+    expect(tx.user_reports.updateMany).not.toHaveBeenCalled()
   })
 
   it("writes every decision to the audit log", async () => {

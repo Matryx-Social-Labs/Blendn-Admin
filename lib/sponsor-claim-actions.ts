@@ -4,7 +4,8 @@ import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
+import { ALREADY_DECIDED, decisionFrom, reasonFrom, refuseUnlessDecided } from "@/lib/decision"
 import { getAuth } from "@/lib/auth"
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
@@ -340,10 +341,15 @@ function hostOf(url: string | null): string | null {
  */
 export async function decideSponsorClaim(
   claimId: string,
-  decision: "approve" | "reject",
+  decisionInput: "approve" | "reject",
   note?: string
 ): Promise<{ notified: boolean }> {
   const admin = await requireAdmin()
+  // Before anything else: a word this queue does not take is refused (M2).
+  const decision = decisionFrom(["approve", "reject"], decisionInput)
+  // A rejection that reaches the claimant with no reason produces an identical
+  // re-file, and the queue gets the same row again.
+  const trimmed = reasonFrom(note, decision === "reject", "Give a reason — it is sent to the claimant.") ?? ""
 
   const claim = await db.sponsor_claims.findUnique({
     where: { id: claimId },
@@ -357,14 +363,7 @@ export async function decideSponsorClaim(
     },
   })
   if (!claim) throw new Refusal("Claim not found")
-  if (claim.status !== "pending") throw new Refusal("This claim has already been decided.")
-
-  // A rejection that reaches the claimant with no reason produces an identical
-  // re-file, and the queue gets the same row again.
-  const trimmed = note?.trim() ?? ""
-  if (decision === "reject" && trimmed.length < 10) {
-    throw new Refusal("Give a reason — it is sent to the claimant.")
-  }
+  if (claim.status !== "pending") throw new Refusal(ALREADY_DECIDED)
 
   if (decision === "approve") {
     /*
@@ -400,13 +399,30 @@ export async function decideSponsorClaim(
       : []
 
   await db.$transaction(async (tx) => {
-    await tx.sponsor_claims.update({
-      where: { id: claimId },
+    // Conditional on still pending: of two decisions racing, one writes and the
+    // other is refused before anything else changes (H1).
+    const decided = await tx.sponsor_claims.updateMany({
+      where: { id: claimId, status: "pending" },
       data: {
         status: decision === "approve" ? "approved" : "rejected",
         reviewed_by: admin.id,
         reviewed_at: new Date(),
         decision_note: trimmed || null,
+      },
+    })
+    refuseUnlessDecided(decided.count)
+
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: decision === "approve" ? "sponsor.claim.approved" : "sponsor.claim.rejected",
+      resource: "sponsors",
+      resourceId: claim.sponsor.id,
+      details: {
+        claimId,
+        orgId: claim.org_id,
+        wasDispute: claim.is_dispute,
+        previousOwnerOrgId: claim.sponsor.org_id,
+        note: trimmed || null,
       },
     })
 
@@ -448,21 +464,6 @@ export async function decideSponsorClaim(
     if (u && l.filed_by !== claim.filed_by)
       await notifyClaimant({ to: u.email, name: u.name, what, outcome: "declined", reason: "Another claim on this brand was approved.", link: null })
   }
-
-  auditLog({
-    userId: admin.id,
-    action: decision === "approve" ? "sponsor.claim.approved" : "sponsor.claim.rejected",
-    resource: "sponsors",
-    resourceId: claim.sponsor.id,
-    details: {
-      claimId,
-      orgId: claim.org_id,
-      wasDispute: claim.is_dispute,
-      previousOwnerOrgId: claim.sponsor.org_id,
-      note: trimmed || null,
-      emailSent: notified,
-    },
-  })
 
   revalidatePath("/dashboard/sponsor-claims")
   revalidatePath("/dashboard/sponsors")

@@ -43,6 +43,25 @@ export function auditLog(entry: AuditLogEntry): void {
 }
 
 /**
+ * Write an audit row inside the caller's transaction, so the decision and its
+ * record commit together or not at all (step 18: a decision that raced and
+ * lost writes neither). Unlike `auditLog` this throws: a decision whose record
+ * cannot be written is not made.
+ */
+export async function auditInTx(tx: Prisma.TransactionClient, entry: AuditLogEntry): Promise<void> {
+  await tx.audit_logs.create({
+    data: {
+      user_id: entry.userId ?? null,
+      action: entry.action,
+      resource: entry.resource,
+      resource_id: entry.resourceId ?? null,
+      ...(entry.details !== undefined && { details: entry.details }),
+      ip_address: entry.ipAddress ?? null,
+    },
+  })
+}
+
+/**
  * The address written onto an audit row. Same reader as the rate limiters —
  * see lib/client-ip.ts for what Railway's edge actually sends. Until
  * SCRUM-195 this recorded the edge node (152.233.x), which identified nobody.
