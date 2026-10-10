@@ -16,6 +16,7 @@ import {
 } from "@/lib/presence"
 import { isUuid } from "@/lib/api-input"
 import { stayExtension } from "@/lib/go-live"
+import { plusRequiredForPing } from "@/lib/plus"
 import { scheduleLiveEnd } from "@/lib/live-timers"
 
 export const dynamic = "force-dynamic"
@@ -80,7 +81,7 @@ export async function POST(
       occurrence: { select: { id: true, end_time: true } },
       // Spread, not hand-picked: a select missing `check_in_radius` reads as
       // "no legacy fence" and silently fails open for every pre-column event.
-      event: { select: { ...fenceSelect } },
+      event: { select: { ...fenceSelect, city: true } },
     },
   })
 
@@ -175,10 +176,16 @@ export async function POST(
     // their "stay" asks it here.
     (decision.reason === "staff_exempt" &&
       evaluateCheckIn({ lat: latitude, lng: longitude }, fence, body.accuracy ?? null).ok)
-  const proposed =
+  /*
+   * And only while they may still stay: if Blendn+ lapsed mid-stay in a gated
+   * city, the window is no longer carried and ends at most
+   * STAY_EXTEND_MINUTES (20) after the last ping that did carry it (D-11).
+   */
+  const carried =
     inside && checkIn.expires_at
       ? stayExtension({ expiresAt: checkIn.expires_at, stay: checkIn.stay, stayUntil: checkIn.stay_until }, now)
       : null
+  const proposed = carried && !(await plusRequiredForPing(authUser.userId, checkIn.event.city, now)) ? carried : null
   let extended: Date | null = null
   if (proposed && checkIn.expires_at) {
     /*
