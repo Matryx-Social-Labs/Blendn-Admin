@@ -1,5 +1,6 @@
 import "server-only"
 
+import { auditInTx } from "./audit-log"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
@@ -157,14 +158,12 @@ export async function recordRazorpayDelivery(
         },
       })
       for (const a of outcome.audit) {
-        await tx.audit_logs.create({
-          data: {
+        await auditInTx(tx, {
             action: a.action,
             resource: a.resource?.kind ?? "organisation",
-            resource_id: a.resource?.id ?? a.orgId,
+            resourceId: a.resource?.id ?? a.orgId,
             details: a.details,
-          },
-        })
+          })
       }
       return { duplicate: false, outcome }
     },

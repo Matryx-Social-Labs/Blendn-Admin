@@ -1,5 +1,6 @@
 "use server"
 
+import { auditInTx } from "./audit-log"
 import { revalidatePath } from "next/cache"
 import type { Prisma } from "@prisma/client"
 import { z } from "zod"
@@ -247,15 +248,13 @@ async function startSubscription(
           created_by: user.id,
         },
       })
-      await tx.audit_logs.create({
-        data: {
-          user_id: user.id,
+      await auditInTx(tx, {
+          userId: user.id,
           action: "billing.checkout.started",
           resource: scope.venueId ? "venue" : "organisation",
-          resource_id: scope.venueId ?? scope.orgId,
+          resourceId: scope.venueId ?? scope.orgId,
           details: { plan: plan.key, providerRef: sub.id, orgId: scope.orgId },
-        },
-      })
+        })
       return sub.id
     }, TX)
     return { kind: "subscription", keyId, subscriptionId }
@@ -374,15 +373,13 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
           created_by: user.id,
         },
       })
-      await tx.audit_logs.create({
-        data: {
-          user_id: user.id,
+      await auditInTx(tx, {
+          userId: user.id,
           action: "billing.checkout.started",
           resource: "organisation",
-          resource_id: org.orgId,
+          resourceId: org.orgId,
           details: { plan: plan.key, providerRef: created.id, eventId: id },
-        },
-      })
+        })
       return { orderId: created.id, amountMinor: chargeMinor(plan) }
     }, TX)
     return { kind: "order", keyId, ...order }
@@ -489,15 +486,13 @@ async function endGrantAudited(
   await db.$transaction(async (tx) => {
     const ended = await endGrants(subject, product, new Date(), tx)
     if (ended === 0) throw new Refusal("That grant has already ended.")
-    await tx.audit_logs.create({
-      data: {
-        user_id: adminId,
+    await auditInTx(tx, {
+        userId: adminId,
         action: "entitlement.grant_ended",
         resource: RESOURCE[subject.kind],
-        resource_id: subject.id,
+        resourceId: subject.id,
         details: { product: product, ended: ended, reason: reason },
-      },
-    })
+      })
   })
 }
 
@@ -511,15 +506,13 @@ async function revokePaidAudited(
   await db.$transaction(async (tx) => {
     const revoked = await revokePaid(subject, entitlementId, new Date(), tx)
     if (!revoked) throw new Refusal("That entitlement isn't live, or isn't a paid one.")
-    await tx.audit_logs.create({
-      data: {
-        user_id: adminId,
+    await auditInTx(tx, {
+        userId: adminId,
         action: "entitlement.revoked",
         resource: RESOURCE[subject.kind],
-        resource_id: subject.id,
+        resourceId: subject.id,
         details: { product: revoked.product, externalRef: revoked.externalRef, entitlementId: revoked.id, reason: reason },
-      },
-    })
+      })
   })
 }
 
@@ -541,15 +534,13 @@ export async function grantAnalytics(orgId: string, months: number, reason: stri
       throw new Refusal("This organisation already has a grant. End it before giving a new one.")
     }
     const made = await grantEntitlement(tx, { subject: { kind: "org", id }, product: "analytics", months: length })
-    await tx.audit_logs.create({
-      data: {
-        user_id: admin.id,
+    await auditInTx(tx, {
+        userId: admin.id,
         action: "entitlement.granted",
         resource: "organisation",
-        resource_id: id,
+        resourceId: id,
         details: { product: "analytics", months: length, expiresAt: made.expiresAt.toISOString(), reason: why, orgName: org.display_name },
-      },
-    })
+      })
     return made
   })
   revalidatePath("/dashboard/organisations")
@@ -605,12 +596,11 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
       throw new Refusal("This venue already has a grant. End it before giving a new one.")
     }
     const made = await grantEntitlement(tx, { subject: { kind: "venue", id }, product: "venue_pro", months: length })
-    await tx.audit_logs.create({
-      data: {
-        user_id: admin.id,
+    await auditInTx(tx, {
+        userId: admin.id,
         action: "entitlement.granted",
         resource: "venue",
-        resource_id: id,
+        resourceId: id,
         details: {
           product: "venue_pro",
           months: length,
@@ -619,8 +609,7 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
           venueName: venue.name,
           orgId: venue.owner_org_id,
         },
-      },
-    })
+      })
     return made
   })
   revalidatePath(`/dashboard/venues/${id}`)

@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client"
 
+import { auditInTx } from "./audit-log"
 import { OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { db } from "@/lib/db"
 import { revokePaidByRefs } from "@/lib/entitlements"
@@ -50,21 +51,19 @@ export async function cancelThenRecord(
     return "razorpay_refused"
   }
   try {
-    await db.$transaction([
-      db.billing_checkouts.update({
+    await db.$transaction(async (tx) => {
+      await tx.billing_checkouts.update({
         where: { id: sub.id },
         data: { cancel_at_cycle_end: true, ...(sub.status === "created" ? { status: "expired" } : {}) },
-      }),
-      db.audit_logs.create({
-        data: {
-          user_id: audit.userId,
-          action: "billing.subscription.cancelled",
-          resource: audit.resource,
-          resource_id: audit.resourceId,
-          details: { providerRef: sub.provider_ref, atCycleEnd, orgId: sub.org_id, ...(audit.reason ? { reason: audit.reason } : {}) },
-        },
-      }),
-    ])
+      })
+      await auditInTx(tx, {
+        userId: audit.userId,
+        action: "billing.subscription.cancelled",
+        resource: audit.resource,
+        resourceId: audit.resourceId,
+        details: { providerRef: sub.provider_ref, atCycleEnd, orgId: sub.org_id, ...(audit.reason ? { reason: audit.reason } : {}) },
+      })
+    })
   } catch (err) {
     logger.error("Razorpay cancelled a subscription but recording it here failed; its subscription.cancelled webhook settles it", {
       providerRef: sub.provider_ref,
@@ -100,15 +99,13 @@ export async function endPreviousOwnersPro(
   const refs = paidByOthers.map((c) => c.provider_ref)
   const ended = await revokePaidByRefs({ kind: "venue", id: venueId }, "venue_pro", refs, new Date(), tx)
   if (ended.length) {
-    await tx.audit_logs.create({
-      data: {
-        user_id: adminId,
+    await auditInTx(tx, {
+        userId: adminId,
         action: "entitlement.ended_on_transfer",
         resource: "venue",
-        resource_id: venueId,
+        resourceId: venueId,
         details: { newOwnerOrgId, ended: ended.length, entitlementIds: ended.map((e) => e.id) },
-      },
-    })
+      })
   }
   return ended.length
 }
@@ -161,22 +158,19 @@ async function cancelEach(venueId: string, newOwnerOrgId: string, adminId: strin
     }
     failed.push(sub.provider_ref)
     if (outcome === "razorpay_refused") {
-      await db.audit_logs
-        .create({
-          data: {
-            user_id: adminId,
-            action: "billing.subscription.cancel_failed",
-            resource: "venue",
-            resource_id: venueId,
-            details: { providerRef: sub.provider_ref, orgId: sub.org_id, newOwnerOrgId, todo: "cancel it from the Razorpay dashboard" },
-          },
+      // Awaited and never thrown: a failed write of this row is logged, and the cancel loop carries on.
+      await auditInTx(db, {
+        userId: adminId,
+        action: "billing.subscription.cancel_failed",
+        resource: "venue",
+        resourceId: venueId,
+        details: { providerRef: sub.provider_ref, orgId: sub.org_id, newOwnerOrgId, todo: "cancel it from the Razorpay dashboard" },
+      }).catch((err: unknown) =>
+        logger.error("Auditing a refused Venue Pro cancel failed", {
+          providerRef: sub.provider_ref,
+          error: err instanceof Error ? err.message : String(err),
         })
-        .catch((err: unknown) =>
-          logger.error("Auditing a refused Venue Pro cancel failed", {
-            providerRef: sub.provider_ref,
-            error: err instanceof Error ? err.message : String(err),
-          })
-        )
+      )
     }
   }
   return { cancelled, failed }
