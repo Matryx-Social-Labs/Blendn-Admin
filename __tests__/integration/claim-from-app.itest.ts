@@ -414,7 +414,7 @@ describe("deciding a no-account venue claim", () => {
     asAdmin()
     await expect(
       decidedWhileReading(claimId, () => db.venue_claims.update({ where: { id: claimId }, data: { status: "declined" } }))
-    ).rejects.toThrow(/already been decided/)
+    ).rejects.toThrow(/Someone else decided this/)
     expect(await ownerOf(venueId)).toBeNull()
   })
 

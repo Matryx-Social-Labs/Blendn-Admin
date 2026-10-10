@@ -207,6 +207,8 @@ export async function fileSponsorClaim(
     resource: "sponsors",
     resourceId: sponsor.id,
     details: { claimId: claim.id, orgId, brand: sponsor.name },
+    // The claimant's, never the brand's owner: a dispute is not the owner's to read (step 18, M3).
+    orgId,
   })
 
   revalidatePath("/dashboard/brand")
@@ -424,6 +426,8 @@ export async function decideSponsorClaim(
         previousOwnerOrgId: claim.sponsor.org_id,
         note: trimmed || null,
       },
+      // The claimant's, never the brand's owner.
+      orgId: claim.org_id,
     })
 
     if (decision !== "approve") return

@@ -254,6 +254,8 @@ async function startSubscription(
           resource: scope.venueId ? "venue" : "organisation",
           resourceId: scope.venueId ?? scope.orgId,
           details: { plan: plan.key, providerRef: sub.id, orgId: scope.orgId },
+          // The payer's (step 18, M3): a venue's checkout is its payer's business.
+          orgId: scope.orgId,
         })
       return sub.id
     }, TX)
@@ -379,6 +381,7 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
           resource: "organisation",
           resourceId: org.orgId,
           details: { plan: plan.key, providerRef: created.id, eventId: id },
+          orgId: org.orgId,
         })
       return { orderId: created.id, amountMinor: chargeMinor(plan) }
     }, TX)
@@ -506,12 +509,18 @@ async function revokePaidAudited(
   await db.$transaction(async (tx) => {
     const revoked = await revokePaid(subject, entitlementId, new Date(), tx)
     if (!revoked) throw new Refusal("That entitlement isn't live, or isn't a paid one.")
+    // The payer's — the checkout's organisation, never the venue's owner now
+    // (step 18, M3). A paid entitlement with no checkout here is the platform's alone.
+    const payer = revoked.externalRef
+      ? await tx.billing_checkouts.findFirst({ where: { provider_ref: revoked.externalRef }, select: { org_id: true } })
+      : null
     await auditInTx(tx, {
         userId: adminId,
         action: "entitlement.revoked",
         resource: RESOURCE[subject.kind],
         resourceId: subject.id,
         details: { product: revoked.product, externalRef: revoked.externalRef, entitlementId: revoked.id, reason: reason },
+        orgId: subject.kind === "org" ? subject.id : (payer?.org_id ?? null),
       })
   })
 }
@@ -609,6 +618,8 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
           venueName: venue.name,
           orgId: venue.owner_org_id,
         },
+        // Given to the owner it was given to.
+        orgId: venue.owner_org_id,
       })
     return made
   })

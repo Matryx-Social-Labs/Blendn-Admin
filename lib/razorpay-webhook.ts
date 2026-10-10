@@ -159,11 +159,15 @@ export async function recordRazorpayDelivery(
       })
       for (const a of outcome.audit) {
         await auditInTx(tx, {
-            action: a.action,
-            resource: a.resource?.kind ?? "organisation",
-            resourceId: a.resource?.id ?? a.orgId,
-            details: a.details,
-          })
+          action: a.action,
+          resource: a.resource?.kind ?? "organisation",
+          resourceId: a.resource?.id ?? a.orgId,
+          details: a.details,
+          // The payer's — the checkout's organisation — never the venue's owner
+          // today: after a transfer, the old payer's references and amounts are
+          // not the new owner's to read (step 18, M3).
+          orgId: a.orgId,
+        })
       }
       return { duplicate: false, outcome }
     },

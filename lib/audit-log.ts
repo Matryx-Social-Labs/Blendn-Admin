@@ -123,8 +123,9 @@ export const ORG_RESOURCES = {
       where: { id: ch.placement_id },
       select: { event: { select: { organizer_org_id: true } }, sponsor: { select: { org_id: true } } },
     })
-    // The bill is the brand's; a brand nobody owns leaves it the host's.
-    return { org: p?.sponsor.org_id ?? p?.event.organizer_org_id ?? null }
+    // The bill is the brand's, and nobody else's: a host never reads what a
+    // brand was charged, and a brand nobody owns leaves it the platform's.
+    return { org: p?.sponsor.org_id ?? null }
   } },
   moderation_flag: { needs: "id", resolve: async (c: Client, e: AuditLogEntry): Promise<Resolved> => {
     const id = idOf(e)

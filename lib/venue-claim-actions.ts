@@ -172,6 +172,9 @@ export async function fileVenueClaim(
     resource: "venue",
     resourceId: venue.id,
     details: { claimId: claim.id, orgId: membership.org_id, venue: venue.name },
+    // The claimant's, never the venue's owner: a dispute filed against an owner
+    // is not the owner's to read in its log (step 18, M3).
+    orgId: membership.org_id,
   })
 
   revalidatePath("/dashboard/venues")
@@ -279,6 +282,8 @@ export async function filePublicVenueClaim(
       resource: "venue",
       resourceId: venue.id,
       details: { claimId: claim.id, onboardingId: input.onboardingId, withoutAccount: true },
+      // No organisation yet: the platform's alone.
+      orgId: null,
     })
     return { ok: true, claimId: claim.id }
   } catch (error) {
@@ -599,6 +604,8 @@ export async function decideVenueClaim(
       note: trimmed || null,
       emailSent: notified,
     },
+    // The claimant's (the organisation it was decided for), never the venue's owner.
+    orgId,
   })
 
   revalidatePath("/dashboard/venue-owners")
