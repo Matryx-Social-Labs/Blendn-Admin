@@ -14,12 +14,11 @@ import { db } from "@/lib/db"
  *    (`viewerTierB` in lib/overlaps.ts).
  * 2. **Three a day, counted in the database.** `tier_b_changes` keeps the
  *    times of the last changes; a fourth inside 24 hours is refused. Per
- *    person, per change (never per request or per IP), and atomic: the check
- *    and the record are one conditional UPDATE, so two requests at once cannot
- *    both take the last one. Not the Redis limiter: that degrades to a
- *    per-process counter when Redis is down, and a limit that resets on
- *    restart or splits across replicas is not one. A database that is down
- *    refuses the write anyway — this fails closed by construction.
+ *    person, per change (never per request or per IP), and atomic with the
+ *    write itself (`writeTierB`, under the row's lock). Not the Redis limiter:
+ *    that degrades to a per-process counter when Redis is down, and a limit
+ *    that resets on restart or splits across replicas is not one. A database
+ *    that is down refuses the write anyway — this fails closed by construction.
  *
  * `__tests__/tier-b-one-writer.test.ts` keeps every write of these columns in
  * the profile route, so no other path can change them without the stamp and
@@ -52,7 +51,7 @@ export function changesTierB(
 ): boolean {
   const was: TierBFacts = stored ?? { languages: [], home_state: null, sun_sign: null, sign_system: null, work_field: null }
   return (
-    (sent.languages !== undefined && JSON.stringify([...sent.languages].sort()) !== JSON.stringify([...was.languages].sort())) ||
+    (sent.languages !== undefined && JSON.stringify(normaliseLanguages(sent.languages)) !== JSON.stringify(normaliseLanguages(was.languages))) ||
     (sent.home_state !== undefined && sent.home_state !== was.home_state) ||
     (sent.sun_sign !== undefined && sent.sun_sign !== was.sun_sign) ||
     (sent.sign_system !== undefined && sent.sign_system !== was.sign_system) ||
@@ -60,23 +59,62 @@ export function changesTierB(
   )
 }
 
+/** The languages as stored: each once, in one order, so a reorder is no change. */
+export const normaliseLanguages = (languages: readonly string[]): string[] => [...new Set(languages)].sort()
+
+export type TierBWrite = "written" | "unchanged" | "refused" | "no_profile"
+
 /**
- * Take one of today's changes for this person, or false when all three are
- * spent. Records the change and stamps `tier_b_changed_at` in the same
- * statement. Call it after every other refusal, right before the write, so a
- * refused save never spends one.
+ * Write a person's Tier B facts — the only writer of these columns once a
+ * profile exists — and stamp and count the change, in one transaction under
+ * the profile row's lock (`SELECT … FOR UPDATE`).
+ *
+ * The lock is the point (step 10 review, the rate-limit scan). Comparing the
+ * request to a profile read earlier, and writing whatever was sent, let a
+ * request that looked like "no change" against a stale read write a change
+ * anyway: ten PUTs at once alternating Kerala and Goa changed the value over
+ * and over, uncounted and unstamped. Here the read, the comparison, the count
+ * and the write see one row version, and a second request waits for the first.
+ * Nothing is reserved and refunded: the count and the write commit together or
+ * not at all, and a database that cannot take the lock refuses the write —
+ * closed by construction, no Redis involved.
+ *
+ * Only the fields sent are written; `undefined` is not sent. A sign is sent
+ * with its calendar (the route refuses one without the other).
  */
-export async function claimTierBChange(userId: string, now: Date = new Date()): Promise<boolean> {
-  const since = new Date(now.getTime() - DAY_MS)
-  const updated = await db.$executeRaw`
-    UPDATE profiles
-       SET tier_b_changes = array_append(
-             ARRAY(SELECT t FROM unnest(tier_b_changes) AS t WHERE t > ${since}),
-             ${now}::timestamptz
-           ),
-           tier_b_changed_at = ${now}
-     WHERE id = ${userId}
-       AND (SELECT count(*) FROM unnest(tier_b_changes) AS t WHERE t > ${since}) < ${TIER_B_CHANGES_PER_DAY}
-  `
-  return updated === 1
+export async function writeTierB(
+  userId: string,
+  sent: Partial<{ [K in keyof TierBFacts]: TierBFacts[K] | undefined }>,
+  now: Date = new Date()
+): Promise<TierBWrite> {
+  const next = { ...sent, ...(sent.languages !== undefined && { languages: normaliseLanguages(sent.languages) }) }
+  return db.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<(TierBFacts & { onboarded: boolean; tier_b_changes: Date[] })[]>`
+      SELECT languages, home_state, sun_sign, sign_system, work_field, onboarded, tier_b_changes
+        FROM profiles WHERE id = ${userId} FOR UPDATE`
+    const current = rows[0]
+    if (!current) return "no_profile"
+    if (!changesTierB(next, current)) return "unchanged"
+
+    // Onboarding's first answers are not counted: nobody is in a room before it.
+    let changes: Date[] | undefined
+    if (current.onboarded) {
+      const recent = current.tier_b_changes.filter((t) => t.getTime() > now.getTime() - DAY_MS)
+      if (recent.length >= TIER_B_CHANGES_PER_DAY) return "refused"
+      changes = [...recent, now]
+    }
+    await tx.profiles.update({
+      where: { id: userId },
+      data: {
+        ...(next.languages !== undefined && { languages: [...next.languages] }),
+        ...(next.home_state !== undefined && { home_state: next.home_state }),
+        ...(next.sun_sign !== undefined && { sun_sign: next.sun_sign }),
+        ...(next.sign_system !== undefined && { sign_system: next.sign_system }),
+        ...(next.work_field !== undefined && { work_field: next.work_field }),
+        tier_b_changed_at: now,
+        ...(changes && { tier_b_changes: changes }),
+      },
+    })
+    return "written"
+  })
 }

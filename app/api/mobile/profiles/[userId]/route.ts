@@ -22,7 +22,7 @@ import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { changesTierB, claimTierBChange, TIER_B_REFUSAL } from "@/lib/tier-b"
+import { changesTierB, normaliseLanguages, TIER_B_REFUSAL, writeTierB } from "@/lib/tier-b"
 import {
   successResponse,
   validationErrorResponse,
@@ -405,21 +405,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         : null
 
     /*
-     * Tier B, changed (step 10 review H1; lib/tier-b.ts): a real change is
-     * stamped and counted — three a day once onboarded, in the database, per
-     * person. Onboarding's first answers are not counted: nobody is in a room
-     * before it. The count is taken right before the write, below, so a save
-     * refused for anything else never spends one.
+     * Tier B (step 10 review H1; lib/tier-b.ts). Written by `writeTierB` below,
+     * which compares, counts, stamps and writes under the row's lock — never
+     * from this read, which another request may have overtaken. This read only
+     * decides the create path: a profile that does not exist yet has nothing to
+     * lock, nobody to protect, and gets its first answers stamped.
      */
-    const tierBChanged =
+    const firstTierB =
+      !existing &&
       touchesTierB &&
-      changesTierB({ languages, home_state, sun_sign, sign_system, work_field }, existing && {
-        languages: existing.languages,
-        home_state: existing.home_state,
-        sun_sign: existing.sun_sign,
-        sign_system: existing.sign_system,
-        work_field: existing.work_field,
-      })
+      changesTierB({ languages, home_state, sun_sign, sign_system, work_field }, null)
 
     /*
      * Specialisms, against the field they will sit under.
@@ -622,9 +617,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const storedPhotos = photos?.map((u: string) => sealedFor.get(u) ?? u)
 
 
-    // The day's Tier B changes, claimed atomically; refused when spent (lib/tier-b.ts).
-    if (tierBChanged && existing?.onboarded && !(await claimTierBChange(userId))) {
-      return errorResponse(TIER_B_REFUSAL, 429, ErrorCode.RATE_LIMITED)
+    // Tier B first, under its row lock: refused means nothing below is written either.
+    if (touchesTierB && existing) {
+      const tierB = await writeTierB(userId, { languages, home_state, sun_sign, sign_system, work_field })
+      if (tierB === "refused") return errorResponse(TIER_B_REFUSAL, 429, ErrorCode.RATE_LIMITED)
     }
 
     // Update user record (name and/or primary photo)
@@ -651,15 +647,21 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       })
     }
 
-    // Matching v2, display only (lib/about-you.ts). Absent means unchanged.
+    // Matching v2's switches (lib/about-you.ts). Absent means unchanged.
     const aboutYou = {
-      ...(languages !== undefined && { languages }),
-      ...(home_state !== undefined && { home_state }),
-      ...(sun_sign !== undefined && { sun_sign, sign_system }),
       ...(shows_up_badge !== undefined && { shows_up_badge }),
       ...(show_badges !== undefined && { show_badges }),
-      // Stamped on every effective change, counted or not (`claimTierBChange` also stamps).
-      ...(tierBChanged && { tier_b_changed_at: new Date() }),
+    }
+    /*
+     * A new profile's first Tier B answers, on the create path only: an
+     * existing row's are written by `writeTierB` above and never here.
+     */
+    const firstAnswers = {
+      ...(languages !== undefined && { languages: normaliseLanguages(languages) }),
+      ...(home_state !== undefined && { home_state }),
+      ...(sun_sign !== undefined && { sun_sign, sign_system }),
+      ...(work_field !== undefined && { work_field }),
+      ...(firstTierB && { tier_b_changed_at: new Date() }),
     }
 
     // Update or create profile
@@ -722,7 +724,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
          * `show_orientation: true` to staging and reading `false` back.
          */
         ...(show_orientation !== undefined && { show_orientation }),
-        ...(work_field !== undefined && { work_field }),
+        // Tier B, first answers (`firstAnswers`).
         ...(prunedExpertise !== undefined && { expertise: prunedExpertise }),
         // Omitted rather than defaulted: the column defaults to true, which is
         // what the settings screen has always claimed, so nobody's apparent
@@ -733,6 +735,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(share_location !== undefined && { share_location }),
         ...(friends_see_me_in_rooms !== undefined && { friends_see_me_in_rooms }),
         ...aboutYou,
+        ...firstAnswers,
       },
       update: {
         ...(name !== undefined && { name }),
@@ -781,7 +784,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
          * `show_orientation: true` to staging and reading `false` back.
          */
         ...(show_orientation !== undefined && { show_orientation }),
-        ...(work_field !== undefined && { work_field }),
+        // No Tier B here: `writeTierB` wrote it under the row's lock.
         // Also when only the FIELD moved -- see `prunedExpertise` above.
         ...(prunedExpertise !== undefined && { expertise: prunedExpertise }),
         ...(push_enabled !== undefined && { push_enabled }),

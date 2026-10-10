@@ -53,10 +53,13 @@ describe("Tier B is written in one place (H1)", () => {
     expect(found).toEqual([])
   })
 
-  it("the profile route stamps and counts every change it writes", () => {
+  it("the profile route writes an existing row's Tier B only through writeTierB, under its lock", () => {
     const route = strip(readFileSync(join(ROOT, "app/api/mobile/profiles/[userId]/route.ts"), "utf8"))
-    expect(route).toMatch(/changesTierB\(/)
-    expect(route).toMatch(/claimTierBChange\(userId\)/)
-    expect(route).toMatch(/tier_b_changed_at: new Date\(\)/)
+    expect(route).toMatch(/writeTierB\(userId, \{ languages, home_state, sun_sign, sign_system, work_field \}\)/)
+    // The upsert's update branch — what an existing row gets — names no Tier B column.
+    const update = route.slice(route.indexOf("update: {", route.indexOf("db.profiles.upsert(")), route.indexOf("updated_at: new Date()"))
+    expect(update.length).toBeGreaterThan(200)
+    expect(update).not.toMatch(TIER_B)
+    expect(update).not.toMatch(/firstAnswers/)
   })
 })

@@ -13,6 +13,8 @@ const profileRoute = require("@/app/api/mobile/profiles/[userId]/route") as type
 const userRoute = require("@/app/api/mobile/users/[userId]/route") as typeof import("@/app/api/mobile/users/[userId]/route")
 const thisOrThatRoute = require("@/app/api/mobile/me/this-or-that/route") as typeof import("@/app/api/mobile/me/this-or-that/route")
 const optionsRoute = require("@/app/api/mobile/profile-options/route") as typeof import("@/app/api/mobile/profile-options/route")
+const preferencesRoute = require("@/app/api/mobile/events/[eventId]/matches/preferences/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/preferences/route")
+const signupRoute = require("@/app/api/mobile/auth/signup/route") as typeof import("@/app/api/mobile/auth/signup/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 /**
@@ -291,7 +293,8 @@ describe("the about-you fields on the profile (MV-I05)", () => {
         where: { id: me.id },
         select: { languages: true, home_state: true, sun_sign: true, sign_system: true, shows_up_badge: true },
       })
-    ).toEqual({ languages: ["malayalam", "kannada_learning"], home_state: "kerala", sun_sign: "leo", sign_system: "rashi", shows_up_badge: true })
+    // Stored each once, in one order: a reorder is no change (lib/tier-b.ts).
+    ).toEqual({ languages: ["kannada_learning", "malayalam"], home_state: "kerala", sun_sign: "leo", sign_system: "rashi", shows_up_badge: true })
 
     const self = await call(profileRoute.GET, `/api/mobile/profiles/${me.id}`, me, { params: { userId: me.id } })
     expect(self.body.data.profile).toMatchObject({ sun_sign: "leo", sign_system: "rashi", suggested_sun_sign: "leo" })
@@ -406,6 +409,70 @@ describe("the Tier B cooldown cannot be sidestepped (H1, the rate-limit scan)", 
     const both = await Promise.all([put(me, { languages: ["tulu"] }), put(me, { work_field: "design" })])
     expect(both.map((r) => r.status).sort()).toEqual([200, 429])
     expect(await changes(me.id)).toBe(3)
+  })
+
+  it("ten PUTs at once, alternating values: at most three changes land, each counted, the stamp on the last", async () => {
+    const me = await who("mv-cd-ten")
+    await db.profiles.update({ where: { id: me.id }, data: { home_state: "kerala" } })
+    // Every change that actually lands on the row, logged by the database itself.
+    const log = testId("tierb_log").toLowerCase()
+    await db.$executeRawUnsafe(`CREATE TABLE ${log} (at timestamptz DEFAULT clock_timestamp(), was text, now text)`)
+    await db.$executeRawUnsafe(
+      `CREATE FUNCTION ${log}_fn() RETURNS trigger AS $$ BEGIN INSERT INTO ${log}(was, now) VALUES (OLD.home_state, NEW.home_state); RETURN NEW; END $$ LANGUAGE plpgsql`
+    )
+    await db.$executeRawUnsafe(
+      `CREATE TRIGGER ${log}_tr AFTER UPDATE ON profiles FOR EACH ROW WHEN (NEW.id = '${me.id}' AND OLD.home_state IS DISTINCT FROM NEW.home_state) EXECUTE FUNCTION ${log}_fn()`
+    )
+    try {
+      const values = ["goa", "kerala", "assam", "kerala", "punjab", "kerala", "goa", "kerala", "assam", "kerala"]
+      const answers = await Promise.all(values.map((home_state) => put(me, { home_state })))
+      expect(answers.every((a) => a.status === 200 || a.status === 429)).toBe(true)
+
+      const landed = (await db.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM ${log}`))[0].n
+      const row = await db.profiles.findUniqueOrThrow({ where: { id: me.id }, select: { tier_b_changes: true, tier_b_changed_at: true } })
+      expect(landed).toBeLessThanOrEqual(3)
+      expect(row.tier_b_changes).toHaveLength(landed)
+      expect(row.tier_b_changed_at?.getTime()).toBe(Math.max(...row.tier_b_changes.map((t) => t.getTime())))
+    } finally {
+      await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${log}_tr ON profiles`)
+      await db.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${log}_fn()`)
+      await db.$executeRawUnsafe(`DROP TABLE IF EXISTS ${log}`)
+    }
+  })
+
+  it("no other route writes Tier B: this-or-that, the room's preferences, sign-up", async () => {
+    const r = await room()
+    const me = await who("mv-cd-routes")
+    await arrive(r, me.id)
+    const before = { home_state: null, languages: [], work_field: null, sun_sign: null }
+    const tierB = async (id: string) =>
+      db.profiles.findUniqueOrThrow({ where: { id }, select: { home_state: true, languages: true, work_field: true, sun_sign: true } })
+
+    const tot = await call(thisOrThatRoute.PUT, "/api/mobile/me/this-or-that", me, {
+      method: "PUT",
+      body: { answers: { metro_or_auto: "a" }, home_state: "goa", languages: ["tulu"] },
+    })
+    expect(tot.status).toBe(200)
+    const prefs = await call(preferencesRoute.PUT, `/api/mobile/events/${r.eventId}/matches/preferences`, me, {
+      method: "PUT",
+      body: { intent: ["friendship"], remember: true, home_state: "goa", work_field: "design" },
+      params: { eventId: r.eventId },
+    })
+    expect(prefs.status).toBe(200)
+    expect(await tierB(me.id)).toEqual(before)
+
+    const email = `${testId("mv-signup")}@itest.invalid`.toLowerCase()
+    const signup = await signupRoute.POST(
+      new NextRequest("http://localhost/api/mobile/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": `10.9.${Math.floor(Math.random() * 250)}.1` },
+        body: JSON.stringify({ email, password: "a-long-enough-password-123", name: "Signup", age: 25, home_state: "goa", sun_sign: "leo", sign_system: "western" }),
+      })
+    )
+    expect(signup.status).toBe(201)
+    const made = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } })
+    users.push(made.id)
+    expect(await tierB(made.id)).toEqual(before)
   })
 
   it("every effective change is stamped server-side, onboarding's first answers too", async () => {
