@@ -55,7 +55,7 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/onboarding` (applications) | ✅ ac0962f, ce62887, 2fd92dd | ✅ 2026-09-11 | credential panel, evidence order |
 | `/dashboard/sponsors` (brands) | ✅ a638b48 | ✅ E6 | duplicates section only when there are any |
 | `/dashboard/creative-review` | ✅ a638b48 | ✅ E6 | rule beside the buttons |
-| `/dashboard/charges` | ✅ a638b48 | ✅ E6 | MetricTiles + divided ledger |
+| `/dashboard/charges` | ✅ a638b48; step 17 to the kit (mockup: kit `admin-supply.jsx` Charges) | ✅ E6; step 17 local seed | KpiStrip + Panel rows; delivered reach and band beside sends; "Send payment link" on an agreed charge, the link's state on the money line; settled by the webhook |
 | `/dashboard/organisations` | ✅ a638b48 | ✅ E7 | divided list, controls to the right |
 | `/dashboard/categories` | ✅ a638b48 | ✅ E3 | merge keeps interests (W14); counts as text |
 | `/dashboard/amenities` | ✅ a638b48 | ✅ #298 | list first, add form last |
@@ -85,9 +85,11 @@ gates, the specialists, and a drive, before the next one starts.
 
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
-| `/dashboard` (venue-owner overview) | ✅ ea82077 (mockup `overview-venue-20260911`) | ✅ 2026-09-11 as Fatima Sheikh | `visibleEventsWhere` scope (H2 fixed here); peak cell outlined; notes as text |
-| `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 6e47108 (my venues, mockup skipped — the row pattern) / ✅ 3233c27 (mockup `venue-detail-20260911`) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima | rows with rules; numbers first, record last; no chips |
-| `/dashboard/venues/new`, `/venues/[id]/claim` | ✅ 2026-09-11 (chrome cut; mockups skipped) | ✅ E7; 2026-09-11 | header titles for both routes |
+| `/dashboard` (venue-owner overview) | ✅ ea82077 (mockup `overview-venue-20260911`); step 17 to the kit (mockup: kit `platform/venue-sponsor.jsx` VenueOverview + Building) | ✅ 2026-09-11 as Fatima Sheikh; step 17 local seed as venue.owner@, 1280/768, a venue day live | "In the building · right now" leads only while a room runs (the venue's own live room as a range); Your venues / heatmap / Ratings Panels; tiles as a KpiStrip; next booking's going held back under 5 for another host's night (SCRUM-501); heatmap on the event's clock |
+| `/dashboard/venues` (my venues), `/venues/[id]` | ✅ 6e47108 (my venues, mockup skipped — the row pattern) / ✅ 3233c27 (mockup `venue-detail-20260911`); step 17 to the kit (mockup: kit MyVenues, VenueDetail) | ✅ E5, #319 lifecycle; 2026-09-11 as Fatima; step 17 local seed, floors saved and read back | linked events in a Panel (confirm / dispute on the row); a Panel per building; detail: Building, KpiStrip, Events here + Ratings Panels, Venue record Panel with **Floors** (owner + admin; "the app's map draws this building about N m tall") |
+| `/dashboard/venues/new`, `/venues/[id]/claim` | ✅ 2026-09-11 (chrome cut; mockups skipped); step 17 to the kit (mockup: kit VenueNew, VenueClaim) | ✅ E7; 2026-09-11; step 17 local seed | the place in a Panel with "Already listed?" beside it; the claim in a Panel that says pre-claim nights stay closed |
+| `/dashboard/plan` (venue owner) | ✅ step 17 (mockup: organiser kit `screens-org.jsx` Plan cards; the step 16 Plan page) | ✅ step 17 local seed, before and after an admin's founding grant | each venue Listed or Venue Pro with "N of 28 days of data" toward the no-charge rule; Listed vs Venue Pro cards (the plan-card stripe on Pro); buy/cancel only when allowed; payments |
+| `/dashboard/venues/[id]` insights | ✅ step 17 (mockup: kit VenueDetail + organiser `ui.jsx` Locked) | ✅ step 17 local seed, Listed and Pro | "Who comes, and when" (guests by day × slot, regulars, returning share; floors, complement held); "Before you claimed it" totals on Pro; Locked previews from samples; Regulars & offers placeholder; admin Venue Pro grant panel |
 | `/dashboard/events`, `/events/[id]` | shared | ✅ | canOperate tabs |
 | `/dashboard/chatrooms`, `/organisation` | ✅ shared | ✅ | |
 | `/reports`, `/audit`, `/settings` | — | ✅ | shared |
@@ -96,9 +98,9 @@ gates, the specialists, and a drive, before the next one starts.
 
 | Route | Chain | Driven | Notes |
 |---|---|---|---|
-| `/dashboard` (sponsor overview) | ✅ #299 + sponsor-surfaces mockup 2026-08-16 | ✅ E6 | |
-| `/dashboard/brand` | ✅ same | ✅ E6 | |
-| `/dashboard/placements` | ✅ same | ✅ E6 | reach suppressed |
+| `/dashboard` (sponsor overview) | ✅ #299 + sponsor-surfaces mockup 2026-08-16; step 17 to the kit (mockup: kit `venue-sponsor.jsx` SponsorHome hero + KpiStrip) | ✅ E6; step 17 local seed | HeroMetric says Blocked with the blocker; KpiStrip with reach (30d), people per night added up |
+| `/dashboard/brand` | ✅ same; step 17 to the kit (mockup: kit BrandPage) | ✅ E6; step 17 local seed | the form in a Panel; "How it appears" beside it |
+| `/dashboard/placements` | ✅ same; step 17 to the kit (mockup: kit SponsorHome) | ✅ E6; step 17 local seed | room preview of the approved creative; rows end in reach (held back under 5 in words) and "Pay ₹X" when a link is due |
 | `/dashboard/organisation`, `/settings` | — | ✅ | shared |
 
 ## The queue, in order

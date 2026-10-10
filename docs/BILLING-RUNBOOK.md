@@ -15,13 +15,104 @@ Register the webhook at `https://<api host>/api/webhooks/razorpay` with these
 events: `subscription.activated`, `subscription.charged`,
 `subscription.pending`, `subscription.halted`, `subscription.cancelled`,
 `subscription.completed`, `subscription.paused`, `subscription.resumed`,
-`payment.captured`, `payment.failed`, `order.paid`, `refund.processed`,
+`payment.captured`, `payment.failed`, `order.paid`, `payment_link.paid`,
+`payment_link.expired`, `payment_link.cancelled`, `refund.processed`,
 `payment.dispute.created`, `payment.dispute.lost`, `payment.dispute.won`.
+**Owner action (step 17):** add `payment_link.expired` and
+`payment_link.cancelled` to an already-registered webhook; without them a link
+closed at Razorpay stays "open" here until a new send expires it.
 Then run `npx tsx scripts/razorpay-plans.ts --apply` once with that
 environment's keys (dry run without `--apply`).
 
-`payment_link.paid` (sponsor payment links) is step 17's and is not handled
-yet: a delivery of it is recorded and changes nothing.
+## Sponsor payment links (step 17)
+
+On Charges, an **agreed** charge for a claimed brand gets "Send payment link":
+a Razorpay Payment Link in the charge's own amount, emailed by Razorpay to the
+sponsor organisation's primary contact and shown on the sponsor's Placements
+page as "Pay ₹…". Our record of it is a `billing_checkouts` row (kind
+`payment_link`, the sponsor's organisation, `charge_id`, `pay_url`); the
+charge keeps its pricing note in `external_ref` until the link settles it.
+The link is created silent and emailed only once our record is committed; if
+our side fails after Razorpay made it, it is cancelled at Razorpay and the id
+logged (`orphanProviderRef`). A second click returns the open link; links
+expire after 14 days, after which a new one can be sent (a stale one is
+marked expired then, even if `payment_link.expired` never arrived). Ten sends
+a minute per admin.
+
+**Void and "Payment received" close the link first.** Razorpay cancels it,
+then our row says so, then the charge moves, in one transaction with its
+audit row (`closedLinks`). If money already came through the link (paid or
+partly paid, here or at Razorpay) the change is refused: let the webhook
+settle it, or refund at Razorpay. If Razorpay will not cancel, nothing
+changes; try again. If Razorpay cancelled and our side then failed, the log
+names the link (`paymentLinkIds`) and the next attempt goes through. Sends,
+voids and settlements on one charge run one at a time; thirty moves a minute
+per admin.
+
+`payment_link.paid` settles the charge, once, against that row: the amount,
+currency and "paid" status must match it and the charge. `notes` are never
+read. Then, by case:
+
+- **Already settled by this link:** a replay changes nothing.
+- **Settled some other way** (by hand, a bank transfer): the sponsor paid
+  twice. `charge.paid_twice` and an error log. **Refund the link's payment
+  from the Razorpay dashboard**; its refund leaves the hand settlement alone.
+- **Voided:** a charge voided before the payment landed stays void. The
+  webhook writes `charge.paid_after_void` and logs an error. **Refund it from
+  the Razorpay dashboard.**
+- **Refunded:** a full refund (`refund.processed`) voids the charge this link
+  settled, with the refund id as the reason — also when Razorpay delivered the
+  refund before the payment.
+- **Disputed:** `charge.disputed` and an error log; answer it at Razorpay. A
+  dispute lost voids the charge this link settled.
+- **Any other state** (a link is only sent for an agreed charge):
+  `charge.paid_unexpected` and an error log; the payment is recorded and the
+  charge left as it is. Reconcile it by hand.
+
+Money that arrives any other way is still settled by hand with "Payment
+received" and its reference.
+
+## Venue Pro (step 17)
+
+A venue owner buys Venue Pro per venue on `/dashboard/plan` (₹2,999 a month or
+₹29,990 a year, before GST; `lib/billing-plans.ts`). The purchase is a
+`billing_checkouts` row naming the venue (`venue_id`); the webhook grants the
+**venue** (`entitlements.subject_kind = 'venue'`, product `venue_pro`), never
+the organisation. One open subscription per venue
+(`billing_checkouts_one_open_subscription_per_venue`); an organisation's own
+Analytics keeps its own index.
+
+- **No charge before four weeks of venue-day data.** Checkout refuses until 28
+  days after the first person went live at the venue (`lib/venue-plan.ts`);
+  the Plan page shows each venue's days of data. Nothing to do by hand.
+- **Founding grant: 3 months per claimed Bengaluru venue.** An admin gives it
+  from the venue's page (Venue Pro panel), with a reason; it is audited on the
+  venue. A grant blocks buying until it ends: subscribe after it.
+- `scripts/razorpay-plans.ts --apply` creates the two Venue Pro plans with the
+  others; run it once per environment after this ships.
+- **The payer controls its mandate.** Cancelling is authorised on the
+  organisation that pays (`billing_checkouts.org_id`), not on who owns the
+  venue today, and the Plan page lists only the caller's organisation's
+  subscriptions and payments.
+- **A venue changing hands** (an approved dispute) ends the previous owner's
+  paid Venue Pro in the same transaction as the transfer
+  (`entitlement.ended_on_transfer` on the venue), then cancels its mandate at
+  the end of the paid cycle. A cancel Razorpay refused is audited
+  `billing.subscription.cancel_failed` on the venue: **cancel it from the
+  Razorpay dashboard**. If it charges anyway the webhook grants nothing
+  (`billing.payer_not_owner`) and cancels it; refund that payment. Grants
+  stay; end them on the venue page.
+- **Cancels: Razorpay first, then us.** A cancel Razorpay refused changes
+  nothing here and the user is told so. One Razorpay confirmed whose record
+  here failed is logged (`providerRef`) and refused; Razorpay's
+  `subscription.cancelled` settles the row and the entitlement. Every state
+  change and its audit row are one transaction; the money actions read the
+  role from the database, not the session.
+- **`superseded`** on a subscription is ours: a second mandate paid late
+  beside a live one. The webhook cancels it at Razorpay and writes
+  `billing.duplicate_subscription`; **refund that payment** from the Razorpay
+  dashboard. A checkout we had expired and the customer paid anyway takes the
+  open slot, and the unpaid one beside it is cancelled.
 
 ## Razorpay's retries, and when it gives up
 

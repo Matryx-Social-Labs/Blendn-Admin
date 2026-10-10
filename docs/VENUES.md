@@ -223,6 +223,17 @@ this and was corrected rather than the code.
 
 ---
 
+## Floors — the 3D map's height (step 17)
+
+`venues.floors` (1–200, nullable; CHECK `venues_floors_range`) is how many
+floors the venue's building has. The app's 3D map draws the building
+`floors × 3.2` m tall over the building data's own height
+(`lib/venue-floors.ts`; 3.2 m a floor is what our own building tiles are
+baked with, scripts/map-buildings). Null leaves the map's height. The venue's owner or an
+admin sets it on the venue page's record; the organisation that only added an
+unclaimed venue corrects the place but not its floors (`updateVenue`). It rides
+on `GET /venues` and `GET /venues/:id` (docs/API.md).
+
 ## Venue days — every venue is live (plan v2 §3, step 3)
 
 Every active venue has a live room from day one, claimed or not (owner decision
@@ -268,8 +279,11 @@ organisation's suspension, and the seeds. Included, on purpose: a person's own
 nights (`/me/attendance`, D-6 — labelled as places by the client), a member's
 own rooms, room archival, reveals, room entry by check-in, and sentiment
 classification (an escalation is how an unclaimed room reaches the platform).
-Building occupancy excludes them until the owner's screens are redesigned
-(step 17), so the room row and its count arrive through `discloseFigure`.
+Building occupancy includes them since the owner's screens were redesigned
+(step 17): "In the building" lists the venue's own live room as "Live at the
+venue", for its owner a range (`liveCountBucket`) like every room they do not
+run, and exactly for an admin. The venue owner's overview carries it there and
+nowhere else (`venue-day-hidden.itest.ts`).
 
 **Retention.** One row per active venue per day, every day anybody goes
 live: venue days will soon outnumber events many times over. Nothing archives

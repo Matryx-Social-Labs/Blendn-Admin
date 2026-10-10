@@ -64,11 +64,14 @@ export function Panel({
 
 /* -------------------------------------------------------------------------- */
 
-/** The Analytics plan's mark: on locked tiles, locked previews and the plan card. */
-export function ProTag() {
+/**
+ * A paid plan's mark: on locked tiles, locked previews and the plan card.
+ * Analytics for an organiser; Venue Pro for a venue (step 17).
+ */
+export function ProTag({ plan = "Analytics" }: { plan?: "Analytics" | "Venue Pro" }) {
   return (
     <span className="inline-flex rounded-full bg-[image:var(--gradient-ember)] px-1.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] text-brand-ink">
-      Analytics
+      {plan}
     </span>
   )
 }
@@ -166,9 +169,12 @@ export function Locked({
   sample,
   action,
   height = 260,
+  plan,
 }: {
   title: string
   body: string
+  /** Which plan opens it; Analytics unless said. */
+  plan?: "Analytics" | "Venue Pro"
   /** A static illustration of the paid view. See above: never real data. */
   sample: ReactNode
   /** The unlock call to action, e.g. a link to the plan page once it exists. */
@@ -188,7 +194,7 @@ export function Locked({
       </div>
       <div className="absolute inset-0 flex items-center justify-center bg-linear-to-b from-background/30 to-background/80 p-6">
         <div className="flex max-w-[420px] flex-col items-center gap-2.5 text-center">
-          <ProTag />
+          <ProTag plan={plan} />
           <p className="text-[1.0625rem] font-bold">{title}</p>
           <p className="text-[0.84375rem] leading-[22px] text-muted-foreground">{body}</p>
           {action ? <div className="mt-1">{action}</div> : null}

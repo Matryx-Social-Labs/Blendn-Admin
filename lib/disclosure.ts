@@ -418,9 +418,11 @@ export function suppressedLabel(kind: "figure" | "poll"): string {
  * On the dashboard they are what a venue is told of a night it does not run,
  * or its own venue day, while it is still moving (SCRUM-516): in the room,
  * arrived, left, the last ten minutes. "20+" is a bucket too: an exact count
- * of a big room still says who just came in. Whether the room is over its
- * capacity is a separate flag, decided on the exact figure, so the building's
- * safety does not depend on the number being shown.
+ * of a big room still says who just came in. Whether a room is over its
+ * event's capacity is a separate flag, decided on the exact figure: the venue
+ * does not set that capacity. The building's flag is decided on what is shown
+ * (lib/building-occupancy.ts), because the owner edits the building's capacity
+ * and could walk it until an exact-figure flag flipped (step 17 review).
  */
 export const LIVE_COUNT_BUCKETS: readonly LiveCountBucket[] = ["quiet", "5-9", "10-19", "20+"]
 

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation"
 import { getAuth } from "./auth"
 import { curationSelect } from "./curation"
 import { db } from "./db"
+import { eventDisplayTitle } from "./event-kind"
 import { actorFor } from "./org-membership"
 import { eventPermissions } from "./rbac"
 
@@ -52,7 +53,8 @@ export async function loadEventPage(id: string) {
   const actor = await actorFor(session.user)
   const permissions = eventPermissions(actor, event)
   if (!permissions.canOperate) redirect("/dashboard/events")
-  return { event, actor, permissions }
+  // A venue day's internal title never reaches the page (PL-I16).
+  return { event: { ...event, title: eventDisplayTitle(event) }, actor, permissions }
 }
 
 export type EventPageData = Awaited<ReturnType<typeof loadEventPage>>

@@ -86,6 +86,10 @@ describe("locked previews use the static sample", () => {
     expect(found.filter((s) => s.file === "app/dashboard/analytics/page.tsx").length).toBeGreaterThanOrEqual(2)
   })
 
+  it("finds the venue page's Venue Pro previews too (step 17)", () => {
+    expect(found.filter((s) => s.file === "app/dashboard/venues/[id]/page.tsx").length).toBeGreaterThanOrEqual(2)
+  })
+
   it("passes only SAMPLE_ constants into every preview", () => {
     const leaks = found.flatMap(({ file, expr }) => foreignValues(expr).map((v) => `${file}: sample gets ${v}`))
     expect(leaks).toEqual([])
@@ -112,9 +116,13 @@ describe("locked previews use the static sample", () => {
     expect(imports.filter((m) => !m[1])).toEqual([])
   })
 
-  it("draws from props alone: the panels take the query module's types and nothing else", () => {
-    const src = stripComments(readFileSync(join(ROOT, "components/dashboard/analytics-panels.tsx"), "utf8"))
-    const fromQueries = [...src.matchAll(/^import\s+(type\s+)?[^;\n]*from\s+"@\/lib\/(org-analytics|analytics-access|entitlements|db)"/gm)]
+  it.each([
+    ["components/dashboard/analytics-panels.tsx", /^import\s+(type\s+)?[^;\n]*from\s+"@\/lib\/(org-analytics|analytics-access|entitlements|db)"/gm],
+    // Step 17: a venue's insight panels, drawn for real figures and for the sample alike.
+    ["components/dashboard/venue-insights-panels.tsx", /^import\s+(type\s+)?[^;\n]*from\s+"@\/lib\/(venue-insights|venue-plan|entitlements|db)"/gm],
+  ])("draws from props alone: %s takes the query module's types and nothing else", (file, pattern) => {
+    const src = stripComments(readFileSync(join(ROOT, file), "utf8"))
+    const fromQueries = [...src.matchAll(pattern)]
     expect(fromQueries.length).toBeGreaterThan(0)
     expect(fromQueries.filter((m) => !m[1]).map((m) => m[0])).toEqual([])
   })

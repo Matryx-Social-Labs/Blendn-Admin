@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation"
 
+import { Panel } from "@/components/dashboard/kit"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { VenueClaimForm } from "@/components/venue-claim-form"
 import { getAuth } from "@/lib/auth"
@@ -70,13 +71,18 @@ export default async function ClaimVenuePage({
         back={{ href: `/dashboard/venues`, label: "Venues" }}
       />
 
-      <VenueClaimForm
-        venueId={venue.id}
-        venueName={venue.name}
-        isDispute={venue.owner_org_id !== null}
-        currentOwnerName={venue.owner_org?.display_name ?? null}
-        hostedEvents={venue._count.events}
-      />
+      <Panel
+        title="Your claim"
+        hint={`${venue._count.events} event${venue._count.events === 1 ? "" : "s"} held here · reviewed by a person`}
+      >
+        <VenueClaimForm
+          venueId={venue.id}
+          venueName={venue.name}
+          isDispute={venue.owner_org_id !== null}
+          currentOwnerName={venue.owner_org?.display_name ?? null}
+          hostedEvents={venue._count.events}
+        />
+      </Panel>
     </div>
   )
 }

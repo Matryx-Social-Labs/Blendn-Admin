@@ -12,6 +12,7 @@ import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
 import { normaliseSponsorName } from "@/lib/sponsor-name"
 import { SPONSORSHIP } from "@/lib/constants"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
+import { placementReach, reachKey } from "@/lib/sponsor-reach"
 import type { placement_status } from "@prisma/client"
 
 /**
@@ -432,9 +433,11 @@ export interface SponsorPlacementRow {
   phase: PlacementPhase
   /** Null until at least one send has happened. */
   sends: number | null
-  /** Withheld below the disclosure floor; null means "not reportable". */
+  /** Distinct people reached (lib/sponsor-reach.ts); null before any send, or held back under 5. */
   reach: number | null
   reachSuppressed: boolean
+  /** An agreed charge with a payment link still to pay (step 17). */
+  due: { amountMinor: number; currency: string; payUrl: string } | null
   /** What is stopping this from running, if anything. */
   blocker: string | null
 }
@@ -451,8 +454,17 @@ export interface SponsorOverview {
   } | null
   liveNow: number
   awaitingYou: number
+  /**
+   * People reached over the last 30 days, night by night: the sum of each
+   * placement's distinct reach. A person at two nights counts twice (each
+   * campaign hashes people apart, lib/sponsor-reach.ts). Nights held back are
+   * left out of the sum, so it never gives one back by subtraction.
+   */
   reach30d: number | null
+  /** Some night in the 30 days was held back, and is not in `reach30d`. */
   reach30dSuppressed: boolean
+  /** What the next placement's approved creative says, as the room will see it. */
+  nextCreative: string | null
   placements: SponsorPlacementRow[]
 }
 
@@ -488,6 +500,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
       awaitingYou: 0,
       reach30d: null,
       reach30dSuppressed: false,
+      nextCreative: null,
       placements: [],
     }
   }
@@ -515,6 +528,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
       awaitingYou: 0,
       reach30d: null,
       reach30dSuppressed: false,
+      nextCreative: null,
       placements: [],
     }
   }
@@ -542,11 +556,26 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
           },
         },
       },
+      // An agreed price with a link still to pay: the "Pay" on the row.
+      charges: {
+        where: { status: "agreed" },
+        select: {
+          amount_minor: true,
+          currency: true,
+          payment_links: {
+            where: { status: { in: ["created", "issued", "partially_paid"] } },
+            orderBy: { created_at: "desc" },
+            take: 1,
+            select: { pay_url: true },
+          },
+        },
+      },
     },
     orderBy: { event: { start_time: "asc" } },
   })
 
   const now = new Date()
+  const reaches = await placementReach(rows.map((r) => ({ eventId: r.event.id, sponsorId: brand.id })))
 
   const placements: SponsorPlacementRow[] = rows.map((r) => {
     const phase = placementPhase({ status: r.status }, r.event, now)
@@ -586,8 +615,13 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
       // `null`, not `0`: an ad that has not run yet has no reach, and rendering
       // zero reads as failure. `MetricTile` already distinguishes the two.
       sends: sends > 0 ? sends : null,
-      reach: null,
-      reachSuppressed: false,
+      reach: reaches.get(reachKey(r.event.id, brand.id))?.reach ?? null,
+      reachSuppressed: reaches.get(reachKey(r.event.id, brand.id))?.suppressed ?? false,
+      due: (() => {
+        const charge = r.charges[0]
+        const link = charge?.payment_links[0]
+        return charge && link?.pay_url ? { amountMinor: charge.amount_minor, currency: charge.currency, payUrl: link.pay_url } : null
+      })(),
       blocker,
     }
   })
@@ -605,16 +639,28 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
       }
     : null
 
+  // The last 30 days: placements running or ended since then.
+  const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+  const recent = placements.filter((p) => p.endTime >= since && p.startTime <= now && (p.reach !== null || p.reachSuppressed))
+  const shown = recent.filter((p) => p.reach !== null)
+  const nextCreative = upcoming[0]
+    ? ((
+        await db.sponsored_creatives.findFirst({
+          where: { moderation_status: "approved", message: { event_id: upcoming[0].eventId, sponsor_id: brand.id } },
+          orderBy: { created_at: "desc" },
+          select: { content: true },
+        })
+      )?.content ?? null)
+    : null
+
   return {
     brandName: brand.name,
     next,
     liveNow: placements.filter((p) => p.phase === "live").length,
     awaitingYou: placements.filter((p) => p.status === "proposed").length,
-    // Reach is materialised at event end (see the plan); until the scheduler
-    // writes sends there is nothing to report, and a fabricated 0 would be
-    // worse than an em dash.
-    reach30d: null,
-    reach30dSuppressed: false,
+    reach30d: shown.length ? shown.reduce((n, p) => n + (p.reach ?? 0), 0) : null,
+    reach30dSuppressed: recent.some((p) => p.reachSuppressed),
+    nextCreative,
     placements,
   }
 }

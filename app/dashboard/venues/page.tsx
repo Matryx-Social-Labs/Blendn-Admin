@@ -1,7 +1,8 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { IconAlertTriangle, IconBuildingStore } from "@tabler/icons-react"
+import { IconAlertTriangle, IconArrowRight, IconBuildingStore, IconPlus } from "@tabler/icons-react"
 
+import { Panel } from "@/components/dashboard/kit"
 import { EmptyState, MetricTile, RatingBars } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import { getAuth } from "@/lib/auth"
@@ -69,7 +70,7 @@ export default async function MyVenuesPage({
       <EmptyState
         icon={<IconBuildingStore />}
         title="No venues yet"
-        description="Add your venue and events held there inherit its location, capacity and check-in area. Sections here are still built from the venue name on each event, so a venue with no events yet stays quiet until one runs."
+        description="Add your venue, or claim it if it is already listed. Events held there then inherit its location, capacity and check-in area."
         action={
           <Button asChild>
             <Link href="/dashboard/venues/new">Add a venue</Link>
@@ -81,61 +82,58 @@ export default async function MyVenuesPage({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         {/* Only the part a reader cannot deduce from the grouping itself: some
             events are attached to a venue record and some are still just a
             string, and those two group differently. */}
         <p className="max-w-prose text-[0.8125rem] text-muted-foreground">
-          Events still on a free-text venue name are grouped by that name, ignoring case
-          and spacing.
+          One panel per building. Events still on a free-text venue name are grouped by that name, ignoring case and
+          spacing.
         </p>
-        <Button asChild>
-          <Link href="/dashboard/venues/new">Add a venue</Link>
+        <Button asChild className="rounded-full">
+          <Link href="/dashboard/venues/new">
+            <IconPlus aria-hidden className="size-4" />
+            Add a venue
+          </Link>
         </Button>
       </div>
 
-      <LinkedEvents events={linkedEvents.rows} />
-      {linkedEvents.total > linkedEvents.rows.length ? (
-        /* A venue owner reads this list to find an event wrongly linked to
-           their building. A cap that hides one is a dispute never filed. */
-        <p className="text-[0.8125rem] text-muted-foreground">
-          Showing {linkedEvents.rows.length} of {linkedEvents.total}.
-        </p>
-      ) : null}
+      <LinkedEvents events={linkedEvents.rows} total={linkedEvents.total} />
 
       {overview.venues.map((venue) => {
         const lowSkew = venue.ratings[0] + venue.ratings[1] > venue.ratings[3] + venue.ratings[4]
         return (
-          /* A section with a rule per building, not a card. The note is a
-             word beside the name — destructive only when it is the ratings. */
-          <section key={venue.name} className="flex flex-col gap-4 border-t border-border pt-5">
-            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-              <h2 className="text-[length:var(--text-h2)] font-bold">
-                {venue.id ? (
-                  <Link href={`/dashboard/venues/${venue.id}`} className="underline-offset-4 hover:underline">
-                    {venue.name}
-                  </Link>
-                ) : (
-                  venue.name
-                )}
-              </h2>
-              <span
-                className={
-                  venue.tone === "destructive"
-                    ? "text-[0.8125rem] font-bold text-destructive"
-                    : "text-[0.8125rem] text-muted-foreground"
-                }
-              >
+          /* A Panel per building. The note is a word beside the name —
+             destructive only when it is the ratings. */
+          <Panel
+            key={venue.id ?? `name:${venue.name}`}
+            title={
+              venue.id ? (
+                <Link href={`/dashboard/venues/${venue.id}`} className="underline-offset-4 hover:underline">
+                  {venue.name}
+                </Link>
+              ) : (
+                venue.name
+              )
+            }
+            hint={
+              <span className={venue.tone === "destructive" ? "font-bold text-destructive" : undefined}>
                 {venue.note}
               </span>
-            </div>
-
-            <div className="flex flex-wrap gap-1">
-              <MetricTile
-                label="Nights/week"
-                value={venue.nightsPerWeek}
-                hint="last 8 weeks"
-              />
+            }
+            action={
+              venue.id ? (
+                <Button asChild size="sm" variant="ghost">
+                  <Link href={`/dashboard/venues/${venue.id}`} aria-label={`Open ${venue.name}`}>
+                    Open
+                    <IconArrowRight aria-hidden className="size-4" />
+                  </Link>
+                </Button>
+              ) : null
+            }
+          >
+            <div className="-mx-3.5 -mt-2 flex flex-wrap gap-1">
+              <MetricTile label="Nights/week" value={venue.nightsPerWeek} hint="last 8 weeks" />
               <MetricTile label="Events (8w)" value={venue.eventsInWindow} />
               <MetricTile
                 label="Capacity"
@@ -177,7 +175,10 @@ export default async function MyVenuesPage({
                       {venue.nextBooking.name}
                     </Link>
                     <span className="text-muted-foreground">
-                      {" "}· {formatDay(venue.nextBooking.startAt)} · {formatNumber(venue.nextBooking.going)} going
+                      {" "}
+                      · {formatDay(venue.nextBooking.startAt)}
+                      {/* Another host's night under the floor says nothing about how many (SCRUM-501). */}
+                      {venue.nextBooking.going === null ? "" : ` · ${formatNumber(venue.nextBooking.going)} going`}
                     </span>
                   </p>
                 ) : (
@@ -190,12 +191,12 @@ export default async function MyVenuesPage({
 
             {lowSkew ? (
               <p className="flex items-start gap-2 text-[0.8125rem] text-destructive">
-                <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
-                Ratings skew low here across different events — likely a facilities problem
-                rather than an event problem.
+                <IconAlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+                Ratings skew low here across different events — likely a facilities problem rather than an event
+                problem.
               </p>
             ) : null}
-          </section>
+          </Panel>
         )
       })}
     </div>

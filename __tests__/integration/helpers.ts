@@ -36,6 +36,31 @@ export async function closeDb() {
   await closeAppDb()
 }
 
+/**
+ * The real database refuses one kind of write while `run` runs: a trigger,
+ * dropped after. For "the database failed after Razorpay said yes" — a
+ * failure a mock would only describe. `when` is a trigger WHEN condition over
+ * NEW, built from fixture ids; the suites run one at a time (maxWorkers 1).
+ */
+export async function refusingWrites(
+  table: "billing_checkouts" | "audit_logs" | "entitlements",
+  op: "INSERT" | "UPDATE",
+  when: string,
+  run: () => Promise<unknown>
+): Promise<void> {
+  await db.$executeRawUnsafe(
+    `CREATE OR REPLACE FUNCTION itest_refuse_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'itest: write refused'; END $$`
+  )
+  // A run that died inside `run` left its trigger behind: drop it first, or every later write here fails.
+  await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS itest_refuse ON ${table}`)
+  await db.$executeRawUnsafe(`CREATE TRIGGER itest_refuse BEFORE ${op} ON ${table} FOR EACH ROW WHEN (${when}) EXECUTE FUNCTION itest_refuse_write()`)
+  try {
+    await run()
+  } finally {
+    await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS itest_refuse ON ${table}`)
+  }
+}
+
 /** Namespace every fixture so a failed run can never collide with the next. */
 export const testId = (label: string) =>
   `itest_${label}_${Math.random().toString(36).slice(2, 10)}`

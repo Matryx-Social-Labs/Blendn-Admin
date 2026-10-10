@@ -5,7 +5,16 @@ import { DateRangeControl } from "@/components/date-range-control"
 import { PageHeader } from "@/components/dashboard/page-header"
 import { venueTitleFor } from "@/lib/dashboard-record-titles"
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
-import { MetricTile, RatingBars, SectionTitle } from "@/components/dashboard/primitives"
+import Link from "next/link"
+
+import { KpiStrip, Locked, Panel, ProTag } from "@/components/dashboard/kit"
+import { OfferPreview, PreClaimFigures, VenueInsightBody, VenueProSample } from "@/components/dashboard/venue-insights-panels"
+import { Button } from "@/components/ui/button"
+import { OrgAnalyticsGrantControl } from "@/app/dashboard/organisations/analytics-grant-control"
+import { liveGrantAndPaid } from "@/lib/entitlements"
+import { SAMPLE_PRE_CLAIM, SAMPLE_VENUE_INSIGHTS, SAMPLE_VENUE_OFFERS } from "@/lib/sample-analytics"
+import { venueInsights, type VenueInsightsView } from "@/lib/venue-insights"
+import { RatingBars } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
 import { VenueManage } from "./venue-manage"
 import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
@@ -81,6 +90,7 @@ export default async function VenueDetailPage({
       longitude: true,
       venue_type: true,
       geofence: true,
+      floors: true,
       created_by_org_id: true,
       owner_org: { select: { id: true, display_name: true } },
     },
@@ -105,6 +115,7 @@ export default async function VenueDetailPage({
     geofence: venue.geofence,
     retired: venue.deleted_at !== null,
     ownerOrg: venue.owner_org?.display_name ?? null,
+    floors: venue.floors,
   }
 
   if (!isAdmin && !(venue.owner_org && (await memberOf(venue.owner_org.id)))) {
@@ -159,6 +170,13 @@ export default async function VenueDetailPage({
     isAdmin && !venue.owner_org && !venue.deleted_at
       ? await organisationOptions()
       : { rows: [], total: 0 }
+
+  // The venue's own insights by its plan, and an admin's view of that plan.
+  // Nothing paid is computed unless the venue holds Venue Pro (lib/venue-insights.ts).
+  const [insights, proRows] = await Promise.all([
+    venue.owner_org && !venue.deleted_at ? venueInsights(id) : null,
+    isAdmin && venue.owner_org ? liveGrantAndPaid({ kind: "venue", id }, "venue_pro") : null,
+  ])
 
   const [events, ratingRows] = await Promise.all([
     db.events.findMany({
@@ -280,38 +298,32 @@ export default async function VenueDetailPage({
           date range someone chose, and this is about right now. */}
       <BuildingOccupancyPanel occupancy={building} />
 
-      <div className="flex flex-wrap gap-1">
-        <MetricTile label="Events" value={formatNumber(rows.length)} hint="in this window" />
-        <MetricTile
-          label="Attended"
-          value={formatNumber(nothingShown ? null : totalAttended)}
-          hint={heldBack ? "GPS check-ins · held-back nights left out" : "GPS check-ins"}
-        />
-        <MetricTile
-          label="Turn-up"
-          value={turnUp === null ? null : formatPct(turnUp)}
-          hint={
-            nothingShown ? "held back" : turnUp === null ? "needs a past event" : "of committed RSVPs"
-          }
-        />
-        <MetricTile
-          label="Returning organisers"
-          value={returning}
-          hint={returning === 0 ? "nobody has come back yet" : "booked here more than once"}
-        />
-      </div>
+      <KpiStrip
+        items={[
+          { label: "Events", value: formatNumber(rows.length), hint: "in this window" },
+          {
+            label: "Attended",
+            value: formatNumber(nothingShown ? null : totalAttended),
+            hint: heldBack ? "GPS check-ins · held-back nights left out" : "GPS check-ins",
+          },
+          {
+            label: "Turn-up",
+            value: turnUp === null ? null : formatPct(turnUp),
+            hint: nothingShown ? "held back" : turnUp === null ? "needs a past event" : "of committed RSVPs",
+          },
+          {
+            label: "Returning organisers",
+            value: returning,
+            hint: returning === 0 ? "nobody has come back yet" : "booked here more than once",
+          },
+        ]}
+      />
 
-      <div className="grid gap-8 @3xl/main:grid-cols-[2fr_1fr] @3xl/main:items-start">
-        <section className="flex flex-col gap-3 border-t border-border pt-5">
-          <SectionTitle hint={rows.length ? `${rows.length} in window` : undefined}>
-            Events here
-          </SectionTitle>
+      <div className="grid gap-5 @3xl/main:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] @3xl/main:items-start">
+        <Panel title="Events here" hint={rows.length ? `${rows.length} in window` : undefined} bodyClassName="px-4 pb-4 pt-3">
           <VenueEventsTable rows={rows} />
-        </section>
-        <section className="flex flex-col gap-3 border-t border-border pt-5">
-          <SectionTitle hint={averageRating === null ? "all-time" : `avg ${averageRating} · all-time`}>
-            Ratings
-          </SectionTitle>
+        </Panel>
+        <Panel title="Ratings" hint={averageRating === null ? "all-time" : `avg ${averageRating} · all-time`}>
           {ratingTotal === 0 ? (
             <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
           ) : averageRating === null ? (
@@ -319,8 +331,23 @@ export default async function VenueDetailPage({
           ) : (
             <RatingBars counts={ratings} />
           )}
-        </section>
+        </Panel>
       </div>
+
+      {insights ? <VenueInsights insights={insights} isAdmin={isAdmin} /> : null}
+
+      {isAdmin && venue.owner_org && proRows ? (
+        <Panel title="Venue Pro" hint="founding grant: 3 months per claimed Bengaluru venue">
+          <OrgAnalyticsGrantControl
+            subject="venue"
+            subjectId={venue.id}
+            name={venue.name}
+            status={venue.deleted_at ? "suspended" : "active"}
+            grant={proRows.grant ? { expiresAt: proRows.grant.expiresAt?.toISOString() ?? null } : null}
+            paid={proRows.paid ? { id: proRows.paid.id, expiresAt: proRows.paid.expiresAt?.toISOString() ?? null } : null}
+          />
+        </Panel>
+      ) : null}
 
       {/* The record last. "Is the pin right" is the third question a venue
           owner asks of this page, after "how busy" and "who books here" — and
@@ -335,6 +362,58 @@ export default async function VenueDetailPage({
         isAdmin={isAdmin}
       />
     </div>
+  )
+}
+
+const SINCE = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+
+/**
+ * The venue's insights by plan (plan v2 §9.1b): Listed sees 30 days; Venue
+ * Pro a year, and the nights before the claim as three totals. What Pro adds
+ * is previewed from the static sample, never this venue's figures. Regulars &
+ * offers is a placeholder until blind offers land (step 12).
+ */
+function VenueInsights({ insights, isAdmin }: { insights: VenueInsightsView; isAdmin: boolean }) {
+  const pro = insights.plan === "pro"
+  const toPlan = isAdmin ? null : (
+    <Button asChild size="sm" variant="outline">
+      <Link href="/dashboard/plan">See Venue Pro</Link>
+    </Button>
+  )
+  return (
+    <>
+      <Panel
+        title="Who comes, and when"
+        // Whole nights: the window ends where today began, so the figures move once a day.
+        hint={`${pro ? "last 12 months" : "last 30 days"} · ${SINCE.format(new Date(insights.recent.from))} – ${SINCE.format(new Date(insights.recent.to))} · guests only, never who`}
+        action={pro ? <ProTag plan="Venue Pro" /> : <span className="text-[0.75rem] text-faint-foreground">Listed</span>}
+      >
+        <VenueInsightBody insight={insights.recent} />
+      </Panel>
+
+      {pro && insights.preClaim ? (
+        <Panel title="Before you claimed it" hint="totals only: the nights held here before your claim stay closed">
+          <PreClaimFigures history={insights.preClaim} />
+        </Panel>
+      ) : !pro ? (
+        <Locked
+          plan="Venue Pro"
+          title="A year of guests, and the venue's past"
+          body="Venue Pro shows 12 months, and the nights held here before your claim as totals — never the people."
+          action={toPlan}
+          height={300}
+          sample={<VenueProSample insight={SAMPLE_VENUE_INSIGHTS} history={SAMPLE_PRE_CLAIM} />}
+        />
+      ) : null}
+
+      <Locked
+        plan="Venue Pro"
+        title="Regulars & offers — coming soon"
+        body="Send an offer to the people who keep coming back. They get it in the app; you see sent, opened and redeemed, never who."
+        height={200}
+        sample={<OfferPreview offer={SAMPLE_VENUE_OFFERS} />}
+      />
+    </>
   )
 }
 

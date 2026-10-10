@@ -60,10 +60,18 @@ export function paymentsOn(): boolean {
 }
 
 /**
+ * The partial unique indexes that hold "one open subscription" when two
+ * requests race past the advisory lock: the organisation's own plan, and each
+ * venue's Venue Pro.
+ */
+export const ONE_OPEN_PER_ORG = "billing_checkouts_one_open_subscription_per_org"
+export const ONE_OPEN_PER_VENUE = "billing_checkouts_one_open_subscription_per_venue"
+
+/**
  * Razorpay's statuses for a subscription that could still charge. `created`
  * counts: an unpaid checkout is open until Razorpay expires it (`expire_by`),
  * and a second one beside it would be a second mandate. The partial unique
- * index `billing_checkouts_one_open_subscription_per_org` lists the same six.
+ * indexes `billing_checkouts_one_open_subscription_per_org` and `…_per_venue` list the same six.
  */
 export const OPEN_SUBSCRIPTION_STATUSES = ["created", "authenticated", "active", "pending", "halted", "paused"] as const
 
@@ -86,7 +94,8 @@ export interface PlanBadge {
 
 async function liveSubscription(orgId: string) {
   return db.billing_checkouts.findFirst({
-    where: { org_id: orgId, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
+    // The organisation's own plan: a venue's Venue Pro is that venue's (lib/venue-plan.ts).
+    where: { org_id: orgId, venue_id: null, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
     orderBy: { created_at: "desc" },
     select: { provider_ref: true, plan_key: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
   })
@@ -147,7 +156,7 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
     analyticsAccess(org.orgId, now),
     liveEntitlement({ kind: "org", id: org.orgId }, "analytics", now),
     db.billing_checkouts.findMany({
-      where: { org_id: org.orgId, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
+      where: { org_id: org.orgId, venue_id: null, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
       orderBy: { created_at: "desc" },
       select: { provider_ref: true, plan_key: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
     }),
@@ -158,7 +167,9 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
       select: { id: true, title: true, start_time: true },
     }),
     db.billing_payments.findMany({
-      where: { checkout: { org_id: org.orgId } },
+      // The organisation's own plan only: a venue's Venue Pro is on the venue's
+      // plan, and a sponsor payment link is a placement charge, not a plan.
+      where: { checkout: { org_id: org.orgId, venue_id: null, kind: { in: ["subscription", "order"] } } },
       orderBy: { captured_at: "desc" },
       take: 24,
       select: {

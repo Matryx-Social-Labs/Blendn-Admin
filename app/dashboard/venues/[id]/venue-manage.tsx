@@ -6,7 +6,7 @@ import { toast } from "sonner"
 
 import type { venue_type } from "@prisma/client"
 
-import { SectionTitle } from "@/components/dashboard/primitives"
+import { Panel } from "@/components/dashboard/kit"
 import { VenueArea } from "@/components/venue-area"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { assignVenueOwner, restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
 import { validateGeofence, type Geofence } from "@/lib/geofence"
 import { refusalMessage } from "@/lib/refusal"
+import { floorsHeightMetres } from "@/lib/venue-floors"
 import { followType, VENUE_TYPE_GROUPS } from "@/lib/venue-types"
 
 /**
@@ -59,6 +60,7 @@ export function VenueManage({
     geofence: unknown
     retired: boolean
     ownerOrg: string | null
+    floors: number | null
   }
   isAdmin: boolean
   /** Owner candidates. Empty for a non-admin, and for an already-owned venue. */
@@ -69,6 +71,10 @@ export function VenueManage({
    */
   canRetire?: boolean
 }) {
+  // The owner's organisation or an admin (`updateVenue` refuses anyone else):
+  // the organisation that added an unclaimed venue corrects the place, not
+  // how tall the app's map draws it.
+  const canSetFloors = isAdmin || venue.ownerOrg !== null
   const router = useRouter()
   const [pending, start] = useTransition()
   const [org, setOrg] = useState("")
@@ -79,6 +85,7 @@ export function VenueManage({
     address: venue.address ?? "",
     city: venue.city ?? "",
     capacity: venue.capacity?.toString() ?? "",
+    floors: venue.floors?.toString() ?? "",
   })
   const [venueType, setVenueType] = useState<venue_type | null>(venue.venueType)
   /** The area's centre once the area changes; the stored pin until then. */
@@ -103,6 +110,7 @@ export function VenueManage({
           address: form.address.trim() || null,
           city: form.city.trim() || null,
           capacity: form.capacity.trim() ? Number(form.capacity) : null,
+          ...(canSetFloors ? { floors: form.floors.trim() ? Number(form.floors) : null } : {}),
           // The pin moves only with the area, as its centre — both at once.
           ...(moved && pin ? { lat: pin.lat, lng: pin.lng } : {}),
           // Always the area on screen, touched or not — so a venue whose
@@ -155,10 +163,8 @@ export function VenueManage({
     })
 
   return (
-    <section className="flex flex-col gap-3 border-t border-border pt-5">
-      <SectionTitle hint="what events here inherit">Record</SectionTitle>
-
-      <div className="grid gap-3 @2xl/main:grid-cols-4">
+    <Panel title="Venue record" hint="events here inherit its pin, capacity and check-in area">
+      <div className="grid gap-3 @2xl/main:grid-cols-5">
         <div className="flex flex-col gap-1.5 @2xl/main:col-span-2">
           <Label htmlFor="name">Name</Label>
           <Input {...field("name")} disabled={venue.retired} />
@@ -192,8 +198,9 @@ export function VenueManage({
           <Label htmlFor="capacity">Capacity</Label>
           <Input {...field("capacity")} inputMode="numeric" disabled={venue.retired} />
         </div>
+        {canSetFloors ? <FloorsField {...field("floors")} disabled={venue.retired} /> : null}
 
-        <div className="flex flex-col gap-1.5 @2xl/main:col-span-4">
+        <div className="flex flex-col gap-1.5 @2xl/main:col-span-5">
           <VenueArea
             fence={fence}
             venueType={venueType}
@@ -240,7 +247,7 @@ export function VenueManage({
           the action refuses it.
         */}
         {isAdmin && !venue.ownerOrg && !venue.retired ? (
-          <div className="flex flex-col gap-1.5 @2xl/main:col-span-4">
+          <div className="flex flex-col gap-1.5 @2xl/main:col-span-5">
             <Label htmlFor="owner">Owner</Label>
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -268,7 +275,7 @@ export function VenueManage({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2 @2xl/main:col-span-4">
+        <div className="flex flex-wrap items-center gap-2 @2xl/main:col-span-5">
           <Button size="sm" onClick={save} disabled={pending || venue.retired}>
             Save
           </Button>
@@ -285,6 +292,28 @@ export function VenueManage({
           ) : null}
         </div>
       </div>
-    </section>
+    </Panel>
+  )
+}
+
+/**
+ * The building's floors, answered in the app's terms: how tall its 3D map
+ * will draw the venue. Empty leaves the map's own height.
+ */
+function FloorsField(props: React.ComponentProps<typeof Input> & { value: string }) {
+  const n = Number(props.value)
+  const valid = props.value.trim() !== "" && Number.isInteger(n) && n >= 1 && n <= 200
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor="floors">Floors</Label>
+      <Input {...props} id="floors" inputMode="numeric" placeholder="From the map" aria-describedby="floors-hint" />
+      <p id="floors-hint" aria-live="polite" className="text-[0.75rem] text-faint-foreground">
+        {valid
+          ? `The app's map draws this building about ${floorsHeightMetres(n)} m tall.`
+          : props.value.trim()
+            ? "A whole number from 1 to 200."
+            : "Empty: the app's map uses its own height."}
+      </p>
+    </div>
   )
 }

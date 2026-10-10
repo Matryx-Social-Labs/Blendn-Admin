@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "fs"
 import { join, relative } from "path"
 
-import { BILLING_PLANS, chargeMinor, grossRupees, gstSplit, isBillingPlanKey, rupees } from "@/lib/billing-plans"
+import { BILLING_PLANS, chargeMinor, grossRupees, gstSplit, isBillingPlanKey, reachBand, rupees } from "@/lib/billing-plans"
 import { addMonths } from "@/lib/entitlements"
 
 import { stripComments } from "./support/strip-comments"
@@ -29,6 +29,27 @@ describe("the price table", () => {
     expect(gstSplit(BILLING_PLANS.analytics_monthly)).toBe("₹1,999 + ₹360 GST")
     expect(gstSplit(BILLING_PLANS.event_pass)).toBe("₹499 + ₹90 GST")
     expect(rupees(23_588)).toBe("₹23,588")
+  })
+
+  it("prices Venue Pro per venue: ₹2,999 a month, a year at ten months (step 17, §9.1b)", () => {
+    expect(BILLING_PLANS.venue_pro_monthly).toMatchObject({ product: "venue_pro", kind: "subscription", period: "monthly" })
+    expect(BILLING_PLANS.venue_pro_yearly).toMatchObject({ product: "venue_pro", kind: "subscription", period: "yearly" })
+    expect(gstSplit(BILLING_PLANS.venue_pro_monthly)).toBe("₹2,999 + ₹540 GST")
+    expect(grossRupees(BILLING_PLANS.venue_pro_monthly)).toBe(3_539)
+    // 29,990 × 1.18 = 35,388.2: two months free on twelve.
+    expect(grossRupees(BILLING_PLANS.venue_pro_yearly)).toBe(35_388)
+    expect(chargeMinor(BILLING_PLANS.venue_pro_monthly)).toBe(353_900)
+  })
+
+  it("bands a sponsor's delivered reach, with no band under the floor (step 17, audit §6.3)", () => {
+    expect(reachBand(null)).toBeNull()
+    expect(reachBand(4)).toBeNull()
+    expect(reachBand(0)).toBeNull()
+    expect(reachBand(5)?.key).toBe("5-49")
+    expect(reachBand(49)?.key).toBe("5-49")
+    expect(reachBand(50)?.key).toBe("50-149")
+    expect(reachBand(399)?.key).toBe("150-399")
+    expect(reachBand(400)?.key).toBe("400+")
   })
 
   it("knows its own keys and nothing else", () => {

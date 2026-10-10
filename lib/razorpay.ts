@@ -184,6 +184,8 @@ export async function createSubscription(input: {
   planId: string
   totalCount: number
   orgId: string
+  /** The venue a Venue Pro subscription is for. */
+  venueId?: string | null
   now?: Date
 }): Promise<RazorpaySubscription> {
   const now = Math.floor((input.now ?? new Date()).getTime() / 1000)
@@ -196,8 +198,8 @@ export async function createSubscription(input: {
     // recent one rather than opening another).
     expire_by: now + SUBSCRIPTION_EXPIRES_AFTER_S,
     // For a person reading the Razorpay dashboard. The webhook never reads
-    // it: the organisation comes from our own `billing_checkouts` row.
-    notes: { org_id: input.orgId },
+    // it: the organisation and venue come from our own `billing_checkouts` row.
+    notes: { org_id: input.orgId, ...(input.venueId ? { venue_id: input.venueId } : {}) },
   })
 }
 
@@ -228,6 +230,89 @@ export async function createEventPassOrder(input: {
     notes: { org_id: input.orgId, event_id: input.eventId },
   })
 }
+
+/* -------------------------------------------------------------------------- */
+/* Payment Links (sponsor charges, step 17)                                     */
+/* -------------------------------------------------------------------------- */
+
+/** How long a sponsor has to pay a link before Razorpay expires it. */
+const PAYMENT_LINK_DAYS = 14
+
+/** Razorpay's own hosts for a link a sponsor is sent to pay at. Anything else is not stored or shown. */
+const PAY_HOSTS = ["rzp.io", "razorpay.com"]
+export function isRazorpayPayUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === "https:" && PAY_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`))
+  } catch {
+    return false
+  }
+}
+
+const paymentLinkSchema = z.object({
+  id: z.string().min(1),
+  short_url: z.string().url().refine(isRazorpayPayUrl, "not a Razorpay payment URL"),
+  status: z.string(),
+  amount: z.number(),
+  currency: z.string(),
+})
+export type RazorpayPaymentLink = z.infer<typeof paymentLinkSchema>
+
+/**
+ * A Razorpay Payment Link for one placement charge, in the charge's own
+ * amount and currency (INR only). Created WITHOUT notifying anybody: the
+ * caller asks Razorpay to email it (`notifyPaymentLink`) only once our record
+ * of it is committed, so a link our side refused is never in an inbox (review
+ * H4). The sponsor's Placements page carries it too. `notes` are for a person
+ * reading the Razorpay dashboard: the webhook resolves the charge from our own
+ * `billing_checkouts` row, never from them.
+ */
+export async function createPaymentLink(input: {
+  chargeId: string
+  orgId: string
+  amountMinor: number
+  currency: "INR"
+  description: string
+  customer: { name: string | null; email: string } | null
+  now?: Date
+}): Promise<RazorpayPaymentLink> {
+  const now = input.now ?? new Date()
+  return call(paymentLinkSchema, "POST", "/payment_links", {
+    amount: input.amountMinor,
+    currency: input.currency,
+    accept_partial: false,
+    description: input.description.slice(0, 2048),
+    // Unique per link, ≤ 40 characters: a second link after the first expired needs its own.
+    reference_id: `chg_${input.chargeId.slice(0, 13)}_${now.getTime().toString(36)}`,
+    expire_by: Math.floor(now.getTime() / 1000) + PAYMENT_LINK_DAYS * 24 * 60 * 60,
+    ...(input.customer
+      ? { customer: { email: input.customer.email, ...(input.customer.name ? { name: input.customer.name } : {}) } }
+      : {}),
+    notify: { email: false, sms: false },
+    reminder_enable: true,
+    notes: { org_id: input.orgId, charge_id: input.chargeId },
+  })
+}
+
+/** Ask Razorpay to email the link to its customer, once our record of it is committed. */
+export async function notifyPaymentLink(id: string): Promise<void> {
+  await call(z.object({}).passthrough(), "POST", `/payment_links/${encodeURIComponent(id)}/notify_by/email`, {})
+}
+
+const linkStatusSchema = z.object({ id: z.string().min(1), status: z.string() })
+
+/** Close a link so it can no longer be paid: a void, a hand settlement, an orphan. */
+export async function cancelPaymentLink(id: string): Promise<{ id: string; status: string }> {
+  return call(linkStatusSchema, "POST", `/payment_links/${encodeURIComponent(id)}/cancel`, {})
+}
+
+/** Where Razorpay says a link is now: after a cancel it refused, was it already closed, or paid? */
+export async function paymentLinkStatus(id: string): Promise<{ id: string; status: string }> {
+  return call(linkStatusSchema, "GET", `/payment_links/${encodeURIComponent(id)}`)
+}
+
+/** How long a link lives at Razorpay (`expire_by`), for our own "still open" rule. */
+export const PAYMENT_LINK_LIFETIME_MS = PAYMENT_LINK_DAYS * 24 * 60 * 60 * 1000
 
 /** How long Razorpay lets a created subscription wait, for our own "still open" rule. */
 export const CREATED_CHECKOUT_LIFETIME_MS = SUBSCRIPTION_EXPIRES_AFTER_S * 1000

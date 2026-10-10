@@ -430,6 +430,7 @@
         "address",
         "city",
         "claimed",
+        "floors",
         "id",
         "latitude",
         "longitude",

@@ -355,15 +355,15 @@ export const dashboardNav: DashboardNavItem[] = [
     hostGroup: "organisation",
   },
   {
-    // An organiser's plan: Free, an Event Pass, or Analytics (step 16). Every
-    // member sees it; only an owner or admin can change it, which the page and
-    // its actions say and enforce (`lib/billing-actions.ts`). Venue plans are
-    // step 17's, so venue owners do not get this one.
+    // An organiser's plan: Free, an Event Pass, or Analytics (step 16); a
+    // venue owner's: each venue Listed or on Venue Pro (step 17). Every member
+    // sees it; only an owner or admin can change it, which the page and its
+    // actions say and enforce (`lib/billing-actions.ts`).
     title: "Plan",
-    description: "Free, an Event Pass, or Analytics — and what your organisation has paid.",
+    description: "Your plan, and what your organisation has paid.",
     url: "/dashboard/plan",
     icon: IconCreditCard,
-    allowedRoles: ["organizer"],
+    allowedRoles: ["organizer", "venue_owner"],
     hostGroup: "organisation",
   },
 ]

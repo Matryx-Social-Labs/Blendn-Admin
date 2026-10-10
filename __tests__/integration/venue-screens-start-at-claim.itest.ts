@@ -9,7 +9,8 @@ import { isValidElement, type ReactElement, type ReactNode } from "react"
 import VenueDetailPage from "@/app/dashboard/venues/[id]/page"
 import { VenueEventsTable } from "@/app/dashboard/venues/[id]/venue-events-table"
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
-import { MetricTile, RatingBars } from "@/components/dashboard/primitives"
+import { KpiStrip } from "@/components/dashboard/kit"
+import { RatingBars } from "@/components/dashboard/primitives"
 import { distinctAttendeeCountsByDay } from "@/lib/attendee-counts"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { confirmVenueLink, disputeVenueLink, getLinkedEventsForOwner } from "@/lib/venue-link-actions"
@@ -101,9 +102,10 @@ describe("the venue page shows the venue from its claim on", () => {
     expect(small).toMatchObject({ going: 10, attended: null })
     expect(table.rows.find((r) => r.id === n.after.id)).toMatchObject({ attended: 6 })
 
-    const attendedTile = find<{ label: string; value: string; hint: string }>(tree, MetricTile).find(
-      (t) => t.label === "Attended"
-    )
+    // The tiles are the KpiStrip's items (step 17: the kit's strip).
+    const attendedTile = find<{ items: { label: string; value: string; hint: string }[] }>(tree, KpiStrip)
+      .flatMap((p) => p.items)
+      .find((t) => t.label === "Attended")
     const shownTotal = table.rows.reduce((sum, r) => sum + (r.attended !== null && r.going !== null ? r.attended : 0), 0)
     expect(attendedTile?.value).toBe(String(shownTotal))
     expect(attendedTile?.hint).toMatch(/held-back nights left out/)
@@ -124,7 +126,8 @@ describe("the venue page shows the venue from its claim on", () => {
 
 describe("the venue page's tiles add up only what its rows show", () => {
   type Tile = { label: string; value: string | null; hint: string }
-  const tiles = async (venue: string) => find<Tile>(await venuePage({ range: "90d" }, venue), MetricTile)
+  const tiles = async (venue: string) =>
+    find<{ items: Tile[] }>(await venuePage({ range: "90d" }, venue), KpiStrip).flatMap((p) => p.items)
   const tile = (all: Tile[], label: string) => all.find((t) => t.label === label)
   const daysAgo = (d: number) => new Date(Date.now() - d * DAY)
 

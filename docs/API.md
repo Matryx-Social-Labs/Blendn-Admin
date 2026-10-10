@@ -656,6 +656,7 @@ vocabulary, meaning exactly what it means there.
   "city": "Bengaluru", "latitude": 12.97, "longitude": 77.59,
   "capacity": 300,
   "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
+  "floors": 3,
   "distance": 1.4,
   "upcomingEventCount": 2,
   "liveNow": "quiet",
@@ -673,6 +674,11 @@ vocabulary, meaning exactly what it means there.
 | `radius` | km. **No default.** Only bites when you send it |
 | `venueType` | One of the 35 slugs; anything else is a 400 |
 | `sortBy` | `name` (default) or `distance` |
+
+`floors` is the 3D map's height override for the venue's building, set by its
+owner or an admin on the dashboard (1–200): draw it `floors × 3.2` m tall,
+the rule our building tiles are baked with (scripts/map-buildings). `null` means
+the map's own height. The same field is on `GET /venues/:venueId`.
 
 60 a minute per person, then 429 — every row carries a live count, as on the
 venue page.
@@ -745,7 +751,7 @@ for one with no known adult age (as at its door). 60 a minute per person, then
   "venue": { "id": "…", "name": "The Humming Tree", "address": "…", "city": "Bengaluru",
              "latitude": 12.97, "longitude": 77.64,
              "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
-             "claimed": false },
+             "floors": null, "claimed": false },
   "live": { "open": true, "closedReason": null, "eventId": null,
             "liveNow": "quiet",
             "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false,
