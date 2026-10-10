@@ -80,11 +80,20 @@ const envSchema = z.object({
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
   /**
-   * Whether Go Live's "stay" needs Blendn+ (`plusGating`). Off until step 11
-   * ships entitlements: "stay" is built as available to everyone until that
-   * changes (docs/HOTSPOTS.md).
+   * Where Blendn+ is gated (`plusGatedIn`). Unset or `false`: launch season
+   * everywhere, everything unlocked. `true`: gated everywhere. Otherwise a
+   * comma-separated list of cities, matched case-insensitively against a
+   * venue's or event's `city` (`Bengaluru,Mumbai`).
    */
-  PLUS_GATING: z.enum(["true", "false"]).optional(),
+  PLUS_GATING: z.string().optional(),
+
+  /**
+   * RevenueCat (plan v2 §5). The value the RevenueCat dashboard sends as the
+   * webhook's `Authorization` header is `Bearer <this>`. We choose it, so 32
+   * or more. Unset: the webhook refuses everything and nothing grants Blendn+
+   * from a store — the feature is off.
+   */
+  REVENUECAT_WEBHOOK_SECRET: z.string().min(32, "REVENUECAT_WEBHOOK_SECRET must be at least 32 characters").optional(),
 
   /**
    * Razorpay (plan v2 §9.2). All optional: unset, the Plan page says payments
@@ -238,13 +247,39 @@ export function googleSignInConfigWarning(
 }
 
 /**
- * Go Live "stay" is Blendn+ only when this is on (`PLUS_GATING=true`).
- *
- * Off by default, and nothing grants Plus yet (step 11), so turning it on
- * today refuses "stay" to everyone with `PLUS_REQUIRED`.
+ * Is Blendn+ gated in this city (`PLUS_GATING`)? A city not gated is in its
+ * launch season: every Plus feature is everyone's (plan v2 §9.3). Cities are
+ * compared trimmed and lower-cased, the way `cityKey` groups them; a place
+ * with no city is gated only when everywhere is.
  */
-export function plusGating(): boolean {
-  return process.env.PLUS_GATING === "true"
+export function plusGatedIn(city: string | null | undefined): boolean {
+  const raw = process.env.PLUS_GATING?.trim().toLowerCase()
+  if (!raw || raw === "false") return false
+  if (raw === "true") return true
+  const key = city?.trim().toLowerCase()
+  return Boolean(key) && raw.split(",").some((c) => c.trim() === key)
+}
+
+/** Is Blendn+ gated anywhere at all? False in a launch season everywhere, so a gate can skip its queries. */
+export function plusGatedAnywhere(): boolean {
+  const raw = process.env.PLUS_GATING?.trim().toLowerCase()
+  return Boolean(raw) && raw !== "false"
+}
+
+/** The RevenueCat webhook's shared secret, or null when the webhook is off (unset or too short to be ours). */
+export function revenuecatWebhookSecret(): string | null {
+  const secret = process.env.REVENUECAT_WEBHOOK_SECRET?.trim()
+  return secret && secret.length >= 32 ? secret : null
+}
+
+/**
+ * The store environment whose purchases grant Blendn+ here: real money in
+ * production, sandbox everywhere else. The other one is recorded and never
+ * granted, so a sandbox purchase cannot hand out Plus in production and a real
+ * one cannot on staging (test plan MN-U05). Same rule as the Razorpay key mode.
+ */
+export function storeEnvironment(): "PRODUCTION" | "SANDBOX" {
+  return process.env.RAILWAY_ENVIRONMENT_NAME === "production" ? "PRODUCTION" : "SANDBOX"
 }
 
 /**

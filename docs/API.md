@@ -309,9 +309,16 @@ holds a row per person per occurrence, so a three-day conference is three rows
 and one event. `attendedAt` is the **first** check-in for that event — when you
 arrived, not when you last turned up.
 
-**`totalCount` is the same figure as `stats.eventsAttended`** on the profile, by
-construction: the list and the count share one predicate, so they cannot
-disagree. Working an event as staff is not attending it, and appears in neither.
+**`totalCount` plus `lockedCount` is the same figure as `stats.eventsAttended`**
+on the profile, by construction: the list and the count share one predicate, so
+they cannot disagree. Working an event as staff is not attending it, and
+appears in neither.
+
+**Your latest 3 nights are free; the rest are Blendn+** where it is gated (the
+city of your latest night). Without Plus there, `events` stops at the third,
+the pages stop with it (`totalCount` is 3), and `lockedCount` says how many more
+there are — show "‹n› more nights with Blendn+". `lockedCount` is 0 whenever
+nothing is hidden.
 
 An event the platform has since deleted is in neither the list nor the count,
 so every page is full and `totalCount` is the number of events listed
@@ -823,13 +830,13 @@ today (choosing it again does not restart the four hours). Anything else is
 
 | Refusal | When |
 |---|---|
-| 403 `PLUS_REQUIRED` | `stay` while Plus gating is on (off today: "stay" is everyone's) |
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
 | 403 `FORBIDDEN` / `AGE_RESTRICTED` | Not onboarded / no known adult age (an unknown age is refused here) |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
 | 400 `NO_CHECK_IN_AREA` | Nobody has drawn this venue's area: no position fixes it |
 | 400 `OUT_OF_RANGE` | A position outside the area — "You're not at ‹venue› yet.", never a distance. Before step 5 this code also covered the two rows above; the event check-in still uses it for all three. A refusal writes nothing: no venue day is made for it |
+| 403 `PLUS_REQUIRED` | `stay` where Blendn+ is gated in the venue's city and you hold neither Plus nor a live Night Pass — open the paywall. Asked last, so it only stands where "stay" would otherwise have worked. In a city's launch season "stay" is everyone's (see Blendn+, below) |
 | 429 `RATE_LIMITED` | 20 a minute per person; ceilings per address and per venue |
 
 ```json
@@ -2777,3 +2784,55 @@ Kept for 180 days, then purged (IT Rules 2021): a copy of what they registered
 with (name, email, phone, date of birth, sign-up method), written in the same
 transaction before the scrub. No route returns it. Their board posts that
 moderation hid are kept too. See `docs/RETENTION.md`.
+
+---
+
+## Blendn+ (step 11)
+
+Blendn+ is bought in the App Store or Google Play through RevenueCat — never
+Razorpay, never in a web view. The app passes **our user id** to
+`Purchases.logIn` at sign-in (and `logOut` at sign-out), and RevenueCat's
+webhook (`POST /api/webhooks/revenuecat`, server to server, not part of this
+API) is the only thing that grants it. The app saying "bought" unlocks nothing:
+after a purchase or restore, poll `GET /me/plus` until `active`.
+
+What Plus is: staying live while you're here (Go Live `stay`), your full night
+history (`/me/attendance` beyond the latest 3), partner perks and crew extras
+(not built yet). A Night Pass is Plus for 24 hours (a second one starts when
+the first ends). Never sold: who liked you, more than the caps allow, seeing a
+venue without going live, a reveal bypass, boosting.
+
+Where: Blendn+ is gated per city. A city that is not gated is in its launch
+season and every Plus feature is everyone's — "stay" simply works. The first
+time a gated city's gate would stop somebody who came out in the last 90 days,
+they get a 14-day trial instead, once ever; and three friends who joined
+through your invite link and checked in since earn one month, once.
+
+### GET /me/plus
+
+```json
+{ "success": true, "data": {
+  "active": true,
+  "product": "plus",
+  "source": "apple",
+  "expiresAt": "2026-11-10T09:00:00.000Z"
+} }
+```
+
+`product` is `plus` or `night_pass`; `source` is `apple`, `google` or `grant`
+(the trial, a referral month). `expiresAt` is when the row that lasts longest
+ends. `no-store`: never cache it. It is not a gate — every Plus feature is
+checked on the server.
+
+### POST /me/plus/paywall-events
+
+```json
+{ "event": "shown", "trigger": "go_live_expiry" }
+```
+
+`event`: `shown`, `dismissed`, `purchase_started`, `purchased`, `restored`.
+`trigger`: `go_live_expiry`, `second_event`, `first_match`, `recap`, `perk`,
+`profile`. Measurement only (`product_events`, one row per person, day, step and
+trigger). The cooldowns are the app's: at most one automatic paywall a session,
+never during onboarding, check-in or chat. 400 for anything off these lists.
+

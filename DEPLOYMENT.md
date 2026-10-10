@@ -339,7 +339,8 @@ so it is never related to session or login state.
 | `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
 | `SEED_PASSWORD` | Staging only | Password for the dashboard test accounts, set on every deploy by `scripts/test-accounts.ts`. Never on production — the step refuses there anyway |
 | `REDIS_URL` | With more than one replica | Shares rate limits and the Socket.io adapter across replicas. Without it a Go Live's end evicts sockets only on the replica that ran it (the per-emit filter still keeps the room from reaching them) |
-| `PLUS_GATING` | No | `true` makes Go Live's "stay" Blendn+ only (`403 PLUS_REQUIRED`). Unset or `false`: "stay" is everyone's. Leave it off until Blendn+ entitlements ship — nothing grants Plus yet, so on would refuse "stay" to everyone |
+| `PLUS_GATING` | No | Where Blendn+ is gated: a comma-separated list of cities (`Bengaluru`), matched case-insensitively against a venue's or event's city; `true` everywhere. Unset or `false`: launch season everywhere, every Plus feature is everyone's. Setting a city is the whole switch: the 14-day trial is granted by the server at the first gate each active person meets (docs/IAP-SETUP.md) |
+| `REVENUECAT_WEBHOOK_SECRET` | For Blendn+ | 32+ characters, chosen by us (`openssl rand -hex 32`). The RevenueCat webhook's Authorization header is `Bearer <this>`. Unset: the webhook refuses everything and no store purchase grants Blendn+. Production grants only PRODUCTION purchases, every other environment only SANDBOX ones (`RAILWAY_ENVIRONMENT_NAME`). Setup: docs/IAP-SETUP.md |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |
 | `PORT` | No | Server port (Railway sets this) |

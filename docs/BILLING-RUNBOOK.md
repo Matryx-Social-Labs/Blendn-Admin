@@ -1,7 +1,9 @@
-# Billing runbook (Razorpay)
+# Billing runbook (Razorpay, and Blendn+ through RevenueCat)
 
 What to do when money and the dashboard disagree. The design is in
-`lib/razorpay-webhook.ts`; this is the operator's half.
+`lib/razorpay-webhook.ts`; this is the operator's half. Blendn+ (the app's
+store purchases) is its own section at the end; its setup is
+docs/IAP-SETUP.md.
 
 ## Setup, per environment
 
@@ -158,3 +160,60 @@ tables (`entitlements`, `payment_events`, `billing_payments`,
 GST records, kept for 72 months. Never run SQL by hand against staging or
 production: the next boot's `prisma migrate deploy` dies on a schema it did not
 write.
+
+## Blendn+ (RevenueCat, step 11)
+
+The app's Blendn+ is sold by Apple and Google; RevenueCat tells us. The design
+is in `lib/revenuecat-webhook.ts`; setup, per environment, is
+docs/IAP-SETUP.md. Razorpay never sells Blendn+ (a database CHECK refuses the
+row, and `__tests__/plus-gate-boundary.test.ts` the code).
+
+- **Every authorised delivery answers 200**, including one that changed
+  nothing. `payment_events` (`provider = 'revenuecat'`) keeps each one — ids,
+  products and times; never the subscriber attributes, aliases or country —
+  and `error` says why it changed nothing:
+  - `stale`: older than what we hold for that purchase. Normal: RevenueCat
+    retries out of order. Each event carries the purchase's whole state, so the
+    newer one already said it.
+  - `wrong_environment`: a sandbox purchase in production, or a real one on
+    staging. App Review buys in the sandbox against production: the review
+    account holds a grant instead (docs/IAP-SETUP.md).
+  - `unknown_user`: `app_user_id` is not one of our accounts (anonymous, or
+    deleted). **Money was taken and nothing granted** — see below.
+  - `not_ours` / `unsupported_store`: not a Blendn+ product, or not the App
+    Store / Play. Check the RevenueCat entitlement `plus` and product ids.
+  - `malformed`: a purchase with no transaction id or end date. File a bug
+    with the delivery.
+- **5xx only when the database failed.** The whole delivery is one
+  transaction, so the claim rolled back with it and RevenueCat's retry applies
+  it. RevenueCat retries five times (5, 10, 20, 40, 80 minutes) and then
+  stops for that event. Alert on any 5xx from `/api/webhooks/revenuecat`.
+- **A delivery that never landed** (the retries ran out): for a subscription,
+  the next event about it — renewal, cancellation, expiration — carries the
+  whole state and puts the row right. A Night Pass has no next event: find
+  the purchase in RevenueCat → Customers → the user id, and give the person
+  the time by hand only through a grant (there is no admin control for a
+  person's grant yet — SCRUM-583; until then, file it and refund from the
+  store's side if asked).
+- **Refunds** are the store's: Apple's or Google's. RevenueCat reports one as
+  a CANCELLATION with `cancel_reason = CUSTOMER_SUPPORT`, and the webhook ends
+  access at that moment. `REFUND_REVERSED` gives it back.
+- **A deleted account** loses its Blendn+ rows with the account (D-17); the
+  person is told to cancel in their store. A later renewal for that account
+  is `unknown_user`.
+- **Rolling back** step 11's migration (`20261010120000_blendn_plus`) is a new
+  forward migration dropping `referrals` and the two `entitlements` columns.
+  Rolling back the code alone is safe.
+
+Read back:
+
+```sql
+SELECT u.email, e.product, e.source, e.starts_at, e.expires_at
+  FROM entitlements e JOIN "User" u ON u.id = e.subject_id
+ WHERE e.subject_kind = 'user' ORDER BY e.created_at DESC LIMIT 5;
+SELECT provider_event_id, type, processed_at, error,
+       count(*) OVER (PARTITION BY provider, provider_event_id) AS times
+  FROM payment_events WHERE provider = 'revenuecat'
+ ORDER BY received_at DESC LIMIT 10;
+```
+

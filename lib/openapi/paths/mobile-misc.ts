@@ -280,12 +280,15 @@ registry.registerPath({
     "runs past the venue's daily reset (06:00 local by default). Going live again while live extends " +
     "the window, never shortens it; going live elsewhere, or checking in to an event, ends it as a " +
     "switch. When it ends you are checked out (`expired`) and the venue's room closes to you.\n\n" +
-    "Refusals, in order: 403 `PLUS_REQUIRED` for `stay` while Plus gating is on; 404 unknown, " +
-    "archived or deleted venue; " +
+    "Refusals, in order: 404 unknown, archived or deleted venue; " +
     PARTICIPATION_GATE +
     "409 `EVENT_LIVE_HERE` with `eventId` when a public event linked to this venue is on or starts " +
-    "within the hour — check in to it instead; 400 `OUT_OF_RANGE` for a fix worse than 150 m, a venue " +
-    "with no check-in area, or a position outside it.",
+    "within the hour — check in to it instead; 400 `GPS_TOO_VAGUE` for a fix worse than 150 m, " +
+    "`NO_CHECK_IN_AREA` for a venue with no check-in area, `OUT_OF_RANGE` for a position outside it; " +
+    "last, 403 `PLUS_REQUIRED` for `stay` where Blendn+ is gated in the venue's city and the caller " +
+    "holds neither Plus nor a live Night Pass (open the paywall). In a city's launch season `stay` is " +
+    "everyone's. While a stay runs, a ping no longer carries it once Plus lapses in a gated city: it " +
+    "ends at most 20 minutes after the last ping that did.",
   security: bearerAuth,
   request: {
     params: z.object({ venueId: z.string().uuid() }),
@@ -896,6 +899,68 @@ registry.registerPath({
   security: bearerAuth,
   responses: {
     200: { description: "Account deleted", content: { "application/json": { schema: wrap(MessageResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+/*
+ * Blendn+ (step 11). The paywall's two calls. Plus itself is granted only by
+ * the stores' webhook (`/api/webhooks/revenuecat`, not part of this API).
+ */
+const PlusStatusSchema = z
+  .object({
+    active: z.boolean().describe("Blendn+ is unlocked now: a subscription, a live Night Pass, the trial or a referral month."),
+    product: z.enum(["plus", "night_pass"]).nullable(),
+    source: z
+      .enum(["apple", "google", "grant"])
+      .nullable()
+      .describe("`grant`: the trial or a referral month. Manage a store subscription in that store."),
+    expiresAt: z.string().datetime().nullable().describe("When the row that lasts longest ends; null never ends."),
+  })
+  .openapi("PlusStatus")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/plus",
+  tags: ["Mobile Profiles"],
+  summary: "Do I have Blendn+, and until when",
+  description:
+    "Read after a purchase or restore and polled until `active`: the app saying \"bought\" unlocks " +
+    "nothing — the store's webhook grants it, usually within seconds. Not cached (`no-store`). " +
+    "Not a gate: every Plus feature is checked on the server.",
+  security: bearerAuth,
+  responses: {
+    200: { description: "Blendn+ status", content: { "application/json": { schema: wrap(PlusStatusSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/me/plus/paywall-events",
+  tags: ["Mobile Profiles"],
+  summary: "Record what the Blendn+ paywall did",
+  description:
+    "Measurement only (`product_events`, one row per person, day, step and trigger). The app keeps " +
+    "the cooldowns. `purchased` here grants nothing.",
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            event: z.enum(["shown", "dismissed", "purchase_started", "purchased", "restored"]),
+            trigger: z.enum(["go_live_expiry", "second_event", "first_match", "recap", "perk", "profile"]),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Recorded",
+      content: { "application/json": { schema: wrap(z.object({ recorded: z.literal(true) })) } },
+    },
     ...standardErrors,
   },
 })

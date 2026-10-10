@@ -20,8 +20,13 @@ import { db } from "./db"
  * Writers:
  *   - `recordPaidEntitlement` / `endPaidEntitlement`: the payment provider's
  *     webhook only (`lib/razorpay-webhook.ts`).
+ *   - `applyStoreWindow` / `transferStoreEntitlements`: the stores' webhook
+ *     only, through RevenueCat (`lib/revenuecat-webhook.ts`).
  *   - `grantEntitlement` / `endGrants` / `revokePaid`: an admin, audited by
  *     the caller (`lib/billing-actions.ts`).
+ *   - `grantPlusOnce`: Blendn+'s own grants, the trial and the referral
+ *     month (`lib/plus.ts`).
+ *   - `eraseUserEntitlements`: the account erasure.
  */
 
 export interface Subject {
@@ -31,6 +36,13 @@ export interface Subject {
 
 type Tx = Prisma.TransactionClient
 type Client = Tx | typeof db
+
+/**
+ * A Night Pass is 24 hours of Blendn+, so asking for Plus finds either. Every
+ * Plus gate asks for `plus` and never needs to know a pass exists.
+ */
+const productWhere = (product: entitlement_product) =>
+  product === "plus" ? { in: ["plus", "night_pass"] as entitlement_product[] } : product
 
 /** Live at `now`: started, and not yet ended. */
 function liveAt(now: Date) {
@@ -59,7 +71,7 @@ export async function hasEntitlement(
     where: {
       subject_kind: subject.kind,
       subject_id: subject.id,
-      product,
+      product: productWhere(product),
       ...(product === "event_pass" ? { event_id: opts.eventId } : {}),
       ...liveAt(now),
     },
@@ -390,4 +402,179 @@ export async function revokePaidByRefs(
     await client.entitlements.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { expires_at: now } })
   }
   return rows
+}
+
+/* -------------------------------------------------------------------------- */
+/* Blendn+ (step 11): a person's Plus, from the stores and from our own grants */
+/* -------------------------------------------------------------------------- */
+
+export type StoreSource = Extract<entitlement_source, "apple" | "google">
+export type PlusProduct = Extract<entitlement_product, "plus" | "night_pass">
+
+const userPlus = (userId: string) => ({
+  subject_kind: "user" as const,
+  subject_id: userId,
+  product: { in: ["plus", "night_pass"] as entitlement_product[] },
+})
+
+/** What a person holds now, for saying so (`GET /me/plus`): the live row that lasts longest. Not a gate. */
+export async function livePlus(
+  userId: string,
+  now: Date = new Date()
+): Promise<{ product: PlusProduct; source: entitlement_source; expiresAt: Date | null } | null> {
+  const row = await db.entitlements.findFirst({
+    where: { ...userPlus(userId), ...liveAt(now) },
+    orderBy: { expires_at: { sort: "desc", nulls: "first" } },
+    select: { product: true, source: true, expires_at: true },
+  })
+  return row ? { product: row.product as PlusProduct, source: row.source, expiresAt: row.expires_at } : null
+}
+
+/** The row a store purchase made, if any: what it is and when it started. */
+export async function storeRow(
+  tx: Tx,
+  source: StoreSource,
+  externalRef: string
+): Promise<{ product: PlusProduct; startsAt: Date } | null> {
+  const row = await tx.entitlements.findUnique({
+    where: { source_external_ref: { source, external_ref: externalRef } },
+    select: { product: true, starts_at: true },
+  })
+  return row ? { product: row.product as PlusProduct, startsAt: row.starts_at } : null
+}
+
+/** When this person's latest live Night Pass ends, other than `exceptRef` (a new one stacks after it, D-16). */
+export async function nightPassEnd(tx: Tx, userId: string, exceptRef: string, now: Date): Promise<Date | null> {
+  const row = await tx.entitlements.findFirst({
+    where: {
+      subject_kind: "user",
+      subject_id: userId,
+      product: "night_pass",
+      NOT: { external_ref: exceptRef },
+      ...liveAt(now),
+    },
+    orderBy: { expires_at: "desc" },
+    select: { expires_at: true },
+  })
+  return row?.expires_at ?? null
+}
+
+/**
+ * One store purchase's window, as the store saw it at `eventAt`. The caller
+ * (the RevenueCat webhook) holds the person's lock.
+ *
+ *   - No row yet: made for `userId`, or nothing when the purchase's owner is
+ *     not one of our people (`no_owner`: recorded by the caller, never granted).
+ *   - A row: its window moves to this one only if no newer event already set
+ *     it (`window_event_at`), and its owner to `userId` only if no newer event
+ *     or transfer already set that (`owner_event_at`). Both are conditional
+ *     updates, so two deliveries racing on one row settle by the store's clock
+ *     whatever order they commit in.
+ *
+ * A window never ends before its row started (the CHECK): a refund before a
+ * stacked Night Pass began ends it at its start.
+ */
+export async function applyStoreWindow(
+  tx: Tx,
+  w: {
+    userId: string | null
+    product: PlusProduct
+    source: StoreSource
+    externalRef: string
+    startsAt: Date
+    expiresAt: Date
+    eventAt: Date
+  }
+): Promise<"created" | "applied" | "stale" | "no_owner"> {
+  const key = { source_external_ref: { source: w.source, external_ref: w.externalRef } }
+  const row = await tx.entitlements.findUnique({ where: key, select: { id: true, starts_at: true } })
+  if (!row) {
+    if (!w.userId) return "no_owner"
+    await tx.entitlements.create({
+      data: {
+        subject_kind: "user",
+        subject_id: w.userId,
+        product: w.product,
+        source: w.source,
+        external_ref: w.externalRef,
+        starts_at: w.startsAt,
+        expires_at: w.expiresAt < w.startsAt ? w.startsAt : w.expiresAt,
+        window_event_at: w.eventAt,
+        owner_event_at: w.eventAt,
+      },
+    })
+    return "created"
+  }
+  const notNewer = (col: "window_event_at" | "owner_event_at") => ({
+    OR: [{ [col]: null }, { [col]: { lte: w.eventAt } }],
+  })
+  const { count } = await tx.entitlements.updateMany({
+    where: { id: row.id, ...notNewer("window_event_at") },
+    data: { expires_at: w.expiresAt < row.starts_at ? row.starts_at : w.expiresAt, window_event_at: w.eventAt },
+  })
+  if (w.userId) {
+    await tx.entitlements.updateMany({
+      where: { id: row.id, ...notNewer("owner_event_at") },
+      data: { subject_id: w.userId, owner_event_at: w.eventAt },
+    })
+  }
+  return count ? "applied" : "stale"
+}
+
+/**
+ * A store's TRANSFER: every store-bought Plus row of `from` now belongs to
+ * `to` — unless a newer event already decided its owner. Returns how many
+ * moved. Only rows from `sources` (the transfer's store, when it names one).
+ */
+export async function transferStoreEntitlements(
+  tx: Tx,
+  input: { from: string[]; to: string; sources: StoreSource[]; at: Date }
+): Promise<number> {
+  if (input.from.length === 0) return 0
+  const { count } = await tx.entitlements.updateMany({
+    where: {
+      subject_kind: "user",
+      subject_id: { in: input.from },
+      product: { in: ["plus", "night_pass"] },
+      source: { in: input.sources },
+      OR: [{ owner_event_at: null }, { owner_event_at: { lte: input.at } }],
+    },
+    data: { subject_id: input.to, owner_event_at: input.at },
+  })
+  return count
+}
+
+/**
+ * Blendn+ from us, once per `ref` ever: the unique (source, external_ref)
+ * makes a second run, or a race, a no-op. True when this call granted it.
+ */
+export async function grantPlusOnce(
+  client: Client,
+  input: { userId: string; ref: string; startsAt: Date; expiresAt: Date }
+): Promise<boolean> {
+  const { count } = await client.entitlements.createMany({
+    data: [
+      {
+        subject_kind: "user",
+        subject_id: input.userId,
+        product: "plus",
+        source: "grant",
+        external_ref: input.ref,
+        starts_at: input.startsAt,
+        expires_at: input.expiresAt,
+      },
+    ],
+    skipDuplicates: true,
+  })
+  return count === 1
+}
+
+/**
+ * The account erasure: a person's Blendn+ rows go with them (test plan D-17).
+ * The deliveries in `payment_events` stay — ids and times, no personal data —
+ * and the person is told to cancel in their store. Returned unawaited, so the
+ * erasure can put it in its one batch transaction.
+ */
+export function eraseUserEntitlements(userId: string) {
+  return db.entitlements.deleteMany({ where: { subject_kind: "user", subject_id: userId } })
 }
