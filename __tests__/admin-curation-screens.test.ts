@@ -377,7 +377,11 @@ describe("what the design review found", () => {
      * trailing report.
      */
     const src = code(CURATE)
-    expect(src.indexOf("Likely a wrong pin")).toBeLessThan(src.indexOf('label="Curated"'))
+    // The tiles are a KpiStrip's items since step 18: `label: "…"`, not a prop.
+    const curated = src.indexOf('label: "Curated"')
+    expect(curated).toBeGreaterThan(-1)
+    expect(src.indexOf('label: "Likely a wrong pin"')).toBeGreaterThan(-1)
+    expect(src.indexOf('label: "Likely a wrong pin"')).toBeLessThan(curated)
   })
 })
 

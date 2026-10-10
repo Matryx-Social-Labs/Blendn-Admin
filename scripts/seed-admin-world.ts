@@ -61,7 +61,6 @@ export async function seedMatrixMarkers(
   await seedDecidedFlag(db, ids.admin)
   await seedReviewedReport(db, ids)
   await seedPlacement(db, ids)
-  await seedAuditRow(db, ids.admin)
 }
 
 /**
@@ -171,17 +170,4 @@ async function seedPlacement(db: Db, ids: { admin: string; brandId: string }) {
     data: { event_id: event.id, sponsor_id: ids.brandId, content, interval_minutes: 45 },
   })
   await db.sponsored_creatives.create({ data: { message_id: message.id, content } })
-}
-
-/** An admin's own act: no organisation's colleague, so no host's audit log shows it. */
-async function seedAuditRow(db: Db, admin: string) {
-  const reason = MATRIX_MARKERS.audit
-  const existing = await db.audit_logs.findFirst({
-    where: { user_id: admin, action: "seed.world_checked", resource: "platform" },
-    select: { id: true },
-  })
-  if (existing) return
-  await db.audit_logs.create({
-    data: { user_id: admin, action: "seed.world_checked", resource: "platform", details: { reason } },
-  })
 }

@@ -113,22 +113,19 @@ const ROW_MARKER: Record<string, { markers: string[]; path?: string }> = {
   // seed-qa now seeds the taxonomy its events are tagged with.
   "/dashboard/categories": { markers: [MATRIX_MARKERS.category] },
   /*
-   * Shared routes: an admin sees the curated listing and the admin's own audit
-   * row; the host roles open these pages too, scoped, and the scoped check
-   * below holds them to receiving neither.
+   * A shared route: an admin sees the curated listing; the host roles open
+   * this page too, scoped, and the scoped check below holds them to not
+   * receiving it.
    */
   "/dashboard/events": { markers: ["Indie Sundowner at Toit"] },
-  "/dashboard/audit": { markers: [MATRIX_MARKERS.audit] },
 }
 
 /**
  * On a route a host role IS entitled to, these are still not theirs: a curated
- * listing has no organisation, and an admin's audit row has no colleague.
- * Allowed and scoped is not the same as allowed.
+ * listing has no organisation. Allowed and scoped is not the same as allowed.
  */
 const SCOPED_OUT: Record<string, string[]> = {
   "/dashboard/events": ["Indie Sundowner at Toit"],
-  "/dashboard/audit": [MATRIX_MARKERS.audit],
   // A venue owner's own "My venues" at the same URL: theirs, never the record
   // index — and not the unclaimed venue their organisation has only claimed.
   "/dashboard/venues": ["Church Street Social"],
@@ -157,6 +154,10 @@ const ownIdentity = (role: (typeof DASHBOARD_ROLES)[number], marker: string) =>
  * Who may read whose figures is held by their own specs and itests.
  */
 const STREAMED_OR_UNSEEDED = new Set([
+  // Empty in a fresh world until an admin acts, and the seed does not write
+  // audit rows nobody performed. Its organisation scope is held by
+  // audit-filter-whole-log.itest.ts.
+  "/dashboard/audit",
   "/dashboard/reports", // a form, not a table
   "/dashboard/attendees", // an organiser's own labels; the identity boundary has its own guard
   "/dashboard/chatrooms", // every role's own rooms; venue-live-ranges.itest.ts holds the venue's view

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { HOME_ORG_ORDER } from "@/lib/org-membership"
+import { activeMembership, HOME_ORG_ORDER } from "@/lib/org-membership"
 
 export interface VenueOwnerFacts {
   /** The home organisation's name (the oldest membership), or null for none. */
@@ -30,7 +30,8 @@ export async function venueOwnerFacts(userIds: string[]): Promise<Record<string,
 
   const [memberships, claims] = await Promise.all([
     db.organisation_members.findMany({
-      where: { user_id: { in: userIds } },
+      // Live memberships only: a left or removed member owns nothing through the organisation.
+      where: { user_id: { in: userIds }, ...activeMembership },
       // Oldest first, so the first membership met per person is their home.
       orderBy: HOME_ORG_ORDER,
       select: { user_id: true, org_id: true, org: { select: { display_name: true } } },

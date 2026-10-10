@@ -10,6 +10,5 @@ export const MATRIX_MARKERS = {
   lead: "founder@thehummingtree.com",
   report: "Kept messaging after being asked to stop",
   creative: "Pour-over flight at the bar from 8pm",
-  audit: "Seeded so the audit log has a row only an admin reads",
   category: "Classical and Carnatic",
 } as const
