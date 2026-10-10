@@ -162,10 +162,11 @@ export async function GET(request: NextRequest) {
      * Blends while open — each as its door admits them now (a member of the
      * crew; on a side of the Blend, in no block across it). A list of their
      * own, `rooms`, not rows of `groups`: an installed app reads `event` off
-     * every `groups` row, and these rooms have none. Not paged: a person is in
-     * at most `CREW.MAX_JOINED` crews and a night's few Blends.
+     * every `groups` row, and these rooms have none. Not paged — a person is in
+     * at most `CREW.MAX_JOINED` crews and a night's few Blends — so sent with
+     * the first page only.
      */
-    const otherRows = await db.chat_group_members.findMany({
+    const otherRows = page > 1 ? [] : await db.chat_group_members.findMany({
       where: {
         user_id: authUser.userId,
         status: { in: ["active", "muted"] },
@@ -324,20 +325,23 @@ export async function GET(request: NextRequest) {
     // Build final response
     /*
      * Who wrote last in each crew and Blend room, named as that room names
-     * people (a crewmate's first name; a Blend's pseudonyms). One lookup per
-     * room, in parallel, before any row is built: there are at most
-     * `CREW.MAX_JOINED` crews and a night's few Blends, never one per event room.
+     * people. A crew's chat names by first name whatever the crew, so every
+     * crew's sender is one lookup; a Blend's names are its event's pseudonyms,
+     * one Blend at a time — never a burst on the pool (`lib/db.ts`).
      */
-    const roomSenderNames = new Map(
-      await Promise.all(
-        others.map(async (m) => {
-          const last = lastMessageMap.get(m.chat_group.id)
-          const room = { id: m.chat_group.id, kind: m.chat_group.kind as "crew" | "blend" }
-          const name = last ? (await namesInRoom(room, [last.user_id])).get(last.user_id) : undefined
-          return [m.chat_group.id, name ?? null] as const
-        })
-      )
-    )
+    const roomSenderNames = new Map<string, string | null>()
+    const withLast = others.flatMap((m) => {
+      const last = lastMessageMap.get(m.chat_group.id)
+      return last ? [{ id: m.chat_group.id, kind: m.chat_group.kind, sender: last.user_id }] : []
+    })
+    const crewRooms = withLast.filter((r) => r.kind === "crew")
+    if (crewRooms.length > 0) {
+      const named = await namesInRoom({ id: crewRooms[0].id, kind: "crew" }, crewRooms.map((r) => r.sender))
+      for (const r of crewRooms) roomSenderNames.set(r.id, named.get(r.sender) ?? null)
+    }
+    for (const r of withLast.filter((x) => x.kind === "blend")) {
+      roomSenderNames.set(r.id, (await namesInRoom({ id: r.id, kind: "blend" }, [r.sender])).get(r.sender) ?? null)
+    }
 
     const groupsWithUnread = memberships.map((membership) => {
       const lastReadAt = membership.last_read_message_id

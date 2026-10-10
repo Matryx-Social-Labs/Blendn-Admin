@@ -213,7 +213,7 @@ export const ChatRoomListItemSchema = z
         createdAt: z.string().datetime(),
         user: z
           .object({ id: RoomUserRefSchema, name: z.string() })
-          .describe("As the room names people: a crewmate's first name; in a Blend, tonight's pseudonym unless revealed there."),
+          .describe("As the room names people: a crewmate's first name; in a Blend, tonight's pseudonym (a reveal names people on GET /blends, never in the chat)."),
       })
       .nullable(),
     membership: z.object({ role: z.string(), joinedAt: z.string().datetime(), status: z.enum(["active", "muted"]) }),
@@ -227,7 +227,7 @@ export const ChatGroupListResponseSchema = z
     rooms: z
       .array(ChatRoomListItemSchema)
       .describe(
-        "My crews' chats and my Blends' rooms while open, each as its door admits me now (never a Blend across a block), newest message first. Not paged."
+        "My crews' chats and my Blends' rooms while open, each as its door admits me now (never a Blend across a block), newest message I can see first. Not paged: sent with page 1, [] after."
       ),
     pagination: PaginationMetaSchema,
   })

@@ -370,6 +370,8 @@ describe("a room pushes replies, and only to the person replied to", () => {
     await send("p1")
     expect(mockSent).toHaveLength(1)
     expect(mockSent[0].data).toMatchObject({ type: "group_message", chatGroupId: "g1", ...data })
+    // Only its own room's owner: a crew reply names no Blend, a Blend reply no crew.
+    expect(mockSent[0].data).not.toHaveProperty(kind === "crew" ? "blendId" : "crewId")
   })
 
   it("replying to yourself pushes nobody", async () => {

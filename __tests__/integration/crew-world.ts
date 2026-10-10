@@ -121,7 +121,7 @@ export const api = {
     call(routes.prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, as, { method: "PUT", body, params: { eventId } }),
   blends: (as: Person) => call(routes.blends.GET, "/api/mobile/blends", as),
   /** The chat list: event rooms in `groups`, crew and Blend rooms in `rooms`. */
-  chatGroups: (as: Person) => call(routes.chatGroups.GET, "/api/mobile/chat/groups?limit=50", as),
+  chatGroups: (as: Person, page = 1) => call(routes.chatGroups.GET, `/api/mobile/chat/groups?limit=50&page=${page}`, as),
   read: (as: Person, g: string) => call(routes.messages.GET, `/api/mobile/chat/groups/${g}/messages`, as, { params: { chatGroupId: g } }),
   send: (as: Person, g: string, content = `hi ${testId("m")}`) =>
     call(routes.messages.POST, `/api/mobile/chat/groups/${g}/messages`, as, { method: "POST", body: { content }, params: { chatGroupId: g } }),

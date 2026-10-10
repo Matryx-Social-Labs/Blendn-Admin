@@ -876,12 +876,14 @@ Lists every **event** room the caller is still a member of: `active` and **`mute
 response carries `rooms` — the caller's crews' chats and their Blends' rooms,
 each `{ id, kind: "crew" | "blend", name, crewId, blendId, closesAt,
 unreadCount, mute, lastMessageAt, lastMessage, membership, status }`, newest
-message first, not paged (at most ten crews and a night's few Blends). Each is
+message first, not paged (at most ten crews and a night's few Blends) — sent
+with the first page, and `[]` on later pages. Each is
 listed as its door admits the caller now: a crew's while they are in the crew;
 a Blend's only while it is open (`closesAt` is its clock — gone from the list
 then, sweeper or not) and never to two people a block across it parted.
 `lastMessage.user` is named as that room names people: a crewmate's first
-name; in a Blend, tonight's pseudonym unless revealed there. Own list rather
+name; in a Blend, tonight's pseudonym (a reveal names people on `GET /blends`,
+never in the chat). Own list rather
 than more `groups` rows because an installed app reads `event` off every
 `groups` row, and these rooms have none. A hidden crew's chat stays listed to
 its members — hiding takes a crew off every surface outside it, not its own
@@ -1434,8 +1436,11 @@ without an owner every 15 minutes, so a suspension (which writes no crew row)
 or a failed erasure settle is not left standing. **Except a crew still waiting
 on its friends:** every crew starts as its owner and the invites out, and the
 sweeper leaves a crew of one standing while it has an open invite or is younger
-than an invite lives (14 days). Once every invite has lapsed or been declined
-and it is past 14 days old, the next pass dissolves it. A departure is not a
+than an invite lives (14 days) and has only ever had the one member row. An
+invite counts while it is open and its sender is still an active member — the
+accept's own rule. Once every invite has lapsed, been declined or lost its
+sender, and the crew is past 14 days old (or had a second member, now
+suspended), the next pass dissolves it. A departure is not a
 wait: a crew somebody leaves down to one dissolves at once.
 
 **Joining is consent.** Creating or joining requires `revealConsent: true`. The

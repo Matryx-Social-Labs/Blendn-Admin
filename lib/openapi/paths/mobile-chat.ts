@@ -61,7 +61,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups",
   tags: ["Mobile Chat"],
   summary: "List chat groups",
-  description: "List the rooms the user is a member of, with last message and unread count. `groups`: event and venue-day rooms, paged, each `kind: \"event\"` with its `event`. `rooms`: the user's crews' chats and their Blends' rooms while open (`kind` `crew` or `blend`, with `crewId`/`blendId`), not paged — a person is in at most ten crews and a night's few Blends. A board post's room is not listed.",
+  description: "List the rooms the user is a member of, with last message and unread count. `groups`: event and venue-day rooms, paged, each `kind: \"event\"` with its `event`. `rooms`: the user's crews' chats and their Blends' rooms while open (`kind` `crew` or `blend`, with `crewId`/`blendId`), not paged — a person is in at most ten crews and a night's few Blends — so sent with page 1 and `[]` after. No preview, unread count or `rooms` time comes from somebody in a block with the caller. A board post's room is not listed.",
   security: bearerAuth,
   request: {
     query: z.object({

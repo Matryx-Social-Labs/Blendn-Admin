@@ -18,8 +18,10 @@ import { OWNER_ROOM_HOURS } from "../room-kind"
  *
  * "People" means **active** members: not suspended, not erased. A suspended
  * member is on no crew surface (§6 Safety), so they neither keep a crew alive
- * nor hold it: a crew of two with one suspended dissolves (D-15), and a crew
- * whose owner is suspended passes to whoever has been in it longest. A
+ * nor hold it: a crew of two with one suspended dissolves (D-15) — unless it
+ * is still waiting on an invite one of its active members sent
+ * (`waitingOnInvites`) — and a crew whose owner is suspended passes to
+ * whoever has been in it longest. A
  * reinstated member does not get either back — dissolving is permanent, and
  * ownership is not a thing a suspension should be able to hold hostage.
  */
@@ -106,7 +108,8 @@ export async function settleLocked(
     select: { user_id: true, role: true },
     orderBy: [{ joined_at: "asc" }, { user_id: "asc" }],
   })
-  const waiting = opts.graceWhileInviting && active.length >= 1 && (await waitingOnInvites(tx, crewId))
+  const waiting =
+    opts.graceWhileInviting && active.length >= 1 && (await waitingOnInvites(tx, crewId, active.map((m) => m.user_id)))
   if (active.length < CREW.MIN_MEMBERS && !waiting) return { dissolved: true, roomIds: await dissolveLocked(tx, crewId) }
   if (!active.some((m) => m.role === "owner")) {
     // The longest-standing active member who can take another crew under the
@@ -129,20 +132,27 @@ export async function settleLocked(
 }
 
 /**
- * A crew of one still waiting on its friends: it has an invite somebody can
- * still say yes to, or it is younger than an invite lives (`CREW.INVITE_TTL_MS`).
- * Every crew starts as one person and its invites (step 9 review, C1): the
- * sweeper's repair must not dissolve it before anybody has had the chance to
- * accept. A departure is not this — a crew somebody leaves down to one still
- * dissolves at once (D-15); only the sweeper gives the grace.
+ * A crew of one still waiting on its friends: an invite somebody can still
+ * say yes to — open, and sent by one of its active members, as the accept
+ * requires — or a crew of one member row younger than an invite lives
+ * (`CREW.INVITE_TTL_MS`). Every crew starts as one person and its
+ * invites (step 9 review, C1): the sweeper's repair must not dissolve it
+ * before anybody has had the chance to accept. A crew of two that lost one to
+ * a suspension is not waiting (two member rows); nor is one whose only open
+ * invite came from somebody no longer in it. A departure is not this either —
+ * a crew somebody leaves down to one still dissolves at once (D-15); only the
+ * sweeper gives the grace.
  */
-async function waitingOnInvites(tx: Prisma.TransactionClient, crewId: string): Promise<boolean> {
+async function waitingOnInvites(tx: Prisma.TransactionClient, crewId: string, activeIds: string[]): Promise<boolean> {
   const since = new Date(Date.now() - CREW.INVITE_TTL_MS)
-  const [young, open] = await Promise.all([
+  const [rows, young, open] = await Promise.all([
+    tx.crew_members.count({ where: { crew_id: crewId } }),
     tx.crews.count({ where: { id: crewId, created_at: { gt: since } } }),
-    tx.crew_invites.count({ where: { crew_id: crewId, declined_at: null, removed_at: null, created_at: { gt: since } } }),
+    tx.crew_invites.count({
+      where: { crew_id: crewId, invited_by: { in: activeIds }, declined_at: null, removed_at: null, created_at: { gt: since } },
+    }),
   ])
-  return young + open > 0
+  return open > 0 || (young > 0 && rows === 1)
 }
 
 /** `settleLocked` in its own transaction, then the sockets out if it dissolved. */
@@ -216,13 +226,18 @@ export async function crewsToRepair(): Promise<string[]> {
           WHERE m.crew_id = c.id AND u.suspended_at IS NULL AND u."deletedAt" IS NULL) AS active,
         EXISTS (SELECT 1 FROM crew_members m JOIN "User" u ON u.id = m.user_id
           WHERE m.crew_id = c.id AND m.role = 'owner' AND u.suspended_at IS NULL AND u."deletedAt" IS NULL) AS has_owner,
-        EXISTS (SELECT 1 FROM crew_invites i WHERE i.crew_id = c.id AND i.declined_at IS NULL AND i.removed_at IS NULL
-          AND i.created_at > now() - make_interval(secs => ${ttl})) AS open_invite
+        EXISTS (SELECT 1 FROM crew_invites i
+          JOIN crew_members im ON im.crew_id = i.crew_id AND im.user_id = i.invited_by
+          JOIN "User" iu ON iu.id = im.user_id
+          WHERE i.crew_id = c.id AND i.declined_at IS NULL AND i.removed_at IS NULL
+            AND i.created_at > now() - make_interval(secs => ${ttl})
+            AND iu.suspended_at IS NULL AND iu."deletedAt" IS NULL) AS open_invite,
+        (SELECT count(*) FROM crew_members m WHERE m.crew_id = c.id) AS member_rows
       FROM crews c WHERE c.dissolved_at IS NULL
     )
     SELECT id::text FROM standing
     WHERE (active < ${CREW.MIN_MEMBERS}
-            AND NOT (active >= 1 AND (open_invite OR created_at > now() - make_interval(secs => ${ttl}))))
+            AND NOT (active >= 1 AND (open_invite OR (member_rows = 1 AND created_at > now() - make_interval(secs => ${ttl})))))
        OR (active >= 1 AND NOT has_owner)
     LIMIT ${REPAIR_BATCH}`
   return broken.map((r) => r.id)

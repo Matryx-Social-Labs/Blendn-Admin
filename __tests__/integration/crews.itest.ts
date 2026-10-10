@@ -930,8 +930,9 @@ describe("standing: active members only, an owner who can act, and the sweeper's
     await db.user.update({ where: { id: m1.id }, data: { suspended_at: new Date() } })
     await db.user.update({ where: { id: o2.id }, data: { suspended_at: new Date() } })
     await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: ghost.crewId, user_id: m4.id } } })
-    // Older than an invite lives, so not a crew still waiting on its friends.
-    await db.crews.updateMany({ where: { id: { in: [pair.crewId, ghost.crewId] } }, data: { created_at: daysAgo(15) } })
+    // The pair is young but had two members: not waiting (step 9 review). The
+    // ghost is down to one member row, so only its age says it is not new.
+    await db.crews.update({ where: { id: ghost.crewId }, data: { created_at: daysAgo(15) } })
 
     const result = await repairCrews()
     expect(result.dissolved).toBeGreaterThanOrEqual(2)
@@ -993,6 +994,33 @@ describe("standing: active members only, an owner who can act, and the sweeper's
     expect(await standing(crewId)).toBe(false)
     expect((await db.chat_groups.findUniqueOrThrow({ where: { id: chatGroupId }, select: { status: true } })).status).toBe("archived")
     expect((await api.join(slow, crewId)).status).toBe(404)
+  })
+
+  it("does not wait on an invite whose sender is no longer an active member, nor on an owner's removal marker", async () => {
+    const owner = await person("nw-owner")
+    const mate = await person("nw-mate")
+    const asked = await person("nw-asked")
+    const { crewId } = await crewOf(owner, [mate])
+    await befriend(mate, asked)
+    expect((await api.invite(mate, crewId, [asked.id])).body.data).toEqual({ invited: 1 })
+    await db.user.update({ where: { id: mate.id }, data: { suspended_at: new Date() } })
+    // The only open invite came from the suspended mate: the accept would refuse it, so the crew is not waiting.
+    expect(await crewsToRepair()).toContain(crewId)
+    expect(await settleCrew(crewId, { graceWhileInviting: true })).toEqual({ dissolved: true })
+    expect((await api.join(asked, crewId)).status).toBe(404)
+
+    const owner2 = await person("nw-owner2")
+    const [kept, gone] = [await person("nw-kept"), await person("nw-gone")]
+    const second = await crewOf(owner2, [kept, gone], "Marked")
+    // The owner removes one (a marker row, removed_at), then the other is suspended: one active, one fresh marker.
+    await db.profiles.update({ where: { id: gone.id }, data: { name: "Gautam Rao" } })
+    const goneRef = (await api.detail(owner2, second.crewId)).body.data.members.find((m: { name: string }) => m.name === "Gautam").userId
+    expect((await api.remove(owner2, second.crewId, goneRef)).body.data).toEqual({ dissolved: false })
+    expect((await inviteRow(second.crewId, gone.id))?.removed_at).toBeInstanceOf(Date)
+    await db.crew_invites.updateMany({ where: { crew_id: second.crewId, invited_user_id: gone.id }, data: { created_at: new Date() } })
+    await db.user.update({ where: { id: kept.id }, data: { suspended_at: new Date() } })
+    expect(await crewsToRepair()).toContain(second.crewId)
+    expect(await settleCrew(second.crewId, { graceWhileInviting: true })).toEqual({ dissolved: true })
   })
 
   it("keeps the crew-chat ban a suspension wrote after the reinstate (D: a ban only a person lifts)", async () => {

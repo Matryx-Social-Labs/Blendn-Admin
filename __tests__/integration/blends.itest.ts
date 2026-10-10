@@ -377,6 +377,11 @@ describe("in the Blend: pseudonyms, the crew reveal with its opt-out, leaving al
     expect((await db.blend_reveals.findMany({ where: { blend_id: blendId }, select: { user_id: true } })).map((r) => r.user_id)).toEqual([solo.id])
     const seen = (await api.blends(crew[1])).body.data.blends.find((b: { blendId: string }) => b.blendId === blendId)
     expect(seen.sides.find((s: { kind: string }) => s.kind === "person").people[0].name).toBe("Meera")
+    // Her side is theirs to the crew (a count of one, revealed 1); to her it is hers: herself, no counts.
+    expect(seen.sides.find((s: { kind: string }) => s.kind === "person")).toMatchObject({ mine: false, count: 1, revealed: 1, keptPrivate: 0 })
+    const hers = (await api.blends(solo)).body.data.blends.find((b: { blendId: string }) => b.blendId === blendId)
+    expect(hers.sides.find((s: { kind: string }) => s.kind === "person")).toMatchObject({ mine: true, count: 1, revealed: null, keptPrivate: null })
+    expect(hers.sides.find((s: { kind: string }) => s.kind === "crew")).toMatchObject({ mine: false })
     // And the crew stays anonymous to the person: her tap named only her.
     const theirs = (await api.blends(solo)).body.data.blends.find((b: { blendId: string }) => b.blendId === blendId)
     expect(JSON.stringify(theirs.sides.find((s: { kind: string }) => s.kind === "crew"))).not.toMatch(/Kiran/)
@@ -648,6 +653,7 @@ describe("crew and Blend rooms in the chat list (step 9 review, S5)", () => {
     return res.body.data.rooms
   }
   const pick = (list: ListedRoom[], id: string) => list.find((r) => r.id === id)
+  const call2 = (p: Person) => api.chatGroups(p, 2)
 
   it("lists a member's crew chat and open Blend with their kind — not the Blend to a pair a block parted, nor once it closes", async () => {
     const w = await blendedPair("cl")
@@ -671,6 +677,11 @@ describe("crew and Blend rooms in the chat list (step 9 review, S5)", () => {
     expect(pick(await rooms(b2), w.roomId)).toBeUndefined()
     expect(pick(await rooms(a2), w.A.roomId)).toBeDefined()
     expect(pick(await rooms(a1), w.roomId)).toBeDefined()
+
+    // Not paged: the first page carries them, a later page none.
+    const second = await call2(a1)
+    expect(second.status).toBe(200)
+    expect(second.body.data.rooms).toEqual([])
 
     // Its clock passes, sweeper or not: off every list.
     await db.blends.update({ where: { id: w.blendId }, data: { closes_at: new Date(Date.now() - 1000) } })
