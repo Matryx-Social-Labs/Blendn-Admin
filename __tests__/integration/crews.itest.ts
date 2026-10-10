@@ -33,7 +33,7 @@ import { initSocketServer } from "@/lib/socket-server"
 import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import { canJoinChat } from "@/lib/socket-auth"
 import { conversationPair } from "@/lib/conversations"
-import { repairCrews } from "@/lib/crews/sweep"
+import { crewsToRepair, repairCrews, settleCrew } from "@/lib/crews/sweep"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 import { resolveReport } from "@/app/dashboard/moderation/reports/actions"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
@@ -735,7 +735,12 @@ describe("nobody kept apart shares a crew (C5, C6)", () => {
     expect(await names(x)).toEqual(["Meera", "Xavier"])
     expect(await names(y)).toEqual(["Meera", "Yamini"])
     expect(await names(owner)).toEqual(["Meera", "Xavier", "Yamini"])
-    expect((await api.detail(x, crewId)).body.data.size).toBe(3)
+    // Not counted to each other either: a size one bigger than the list says
+    // somebody is hiding from you (step 9 review, H4).
+    expect((await api.detail(x, crewId)).body.data.size).toBe(2)
+    expect((await api.detail(y, crewId)).body.data.size).toBe(2)
+    expect((await api.detail(owner, crewId)).body.data.size).toBe(3)
+    expect((await api.mine(x)).body.data.crews.find((c: { crewId: string }) => c.crewId === crewId).size).toBe(2)
     // The chat: y's line reaches the owner, not x; the roster drops each for the other.
     expect((await api.send(y, roomId, "y says hi")).status).toBe(201)
     const read = async (p: Person) => (await api.read(p, roomId)).body.data.messages.map((m: { content: string }) => m.content)
@@ -743,6 +748,58 @@ describe("nobody kept apart shares a crew (C5, C6)", () => {
     expect(await read(x)).not.toContain("y says hi")
     const roster = (await api.roster(x, roomId)).body.data.participants.map((p: { name: string }) => p.name)
     expect(roster).not.toContain("Yamini")
+  })
+})
+
+describe("what the viewer is shown is what the viewer can do (step 9 review, H4, M5)", () => {
+  it("lists only an invite the accept would take: its sender still in and still a friend, nobody in it kept apart", async () => {
+    const owner = await person("li-owner")
+    const sender = await person("li-sender")
+    const other = await person("li-other")
+    const target = await person("li-target")
+    const { crewId } = await crewOf(owner, [sender, other])
+    await befriend(sender, target)
+    expect((await api.invite(sender, crewId, [target.id])).body.data).toEqual({ invited: 1 })
+    const listed = async () => (await api.mine(target)).body.data.invites.map((i: { crewId: string }) => i.crewId)
+    expect(await listed()).toEqual([crewId])
+
+    // A closed conversation with a member who did not send it.
+    const [user1_id, user2_id] = conversationPair(other.id, target.id)
+    const closed = await db.private_conversations.create({ data: { user1_id, user2_id, closed_at: new Date(), closed_by: target.id, closed_reason: "unmatch" } })
+    expect(await listed()).toEqual([])
+    expect((await api.join(target, crewId)).status).toBe(404)
+    await db.private_conversations.delete({ where: { id: closed.id } })
+    expect(await listed()).toEqual([crewId])
+
+    // The sender suspended: no longer an active member.
+    await db.user.update({ where: { id: sender.id }, data: { suspended_at: new Date() } })
+    expect(await listed()).toEqual([])
+    expect((await api.join(target, crewId)).status).toBe(404)
+    await db.user.update({ where: { id: sender.id }, data: { suspended_at: null } })
+    expect(await listed()).toEqual([crewId])
+
+    // No longer friends with the sender (a row gone some other way than an unfriend, which drops the invite).
+    const [f1, f2] = conversationPair(sender.id, target.id)
+    await db.friendships.delete({ where: { user1_id_user2_id: { user1_id: f1, user2_id: f2 } } })
+    expect(await listed()).toEqual([])
+    expect((await api.join(target, crewId)).status).toBe(404)
+  })
+
+  it("marks each crewmate who is the viewer's friend, and nobody else", async () => {
+    const owner = await person("fr-owner", "Meera Iyer")
+    const x = await person("fr-x", "Xavier Dsouza")
+    const y = await person("fr-y", "Yamini Rao")
+    const { crewId } = await crewOf(owner, [x, y])
+    const friendly = async (p: Person) =>
+      Object.fromEntries((await api.detail(p, crewId)).body.data.members.map((m: { name: string; isFriend: boolean }) => [m.name, m.isFriend]))
+    expect(await friendly(x)).toEqual({ Meera: true, Xavier: false, Yamini: false })
+    expect(await friendly(owner)).toEqual({ Meera: false, Xavier: true, Yamini: true })
+    await befriend(x, y)
+    expect(await friendly(x)).toEqual({ Meera: true, Xavier: false, Yamini: true })
+    // Still never an account id: the handle, whoever it is.
+    const ids = (await api.detail(x, crewId)).body.data.members.map((m: { userId: string }) => m.userId)
+    expect(ids).not.toContain(y.id)
+    expect(ids).not.toContain(owner.id)
   })
 })
 
@@ -873,6 +930,9 @@ describe("standing: active members only, an owner who can act, and the sweeper's
     await db.user.update({ where: { id: m1.id }, data: { suspended_at: new Date() } })
     await db.user.update({ where: { id: o2.id }, data: { suspended_at: new Date() } })
     await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: ghost.crewId, user_id: m4.id } } })
+    // The pair is young but had two members: not waiting (step 9 review). The
+    // ghost is down to one member row, so only its age says it is not new.
+    await db.crews.update({ where: { id: ghost.crewId }, data: { created_at: daysAgo(15) } })
 
     const result = await repairCrews()
     expect(result.dissolved).toBeGreaterThanOrEqual(2)
@@ -885,6 +945,82 @@ describe("standing: active members only, an owner who can act, and the sweeper's
     // Idempotent: a second pass finds nothing of theirs.
     await repairCrews()
     expect(await db.crew_members.count({ where: { crew_id: trio.crewId, role: "owner" } })).toBe(1)
+  })
+
+  const standing = async (crewId: string) =>
+    (await db.crews.findUniqueOrThrow({ where: { id: crewId }, select: { dissolved_at: true } })).dissolved_at === null
+
+  it("leaves a new crew of one standing while its invites are out, and the accept after the sweep lands (step 9 review, C1)", async () => {
+    const owner = await person("wait-owner")
+    const [f1, f2] = [await person("wait-f1"), await person("wait-f2")]
+    await befriend(owner, f1, f2)
+    const crewId = (await api.create(owner, { name: "Waiting Lot", inviteUserIds: [f1.id, f2.id] })).body.data.crewId as string
+    expect(await crewsToRepair()).not.toContain(crewId)
+    await repairCrews()
+    expect(await standing(crewId)).toBe(true)
+    expect((await api.mine(f1)).body.data.invites.map((i: { crewId: string }) => i.crewId)).toEqual([crewId])
+    expect((await api.join(f1, crewId)).status).toBe(200)
+    expect((await api.detail(f1, crewId)).body.data.size).toBe(2)
+  })
+
+  it("waits on an invite as on a young crew: an old crew asked a friend today stands, and the settle re-reads it under the lock", async () => {
+    const owner = await person("wait2-owner")
+    const friend = await person("wait2-friend")
+    await befriend(owner, friend)
+    const crewId = (await api.create(owner, { name: "Slow Lot" })).body.data.crewId as string
+    // Young, nobody asked yet: a crew of one is how every crew starts.
+    expect(await crewsToRepair()).not.toContain(crewId)
+    expect(await settleCrew(crewId, { graceWhileInviting: true })).toEqual({ dissolved: false })
+    // Older than an invite lives, nobody asked: the sweep's to settle.
+    await db.crews.update({ where: { id: crewId }, data: { created_at: daysAgo(20) } })
+    expect(await crewsToRepair()).toContain(crewId)
+    // The owner asks before the settle takes the lock: the settle sees the invite.
+    expect((await api.invite(owner, crewId, [friend.id])).body.data).toEqual({ invited: 1 })
+    expect(await settleCrew(crewId, { graceWhileInviting: true })).toEqual({ dissolved: false })
+    expect(await crewsToRepair()).not.toContain(crewId)
+    expect((await api.join(friend, crewId)).status).toBe(200)
+  })
+
+  it("dissolves a crew of one whose invites all lapsed or were declined", async () => {
+    const owner = await person("lap-owner")
+    const [no, slow] = [await person("lap-no"), await person("lap-slow")]
+    await befriend(owner, no, slow)
+    const { crewId, chatGroupId } = (await api.create(owner, { name: "Nobody Came", inviteUserIds: [no.id, slow.id] })).body.data
+    expect((await api.decline(no, crewId)).status).toBe(200)
+    await db.crew_invites.updateMany({ where: { crew_id: crewId, invited_user_id: slow.id }, data: { created_at: daysAgo(15) } })
+    await db.crews.update({ where: { id: crewId }, data: { created_at: daysAgo(15) } })
+    expect(await crewsToRepair()).toContain(crewId)
+    await repairCrews()
+    expect(await standing(crewId)).toBe(false)
+    expect((await db.chat_groups.findUniqueOrThrow({ where: { id: chatGroupId }, select: { status: true } })).status).toBe("archived")
+    expect((await api.join(slow, crewId)).status).toBe(404)
+  })
+
+  it("does not wait on an invite whose sender is no longer an active member, nor on an owner's removal marker", async () => {
+    const owner = await person("nw-owner")
+    const mate = await person("nw-mate")
+    const asked = await person("nw-asked")
+    const { crewId } = await crewOf(owner, [mate])
+    await befriend(mate, asked)
+    expect((await api.invite(mate, crewId, [asked.id])).body.data).toEqual({ invited: 1 })
+    await db.user.update({ where: { id: mate.id }, data: { suspended_at: new Date() } })
+    // The only open invite came from the suspended mate: the accept would refuse it, so the crew is not waiting.
+    expect(await crewsToRepair()).toContain(crewId)
+    expect(await settleCrew(crewId, { graceWhileInviting: true })).toEqual({ dissolved: true })
+    expect((await api.join(asked, crewId)).status).toBe(404)
+
+    const owner2 = await person("nw-owner2")
+    const [kept, gone] = [await person("nw-kept"), await person("nw-gone")]
+    const second = await crewOf(owner2, [kept, gone], "Marked")
+    // The owner removes one (a marker row, removed_at), then the other is suspended: one active, one fresh marker.
+    await db.profiles.update({ where: { id: gone.id }, data: { name: "Gautam Rao" } })
+    const goneRef = (await api.detail(owner2, second.crewId)).body.data.members.find((m: { name: string }) => m.name === "Gautam").userId
+    expect((await api.remove(owner2, second.crewId, goneRef)).body.data).toEqual({ dissolved: false })
+    expect((await inviteRow(second.crewId, gone.id))?.removed_at).toBeInstanceOf(Date)
+    await db.crew_invites.updateMany({ where: { crew_id: second.crewId, invited_user_id: gone.id }, data: { created_at: new Date() } })
+    await db.user.update({ where: { id: kept.id }, data: { suspended_at: new Date() } })
+    expect(await crewsToRepair()).toContain(second.crewId)
+    expect(await settleCrew(second.crewId, { graceWhileInviting: true })).toEqual({ dissolved: true })
   })
 
   it("keeps the crew-chat ban a suspension wrote after the reinstate (D: a ban only a person lifts)", async () => {

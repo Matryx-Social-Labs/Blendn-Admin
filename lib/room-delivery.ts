@@ -127,6 +127,8 @@ export async function deliverToRoom(input: {
         chat_group: {
           select: {
             kind: true,
+            crew_id: true,
+            blend_id: true,
             event: { select: { status: true, deleted_at: true, kind: true } },
             ...ownerDoor(recipientId),
           },
@@ -148,6 +150,13 @@ export async function deliverToRoom(input: {
       preview: input.preview,
       chatGroupId,
       senderHandle: roomHandle(input.scope, senderId),
+      // Which kind of room the tap opens (step 9 review, H2): a crew's or a
+      // Blend's is not an event's, and the app routes on this.
+      room: {
+        kind: membership.chat_group.kind,
+        crewId: membership.chat_group.crew_id,
+        blendId: membership.chat_group.blend_id,
+      },
     })
   } catch (error) {
     logger.error("Room push notification failed", {

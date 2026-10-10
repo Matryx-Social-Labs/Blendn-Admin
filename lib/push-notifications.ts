@@ -697,6 +697,12 @@ export async function notifyRoomReply(reply: {
   preview: string
   chatGroupId: string
   senderHandle: string
+  /**
+   * The room's kind — `event` (a venue day's room is one too), `crew`,
+   * `blend` or `board_post` — and its crew or Blend, so the tap opens the
+   * right screen. Ids of rooms the recipient is in; never a person's.
+   */
+  room: { kind: string; crewId?: string | null; blendId?: string | null }
 }): Promise<boolean> {
   const fresh = await firstInWindow(
     `push:room-reply:${reply.chatGroupId}:${reply.recipientId}`,
@@ -708,7 +714,14 @@ export async function notifyRoomReply(reply: {
     userId: reply.recipientId,
     title: reply.groupName,
     body: `${reply.senderName} replied: ${clip(reply.preview, 80)}`,
-    data: { type: "group_message", chatGroupId: reply.chatGroupId, senderId: reply.senderHandle },
+    data: {
+      type: "group_message",
+      chatGroupId: reply.chatGroupId,
+      senderId: reply.senderHandle,
+      kind: reply.room.kind,
+      ...(reply.room.crewId && { crewId: reply.room.crewId }),
+      ...(reply.room.blendId && { blendId: reply.room.blendId }),
+    },
   })
 }
 
