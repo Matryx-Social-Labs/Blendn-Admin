@@ -857,9 +857,9 @@ now — see Crews), and a Blend's (see Blends). The `/chat/groups/:chatGroupId/.
 admit whoever its owner admits — for a room that is not an event's, a
 membership row alone is not enough, and a refusal reads exactly as "not a
 member". Every id they send is a handle in that room's own scope (see Room
-handles). `GET /chat/groups` still lists event rooms only, so every row keeps
-its `event`; other kinds get their place in the list with the app that shows
-them. In a board post's room the roster (`/participants`) lists only the
+handles). `GET /chat/groups` lists event rooms in `groups` (each
+`kind: "event"`, with its `event`) and crew and Blend rooms in `rooms` — see
+below; a board post's room is not listed. In a board post's room the roster (`/participants`) lists only the
 people its owner admits, an asker in a block with the author is out, writes
 stop 12 hours after the event ends (`CHAT_CLOSED`), and a withdrawn or
 taken-down post closes the room (404). To block or report somebody there, use
@@ -871,6 +871,31 @@ removed is out of the room at once, their row kept `left` for the history.
 
 ### GET /chat/groups
 Lists every **event** room the caller is still a member of: `active` and **`muted`** memberships (a mute silences, it does not banish — the room stays readable and a post is refused with the reason), in `active` and **`locked`** rooms (read-only until the organiser reopens it). Each row carries `membership.status` and the room's `status` so the client can label _Muted_ / _Locked_. Banned and left memberships, and archived rooms, are not listed.
+
+**`rooms`: crews' and Blends' rooms (step 9).** Beside the paged `groups`, the
+response carries `rooms` — the caller's crews' chats and their Blends' rooms,
+each `{ id, kind: "crew" | "blend", name, crewId, blendId, closesAt,
+unreadCount, mute, lastMessageAt, lastMessage, membership, status }`, newest
+message first, not paged (at most ten crews and a night's few Blends) — sent
+with the first page, and `[]` on later pages. Each is
+listed as its door admits the caller now: a crew's while they are in the crew;
+a Blend's only while it is open (`closesAt` is its clock — gone from the list
+then, sweeper or not) and never to two people a block across it parted.
+`lastMessage.user` is named as that room names people: a crewmate's first
+name; in a Blend, tonight's pseudonym (a reveal names people on `GET /blends`,
+never in the chat). Own list rather
+than more `groups` rows because an installed app reads `event` off every
+`groups` row, and these rooms have none. A hidden crew's chat stays listed to
+its members — hiding takes a crew off every surface outside it, not its own
+chat (C12) — while a Blend with a hidden side is gone for everyone.
+
+**Nothing in a row comes from somebody in a block with you.** On every row,
+`groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
+from anybody you blocked or who blocked you — the same filter the room's
+history applies — so a blocked person's line is never previewed, named or
+counted. On `rooms`, `lastMessageAt` is the time of the newest message you can
+see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the
+paging order, are still the room's own last message.)
 
 ### POST /message-requests
 **`message` is required.** A request with no message is indistinguishable from a
@@ -1358,7 +1383,7 @@ at an event. `lib/crews/`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/crews` | My crews `{ crews, invites }` — open invites waiting for me, by the inviting friend's first name |
+| GET | `/crews` | My crews `{ crews, invites }` — open invites waiting for me that an accept would take, by the inviting friend's first name |
 | POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous? }` → 201 `{ crewId, chatGroupId, invited }` |
 | GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
 | PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
@@ -1392,7 +1417,9 @@ sent again. One invite push per inviter and invitee a day, whatever the crew
 **Accepting asks again**, under the crew's lock: the invite open; whoever sent
 it still in the crew and still your friend; nobody in the crew kept apart from
 you. Any of those failing is the same 404 as no invite. A block or an unfriend
-also withdraws the invites between the two people at once.
+also withdraws the invites between the two people at once. `GET /crews` lists
+only an invite that would pass these checks now: one the accept would refuse is
+not on the screen, so a 404 after a listed invite never says a block is there.
 
 **Caps.** You can own 3 standing crews and be in 10 (409 past either), and make
 3 new crews in 24 hours (429).
@@ -1406,7 +1433,15 @@ the rest are let go, open invites are withdrawn. A crew without an active owner
 passes to the active member who has been in it longest — when its owner leaves,
 is erased or is suspended. The chat sweeper repairs any crew left below two or
 without an owner every 15 minutes, so a suspension (which writes no crew row)
-or a failed erasure settle is not left standing.
+or a failed erasure settle is not left standing. **Except a crew still waiting
+on its friends:** every crew starts as its owner and the invites out, and the
+sweeper leaves a crew of one standing while it has an open invite or is younger
+than an invite lives (14 days) and has only ever had the one member row. An
+invite counts while it is open and its sender is still an active member — the
+accept's own rule. Once every invite has lapsed, been declined or lost its
+sender, and the crew is past 14 days old (or had a second member, now
+suspended), the next pass dissolves it. A departure is not a
+wait: a crew somebody leaves down to one dissolves at once.
 
 **Joining is consent.** Creating or joining requires `revealConsent: true`. The
 app shows, beside it: *"Anyone in this crew can reveal the crew — your name and
@@ -1441,8 +1476,13 @@ name — on `/crews` and in the crew's room. Member ids are handles in the crew'
 room (yours is your own id); `DELETE /crews/:crewId/members/:userId` takes that
 handle back, and a raw id or another room's handle names nobody (404). Two
 members kept apart (a block or a closed conversation) are not listed to each
-other on `/crews`, and the crew chat already hides each one's messages and
-roster entry from the other; `size` still counts everybody active.
+other on `/crews`, and not counted to each other either — `size` is the
+members that viewer is shown, so a size one bigger than the list never says
+somebody is hiding — and the crew chat already hides each one's messages and
+roster entry from the other. Each member carries **`isFriend`** — one of the
+viewer's friends (never true for the viewer) — so an invite picker can leave
+out a friend already in without the client ever holding another member's
+account id.
 
 **"We're here"** needs the tapper checked in at the event now (403 otherwise)
 and checks **nobody else** in: every member checks in by their own GPS. It
@@ -1492,7 +1532,7 @@ messages in a crew chat stay, as in any room.
 | POST | `/events/:eventId/crews/:crewId/like` | Like a crew here: `{ asCrewId? }` — as one of your crews here, or as yourself → `{ liked: true, blend }` |
 | POST | `/events/:eventId/matches/likes` | With `asCrewId`: like one person on your crew's behalf → `{ liked: true, blend }` |
 | PUT | `/events/:eventId/matches/preferences` | `openToCrews` — "Open to joining a crew tonight" (until the end of your occurrence) |
-| POST | `/blends/:blendId/reveal` | One tap reveals your crew **in this Blend** → `{ revealed, keptPrivate }` |
+| POST | `/blends/:blendId/reveal` | One tap reveals your crew **in this Blend** → `{ revealed: true }` |
 | GET | `/blends` | My open Blends: room, clock, both sides' people |
 
 **No voting.** Any member of a crew that is here (two or more checked in) likes
@@ -1556,7 +1596,11 @@ again as the reveal is written) — consent was given on joining — is revealed
 **to that Blend's people only** (`blend_reveals`): first name and one photo on
 `GET /blends`. Not to the event's room, its roster or deck, not in any DM, not
 in another Blend. The matched person in a crew ↔ person Blend reveals only
-themselves. `GET /blends` says *"N revealed · M keep it private"* per crew.
+themselves. `GET /blends` says *"N revealed · M keep it private"* for the
+**other** side only. Your own side is you and a count (`mine: true`, `count`,
+`people` = you alone, `revealed` and `keptPrivate` null), and the reveal
+answers `{ revealed: true }` with no count: your crewmates' faces beside one
+pseudonym, or "1 keeps it private", would tell your crew which of you said no.
 Switching "keep me anonymous" on afterwards applies from then on (D-10): a
 reveal already made is not undone. Deleting your account deletes your reveals.
 
@@ -2654,7 +2698,7 @@ them any more. Rows written before that are hidden, and retention removes them.
 |---|---|---|
 | A DM | The recipient, when the conversation goes from read to unread; while it stays unread, at most once every 5 minutes, as "N new messages" | One notification per conversation, replaced in place (`dm:{conversationId}`) |
 | A room message | **Nobody** | — |
-| A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes | `room:{chatGroupId}`, replaced in place |
+| A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes. `data: { type: "group_message", chatGroupId, senderId, kind }` — `kind` is the room's: `event` (a venue day's room too), `crew` (with `crewId`), `blend` (with `blendId`) or `board_post`; open the tap as that room | `room:{chatGroupId}`, replaced in place |
 | A check-in | **Nobody** — the live roster carries arrivals | — |
 | An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going, maybe, waitlisted and saved | `event:{eventId}`, replaced in place: only the latest state is true |
 | An organiser announcement | Everyone in the room | Stacked with its event, never replaced |
