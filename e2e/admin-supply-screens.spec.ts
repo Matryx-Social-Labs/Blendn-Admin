@@ -219,7 +219,8 @@ test("Settings is every role's, and the same screen for each", async ({ baseURL 
 test("a lead from an address that applied says so in its drawer", async ({ baseURL }) => {
   const ctx = await browser.newContext({ storageState: statePathFor("admin"), viewport: { width: 1440, height: 900 }, baseURL })
   const page = await ctx.newPage()
-  await page.goto("/dashboard/leads?status=contacted", { waitUntil: "networkidle" })
+  // `all`, not the seeded `contacted`: the seed leaves the lead alone once somebody has moved it.
+  await page.goto("/dashboard/leads?status=all", { waitUntil: "networkidle" })
   // The row's way in is its first cell's link, as on every DataTable.
   await main(page).getByRole("row", { name: new RegExp(MATRIX_MARKERS.lead) }).getByRole("link").click()
   const drawer = page.getByRole("dialog", { name: "Lead detail" })
