@@ -1,6 +1,6 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
-import type { board_request_status } from "@prisma/client"
+import type { board_request_status, Prisma } from "@prisma/client"
 
 import { ageFrom } from "./age"
 import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
@@ -414,4 +414,77 @@ export async function boardRequestCounterpart(
   if (r?.from_user_id === viewerId) return r.to_user_id
   if (r?.to_user_id === viewerId) return r.from_user_id
   return null
+}
+
+/* -------------------------------------------------------------------------- */
+/* The post's room                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Accepted askers a post needs before it has a room. One asker and the author
+ * already have their conversation (the accept opens it); a room is for the
+ * car of three, the table of four — CR-I16, "an offer with 2 accepted → the
+ * post's group".
+ */
+export const BOARD_ROOM_MIN_ACCEPTED = 2
+
+/** A post's room is named by what the post offered, cut to a line. */
+const ROOM_NAME_MAX = 60
+
+/**
+ * Seat everybody a post's room admits — its author and every accepted asker —
+ * creating the room on the accept that makes it worth having (step 10,
+ * SCRUM-535). Inside the accept's transaction, after the claim, under the
+ * post's row lock, so two accepts at once count each other and make one room.
+ *
+ * The member row is what the room's socket, roster and pseudonym read; the
+ * door is still the post (`roomOwnerDenial` in lib/room-kind.ts) — a row never
+ * admits anybody the owner does not. A row that already exists is left as it
+ * is: somebody who left the room or was banned from it is not put back by the
+ * next accept.
+ *
+ * Pseudonyms are the event room's (`boardPseudonyms`), the names the board
+ * already showed them by. One name per room: should two people somehow carry
+ * the same one, the later goes unnamed ("Attendee") rather than failing the
+ * accept on the room's unique name.
+ */
+export async function seatBoardRoom(
+  tx: Prisma.TransactionClient,
+  post: { id: string; event_id: string; author_id: string; body: string }
+): Promise<string | null> {
+  const accepted = await tx.board_requests.findMany({
+    where: { post_id: post.id, status: "accepted" },
+    select: { from_user_id: true },
+  })
+  if (accepted.length < BOARD_ROOM_MIN_ACCEPTED) return null
+
+  const room = await tx.chat_groups.upsert({
+    where: { board_post_id: post.id },
+    create: {
+      kind: "board_post",
+      board_post_id: post.id,
+      name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Board",
+      status: "active",
+    },
+    update: {},
+    select: { id: true },
+  })
+
+  const people = [post.author_id, ...accepted.map((a) => a.from_user_id)]
+  const [names, seated] = await Promise.all([
+    boardPseudonyms(post.event_id, people),
+    tx.chat_group_members.findMany({ where: { chat_group_id: room.id }, select: { user_id: true, anonymous_name: true } }),
+  ])
+  const have = new Set(seated.map((m) => m.user_id))
+  const taken = new Set(seated.flatMap((m) => (m.anonymous_name ? [m.anonymous_name] : [])))
+  for (const userId of people) {
+    if (have.has(userId)) continue
+    const name = names.get(userId)
+    const seatName = name && !taken.has(name) ? name : null
+    if (seatName) taken.add(seatName)
+    await tx.chat_group_members.create({
+      data: { chat_group_id: room.id, user_id: userId, status: "active", anonymous_name: seatName },
+    })
+  }
+  return room.id
 }

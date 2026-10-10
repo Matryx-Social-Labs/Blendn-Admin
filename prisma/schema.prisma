@@ -370,6 +370,29 @@ model profiles {
   /// `maySeeIdentityFor`, which is what every room surface asks; the friends
   /// list and the friend's profile are friend surfaces and do not depend on it.
   friends_see_me_in_rooms Boolean @default(false)
+
+  /// Matching v2, display only (plan v2 §8, `lib/about-you.ts`). Shown as a
+  /// named overlap when two people share one — "You both speak Malayalam",
+  /// "Both from Kerala", "Both Leos" — and **never scored**: ranking by origin
+  /// would sort rooms by region, and by sign, by stars. Tier B (§8.5): before a
+  /// reveal, only in rooms of eight or more and one per card.
+  ///
+  /// Languages besides English, curated slugs, at most five.
+  languages      String[] @default([])
+  /// State or union territory, a curated slug — never a district or a town.
+  home_state     String?
+  /// Their sign, **only if they picked one** (opt-in, off by default). Never
+  /// derived behind their back: the editor suggests the Western sign of their
+  /// birth date, and nothing is stored until they choose. The same slug in
+  /// either calendar; `sign_system` says which one is theirs.
+  sun_sign       String?
+  /// `western` or `rashi`. Set exactly when `sun_sign` is (`profiles_sign_shape`).
+  sign_system    String?
+  /// Show "Shows up" (attended 80% of RSVPs, at least three) on your card.
+  /// Off unless turned on, as Hinge's Signals are.
+  shows_up_badge Boolean  @default(false)
+
+  this_or_that   this_or_that_answers[]
   // push_token and push_platform removed — use push_tokens table instead
   created_at     DateTime @default(now()) @db.Timestamptz(6)
   updated_at     DateTime @default(now()) @db.Timestamptz(6)
@@ -1115,6 +1138,23 @@ model mobile_refresh_tokens {
 
   @@index([user_id])
   @@index([expires_at])
+}
+
+/// This-or-that answers (plan v2 §8.3). One per person per question; the
+/// questions are constants in `lib/this-or-that.ts`, so a question retired
+/// there simply stops being read. Display only — "you both picked filter
+/// coffee over chai" — until data says which answers precede a mutual like.
+model this_or_that_answers {
+  user_id     String
+  /// A slug from `THIS_OR_THAT`.
+  question    String
+  /// `a` or `b` (`this_or_that_choice`).
+  choice      String
+  answered_at DateTime @default(now()) @db.Timestamptz(6)
+
+  profile profiles @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, question])
 }
 
 model user_interests {

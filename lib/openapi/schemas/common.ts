@@ -146,3 +146,24 @@ export const standardErrors = {
     },
   },
 } as const
+
+/**
+ * A display-only line two people (or two crews) share — matching v2, plan v2
+ * §8 (`lib/overlaps.ts`). A sentence ready to print; `kind` picks the icon.
+ * Never scored. Tier B kinds (`language`, `home_state`, `sign`) only in rooms
+ * of eight or more before a reveal, one per card.
+ */
+export const OverlapSchema = z
+  .object({
+    kind: z.enum(["interest", "ipl", "this_or_that", "language", "home_state", "sign"]),
+    text: z.string().describe("e.g. \"Both CSK — in RCB country 💛\", \"You both picked filter coffee over chai\", \"Both from Kerala\""),
+  })
+  .openapi("Overlap")
+
+/** A badge earned by GPS check-ins, never typed or bought (plan v2 §8.6). */
+export const BadgeSchema = z
+  .object({
+    kind: z.enum(["regular_here", "shows_up", "nights_out", "nights_together"]),
+    label: z.string().describe("\"Regular here\", \"Shows up\", \"5+ nights this month\", \"6 nights out together\""),
+  })
+  .openapi("Badge")

@@ -273,7 +273,7 @@ describe("accepting opens a conversation that can be told apart from a match", (
     expect(src).toMatch(/action === "accept" && !isLiveRequest\(/)
     // ...and it must read the row, not a value it invented.
     expect(src).toContain("event: { select: { end_time: true } }")
-    expect(src).toContain("post: { select: { deleted_at: true, spaces_left: true } }")
+    expect(src).toContain("post: { select: { deleted_at: true, spaces_left: true, body: true } }")
   })
 })
 

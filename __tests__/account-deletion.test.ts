@@ -20,6 +20,7 @@ const mockDb = {
   user: { update: jest.fn().mockReturnValue({ op: "user.update" }) },
   profiles: { update: jest.fn() },
   user_interests: { deleteMany: jest.fn() },
+  this_or_that_answers: { deleteMany: jest.fn() },
   // Two open RSVPs on future events, read before the transaction; both go.
   event_rsvps: { findMany: jest.fn().mockResolvedValue([{ event_id: "ev-1" }, { event_id: "ev-2" }]), deleteMany: jest.fn() },
   event_match_preferences: { deleteMany: jest.fn() },
@@ -156,6 +157,8 @@ describe("deleting an account scrubs the matching inputs", () => {
     // purpose, so nothing removes them unless this does.
     await del()
     expect(mockDb.user_interests.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // This-or-that answers hang off the kept profile row, so nothing cascades either.
+    expect(mockDb.this_or_that_answers.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
     // Where they were waiting is theirs too. It cascades on the foreign key as
     // well; asserted here so the deletion path stays a readable list of
     // everything it removes rather than a set of constraints to go and check.
@@ -344,6 +347,7 @@ describe("no field on the profile survives deletion unnoticed", () => {
     read_receipts: "a setting, not an attribute of the person",
     share_location: "a setting, not an attribute of the person",
     friends_see_me_in_rooms: "a setting, not an attribute of the person — and the friendships it governs are deleted",
+    this_or_that: "the relation to this_or_that_answers, whose rows are deleted (`removes the this-or-that answers` above)",
   }
 
   function profileFields(): string[] {

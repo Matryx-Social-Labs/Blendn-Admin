@@ -63,6 +63,30 @@
       "workFields"
     ]
   },
+  "/api/mobile/profile-options": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "homeStates",
+      "languages",
+      "maxLanguages",
+      "signs",
+      "thisOrThat"
+    ]
+  },
+  "/api/mobile/me/this-or-that": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "answers"
+    ]
+  },
   "/api/mobile/venues": {
     "status": 200,
     "envelope": [
@@ -390,10 +414,12 @@
         "friends_see_me_in_rooms",
         "gender",
         "goals",
+        "home_state",
         "id",
         "intent_default",
         "interested_in",
         "interests",
+        "languages",
         "location",
         "looking_for",
         "name",
@@ -408,6 +434,10 @@
         "share_location",
         "show_online",
         "show_orientation",
+        "shows_up_badge",
+        "sign_system",
+        "suggested_sun_sign",
+        "sun_sign",
         "updated_at",
         "work_field"
       ]

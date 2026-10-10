@@ -31,7 +31,8 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { updateProfileSchema } from "@/lib/validations/profile"
+import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
+import { homeStateLabel, languageLabels, signLabel, westernSignFor } from "@/lib/about-you"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 
@@ -193,6 +194,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * tag on a card, never as the values behind it.
        */
       ...(identified && p.show_orientation ? { orientations: p.orientations } : {}),
+      /*
+       * Languages, home state and sign — labels, and only to somebody who can
+       * see who this is. Before that they are Tier B (plan v2 §8.5): a card
+       * shows one of them as a shared line in a room big enough to hide in,
+       * never the set beside an age and a city.
+       */
+      ...(identified
+        ? {
+            languages: languageLabels(p.languages),
+            home_state: homeStateLabel(p.home_state),
+            sign: signLabel(p.sun_sign, p.sign_system),
+          }
+        : {}),
     }
 
     /*
@@ -203,7 +217,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * without a code change — the withholding is the deliberate part, and it
      * is one name long.
      */
-    const { date_of_birth: _dob, ...selfProfileFields } = { ...p, age: profileAge }
+    const { date_of_birth: _dob, ...selfProfileFields } = {
+      ...p,
+      age: profileAge,
+      // The editor's prefill, never stored until they pick it (lib/about-you.ts).
+      suggested_sun_sign: westernSignFor(p?.date_of_birth),
+    }
 
     return successResponse({
       id: isSelf ? user.id : ref,
@@ -273,7 +292,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
       push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
+      languages, home_state, sun_sign, sign_system, shows_up_badge,
     } = parsed.data
+    const signRefusal = signPairRefusal(parsed.data)
+    if (signRefusal) return errorResponse(signRefusal, 400, "VALIDATION_ERROR")
 
     /*
      * A photo moderation pulled stays pulled (SCRUM-479). The app sends back
@@ -597,6 +619,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    // Matching v2, display only (lib/about-you.ts). Absent means unchanged.
+    const aboutYou = {
+      ...(languages !== undefined && { languages }),
+      ...(home_state !== undefined && { home_state }),
+      ...(sun_sign !== undefined && { sun_sign, sign_system }),
+      ...(shows_up_badge !== undefined && { shows_up_badge }),
+    }
+
     // Update or create profile
     await db.profiles.upsert({
       where: { id: userId },
@@ -667,6 +697,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),
         ...(friends_see_me_in_rooms !== undefined && { friends_see_me_in_rooms }),
+        ...aboutYou,
       },
       update: {
         ...(name !== undefined && { name }),
@@ -723,6 +754,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),
         ...(friends_see_me_in_rooms !== undefined && { friends_see_me_in_rooms }),
+        ...aboutYou,
         updated_at: new Date(),
       },
     })

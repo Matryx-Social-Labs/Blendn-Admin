@@ -29,6 +29,9 @@ const mockDb = {
   event_likes: { findMany: jest.fn(), groupBy: jest.fn() },
   chat_group_members: { findMany: jest.fn() },
   categories: { findMany: jest.fn() },
+  // Matching v2's display traits and badges (lib/overlaps.ts): none here.
+  this_or_that_answers: { findMany: jest.fn().mockResolvedValue([]) },
+  events: { findUnique: jest.fn().mockResolvedValue({ venue_id: null }) },
   // The room identity rule (`visibleInRoom`) also reads closed pairs and
   // friendships. None here: these fixtures are about multi-day check-ins.
   private_conversations: { findMany: jest.fn() },

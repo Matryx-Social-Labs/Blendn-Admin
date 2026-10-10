@@ -21,6 +21,8 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 
+import { CUISINE_LOVES, IPL_TEAMS } from "../lib/about-you"
+
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 })
@@ -96,7 +98,17 @@ export const TAXONOMY: Record<string, string[]> = {
     // cafe meet-up as a "Pop-up".
     "Cocktails and mixology",
     "Coffee",
+    // Cuisine loves (matching v2, §8.3): tastes as interest leaves, never a
+    // diet. The migration 20261010120000_matching_v2 writes the same rows.
+    ...CUISINE_LOVES,
   ],
+  /*
+   * Matching v2 (§8.3): the ten teams as interest leaves, so "Both CSK — in
+   * RCB country" ranks through IDF like any rare interest. Named by code, the
+   * way everybody says them. Also an event filter: tag a screening with the
+   * two teams playing.
+   */
+  IPL: IPL_TEAMS.map((t) => t.code),
   Nightlife: ["Parties", "DJ sets", "Comedy", "Karaoke"],
   "Arts & Culture": [
     "Theatre",

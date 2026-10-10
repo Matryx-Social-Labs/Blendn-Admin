@@ -178,9 +178,19 @@ export async function DELETE(request: NextRequest) {
           // Three slugs narrow a person further than the bucket above them, so
           // they go for the same reason it does.
           expertise: [],
+          // Matching v2 (plan v2 §8): origin-like facts and a sign — exactly
+          // what "delete my account" means to be gone.
+          languages: [],
+          home_state: null,
+          sun_sign: null,
+          sign_system: null,
+          shows_up_badge: false,
           onboarded: false,
         },
       }),
+      // Their this-or-that answers: theirs alone, and the profile row they
+      // hang off is kept, so nothing cascades.
+      db.this_or_that_answers.deleteMany({ where: { user_id: authUser.userId } }),
       // Structured interests. Nothing cascades here, because the `User` row is
       // deliberately kept — deleting it would cascade other people's chat
       // history and event history along with it.
