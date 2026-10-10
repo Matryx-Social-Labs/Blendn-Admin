@@ -1767,9 +1767,9 @@
       "date": "2026-10-10"
     },
     "admin-gate-reads-database.itest.ts": {
-      "guards": "Step 18 (PR A), behavioural: a session claiming app_admin over an organiser row or a suspended admin row is refused by createAmenity, createCategory, updateUserRole, setOrganisationMaySponsor (Forbidden) and curateEvent ({ ok: false }), and the tables read back unchanged with no audit row; an admin row's calls write.",
-      "mutation": "M1102 requireAdmin reads the session's claim. M1103 currentUser lets a suspended account through (suspended_at not checked).",
-      "observed": "M1102: 2 of 3 failing (both refused cases wrote). M1103: 1 of 3 failing (the suspended admin). Restored; 3 of 3 green.",
+      "guards": "Step 18 (PR A), behavioural: a session claiming app_admin over an organiser row or a suspended admin row is refused by createAmenity, createCategory, updateUserRole, setOrganisationMaySponsor (Forbidden) and curateEvent ({ ok: false }), and the tables read back unchanged with no audit row; an admin row's calls write. actorFor, getAuditLog's scope, the overview's role and a venue edit follow the row, not the claim.",
+      "mutation": "M1102 requireAdmin reads the session's claim. M1103 currentUser lets a suspended account through (suspended_at not checked). Extended the same day to the reads whose admin branch is the whole platform: M1104 actorFor short-circuits on the role it was passed. M1105 getAuditLog's admin scope from the session. M1106 the overview's role from the session. M1107 venue-actions' requireUser takes the session's role.",
+      "observed": "M1102: 2 of 3 failing (both refused cases wrote). M1103: 1 of 3 failing (the suspended admin). Restored; 3 of 3 green. M1104–M1107: 1 of 7 failing each (the actor, the audit scope, the overview, the venue edit). Restored; 7 of 7 green.",
       "date": "2026-10-10"
     }
   },
