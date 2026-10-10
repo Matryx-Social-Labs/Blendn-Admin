@@ -153,17 +153,20 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
       )
       const memberRole = v.owner_org_id ? roleIn.get(v.owner_org_id) : undefined
       const payerRoles = mine.map((s) => roleIn.get(s.org_id))
+      const owned = memberRole !== undefined
       return {
         venueId: v.id,
         name: v.name,
         city: v.city,
-        orgName: v.owner_org?.display_name ?? "",
-        owned: memberRole !== undefined,
+        owned,
         mayBuy: memberRole ? mayManageVenueBilling(user.role, memberRole) : false,
         mayCancel: payerRoles.some((r) => r !== undefined && mayManageVenueBilling(user.role, r)),
-        pro: pros[i],
-        date: planDate(pros[i], mine[0] ?? null),
-        readiness: readinessFrom(since.get(v.id) ?? null, now),
+        // A venue this organisation no longer owns shows only its own
+        // mandate: not who owns it now, nor that owner's plan or data.
+        orgName: owned ? (v.owner_org?.display_name ?? "") : "",
+        pro: owned ? pros[i] : null,
+        date: owned ? planDate(pros[i], mine[0] ?? null) : null,
+        readiness: owned ? readinessFrom(since.get(v.id) ?? null, now) : readinessFrom(null, now),
         subscriptions,
       }
     }),
