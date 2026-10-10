@@ -3944,6 +3944,9 @@ model entitlements {
   /// did not write.
   window_event_at DateTime?        @db.Timestamptz(6)
   owner_event_at  DateTime?        @db.Timestamptz(6)
+  /// The store transaction behind the current window (the latest renewal).
+  /// A refund of an older period ends nothing; a TRANSFER matches by it.
+  window_transaction_id String?
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
   updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
 
@@ -3964,6 +3967,9 @@ model referrals {
   invitee_id String   @id
   inviter_id String
   created_at DateTime @default(now()) @db.Timestamptz(6)
+  /// When this invitee counted toward a referral month, and which: once each.
+  rewarded_at  DateTime? @db.Timestamptz(6)
+  rewarded_ref String?
 
   invitee User @relation("ReferralInvitee", fields: [invitee_id], references: [id], onDelete: Cascade)
   inviter User @relation("ReferralInviter", fields: [inviter_id], references: [id], onDelete: Cascade)

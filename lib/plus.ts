@@ -5,8 +5,8 @@ import { Prisma } from "@prisma/client"
 import { attendedEventIds } from "./attendee-counts"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
-import { addMonths, grantPlusOnce, hasEntitlement } from "./entitlements"
-import { plusGatedAnywhere, plusGatedIn } from "./env"
+import { addMonths, grantPlusOnce, hasEntitlement, plusGrantsSince } from "./entitlements"
+import { plusGateFor, plusGatedAnywhere } from "./env"
 
 /**
  * Blendn+ for attendees (plan v2 §9.3), configured here and nowhere else.
@@ -14,41 +14,50 @@ import { plusGatedAnywhere, plusGatedIn } from "./env"
  * What Plus is: staying live while you're here, your full night history (free
  * keeps the last 3), partner perks, crew extras. Every one of them asks
  * `plusRequired` on the server. Perks and crew extras do not exist yet; they
- * call it when they land (SCRUM-584).
+ * call it when they land (SCRUM-584). "History" is `/me/attendance` only: a
+ * room's own messages follow the room's rules, not Plus (review L7).
  *
  * What is NEVER sold (owner ruling 2026-10-01): who liked you, more than the
  * caps allow, seeing a venue without going live, a reveal bypass, boosting.
  * `__tests__/plus-gate-boundary.test.ts` holds the list of files allowed to
  * ask, so none of those can quietly start asking.
  *
- * Where it is sold: `PLUS_GATING` (lib/env.ts) names the gated cities. A city
- * not named is in its launch season, everything unlocked.
+ * Where it is sold: `PLUS_GATING` (lib/env.ts) names the gated cities and the
+ * day each flipped. A city not named is in its launch season, everything
+ * unlocked.
  *
- * What we give away, once each, at the moment it matters — the first time a
- * person would be refused in a gated city:
- *   - **the trial**: 14 days, to anyone who came out in the last 90 days. The
- *     plan's "when the gate flips, active users get a 14-day trial", taken
- *     lazily: nobody has to run anything on the day a city flips, an inactive
- *     person gets none, and each person's 14 days start when they first use it.
- *   - **the referral month**: once 3 people who signed up through your invite
- *     link (a new account, onboarded and 18+ — the friend-request route's own
- *     gate) have checked in somewhere after joining. Banked until then. A
- *     request sent or accepted earns nothing; a check-in at a real place does,
- *     and only once per person, ever, for one inviter.
- * Both are rows with a fixed `external_ref` per person, so a second attempt —
- * or two at once — grants nothing more, and each is audited in the same
- * transaction as its row (a refused audit takes the grant with it).
+ * What we give away, once each per account, at the moment it matters — the
+ * first time the account would be refused in a gated city:
+ *   - **the trial**: 14 days, to an account that already existed when that
+ *     city flipped and had come out in the 90 days before it. What it is for
+ *     is softening the flip for people already here; an account made after
+ *     the flip gets none, so a fresh account is not a fresh trial.
+ *   - **a referral month**: three people who signed up through your invite
+ *     link (new accounts, onboarded and 18+) each checked in at a DIFFERENT
+ *     event, each with at least 5 other people there (not you, not others you
+ *     invited), at least 72 hours ago — and are still here (not deleted, not
+ *     suspended) when it is paid. Each invitee counts toward one month, ever;
+ *     at most 3 months a year. A request sent or accepted earns nothing.
+ * Both are decided under a per-person lock with Plus read again inside it, so
+ * concurrent requests grant one thing at most, and each is audited in the
+ * transaction that grants it (a refused audit takes the grant back).
  */
 export const PLUS = {
   /** Nights of history everyone keeps; older ones are Plus. */
   FREE_HISTORY_NIGHTS: 3,
-  /** A Night Pass: Plus for this long from purchase, or from the end of one still running (D-16). */
+  /** A Night Pass: Plus for this long from purchase, or from the end of the last one not yet over (D-16). */
   NIGHT_PASS_MS: 24 * 60 * 60 * 1000,
   TRIAL_DAYS: 14,
-  /** "Active": came out at least once in this many days. */
+  /** "Active" before the flip: came out at least once in this many days before it. */
   TRIAL_ACTIVE_DAYS: 90,
   REFERRAL_FRIENDS: 3,
   REFERRAL_MONTHS: 1,
+  /** A referral month is paid only once its third qualifying night is this old. */
+  REFERRAL_DELAY_HOURS: 72,
+  /** Each qualifying night was an event with at least this many other people there. */
+  REFERRAL_MIN_OTHERS: 5,
+  /** At most this many referral months in a year. */
+  REFERRAL_MONTHS_PER_YEAR: 3,
   /**
    * A referral is a new signup: the invitee's account is at most this many
    * days old when they first use the link. Somebody already on Blendn tapping
@@ -68,77 +77,16 @@ export const PLUS = {
   },
 } as const
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
+type Client = Prisma.TransactionClient | typeof db
 const user = (id: string) => ({ kind: "user" as const, id })
 
-/** The once-per-person references. One trial, one referral month, ever. */
+/** The trial's reference: one per account, ever. */
 export const trialRef = (userId: string) => `plus-trial:${userId}`
-export const referralRef = (userId: string) => `plus-referral:${userId}`
-
-/** Has this person checked in anywhere since `since`? */
-async function cameOutSince(userId: string, since: Date): Promise<boolean> {
-  const [row] = await db.$queryRaw<{ yes: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1 FROM event_check_ins
-       WHERE user_id = ${userId}
-         AND kind = 'attendee'
-         AND status::text IN (${Prisma.join(ATTENDED)})
-         AND check_in_time >= ${since}
-    ) AS yes`
-  return row?.yes === true
-}
-
-/** How many people who joined through this person's link have checked in since joining. Each counts once. */
-export async function referredFriendsWhoCameOut(inviterId: string): Promise<number> {
-  const [row] = await db.$queryRaw<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM referrals r
-     WHERE r.inviter_id = ${inviterId}
-       AND EXISTS (
-         SELECT 1 FROM event_check_ins ci
-          WHERE ci.user_id = r.invitee_id
-            AND ci.kind = 'attendee'
-            AND ci.status::text IN (${Prisma.join(ATTENDED)})
-            AND ci.check_in_time >= r.created_at
-       )`
-  return row?.n ?? 0
-}
-
-/** One of our own grants, once per `ref`, with its audit row in the same transaction. True when this call granted it. */
-async function grantAudited(
-  userId: string,
-  ref: string,
-  startsAt: Date,
-  expiresAt: Date,
-  action: "entitlement.trial" | "entitlement.referral",
-  details: Record<string, number> = {}
-): Promise<boolean> {
-  return db.$transaction(async (tx) => {
-    if (!(await grantPlusOnce(tx, { userId, ref, startsAt, expiresAt }))) return false
-    await tx.audit_logs.create({
-      data: {
-        action: action,
-        resource: "user",
-        resource_id: userId,
-        details: { product: "plus", ref: ref, expiresAt: expiresAt.toISOString(), ...details },
-      },
-    })
-    return true
-  })
-}
-
-/** Grant whatever this person is owed and has not had: the trial first, then the referral month (banked until the trial is over). */
-async function grantOwed(userId: string, now: Date): Promise<boolean> {
-  if (await cameOutSince(userId, new Date(now.getTime() - PLUS.TRIAL_ACTIVE_DAYS * DAY_MS))) {
-    const until = new Date(now.getTime() + PLUS.TRIAL_DAYS * DAY_MS)
-    if (await grantAudited(userId, trialRef(userId), now, until, "entitlement.trial")) return true
-  }
-  const friends = await referredFriendsWhoCameOut(userId)
-  if (friends >= PLUS.REFERRAL_FRIENDS) {
-    const until = addMonths(now, PLUS.REFERRAL_MONTHS)
-    if (await grantAudited(userId, referralRef(userId), now, until, "entitlement.referral", { friends })) return true
-  }
-  return false
-}
+/** A referral month's reference names the three invitees it was for. */
+export const REFERRAL_REF_PREFIX = "plus-referral:"
+const referralRef = (inviterId: string, invitees: string[]) => `${REFERRAL_REF_PREFIX}${inviterId}:${[...invitees].sort().join("+")}`
 
 /**
  * Does this person hold Blendn+ now: the subscription (or one of our grants),
@@ -146,12 +94,136 @@ async function grantOwed(userId: string, now: Date): Promise<boolean> {
  * lives here and only here; `hasEntitlement` answers for exactly the product it
  * is asked about.
  */
-export async function hasPlus(userId: string, now: Date = new Date()): Promise<boolean> {
-  const [plus, pass] = await Promise.all([
-    hasEntitlement(user(userId), "plus", {}, now),
-    hasEntitlement(user(userId), "night_pass", {}, now),
-  ])
-  return plus || pass
+export async function hasPlus(userId: string, now: Date = new Date(), client: Client = db): Promise<boolean> {
+  // One after the other: inside a transaction there is one connection.
+  return (
+    (await hasEntitlement(user(userId), "plus", {}, now, client)) ||
+    (await hasEntitlement(user(userId), "night_pass", {}, now, client))
+  )
+}
+
+/** Was this account here, and out, before its city flipped? Then the trial is theirs to have once. */
+async function trialEligible(tx: Prisma.TransactionClient, userId: string, flippedAt: Date): Promise<boolean> {
+  const since = new Date(flippedAt.getTime() - PLUS.TRIAL_ACTIVE_DAYS * DAY_MS)
+  const [row] = await tx.$queryRaw<{ yes: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM "User" u
+       WHERE u.id = ${userId} AND u."createdAt" < ${flippedAt}
+         AND EXISTS (
+           SELECT 1 FROM event_check_ins ci
+            WHERE ci.user_id = u.id
+              AND ci.kind = 'attendee'
+              AND ci.status::text IN (${Prisma.join(ATTENDED)})
+              AND ci.check_in_time >= ${since} AND ci.check_in_time < ${flippedAt}
+         )
+    ) AS yes`
+  return row?.yes === true
+}
+
+/**
+ * Three of this inviter's unrewarded invitees who each qualify on a different
+ * event, or null. A qualifying night: an attended check-in after the referral,
+ * at least `REFERRAL_DELAY_HOURS` old, at an event with at least
+ * `REFERRAL_MIN_OTHERS` other attendees who are neither the inviter nor anyone
+ * else they invited. The invitee must still be here — not deleted, not
+ * suspended — when it is paid.
+ */
+async function referralTriple(tx: Prisma.TransactionClient, inviterId: string, now: Date): Promise<string[] | null> {
+  const ripe = new Date(now.getTime() - PLUS.REFERRAL_DELAY_HOURS * HOUR_MS)
+  const pairs = await tx.$queryRaw<{ invitee_id: string; event_id: string }[]>`
+    SELECT DISTINCT r.invitee_id, ci.event_id::text AS event_id
+      FROM referrals r
+      JOIN "User" u ON u.id = r.invitee_id AND u."deletedAt" IS NULL AND u.suspended_at IS NULL
+      JOIN event_check_ins ci ON ci.user_id = r.invitee_id
+     WHERE r.inviter_id = ${inviterId}
+       AND r.rewarded_at IS NULL
+       AND ci.kind = 'attendee'
+       AND ci.status::text IN (${Prisma.join(ATTENDED)})
+       AND ci.check_in_time >= r.created_at
+       AND ci.check_in_time <= ${ripe}
+       AND (
+         SELECT count(DISTINCT o.user_id) FROM event_check_ins o
+          WHERE o.event_id = ci.event_id
+            AND o.kind = 'attendee'
+            AND o.status::text IN (${Prisma.join(ATTENDED)})
+            AND o.user_id <> ${inviterId}
+            AND o.user_id NOT IN (SELECT invitee_id FROM referrals WHERE inviter_id = ${inviterId})
+       ) >= ${PLUS.REFERRAL_MIN_OTHERS}
+     LIMIT 500`
+  const eventsOf = new Map<string, Set<string>>()
+  for (const p of pairs) eventsOf.set(p.invitee_id, (eventsOf.get(p.invitee_id) ?? new Set()).add(p.event_id))
+  return threeOnDistinctEvents(eventsOf)
+}
+
+/**
+ * Three people who can each be given a different event (Hall's condition for
+ * three sets: each has one, any two have two between them, all three have
+ * three). Exported for its unit test.
+ */
+export function threeOnDistinctEvents(eventsOf: Map<string, Set<string>>): string[] | null {
+  const people = [...eventsOf.keys()].slice(0, 30)
+  const union = (...ids: string[]) => new Set(ids.flatMap((id) => [...eventsOf.get(id)!])).size
+  for (let i = 0; i < people.length; i++)
+    for (let j = i + 1; j < people.length; j++)
+      for (let k = j + 1; k < people.length; k++) {
+        const [a, b, c] = [people[i], people[j], people[k]]
+        if (union(a, b) >= 2 && union(a, c) >= 2 && union(b, c) >= 2 && union(a, b, c) >= 3) return [a, b, c]
+      }
+  return null
+}
+
+/**
+ * Grant whatever this account is owed and has not had — the trial first, a
+ * referral month after it (banked until the trial is over) — under the
+ * account's own lock, Plus read again inside it: two requests at once grant
+ * one thing at most.
+ */
+async function grantOwed(userId: string, flippedAt: Date | null, now: Date): Promise<void> {
+  await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`plus-owed:${userId}`}, 0))`
+    if (await hasPlus(userId, now, tx)) return
+
+    if (flippedAt && (await trialEligible(tx, userId, flippedAt))) {
+      const ref = trialRef(userId)
+      const until = new Date(now.getTime() + PLUS.TRIAL_DAYS * DAY_MS)
+      if (await grantPlusOnce(tx, { userId, ref, startsAt: now, expiresAt: until })) {
+        await audit(tx, userId, "entitlement.trial", ref, until, { flippedAt: flippedAt.toISOString() })
+        return
+      }
+    }
+
+    const yearAgo = new Date(now.getTime() - 365 * DAY_MS)
+    if ((await plusGrantsSince(tx, userId, REFERRAL_REF_PREFIX, yearAgo)) >= PLUS.REFERRAL_MONTHS_PER_YEAR) return
+    const invitees = await referralTriple(tx, userId, now)
+    if (!invitees) return
+    const ref = referralRef(userId, invitees)
+    const until = addMonths(now, PLUS.REFERRAL_MONTHS)
+    if (!(await grantPlusOnce(tx, { userId, ref, startsAt: now, expiresAt: until }))) return
+    const marked = await tx.referrals.updateMany({
+      where: { inviter_id: userId, invitee_id: { in: invitees }, rewarded_at: null },
+      data: { rewarded_at: now, rewarded_ref: ref },
+    })
+    if (marked.count !== invitees.length) throw new Error("referral invitees changed while being rewarded")
+    await audit(tx, userId, "entitlement.referral", ref, until, { invitees: invitees.length })
+  })
+}
+
+async function audit(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  action: "entitlement.trial" | "entitlement.referral",
+  ref: string,
+  expiresAt: Date,
+  details: Record<string, string | number>
+) {
+  await tx.audit_logs.create({
+    data: {
+      action: action,
+      resource: "user",
+      resource_id: userId,
+      details: { product: "plus", ref: ref, expiresAt: expiresAt.toISOString(), ...details },
+    },
+  })
 }
 
 /**
@@ -165,9 +237,10 @@ export async function hasPlus(userId: string, now: Date = new Date()): Promise<b
  * cached response says who has Plus (test plan MN-I10, SEC-15).
  */
 export async function plusRequired(userId: string, city: string | null, now: Date = new Date()): Promise<boolean> {
-  if (!plusGatedIn(city)) return false
+  const gate = plusGateFor(city)
+  if (!gate.gated) return false
   if (await hasPlus(userId, now)) return false
-  await grantOwed(userId, now)
+  await grantOwed(userId, gate.flippedAt, now)
   return !(await hasPlus(userId, now))
 }
 

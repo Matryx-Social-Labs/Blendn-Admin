@@ -315,7 +315,8 @@ they cannot disagree. Working an event as staff is not attending it, and
 appears in neither.
 
 **Your latest 3 nights are free; the rest are Blendn+** where it is gated (the
-city of your latest night). Without Plus there, `events` stops at the third,
+city of your latest night). This list is what "night history" means for
+Blendn+; a room's own messages follow the room's rules, not Plus. Without Plus there, `events` stops at the third,
 the pages stop with it (`totalCount` is 3), and `lockedCount` says how many more
 there are — show "‹n› more nights with Blendn+". `lockedCount` is 0 whenever
 nothing is hidden.
@@ -2804,9 +2805,11 @@ venue without going live, a reveal bypass, boosting.
 
 Where: Blendn+ is gated per city. A city that is not gated is in its launch
 season and every Plus feature is everyone's — "stay" simply works. The first
-time a gated city's gate would stop somebody who came out in the last 90 days,
-they get a 14-day trial instead, once ever; and three friends who joined
-through your invite link and checked in since earn one month, once.
+time a gated city's gate would stop somebody whose account was here, and out,
+in the 90 days before that city flipped,
+they get a 14-day trial instead (once per account); and three new people who
+joined through your invite link and have each been to a different event with
+others there earn a month (each friend counts once; at most 3 a year).
 
 ### GET /me/plus
 
@@ -2821,7 +2824,7 @@ through your invite link and checked in since earn one month, once.
 
 `product` is `plus` or `night_pass`; `source` is `apple`, `google` or `grant`
 (the trial, a referral month). `expiresAt` is when the row that lasts longest
-ends. `no-store`: never cache it. It is not a gate — every Plus feature is
+ends. `no-store`: never cache it; 60 a minute per person (the paywall polls every 3 s for a minute at most). It is not a gate — every Plus feature is
 checked on the server.
 
 ### POST /me/plus/paywall-events

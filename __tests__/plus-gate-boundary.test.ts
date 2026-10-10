@@ -51,6 +51,7 @@ const ALLOWED: Record<string, string> = {
   "app/api/mobile/events/[eventId]/presence/route.ts": "stay live: carrying the window",
   "app/api/mobile/me/attendance/route.ts": "night history beyond 3",
   "app/api/mobile/me/plus/route.ts": "the status the paywall polls",
+  "lib/billing-actions.ts": "the admin's view of a person's Plus, beside their grant (SCRUM-583)",
 }
 
 describe("the detector", () => {
@@ -78,9 +79,11 @@ describe("Blendn+ is asked about only where it is sold", () => {
     expect(files.filter((f) => asksForPlus(f.code)).map((f) => f.rel).sort()).toEqual(Object.keys(ALLOWED).sort())
   })
 
-  it("is never sold through Razorpay: the dashboard's money code names no Blendn+ product (MN-G03)", () => {
-    const money = files.filter((f) => /^lib\/(razorpay|billing)/.test(f.rel))
-    expect(money.length).toBeGreaterThan(2)
+  it("is never sold through Razorpay: Razorpay's code and the price table name no Blendn+ product (MN-G03)", () => {
+    // The admin's grant in lib/billing-actions.ts names "plus" and writes only source "grant"
+    // (grantEntitlement); the database's CHECK refuses Plus from Razorpay whatever the code says.
+    const money = files.filter((f) => /^lib\/(razorpay[^/]*|billing|billing-plans)\.ts$/.test(f.rel))
+    expect(money.map((f) => f.rel).sort()).toEqual(["lib/billing-plans.ts", "lib/billing.ts", "lib/razorpay-webhook.ts", "lib/razorpay.ts"])
     for (const f of money) expect([f.rel, /["'](plus|night_pass)["']/.test(f.code)]).toEqual([f.rel, false])
   })
 })

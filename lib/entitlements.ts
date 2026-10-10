@@ -57,10 +57,11 @@ export async function hasEntitlement(
   subject: Subject,
   product: entitlement_product,
   opts: { eventId?: string } = {},
-  now: Date = new Date()
+  now: Date = new Date(),
+  client: Client = db
 ): Promise<boolean> {
   if (product === "event_pass" && !opts.eventId) return false
-  const row = await db.entitlements.findFirst({
+  const row = await client.entitlements.findFirst({
     where: {
       subject_kind: subject.kind,
       subject_id: subject.id,
@@ -112,7 +113,8 @@ export async function liveGrant(
   client: Client = db
 ): Promise<LiveEntitlement | null> {
   const row = await client.entitlements.findFirst({
-    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", ...liveAt(now) },
+    // An admin's grant has no reference; a trial or referral month (lib/plus.ts) has one.
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", external_ref: null, ...liveAt(now) },
     orderBy: { expires_at: { sort: "desc", nulls: "first" } },
     select: { id: true, source: true, starts_at: true, expires_at: true },
   })
@@ -338,7 +340,8 @@ export async function endGrants(
   client: Client = db
 ): Promise<number> {
   const { count } = await client.entitlements.updateMany({
-    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", ...liveAt(now) },
+    // An admin's grants only (no reference): never a trial or referral month.
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", external_ref: null, ...liveAt(now) },
     // A live row has started (liveAt), so `now` is never before starts_at.
     data: { expires_at: now },
   })
@@ -428,15 +431,22 @@ export async function storeRow(
   tx: Tx,
   source: StoreSource,
   externalRef: string
-): Promise<{ product: PlusProduct; startsAt: Date } | null> {
+): Promise<{ product: PlusProduct; startsAt: Date; subjectId: string; windowTransactionId: string | null } | null> {
   const row = await tx.entitlements.findUnique({
     where: { source_external_ref: { source, external_ref: externalRef } },
-    select: { product: true, starts_at: true },
+    select: { product: true, starts_at: true, subject_id: true, window_transaction_id: true },
   })
-  return row ? { product: row.product as PlusProduct, startsAt: row.starts_at } : null
+  return row
+    ? { product: row.product as PlusProduct, startsAt: row.starts_at, subjectId: row.subject_id, windowTransactionId: row.window_transaction_id }
+    : null
 }
 
-/** When this person's latest live Night Pass ends, other than `exceptRef` (a new one stacks after it, D-16). */
+/**
+ * When this person's last Night Pass not yet over ends, other than
+ * `exceptRef`: a new one stacks after it (D-16). Not yet over, not "live" —
+ * a pass already stacked to start tomorrow counts, so a third bought today
+ * goes after the second, not on top of it.
+ */
 export async function nightPassEnd(tx: Tx, userId: string, exceptRef: string, now: Date): Promise<Date | null> {
   const row = await tx.entitlements.findFirst({
     where: {
@@ -444,7 +454,7 @@ export async function nightPassEnd(tx: Tx, userId: string, exceptRef: string, no
       subject_id: userId,
       product: "night_pass",
       NOT: { external_ref: exceptRef },
-      ...liveAt(now),
+      expires_at: { gt: now },
     },
     orderBy: { expires_at: "desc" },
     select: { expires_at: true },
@@ -477,6 +487,8 @@ export async function applyStoreWindow(
     startsAt: Date
     expiresAt: Date
     eventAt: Date
+    /** The store transaction this event is about (`transaction_id`). */
+    transactionId: string | null
   }
 ): Promise<"created" | "applied" | "stale" | "no_owner"> {
   const key = { source_external_ref: { source: w.source, external_ref: w.externalRef } }
@@ -494,6 +506,7 @@ export async function applyStoreWindow(
         expires_at: w.expiresAt < w.startsAt ? w.startsAt : w.expiresAt,
         window_event_at: w.eventAt,
         owner_event_at: w.eventAt,
+        window_transaction_id: w.transactionId,
       },
     })
     return "created"
@@ -503,7 +516,11 @@ export async function applyStoreWindow(
   })
   const { count } = await tx.entitlements.updateMany({
     where: { id: row.id, ...notNewer("window_event_at") },
-    data: { expires_at: w.expiresAt < row.starts_at ? row.starts_at : w.expiresAt, window_event_at: w.eventAt },
+    data: {
+      expires_at: w.expiresAt < row.starts_at ? row.starts_at : w.expiresAt,
+      window_event_at: w.eventAt,
+      ...(w.transactionId ? { window_transaction_id: w.transactionId } : {}),
+    },
   })
   if (w.userId) {
     await tx.entitlements.updateMany({
@@ -515,26 +532,38 @@ export async function applyStoreWindow(
 }
 
 /**
- * A store's TRANSFER: every store-bought Plus row of `from` now belongs to
- * `to` — unless a newer event already decided its owner. Returns how many
- * moved. Only rows from `sources` (the transfer's store, when it names one).
+ * A store's TRANSFER: the store-bought Plus rows of `from` that RevenueCat now
+ * holds under `to` — matched by a transaction RevenueCat reports for `to`
+ * (`confirmed`): the purchase's own reference, or the transaction behind its
+ * current window — move to `to`, unless a newer event already decided their
+ * owner. Nothing else of `from`'s moves. Returns how many moved.
  */
 export async function transferStoreEntitlements(
   tx: Tx,
-  input: { from: string[]; to: string; sources: StoreSource[]; at: Date }
+  input: { from: string[]; to: string; sources: StoreSource[]; at: Date; confirmed: string[] }
 ): Promise<number> {
-  if (input.from.length === 0) return 0
+  if (input.from.length === 0 || input.confirmed.length === 0) return 0
   const { count } = await tx.entitlements.updateMany({
     where: {
       subject_kind: "user",
       subject_id: { in: input.from },
       product: { in: ["plus", "night_pass"] },
       source: { in: input.sources },
-      OR: [{ owner_event_at: null }, { owner_event_at: { lte: input.at } }],
+      AND: [
+        { OR: [{ external_ref: { in: input.confirmed } }, { window_transaction_id: { in: input.confirmed } }] },
+        { OR: [{ owner_event_at: null }, { owner_event_at: { lte: input.at } }] },
+      ],
     },
     data: { subject_id: input.to, owner_event_at: input.at },
   })
   return count
+}
+
+/** How many of Blendn+'s own grants with this reference prefix this person has had since `since` (the referral month's yearly cap). */
+export async function plusGrantsSince(client: Client, userId: string, refPrefix: string, since: Date): Promise<number> {
+  return client.entitlements.count({
+    where: { subject_kind: "user", subject_id: userId, source: "grant", external_ref: { startsWith: refPrefix }, created_at: { gte: since } },
+  })
 }
 
 /**

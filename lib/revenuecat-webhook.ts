@@ -14,9 +14,10 @@ import {
   type PlusProduct,
   type StoreSource,
 } from "./entitlements"
-import { storeEnvironment } from "./env"
+import { revenuecatSecretKey, storeEnvironment } from "./env"
 import { logger } from "./logger"
 import { PLUS } from "./plus"
+import { subscriberTransactionIds } from "./revenuecat-api"
 
 /**
  * What a verified RevenueCat delivery does (plan v2 §5, §9.3).
@@ -48,11 +49,17 @@ import { PLUS } from "./plus"
  *   INITIAL_PURCHASE, RENEWAL, UNCANCELLATION,
  *   SUBSCRIPTION_EXTENDED, REFUND_REVERSED   until `expiration_at_ms`
  *   CANCELLATION                             until `expiration_at_ms`: access to the period's end
- *   CANCELLATION, cancel_reason CUSTOMER_SUPPORT   a refund: ends now (the event's time)
- *   EXPIRATION                               until `expiration_at_ms`, already past
+ *   CANCELLATION, cancel_reason CUSTOMER_SUPPORT or DEVELOPER_INITIATED
+ *                                            a refund: ends now (the event's time) —
+ *                                            if it refunds the current window's
+ *                                            transaction; an older period's refund
+ *                                            ends nothing and is audited
+ *   EXPIRATION                               until `expiration_at_ms`, never past the event
  *   BILLING_ISSUE                            until the grace period's end, else `expiration_at_ms`
- *   NON_RENEWING_PURCHASE (the Night Pass)   24 h from purchase, or from the end of one running
- *   TRANSFER                                 the rows move to the new owner
+ *   NON_RENEWING_PURCHASE (the Night Pass)   24 h from purchase, or from the end of the last
+ *                                            one not yet over; one row per transaction
+ *   TRANSFER                                 only what RevenueCat's own record of the
+ *                                            receiving account confirms moves (below)
  *   PRODUCT_CHANGE                           nothing: informational; the change arrives as a
  *                                            RENEWAL (Apple) or INITIAL_PURCHASE (Google)
  *   SUBSCRIBER_ALIAS                         nothing: deprecated, and the app logs in before
@@ -77,7 +84,15 @@ export function authorised(header: string | null, secret: string): boolean {
 }
 
 /** Why a delivery changed nothing. Stored in `payment_events.error`. */
-export type Refused = "unknown_user" | "wrong_environment" | "unsupported_store" | "not_ours" | "malformed" | "stale"
+export type Refused =
+  | "unknown_user"
+  | "wrong_environment"
+  | "unsupported_store"
+  | "not_ours"
+  | "malformed"
+  | "stale"
+  | "old_period_refund"
+  | "unreconciled"
 
 export interface DeliveryResult {
   duplicate: boolean
@@ -85,7 +100,8 @@ export interface DeliveryResult {
   refused?: Refused
 }
 
-const ms = z.number().int().nonnegative()
+/** Milliseconds since 1970, within what a Date can hold (8.64e15): never an Invalid Date. */
+const ms = z.number().int().nonnegative().max(8.64e15)
 const appUserId = z.string().min(1).max(200)
 const text = (max: number) => z.string().max(max).nullish()
 
@@ -148,6 +164,32 @@ const applied: Outcome = { applied: true }
 const nothing: Outcome = { applied: false }
 const refuse = (refused: Refused): Outcome => ({ applied: false, refused })
 
+/**
+ * An authorised body this server could not read (not JSON, or not the shape
+ * above). Kept — by its hash, with RevenueCat's type when there is one — and
+ * answered 200: a 4xx would be retried five times and then dropped, and a
+ * money event dropped silently is worse than one an operator can find.
+ */
+export async function recordUnreadable(bodySha256: string, json: unknown, now: Date = new Date()): Promise<void> {
+  const typed = z.object({ event: z.object({ type: z.string() }) }).safeParse(json)
+  const type = typed.success ? typed.data.event.type.slice(0, 64) : "unreadable"
+  await db.payment_events.createMany({
+    data: [
+      {
+        provider: PROVIDER,
+        provider_event_id: `unreadable:${bodySha256}`,
+        body_sha256: bodySha256,
+        type: type,
+        payload: { unreadable: true },
+        received_at: now,
+        error: "malformed",
+      },
+    ],
+    skipDuplicates: true,
+  })
+  logger.error("RevenueCat delivery could not be read; kept by its hash", { bodySha256, type })
+}
+
 /** Record one verified delivery and apply it. Idempotent on the event id and on the body. */
 export async function recordRevenuecatEvent(
   body: z.infer<typeof revenuecatBodySchema>,
@@ -155,6 +197,8 @@ export async function recordRevenuecatEvent(
   now: Date = new Date()
 ): Promise<DeliveryResult> {
   const e = body.event
+  // Read before the transaction, never inside it: a network call must not hold the person's lock.
+  const confirmed = e.type === "TRANSFER" ? await confirmedForReceiver(e) : undefined
   const result = await db.$transaction(
     async (tx) => {
       const { count } = await tx.payment_events.createMany({
@@ -173,7 +217,7 @@ export async function recordRevenuecatEvent(
       if (count === 0) return { duplicate: true, outcome: nothing }
 
       await lockPeople(tx, [e.app_user_id, ...(e.transferred_from ?? []), ...(e.transferred_to ?? [])])
-      const outcome = await apply(tx, e, now)
+      const outcome = await apply(tx, e, now, confirmed)
       await tx.payment_events.update({
         where: { provider_provider_event_id: { provider: PROVIDER, provider_event_id: e.id } },
         data: outcome.refused ? { error: outcome.refused } : { processed_at: new Date() },
@@ -186,7 +230,8 @@ export async function recordRevenuecatEvent(
   const { outcome } = result
   if (outcome.refused) {
     // Money the store took and we did not grant is the operator's to look at.
-    const level = outcome.refused === "stale" ? "info" : outcome.refused === "wrong_environment" ? "warn" : "error"
+    const level =
+      outcome.refused === "stale" ? "info" : outcome.refused === "wrong_environment" || outcome.refused === "old_period_refund" ? "warn" : "error"
     logger[level]("RevenueCat delivery not applied", {
       eventId: e.id,
       type: e.type,
@@ -206,11 +251,33 @@ async function lockPeople(tx: Tx, ids: Array<string | null | undefined>) {
   }
 }
 
-/** Our person, if this app user id is one: an account that exists and was not deleted. */
+/**
+ * Our person, if this app user id is one: an account that exists and was not
+ * deleted — held FOR SHARE until the transaction ends, so an erasure cannot
+ * slip in between this read and the grant. (The erasure also takes this
+ * person's `revenuecat:` lock first; either way one waits for the other.)
+ */
 async function personOf(tx: Tx, appUserId: string | null | undefined): Promise<string | null> {
   if (!appUserId) return null
-  const row = await tx.user.findFirst({ where: { id: appUserId, deletedAt: null }, select: { id: true } })
-  return row?.id ?? null
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "User" WHERE id = ${appUserId} AND "deletedAt" IS NULL FOR SHARE`
+  return rows[0]?.id ?? null
+}
+
+/** The one account a TRANSFER names as receiving it, or null (none, or several). */
+const receiverOf = (e: RevenuecatEvent): string | null => (e.transferred_to?.length === 1 ? e.transferred_to[0] : null)
+
+/**
+ * For a TRANSFER: every store transaction RevenueCat now holds under the
+ * receiving account, read from RevenueCat itself with the secret key. Null
+ * when the key is not set — then nothing moves (fail closed). A failed read
+ * throws: the delivery is a 500 and RevenueCat retries it.
+ */
+async function confirmedForReceiver(e: RevenuecatEvent): Promise<Set<string> | null> {
+  const key = revenuecatSecretKey()
+  const to = receiverOf(e)
+  if (!key || !to) return null
+  return subscriberTransactionIds(to, key, storeEnvironment() === "SANDBOX")
 }
 
 /** Which Blendn+ product a purchase is: the Night Pass by product id, Plus by RevenueCat's `plus` entitlement. */
@@ -220,73 +287,108 @@ function productOf(e: RevenuecatEvent): PlusProduct | null {
   return null
 }
 
-async function apply(tx: Tx, e: RevenuecatEvent, now: Date): Promise<Outcome> {
+async function apply(tx: Tx, e: RevenuecatEvent, now: Date, confirmed: Set<string> | null | undefined): Promise<Outcome> {
   const isWindow = WINDOW_EVENTS.has(e.type)
   if (!isWindow && e.type !== "TRANSFER") return nothing
   // A TRANSFER may leave its environment out; a purchase never does.
   if ((isWindow || e.environment) && e.environment !== storeEnvironment()) return refuse("wrong_environment")
-  return isWindow ? applyPurchase(tx, e, now) : applyTransfer(tx, e)
+  return isWindow ? applyPurchase(tx, e, now) : applyTransfer(tx, e, confirmed ?? null)
 }
+
+/** RevenueCat's refunds: a support refund, or one the developer made (Google revocations). */
+const REFUND_REASONS = new Set(["CUSTOMER_SUPPORT", "DEVELOPER_INITIATED"])
 
 async function applyPurchase(tx: Tx, e: RevenuecatEvent, now: Date): Promise<Outcome> {
   const source = e.store ? SOURCE[e.store] : undefined
   if (!source) return refuse("unsupported_store")
-  const ref = e.original_transaction_id ?? e.transaction_id
+  // A Night Pass is one purchase per transaction; a subscription is one row for its whole life.
+  const guess = productOf(e)
+  const ref = guess === "night_pass" ? (e.transaction_id ?? e.original_transaction_id) : (e.original_transaction_id ?? e.transaction_id)
   if (!ref) return refuse("malformed")
 
   const eventAt = new Date(e.event_timestamp_ms)
   const userId = await personOf(tx, e.app_user_id)
   const existing = await storeRow(tx, source, ref)
-  const product = existing?.product ?? productOf(e)
+  const product = existing?.product ?? guess
   if (!product) return refuse("not_ours")
   if (!existing && !userId) return refuse("unknown_user")
 
-  const refund = e.type === "CANCELLATION" && e.cancel_reason === "CUSTOMER_SUPPORT"
+  const refund = e.type === "CANCELLATION" && REFUND_REASONS.has(e.cancel_reason ?? "")
+  // A refund of an older period of a subscription that has since renewed ends
+  // nothing: the period it refunds is over, and the one running was paid for.
+  if (refund && product === "plus" && existing?.windowTransactionId && e.transaction_id && e.transaction_id !== existing.windowTransactionId) {
+    await tx.audit_logs.create({
+      data: {
+        action: "entitlement.refund_old_period",
+        resource: "user",
+        resource_id: existing.subjectId,
+        details: { ref: ref, refunded: e.transaction_id, current: existing.windowTransactionId, eventId: e.id },
+      },
+    })
+    return refuse("old_period_refund")
+  }
+
   const bought = new Date(Math.min(e.purchased_at_ms ?? e.event_timestamp_ms, now.getTime()))
   let startsAt: Date
   let expiresAt: Date
   if (product === "night_pass") {
-    // Stacks after a pass still running (D-16); a refund ends it at the refund.
+    // Stacks after the last pass not yet over (D-16); a refund ends it at the
+    // refund, never later than it would have ended anyway.
     const running = existing ? null : await nightPassEnd(tx, userId!, ref, now)
     startsAt = existing?.startsAt ?? (running && running > bought ? running : bought)
-    expiresAt = refund ? eventAt : new Date(startsAt.getTime() + PLUS.NIGHT_PASS_MS)
+    const natural = startsAt.getTime() + PLUS.NIGHT_PASS_MS
+    expiresAt = new Date(refund ? Math.min(natural, e.event_timestamp_ms) : natural)
   } else {
     const until = e.type === "BILLING_ISSUE" ? (e.grace_period_expiration_at_ms ?? e.expiration_at_ms) : e.expiration_at_ms
     if (until === null || until === undefined) return refuse("malformed")
     startsAt = existing?.startsAt ?? bought
-    expiresAt = new Date(refund ? Math.min(until, e.event_timestamp_ms) : until)
+    // A refund ends it now; an expiration has ended it — neither ever lengthens it.
+    expiresAt = new Date(refund || e.type === "EXPIRATION" ? Math.min(until, e.event_timestamp_ms) : until)
   }
 
-  const done = await applyStoreWindow(tx, { userId, product, source, externalRef: ref, startsAt, expiresAt, eventAt })
+  const done = await applyStoreWindow(tx, {
+    userId,
+    product,
+    source,
+    externalRef: ref,
+    startsAt,
+    expiresAt,
+    eventAt,
+    transactionId: e.transaction_id ?? null,
+  })
   return done === "stale" ? refuse("stale") : done === "no_owner" ? refuse("unknown_user") : applied
 }
 
 /**
- * A TRANSFER moves what was bought from the accounts it names to the ONE
- * account it names — both ours, from the verified event, never a guess:
- * a receiving list that is not exactly one of our people (anonymous, deleted,
- * unknown, or several) moves nothing and is recorded for the operator. Only
- * rows that exist move, so it never creates access nobody paid for. Every
- * move is audited in this transaction.
+ * A TRANSFER is RevenueCat saying purchases moved between app user ids —
+ * when somebody restores while signed in as another account. App user ids
+ * are set by the app (`Purchases.logIn`), so the event alone cannot say WHICH
+ * purchases are the restorer's: an account signed in under somebody else's
+ * id and restored would take everything that person bought (review H1).
  *
- * RevenueCat sends one when somebody restores purchases while signed in as a
- * different account ("Transfer to new App User ID", the project's restore
- * behaviour): the Apple ID or Google account that paid decides who holds it,
- * as the stores intend (docs/IAP-SETUP.md).
+ * So the event decides only who: exactly one receiving account, ours and not
+ * deleted, and giving accounts ours and not deleted. What moves is decided by
+ * RevenueCat's own record of the receiving account, read with the secret key
+ * (`confirmedForReceiver`): only purchases RevenueCat now holds under it.
+ * Without the key nothing moves (`unreconciled`, for the runbook). Only rows
+ * that exist move, so it never creates access nobody paid for, and every move
+ * is audited in this transaction.
  */
-async function applyTransfer(tx: Tx, e: RevenuecatEvent): Promise<Outcome> {
+async function applyTransfer(tx: Tx, e: RevenuecatEvent, confirmed: Set<string> | null): Promise<Outcome> {
   if (e.store && !SOURCE[e.store]) return nothing
-  const receiving = e.transferred_to ?? []
-  const to = receiving.length === 1 ? await personOf(tx, receiving[0]) : null
+  const receiver = receiverOf(e)
+  const to = receiver ? await personOf(tx, receiver) : null
   if (!to) return refuse("unknown_user")
   const named = [...new Set((e.transferred_from ?? []).filter((id) => id !== to))]
-  const from = (await tx.user.findMany({ where: { id: { in: named } }, select: { id: true } })).map((u) => u.id)
+  const from = (await tx.user.findMany({ where: { id: { in: named }, deletedAt: null }, select: { id: true } })).map((u) => u.id)
   if (from.length === 0) return refuse("unknown_user")
+  if (confirmed === null) return refuse("unreconciled")
   const moved = await transferStoreEntitlements(tx, {
     from,
     to,
     sources: e.store ? [SOURCE[e.store]] : ["apple", "google"],
     at: new Date(e.event_timestamp_ms),
+    confirmed: [...confirmed],
   })
   if (moved === 0) return nothing
   await tx.audit_logs.create({
@@ -294,7 +396,7 @@ async function applyTransfer(tx: Tx, e: RevenuecatEvent): Promise<Outcome> {
       action: "entitlement.transferred",
       resource: "user",
       resource_id: to,
-      details: { from: from, moved: moved, store: e.store ?? null, eventId: e.id },
+      details: { from: from, moved: moved, store: e.store ?? null, eventId: e.id, reconciled: true },
     },
   })
   return applied

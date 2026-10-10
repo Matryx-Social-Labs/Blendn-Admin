@@ -24,16 +24,25 @@ SET LOCAL lock_timeout = '5s';
 ALTER TABLE "entitlements" ADD COLUMN "window_event_at" TIMESTAMPTZ(6);
 ALTER TABLE "entitlements" ADD COLUMN "owner_event_at" TIMESTAMPTZ(6);
 
--- Who brought whom: the first invite link a person used (plan v2 §9.3,
+-- The store transaction behind the current window (a subscription's latest
+-- renewal). A refund of an OLDER period ends nothing, and a TRANSFER matches
+-- RevenueCat's own record of the purchase by it.
+ALTER TABLE "entitlements" ADD COLUMN "window_transaction_id" TEXT;
+
+-- Who brought whom: the first invite link a NEW account used (plan v2 §9.3,
 -- "3 friends who check in = 1 month"). One row per invitee, ever, so a friend
--- counts once for one inviter. CASCADE for completeness; accounts are
+-- counts once, for one inviter, toward one month. CASCADE for completeness; accounts are
 -- tombstoned rather than deleted, and the erasure deletes these rows itself.
 CREATE TABLE "referrals" (
     "invitee_id" TEXT NOT NULL,
     "inviter_id" TEXT NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Set when this invitee counted toward a referral month: each counts once.
+    "rewarded_at" TIMESTAMPTZ(6),
+    "rewarded_ref" TEXT,
 
     CONSTRAINT "referrals_pkey" PRIMARY KEY ("invitee_id"),
+    CONSTRAINT "referrals_rewarded_together" CHECK (("rewarded_at" IS NULL) = ("rewarded_ref" IS NULL)),
     CONSTRAINT "referrals_not_self" CHECK ("invitee_id" <> "inviter_id")
 );
 

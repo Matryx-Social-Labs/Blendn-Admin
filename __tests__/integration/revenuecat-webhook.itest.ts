@@ -7,7 +7,7 @@
  * or trusted: `subscriber_attributes` with an email, `aliases`, the country.
  * Every case reads the rows back. Times are literals relative to T0.
  */
-import { randomUUID } from "crypto"
+import { createHash, randomUUID } from "crypto"
 import { NextRequest } from "next/server"
 
 import { hasPlus } from "@/lib/plus"
@@ -72,6 +72,8 @@ function rc(
     cancelReason?: string
     grace?: number
     attributesUser?: string
+    /** The store transaction this event is about, when not the purchase's first. */
+    transactionId?: string
   }
 ) {
   return {
@@ -92,7 +94,7 @@ function rc(
       ...(o.grace !== undefined ? { grace_period_expiration_at_ms: o.grace } : {}),
       environment: o.environment ?? "SANDBOX",
       store: o.store ?? "APP_STORE",
-      transaction_id: o.txn,
+      transaction_id: o.transactionId ?? o.txn,
       original_transaction_id: o.txn,
       is_family_share: false,
       country_code: "IN",
@@ -132,6 +134,36 @@ async function post(body: unknown, auth: string | null = AUTH) {
   const res = await route.POST(new NextRequest("http://localhost/api/webhooks/revenuecat", { method: "POST", headers, body: raw }))
   return { status: res.status, json: (await res.json()) as Record<string, unknown> }
 }
+
+/**
+ * RevenueCat's REST API, stubbed: `held` is what GET /v1/subscribers/{id}
+ * reports for each app user id (store transaction ids, sandbox). Anything
+ * else the test did not expect fails it.
+ */
+function revenuecatHolds(held: Record<string, string[]>, opts: { status?: number } = {}) {
+  process.env.REVENUECAT_SECRET_KEY = "sk_itestsecretkey0123456789"
+  return jest.spyOn(global, "fetch").mockImplementation(async (input) => {
+    const url = String(input)
+    const id = decodeURIComponent(url.split("/subscribers/")[1] ?? "")
+    if (!url.startsWith("https://api.revenuecat.com/v1/subscribers/")) throw new Error(`unexpected fetch ${url}`)
+    if (opts.status) return new Response("{}", { status: opts.status })
+    const txns = held[id] ?? []
+    return new Response(
+      JSON.stringify({
+        subscriber: {
+          subscriptions: Object.fromEntries(txns.filter((t) => !t.startsWith("pass:")).map((t, i) => [`p${i}`, { store_transaction_id: t, is_sandbox: true }])),
+          non_subscriptions: { blendn_night_pass: txns.filter((t) => t.startsWith("pass:")).map((t) => ({ id: t, store_transaction_id: t.slice(5), is_sandbox: true })) },
+        },
+      }),
+      { status: 200 }
+    )
+  })
+}
+
+afterEach(() => {
+  jest.restoreAllMocks()
+  delete process.env.REVENUECAT_SECRET_KEY
+})
 
 const rowsFor = (txn: string) => db.entitlements.findMany({ where: { external_ref: txn } })
 const rowOf = async (txn: string) => (await rowsFor(txn))[0]
@@ -177,10 +209,48 @@ describe("authorisation (MN-U03, SEC-13)", () => {
     expect(await rowsFor(txn)).toHaveLength(0)
   })
 
-  it("answers 400 for a body that is not an event, 413 for one far too big", async () => {
-    expect((await post("not json")).status).toBe(400)
-    expect((await post({ api_version: "1.0", event: { type: "RENEWAL" } })).status).toBe(400)
+  it("keeps an authorised body it cannot read — by its hash, answered 200 — and refuses one far too big (L4)", async () => {
+    const unreadable = (body: string) =>
+      db.payment_events.findMany({ where: { provider: "revenuecat", body_sha256: createHash("sha256").update(body).digest("hex") } })
+    for (const body of [
+      "not json",
+      JSON.stringify({ api_version: "1.0", event: { type: "RENEWAL" } }),
+      // Past what a Date can hold: never an Invalid Date, never a 500.
+      JSON.stringify({ api_version: "1.0", event: { id: `itest_rc_${randomUUID()}`, type: "RENEWAL", event_timestamp_ms: 9e15 } }),
+    ]) {
+      const res = await post(body)
+      expect(res).toEqual({ status: 200, json: { ok: true, duplicate: false, applied: false, refused: "malformed" } })
+      const [kept] = await unreadable(body)
+      expect(kept).toMatchObject({ error: "malformed", processed_at: null })
+      expect(kept.provider_event_id).toMatch(/^unreadable:/)
+      await post(body)
+      expect(await unreadable(body)).toHaveLength(1)
+      await db.payment_events.deleteMany({ where: { id: kept.id } })
+    }
     expect((await post({ api_version: "1.0", event: { id: "x".repeat(70_000), type: "TEST", event_timestamp_ms: T0 } })).status).toBe(413)
+  })
+
+  it("says the secret is missing once, not once a request (L5)", async () => {
+    // The route remembers it has said so; a fresh module stands for a fresh process.
+    let freshRoute = route
+    let freshLogger: typeof import("@/lib/logger").logger | undefined
+    jest.isolateModules(() => {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      freshRoute = require("@/app/api/webhooks/revenuecat/route") as typeof route
+      freshLogger = (require("@/lib/logger") as typeof import("@/lib/logger")).logger
+      /* eslint-enable @typescript-eslint/no-require-imports */
+    })
+    const errors = jest.spyOn(freshLogger!, "error").mockImplementation(() => {})
+    delete process.env.REVENUECAT_WEBHOOK_SECRET
+    try {
+      for (let i = 0; i < 3; i++) {
+        const res = await freshRoute.POST(new NextRequest("http://localhost/api/webhooks/revenuecat", { method: "POST", body: "{}" }))
+        expect(res.status).toBe(401)
+      }
+    } finally {
+      process.env.REVENUECAT_WEBHOOK_SECRET = SECRET
+    }
+    expect(errors.mock.calls.filter(([m]) => String(m).includes("REVENUECAT_WEBHOOK_SECRET"))).toHaveLength(1)
   })
 })
 
@@ -338,15 +408,76 @@ describe("the Night Pass (NON_RENEWING_PURCHASE)", () => {
     await post(refund)
     expect((await rowOf(first)).expires_at!.getTime()).toBe(T0 + 2000)
   })
+
+  it("stacks a third pass bought the same day after the second, not on top of it (M1, D-16)", async () => {
+    const user = await fresh("rc-three")
+    const base = Date.now() - 3 * 60 * 60 * 1000
+    const refs = [newTxn(), newTxn(), newTxn()]
+    for (let i = 0; i < 3; i++) {
+      await post(rc("NON_RENEWING_PURCHASE", { txn: refs[i], at: base + i * 60_000, user, product: "blendn_night_pass", entitlements: null, expires: null }))
+    }
+    const [a, b, c] = await Promise.all(refs.map(rowOf))
+    expect(b.starts_at.getTime()).toBe(a.expires_at!.getTime())
+    expect(c.starts_at.getTime()).toBe(b.expires_at!.getTime())
+    expect(c.expires_at!.getTime() - a.starts_at.getTime()).toBe(3 * 86_400_000)
+  })
+
+  it("is one row per transaction, and a refund after it ran out never lengthens it (L1, L2)", async () => {
+    const user = await fresh("rc-passref")
+    const original = newTxn()
+    const [one, two] = [newTxn(), newTxn()]
+    // Two passes reported under one original transaction are still two passes.
+    for (const [txn, at] of [[one, T0 - 3 * DAY], [two, T0 - 3 * DAY + 1000]] as const) {
+      await post(rc("NON_RENEWING_PURCHASE", { txn: original, transactionId: txn, at, user, product: "blendn_night_pass", entitlements: null, expires: null }))
+    }
+    expect(await db.entitlements.count({ where: { external_ref: { in: [one, two] } } })).toBe(2)
+    const before = (await rowOf(one)).expires_at!.getTime()
+    await post(rc("CANCELLATION", { txn: original, transactionId: one, at: T0, user, product: "blendn_night_pass", entitlements: null, cancelReason: "CUSTOMER_SUPPORT", expires: null }))
+    expect((await rowOf(one)).expires_at!.getTime()).toBe(before)
+  })
+})
+
+describe("refunds and expirations end access, never lengthen it (L1)", () => {
+  it("an EXPIRATION carrying a later expiration_at_ms ends at the event, not later", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn, user, at: T0, expires: T0 + 3_600_000 }))
+    await post(rc("EXPIRATION", { txn, user, at: T0 + 10_000, expires: T0 + MONTH }))
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + 10_000)
+  })
+
+  it("a DEVELOPER_INITIATED cancellation is a refund: it ends now", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn, user, at: T0 }))
+    await post(rc("CANCELLATION", { txn, user, at: T0 + DAY, cancelReason: "DEVELOPER_INITIATED", expires: T0 + MONTH }))
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + 86_400_000)
+  })
+
+  it("a refund of an older period after a renewal ends nothing and is audited; one of the current period ends it", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn, user, at: T0 - 40 * DAY, expires: T0 - 10 * DAY, transactionId: `${txn}-p1` }))
+    await post(rc("RENEWAL", { txn, user, at: T0 - 10 * DAY, expires: T0 + 20 * DAY, transactionId: `${txn}-p2` }))
+    const old = rc("CANCELLATION", { txn, user, at: T0, expires: T0 - 10 * DAY, cancelReason: "CUSTOMER_SUPPORT", transactionId: `${txn}-p1` })
+    expect((await post(old)).json).toMatchObject({ applied: false, refused: "old_period_refund" })
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + 20 * 86_400_000)
+    expect(await plusAt(user, T0 + 1000)).toBe(true)
+    expect(await db.audit_logs.count({ where: { action: "entitlement.refund_old_period", resource_id: user } })).toBe(1)
+
+    await post(rc("CANCELLATION", { txn, user, at: T0 + 1000, expires: T0 + 20 * DAY, cancelReason: "CUSTOMER_SUPPORT", transactionId: `${txn}-p2` }))
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + 1000)
+  })
 })
 
 describe("who it belongs to", () => {
-  it("TRANSFER moves it; an older renewal still extends it but cannot move it back, nor can an older transfer", async () => {
+  it("TRANSFER moves what RevenueCat holds for the receiver; an older renewal still extends it but cannot move it back, nor can an older transfer", async () => {
     const dan = await makeUser("rc-dan")
     const erin = await makeUser("rc-erin")
     users.push(dan, erin)
     const txn = newTxn()
     await post(rc("INITIAL_PURCHASE", { txn, at: T0, user: dan }))
+    revenuecatHolds({ [erin]: [txn], [dan]: [txn] })
     // Forged, it moves nothing.
     expect((await post(transfer([dan], [erin], T0 + 2 * DAY), "Bearer rc_forged_0123456789abcdef0123456789")).status).toBe(401)
     expect((await rowOf(txn)).subject_id).toBe(dan)
@@ -363,6 +494,55 @@ describe("who it belongs to", () => {
 
     await post(transfer([erin], [dan], T0 + DAY))
     expect((await rowOf(txn)).subject_id).toBe(erin)
+  })
+
+  it("an attacker who restores their own purchase made under the victim's id takes only that purchase (review H1)", async () => {
+    const victim = await fresh("rc-victim")
+    const attacker = await fresh("rc-attacker")
+    const victimSub = newTxn()
+    const attackerPass = newTxn()
+    await post(rc("INITIAL_PURCHASE", { user: victim, txn: victimSub, at: T0 }))
+    // The attacker signed in to RevenueCat as the victim (the SDK key is public) and bought a pass.
+    await post(rc("NON_RENEWING_PURCHASE", { user: victim, txn: attackerPass, at: T0 + 1000, product: "blendn_night_pass", entitlements: null, expires: null }))
+    // Then restored on their own account: RevenueCat moves only the attacker's receipt.
+    const rc_ = revenuecatHolds({ [attacker]: [`pass:${attackerPass}`], [victim]: [victimSub] })
+    const res = await post(transfer([victim], [attacker], T0 + 5000))
+    expect(res.json.applied).toBe(true)
+    expect(rc_).toHaveBeenCalledWith(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(attacker)}`, expect.anything())
+    expect((await rowOf(victimSub)).subject_id).toBe(victim)
+    expect((await rowOf(attackerPass)).subject_id).toBe(attacker)
+    expect(await plusAt(victim, T0 + 10_000)).toBe(true)
+  })
+
+  it("without RevenueCat's secret key a TRANSFER moves nothing (fail closed); a failed read is a 500 RevenueCat retries", async () => {
+    const giver = await fresh("rc-giver")
+    const taker = await fresh("rc-taker")
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { user: giver, txn, at: T0 }))
+    const blind = transfer([giver], [taker], T0 + 1000)
+    expect((await post(blind)).json).toMatchObject({ applied: false, refused: "unreconciled" })
+    expect((await deliveryOf(blind))[0].error).toBe("unreconciled")
+    expect((await rowOf(txn)).subject_id).toBe(giver)
+
+    revenuecatHolds({}, { status: 503 })
+    const down = transfer([giver], [taker], T0 + 2000)
+    await expect(post(down)).rejects.toThrow()
+    expect(await deliveryOf(down)).toHaveLength(0)
+    jest.restoreAllMocks()
+    revenuecatHolds({ [taker]: [txn] })
+    expect((await post(down)).json.applied).toBe(true)
+    expect((await rowOf(txn)).subject_id).toBe(taker)
+  })
+
+  it("a TRANSFER from a deleted account moves nothing", async () => {
+    const gone = await fresh("rc-gonegiver")
+    const taker = await fresh("rc-taker2")
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { user: gone, txn, at: T0 }))
+    await db.user.update({ where: { id: gone }, data: { deletedAt: new Date() } })
+    revenuecatHolds({ [taker]: [txn] })
+    expect((await post(transfer([gone], [taker], T0 + 1000))).json).toMatchObject({ refused: "unknown_user" })
+    expect((await rowOf(txn)).subject_id).toBe(gone)
   })
 
   it("records and never grants an id that is not one of our people: anonymous, deleted, unknown (MN-I06)", async () => {

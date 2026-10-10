@@ -182,8 +182,16 @@ row, and `__tests__/plus-gate-boundary.test.ts` the code).
     deleted). **Money was taken and nothing granted** — see below.
   - `not_ours` / `unsupported_store`: not a Blendn+ product, or not the App
     Store / Play. Check the RevenueCat entitlement `plus` and product ids.
-  - `malformed`: a purchase with no transaction id or end date. File a bug
+  - `malformed`: a purchase with no transaction id or end date, or a body we
+    could not read at all (`provider_event_id` = `unreadable:<hash>`, kept by
+    its hash and answered 200 so it is not retried into the void). File a bug
     with the delivery.
+  - `old_period_refund`: a refund of a subscription period that has since
+    renewed. The running period was paid for, so access stays; an
+    `entitlement.refund_old_period` audit row says which transaction.
+  - `unreconciled`: a `TRANSFER` while `REVENUECAT_SECRET_KEY` is unset.
+    Nothing moved (fail closed). Set the key; the next event about each
+    purchase puts its owner right, or ask the person to restore again.
 - **5xx only when the database failed.** The whole delivery is one
   transaction, so the claim rolled back with it and RevenueCat's retry applies
   it. RevenueCat retries five times (5, 10, 20, 40, 80 minutes) and then
@@ -192,17 +200,24 @@ row, and `__tests__/plus-gate-boundary.test.ts` the code).
   the next event about it — renewal, cancellation, expiration — carries the
   whole state and puts the row right. A Night Pass has no next event: find
   the purchase in RevenueCat → Customers → the user id, and give the person
-  the time by hand only through a grant (there is no admin control for a
-  person's grant yet — SCRUM-583; until then, file it and refund from the
-  store's side if asked).
+  the time through the dashboard: Users → the row's ⋯ → Blendn+ → Grant
+  (audited). Never by hand in the database.
 - **Refunds** are the store's: Apple's or Google's. RevenueCat reports one as
-  a CANCELLATION with `cancel_reason = CUSTOMER_SUPPORT`, and the webhook ends
-  access at that moment. `REFUND_REVERSED` gives it back.
-- **A deleted account** loses its Blendn+ rows with the account (D-17); the
-  person is told to cancel in their store. A later renewal for that account
-  is `unknown_user`.
+  a CANCELLATION with `cancel_reason` `CUSTOMER_SUPPORT` (or
+  `DEVELOPER_INITIATED`), and the webhook ends access at that moment — never
+  later than it would have ended anyway. `REFUND_REVERSED` gives it back.
+- **Transfers** (`TRANSFER`, somebody restoring on another account) move only
+  what RevenueCat's own record of the receiving account confirms, read with
+  `REVENUECAT_SECRET_KEY` before the delivery's transaction; a failed read is a
+  5xx RevenueCat retries. Every move is an `entitlement.transferred` audit row.
+- **A deleted account** loses its Blendn+ rows with the account (D-17), in the
+  same transaction as the rest of the erasure and after any purchase being
+  granted at that moment (the erasure takes the person's `revenuecat:` lock
+  first). With `REVENUECAT_SECRET_KEY` set the customer is deleted at
+  RevenueCat too (best effort, logged). The person is told to cancel in their
+  store; a later renewal for that account is `unknown_user`.
 - **Rolling back** step 11's migration (`20261010120000_blendn_plus`) is a new
-  forward migration dropping `referrals` and the two `entitlements` columns.
+  forward migration dropping `referrals` and the three `entitlements` columns.
   Rolling back the code alone is safe.
 
 Read back:

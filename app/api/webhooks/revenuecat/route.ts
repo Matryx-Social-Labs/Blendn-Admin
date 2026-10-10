@@ -5,7 +5,7 @@ import { clientNetworkFrom } from "@/lib/client-ip"
 import { revenuecatWebhookSecret } from "@/lib/env"
 import { logger } from "@/lib/logger"
 import { hit } from "@/lib/rate-limit-store"
-import { authorised, recordRevenuecatEvent, revenuecatBodySchema } from "@/lib/revenuecat-webhook"
+import { authorised, recordRevenuecatEvent, recordUnreadable, revenuecatBodySchema } from "@/lib/revenuecat-webhook"
 import { readCapped } from "@/lib/webhook-body"
 
 /**
@@ -27,9 +27,12 @@ import { readCapped } from "@/lib/webhook-body"
  *      over SHA-256 digests, so neither the secret's length nor a matching
  *      prefix shows in the timing. A network that keeps failing it is
  *      rate-limited; a good delivery is never counted;
- *   3. only then JSON, its shape (zod), and `lib/revenuecat-webhook.ts`.
+ *   3. only then JSON, its shape (zod), and `lib/revenuecat-webhook.ts`. An
+ *      authorised body that cannot be read is kept by its hash and answered
+ *      200 (`recordUnreadable`): a 4xx is retried five times and then gone.
  *
- * Unset secret: the feature is off and everything is a 401.
+ * Unset secret: the feature is off and everything is a 401 (logged once per
+ * process, not once per request).
  *
  * Every authorised delivery answers 200, including one that changed nothing
  * (an unknown person, the other environment, an older event): RevenueCat
@@ -44,6 +47,8 @@ export const dynamic = "force-dynamic"
 const MAX_BODY_BYTES = 64 * 1024
 const BAD_AUTH = { max: 30, windowMs: 60_000 }
 
+let reportedUnset = false
+
 function fail(status: number, error: string) {
   return NextResponse.json({ error }, { status })
 }
@@ -51,7 +56,10 @@ function fail(status: number, error: string) {
 export async function POST(req: NextRequest) {
   const secret = revenuecatWebhookSecret()
   if (!secret) {
-    logger.error("RevenueCat webhook rejected: REVENUECAT_WEBHOOK_SECRET is not set", {})
+    if (!reportedUnset) {
+      reportedUnset = true
+      logger.error("RevenueCat webhook rejected: REVENUECAT_WEBHOOK_SECRET is not set (logged once)", {})
+    }
     return fail(401, "unauthorized")
   }
 
@@ -68,16 +76,19 @@ export async function POST(req: NextRequest) {
     return fail(401, "unauthorized")
   }
 
-  let json: unknown
+  const bodySha256 = createHash("sha256").update(raw).digest("hex")
+  let json: unknown = null
   try {
     json = JSON.parse(Buffer.from(raw).toString("utf8"))
   } catch {
-    return fail(400, "malformed")
+    // Not JSON: kept below like any body that is not an event.
   }
   const body = revenuecatBodySchema.safeParse(json)
-  if (!body.success) return fail(400, "malformed")
+  if (!body.success) {
+    await recordUnreadable(bodySha256, json)
+    return NextResponse.json({ ok: true, duplicate: false, applied: false, refused: "malformed" })
+  }
 
-  const bodySha256 = createHash("sha256").update(raw).digest("hex")
   const result = await recordRevenuecatEvent(body.data, bodySha256)
   return NextResponse.json({ ok: true, ...result })
 }

@@ -6,11 +6,16 @@ process.env.MOBILE_JWT_SECRET =
 
 // `jose` is ESM-only; see checkin.itest.ts.
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+// The dashboard's session, for the admin's grant (SCRUM-583).
+const mockGetAuth = jest.fn()
+jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
+import { endPlusGrant, grantPlus, personPlus } from "@/lib/billing-actions"
 import { hasEntitlement } from "@/lib/entitlements"
 import { inviteTokenFor } from "@/lib/friends"
-import { hasPlus, plusRequired, referralRef, trialRef } from "@/lib/plus"
+import { hasPlus, plusRequired, threeOnDistinctEvents, trialRef } from "@/lib/plus"
 import { flushProductEvents } from "@/lib/product-events"
 
 import { closeDb, db, makeEvent, makeUser, occurrenceOf, refusingWrites, testId } from "./helpers"
@@ -154,6 +159,16 @@ describe("Go Live 'stay' (the stay-live gate)", () => {
     }
   })
 
+  it("knows a city by any of its names, and a place with no city is not a way round it (review L6)", async () => {
+    process.env.PLUS_GATING = `Bangalore:${TODAY}`
+    const v = await venue()
+    const me = await person()
+    expect((await goLive(me.token, v, { stay: true })).json.errorCode).toBe("PLUS_REQUIRED")
+    expect(await plusRequired(me.id, null)).toBe(true)
+    expect(await plusRequired(me.id, "  BENGALURU ")).toBe(true)
+    expect(await plusRequired(me.id, "Mumbai")).toBe(false)
+  })
+
   it("is asked last: an unknown venue is still a 404 and outside is still OUT_OF_RANGE (the paywall only where stay would work)", async () => {
     process.env.PLUS_GATING = "true"
     const me = await person()
@@ -180,11 +195,22 @@ describe("Go Live 'stay' (the stay-live gate)", () => {
   })
 })
 
-describe("the trial and the referral month: once each, at the gate (MN-I08, MN-I09)", () => {
-  it("gives someone who came out in the last 90 days 14 days of Plus the first time the gate would stop them, and never again", async () => {
-    process.env.PLUS_GATING = "Bengaluru"
+/** Today in India, as PLUS_GATING writes a flip date: gating went on at midnight IST today. */
+const TODAY = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10)
+const FLIPPED_TODAY = `Bengaluru:${TODAY}`
+
+/** An account that was already here long before today's flip. */
+async function oldHand(label = "plusold") {
+  const p = await person(label)
+  await db.user.update({ where: { id: p.id }, data: { createdAt: new Date(Date.now() - 200 * DAY) } })
+  return p
+}
+
+describe("the trial: for people already out before their city flipped, once (MN-I08, review M4)", () => {
+  it("gives an account that was out in the 90 days before the flip 14 days of Plus at its first refusal, audited, and never again", async () => {
+    process.env.PLUS_GATING = FLIPPED_TODAY
     const v = await venue()
-    const regular = await person()
+    const regular = await oldHand()
     await nightsOut(regular.id, 1, { daysAgo: 89 })
     const before = Date.now()
     expect((await goLive(regular.token, v, { stay: true })).status).toBe(200)
@@ -204,68 +230,192 @@ describe("the trial and the referral month: once each, at the gate (MN-I08, MN-I
   })
 
   it("lets two first refusals at once both see the one trial", async () => {
-    process.env.PLUS_GATING = "Bengaluru"
-    const regular = await person()
+    process.env.PLUS_GATING = FLIPPED_TODAY
+    const regular = await oldHand()
     await nightsOut(regular.id, 1)
     expect(await Promise.all([plusRequired(regular.id, "Bengaluru"), plusRequired(regular.id, "Bengaluru")])).toEqual([false, false])
     expect(await grants(regular.id)).toHaveLength(1)
   })
 
-  it("gives none to someone who has not come out lately, or ever", async () => {
+  it("gives none to an account made after the flip, to one only out after it or long before it, or where the flip has no date", async () => {
+    process.env.PLUS_GATING = FLIPPED_TODAY
+    const fresh = await person("plusnew")
+    await nightsOut(fresh.id, 1)
+    const lateComer = await oldHand()
+    await nightsOut(lateComer.id, 1, { daysAgo: 0 })
+    await db.event_check_ins.updateMany({ where: { user_id: lateComer.id }, data: { check_in_time: new Date() } })
+    const longAgo = await oldHand()
+    await nightsOut(longAgo.id, 1, { daysAgo: 95 })
+    const never = await oldHand()
+    for (const p of [fresh, lateComer, longAgo, never]) {
+      expect(await plusRequired(p.id, "Bengaluru")).toBe(true)
+      expect(await grants(p.id)).toHaveLength(0)
+    }
     process.env.PLUS_GATING = "Bengaluru"
-    const [never, longAgo] = [await person(), await person()]
-    await nightsOut(longAgo.id, 1, { daysAgo: 91 })
-    expect(await plusRequired(never.id, "Bengaluru")).toBe(true)
-    expect(await plusRequired(longAgo.id, "Bengaluru")).toBe(true)
-    expect(await grants(never.id)).toHaveLength(0)
-    expect(await grants(longAgo.id)).toHaveLength(0)
+    const undated = await oldHand()
+    await nightsOut(undated.id, 1)
+    expect(await plusRequired(undated.id, "Bengaluru")).toBe(true)
+    expect(await grants(undated.id)).toHaveLength(0)
   })
 
   it("is nothing in a launch-season city: no trial is used up where nothing is locked", async () => {
-    process.env.PLUS_GATING = "Mumbai"
-    const regular = await person()
+    process.env.PLUS_GATING = `Mumbai:${TODAY}`
+    const regular = await oldHand()
     await nightsOut(regular.id, 1)
     expect(await plusRequired(regular.id, "Bengaluru")).toBe(false)
     expect(await grants(regular.id)).toHaveLength(0)
   })
 
-  it("pays one month once three people who joined through your link have checked in since — people, not check-ins", async () => {
+  it("takes the grant back with a refused audit row: no Plus without its audit", async () => {
+    process.env.PLUS_GATING = FLIPPED_TODAY
+    const regular = await oldHand()
+    await nightsOut(regular.id, 1)
+    await refusingWrites("audit_logs", "INSERT", `NEW.resource_id = '${regular.id}'`, async () => {
+      await expect(plusRequired(regular.id, "Bengaluru")).rejects.toThrow()
+    })
+    expect(await grants(regular.id)).toHaveLength(0)
+    expect(await plusRequired(regular.id, "Bengaluru")).toBe(false)
+    expect(await grants(regular.id)).toHaveLength(1)
+  })
+})
+
+/** An event with `others` other people who came, `daysAgo` days ago. */
+async function crowdedEvent(others = 5, daysAgo = 4) {
+  if (hosts.length === 0) hosts.push(await makeUser(testId("plus_host"), "organizer"))
+  const eventId = await makeEvent(hosts[0])
+  extraEvents.push(eventId)
+  for (let i = 0; i < others; i++) {
+    const crowd = await makeUser(testId("plus_crowd"))
+    world.users.push(crowd)
+    await nightAt(crowd, eventId, daysAgo)
+  }
+  return eventId
+}
+
+async function nightAt(userId: string, eventId: string, daysAgo = 4) {
+  const at = new Date(Date.now() - daysAgo * DAY)
+  await db.event_check_ins.create({
+    data: { event_id: eventId, occurrence_id: await occurrenceOf(eventId), user_id: userId, kind: "attendee", status: "checked_out", check_in_time: at, created_at: at },
+  })
+}
+
+/** `n` new people who joined through the inviter's link ten days ago. */
+async function invited(inviter: { id: string }, n: number) {
+  const token = await inviteTokenFor(inviter.id)
+  const friends = []
+  for (let i = 0; i < n; i++) {
+    const f = await person("plusfriend")
+    expect((await friendRequests.POST(req("/api/mobile/friends/requests", f.token, "POST", { token }))).status).toBe(200)
+    friends.push(f)
+  }
+  await db.referrals.updateMany({ where: { inviter_id: inviter.id }, data: { created_at: new Date(Date.now() - 10 * DAY) } })
+  return friends
+}
+
+describe("the referral month: three new people, three real nights (MN-I09, review M4)", () => {
+  it("pays one month once three invited people have each been to a different event with 5 others, 72 hours ago or more — once each", async () => {
     process.env.PLUS_GATING = "Bengaluru"
     const inviter = await person("plusinviter")
-    const token = await inviteTokenFor(inviter.id)
-    const friends = await Promise.all([1, 2, 3, 4].map(() => person("plusfriend")))
-    for (const f of friends) {
-      const res = await friendRequests.POST(req("/api/mobile/friends/requests", f.token, "POST", { token }))
-      expect(res.status).toBe(200)
-    }
-    expect(await db.referrals.count({ where: { inviter_id: inviter.id } })).toBe(4)
-    // They joined ten days ago, so every night below is after joining — but the one moved after.
-    await db.referrals.updateMany({ where: { inviter_id: inviter.id }, data: { created_at: new Date(Date.now() - 10 * DAY) } })
+    const friends = await invited(inviter, 6)
+    for (const f of friends.slice(0, 3)) await nightAt(f.id, await crowdedEvent())
+    // One of them twice: still one person.
+    await nightAt(friends[0].id, await crowdedEvent())
 
-    // Two came out after joining, one of them twice (three check-ins); one only BEFORE joining. Two people: not yet.
-    await nightsOut(friends[0].id, 2, { daysAgo: 0 })
-    await nightsOut(friends[1].id, 1, { daysAgo: 0 })
-    await db.referrals.update({ where: { invitee_id: friends[2].id }, data: { created_at: new Date(Date.now() + DAY) } })
-    await nightsOut(friends[2].id, 1, { daysAgo: 0 })
-    expect(await plusRequired(inviter.id, "Bengaluru")).toBe(true)
-    expect(await grants(inviter.id)).toHaveLength(0)
-
-    // The third person. Then a fourth changes nothing.
-    await nightsOut(friends[3].id, 1, { daysAgo: 0 })
     expect(await plusRequired(inviter.id, "Bengaluru")).toBe(false)
     const [month] = await grants(inviter.id)
-    expect(month.external_ref).toBe(referralRef(inviter.id))
-    expect(await audits(inviter.id)).toEqual([
-      { action: "entitlement.referral", user_id: null, details: expect.objectContaining({ ref: referralRef(inviter.id), friends: 3 }) },
-    ])
+    expect(month.external_ref).toMatch(/^plus-referral:/)
     const start = month.starts_at
     const oneMonthOn = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))
     oneMonthOn.setUTCDate(Math.min(start.getUTCDate(), new Date(Date.UTC(oneMonthOn.getUTCFullYear(), oneMonthOn.getUTCMonth() + 1, 0)).getUTCDate()))
     oneMonthOn.setUTCHours(start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds(), start.getUTCMilliseconds())
     expect(month.expires_at!.toISOString()).toBe(oneMonthOn.toISOString())
+    expect(await audits(inviter.id)).toEqual([
+      { action: "entitlement.referral", user_id: null, details: expect.objectContaining({ ref: month.external_ref, invitees: 3 }) },
+    ])
+    const rewarded = await db.referrals.findMany({ where: { inviter_id: inviter.id, rewarded_at: { not: null } }, select: { invitee_id: true, rewarded_ref: true } })
+    expect(rewarded.map((r) => r.invitee_id).sort()).toEqual(friends.slice(0, 3).map((f) => f.id).sort())
+    expect(new Set(rewarded.map((r) => r.rewarded_ref))).toEqual(new Set([month.external_ref]))
+
+    // Over: the fourth alone pays nothing — the three already counted.
     await db.entitlements.update({ where: { id: month.id }, data: { expires_at: new Date(Date.now() - 1000), starts_at: new Date(Date.now() - 2000) } })
+    await nightAt(friends[3].id, await crowdedEvent())
     expect(await plusRequired(inviter.id, "Bengaluru")).toBe(true)
     expect(await grants(inviter.id)).toHaveLength(1)
+    // Three NEW people make a second month, for those three.
+    for (const f of friends.slice(4)) await nightAt(f.id, await crowdedEvent())
+    expect(await plusRequired(inviter.id, "Bengaluru")).toBe(false)
+    const [, second] = await grants(inviter.id)
+    expect(second.external_ref).not.toBe(month.external_ref)
+    expect(await db.referrals.count({ where: { inviter_id: inviter.id, rewarded_ref: second.external_ref } })).toBe(3)
+  })
+
+  it.each([
+    ["all three at the same event", "same"],
+    ["an event with only 4 others there", "thin"],
+    ["the third night under 72 hours ago", "fresh"],
+    ["the inviter and their other invitees as the crowd", "own"],
+    ["a friend suspended by the time it is paid", "suspended"],
+    ["a friend who deleted their account", "deleted"],
+  ])("pays nothing for %s", async (_label, kind) => {
+    process.env.PLUS_GATING = "Bengaluru"
+    const inviter = await person("plusinviter")
+    const friends = await invited(inviter, kind === "own" ? 8 : 3)
+    if (kind === "same") {
+      const shared = await crowdedEvent()
+      for (const f of friends) await nightAt(f.id, shared)
+    } else if (kind === "own") {
+      // Two real nights, and a third where the "crowd" is the inviter and five more of their invitees.
+      for (const f of friends.slice(0, 2)) await nightAt(f.id, await crowdedEvent())
+      const staged = await crowdedEvent(0)
+      for (const f of [inviter, ...friends.slice(2)]) await nightAt(f.id, staged)
+    } else {
+      await nightAt(friends[0].id, await crowdedEvent())
+      await nightAt(friends[1].id, await crowdedEvent())
+      await nightAt(friends[2].id, await crowdedEvent(kind === "thin" ? 4 : 5), kind === "fresh" ? 2 : 4)
+      if (kind === "suspended") await db.user.update({ where: { id: friends[2].id }, data: { suspended_at: new Date() } })
+      if (kind === "deleted") await db.user.update({ where: { id: friends[2].id }, data: { deletedAt: new Date() } })
+    }
+    expect(await plusRequired(inviter.id, "Bengaluru")).toBe(true)
+    expect(await grants(inviter.id)).toHaveLength(0)
+  })
+
+  it("pays at most 3 months a year", async () => {
+    process.env.PLUS_GATING = "Bengaluru"
+    const inviter = await person("plusinviter")
+    for (let i = 0; i < 3; i++) {
+      await db.entitlements.create({
+        data: {
+          subject_kind: "user", subject_id: inviter.id, product: "plus", source: "grant",
+          external_ref: `plus-referral:${inviter.id}:earlier${i}`,
+          starts_at: new Date(Date.now() - (60 - i) * DAY), expires_at: new Date(Date.now() - (30 - i) * DAY),
+        },
+      })
+    }
+    const friends = await invited(inviter, 3)
+    for (const f of friends) await nightAt(f.id, await crowdedEvent())
+    expect(await plusRequired(inviter.id, "Bengaluru")).toBe(true)
+    expect(await grants(inviter.id)).toHaveLength(3)
+  })
+
+  it("grants one thing when a trial and a banked month are both owed and three requests arrive at once (review M3)", async () => {
+    process.env.PLUS_GATING = FLIPPED_TODAY
+    const inviter = await oldHand("plusinviter")
+    await nightsOut(inviter.id, 1)
+    const friends = await invited(inviter, 3)
+    for (const f of friends) await nightAt(f.id, await crowdedEvent())
+    const answers = await Promise.all([1, 2, 3].map(() => plusRequired(inviter.id, "Bengaluru")))
+    expect(answers).toEqual([false, false, false])
+    const owed = await grants(inviter.id)
+    expect(owed.map((g) => g.external_ref)).toEqual([trialRef(inviter.id)])
+    expect(await hasPlus(inviter.id)).toBe(true)
+  })
+
+  it("finds three people with three different events only when they exist (Hall's condition)", () => {
+    const sets = (o: Record<string, string[]>) => new Map(Object.entries(o).map(([k, v]) => [k, new Set(v)]))
+    expect(threeOnDistinctEvents(sets({ a: ["e1", "e2", "e3"], b: ["e1"], c: ["e1"] }))).toBeNull()
+    expect(threeOnDistinctEvents(sets({ a: ["e1", "e2"], b: ["e1", "e2"], c: ["e1", "e2"] }))).toBeNull()
+    expect(threeOnDistinctEvents(sets({ a: ["e1"], b: ["e2"], c: ["e1", "e3"] }))).toEqual(["a", "b", "c"])
+    expect(threeOnDistinctEvents(sets({ a: ["e1"], b: ["e1"], c: ["e2"], d: ["e3"] }))).toEqual(["a", "c", "d"])
   })
 
   it("counts only a new signup: somebody already on Blendn using a link is a friend request, not a referral", async () => {
@@ -275,18 +425,6 @@ describe("the trial and the referral month: once each, at the gate (MN-I08, MN-I
     const res = await friendRequests.POST(req("/api/mobile/friends/requests", regular.token, "POST", { token: await inviteTokenFor(inviter.id) }))
     expect(res.status).toBe(200)
     expect(await db.referrals.count({ where: { invitee_id: regular.id } })).toBe(0)
-  })
-
-  it("takes the grant back with a refused audit row: no Plus without its audit", async () => {
-    process.env.PLUS_GATING = "Bengaluru"
-    const regular = await person()
-    await nightsOut(regular.id, 1)
-    await refusingWrites("audit_logs", "INSERT", `NEW.resource_id = '${regular.id}'`, async () => {
-      await expect(plusRequired(regular.id, "Bengaluru")).rejects.toThrow()
-    })
-    expect(await grants(regular.id)).toHaveLength(0)
-    expect(await plusRequired(regular.id, "Bengaluru")).toBe(false)
-    expect(await grants(regular.id)).toHaveLength(1)
   })
 
   it("never counts a person for two inviters, or anyone for themselves", async () => {
@@ -382,3 +520,67 @@ describe("GET /me/plus and the paywall's events (MN-C01)", () => {
     ])
   })
 })
+
+describe("an admin gives or ends a person's Blendn+ (SCRUM-583, review M5)", () => {
+  const as = (id: string, role: "app_admin" | "organizer") => mockGetAuth.mockResolvedValue({ user: { id, role } })
+
+  it("grants it for whole months with the reason audited in the same transaction, one at a time, and ends only that grant", async () => {
+    const admin = await makeUser(testId("plus_admin"), "app_admin")
+    world.users.push(admin)
+    const reviewer = await person("plusreviewer")
+    await plus(reviewer.id, { until: Date.now() + 3 * DAY })
+    as(admin, "app_admin")
+
+    const { expiresAt } = await grantPlus(reviewer.id, 1, "App Review account for the iOS submission")
+    const [row] = await db.entitlements.findMany({ where: { subject_id: reviewer.id, source: "grant" } })
+    expect(row).toMatchObject({ product: "plus", external_ref: null })
+    expect(row.expires_at!.toISOString()).toBe(expiresAt)
+    expect(await audits(reviewer.id)).toEqual([
+      { action: "entitlement.granted", user_id: admin, details: expect.objectContaining({ product: "plus", months: 1, reason: "App Review account for the iOS submission" }) },
+    ])
+    await expect(grantPlus(reviewer.id, 3, "A second grant beside the first")).rejects.toThrow(/already has a grant/)
+    expect(await personPlus(reviewer.id)).toEqual({
+      grant: { expiresAt },
+      held: expect.objectContaining({ product: "plus" }),
+    })
+
+    await endPlusGrant(reviewer.id, "Review finished, no longer needed")
+    expect(await hasEntitlement({ kind: "user", id: reviewer.id }, "plus")).toBe(true) // the store's row is untouched
+    expect((await db.entitlements.findUniqueOrThrow({ where: { id: row.id } })).expires_at!.getTime()).toBeLessThanOrEqual(Date.now())
+  })
+
+  it("never ends a trial or a referral month, and refuses non-admins, short reasons and deleted accounts — writing nothing", async () => {
+    const admin = await makeUser(testId("plus_admin"), "app_admin")
+    const organiser = await makeUser(testId("plus_org"), "organizer")
+    world.users.push(admin, organiser)
+    const trialist = await person()
+    await db.entitlements.create({
+      data: { subject_kind: "user", subject_id: trialist.id, product: "plus", source: "grant", external_ref: trialRef(trialist.id), starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 13 * DAY) },
+    })
+    as(admin, "app_admin")
+    await expect(endPlusGrant(trialist.id, "Ending what is not ours to end")).rejects.toThrow(/already ended/)
+    expect(await hasPlus(trialist.id)).toBe(true)
+
+    const target = await person()
+    as(organiser, "organizer")
+    await expect(grantPlus(target.id, 1, "An organiser trying this")).rejects.toThrow(/Forbidden/)
+    as(admin, "app_admin")
+    await expect(grantPlus(target.id, 1, "short")).rejects.toThrow(/10 to 500/)
+    await db.user.update({ where: { id: target.id }, data: { deletedAt: new Date() } })
+    await expect(grantPlus(target.id, 1, "A deleted account cannot hold Plus")).rejects.toThrow(/not found/)
+    expect(await grants(target.id)).toHaveLength(0)
+  })
+})
+
+describe("GET /me/plus is rate limited (review L9)", () => {
+  it("answers 429 once a person polls it past 60 a minute", async () => {
+    const me = await person()
+    let first429 = 0
+    for (let i = 1; i <= 70 && !first429; i++) {
+      const res = await plusRoute.GET(req("/api/mobile/me/plus", me.token))
+      if (res.status === 429) first429 = i
+    }
+    expect(first429).toBe(61)
+  })
+})
+

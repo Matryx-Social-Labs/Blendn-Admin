@@ -28,6 +28,7 @@ import {
   IconMapPin,
   IconPhone,
   IconSearch,
+  IconSparkles,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 
@@ -69,7 +70,10 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 
+import { personPlus } from "@/lib/billing-actions"
+import { refusalMessage } from "@/lib/refusal"
 import { rowCountLabel } from "@/lib/row-count-label"
+import { OrgAnalyticsGrantControl } from "../organisations/analytics-grant-control"
 import { UserWithProfile, updateUser, updateUserRole } from "./actions"
 import type { user_role } from "@prisma/client"
 
@@ -113,6 +117,7 @@ function ActionsCell({
   const user = row.original
   const currentUserRole = table.options.meta?.currentUserRole
   const [isEditOpen, setIsEditOpen] = React.useState(false)
+  const [isPlusOpen, setIsPlusOpen] = React.useState(false)
 
   return (
     <>
@@ -132,6 +137,10 @@ function ActionsCell({
             <IconEdit className="mr-2 size-4" />
             Edit
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setIsPlusOpen(true)}>
+            <IconSparkles className="mr-2 size-4" />
+            Blendn+
+          </DropdownMenuItem>
           {/*
             No Delete. Suspension is the reversible control and it lives on the
             moderation screens; a hard delete here cascaded other users' events,
@@ -147,8 +156,72 @@ function ActionsCell({
         onSuccess={() => table.options.meta?.onRefresh?.()}
         currentUserRole={currentUserRole}
       />
-
+      {isPlusOpen ? <PlusSheet user={user} onOpenChange={setIsPlusOpen} /> : null}
     </>
+  )
+}
+
+const PLUS_DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+const PLUS_FROM: Record<string, string> = { apple: "the App Store", google: "Google Play", grant: "a grant" }
+
+/**
+ * A person's Blendn+ (SCRUM-583): where it comes from, then the admin's grant
+ * control. The source line is the point of the sheet — a store's purchase is
+ * shown and is the store's; only a grant has an End button.
+ */
+function PlusSheet({ user, onOpenChange }: { user: UserWithProfile; onOpenChange: (open: boolean) => void }) {
+  type State = Awaited<ReturnType<typeof personPlus>>
+  const [state, setState] = React.useState<State | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const name = user.name || user.email
+
+  const load = React.useCallback(() => {
+    personPlus(user.id)
+      .then((s) => {
+        setState(s)
+        setError(null)
+      })
+      .catch((err) => setError(refusalMessage(err, "Could not load Blendn+")))
+  }, [user.id])
+  React.useEffect(load, [load])
+
+  const held = state?.held
+  const until = held?.expiresAt ? ` until ${PLUS_DAY.format(new Date(held.expiresAt))}` : ""
+  return (
+    <Sheet open onOpenChange={onOpenChange}>
+      <SheetContent className="sm:max-w-[500px]">
+        <SheetHeader>
+          <SheetTitle>Blendn+</SheetTitle>
+          <SheetDescription>{name}</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col gap-4 py-4 text-[0.8125rem]">
+          {error ? (
+            <p role="alert" className="text-destructive">{error}</p>
+          ) : !state ? (
+            <p className="text-muted-foreground">Loading…</p>
+          ) : (
+            <>
+              <p data-plus-source={held?.source ?? "none"}>
+                {held
+                  ? `${held.product === "night_pass" ? "A Night Pass" : "Blendn+"} from ${PLUS_FROM[held.source] ?? held.source}${until}${
+                      held.source === "apple" || held.source === "google" ? " — managed in the store" : ""
+                    }`
+                  : "No Blendn+ right now."}
+              </p>
+              <OrgAnalyticsGrantControl
+                subject="user"
+                subjectId={user.id}
+                name={name}
+                status="active"
+                grant={state.grant}
+                paid={null}
+                onChanged={load}
+              />
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }
 

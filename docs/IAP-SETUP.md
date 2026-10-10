@@ -47,14 +47,14 @@ store. ([Play: create a subscription](https://support.google.com/googleplay/andr
 | 7 | Owner + engineer | RevenueCat project, apps, store credentials | [RevenueCat](#revenuecat) |
 | 8 | Owner | RevenueCat products, entitlement `plus`, offering `default` | [RevenueCat](#revenuecat) |
 | 9 | Owner + engineer | Apple server notifications; Google service account + real-time notifications | [A4](#a4-keys-and-server-notifications), [G4](#g4-service-account-and-real-time-notifications-engineer) |
-| 10 | Engineer | Two RevenueCat webhooks; `REVENUECAT_WEBHOOK_SECRET` on Railway | [Server](#server-railway) |
+| 10 | Engineer | Two RevenueCat webhooks; `REVENUECAT_WEBHOOK_SECRET` and `REVENUECAT_SECRET_KEY` on Railway; restore behaviour "Transfer if there are no active subscriptions" | [Server](#server-railway), [RevenueCat](#revenuecat) |
 | 11 | Engineer | EAS env vars (public SDK keys); rebuild and ship | [App](#app-eas) |
 | 12 | Owner | Apple sandbox testers; Google licence testers on the internal track | [Testing](#testing) |
 | 13 | Owner + engineer | One sandbox purchase per store; read the rows back | [Testing](#testing) |
-| 14 | Engineer | Review prep: `appreview@blendn.app` grant, paywall disclosures, notes, screenshots | [App Review](#app-review) |
+| 14 | Engineer | Review prep: `appreview@blendn.app` Blendn+ grant (dashboard → Users → ⋯ → Blendn+), paywall disclosures, notes, screenshots | [App Review](#app-review) |
 | 15 | Owner | Apple: submit the version with all four products attached | [App Review](#app-review) |
 | 16 | Owner | Google: promote the release to production | [App Review](#app-review) |
-| 17 | Owner, later | Gate a city: set `PLUS_GATING` on Railway, redeploy | [Server](#server-railway) |
+| 17 | Owner, later | Gate a city: set `PLUS_GATING` (e.g. `Bengaluru:2026-11-01`) on Railway, redeploy | [Server](#server-railway) |
 
 ## App Store Connect
 
@@ -197,21 +197,25 @@ Needs step 4 first (a build with Play Billing on the internal track).
    | `$rc_annual` | `blendn_plus_yearly` / `blendn_plus:yearly` |
    | `night_pass` (custom) | `blendn_night_pass` / `blendn_night_pass` |
 
-7. **Restore behaviour** (**Project settings** → **General**): keep the default,
-   **Transfer to new App User ID**. If a second Blendn account restores or buys
-   on the same Apple ID or Google account, the purchase moves to it and the
-   first loses it; RevenueCat sends `TRANSFER` and our server moves the grant.
+7. **Restore behaviour** (**Project settings** → **General**): choose
+   **Transfer if there are no active subscriptions** (not the default,
+   **Transfer to new App User ID**). RevenueCat then moves purchases to a
+   restoring account only when they hold no active subscription; one-time
+   purchases (a Night Pass) still move.
+   **Why:** the app sets RevenueCat's app user id itself (`Purchases.logIn`
+   with our user id), with a public SDK key, so an app user id is the app's
+   claim, not proof. A `TRANSFER` therefore says only that something moved
+   between two ids. Our server applies one only as far as RevenueCat's own
+   record of the receiving account confirms it — read with the secret key
+   (`REVENUECAT_SECRET_KEY`, below) — moves only purchases RevenueCat now holds
+   under that account, between two of our accounts that exist and are not
+   deleted, and audits every move (`entitlement.transferred`). Without the
+   secret key a transfer moves nothing and is recorded as `unreconciled`.
+   With this setting a running subscription never moves at all; the person
+   who paid restores on their own account. **Keep with original App User ID**
+   refuses every move, including a person changing Blendn account.
    The app calls `Purchases.logIn(<our user id>)` at sign-in, `logOut` at
    sign-out, and never sells while anonymous.
-   **What this decides:** whoever signs in to Blendn on a phone using the
-   Apple ID or Google account that paid can move Blendn+ to their account by
-   restoring. That is the stores' rule (the purchase belongs to the store
-   account) and RevenueCat's documented default. The server moves it only
-   between two of our real accounts named in a verified webhook — never to an
-   anonymous or deleted one — and writes an `entitlement.transferred` audit row
-   for every move. The alternative, **Keep with original App User ID**, stops
-   the move but leaves a person who changes Blendn account unable to restore
-   what they paid for; it is the owner's call, and the default is recommended.
 
 ([projects](https://www.revenuecat.com/docs/projects/overview), [connect a store](https://www.revenuecat.com/docs/projects/connect-a-store), [API keys](https://www.revenuecat.com/docs/projects/authentication), [products](https://www.revenuecat.com/docs/offerings/products-overview), [entitlements](https://www.revenuecat.com/docs/getting-started/entitlements), [non-subscriptions](https://www.revenuecat.com/docs/platform-resources/non-subscriptions), [offerings](https://www.revenuecat.com/docs/offerings/overview), [restore behaviour](https://www.revenuecat.com/docs/projects/restore-behavior))
 
@@ -230,7 +234,14 @@ Needs step 4 first (a build with Play Billing on the internal track).
 
 Railway, each environment's admin service → **Variables** →
 `REVENUECAT_WEBHOOK_SECRET` = the bare secret (no `Bearer `) → redeploy. Unset:
-every delivery gets a 401, so Blendn+ is off. The server reads its environment
+every delivery gets a 401, so Blendn+ is off. And `REVENUECAT_SECRET_KEY` =
+RevenueCat's secret API key (`sk_…`, **Project settings** → **API keys** → a
+secret key, v1; the same key for staging and production is fine, it is
+per-project). The server uses it for two reads and a delete only: what
+RevenueCat holds for the account receiving a `TRANSFER`, and deleting an
+erased account at RevenueCat. Unset: transfers move nothing (`unreconciled`)
+and erased accounts stay at RevenueCat until deleted there by hand. Never in
+the app or in EAS. The server reads its environment
 from `RAILWAY_ENVIRONMENT_NAME`: `production` grants only PRODUCTION events,
 every other environment only SANDBOX; the rest is recorded, never granted.
 
@@ -241,13 +252,21 @@ RevenueCat retries a non-2xx five times (5, 10, 20, 40, 80 minutes).
 ([RevenueCat: webhooks](https://www.revenuecat.com/docs/integrations/webhooks), [event types](https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields))
 
 **Gating a city (owner, later).** `PLUS_GATING` unset or `false`: launch season
-everywhere, everything free. `true`: gated everywhere. A comma list of cities
-(case-insensitive, as written on venues), e.g. `Bengaluru`: only those. To gate
-a city, set it on Railway and redeploy. **Nothing else to run.** The server
-grants the 14-day trial itself, once per person ever, the first time someone
-who has come out at least once in the last 90 days meets a Blendn+ gate in a
-gated city, and at that moment pays out any banked referral month (3 invited
-friends who checked in = 1 month).
+everywhere, everything free. Otherwise comma-separated `<city>:<date>` entries,
+the date being the day that city's gating goes on (midnight in India), e.g.
+`Bengaluru:2026-11-01`; `*:<date>` is everywhere. Cities match by any common
+name (`Bangalore` is Bengaluru; the one alias list is in `lib/env.ts`), and a
+place with no city counts as gated once anything is. To gate a city, set it on
+Railway and redeploy. **Nothing else to run.** The server grants:
+- **the 14-day trial**, once per account, the first time it meets a Blendn+
+  gate in that city — only to an account that existed before that city's date
+  and came out in the 90 days before it. It softens the flip for people already
+  here; an account made after the flip gets none (an entry without a date
+  gives no trial at all);
+- **a referral month** when three people who signed up through your invite
+  link have each been to a different event, with at least 5 other people
+  there, at least 72 hours ago, and are still on Blendn when it is paid. Each
+  friend counts toward one month; at most 3 months a year.
 
 ## App (EAS)
 
@@ -312,15 +331,17 @@ refuses sandbox events; the purchase reaches only the staging webhook, where
 that user is unknown (`unknown_user`). So the review account is granted Plus in
 advance. ([RevenueCat: App Store rejections](https://www.revenuecat.com/docs/test-and-launch/app-store-rejections))
 
-1. **Engineer:** while production has no `PLUS_GATING` (launch season, which
-   is how Blendn+ launches), every Plus feature is already open to the
-   reviewer and no grant is needed. Once a city is gated, grant
-   `appreview@blendn.app` Plus on **production** (`source = 'grant'`). There is
-   no dashboard control for a person's Plus yet (SCRUM-583); until there is,
-   keep the review account's city ungated or ask for the control first — never
-   write `entitlements` by hand. Either way, check the account passes the 18+
-   gate **and can still open the paywall and buy**: Guideline 2.1(b) wants
-   every product visible and working for the reviewer.
+1. **Engineer:** give `appreview@blendn.app` Blendn+ on **production** before
+   submitting: dashboard → **Users** → search `appreview` → the row's **⋯** →
+   **Blendn+** → **Grant Blendn+** → length (1 month is enough for a review) →
+   the reason ("App Review account for the iOS submission") → **Grant**. It is
+   audited; **End grant** in the same place takes it back after approval. While
+   production has no `PLUS_GATING` every Plus feature is open to the reviewer
+   anyway, but the grant also makes the paywall's "you have Blendn+" state what
+   they see after their sandbox purchase (which production never credits).
+   Check the account passes the 18+ gate **and can still open the paywall and
+   buy**: Guideline 2.1(b) wants every product visible and working for the
+   reviewer, and our paywall keeps the plans buyable with Plus on.
 2. **Engineer and designer, the paywall shows:** each subscription's name,
    length and what Plus gives; the full renewal price, the billed amount the
    most prominent (₹1,499/year above any "₹125/month"); **Restore purchases**;
@@ -381,7 +402,30 @@ RevenueCat id, a deleted account, or a user of the other database, such as the
 reviewer's sandbox purchase on staging); `wrong_environment` (sandbox on
 production, or real elsewhere); `unsupported_store` (not App Store or Play, e.g.
 RevenueCat's test store); `not_ours` (product ID not ours); `malformed` (a field
-we need is missing); `stale` (older than the state we hold: normal, not an error).
+we need is missing, or a body we could not read — kept by its hash);
+`stale` (older than the state we hold: normal, not an error); `old_period_refund`
+(a refund of a period that has since renewed: access stays, audited);
+`unreconciled` (a `TRANSFER` with no `REVENUECAT_SECRET_KEY`: nothing moved).
+
+**Sandbox check worth doing once (anonymous purchases).** Buy while the app is
+signed out — the app should refuse (its buttons are off unless RevenueCat's user
+is ours). If a purchase is ever made anonymously anyway, it is recorded as
+`unknown_user` and never granted, and its later renewals are too: signing in
+afterwards does not recover it. The person restores on their account; with
+the restore behaviour above, RevenueCat transfers it and the server moves only
+what RevenueCat confirms.
+
+**Measuring conversion.** Count purchases from `entitlements` (source `apple` /
+`google`, by `created_at`) — the store's word through the webhook. The app's
+`paywall_purchased` event (`product_events`) is the app's claim, good for the
+funnel's shape, never for revenue or conversion.
+
+**Privacy.** RevenueCat holds each buyer's purchase history under our user id
+(a processor for store purchases). Erasing an account deletes its Blendn+ rows
+here and, with `REVENUECAT_SECRET_KEY` set, the customer at RevenueCat (best
+effort; a failure is logged — delete by hand under **Customers**). Our
+`payment_events` keep ids, products and times only; the privacy notice should
+name RevenueCat (SCRUM-562 covers the notice).
 
 ## Still open for the owner
 

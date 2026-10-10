@@ -4,6 +4,7 @@ import { serverErrorResponse, successResponse, unauthorizedResponse } from "@/li
 import { livePlus } from "@/lib/entitlements"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
 
@@ -20,6 +21,9 @@ export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    // 60 a minute: the paywall polls every 3 s for a minute at most.
+    const limited = await rateLimit(request, userLimit("read", "me-plus", authUser.userId))
+    if (limited) return limited
 
     const live = await livePlus(authUser.userId)
     const res = await successResponse({
