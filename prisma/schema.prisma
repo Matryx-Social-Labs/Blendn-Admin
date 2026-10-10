@@ -3098,11 +3098,19 @@ model audit_logs {
   details     Json?
   ip_address  String?
   created_at  DateTime @default(now()) @db.Timestamptz(6)
+  /// The organisation the row belongs to: set when the actor is a member of the
+  /// organisation that owns the row's resource (lib/audit-log.ts). An
+  /// organisation's log reads by it (step 18, M3). Null: the platform's alone.
+  org_id      String?  @db.Uuid
+  /// True only for rows written before `org_id` existed, which keep the actor
+  /// rule (members, since they joined). Every new row is false.
+  pre_org_scope Boolean @default(false)
 
   @@index([user_id])
   @@index([action])
   @@index([resource])
   @@index([created_at])
+  @@index([org_id, created_at])
 }
 
 /// What a person registered with, kept for 180 days after they delete their

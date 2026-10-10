@@ -91,11 +91,29 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
     const manageable = myOrgs.filter((m) => m.role === "owner" || m.role === "admin")
     if (manageable.length === 0) throw new Refusal("Forbidden")
 
+    /*
+     * Rows that belong to these organisations (step 18, M3). The rule used to
+     * be "written by one of our members", which handed this log a shared
+     * member's actions for their other organisation, and a new member's
+     * whole past. A row now records its organisation when it is written
+     * (`org_id`, lib/audit-log.ts): an action on one of our resources by one
+     * of us. Rows from before that keep the member rule, bounded to what each
+     * member wrote since joining.
+     */
+    const orgIds = manageable.map((m) => m.org_id)
     const colleagues = await db.organisation_members.findMany({
-      where: { org_id: { in: manageable.map((m) => m.org_id) } },
-      select: { user_id: true },
+      where: { org_id: { in: orgIds }, ...activeMembership },
+      select: { user_id: true, created_at: true },
     })
-    and.push({ user_id: { in: colleagues.map((c) => c.user_id) } })
+    and.push({
+      OR: [
+        { org_id: { in: orgIds } },
+        {
+          pre_org_scope: true,
+          OR: colleagues.map((c) => ({ user_id: c.user_id, created_at: { gte: c.created_at } })),
+        },
+      ],
+    })
   }
 
   // The dropdown lists every action in scope, not only the filtered one (SCRUM-462).
