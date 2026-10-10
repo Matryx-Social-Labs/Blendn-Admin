@@ -1762,8 +1762,26 @@
     },
     "admin-gate-reads-database.test.ts": {
       "guards": "Step 18 (PR A): no 'use server' file keeps its own requireAdmin or gates an admin action on the session's role claim; every file that calls requireAdmin imports the one in lib/current-user.ts, which reads the caller's row.",
-      "mutation": "M1100 a local session-gated requireAdmin put back in lib/amenity-actions.ts. M1101 getCreativeQueue gated on `session?.user?.role !== \"app_admin\"` again. M1102 requireAdmin reads the session's claim instead of currentUser().",
-      "observed": "M1100: 3 of 5 failing (own requireAdmin, session claim, import). M1101: 1 of 5 failing (session claim, naming lib/creative-review-actions.ts). M1102: 1 of 5 failing (reads the caller's row). Each restored with git checkout from the committed tree; 5 of 5 green after.",
+      "mutation": "M1100 a local session-gated requireAdmin put back in lib/amenity-actions.ts. M1101 getCreativeQueue gated on `session?.user?.role !== \"app_admin\"` again. M1102 requireAdmin reads the session's claim instead of currentUser(). Extended to route handlers and lib (security review L5): M1136 lib/dashboard-record-titles.ts's accountTitleFor gated on the session's claim again.",
+      "observed": "M1100: 3 of 5 failing (own requireAdmin, session claim, import). M1101: 1 of 5 failing (session claim, naming lib/creative-review-actions.ts). M1102: 1 of 5 failing (reads the caller's row). Each restored with git checkout from the committed tree; 5 of 5 green after. M1136: 1 of 8 failing (the route-and-lib scan, naming lib/dashboard-record-titles.ts). Restored, 8 of 8.",
+      "date": "2026-10-10"
+    },
+    "audit-writes-boundary.test.ts": {
+      "guards": "Step 18 (M3): every audit row is written by lib/audit-log.ts, where its organisation is attributed (ORG_RESOURCES); no direct audit_logs.create/createMany/upsert/update in app/, lib/ or scripts/.",
+      "mutation": "M1139 a direct `tx.audit_logs.create` added to lib/charge-actions.ts.",
+      "observed": "M1139: 1 of 3 failing ('nothing else writes audit_logs', naming lib/charge-actions.ts). Restored, 3 of 3.",
+      "date": "2026-10-10"
+    },
+    "audit-org-scope.itest.ts": {
+      "guards": "Step 18 (M3), behavioural plus the backfill SQL read from its migration: an organisation's log is the rows whose org_id is its own — a shared member's work only in the organisation it was for, a departed member's history kept, an admin's act on B's data in B's log as Blend'n and never in A's; an organisation's row that cannot be attributed throws in tests and is the platform's alone in production; the backfill gives old rows their resource's organisation.",
+      "mutation": "M1130 the read back to 'written by our members'. M1131 attribution skipped for every resource. M1132 strict attribution off in tests. M1133 an unattributable row written to an organisation. M1138 the backfill's venue statement matching nothing. M1140 admins named to hosts.",
+      "observed": "M1130: 4 of 6 failing. M1131: 4 of 6. M1132: 1 of 6 (the test-time throw). M1133: 1 of 6 (production null). M1138: 1 of 6 (backfill). M1140: 1 of 6 (Blend'n). Restored, 6 of 6.",
+      "date": "2026-10-10"
+    },
+    "audit-money-attribution.itest.ts": {
+      "guards": "Step 18 (M3 follow-up), behavioural plus the backfill SQL: money is its payer's — a venue's Venue Pro checkout, payment, invoice and the entitlements ended at a transfer are in the payer's log and never the new owner's, which gets one row with no money in it; a sponsor's charge is the brand's and the platform's, never the host's; the backfill attributes an old row to the organisation of its time, never the venue's owner today, and money with no payer on the row to nobody.",
+      "mutation": "M1141 the webhook's audit rows lose the payer (orgId: a.orgId). M1142 the transfer's ended row loses the payer. M1143 a charge attributed to the host. M1144 the backfill's venue rule without the time condition. M1145 the backfill's venue rule without the money/claim exclusion.",
+      "observed": "M1141–M1145: 1 of 3 failing each. Restored, 3 of 3.",
       "date": "2026-10-10"
     },
     "admin-gate-reads-database.itest.ts": {
