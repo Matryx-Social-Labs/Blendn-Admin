@@ -1,12 +1,12 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useMemo, useState } from "react"
 import { IconArrowRight, IconBuildingStore, IconCalendarEvent, IconCircleCheck } from "@tabler/icons-react"
 
+import { Callout } from "@/components/dashboard/kit"
+import { PublicChip, PublicFrame, PublicLockup } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { onboardingTier } from "@/lib/org-invites"
@@ -32,13 +32,14 @@ type Role = "organizer" | "venue_owner"
 /**
  * The three objections someone actually has with the form in front of them.
  *
- * All three are true today and all three are checked elsewhere: pricing is
- * undecided and everything is free (`docs/ROADMAP.md`), nothing in this flow
- * touches payment, and `/dashboard/onboarding` is a queue a human reads.
+ * All three are true today. Running events is free and Analytics is the one
+ * paid plan, bought later from the dashboard (owner, 2026-10-01; the kit's
+ * NOTES-2 retired "Free while we're in development"); nothing in this flow
+ * touches payment; and `/dashboard/onboarding` is a queue a human reads (R6).
  */
 const REASSURANCES = [
-  "Free while we're in development — pricing isn't decided yet.",
-  "No card. There's nothing to enter and no trial to expire.",
+  "Free to run events — check-in, the live headcount and room moderation cost nothing.",
+  "Analytics is an optional paid plan, for when you want to know which nights worked.",
   "Read by a person, not a filter. Usually within two working days.",
 ] as const
 
@@ -128,55 +129,36 @@ export default function ApplyPage() {
 
   if (done) {
     return (
-      <main className="apply-light apply-gradient flex min-h-screen items-center justify-center px-6 py-10">
-        <Card className="apply-card w-full max-w-lg rounded-3xl">
-          <CardContent className="space-y-5 px-8 py-10 text-center">
-            <Image
-              src="/brand/lockup-dark.webp"
-              alt="Blend'n"
-              width={852}
-              height={240}
-              className="mx-auto h-9 w-auto"
-            />
-            <IconCircleCheck className="mx-auto size-12 text-primary" />
-            <h1 className="text-2xl font-bold text-foreground">
-              {done.emailSent ? "Check your email" : "Application received"}
-            </h1>
-            <p className="text-sm leading-6 text-muted-foreground">{done.message}</p>
-            <p className="text-sm leading-6 text-muted-foreground">
-              Applications are reviewed by a person, usually within two working days. No account has
-              been created yet.
-            </p>
-            <Button asChild variant="outline" className="rounded-2xl">
-              <Link href="/">Back to Blend&apos;n</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </main>
+      <PublicFrame width="narrow">
+        <div className="flex flex-col items-center gap-5 px-8 py-10 text-center">
+          <PublicLockup className="self-center" />
+          <IconCircleCheck aria-hidden className="size-12 text-primary" />
+          <h1 className="text-2xl font-bold text-foreground">
+            {done.emailSent ? "Check your email" : "Application received"}
+          </h1>
+          <p className="text-sm leading-6 text-muted-foreground">{done.message}</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            A person reviews every application, usually within two working days. No account has been
+            created yet.
+          </p>
+          <Button asChild variant="outline" className="rounded-2xl">
+            <Link href="/">Back to Blend&apos;n</Link>
+          </Button>
+        </div>
+      </PublicFrame>
     )
   }
 
   return (
-    <main className="apply-light apply-gradient relative min-h-screen px-6 py-10 md:px-10">
-      <div className="apply-card apply-shell mx-auto grid overflow-hidden rounded-3xl border border-border bg-card lg:grid-cols-[0.9fr_1.1fr]">
+    <PublicFrame>
+      <div className="grid lg:grid-cols-[0.9fr_1.1fr]">
         <section className="flex flex-col gap-8 border-b border-border px-6 py-10 lg:border-b-0 lg:border-r lg:px-10 lg:py-12">
-          {/* The landing page's own lockup, not the monogram-plus-wordmark used
-              in dashboard chrome — that pairing appears nowhere on the marketing
-              site and would read as a third brand at the moment someone is
-              deciding whether to trust us. */}
-          <Image
-            src="/brand/lockup-dark.webp"
-            alt="Blend'n"
-            width={852}
-            height={240}
-            priority
-            className="h-9 w-auto self-start"
-          />
+          <PublicLockup priority />
 
-          <div className="space-y-4">
-            <span className="apply-chip">Become a host</span>
+          <div className="flex flex-col gap-4">
+            <PublicChip>Become a host</PublicChip>
             <h1 className="max-w-xl text-4xl font-bold leading-tight tracking-tight text-foreground">
-              List your events where people are looking for them.
+              Turn your crowd into a room where people actually meet.
             </h1>
             <p className="max-w-xl text-base leading-7 text-muted-foreground">
               Tell us about your organisation. We review every application by hand — it keeps the
@@ -331,17 +313,11 @@ export default function ApplyPage() {
               </Field>
 
               {needsProof ? (
-                <div
-                  className={`rounded-2xl border p-4 text-sm leading-6 ${
-                    proofGiven
-                      ? "border-border bg-muted/40 text-muted-foreground"
-                      : "border-amber-500/40 bg-amber-500/5 text-foreground"
-                  }`}
-                >
+                <Callout tone={proofGiven ? "success" : "warning"}>
                   {proofGiven
                     ? "Thanks — that's enough to submit from a personal address."
                     : "That's a personal email address. Add a GSTIN or your website above and you can submit — a company address needs neither."}
-                </div>
+                </Callout>
               ) : null}
             </div>
 
@@ -376,7 +352,7 @@ export default function ApplyPage() {
           </form>
         </section>
       </div>
-    </main>
+    </PublicFrame>
   )
 }
 

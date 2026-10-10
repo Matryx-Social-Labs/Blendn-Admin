@@ -1,11 +1,10 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { IconCircleCheck } from "@tabler/icons-react"
-
+import { Callout } from "@/components/dashboard/kit"
+import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -83,123 +82,93 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-6">
-      <Image
-        src="/brand/monogram-gradient.png"
-        alt=""
-        aria-hidden
-        width={560}
-        height={560}
-        className="pointer-events-none absolute -bottom-[18%] -right-[8%] w-[560px] max-w-none opacity-[0.04]"
-      />
-
-      <div className="relative flex w-full max-w-[400px] flex-col gap-7">
-        <div className="flex flex-col items-center gap-3.5">
-          <Image src="/brand/monogram-gradient.png" alt="Blend'n" width={64} height={64} priority />
-          <div className="text-center">
-            <h1 className="text-[length:var(--text-h1)] font-bold">
-              {done ? "Password changed" : linkDead ? "This link no longer works" : "Set a new password"}
-            </h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              {done
-                ? "Signing you back in…"
-                : linkDead
-                  ? "Reset links work once, and for an hour."
-                  : `At least ${MIN_PASSWORD_LENGTH} characters. Length beats symbols.`}
-            </p>
-          </div>
-        </div>
-
-        {done ? (
-          <div className="flex flex-col items-center gap-4 rounded-[var(--radius)] border border-border bg-card p-6 text-center">
-            <IconCircleCheck className="size-8 text-primary" />
-            <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-              Any mobile app sessions on this account were signed out, in case someone else had
-              them.
-            </p>
-            <Button asChild>
-              <Link href="/login">Sign in</Link>
-            </Button>
-          </div>
-        ) : linkDead ? (
-          <div className="flex flex-col items-center gap-4 rounded-[var(--radius)] border border-border bg-card p-6 text-center">
-            <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-              It has been used already, or it has expired. Ask for a new one and use the newest email.
-            </p>
-            <Button asChild>
-              <Link href="/forgot-password">Request a new link</Link>
-            </Button>
-          </div>
-        ) : (
-          <form
-            onSubmit={submit}
-            className="relative flex flex-col gap-4 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-6"
-          >
-            <div
-              aria-hidden
-              className="absolute inset-x-0 top-0 h-[3px] bg-[image:var(--gradient-brand)]"
+    <AuthFrame
+      title={done ? "Password changed" : linkDead ? "This link no longer works" : "Set a new password"}
+      sub={
+        done
+          ? "Signing you back in…"
+          : linkDead
+            ? "Reset links work once, and for an hour."
+            : `At least ${MIN_PASSWORD_LENGTH} characters. Length beats symbols.`
+      }
+    >
+      {done ? (
+        <>
+          <Callout tone="success" role="status">
+            Any mobile app sessions on this account were signed out, in case someone else had them.
+          </Callout>
+          <Button asChild>
+            <Link href="/login">Sign in</Link>
+          </Button>
+        </>
+      ) : linkDead ? (
+        <>
+          <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+            It has been used already, or it has expired. Ask for a new one and use the newest email.
+          </p>
+          <Button asChild>
+            <Link href="/forgot-password">Request a new link</Link>
+          </Button>
+        </>
+      ) : (
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="password">New password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+              className="h-11"
             />
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="password">New password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                required
-                className="h-11"
-              />
-              {localCheck && !localCheck.ok ? (
-                <p className="text-[0.75rem] text-muted-foreground">{localCheck.message}</p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="confirm">Confirm</Label>
-              <Input
-                id="confirm"
-                type="password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                autoComplete="new-password"
-                required
-                aria-invalid={mismatch}
-                className="h-11"
-              />
-              {mismatch ? (
-                <p className="text-[0.75rem] text-destructive">These don&apos;t match.</p>
-              ) : null}
-            </div>
-
-            {error ? (
-              <p role="alert" className="text-[0.8125rem] text-destructive">
-                {error}
-              </p>
+            {localCheck && !localCheck.ok ? (
+              <p className="text-[0.75rem] text-muted-foreground">{localCheck.message}</p>
             ) : null}
+          </div>
 
-            <Button
-              type="submit"
-              size="lg"
-              disabled={loading || !token || !localCheck?.ok || mismatch}
-              className="w-full"
-            >
-              {loading ? "Saving…" : "Change password"}
-            </Button>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="confirm">Confirm new password</Label>
+            <Input
+              id="confirm"
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              required
+              aria-invalid={mismatch}
+              className="h-11"
+            />
+            {mismatch ? <p className="text-[0.75rem] text-destructive">These don&apos;t match.</p> : null}
+          </div>
 
-            {!token ? (
-              <p className="text-[0.75rem] text-muted-foreground">
-                This link is missing its token. Use the link from the email exactly as sent, or{" "}
-                <Link href="/forgot-password" className="text-primary hover:underline">
-                  request a new one
-                </Link>
-                .
-              </p>
-            ) : null}
-          </form>
-        )}
-      </div>
-    </main>
+          {error ? (
+            <p role="alert" className="text-[0.8125rem] text-destructive">
+              {error}
+            </p>
+          ) : null}
+
+          <Button type="submit" size="lg" disabled={loading || !token || !localCheck?.ok || mismatch} className="w-full">
+            {loading ? "Saving…" : "Change password"}
+          </Button>
+
+          {!token ? (
+            <p className="text-[0.75rem] text-muted-foreground">
+              This link is missing its token. Use the link from the email exactly as sent, or{" "}
+              <Link href="/forgot-password" className="text-foreground underline underline-offset-4">
+                request a new one
+              </Link>
+              .
+            </p>
+          ) : (
+            // Said before they press it: the reset revokes every mobile refresh token (the route).
+            <p className="text-center text-[0.78125rem] text-faint-foreground">
+              Your phones are signed out when the password changes.
+            </p>
+          )}
+        </form>
+      )}
+    </AuthFrame>
   )
 }

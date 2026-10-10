@@ -319,7 +319,10 @@ describe("no h1 anywhere else in the dashboard tree", () => {
 
   it("finds an h1 only in PageHeader", () => {
     const withH1 = tree.filter((f) => /<h1[\s>]/.test(readFileSync(join(ROOT, f), "utf8")))
-    expect(withH1).toEqual([join("components", "dashboard", "page-header.tsx")])
+    // `components/` is shared with the public pages, whose frames draw their
+    // page's one h1 (step 18). Allowed because `apply-theme.test.ts` keeps
+    // every importer of public-frame outside the dashboard.
+    expect(withH1).toEqual([join("components", "dashboard", "page-header.tsx"), join("components", "public-frame.tsx")])
   })
 })
 

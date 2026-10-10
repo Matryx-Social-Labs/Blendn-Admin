@@ -260,7 +260,9 @@ test.describe("claiming a curated event", () => {
     const body = await (await anon.get(ids[0])).text()
     await anon.dispose()
 
-    expect(body).toContain("Is this your event?")
+    // The kit's ClaimPublic (step 18): the listing named as ours, its title the h1, the form's own button.
+    expect(body).toContain("Listed by Blend")
+    expect(body).toContain("This is my event")
     expect(body, "the claim form asks for a way to reply").toMatch(/Email/i)
   })
 })

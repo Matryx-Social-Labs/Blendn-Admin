@@ -19,7 +19,7 @@ import { cityKey } from "@/lib/address"
 import { realEventsWhere } from "@/lib/event-kind"
 import { liveGuestIds, venueLiveBucket } from "@/lib/live-count"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { mayAttendWhere, undisputedLinkWhere, venuesTakenOver } from "@/lib/venue-visibility"
+import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere, venuesTakenOver } from "@/lib/venue-visibility"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -70,6 +70,12 @@ const DISTANCE_SORT_CEILING = 5000
  * with `EVENT_LIVE_HERE` — so the list, the venue page and the door cannot
  * disagree. Per viewer: a 21+ night does not hide its venue from somebody it
  * would turn away (D-3).
+ *
+ * ## A claimed venue its owner took off Blendn is not listed
+ *
+ * "Open on Blendn" (D-13): the owner of a claimed venue may switch it off, and
+ * then it leaves Places and the home map, which both read this list. Its events
+ * still show, and still say "at <Venue>". An unclaimed venue is always listed.
  *
  * ## `liveNow` is a bucket, never a number
  *
@@ -138,6 +144,9 @@ export async function GET(request: NextRequest) {
       // `archived` is how a venue is retired without deleting the events that
       // happened in it, so it must not appear in discovery.
       status: "active",
+      // A claimed venue its owner took off Blendn (D-13). Under `AND`: the
+      // search below sets `OR`, and two ORs on one object replace each other.
+      AND: [openOnBlendnWhere],
     }
 
     if (search) {
