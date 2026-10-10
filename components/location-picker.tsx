@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import {
   Popover,
   PopoverContent,
-  PopoverTrigger,
+  PopoverAnchor,
 } from "@/components/ui/popover"
 import { IconMapPin, IconSearch } from "@tabler/icons-react"
 import { extractAddress } from "@/lib/address"
@@ -365,13 +365,19 @@ export function LocationPicker({
   return (
     <div className="space-y-2">
       <Popover open={showSuggestions} onOpenChange={setShowSuggestions}>
-        <PopoverTrigger asChild>
+        {/*
+          An anchor, not a trigger: the suggestions open as you type, and a
+          trigger made this wrapper a "button" with aria-expanded — a div that
+          role cannot take (axe: aria-allowed-attr, critical).
+        */}
+        <PopoverAnchor asChild>
           <div className="relative">
             <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
             <Input
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
               placeholder="Search for a location..."
+              aria-label="Search for a location"
               className="pl-9 pr-20"
               onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
             />
@@ -381,7 +387,7 @@ export function LocationPicker({
               </span>
             )}
           </div>
-        </PopoverTrigger>
+        </PopoverAnchor>
         {suggestions.length > 0 && (
           <PopoverContent
             align="start"

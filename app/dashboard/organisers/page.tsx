@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { getAuth } from "@/lib/auth"
 import { getRoleUsers } from "@/lib/admin-role-actions"
 import { neverPublished } from "@/lib/dashboard-format"
+import { StatLine } from "@/components/dashboard/kit"
 import { RoleUsersTable } from "@/components/role-users-table"
 
 import { routeMetadata } from "@/lib/dashboard-route-content"
@@ -36,38 +37,30 @@ export default async function OrganisersPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground">
-        <span>
-          <b className="font-bold text-foreground tabular-nums">{users.length}</b> organiser
-          {users.length === 1 ? "" : "s"}
-        </span>
-        <span>
-          <span className="tabular-nums">{published}</span> published event
-          {published === 1 ? "" : "s"}
-        </span>
-        {busiest && busiest.published > 0 ? (
-          <span>
-            busiest holds <span className="tabular-nums">{busiest.sharePct}%</span> ·{" "}
-            {busiest.name ?? busiest.email}
-          </span>
-        ) : null}
-        {/*
-          Accounts that exist and have shipped nothing. On a two-sided product
-          this is the acquisition number: supply that was recruited and never
-          arrived, which no other screen counts.
-        */}
-        {dormant > 0 ? (
-          <span className="font-medium text-warning">
-            <span className="tabular-nums">{dormant}</span> never published
-          </span>
-        ) : null}
-      </div>
-
       <RoleUsersTable
         users={users}
         role="organizer"
         roleLabel="Organiser"
         detailBasePath="/dashboard/organisers"
+        summary={
+          /*
+            Accounts that exist and have shipped nothing ("never published")
+            are, on a two-sided product, the acquisition number: supply that was
+            recruited and never arrived, which no other screen counts.
+          */
+          <StatLine
+            items={[
+              { value: users.length, label: users.length === 1 ? "organiser" : "organisers" },
+              { value: published, label: published === 1 ? "published event" : "published events" },
+              busiest !== null &&
+                busiest.published > 0 && {
+                  value: `${busiest.sharePct}%`,
+                  label: `held by the busiest · ${busiest.name ?? busiest.email}`,
+                },
+              dormant > 0 && { value: dormant, label: "never published", tone: "warning" },
+            ]}
+          />
+        }
       />
     </div>
   )

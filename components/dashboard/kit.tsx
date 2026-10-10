@@ -1,6 +1,6 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
-import { IconLock } from "@tabler/icons-react"
+import { IconAlertTriangle, IconCircleCheck, IconLock } from "@tabler/icons-react"
 
 import { MetricTile } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
@@ -250,10 +250,16 @@ export function DateBlock({ day, month, live }: { day: string | number; month: s
         live ? "border-destructive/50" : "border-border"
       )}
     >
+      {/*
+        Live is ink on the red, not red on the tile: red 10px text on
+        surface-raised measured 4.25:1 (axe, step 18, an admin's events list
+        with a night running), and ink on --destructive is 5.1:1 — the nav
+        badge's reasoning in globals.css.
+      */}
       <span
         className={cn(
           "text-[0.625rem] font-medium uppercase tracking-[0.08em]",
-          live ? "text-destructive" : "text-muted-foreground"
+          live ? "rounded-[3px] bg-destructive px-1 font-bold text-destructive-foreground" : "text-muted-foreground"
         )}
       >
         {live ? "Live" : month}
@@ -355,5 +361,119 @@ export function PillTabs({
         </Link>
       ))}
     </nav>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A line of counts above a list (the platform kit's `StatLine`): the first
+ * figure bold, the rest muted. Tone is for the one count that means somebody
+ * should look — `destructive` and `warning` — or `faint` for the one that means
+ * the system worked (deleted accounts). A tone only on a non-zero count is the
+ * caller's job: a red "0 suspended" is a false alarm.
+ */
+export function StatLine({
+  items,
+  className,
+}: {
+  items: Array<{ value: ReactNode; label: string; tone?: "destructive" | "warning" | "faint" } | null | false>
+  className?: string
+}) {
+  return (
+    <p className={cn("flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground", className)}>
+      {items.filter(Boolean).map((item) => {
+        const { value, label, tone } = item as Exclude<typeof item, null | false>
+        return (
+          <span
+            key={label}
+            className={cn(
+              tone === "destructive" && "font-medium text-destructive",
+              tone === "warning" && "font-medium text-warning",
+              tone === "faint" && "text-faint-foreground"
+            )}
+          >
+            <b className={cn("font-bold tabular-nums", !tone && "text-foreground")}>{value}</b> {label}
+          </span>
+        )
+      })}
+    </p>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+const CALLOUT_TONE = {
+  warning: { box: "border-warning/40 bg-warning/[0.07]", icon: "text-warning" },
+  destructive: { box: "border-destructive/40 bg-destructive/[0.07]", icon: "text-destructive" },
+  success: { box: "border-success/40 bg-success/[0.07]", icon: "text-success" },
+} as const
+
+/**
+ * A boxed sentence that changes a decision (the kit's `Warn`): a dispute, a
+ * blocked hand-over, an address that is already an applicant. Not for prose a
+ * screen could do without — that is the "type, not boxes" rule still applying
+ * inside a Panel. `role` is left to the caller: a callout that appears after
+ * an action (a filed claim) wants `status`; one that is simply on the page
+ * wants none.
+ */
+export function Callout({
+  tone = "warning",
+  title,
+  children,
+  role,
+  className,
+}: {
+  tone?: keyof typeof CALLOUT_TONE
+  title?: ReactNode
+  children?: ReactNode
+  role?: "status" | "alert"
+  className?: string
+}) {
+  const Icon = tone === "success" ? IconCircleCheck : IconAlertTriangle
+  return (
+    <div role={role} className={cn("flex gap-2.5 rounded-[10px] border px-3.5 py-3", CALLOUT_TONE[tone].box, className)}>
+      <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", CALLOUT_TONE[tone].icon)} />
+      <div className="flex min-w-0 flex-col gap-0.5 text-[0.8125rem]">
+        {title ? <p className="font-bold">{title}</p> : null}
+        {children ? <div className="leading-5 text-muted-foreground">{children}</div> : null}
+      </div>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Labelled facts in a grid (the kit's `Dl`): a claim's GSTIN, a lead's city.
+ * An empty value reads "—", never a blank cell; `mono` for identifiers.
+ */
+export function Facts({
+  items,
+  cols = 2,
+}: {
+  items: Array<{ label: string; value: ReactNode; mono?: boolean } | null | false>
+  cols?: 1 | 2 | 3
+}) {
+  return (
+    <dl
+      className={cn(
+        "grid gap-x-6 gap-y-2.5",
+        cols === 2 && "@xl/main:grid-cols-2",
+        cols === 3 && "@xl/main:grid-cols-3"
+      )}
+    >
+      {items.filter(Boolean).map((item) => {
+        const { label, value, mono } = item as Exclude<typeof item, null | false>
+        return (
+          <div key={label} className="flex min-w-0 flex-col gap-0.5">
+            <dt className="text-[0.75rem] text-faint-foreground">{label}</dt>
+            <dd className={cn("min-w-0 break-words text-[0.84375rem]", mono && "font-mono")}>
+              {value === null || value === undefined || value === "" ? "—" : value}
+            </dd>
+          </div>
+        )
+      })}
+    </dl>
   )
 }

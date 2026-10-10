@@ -16,6 +16,7 @@ import {
 import type { lead_status } from "@prisma/client"
 
 import { DataTable, type Column } from "@/components/dashboard/data-table"
+import { Callout, Facts } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -136,9 +137,12 @@ const columns: Column<LeadRow>[] = [
 export function LeadsInbox({
   rows,
   assignees,
+  counts,
 }: {
   rows: LeadRow[]
   assignees: { id: string; name: string | null; email: string }[]
+  /** How many each pill holds, so an empty status is not a click to find out. */
+  counts: Record<string, number>
 }) {
   const router = useRouter()
   const params = useSearchParams()
@@ -163,6 +167,8 @@ export function LeadsInbox({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
+        {/* The kit's status pills: the count beside each, bold on the one you
+            are on and faint on the rest, so "New 0" reads as done. */}
         {FILTERS.map((f) => (
           <button
             key={f.key}
@@ -170,11 +176,21 @@ export function LeadsInbox({
             onClick={() => setParam("status", f.key)}
             aria-pressed={status === f.key}
             className={cn(
-              "rounded-full border px-3 py-1.5 text-[0.78125rem]",
-              status === f.key ? "border-primary bg-surface-raised font-bold" : "border-border"
+              "rounded-full border px-3 py-1.5 text-[0.8125rem] transition-colors pointer-coarse:min-h-11",
+              status === f.key
+                ? "border-border-strong bg-accent text-foreground"
+                : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
             )}
           >
-            {f.label}
+            {f.label}{" "}
+            <span
+              className={cn(
+                "ml-1 font-bold tabular-nums",
+                status === f.key ? "text-foreground" : "text-faint-foreground"
+              )}
+            >
+              {counts[f.key] ?? 0}
+            </span>
           </button>
         ))}
 
@@ -347,29 +363,29 @@ function LeadDrawer({
         {/* The highest-value widget here: whether this person already applied,
             so nobody chases someone who signed up last week. */}
         {detail?.application ? (
-          <div className="flex flex-col gap-1 rounded-lg border border-success/40 bg-success/5 p-4">
-            <p className="text-[0.8125rem] font-bold">Already applied</p>
-            <p className="text-[0.78125rem] text-muted-foreground">
-              {detail.application.displayName} — application is{" "}
-              <b>{detail.application.status}</b>, filed {formatSince(detail.application.createdAt.toISOString())}.
-            </p>
-          </div>
+          <Callout tone="success" title="Already applied">
+            {detail.application.displayName} — application is <b>{detail.application.status}</b>, filed{" "}
+            {formatSince(detail.application.createdAt.toISOString())}.
+          </Callout>
         ) : detail ? (
-          <p className="flex items-center gap-2 text-[0.78125rem] text-faint-foreground">
+          <p className="flex items-center gap-2 text-[0.78125rem] text-muted-foreground">
             <IconAlertTriangle className="size-3.5" />
             No application from this address yet.
           </p>
         ) : null}
 
-        <dl className="flex flex-col gap-2 text-[0.8125rem]">
-          <Field label="City" value={row?.city} />
-          <Field label="Runs" value={row?.eventTypes} />
-          <Field label="Source" value={row?.source} />
-          <Field
-            label="Waiting"
-            value={row?.hoursWaiting === null ? "Contacted" : `${row?.hoursWaiting ?? 0}h`}
-          />
-        </dl>
+        <Facts
+          cols={1}
+          items={[
+            { label: "City", value: row?.city },
+            { label: "Runs", value: row?.eventTypes },
+            { label: "Source", value: row?.source },
+            {
+              label: "Waiting",
+              value: row?.hoursWaiting === null ? "Contacted" : `${row?.hoursWaiting ?? 0}h`,
+            },
+          ]}
+        />
 
         {row ? (
           <div className="flex flex-col gap-2">
@@ -469,13 +485,4 @@ function withParam(qs: string, key: string, value: string): string {
   const next = new URLSearchParams(qs)
   next.set(key, value)
   return next.toString()
-}
-
-function Field({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className="flex justify-between gap-3 border-b border-border pb-1.5 last:border-0">
-      <dt className="text-faint-foreground">{label}</dt>
-      <dd className="text-right">{value || "—"}</dd>
-    </div>
-  )
 }

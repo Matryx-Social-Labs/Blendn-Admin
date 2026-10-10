@@ -39,29 +39,30 @@ gates, the specialists, and a drive, before the next one starts.
 | `/dashboard/moderation` | ✅ 2026-09-11 (chips → words; mockup skipped — DataTable pattern) | ✅ E10; 2026-09-11 with two seeded flags | erased author reads "Deleted account" |
 | `/dashboard/moderation/reports` | ✅ 2026-09-11 (same) | ✅ E10 | |
 | `/dashboard/events` (list) | ✅ 46d00fb, 380ba27 | ✅ 2026-09-10 | server-fetched, zero column fixed |
-| `/dashboard/events/curate` | ✅ #276-era W5 + design review 2026-08-24 (6→9/10) | ✅ browser, 2026-08-24 | form → `components/ui/form`, timezone bug |
+| `/dashboard/events/curate` | ✅ #276-era W5 + design review 2026-08-24 (6→9/10); step 18 to the kit (mockup: kit `admin-supply.jsx` Curation) | ✅ browser, 2026-08-24; step 18 local seed at 375/768/1440, axe clean in `main` (`e2e/admin-supply-screens.spec.ts`) | form → `components/ui/form`, timezone bug; step 18: KpiStrip of four (wrong pin first), the curate form in a Panel, the kit's sentence as the page's description; the admin's events list offers "Curate from a listing" |
 | `/dashboard/events/new` | ✅ 081bd48 (mockup `event-authoring-20260911`) | ✅ 2026-09-11, published + edited + cancelled, rows read back | four sections + sticky publish rail; Status select, required long description, category wall, organiser-settable Featured all cut |
 | `/dashboard/events/[id]/edit` | ✅ 081bd48 | ✅ 2026-09-11 | same form; rail says Published, Save changes, Cancel event… |
 | `/dashboard/events/[id]` (overview, live, attendees tabs) | ✅ 8d6f547 (mockup `event-page-20260911`); Turned away section added 2026-09-21 (mockup `event-turned-away-20260921`, SCRUM-196) | ✅ E8/E9; 2026-09-11 draft/upcoming/over looked at as organiser; 2026-09-21 live with two refusals at 1280 and 768, link followed to the editor's Where section | lifecycle strip replaces the status badge; hero is Going (maybe · saved), Came when nobody RSVP'd; sections with rules, not cards; Turned away sits between Attendance and Connections and its verdict is a sentence (the fence, or the phones), hidden at zero |
 | `/dashboard/events/[id]/messaging` | ✅ d1096f7 (mockup `event-messaging-20260911`) | ✅ E10; 2026-09-11 as organiser + venue owner | the room's pulse line; composer sticky; templates as chips; header retitled "Room" |
 | `/dashboard/events/[id]/feedback` | ✅ d1096f7 (mockup `event-feedback-20260911`) | ✅ E12; 2026-09-11 | sentiment bar is the hero; sections with rules; stars only when rated |
 | `/dashboard/chatrooms` | ✅ (see organizer) | ✅ E10 | E17 fixed the 403-as-empty state |
-| `/dashboard/users` | ✅ 380ba27, 99bf013, f2aa14e | ✅ 2026-09-11 local + read back | deleted-account state, status Select |
-| `/dashboard/organisers`, `/organisers/[id]` | ✅ 503dead (index) / ✅ a638b48 (detail, `RoleUserDetail`) | ✅ index; detail 2026-09-11 | |
-| `/dashboard/venues` (admin index), `/venues/[id]`, `/venues/new`, `/venues/[id]/claim` | ✅ c1ff7fb, 634bfae (index) / ✅ 2026-09-11 (detail, new, claim — shared with venue owner) | ✅ index 2026-09-10 | |
-| `/dashboard/venue-owners`, `/venue-owners/[id]` | ✅ 503dead (index) / ✅ a638b48 (detail) | ✅ index | shares `RoleUserDetail` |
-| `/dashboard/leads` | ✅ a638b48 | ✅ E3 | status as a word; duplicate h2 cut |
+| `/dashboard/users` | ✅ 380ba27, 99bf013, f2aa14e; step 18 to the kit (mockup: kit `admin-supply.jsx` Users) | ✅ 2026-09-11 local + read back; step 18 local seed at 375/768/1440, axe clean in `main` (`e2e/admin-supply-screens.spec.ts`) | deleted-account state, status Select; step 18: StatLine (suspended red only when >0, deleted faint) |
+| `/dashboard/organisers`, `/organisers/[id]` | ✅ 503dead (index) / ✅ a638b48 (detail, `RoleUserDetail`); step 18 to the kit (mockup: kit `admin-supply.jsx` RoleUsers) | ✅ index; detail 2026-09-11; step 18 local seed at 375/768/1440, axe clean in `main` (`e2e/admin-supply-screens.spec.ts`) | step 18: StatLine (published, the busiest's share, never published in warning), "never" in the Published column |
+| `/dashboard/venues` (admin index), `/venues/[id]`, `/venues/new`, `/venues/[id]/claim` | ✅ c1ff7fb, 634bfae (index) / ✅ 2026-09-11 (detail, new, claim — shared with venue owner); step 18 the index to the kit (mockup: kit `admin-supply.jsx` VenueRecords) | ✅ index 2026-09-10; step 18 local seed at 375/768/1440, axe clean in `main` | step 18: StatLine (unclaimed in warning, disputed in red), owner column reads "unclaimed" |
+| `/dashboard/events` (admin) | ✅ step 15 shared; step 18 (mockup: kit `admin-supply.jsx` AdminEvents) | ✅ step 18 local seed at 375/768/1440 | "Curate from a listing" beside the h1 for an admin; a curated event's host reads "Listed by us"; the kit's DateBlock "Live" is ink on the red (red 10px text on the tile measured 4.25:1) |
+| `/dashboard/venue-owners`, `/venue-owners/[id]` | ✅ 503dead (index) / ✅ a638b48 (detail); step 18 to the kit (mockup: kit `admin-supply.jsx` RoleUsers) | ✅ index; step 18 local seed at 375/768/1440, axe clean in `main` (`e2e/admin-supply-screens.spec.ts`) | shares `RoleUserDetail`; step 18: StatLine (owners, venues held, claims pending), per owner the home organisation, venues through live memberships and "claim pending" (`lib/venue-owner-facts.ts`) |
+| `/dashboard/leads` | ✅ a638b48; step 18 to the kit (mockup: kit `admin-supply.jsx` Leads) | ✅ E3; step 18 local: a note added and the seeded lead moved contacted → qualified, `lead_notes` + `leads.status` + `lead.status_changed` read back | status as a word; duplicate h2 cut; step 18: pills with counts, the drawer's "Already applied" Callout and Facts, the metrics as a KpiStrip |
 | `/dashboard/claims`, `/claims/venues`, `/claims/brands` | ✅ W5 + design review 2026-08-24 (events) / ◐ (venues, brands share the queue) | ✅ E7 | one queue, three kinds |
 | `/dashboard/onboarding` (applications) | ✅ ac0962f, ce62887, 2fd92dd | ✅ 2026-09-11 | credential panel, evidence order |
-| `/dashboard/sponsors` (brands) | ✅ a638b48 | ✅ E6 | duplicates section only when there are any |
+| `/dashboard/sponsors` (brands) | ✅ a638b48; step 18 to the kit (mockup: kit `admin-supply.jsx` Brands) | ✅ E6; step 18 local seed at 375/768/1440, axe clean in `main` (`e2e/admin-supply-screens.spec.ts`) | duplicates section only when there are any; step 18: StatLine, Panels |
 | `/dashboard/creative-review` | ✅ a638b48 | ✅ E6 | rule beside the buttons |
 | `/dashboard/charges` | ✅ a638b48; step 17 to the kit (mockup: kit `admin-supply.jsx` Charges) | ✅ E6; step 17 local seed | KpiStrip + Panel rows; delivered reach and band beside sends; "Send payment link" on an agreed charge, the link's state on the money line; settled by the webhook |
-| `/dashboard/organisations` | ✅ a638b48 | ✅ E7 | divided list, controls to the right |
-| `/dashboard/categories` | ✅ a638b48 | ✅ E3 | merge keeps interests (W14); counts as text |
-| `/dashboard/amenities` | ✅ a638b48 | ✅ #298 | list first, add form last |
+| `/dashboard/organisations` | ✅ a638b48; step 18 to the kit (mockup: kit `admin-supply.jsx` Organisations) | ✅ E7; step 18 local seed at 375/768/1440, axe clean in `main` (`e2e/admin-supply-screens.spec.ts`) | divided list, controls to the right; step 18: one bordered list, verified domains in green |
+| `/dashboard/categories` | ✅ a638b48; step 18 to the kit (mockup: kit `admin-supply.jsx` Categories) | ✅ E3; step 18 local: a category created, row + `category.created` read back | merge keeps interests (W14); counts as text; step 18: a Panel per category, sub-rows as Rows; seed-qa seeds the taxonomy its events are tagged with |
+| `/dashboard/amenities` | ✅ a638b48; step 18 to the kit (mockup: kit `admin-supply.jsx` Amenities) | ✅ #298; step 18 local: Rooftop retired and restored, `is_active` + `amenity.retire`/`amenity.restore` read back | list first, add form last; step 18: Panels |
 | `/dashboard/reports` | ✅ a638b48 | ✅ E12 (exports) | radio list, one orange button |
 | `/dashboard/audit` | ✅ a638b48 | ✅ E3 | mono words; en-GB pinned (hydration) |
-| `/dashboard/settings` | ✅ a638b48 | ✅ E3 | one primary |
+| `/dashboard/settings` | ✅ a638b48; step 18 to the kit (mockup: kit `shared.jsx` Settings) | ✅ E3; step 18 local: the profile name saved and read back (`account.profile_updated`), every role at 375/768/1440 in `e2e/admin-supply-screens.spec.ts` | one primary; step 18: section titles at panel weight, the password callout |
 
 ## organizer
 

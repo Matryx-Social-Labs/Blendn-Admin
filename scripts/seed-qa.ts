@@ -7,6 +7,7 @@ import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
 import { normaliseSponsorName } from "../lib/sponsor-name"
 import { ensureOrgBrand, ensurePendingBrandClaim, findBrandByName } from "./seed-brand"
+import { seedMatrixMarkers, seedTaxonomy } from "./seed-admin-world"
 import { describeLive, describeRefresh, refreshSeededEvent } from "./seed-occurrences"
 import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS, upsertOrg } from "./test-accounts"
@@ -613,6 +614,9 @@ async function main() {
     ownerId: null,
     geofence: null,
   })
+
+  // The taxonomy the events below are tagged with (see seed-admin-world.ts).
+  await seedTaxonomy(db)
 
   // ── events ───────────────────────────────────────────────────────────────
   const hotlinked: string[] = []
@@ -1246,7 +1250,7 @@ async function main() {
 
   // ── sponsors and a brand claim ───────────────────────────────────────────
   const brandName = "Blue Tokai"
-  await ensureOrgBrand(db, {
+  const ownBrand = await ensureOrgBrand(db, {
     name: brandName,
     orgId: orgs.brands.id,
     createdBy: users.admin,
@@ -1422,6 +1426,9 @@ async function main() {
       data: { user_id: userId, city, city_key: city.toLowerCase(), country: "India", opens: 3 + i },
     })
   }
+
+  // ── a row on every admin screen the access matrix reads (step 18) ───────
+  await seedMatrixMarkers(db, { admin: users.admin, attendees: attendeeIds, brandId: ownBrand.id })
 
   // ── retire the previous names ────────────────────────────────────────────
   if (APPLY) {

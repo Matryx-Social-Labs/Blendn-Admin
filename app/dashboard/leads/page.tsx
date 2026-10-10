@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation"
 
-import { MetricTile } from "@/components/dashboard/primitives"
+import { KpiStrip } from "@/components/dashboard/kit"
 import { getAuth } from "@/lib/auth"
-import { getLeadAssignees, getLeadMetrics, getLeads } from "@/lib/lead-queries"
+import { getLeadAssignees, getLeadMetrics, getLeads, getLeadStatusCounts } from "@/lib/lead-queries"
 import type { lead_status } from "@prisma/client"
 
 import { LeadsInbox } from "./leads-inbox"
@@ -34,10 +34,11 @@ export default async function LeadsPage({
   // received is history; the inbox should show work.
   const status = (sp.status ?? "new") as lead_status | "open" | "all"
 
-  const [rows, metrics, assignees] = await Promise.all([
+  const [rows, metrics, assignees, counts] = await Promise.all([
     getLeads({ status, q: sp.q, assignedTo: sp.assigned }),
     getLeadMetrics(),
     getLeadAssignees(),
+    getLeadStatusCounts(),
   ])
 
   return (
@@ -49,28 +50,30 @@ export default async function LeadsPage({
         for an account.
       </p>
 
-      <div className="flex flex-wrap gap-1">
-        <MetricTile label="New this week" value={String(metrics.newThisWeek)} />
-        <MetricTile
-          label="Median time to contact"
-          value={metrics.medianHoursToContact === null ? null : `${metrics.medianHoursToContact}h`}
-          hint={metrics.medianHoursToContact === null ? "nothing contacted yet" : "last 30 days"}
-        />
-        <MetricTile
-          label="Converted"
-          value={metrics.conversionPct === null ? null : `${metrics.conversionPct}%`}
-          hint="last 30 days, spam excluded"
-        />
-        {/* Deliberately prominent. If this number is ugly, the screen is doing
-            its job by showing you. */}
-        <MetricTile
-          label="Oldest untouched"
-          value={metrics.oldestUntouchedHours === null ? null : `${metrics.oldestUntouchedHours}h`}
-          hint={metrics.oldestUntouchedHours === null ? "nothing waiting" : "nobody has replied"}
-        />
-      </div>
+      {/* One strip, the kit's way. "Oldest untouched" is deliberately in it: if
+          this number is ugly, the screen is doing its job by showing you. */}
+      <KpiStrip
+        items={[
+          { label: "New this week", value: String(metrics.newThisWeek) },
+          {
+            label: "Median time to contact",
+            value: metrics.medianHoursToContact === null ? null : `${metrics.medianHoursToContact}h`,
+            hint: metrics.medianHoursToContact === null ? "nothing contacted yet" : "last 30 days",
+          },
+          {
+            label: "Converted",
+            value: metrics.conversionPct === null ? null : `${metrics.conversionPct}%`,
+            hint: "last 30 days, spam excluded",
+          },
+          {
+            label: "Oldest untouched",
+            value: metrics.oldestUntouchedHours === null ? null : `${metrics.oldestUntouchedHours}h`,
+            hint: metrics.oldestUntouchedHours === null ? "nothing waiting" : "nobody has replied",
+          },
+        ]}
+      />
 
-      <LeadsInbox rows={rows} assignees={assignees} />
+      <LeadsInbox rows={rows} assignees={assignees} counts={counts} />
     </div>
   )
 }
