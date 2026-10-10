@@ -386,6 +386,8 @@ const columns: ColumnDef<typeof features, UserWithProfile>[] = [
   },
   {
     id: "actions",
+    // A header with no text is announced as a blank column (axe: empty-table-header).
+    header: () => <span className="sr-only">Actions</span>,
     cell: ({ row, table }) =>
       row.original.deletedAt ? null : <ActionsCell row={row} table={table} />,
   },
@@ -668,7 +670,8 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+              {/* Named for the narrow column too, where the word is hidden (axe: button-name). */}
+              <Button variant="outline" size="sm" aria-label="Columns">
                 <IconLayoutColumns />
                 <span className="hidden @2xl/main:inline">Columns</span>
                 <IconChevronDown />

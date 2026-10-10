@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react"
 import { toast } from "sonner"
 
+import { Callout, Panel, StatLine } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,32 +23,44 @@ import { refusalMessage } from "@/lib/refusal"
  * unrelated brands just as happily. An admin picks which row survives.
  */
 export function SponsorRegisterView({ register }: { register: SponsorRegister }) {
+  const all = [...register.duplicates.flat(), ...register.rest]
+  const unclaimed = all.filter((row) => row.ownerName === null).length
+  const doubled = register.duplicates.reduce((n, cluster) => n + cluster.length - 1, 0)
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-5">
+      {/* The kit's Brands: the counts first, the one that needs a person in red. */}
+      <StatLine
+        items={[
+          { value: all.length, label: all.length === 1 ? "brand" : "brands" },
+          unclaimed > 0 && { value: unclaimed, label: "unclaimed", tone: "warning" },
+          doubled > 0 && {
+            value: doubled,
+            label: doubled === 1 ? "possible duplicate" : "possible duplicates",
+            tone: "destructive",
+          },
+        ]}
+      />
+
       {/* Only when there is something to merge. A heading over "None." was a
           section about nothing, above the list the page exists for. */}
       {register.duplicates.length > 0 ? (
-        <section className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-[length:var(--text-h2)] font-bold">Possible duplicates</h2>
-            <span className="text-[0.75rem] text-faint-foreground">
-              same name key — a hint, not a verdict; check the websites before merging
-            </span>
-          </div>
+        <Panel
+          title="Possible duplicates"
+          hint="same name key — a hint, not a verdict; check the websites before merging"
+          bodyClassName="gap-0 pt-2"
+        >
           {register.duplicates.map((cluster) => (
             <DuplicateCluster key={cluster[0].name_key} cluster={cluster} />
           ))}
-        </section>
+        </Panel>
       ) : null}
 
-      <section className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-[length:var(--text-h2)] font-bold">All brands</h2>
-          <span className="text-[0.75rem] text-faint-foreground">
-            {register.rest.length + register.duplicates.flat().length}
-            {register.duplicates.length === 0 ? " · every name is distinct" : ""}
-          </span>
-        </div>
+      <Panel
+        title="All brands"
+        hint={`${all.length}${register.duplicates.length === 0 ? " · every name is distinct" : ""}`}
+        bodyClassName="gap-0 pt-2"
+      >
         {register.rest.length === 0 ? (
           <p className="text-[0.8125rem] text-muted-foreground">No brands yet.</p>
         ) : (
@@ -59,20 +72,26 @@ export function SponsorRegisterView({ register }: { register: SponsorRegister })
             ))}
           </ul>
         )}
-      </section>
+      </Panel>
     </div>
   )
 }
 
-function SponsorLine({ row }: { row: AdminSponsorRow }) {
+function SponsorLine({ row, looksLike }: { row: AdminSponsorRow; looksLike?: string }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
       <div className="flex min-w-0 flex-col gap-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2">
           <span className="truncate font-medium">{row.name}</span>
+          {/* The kit's tell: the second spelling names the first. */}
+          {looksLike ? <span className="text-[0.75rem] text-destructive">looks like {looksLike}</span> : null}
           {/* Words, not chips. The owner is a fact; a pending claim is the one
               thing here that wants a decision, so it carries the weight. */}
-          <span className="text-[0.8125rem] text-muted-foreground">{row.ownerName ?? "unclaimed"}</span>
+          {row.ownerName ? (
+            <span className="text-[0.8125rem] text-muted-foreground">{row.ownerName}</span>
+          ) : (
+            <span className="text-[0.8125rem] text-warning">unclaimed</span>
+          )}
           {row.pendingClaims > 0 ? (
             <span className="text-[0.8125rem] font-bold text-foreground">
               · {row.pendingClaims} claim{row.pendingClaims === 1 ? "" : "s"} pending
@@ -136,16 +155,17 @@ function DuplicateCluster({ cluster }: { cluster: AdminSponsorRow[] }) {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
-      <fieldset className="flex flex-col gap-2">
+    // A block inside the Panel, divided by a hairline — not a card in a card.
+    <div className="flex flex-col gap-3 border-t border-border py-4 first:border-t-0 first:pt-0">
+      <fieldset className="flex flex-col gap-1">
         <legend className="pb-2 text-[0.8125rem] font-medium">
           Which one survives?
         </legend>
-        {cluster.map((row) => (
+        {cluster.map((row, i) => (
           <label
             key={row.id}
-            className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${
-              keeper === row.id ? "border-primary bg-muted/50" : ""
+            className={`flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+              keeper === row.id ? "bg-accent" : "hover:bg-accent/60"
             }`}
           >
             <input
@@ -159,14 +179,14 @@ function DuplicateCluster({ cluster }: { cluster: AdminSponsorRow[] }) {
               }}
             />
             <span className="min-w-0 flex-1">
-              <SponsorLine row={row} />
+              <SponsorLine row={row} looksLike={i > 0 ? cluster[0].name : undefined} />
             </span>
           </label>
         ))}
       </fieldset>
 
       {keeper ? (
-        <div className="flex flex-col gap-3 border-t pt-3">
+        <div className="flex flex-col gap-3 border-t border-border pt-3">
           <div className="flex flex-col gap-2">
             <Label htmlFor={`note-${cluster[0].name_key}`}>Why these are the same brand</Label>
             <Input
@@ -182,11 +202,8 @@ function DuplicateCluster({ cluster }: { cluster: AdminSponsorRow[] }) {
           </div>
 
           {preview ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-              <p className="text-[0.8125rem] leading-6">
-                Moving into <strong>{keeperRow?.name}</strong>:
-              </p>
-              <ul className="flex flex-col gap-1 text-[0.8125rem]">
+            <Callout tone="destructive" title={`Moving into ${keeperRow?.name ?? "the survivor"}`}>
+              <ul className="flex flex-col gap-1 text-foreground">
                 {losers.map((l, i) => (
                   <li key={l.id}>
                     <strong>{l.name}</strong> — {preview[i].placements} placement
@@ -196,11 +213,11 @@ function DuplicateCluster({ cluster }: { cluster: AdminSponsorRow[] }) {
                   </li>
                 ))}
               </ul>
-              <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+              <p className="mt-1">
                 A placement on an event {keeperRow?.name} already sponsors is
                 dropped rather than moved — the brand is already there.
               </p>
-              <div className="flex gap-2 pt-1">
+              <div className="flex gap-2 pt-2">
                 <Button size="sm" variant="destructive" disabled={pending} onClick={merge}>
                   Merge {losers.length} into {keeperRow?.name}
                 </Button>
@@ -208,7 +225,7 @@ function DuplicateCluster({ cluster }: { cluster: AdminSponsorRow[] }) {
                   Back
                 </Button>
               </div>
-            </div>
+            </Callout>
           ) : (
             <Button
               size="sm"

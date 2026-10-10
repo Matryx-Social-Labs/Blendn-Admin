@@ -157,18 +157,14 @@ export function CurateForm({ defaultCity }: { defaultCity?: string }) {
 
   return (
     <Form {...form}>
-      <form
-        onSubmit={form.handleSubmit(submit)}
-        className="flex flex-col gap-4 border-t border-border pt-5"
-      >
-        <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-bold">Add an event we found</h3>
-          <p className="text-[0.75rem] leading-5 text-muted-foreground">
-            Facts only — the description is written from them. We never copy a
-            listing&rsquo;s words or its image, and the source link is what a
-            claimant is later verified against.
-          </p>
-        </div>
+      {/* Inside the page's Panel, which names it ("Add an event from a public
+          listing"); the form carries only the rule a reader cannot infer. */}
+      <form onSubmit={form.handleSubmit(submit)} className="flex flex-col gap-4">
+        <p className="text-[0.75rem] leading-5 text-muted-foreground">
+          Facts only — the description is written from them. We never copy a
+          listing&rsquo;s words or its image, and the source link is what a
+          claimant is later verified against.
+        </p>
 
         <div className="grid gap-3 @2xl/main:grid-cols-2">
           <FormField

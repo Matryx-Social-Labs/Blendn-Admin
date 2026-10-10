@@ -118,8 +118,8 @@ describe("the stats line", () => {
 
   it("renders the erased count only when there is one", () => {
     const page = read("app/dashboard/users/page.tsx")
-    expect(page).toMatch(/stats\.deleted > 0 \? \(/)
-    expect(page).toMatch(/\{stats\.deleted\.toLocaleString\(\)\}<\/span> deleted/)
+    // The kit's StatLine (step 18): an item only when the count is not zero, faint.
+    expect(page).toMatch(/stats\.deleted > 0 && \{ value: stats\.deleted\.toLocaleString\(\), label: "deleted", tone: "faint" \}/)
   })
 })
 
