@@ -56,6 +56,33 @@ const SESSION_CLAIM_GATE = [
   /\bif\s*\(\s*(?:user|session\.user)\.role\s*!==\s*["']app_admin["']\s*\)\s*(?:\{\s*)?throw\b/,
 ]
 
+/**
+ * The same refusal for every other place a request is answered (step 18
+ * security review, L5): route handlers, and the plain modules they and the
+ * pages call. The leads export and an admin-only title helper gated on the
+ * claim; the API reference leaned on the middleware's.
+ */
+const routeAndLibFiles = ROOTS.flatMap((r) => walk(join(process.cwd(), r))).filter(
+  (f) => !serverActionFiles.includes(f) && (/\/route\.tsx?$/.test(f) || rel(f).startsWith("lib/"))
+)
+
+describe("route handlers and lib modules read the role from the database too", () => {
+  it("finds them at all", () => {
+    expect(routeAndLibFiles.length).toBeGreaterThan(100)
+  })
+
+  it("none gates on the session's role claim", () => {
+    const gated = routeAndLibFiles.filter((f) => SESSION_CLAIM_GATE.some((shape) => shape.test(code(f)))).map(rel)
+    expect(gated).toEqual([])
+  })
+
+  it("the admin-only routes ask requireAdmin", () => {
+    for (const f of ["app/api/docs/route.ts", "app/api/leads/export/route.ts"]) {
+      expect([f, /await requireAdmin\(\)/.test(code(join(process.cwd(), f)))]).toEqual([f, true])
+    }
+  })
+})
+
 describe("admin-only server actions read the role from the database", () => {
   it("finds the server action files at all", () => {
     // Without this both checks below pass vacuously if the walk breaks.

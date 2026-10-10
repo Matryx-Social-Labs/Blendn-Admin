@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server"
 
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { toCsv, csvResponse, UTF8_BOM, type CsvColumn } from "@/lib/csv"
 import { getLeads, type LeadRow } from "@/lib/lead-queries"
 import type { lead_status } from "@prisma/client"
@@ -28,8 +28,10 @@ const columns: CsvColumn<LeadRow>[] = [
 ]
 
 export async function GET(req: NextRequest) {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") {
+  // The role the database holds now, not the cookie's (step 18, L5): every lead's address is in this file.
+  try {
+    await requireAdmin()
+  } catch {
     return new Response("Forbidden", { status: 403 })
   }
 
