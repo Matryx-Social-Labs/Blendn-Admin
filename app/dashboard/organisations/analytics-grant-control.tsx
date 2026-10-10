@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
   endAnalyticsGrant,
+  endPlusGrant,
   endVenueProGrant,
   grantAnalytics,
+  grantPlus,
   grantVenuePro,
   revokePaidEntitlement,
   revokeVenueProPaid,
@@ -29,7 +31,10 @@ import { refusalMessage } from "@/lib/refusal"
  * browser's clock worked out.
  *
  * The same control gives a venue Venue Pro (`subject="venue"`, step 17): the
- * founding grant there is three months per claimed Bengaluru venue.
+ * founding grant there is three months per claimed Bengaluru venue. And a
+ * person Blendn+ (`subject="user"`, SCRUM-583) — the App Review account, a
+ * lost Night Pass, goodwill. A person's paid Plus is a store's, so there is no
+ * Revoke for it here (`paid` is never passed for a person).
  */
 
 const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
@@ -37,8 +42,9 @@ type Mode = null | "grant" | "end" | "revoke"
 
 /** What each subject is given, and its founding grant first. */
 const PRODUCT = {
-  org: { label: "Analytics", months: [6, 3, 12], founding: 6, example: "Founding organiser, Bengaluru season one" },
-  venue: { label: "Venue Pro", months: [3, 6, 12], founding: 3, example: "Founding venue, claimed in Bengaluru" },
+  org: { label: "Analytics", months: [6, 3, 12], founding: 6, firstNote: "founding", example: "Founding organiser, Bengaluru season one" },
+  venue: { label: "Venue Pro", months: [3, 6, 12], founding: 3, firstNote: "founding", example: "Founding venue, claimed in Bengaluru" },
+  user: { label: "Blendn+", months: [1, 3, 12], founding: 1, firstNote: "App Review", example: "App Review account for the iOS submission" },
 } as const
 
 export function OrgAnalyticsGrantControl({
@@ -48,14 +54,17 @@ export function OrgAnalyticsGrantControl({
   status,
   grant,
   paid,
+  onChanged,
 }: {
-  /** The organisation's id, or the venue's when `subject` is "venue". */
+  /** The organisation's id, the venue's when `subject` is "venue", the person's when "user". */
   subjectId: string
-  subject?: "org" | "venue"
+  subject?: "org" | "venue" | "user"
   name: string
   status: string
   grant: { expiresAt: string | null } | null
   paid: { id: string; expiresAt: string | null } | null
+  /** Called after a change lands, for a host that loaded the state itself (the Users page's sheet). */
+  onChanged?: () => void
 }) {
   const product = PRODUCT[subject]
   const [mode, setMode] = useState<Mode>(null)
@@ -70,6 +79,7 @@ export function OrgAnalyticsGrantControl({
         toast.success(await work())
         setMode(null)
         setReason("")
+        onChanged?.()
       } catch (err) {
         toast.error(refusalMessage(err, `Could not change ${product.label}`))
       }
@@ -107,7 +117,7 @@ export function OrgAnalyticsGrantControl({
   const sentence =
     mode === "grant" ? (
       <>
-        {name} gets <strong>{product.label} for {months} months</strong>, at no charge. Record why.
+        {name} gets <strong>{product.label} for {months} month{months === 1 ? "" : "s"}</strong>, at no charge. Record why.
       </>
     ) : mode === "end" ? (
       <>
@@ -132,14 +142,14 @@ export function OrgAnalyticsGrantControl({
           >
             {product.months.map((m) => (
               <option key={m} value={m}>
-                {m} months{m === product.founding ? " (founding)" : ""}
+                {m} month{m === 1 ? "" : "s"}{m === product.founding ? ` (${product.firstNote})` : ""}
               </option>
             ))}
           </select>
         </label>
       ) : null}
       <Textarea
-        aria-label={mode === "grant" ? `Why this ${subject === "venue" ? "venue" : "organisation"} gets ${product.label}` : "Why it ends"}
+        aria-label={mode === "grant" ? `Why this ${subject === "venue" ? "venue" : subject === "user" ? "person" : "organisation"} gets ${product.label}` : "Why it ends"}
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={2}
@@ -155,12 +165,17 @@ export function OrgAnalyticsGrantControl({
           onClick={() =>
             run(async () => {
               const venue = subject === "venue"
+              const person = subject === "user"
               if (mode === "grant") {
-                const { expiresAt } = venue ? await grantVenuePro(subjectId, months, reason) : await grantAnalytics(subjectId, months, reason)
+                const { expiresAt } = person
+                  ? await grantPlus(subjectId, months, reason)
+                  : venue
+                    ? await grantVenuePro(subjectId, months, reason)
+                    : await grantAnalytics(subjectId, months, reason)
                 return `${name} has ${product.label} until ${day(expiresAt)}`
               }
               if (mode === "end") {
-                await (venue ? endVenueProGrant(subjectId, reason) : endAnalyticsGrant(subjectId, reason))
+                await (person ? endPlusGrant(subjectId, reason) : venue ? endVenueProGrant(subjectId, reason) : endAnalyticsGrant(subjectId, reason))
                 return `${name}'s ${product.label} grant has ended`
               }
               await (venue ? revokeVenueProPaid(subjectId, paid!.id, reason) : revokePaidEntitlement(subjectId, paid!.id, reason))

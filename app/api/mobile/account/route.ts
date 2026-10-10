@@ -8,6 +8,9 @@ import { evictUserSockets } from "@/lib/socket-server"
 import { closeRoomSockets } from "@/lib/room-close"
 import { settleCrewsAfterErasure } from "@/lib/crews/sweep"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
+import { eraseUserEntitlements } from "@/lib/entitlements"
+import { revenuecatSecretKey } from "@/lib/env"
+import { deleteSubscriber } from "@/lib/revenuecat-api"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
 import { eraseChatMedia, retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
@@ -106,7 +109,14 @@ export async function DELETE(request: NextRequest) {
     const deletedAt = new Date()
     const erasure = [
       /*
-       * FIRST, before anything below scrubs it: the copy of what they
+       * Before anything: this person's RevenueCat lock, the one the store's
+       * webhook takes. A purchase being granted right now finishes first and
+       * its row is erased below; one arriving after waits, then finds a
+       * deleted account and grants nothing (review M2).
+       */
+      db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`revenuecat:${authUser.userId}`}, 0))`,
+      /*
+       * Then, before anything below scrubs it: the copy of what they
        * registered with that the IT Rules 2021, r.3(1)(h), require for 180
        * days. Inside the batch, so it commits or rolls back with the erasure.
        */
@@ -231,6 +241,16 @@ export async function DELETE(request: NextRequest) {
         where: { OR: [{ sender_id: authUser.userId }, { recipient_id: authUser.userId }] },
       }),
       db.friend_invites.deleteMany({ where: { user_id: authUser.userId } }),
+      // Who brought whom, either way: their place in somebody's referral count goes too.
+      db.referrals.deleteMany({ where: { OR: [{ invitee_id: authUser.userId }, { inviter_id: authUser.userId }] } }),
+      /*
+       * Their Blendn+ (test plan D-17). A store subscription still running is
+       * the store's to stop — the app tells them to cancel there first — and a
+       * later renewal for this account grants nothing: the webhook knows only
+       * accounts that were not deleted. `payment_events` stays: ids and times,
+       * no personal data.
+       */
+      eraseUserEntitlements(authUser.userId),
       /*
        * Out of every crew, and every crew invite to them or from them goes —
        * their removal markers too (there is nobody left to keep out), but not
@@ -473,6 +493,19 @@ export async function DELETE(request: NextRequest) {
     // on. Never throws; a crew it misses, the chat sweeper repairs.
     const leftCrews = erased[erasure.indexOf(leaveCrews)] as { crew_id: string }[]
     await settleCrewsAfterErasure(leftCrews.map((row) => row.crew_id))
+
+    // Gone at RevenueCat too (best effort; it holds their purchase history
+    // under our user id). A store subscription still running is the store's.
+    const rcKey = revenuecatSecretKey()
+    const erasedId = authUser.userId
+    if (rcKey) {
+      await deleteSubscriber(erasedId, rcKey).catch((error) =>
+        logger.warn("Account deletion: RevenueCat delete failed; delete the customer in RevenueCat by hand", {
+          userId: erasedId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
 
     // Seats they held are free now; the waitlist moves, per event.
     for (const eventId of openEventIds) {

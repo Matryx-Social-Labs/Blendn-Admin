@@ -99,7 +99,9 @@ enforced, and this line is the reminder that it is a stub and not a decision.
 Pricing was decided on 2026-10-01 (`ROADMAP.md`, *Pricing*): the 20/45/60-minute
 windows stay free and "Stay" is Blendn+. Go Live shipped in step 4 of plan v2
 with "Stay" open to everyone behind the `PLUS_GATING` flag (off); step 11's
-entitlements are what turn it on (docs/CHECKIN.md § Go Live).
+entitlements are what turn it on (docs/CHECKIN.md § Go Live). Step 11 shipped
+them: `PLUS_GATING` now names the gated cities, and "stay" there asks
+`plusRequired` (`lib/plus.ts`).
 
 ### 2. Real names in the locked view
 

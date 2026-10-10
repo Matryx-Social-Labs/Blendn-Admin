@@ -61,6 +61,8 @@ const ROUTES = [
   "/api/mobile/crews",
   // My open Blends (step 8): `{ blends }`.
   "/api/mobile/blends",
+  // Do I have Blendn+ (step 11): what the paywall polls after a purchase.
+  "/api/mobile/me/plus",
 ]
 
 /**
