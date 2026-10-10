@@ -278,7 +278,7 @@ starts. "App" in a row means the work is client-side and tracked in
 | 8 | **Crews: server.** Crews of 2–12, crew chat, "We're here", presence derived from members' own GPS check-ins, `events.crews_enabled`, crew likes, Blend rooms, crew reveal with "keep me anonymous" | §6 |
 | 9 | **Crews on the app.** App | §6 |
 | 10 | **Matching v2.** IPL teams and cuisine as interest leaves, this-or-that, languages / home state / opt-in sign as display-only chips, the Tier B label budget, badges derived from check-ins, crew-held signals | §8 |
-| 11 | **Blendn+.** User entitlements, `/api/webhooks/revenuecat` (the only writer), gates through `hasEntitlement` on the server, the store setup with the owner | §5, §9.3 |
+| 11 | **Blendn+.** User entitlements, `/api/webhooks/revenuecat` (the only writer: authorised, idempotent, ordered by the store's clock, refunds and transfers), per-city `PLUS_GATING` with the trial and referral month granted at the gate, stay live and night history gated on the server (`lib/plus.ts`), `GET /me/plus`; the store setup with the owner (docs/IAP-SETUP.md). Perks and crew extras get their gate when they are built | §5, §9.3 |
 | 12 | **Regulars, blind offers, the door pass.** The venue targets a rule and sees sent / opened / redeemed, never people; an audience under 5 is refused; a person is visible to a venue only by their own opt-in; Venue Pro gate | §2 |
 
 **Track B — dashboard**

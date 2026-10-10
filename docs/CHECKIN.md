@@ -275,11 +275,11 @@ a mute and a ban a person pressed; a room you left yourself is re-entered.
 | Status | When |
 |---|---|
 | 429 | 20 a minute per person; also ceilings per address (300) and per venue (240) |
-| 403 `PLUS_REQUIRED` | `stay` while `PLUS_GATING=true` (off: "stay" is everyone's until step 11) |
 | 404 | the venue is unknown, archived or deleted — or today's venue day was deleted (closed for the day) |
 | 403 `FORBIDDEN` / `AGE_RESTRICTED` | not onboarded; or no known adult age. A venue's room has no event to carry an age rule, so the account rule is its rule, and an unknown age is refused — an onboarded account with no age on file, or an under-18 from before the ruling, may not Go Live |
 | 409 `EVENT_LIVE_HERE` + `eventId` | a real event has the venue (below) — check in to it instead. Before the fence, so somebody at the door is sent to the event rather than told they are outside |
 | 400 `OUT_OF_RANGE` | a fix worse than 150 m, no area at this venue, or outside it: "You're not at ‹venue› yet." — **never the distance** (D-x6): a venue's area is drawn by nobody the caller knows, and the shortfall asked from a few places would draw it for them |
+| 403 `PLUS_REQUIRED` | `stay` where the venue's city is in `PLUS_GATING` and the person holds neither Plus nor a live Night Pass (`lib/plus.ts`, step 11). Last, so the paywall only stands where "stay" would have worked. Unset: launch season, "stay" is everyone's. A stay already running is no longer carried by pings once Plus lapses there, so it ends at most 20 minutes after the last ping that did (D-11) |
 
 **Nothing is written by a refusal.** The venue's day is found, never made,
 until the person is known to be standing inside its area; a refusal is recorded

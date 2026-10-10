@@ -14,9 +14,9 @@ import {
 import { fenceRefusal, personAtTheDoor, seatAtTheDoor, vagueFixRefusal } from "@/lib/check-in-core"
 import { performCheckout } from "@/lib/checkout"
 import { db } from "@/lib/db"
-import { plusGating } from "@/lib/env"
 import { goLiveSchema, goLiveWindow } from "@/lib/go-live"
 import { logger } from "@/lib/logger"
+import { plusRequired } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { clientIpFrom } from "@/lib/client-ip"
@@ -39,7 +39,6 @@ interface RouteParams {
  * closed to you (`liveInVenueDay`).
  *
  * Refused, in this order (PL-U08):
- *   403  `PLUS_REQUIRED` for "stay" while `PLUS_GATING` is on
  *   404  no such venue, or archived or deleted
  *   403  not onboarded / not an adult (`personAtTheDoor`)
  *   409  `EVENT_LIVE_HERE {eventId}` — a real event has the venue: on now or
@@ -47,6 +46,10 @@ interface RouteParams {
  *        somebody at the door is sent to the event, not told they are outside
  *   400  `GPS_TOO_VAGUE` a fix too vague; `NO_CHECK_IN_AREA` no area at this
  *        venue; `OUT_OF_RANGE` outside it
+ *   403  `PLUS_REQUIRED` for "stay" where Blendn+ is gated (the venue's city
+ *        is in `PLUS_GATING`) and the person holds neither Plus nor a Night
+ *        Pass — last, so the paywall only ever stands where "stay" would
+ *        otherwise have worked (`lib/plus.ts`, step 11)
  *
  * Going live again while live extends the window, never shortens it. Going
  * live somewhere else — or checking in to an event — ends this one as a
@@ -95,14 +98,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const input = parsed.data
     const choice = "stay" in input ? ({ stay: true } as const) : { minutes: input.minutes }
 
-    // Blendn+ once gated (step 11 grants it); until then "stay" is everyone's.
-    if ("stay" in choice && plusGating()) {
-      return errorResponse("Staying live is part of Blendn+.", 403, ErrorCode.PLUS_REQUIRED)
-    }
-
     const venue = await db.venues.findFirst({
       where: { id: venueId, deleted_at: null, status: "active" },
-      select: { id: true, name: true, geofence: true, timezone: true, day_reset_hour: true },
+      select: { id: true, name: true, city: true, geofence: true, timezone: true, day_reset_hour: true },
     })
     if (!venue) return notFoundResponse("Venue not found")
 
@@ -158,6 +156,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       outsideMessage: `You're not at ${venue.name} yet.`,
     })
     if (refused) return refused
+
+    // Blendn+ where the venue's city is gated; everyone's in its launch season.
+    if ("stay" in choice && (await plusRequired(userId, venue.city, now))) {
+      return errorResponse("Staying live is part of Blendn+.", 403, ErrorCode.PLUS_REQUIRED)
+    }
 
     const day = await venueDayFor(venueId, at)
     if (!day) return notFoundResponse("Venue not found")

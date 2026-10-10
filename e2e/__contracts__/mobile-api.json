@@ -212,6 +212,20 @@
       "blends"
     ]
   },
+  "/api/mobile/me/plus": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "active",
+      "expiresAt",
+      "gated",
+      "product",
+      "source"
+    ]
+  },
   "/api/mobile/events/:eventId": {
     "status": 200,
     "envelope": [
