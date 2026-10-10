@@ -30,6 +30,7 @@ export const routes = {
   personLike: require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route"),
   prefs: require("@/app/api/mobile/events/[eventId]/matches/preferences/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/preferences/route"),
   blends: require("@/app/api/mobile/blends/route") as typeof import("@/app/api/mobile/blends/route"),
+  chatGroups: require("@/app/api/mobile/chat/groups/route") as typeof import("@/app/api/mobile/chat/groups/route"),
   messages: require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route"),
   participants: require("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route"),
   leave: require("@/app/api/mobile/chat/groups/[chatGroupId]/leave/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/leave/route"),
@@ -119,6 +120,8 @@ export const api = {
   prefs: (as: Person, eventId: string, body: Record<string, unknown>) =>
     call(routes.prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, as, { method: "PUT", body, params: { eventId } }),
   blends: (as: Person) => call(routes.blends.GET, "/api/mobile/blends", as),
+  /** The chat list: event rooms in `groups`, crew and Blend rooms in `rooms`. */
+  chatGroups: (as: Person) => call(routes.chatGroups.GET, "/api/mobile/chat/groups?limit=50", as),
   read: (as: Person, g: string) => call(routes.messages.GET, `/api/mobile/chat/groups/${g}/messages`, as, { params: { chatGroupId: g } }),
   send: (as: Person, g: string, content = `hi ${testId("m")}`) =>
     call(routes.messages.POST, `/api/mobile/chat/groups/${g}/messages`, as, { method: "POST", body: { content }, params: { chatGroupId: g } }),

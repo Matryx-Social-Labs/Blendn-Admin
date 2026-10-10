@@ -5,7 +5,9 @@ import { db } from "@/lib/db"
 import { inRoomWhere, realEventsWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PAGINATION } from "@/lib/constants"
+import { namesInRoom } from "@/lib/identity"
 import { idForViewer } from "@/lib/room-handle"
+import { ownerDoor, roomOwnerDenial } from "@/lib/room-kind"
 import { roomMuteState } from "@/lib/room-mute"
 import {
   successResponse,
@@ -141,11 +143,55 @@ export async function GET(request: NextRequest) {
       m.chat_group.event ? [{ ...m, chat_group: { ...m.chat_group, event: m.chat_group.event } }] : []
     )
 
+    /*
+     * Crew and Blend rooms (step 9): the viewer's crews' chats, and their
+     * Blends while open — each as its door admits them now (a member of the
+     * crew; on a side of the Blend, in no block across it). A list of their
+     * own, `rooms`, not rows of `groups`: an installed app reads `event` off
+     * every `groups` row, and these rooms have none. Not paged: a person is in
+     * at most `CREW.MAX_JOINED` crews and a night's few Blends.
+     */
+    const otherRows = await db.chat_group_members.findMany({
+      where: {
+        user_id: authUser.userId,
+        status: { in: ["active", "muted"] },
+        chat_group: {
+          OR: [
+            { kind: "crew", status: { in: ["active", "locked"] }, crew: { dissolved_at: null } },
+            { kind: "blend", status: "active", blend: { closed_at: null, closes_at: { gt: now } } },
+          ],
+        },
+      },
+      select: {
+        chat_group_id: true,
+        status: true,
+        role: true,
+        joined_at: true,
+        last_read_message_id: true,
+        notification_preferences: true,
+        chat_group: {
+          select: {
+            id: true,
+            kind: true,
+            name: true,
+            status: true,
+            last_message_at: true,
+            crew_id: true,
+            blend_id: true,
+            ...ownerDoor(authUser.userId),
+            _count: { select: { messages: { where: { deleted_at: null } } } },
+          },
+        },
+      },
+      orderBy: { chat_group: { last_message_at: "desc" } },
+    })
+    const others = otherRows.filter((m) => roomOwnerDenial({ ...m.chat_group, event: null }, authUser.userId) === null)
+
     // Batch fetch all data in 3 queries instead of N*3 queries
-    const chatGroupIds = memberships.map((m) => m.chat_group_id)
+    const chatGroupIds = [...memberships, ...others].map((m) => m.chat_group_id)
 
     // 1. Batch fetch last read messages (single query)
-    const lastReadMessageIds = memberships
+    const lastReadMessageIds = [...memberships, ...others]
       .filter((m) => m.last_read_message_id)
       .map((m) => m.last_read_message_id!)
 
@@ -192,7 +238,7 @@ export async function GET(request: NextRequest) {
 
     // 3. Batch calculate unread counts (single query)
     // Build membership data for unread calculation
-    const membershipData = memberships.map((m) => ({
+    const membershipData = [...memberships, ...others].map((m) => ({
       chatGroupId: m.chat_group_id,
       lastReadAt: m.last_read_message_id
         ? lastReadMessageMap.get(m.last_read_message_id)
@@ -259,6 +305,23 @@ export async function GET(request: NextRequest) {
     const checkedInEventIds = new Set(activeCheckIns.map((c) => c.event_id))
 
     // Build final response
+    /*
+     * Who wrote last in each crew and Blend room, named as that room names
+     * people (a crewmate's first name; a Blend's pseudonyms). One lookup per
+     * room, in parallel, before any row is built: there are at most
+     * `CREW.MAX_JOINED` crews and a night's few Blends, never one per event room.
+     */
+    const roomSenderNames = new Map(
+      await Promise.all(
+        others.map(async (m) => {
+          const last = lastMessageMap.get(m.chat_group.id)
+          const room = { id: m.chat_group.id, kind: m.chat_group.kind as "crew" | "blend" }
+          const name = last ? (await namesInRoom(room, [last.user_id])).get(last.user_id) : undefined
+          return [m.chat_group.id, name ?? null] as const
+        })
+      )
+    )
+
     const groupsWithUnread = memberships.map((membership) => {
       const lastReadAt = membership.last_read_message_id
         ? lastReadMessageMap.get(membership.last_read_message_id)
@@ -280,6 +343,8 @@ export async function GET(request: NextRequest) {
 
       return {
         id: membership.chat_group.id,
+        /** Always `event` here (a venue day's room is one too); crews' and Blends' are in `rooms`. */
+        kind: "event" as const,
         name: membership.chat_group.name,
         type: membership.chat_group.type,
         /*
@@ -346,8 +411,46 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    // The crew and Blend rows: who wrote last, named as that room names people.
+    const rooms = others.map((m) => {
+      const room = m.chat_group
+      const kind = room.kind as "crew" | "blend"
+      const lastMessage = lastMessageMap.get(room.id)
+      const lastReadAt = m.last_read_message_id ? lastReadMessageMap.get(m.last_read_message_id) : null
+      const scope = { kind, groupId: room.id }
+      return {
+        id: room.id,
+        /** `crew` or `blend`: open it as that room, never as an event's. */
+        kind,
+        name: room.name,
+        crewId: room.crew_id,
+        blendId: room.blend_id,
+        /** A Blend's clock: it closes then (the occurrence's end + 12 h). Null for a crew's chat. */
+        closesAt: room.blend?.closes_at ?? null,
+        unreadCount: lastReadAt ? unreadCountMap.get(room.id) || 0 : room._count.messages,
+        mute: roomMuteState(m.notification_preferences),
+        lastMessageAt: room.last_message_at,
+        lastMessage: lastMessage
+          ? {
+              id: lastMessage.id,
+              content:
+                lastMessage.type === "image" || lastMessage.type === "video"
+                  ? `[${lastMessage.type}]`
+                  : lastMessage.content.substring(0, 100),
+              createdAt: lastMessage.created_at,
+              user: { id: idForViewer(authUser.userId, scope, lastMessage.user_id), name: roomSenderNames.get(room.id) },
+            }
+          : null,
+        membership: { role: m.role, joinedAt: m.joined_at, status: m.status },
+        status: room.status,
+      }
+    })
+
     return successResponse({
+      /** Event and venue-day rooms, paged. Each says `kind: "event"`. */
       groups: groupsWithUnread,
+      /** Crew and Blend rooms, newest message first, not paged (see above). */
+      rooms,
       pagination: {
         page,
         limit,

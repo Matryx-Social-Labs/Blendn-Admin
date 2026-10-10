@@ -235,6 +235,7 @@ describe("messages live in their inbox, not the bell", () => {
       preview: "y",
       chatGroupId: "g1",
       senderHandle: "h",
+      room: { kind: "event" },
     })
     expect(created).not.toHaveBeenCalled()
   })
@@ -341,6 +342,34 @@ describe("a room pushes replies, and only to the person replied to", () => {
     })
     // SCRUM-371: a room never sends another person's real id.
     expect(mockSent[0].data).toMatchObject({ type: "group_message", chatGroupId: "g1", senderId: "handle-of-sender" })
+    // And says which kind of room the tap opens (step 9 review, H2).
+    expect(mockSent[0].data).toMatchObject({ kind: "event" })
+    expect(mockSent[0].data).not.toHaveProperty("crewId")
+    expect(mockSent[0].data).not.toHaveProperty("blendId")
+  })
+
+  it.each([
+    ["crew", { crew_id: "crew-1", blend_id: null }, { kind: "crew", crewId: "crew-1" }],
+    ["blend", { crew_id: null, blend_id: "blend-1" }, { kind: "blend", blendId: "blend-1" }],
+  ])("a reply in a %s room carries the room's kind and owner, so the tap opens that room", async (kind, owner, data) => {
+    // The door's owner rows: the recipient a member of the crew, on a side of the open Blend.
+    const door = {
+      board_post: null,
+      crew: { dissolved_at: null, members: [{ user_id: "author" }] },
+      blend: {
+        closes_at: new Date(Date.now() + 3_600_000),
+        closed_at: null,
+        b_user_id: null,
+        occurrence: { check_ins: [{ user_id: "author" }] },
+        a_crew: { dissolved_at: null, hidden_at: null, members: [{ user_id: "author", user: { blocked_users: [], blocked_by: [], conversations_as_user1: [], conversations_as_user2: [] } }] },
+        b_crew: { dissolved_at: null, hidden_at: null, members: [] },
+        b_user: null,
+      },
+    }
+    membershipOf.mockResolvedValue({ status: "active", last_allowed_at: null, chat_group: { kind, event: null, ...owner, ...door } })
+    await send("p1")
+    expect(mockSent).toHaveLength(1)
+    expect(mockSent[0].data).toMatchObject({ type: "group_message", chatGroupId: "g1", ...data })
   })
 
   it("replying to yourself pushes nobody", async () => {

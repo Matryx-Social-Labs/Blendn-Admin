@@ -98,14 +98,16 @@ export async function dissolveLocked(tx: Prisma.TransactionClient, crewId: strin
  */
 export async function settleLocked(
   tx: Prisma.TransactionClient,
-  crewId: string
+  crewId: string,
+  opts: { graceWhileInviting?: boolean } = {}
 ): Promise<{ dissolved: boolean; roomIds: string[] }> {
   const active = await tx.crew_members.findMany({
     where: { crew_id: crewId, ...activeMemberWhere },
     select: { user_id: true, role: true },
     orderBy: [{ joined_at: "asc" }, { user_id: "asc" }],
   })
-  if (active.length < CREW.MIN_MEMBERS) return { dissolved: true, roomIds: await dissolveLocked(tx, crewId) }
+  const waiting = opts.graceWhileInviting && active.length >= 1 && (await waitingOnInvites(tx, crewId))
+  if (active.length < CREW.MIN_MEMBERS && !waiting) return { dissolved: true, roomIds: await dissolveLocked(tx, crewId) }
   if (!active.some((m) => m.role === "owner")) {
     // The longest-standing active member who can take another crew under the
     // cap (`CREW.MAX_OWNED`); only if nobody can, the longest-standing anyway —
@@ -126,11 +128,28 @@ export async function settleLocked(
   return { dissolved: false, roomIds: [] }
 }
 
+/**
+ * A crew of one still waiting on its friends: it has an invite somebody can
+ * still say yes to, or it is younger than an invite lives (`CREW.INVITE_TTL_MS`).
+ * Every crew starts as one person and its invites (step 9 review, C1): the
+ * sweeper's repair must not dissolve it before anybody has had the chance to
+ * accept. A departure is not this — a crew somebody leaves down to one still
+ * dissolves at once (D-15); only the sweeper gives the grace.
+ */
+async function waitingOnInvites(tx: Prisma.TransactionClient, crewId: string): Promise<boolean> {
+  const since = new Date(Date.now() - CREW.INVITE_TTL_MS)
+  const [young, open] = await Promise.all([
+    tx.crews.count({ where: { id: crewId, created_at: { gt: since } } }),
+    tx.crew_invites.count({ where: { crew_id: crewId, declined_at: null, removed_at: null, created_at: { gt: since } } }),
+  ])
+  return young + open > 0
+}
+
 /** `settleLocked` in its own transaction, then the sockets out if it dissolved. */
-export async function settleCrew(crewId: string): Promise<{ dissolved: boolean }> {
+export async function settleCrew(crewId: string, opts: { graceWhileInviting?: boolean } = {}): Promise<{ dissolved: boolean }> {
   const result = await db.$transaction(async (tx) => {
     if (!(await lockCrew(tx, crewId))) return { dissolved: false, roomIds: [] }
-    return settleLocked(tx, crewId)
+    return settleLocked(tx, crewId, opts)
   })
   for (const id of result.roomIds) closeRoomSockets(id)
   return { dissolved: result.dissolved }
@@ -164,7 +183,10 @@ const REPAIR_BATCH = 200
  * The sweeper's arm: every standing crew below two active members or without
  * an active owner, settled. Catches what a writer could not finish — an
  * erasure's settle that failed after its commit, a suspension (which writes
- * no crew row) — on the next pass.
+ * no crew row) — on the next pass. Never a crew of one still waiting on its
+ * invites (`waitingOnInvites`): a new crew is its owner and the friends it
+ * asked, and dissolving it at the next sweep turned every accept that came
+ * later than fifteen minutes into a 404 (step 9 review, C1).
  *
  * ponytail: a scan of every standing crew each pass, with two correlated
  * counts per crew. Cheap while crews number in the thousands; add a
@@ -172,20 +194,38 @@ const REPAIR_BATCH = 200
  * pass ever shows up in the slow-query log.
  */
 export async function repairCrews(): Promise<{ repaired: number; dissolved: number }> {
-  const broken = await db.$queryRaw<{ id: string }[]>`
-    SELECT c.id::text FROM crews c
-    WHERE c.dissolved_at IS NULL AND (
-      (SELECT count(*) FROM crew_members m JOIN "User" u ON u.id = m.user_id
-        WHERE m.crew_id = c.id AND u.suspended_at IS NULL AND u."deletedAt" IS NULL) < ${CREW.MIN_MEMBERS}
-      OR NOT EXISTS (SELECT 1 FROM crew_members m JOIN "User" u ON u.id = m.user_id
-        WHERE m.crew_id = c.id AND m.role = 'owner' AND u.suspended_at IS NULL AND u."deletedAt" IS NULL)
-    )
-    LIMIT ${REPAIR_BATCH}`
+  const broken = await crewsToRepair()
   let dissolved = 0
-  for (const { id } of broken) {
-    if ((await settleCrew(id)).dissolved) dissolved++
+  for (const id of broken) {
+    if ((await settleCrew(id, { graceWhileInviting: true })).dissolved) dissolved++
   }
   return { repaired: broken.length, dissolved }
+}
+
+/**
+ * The crews `repairCrews` settles this pass. A waiting crew is left out here,
+ * not only by the settle: one picked up every pass would fill the batch, and a
+ * crew that really is broken would wait behind two hundred that are not.
+ */
+export async function crewsToRepair(): Promise<string[]> {
+  const ttl = CREW.INVITE_TTL_MS / 1000
+  const broken = await db.$queryRaw<{ id: string }[]>`
+    WITH standing AS (
+      SELECT c.id, c.created_at,
+        (SELECT count(*) FROM crew_members m JOIN "User" u ON u.id = m.user_id
+          WHERE m.crew_id = c.id AND u.suspended_at IS NULL AND u."deletedAt" IS NULL) AS active,
+        EXISTS (SELECT 1 FROM crew_members m JOIN "User" u ON u.id = m.user_id
+          WHERE m.crew_id = c.id AND m.role = 'owner' AND u.suspended_at IS NULL AND u."deletedAt" IS NULL) AS has_owner,
+        EXISTS (SELECT 1 FROM crew_invites i WHERE i.crew_id = c.id AND i.declined_at IS NULL AND i.removed_at IS NULL
+          AND i.created_at > now() - make_interval(secs => ${ttl})) AS open_invite
+      FROM crews c WHERE c.dissolved_at IS NULL
+    )
+    SELECT id::text FROM standing
+    WHERE (active < ${CREW.MIN_MEMBERS}
+            AND NOT (active >= 1 AND (open_invite OR created_at > now() - make_interval(secs => ${ttl}))))
+       OR (active >= 1 AND NOT has_owner)
+    LIMIT ${REPAIR_BATCH}`
+  return broken.map((r) => r.id)
 }
 
 /**

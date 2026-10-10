@@ -139,6 +139,7 @@ export const EventChatResponseSchema = z
 export const ChatGroupSchema = z
   .object({
     id: z.string().uuid(),
+    kind: z.literal("event").describe("Always `event` (a venue day's room is one too). Crew and Blend rooms are in `rooms`."),
     name: z.string(),
     type: z.string(),
     memberCount: z
@@ -192,9 +193,41 @@ export const ChatGroupSchema = z
   })
   .openapi("ChatGroup")
 
+/** A crew's chat or a Blend's room, as the chat list shows it (step 9). */
+export const ChatRoomListItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    kind: z.enum(["crew", "blend"]).describe("Open it as that room, never as an event's."),
+    name: z.string(),
+    crewId: z.string().uuid().nullable().describe("A crew's chat: its crew (`GET /crews/{crewId}`)."),
+    blendId: z.string().uuid().nullable().describe("A Blend's room: its Blend (`GET /blends`)."),
+    closesAt: z.string().datetime().nullable().describe("A Blend's clock — gone from this list then. Null for a crew's chat."),
+    unreadCount: z.number(),
+    mute: RoomMuteSchema,
+    lastMessageAt: z.string().datetime().nullable(),
+    lastMessage: z
+      .object({
+        id: z.string().uuid(),
+        content: z.string(),
+        createdAt: z.string().datetime(),
+        user: z
+          .object({ id: RoomUserRefSchema, name: z.string() })
+          .describe("As the room names people: a crewmate's first name; in a Blend, tonight's pseudonym unless revealed there."),
+      })
+      .nullable(),
+    membership: z.object({ role: z.string(), joinedAt: z.string().datetime(), status: z.enum(["active", "muted"]) }),
+    status: z.enum(["active", "locked"]),
+  })
+  .openapi("ChatRoomListItem")
+
 export const ChatGroupListResponseSchema = z
   .object({
-    groups: z.array(ChatGroupSchema),
+    groups: z.array(ChatGroupSchema).describe("Event and venue-day rooms, paged."),
+    rooms: z
+      .array(ChatRoomListItemSchema)
+      .describe(
+        "My crews' chats and my Blends' rooms while open, each as its door admits me now (never a Blend across a block), newest message first. Not paged."
+      ),
     pagination: PaginationMetaSchema,
   })
   .openapi("ChatGroupListResponse")
@@ -347,6 +380,7 @@ const schemas = {
   EventChatResponse: EventChatResponseSchema,
   GroupChatMessage: GroupChatMessageSchema,
   ChatGroup: ChatGroupSchema,
+  ChatRoomListItem: ChatRoomListItemSchema,
   ChatGroupListResponse: ChatGroupListResponseSchema,
   GroupMessagesResponse: GroupMessagesResponseSchema,
   Participant: ParticipantSchema,

@@ -306,7 +306,8 @@ describe("in the Blend: pseudonyms, the crew reveal with its opt-out, leaving al
 
     const tap = await api.reveal(a1, w.blendId)
     expect(tap.status).toBe(200)
-    expect(tap.body.data).toEqual({ revealed: 1, keptPrivate: 1 })
+    // No count back: the tapper is in the crew, and "1 kept private" says which crewmate (step 9 review, H3).
+    expect(tap.body.data).toEqual({ revealed: true })
     expect((await db.blend_reveals.findMany({ where: { blend_id: w.blendId }, select: { user_id: true } })).map((r) => r.user_id)).toEqual([a1.id])
     // Scoped to the Blend: no event-wide reveal, no DM touched.
     expect(await db.event_match_preferences.count({ where: { event_id: w.eventId, revealed: true } })).toBe(0)
@@ -314,7 +315,12 @@ describe("in the Blend: pseudonyms, the crew reveal with its opt-out, leaving al
     // The other side sees a1's first name — never the full one — and a2 as a pseudonym.
     const seen = (await api.blends(b1)).body.data.blends.find((b: { blendId: string }) => b.blendId === w.blendId)
     const side = seen.sides.find((s: { crewId: string }) => s.crewId === w.A.crewId)
-    expect(side).toMatchObject({ revealed: 1, keptPrivate: 1 })
+    expect(side).toMatchObject({ mine: false, count: 2, revealed: 1, keptPrivate: 1 })
+    // a1's own side, to a1: a count and a1 — never who of the crew revealed or kept private.
+    const own = (await api.blends(a1)).body.data.blends.find((b: { blendId: string }) => b.blendId === w.blendId)
+      .sides.find((s: { crewId: string }) => s.crewId === w.A.crewId)
+    expect(own).toMatchObject({ mine: true, count: 2, revealed: null, keptPrivate: null })
+    expect(own.people.map((p: { userId: string }) => p.userId)).toEqual([a1.id])
     const byPseudonym = new Map(side.people.map((p: { pseudonym: string; name: string | null }) => [p.pseudonym, p.name]))
     expect(byPseudonym.get(w.pseudonyms.get(a1.id))).toBe("Ananya")
     expect(byPseudonym.get(w.pseudonyms.get(a2.id))).toBeNull()
@@ -333,7 +339,7 @@ describe("in the Blend: pseudonyms, the crew reveal with its opt-out, leaving al
     await api.settings(a2, w.A.crewId, false)
     // a2 checks out before the next tap: here now only, so the tap does not reveal them.
     await db.event_check_ins.updateMany({ where: { event_id: w.eventId, user_id: a2.id }, data: { status: "checked_out", check_out_time: new Date() } })
-    expect((await api.reveal(a1, w.blendId)).body.data).toEqual({ revealed: 0, keptPrivate: 1 })
+    expect((await api.reveal(a1, w.blendId)).body.data).toEqual({ revealed: true })
     expect((await db.blend_reveals.findMany({ where: { blend_id: w.blendId }, select: { user_id: true } })).map((r) => r.user_id)).toEqual([a1.id])
     // Somebody not in this Blend cannot tap it: the same 404 as no Blend.
     expect((await api.reveal(bystander, w.blendId)).status).toBe(404)
@@ -348,7 +354,8 @@ describe("in the Blend: pseudonyms, the crew reveal with its opt-out, leaving al
     await api.likeCrew(a1, w.eventId, C.crewId, w.A.crewId)
     const other = await api.likeCrew(c1, w.eventId, w.A.crewId, C.crewId)
     const otherBlend = other.body.data.blend.blendId as string
-    expect((await api.reveal(a1, w.blendId)).body.data.revealed).toBeGreaterThan(0)
+    expect((await api.reveal(a1, w.blendId)).body.data).toEqual({ revealed: true })
+    expect(await db.blend_reveals.count({ where: { blend_id: w.blendId, user_id: a1.id } })).toBe(1)
     const seenByC = (await api.blends(c1)).body.data.blends.find((b: { blendId: string }) => b.blendId === otherBlend)
     expect(seenByC).toBeDefined()
     expect(JSON.stringify(seenByC)).not.toMatch(/Ananya/)
@@ -366,7 +373,7 @@ describe("in the Blend: pseudonyms, the crew reveal with its opt-out, leaving al
     await api.likeCrew(solo, eventId, C.crewId)
     const back = await api.likePerson(crew[0], eventId, roomHandle(eventId, solo.id), C.crewId)
     const blendId = back.body.data.blend.blendId as string
-    expect((await api.reveal(solo, blendId)).body.data).toEqual({ revealed: 1, keptPrivate: 0 })
+    expect((await api.reveal(solo, blendId)).body.data).toEqual({ revealed: true })
     expect((await db.blend_reveals.findMany({ where: { blend_id: blendId }, select: { user_id: true } })).map((r) => r.user_id)).toEqual([solo.id])
     const seen = (await api.blends(crew[1])).body.data.blends.find((b: { blendId: string }) => b.blendId === blendId)
     expect(seen.sides.find((s: { kind: string }) => s.kind === "person").people[0].name).toBe("Meera")
@@ -610,18 +617,66 @@ describe("the Blend's people, as each viewer sees them (C4)", () => {
     const w = await blendedPair("c4")
     const [a1, a2] = w.a
     const [b1, b2] = w.b
-    const listed = async (viewer: Person) =>
-      ((await api.blends(viewer)).body.data.blends.find((b: { blendId: string }) => b.blendId === w.blendId)?.sides ?? [])
-        .flatMap((s: { people: { userId: string }[] }) => s.people.map((p) => p.userId))
-    expect(await listed(a1)).toHaveLength(5)
-    // a2 turns "show online" off: off everyone's list but their own.
+    // Each side as [mine, count, how many people listed]: their side person by
+    // person, your own as you and a count (step 9 review, H3).
+    const sides = async (viewer: Person) =>
+      ((await api.blends(viewer)).body.data.blends.find((b: { blendId: string }) => b.blendId === w.blendId)?.sides ?? []).map(
+        (s: { crewId: string; mine: boolean; count: number; people: unknown[] }) => [s.crewId, s.mine, s.count, s.people.length]
+      )
+    const before = await sides(a1)
+    expect(before).toHaveLength(2)
+    expect(before).toEqual(expect.arrayContaining([[w.A.crewId, true, 3, 1], [w.B.crewId, false, 2, 2]]))
+    // a2 turns "show online" off: off everyone's list and count but their own.
     await db.profiles.update({ where: { id: a2.id }, data: { show_online: false } })
-    expect(await listed(b1)).toHaveLength(4)
-    expect(await listed(a2)).toContain(a2.id)
+    expect(await sides(b1)).toContainEqual([w.A.crewId, false, 2, 2])
+    expect(await sides(a1)).toContainEqual([w.A.crewId, true, 2, 1])
+    expect(await sides(a2)).toContainEqual([w.A.crewId, true, 3, 1])
     // A block inside a side (a crewmate) hides the pair from each other, nobody else.
     await db.blocked_users.create({ data: { blocker_id: b1.id, blocked_id: b2.id } })
-    expect((await listed(b1)).length).toBe(3)
-    expect((await listed(a1)).length).toBe(4)
+    expect(await sides(b1)).toContainEqual([w.B.crewId, true, 1, 1])
+    expect(await sides(a1)).toContainEqual([w.B.crewId, false, 2, 2])
+  })
+})
+
+describe("crew and Blend rooms in the chat list (step 9 review, S5)", () => {
+  type ListedRoom = { id: string; kind: string; crewId: string | null; blendId: string | null; closesAt: string | null; lastMessage: { content: string; user: { id: string; name: string } } | null }
+  const rooms = async (p: Person): Promise<ListedRoom[]> => {
+    const res = await api.chatGroups(p)
+    expect(res.status).toBe(200)
+    // Every row of `groups` is an event's room and says so; crews' and Blends' are their own list.
+    expect(res.body.data.groups.every((g: { kind: string }) => g.kind === "event")).toBe(true)
+    return res.body.data.rooms
+  }
+  const pick = (list: ListedRoom[], id: string) => list.find((r) => r.id === id)
+
+  it("lists a member's crew chat and open Blend with their kind — not the Blend to a pair a block parted, nor once it closes", async () => {
+    const w = await blendedPair("cl")
+    const [a1, a2] = w.a
+    const [b1, b2] = w.b
+    const mine = await rooms(a1)
+    expect(pick(mine, w.A.roomId)).toMatchObject({ kind: "crew", crewId: w.A.crewId, blendId: null, closesAt: null })
+    expect(pick(mine, w.roomId)).toMatchObject({ kind: "blend", crewId: null, blendId: w.blendId, closesAt: expect.any(String) })
+    expect(pick(mine, w.B.roomId)).toBeUndefined()
+    expect(await rooms(await person("cl-stranger"))).toEqual([])
+
+    // Its last line, named as the room names people: the Blend's handle and pseudonym, as its history has them.
+    expect((await api.send(a1, w.roomId, "list me")).status).toBe(201)
+    const line = (await api.read(b1, w.roomId)).body.data.messages.find((m: { content: string }) => m.content === "list me")
+    expect(pick(await rooms(b1), w.roomId)?.lastMessage).toMatchObject({ content: "list me", user: { id: line.user.id, name: line.user.name } })
+    expect(line.user.id).toMatch(/^rh_/)
+
+    // A block across the sides: the pair do not list the Blend; everyone else does, and the crew chats stay.
+    expect((await api.block(a2, b2.id)).status).toBe(200)
+    expect(pick(await rooms(a2), w.roomId)).toBeUndefined()
+    expect(pick(await rooms(b2), w.roomId)).toBeUndefined()
+    expect(pick(await rooms(a2), w.A.roomId)).toBeDefined()
+    expect(pick(await rooms(a1), w.roomId)).toBeDefined()
+
+    // Its clock passes, sweeper or not: off every list.
+    await db.blends.update({ where: { id: w.blendId }, data: { closes_at: new Date(Date.now() - 1000) } })
+    const after = await rooms(a1)
+    expect(pick(after, w.roomId)).toBeUndefined()
+    expect(pick(after, w.A.roomId)).toBeDefined()
   })
 })
 
