@@ -114,6 +114,22 @@ export async function liveGrant(
   return row ? { id: row.id, source: row.source, startsAt: row.starts_at, expiresAt: row.expires_at } : null
 }
 
+/** One subject's live grant and longest live paid row, apart (the admin's control on a venue). */
+export async function liveGrantAndPaid(
+  subject: Subject,
+  product: Exclude<entitlement_product, "event_pass">,
+  now: Date = new Date()
+): Promise<{ grant: LiveEntitlement | null; paid: LiveEntitlement | null }> {
+  const rows = await db.entitlements.findMany({
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, ...liveAt(now) },
+    select: { id: true, source: true, starts_at: true, expires_at: true },
+    orderBy: { expires_at: { sort: "desc", nulls: "first" } },
+  })
+  const as = (r: (typeof rows)[number] | undefined) =>
+    r ? { id: r.id, source: r.source, startsAt: r.starts_at, expiresAt: r.expires_at } : null
+  return { grant: as(rows.find((r) => r.source === "grant")), paid: as(rows.find((r) => r.source !== "grant")) }
+}
+
 /** For many organisations at once (the admin's list): the live grant and the longest paid row, apart. */
 export async function liveAnalyticsByOrg(
   orgIds: string[],
@@ -313,9 +329,10 @@ export async function grantEntitlement(
 export async function endGrants(
   subject: Subject,
   product: Exclude<entitlement_product, "event_pass">,
-  now: Date = new Date()
+  now: Date = new Date(),
+  client: Client = db
 ): Promise<number> {
-  const { count } = await db.entitlements.updateMany({
+  const { count } = await client.entitlements.updateMany({
     where: { subject_kind: subject.kind, subject_id: subject.id, product, source: "grant", ...liveAt(now) },
     // A live row has started (liveAt), so `now` is never before starts_at.
     data: { expires_at: now },
@@ -331,9 +348,10 @@ export async function endGrants(
 export async function revokePaid(
   subject: Subject,
   entitlementId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  client: Client = db
 ): Promise<{ id: string; product: entitlement_product; externalRef: string | null } | null> {
-  const { count } = await db.entitlements.updateMany({
+  const { count } = await client.entitlements.updateMany({
     where: {
       id: entitlementId,
       subject_kind: subject.kind,
@@ -344,9 +362,32 @@ export async function revokePaid(
     data: { expires_at: now },
   })
   if (count === 0) return null
-  const row = await db.entitlements.findUniqueOrThrow({
+  const row = await client.entitlements.findUniqueOrThrow({
     where: { id: entitlementId },
     select: { id: true, product: true, external_ref: true },
   })
   return { id: row.id, product: row.product, externalRef: row.external_ref }
+}
+
+/**
+ * End now every live PAID row on this subject and product that one of these
+ * provider references paid for (a venue changing hands, `billing-actions`).
+ * Never a grant. Returns the rows ended.
+ */
+export async function revokePaidByRefs(
+  subject: Subject,
+  product: Exclude<entitlement_product, "event_pass">,
+  refs: string[],
+  now: Date = new Date(),
+  client: Client = db
+): Promise<{ id: string }[]> {
+  if (refs.length === 0) return []
+  const rows = await client.entitlements.findMany({
+    where: { subject_kind: subject.kind, subject_id: subject.id, product, source: { not: "grant" }, external_ref: { in: refs }, ...liveAt(now) },
+    select: { id: true },
+  })
+  if (rows.length) {
+    await client.entitlements.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { expires_at: now } })
+  }
+  return rows
 }

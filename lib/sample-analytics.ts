@@ -1,4 +1,5 @@
 import type { EventAnalytics, OrgAnalytics } from "./org-analytics"
+import type { PreClaimHistory, VenueInsight } from "./venue-insights"
 
 /**
  * What a locked Analytics screen shows behind its blur: an illustration,
@@ -51,4 +52,35 @@ export const SAMPLE_EVENT_ANALYTICS: EventAnalytics = {
   firstTimers: 21,
   returning: 30,
   funnel: { viewers: 212, viewersWhoRsvpd: 58, conversionPct: 27 },
+}
+
+/**
+ * A venue's year under Venue Pro (step 17), for the locked panel a Listed
+ * venue sees. Invented, like the rest of this file.
+ */
+export const SAMPLE_VENUE_INSIGHTS: VenueInsight = {
+  window: "12m",
+  from: "2025-02-01T00:00:00.000Z",
+  to: "2026-02-01T00:30:00.000Z",
+  people: [
+    [0, 6, 18, 9],
+    [0, 7, 22, 11],
+    [0, 9, 31, 14],
+    [5, 11, 44, 26],
+    [8, 14, 63, 58],
+    [21, 35, 71, 66],
+    [26, 30, 38, 12],
+  ],
+  regulars: { visitors: 412, regulars: 118, oneTimers: 294, sharePct: 29 },
+}
+
+export const SAMPLE_PRE_CLAIM: PreClaimHistory = { nights: 37, people: 680, since: "2024-11" }
+
+/** What the regulars & offers composer will report (step 12), for its placeholder. */
+export const SAMPLE_VENUE_OFFERS = {
+  offer: "Sample: a free pint with your second visit this month",
+  audience: "Regulars · came 2+ nights in the last 60 days",
+  sent: 96,
+  opened: 71,
+  redeemed: 23,
 }

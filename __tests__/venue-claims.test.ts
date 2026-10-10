@@ -11,6 +11,8 @@ const mockAuth = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
+// What a transfer does to the previous owner's Venue Pro is the venue-plans itest's.
+jest.mock("@/lib/subscription-cancel", () => ({ endPreviousOwnersPro: jest.fn(), cancelPreviousOwnersMandates: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const sent: { to: string; subject: string; text: string }[] = []
 jest.mock("@/lib/email", () => {

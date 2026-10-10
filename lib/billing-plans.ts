@@ -8,7 +8,8 @@
  * ## GST
  *
  * The list prices are the audit's (plan v2 §9.1b): ₹1,999 a month, ₹19,990 a
- * year, ₹499 an Event Pass, all before 18% GST. India shows consumer prices
+ * year, ₹499 an Event Pass; Venue Pro ₹2,999 a month per venue, or ₹29,990 a
+ * year (two months free, audit §6.2); all before 18% GST. India shows consumer prices
  * with tax in, and the plan says to (₹2,359 / ₹589), so what Razorpay charges
  * is the GST-inclusive figure rounded to the rupee — the number on the card is
  * the number on the statement. The invoice splits it back out; issuing it with
@@ -19,12 +20,17 @@
 
 export const GST_RATE_PERCENT = 18
 
-export type BillingPlanKey = "analytics_monthly" | "analytics_yearly" | "event_pass"
+export type BillingPlanKey =
+  | "analytics_monthly"
+  | "analytics_yearly"
+  | "event_pass"
+  | "venue_pro_monthly"
+  | "venue_pro_yearly"
 
 export interface BillingPlan {
   key: BillingPlanKey
-  /** The entitlement it buys. */
-  product: "analytics" | "event_pass"
+  /** The entitlement it buys: an organisation's, or (`venue_pro`) one venue's. */
+  product: "analytics" | "event_pass" | "venue_pro"
   /** A Razorpay Plan + Subscription, or a one-off Order. */
   kind: "subscription" | "order"
   /** Razorpay's period words, for a subscription. */
@@ -61,6 +67,24 @@ export const BILLING_PLANS: Record<BillingPlanKey, BillingPlan> = {
     kind: "order",
     label: "Event Pass",
     listRupees: 499,
+  },
+  venue_pro_monthly: {
+    key: "venue_pro_monthly",
+    product: "venue_pro",
+    kind: "subscription",
+    period: "monthly",
+    totalCount: 120,
+    label: "Venue Pro, monthly",
+    listRupees: 2_999,
+  },
+  venue_pro_yearly: {
+    key: "venue_pro_yearly",
+    product: "venue_pro",
+    kind: "subscription",
+    period: "yearly",
+    totalCount: 10,
+    label: "Venue Pro, yearly",
+    listRupees: 29_990,
   },
 }
 

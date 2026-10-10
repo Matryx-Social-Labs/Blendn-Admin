@@ -12,6 +12,10 @@
  *     no row.
  *   - Admin grants: admin only, a reason, audited, one live grant, ended all
  *     at once, never hidden behind a paid row; revoking a paid row.
+ *   - When one side fails (scan 3): Razorpay refusing, and the database
+ *     refusing after Razorpay said yes, for every action that writes both —
+ *     the final row, the audit, and that no access is left open. The role is
+ *     the database's, not the session's.
  *
  * Razorpay's API is replaced by a stub `fetch` that records each call.
  */
@@ -20,14 +24,17 @@ const mockGetAuth = jest.fn()
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
-import { randomUUID } from "crypto"
+import { createHmac, randomUUID } from "crypto"
+import { NextRequest } from "next/server"
 
+import { logger } from "@/lib/logger"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, refusingWrites as refusing, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const actions = require("@/lib/billing-actions") as typeof import("@/lib/billing-actions")
+const route = require("@/app/api/webhooks/razorpay/route") as typeof import("@/app/api/webhooks/razorpay/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -47,6 +54,9 @@ let otherEventId = ""
 const calls: { method: string; url: string; body: Record<string, unknown> | undefined }[] = []
 const realFetch = global.fetch
 let failNext = false
+/** Every id Razorpay handed back, newest last. */
+const made: string[] = []
+const WEBHOOK_SECRET = "whsec_itest_billing_actions_0123456789ab"
 
 function stubRazorpay() {
   global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -66,9 +76,15 @@ function stubRazorpay() {
         ],
       })
     }
-    if (url.endsWith("/subscriptions")) return json(200, { id: `sub_${randomUUID().slice(0, 12)}`, plan_id: body?.plan_id, status: "created" })
+    if (url.endsWith("/subscriptions")) {
+      made.push(`sub_${randomUUID().slice(0, 12)}`)
+      return json(200, { id: made.at(-1), plan_id: body?.plan_id, status: "created" })
+    }
     if (url.includes("/cancel")) return json(200, { id: "sub_x", plan_id: "plan_month", status: "active" })
-    if (url.endsWith("/orders")) return json(200, { id: `order_${randomUUID().slice(0, 12)}`, amount: body?.amount, currency: "INR", status: "created" })
+    if (url.endsWith("/orders")) {
+      made.push(`order_${randomUUID().slice(0, 12)}`)
+      return json(200, { id: made.at(-1), amount: body?.amount, currency: "INR", status: "created" })
+    }
     return json(404, { error: { description: "not stubbed" } })
   }) as typeof fetch
 }
@@ -144,7 +160,7 @@ beforeEach(() => {
   failNext = false
   process.env.RAZORPAY_KEY_ID = "rzp_test_itestkey"
   process.env.RAZORPAY_KEY_SECRET = "itest_key_secret_value_24"
-  process.env.RAZORPAY_WEBHOOK_SECRET = "whsec_itest_billing_actions_0123456789ab"
+  process.env.RAZORPAY_WEBHOOK_SECRET = WEBHOOK_SECRET
   stubRazorpay()
 })
 
@@ -159,6 +175,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await db.audit_logs.deleteMany({ where: { resource_id: { in: orgs } } })
+  await db.payment_events.deleteMany({ where: { provider_event_id: { startsWith: "itest_ba_" } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
   await cleanup(users, events)
   await closeDb()
@@ -393,3 +410,214 @@ describe("admin grants (G8)", () => {
     expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
   })
 })
+
+describe("when one side fails (scan 3)", () => {
+  let errors: jest.SpyInstance
+  beforeEach(() => {
+    errors = jest.spyOn(logger, "error").mockImplementation(() => undefined)
+  })
+  afterEach(() => errors.mockRestore())
+  const logged = (key: string, value: string) => errors.mock.calls.some(([, meta]) => (meta as Record<string, unknown> | undefined)?.[key] === value)
+  const auditsSince = (since: Date, action: string) => db.audit_logs.count({ where: { resource_id: orgId, action, created_at: { gte: since } } })
+
+  /** A running Analytics subscription with its paid entitlement, as the webhook leaves it. */
+  async function running() {
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_month", org_id: orgId, plan_key: "analytics_monthly", amount_minor: 235_900, status: "active", current_end: new Date(Date.now() + 20 * 86_400_000) },
+    })
+    const ent = await db.entitlements.create({
+      data: { subject_kind: "org", subject_id: orgId, product: "analytics", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - 86_400_000), expires_at: new Date(Date.now() + 23 * 86_400_000) },
+    })
+    return { ref, ent }
+  }
+
+  describe("starting a subscription", () => {
+    it("Razorpay refuses: no row, no audit, nothing granted", async () => {
+      const t0 = new Date()
+      as(owner, "organizer")
+      failNext = true
+      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Razorpay didn't accept that just now")
+      expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
+      expect(await auditsSince(t0, "billing.checkout.started")).toBe(0)
+      expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
+    })
+
+    it("the database refuses after Razorpay made it: no row, and Razorpay's subscription is cancelled and logged", async () => {
+      const t0 = new Date()
+      as(owner, "organizer")
+      await refusing("billing_checkouts", "INSERT", `NEW.org_id::text = '${orgId}'`, () =>
+        expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Nothing was started")
+      )
+      const orphan = made.at(-1)!
+      expect(orphan).toMatch(/^sub_/)
+      expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
+      expect(await auditsSince(t0, "billing.checkout.started")).toBe(0)
+      expect(calls.some((c) => c.method === "POST" && c.url.endsWith(`/subscriptions/${orphan}/cancel`))).toBe(true)
+      expect(logged("orphanProviderRef", orphan)).toBe(true)
+      expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
+    })
+
+    it("its audit row is refused: the checkout is not saved either (one transaction)", async () => {
+      as(owner, "organizer")
+      await refusing("audit_logs", "INSERT", `NEW.action = 'billing.checkout.started' AND NEW.resource_id = '${orgId}'`, () =>
+        expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Nothing was started")
+      )
+      expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
+      expect(calls.some((c) => c.url.endsWith(`/subscriptions/${made.at(-1)}/cancel`))).toBe(true)
+    })
+  })
+
+  describe("starting an Event Pass", () => {
+    it("Razorpay refuses: no order row, no audit, nothing granted", async () => {
+      const t0 = new Date()
+      as(owner, "organizer")
+      failNext = true
+      await expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("Razorpay didn't accept that just now")
+      expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
+      expect(await auditsSince(t0, "billing.checkout.started")).toBe(0)
+      expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
+    })
+
+    it("the database refuses after Razorpay made the order: no row, the orphan's id logged, nothing granted", async () => {
+      as(owner, "organizer")
+      await refusing("billing_checkouts", "INSERT", `NEW.org_id::text = '${orgId}'`, () =>
+        expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("Nothing was started")
+      )
+      const orphan = made.at(-1)!
+      expect(orphan).toMatch(/^order_/)
+      expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
+      expect(logged("orphanProviderRef", orphan)).toBe(true)
+      expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
+    })
+  })
+
+  describe("cancelling (cancelAnalytics; cancelVenuePro shares cancelOpen)", () => {
+    it("Razorpay refuses: still open here, no audit, and the entitlement neither ended nor stretched", async () => {
+      const { ref, ent } = await running()
+      const t0 = new Date()
+      as(owner, "organizer")
+      failNext = true
+      await expect(actions.cancelAnalytics()).rejects.toThrow("Nothing was cancelled")
+      expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+      expect(await auditsSince(t0, "billing.subscription.cancelled")).toBe(0)
+      expect((await db.entitlements.findUniqueOrThrow({ where: { id: ent.id } })).expires_at).toEqual(ent.expires_at)
+      expect(logged("providerRef", ref)).toBe(true)
+    })
+
+    it("the database refuses after Razorpay cancelled: refused, logged with the id, and Razorpay's webhook settles it", async () => {
+      const { ref, ent } = await running()
+      const t0 = new Date()
+      as(owner, "organizer")
+      await refusing("billing_checkouts", "UPDATE", `NEW.provider_ref = '${ref}'`, () =>
+        expect(actions.cancelAnalytics()).rejects.toThrow("Razorpay has stopped it")
+      )
+      expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+      expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+      expect(await auditsSince(t0, "billing.subscription.cancelled")).toBe(0)
+      expect(logged("providerRef", ref)).toBe(true)
+
+      // Razorpay's subscription.cancelled, at the cycle's end, is the repair.
+      const endedAt = Math.floor(Date.now() / 1000) - 5
+      const raw = JSON.stringify({
+        event: "subscription.cancelled",
+        created_at: endedAt,
+        payload: { subscription: { entity: { id: ref, plan_id: "plan_month", status: "cancelled", ended_at: endedAt } } },
+      })
+      const res = await route.POST(
+        new NextRequest("http://localhost/api/webhooks/razorpay", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-real-ip": "203.0.113.12",
+            "x-razorpay-signature": createHmac("sha256", WEBHOOK_SECRET).update(raw).digest("hex"),
+            "x-razorpay-event-id": `itest_ba_${randomUUID()}`,
+          },
+          body: raw,
+        })
+      )
+      expect(res.status).toBe(200)
+      expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).status).toBe("cancelled")
+      const after = await db.entitlements.findUniqueOrThrow({ where: { id: ent.id } })
+      expect(after.expires_at!.getTime()).toBeLessThanOrEqual(endedAt * 1000)
+    })
+
+    it("its audit row is refused: the cancel is not recorded either (one transaction)", async () => {
+      const { ref } = await running()
+      as(owner, "organizer")
+      await refusing("audit_logs", "INSERT", `NEW.action = 'billing.subscription.cancelled' AND NEW.resource_id = '${orgId}'`, () =>
+        expect(actions.cancelAnalytics()).rejects.toThrow("Razorpay has stopped it")
+      )
+      expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+    })
+  })
+
+  describe("an admin ending or revoking (no Razorpay call)", () => {
+    it("ending a grant whose audit is refused leaves the grant live and says so", async () => {
+      as(admin, "app_admin")
+      await actions.grantAnalytics(orgId, 1, "Founding organiser, for the failure test")
+      await refusing("audit_logs", "INSERT", `NEW.action = 'entitlement.grant_ended' AND NEW.resource_id = '${orgId}'`, () =>
+        expect(actions.endAnalyticsGrant(orgId, "Ending it while the audit is down")).rejects.toThrow()
+      )
+      expect(await db.entitlements.count({ where: { subject_id: orgId, source: "grant", expires_at: { gt: new Date() } } })).toBe(1)
+    })
+
+    it("revoking a paid row whose audit is refused leaves it live and says so", async () => {
+      const { ent } = await running()
+      as(admin, "app_admin")
+      await refusing("audit_logs", "INSERT", `NEW.action = 'entitlement.revoked' AND NEW.resource_id = '${orgId}'`, () =>
+        expect(actions.revokePaidEntitlement(orgId, ent.id, "Refunded by bank transfer, ticket 43")).rejects.toThrow()
+      )
+      expect((await db.entitlements.findUniqueOrThrow({ where: { id: ent.id } })).expires_at).toEqual(ent.expires_at)
+    })
+  })
+
+  describe("the role is the database's, not the session's (review LOW 18)", () => {
+    it("a session claiming app_admin for an organiser grants nothing", async () => {
+      as(owner, "app_admin")
+      await expect(actions.grantAnalytics(orgId, 6, "A stale or forged admin claim")).rejects.toThrow("Forbidden")
+      expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
+    })
+
+    it("a buyer demoted, or suspended, since the session began buys nothing", async () => {
+      const demoted = await makeUser(testId("bill-demoted"), "organizer")
+      users.push(demoted)
+      await db.organisation_members.create({ data: { org_id: orgId, user_id: demoted, role: "owner" } })
+      await db.user.update({ where: { id: demoted }, data: { role: "attendee" } })
+      as(demoted, "organizer")
+      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/organiser's organisation/)
+      await db.user.update({ where: { id: demoted }, data: { role: "organizer", suspended_at: new Date() } })
+      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Unauthorized")
+      expect(calls).toHaveLength(0)
+      await db.organisation_members.deleteMany({ where: { user_id: demoted } })
+    })
+  })
+})
+
+describe("GAP cancelling an unpaid checkout", () => {
+  it("GAP-X01/X03 stops it now, not at a cycle end it has not reached, and a restart gets a new subscription", async () => {
+    as(owner, "organizer")
+    const first = await actions.startAnalyticsCheckout("monthly")
+    calls.length = 0
+    await actions.cancelAnalytics()
+    expect(calls.find((c) => c.url.includes("/cancel"))?.body).toEqual({ cancel_at_cycle_end: 0 })
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: first.subscriptionId } })).status).toBe("expired")
+    const second = await actions.startAnalyticsCheckout("monthly")
+    expect(second.subscriptionId).not.toBe(first.subscriptionId)
+  })
+})
+
+describe("GAP a deleted buyer", () => {
+  it("GAP-X16 buys nothing", async () => {
+    const gone = await makeUser(testId("bill-deleted"), "organizer")
+    users.push(gone)
+    await db.organisation_members.create({ data: { org_id: orgId, user_id: gone, role: "owner" } })
+    await db.user.update({ where: { id: gone }, data: { deletedAt: new Date() } })
+    as(gone, "organizer")
+    calls.length = 0
+    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Unauthorized")
+    expect(calls).toHaveLength(0)
+    await db.organisation_members.deleteMany({ where: { user_id: gone } })
+  })
+})
+

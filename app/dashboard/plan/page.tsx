@@ -1,17 +1,18 @@
 import { redirect } from "next/navigation"
-import { IconBuilding, IconCheck } from "@tabler/icons-react"
+import { IconBuilding } from "@tabler/icons-react"
 
 import { Panel, ProTag } from "@/components/dashboard/kit"
+import { PlanCard } from "@/components/dashboard/plan-card"
 import { EmptyState } from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor, planPageData, type PlanDate, type PlanPageData } from "@/lib/billing"
 import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
 import { mayReachRoute } from "@/lib/dashboard-nav"
 import { routeMetadata } from "@/lib/dashboard-route-content"
-import { cn } from "@/lib/utils"
+import { venuePlanPage } from "@/lib/venue-plan"
 
 import { AnalyticsBuy, CancelAnalytics, CheckoutProvider, EventPassBuy, PendingWatcher } from "./checkout"
+import { VenuePlan } from "./venue-plan"
 
 // The tab says what the h1 says (WCAG 2.4.2).
 export const metadata = routeMetadata("/dashboard/plan")
@@ -68,6 +69,22 @@ export default async function PlanPage({
   const session = await getAuth()
   if (!session?.user) redirect("/login")
   if (!mayReachRoute(session.user.role, "/dashboard/plan")) redirect("/dashboard")
+
+  // A venue owner's plan is each venue's (step 17).
+  if (session.user.role === "venue_owner") {
+    const params = await searchParams
+    const view = await venuePlanPage({ id: session.user.id, role: session.user.role })
+    // Waiting until the webhook has moved the subscription Checkout came back
+    // with past `created`; then the plan is on the page and nothing waits.
+    const arrived = view.venues.some((v) => v.subscriptions.some((s) => s.providerRef === params.ref && s.status !== "created"))
+    const pending = params.status === "pending" && params.for === "venue" && !arrived
+    return (
+      <>
+        <VenuePlan view={view} pending={pending} />
+        {pending ? <PendingWatcher reference={params.ref ?? null} /> : null}
+      </>
+    )
+  }
 
   const org = await billingOrgFor({ id: session.user.id, role: session.user.role })
   if (!org) {
@@ -234,48 +251,6 @@ function Subscriptions({ view }: { view: PlanPageData }) {
         </div>
       ) : null}
     </Panel>
-  )
-}
-
-function PlanCard({
-  name,
-  tag,
-  brand,
-  current,
-  items,
-  children,
-}: {
-  name: string
-  tag?: React.ReactNode
-  brand?: boolean
-  current?: boolean
-  items: string[]
-  children: React.ReactNode
-}) {
-  return (
-    <section
-      aria-label={`${name} plan`}
-      className={cn(
-        "relative flex min-w-0 flex-col gap-4 overflow-hidden rounded-xl border bg-card p-6",
-        brand ? "border-primary/45" : "border-border"
-      )}
-    >
-      {/* The plan card's stripe (R4): on the Analytics card only. */}
-      {brand ? <div aria-hidden="true" className="absolute inset-x-0 top-0 h-[3px] bg-[image:var(--gradient-brand)]" /> : null}
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-[1.25rem] font-bold">{name}</h2>
-        {current ? <Badge variant="outline">Current plan</Badge> : tag}
-      </div>
-      {children}
-      <ul className="flex flex-1 flex-col gap-2.5">
-        {items.map((item) => (
-          <li key={item} className="flex gap-2.5 text-[0.84375rem]">
-            <IconCheck aria-hidden className={cn("mt-0.5 size-4 shrink-0", brand ? "text-primary" : "text-success")} />
-            {item}
-          </li>
-        ))}
-      </ul>
-    </section>
   )
 }
 

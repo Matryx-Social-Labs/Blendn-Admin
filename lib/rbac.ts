@@ -342,11 +342,20 @@ export function broadcastMayCarryMedia(kind: BroadcastKind): boolean {
 /**
  * May this member of an organisation buy, change or cancel its plan (step 16)?
  *
- * Organisers only (venue plans are step 17's), and the organisation's owners
+ * Organisers only (a venue's plan is `mayManageVenueBilling`), and the organisation's owners
  * and admins: the people who manage its members (`orgPermissions`). Staff see
  * the plan and are told who can change it. A platform admin buys nothing for
  * an organisation; they grant (`lib/billing-actions.ts`).
  */
 export function mayManageBilling(userRole: user_role, memberRole: org_role): boolean {
   return userRole === "organizer" && (memberRole === "owner" || memberRole === "admin")
+}
+
+/**
+ * May this member of a venue's owning organisation buy, change or cancel the
+ * venue's Venue Pro (step 17)? Venue owners only, and the organisation's
+ * owners and admins, as for an organiser's plan. A platform admin grants.
+ */
+export function mayManageVenueBilling(userRole: user_role, memberRole: org_role): boolean {
+  return userRole === "venue_owner" && (memberRole === "owner" || memberRole === "admin")
 }

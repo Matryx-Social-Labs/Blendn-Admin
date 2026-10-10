@@ -73,7 +73,8 @@ describe("the sidebar groups its destinations", () => {
     expect(titlesByGroup("venue_owner")).toEqual([
       [null, ["Overview", "Events", "My venues"]],
       ["Community", ["Chatrooms"]],
-      ["Organisation", ["Team", "Reports", "Audit log"]],
+      // Plan since step 17: each venue Listed or on Venue Pro.
+      ["Organisation", ["Team", "Reports", "Audit log", "Plan"]],
     ])
     expect(titlesByGroup("sponsor")).toEqual([
       [null, ["Overview", "Placements"]],

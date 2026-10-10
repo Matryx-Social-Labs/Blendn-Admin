@@ -205,6 +205,14 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
     }
   }
 
+  // A venue's plan is the venue's, not an organiser's Analytics (step 17).
+  if (pathname === "/dashboard/plan" && role === "venue_owner") {
+    return {
+      title: "Plan",
+      description: "Listing your venue is free. Venue Pro is a year of insight, and its history from before your claim.",
+    }
+  }
+
   const exact = routeContent[pathname]
   if (exact) return exact
 

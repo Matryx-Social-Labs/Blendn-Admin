@@ -6,7 +6,13 @@ import { createContext, useContext, useEffect, useRef, useState, useTransition, 
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { cancelAnalytics, startAnalyticsCheckout, startEventPassCheckout } from "@/lib/billing-actions"
+import {
+  cancelAnalytics,
+  cancelVenuePro,
+  startAnalyticsCheckout,
+  startEventPassCheckout,
+  startVenueProCheckout,
+} from "@/lib/billing-actions"
 import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
 import { refusalMessage } from "@/lib/refusal"
 
@@ -122,23 +128,47 @@ function Failure({ message }: { message: string | null }) {
 }
 
 export function AnalyticsBuy({ enabled, pending }: { enabled: boolean; pending: boolean }) {
+  return <SubscriptionBuy enabled={enabled} pending={pending} product="analytics" />
+}
+
+/** Venue Pro for one venue (step 17), monthly or yearly, as Analytics is bought. */
+export function VenueProBuy({ venueId, enabled, pending }: { venueId: string; enabled: boolean; pending: boolean }) {
+  return <SubscriptionBuy enabled={enabled} pending={pending} product="venue_pro" venueId={venueId} />
+}
+
+function SubscriptionBuy({
+  enabled,
+  pending,
+  product,
+  venueId,
+}: {
+  enabled: boolean
+  pending: boolean
+  product: "analytics" | "venue_pro"
+  venueId?: string
+}) {
   const [period, setPeriod] = useState<"monthly" | "yearly">("monthly")
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, start] = useTransition()
   const button = useRef<HTMLButtonElement>(null)
   const buy = useBuy(enabled, pending)
   const open = useOpen(setFailure, () => button.current?.focus())
-  const plan = BILLING_PLANS[period === "monthly" ? "analytics_monthly" : "analytics_yearly"]
+  const plan = BILLING_PLANS[`${product}_${period}`]
   const price = rupees(grossRupees(plan))
   const per = period === "monthly" ? "month" : "year"
+  const name = product === "analytics" ? "Analytics" : "Venue Pro"
 
   function onBuy() {
     if (!buy.usable || busy || !window.Razorpay) return
     setFailure(null)
     start(async () => {
       try {
-        const checkout = await startAnalyticsCheckout(period)
-        open({ key: checkout.keyId, subscription_id: checkout.subscriptionId, description: `${plan.label} · ${price} incl. GST` }, "analytics", checkout.subscriptionId)
+        const checkout = venueId ? await startVenueProCheckout(venueId, period) : await startAnalyticsCheckout(period)
+        open(
+          { key: checkout.keyId, subscription_id: checkout.subscriptionId, description: `${plan.label} · ${price} incl. GST` },
+          product === "analytics" ? "analytics" : "venue",
+          checkout.subscriptionId
+        )
       } catch (err) {
         toast.error(refusalMessage(err, "Couldn't start the payment."))
       }
@@ -154,7 +184,7 @@ export function AnalyticsBuy({ enabled, pending }: { enabled: boolean; pending: 
             key={p}
             className="cursor-pointer rounded-full px-2.5 py-1 text-muted-foreground has-[:checked]:bg-accent has-[:checked]:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring pointer-coarse:min-h-11"
           >
-            <input type="radio" name="analytics-period" value={p} checked={period === p} onChange={() => setPeriod(p)} className="sr-only" />
+            <input type="radio" name={`${product}-period-${venueId ?? "org"}`} value={p} checked={period === p} onChange={() => setPeriod(p)} className="sr-only" />
             {p === "monthly" ? "Monthly" : "Yearly"}
           </label>
         ))}
@@ -168,7 +198,7 @@ export function AnalyticsBuy({ enabled, pending }: { enabled: boolean; pending: 
         </p>
       </div>
       <Button ref={button} aria-disabled={!buy.usable || busy} onClick={onBuy}>
-        {busy ? "Starting…" : `Start Analytics · ${price} / ${per}`}
+        {busy ? "Starting…" : `Start ${name} · ${price} / ${per}`}
       </Button>
       <Unavailable reason={buy.reason} failed={buy.failed} retry={buy.retry} />
       <Failure message={failure} />
@@ -270,7 +300,8 @@ export function PendingWatcher({ reference }: { reference: string | null }) {
   )
 }
 
-export function CancelAnalytics({ running }: { running: boolean }) {
+export function CancelAnalytics({ running, venueId }: { running: boolean; venueId?: string }) {
+  const name = venueId ? "Venue Pro" : "Analytics"
   const [confirming, setConfirming] = useState(false)
   const [busy, start] = useTransition()
 
@@ -283,7 +314,7 @@ export function CancelAnalytics({ running }: { running: boolean }) {
   }
   return (
     <div className="flex flex-wrap items-center gap-2 text-[0.8125rem]">
-      <span>{running ? "Analytics stays on until the cycle ends, then stops." : "Analytics stops now."}</span>
+      <span>{running ? `${name} stays on until the cycle ends, then stops.` : `${name} stops now.`}</span>
       <Button
         size="sm"
         variant="destructive"
@@ -292,7 +323,7 @@ export function CancelAnalytics({ running }: { running: boolean }) {
           !busy &&
           start(async () => {
             try {
-              await cancelAnalytics()
+              await (venueId ? cancelVenuePro(venueId) : cancelAnalytics())
               toast.success("Cancelled. Razorpay will confirm it shortly.")
               setConfirming(false)
             } catch (err) {

@@ -6,6 +6,7 @@ import { z } from "zod"
 import { db } from "./db"
 import { endPaidEntitlement, passHeldElsewhere, recordPaidEntitlement, type Subject } from "./entitlements"
 import { logger } from "./logger"
+import { OPEN_SUBSCRIPTION_STATUSES } from "./billing"
 import { cancelSubscription } from "./razorpay"
 
 /**
@@ -105,6 +106,8 @@ interface Audit {
   action: string
   orgId: string
   details: Prisma.InputJsonValue
+  /** What the row is about, when not the organisation: a venue (Venue Pro). */
+  resource?: { kind: string; id: string }
 }
 
 interface Outcome {
@@ -153,7 +156,12 @@ export async function recordRazorpayDelivery(
       })
       for (const a of outcome.audit) {
         await tx.audit_logs.create({
-          data: { action: a.action, resource: "organisation", resource_id: a.orgId, details: a.details },
+          data: {
+            action: a.action,
+            resource: a.resource?.kind ?? "organisation",
+            resource_id: a.resource?.id ?? a.orgId,
+            details: a.details,
+          },
         })
       }
       return { duplicate: false, outcome }
@@ -207,6 +215,8 @@ interface Checkout {
   provider_plan_id: string | null
   org_id: string
   event_id: string | null
+  /** The venue a Venue Pro subscription is for; null for an organisation's own purchase. */
+  venue_id: string | null
   plan_key: string
   amount_minor: number
   currency: string
@@ -219,7 +229,7 @@ interface Checkout {
 async function lockCheckout(tx: Tx, providerRef: string): Promise<Checkout | null> {
   const rows = await tx.$queryRaw<Checkout[]>`
     SELECT id, kind::text AS kind, provider_ref, provider_plan_id, org_id::text AS org_id, event_id::text AS event_id,
-           plan_key, amount_minor, currency, status, status_at, current_end
+           venue_id::text AS venue_id, plan_key, amount_minor, currency, status, status_at, current_end
       FROM billing_checkouts
      WHERE provider = ${PROVIDER} AND provider_ref = ${providerRef}
        FOR UPDATE`
@@ -255,7 +265,15 @@ async function recordPayment(tx: Tx, c: Checkout, payment: Entity, eventAt: Date
   })
 }
 
-const orgOf = (c: Checkout): Subject => ({ kind: "org", id: c.org_id })
+/**
+ * Who a purchase's entitlement belongs to, and what it is, from our own row:
+ * a venue's Venue Pro when the checkout names a venue, else the
+ * organisation's Analytics or Event Pass. Never from the payload.
+ */
+const subjectOf = (c: Checkout): Subject => (c.venue_id ? { kind: "venue", id: c.venue_id } : { kind: "org", id: c.org_id })
+const subscriptionProduct = (c: Checkout): "analytics" | "venue_pro" => (c.venue_id ? "venue_pro" : "analytics")
+/** A venue's purchase is audited on the venue, where its page reads it; an organisation's on the organisation. */
+const auditResource = (c: Checkout) => (c.venue_id ? { resource: { kind: "venue", id: c.venue_id } } : {})
 
 async function apply(tx: Tx, d: Delivery): Promise<Outcome> {
   if (d.event.startsWith("subscription.")) return applySubscription(tx, d)
@@ -289,10 +307,30 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
     }
     await recordPayment(tx, c, payment, eventAt)
     const endedSince = TERMINAL.includes(c.status) && c.status_at !== null && c.status_at >= eventAt
-    if (!endedSince) {
+    // A venue's Pro is paid for by its owner. A mandate that charges after the
+    // venue changed hands (its cancel failed, review M7) grants the new owner
+    // nothing: flagged for a refund and cancelled after the commit.
+    const payerOwnsVenue =
+      !c.venue_id ||
+      (await tx.venues.findFirst({ where: { id: c.venue_id, owner_org_id: c.org_id }, select: { id: true } })) !== null
+    if (!payerOwnsVenue) {
+      logger.error("A Venue Pro mandate charged after its venue changed hands; refund it from the Razorpay dashboard", {
+        providerRef: subId,
+        venueId: c.venue_id,
+        payerOrgId: c.org_id,
+      })
+      out.audit.push({
+        action: "billing.payer_not_owner",
+        orgId: c.org_id,
+        ...auditResource(c),
+        details: { providerRef: subId, paymentId: str(payment.id), payerOrgId: c.org_id },
+      })
+      if (!TERMINAL.includes(c.status)) out.after.push(() => cancelSubscription(subId, false))
+    }
+    if (!endedSince && payerOwnsVenue) {
       const granted = await recordPaidEntitlement(tx, {
-        subject: orgOf(c),
-        product: "analytics",
+        subject: subjectOf(c),
+        product: subscriptionProduct(c),
         source: "razorpay",
         externalRef: subId,
         startsAt: at(sub.start_at) ?? at(sub.current_start) ?? eventAt,
@@ -301,8 +339,10 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
       out.audit.push({
         action: "entitlement.paid",
         orgId: c.org_id,
+        ...auditResource(c),
         details: {
-          product: "analytics",
+          product: subscriptionProduct(c),
+          ...(c.venue_id ? { venueId: c.venue_id } : {}),
           plan: c.plan_key,
           source: "razorpay",
           externalRef: subId,
@@ -327,8 +367,55 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
     await endAccess(tx, out, c, subId, at(sub.ended_at) ?? eventAt, d.event)
   }
 
-  await advance(tx, c, eventAt, status, currentEnd)
+  await advance(tx, c, eventAt, await clearOpenConflicts(tx, out, c, subId, status), currentEnd)
   return out
+}
+
+/**
+ * Before a subscription becomes open, make room for it in its scope (the
+ * organisation's own plan, or one venue): one open subscription is a unique
+ * index, and a violation here was a 500 that Razorpay retried for a day
+ * (review M6) — a checkout abandoned and marked expired here, paid late at
+ * Razorpay, while a newer one waited.
+ *
+ *   - Another row still only `created` (never paid) is expired, and cancelled
+ *     at Razorpay after the commit so it cannot charge.
+ *   - Another row already live (a mandate that charged) wins: this one is
+ *     `superseded` — our word, not Razorpay's — cancelled at Razorpay, audited
+ *     and logged for a refund. Never a 500.
+ */
+async function clearOpenConflicts(tx: Tx, out: Outcome, c: Checkout, subId: string, status: string): Promise<string> {
+  if (!(OPEN_SUBSCRIPTION_STATUSES as readonly string[]).includes(status)) return status
+  const others = await tx.billing_checkouts.findMany({
+    where: {
+      id: { not: c.id },
+      kind: "subscription",
+      status: { in: [...OPEN_SUBSCRIPTION_STATUSES] },
+      ...(c.venue_id ? { venue_id: c.venue_id } : { org_id: c.org_id, venue_id: null }),
+    },
+    select: { id: true, provider_ref: true, status: true },
+  })
+  const unpaid = others.filter((o) => o.status === "created")
+  if (unpaid.length) {
+    await tx.billing_checkouts.updateMany({ where: { id: { in: unpaid.map((o) => o.id) } }, data: { status: "expired" } })
+    for (const o of unpaid) out.after.push(() => cancelSubscription(o.provider_ref, false))
+  }
+  const live = others.filter((o) => o.status !== "created")
+  if (live.length === 0) return status
+  logger.error("A second subscription was paid for one plan; it is cancelled, refund it from the Razorpay dashboard", {
+    providerRef: subId,
+    keptRef: live[0].provider_ref,
+    orgId: c.org_id,
+    venueId: c.venue_id,
+  })
+  out.audit.push({
+    action: "billing.duplicate_subscription",
+    orgId: c.org_id,
+    ...auditResource(c),
+    details: { providerRef: subId, keptRef: live[0].provider_ref, plan: c.plan_key },
+  })
+  out.after.push(() => cancelSubscription(subId, false))
+  return "superseded"
 }
 
 async function endAccess(tx: Tx, out: Outcome, c: Checkout, ref: string, endAt: Date, reason: string) {
@@ -337,7 +424,15 @@ async function endAccess(tx: Tx, out: Outcome, c: Checkout, ref: string, endAt: 
   out.audit.push({
     action: "entitlement.ended",
     orgId: c.org_id,
-    details: { product: c.kind === "order" ? "event_pass" : "analytics", source: "razorpay", externalRef: ref, reason, expiresAt: ended.expiresAt.toISOString() },
+    ...auditResource(c),
+    details: {
+      product: c.kind === "order" ? "event_pass" : subscriptionProduct(c),
+      ...(c.venue_id ? { venueId: c.venue_id } : {}),
+      source: "razorpay",
+      externalRef: ref,
+      reason,
+      expiresAt: ended.expiresAt.toISOString(),
+    },
   })
 }
 
@@ -375,7 +470,7 @@ async function applyOrderPaid(tx: Tx, d: Delivery): Promise<Outcome> {
     })
   } else {
     await recordPaidEntitlement(tx, {
-      subject: orgOf(c),
+      subject: subjectOf(c),
       product: "event_pass",
       eventId: c.event_id,
       source: "razorpay",
@@ -471,8 +566,8 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
       c.kind === "order" ? null : c.current_end ? new Date(c.current_end.getTime() + RENEWAL_GRACE_MS) : null
     if (c.kind === "order" || expiresAt) {
       await recordPaidEntitlement(tx, {
-        subject: orgOf(c),
-        product: c.kind === "order" ? "event_pass" : "analytics",
+        subject: subjectOf(c),
+        product: c.kind === "order" ? "event_pass" : subscriptionProduct(c),
         eventId: c.kind === "order" ? c.event_id : null,
         source: "razorpay",
         externalRef: c.provider_ref,
@@ -482,6 +577,7 @@ async function applyDispute(tx: Tx, d: Delivery): Promise<Outcome> {
       out.audit.push({
         action: "entitlement.restored",
         orgId: c.org_id,
+        ...auditResource(c),
         details: { source: "razorpay", externalRef: c.provider_ref, reason: d.event },
       })
     }

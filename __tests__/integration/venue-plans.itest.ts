@@ -1,0 +1,945 @@
+/*
+ * Venue plans against real Postgres (step 17 part B; TQ-DV06: MN-I05 for a
+ * venue, the no-charge rule, founding grants, insights by tier).
+ *
+ *   - No charge before four weeks of venue-day data: the checkout action
+ *     refuses, with nothing written and nothing asked of Razorpay; past it, a
+ *     purchase names its venue and grants nothing until the webhook.
+ *   - One open subscription per venue, and an organisation may hold Pro on two.
+ *   - The webhook settles a venue's Pro onto the VENUE, from our own row.
+ *   - Founding grants: admin only, claimed venues only, one live at a time.
+ *   - Insights: Listed computes 30 days and nothing paid — no 12-month query,
+ *     no pre-claim query — and its page tree carries none of the paid
+ *     canaries; Venue Pro carries them (the positive control). Pre-claim
+ *     history is three totals. Floors on every figure; regulars and
+ *     one-timers held back together.
+ *
+ * Razorpay's API is a stub `fetch`; signatures are computed here.
+ */
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+const mockGetAuth = jest.fn()
+jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+// The venue's map form imports Leaflet's CSS, which node cannot load.
+jest.mock("@/app/dashboard/venues/[id]/venue-manage", () => ({ VenueManage: () => null }))
+/*
+ * Every raw query the app's client runs, with its values, so a test can say
+ * which windows were asked for. The real client does the work.
+ */
+const mockRawCalls: unknown[][] = []
+/** While set, `billing_checkouts.findMany` through the app's client fails, as a dropped connection would. */
+const mockFail = { checkoutReads: false }
+jest.mock("@/lib/db", () => {
+  const actual = jest.requireActual("@/lib/db")
+  const real = actual.db
+  const db = new Proxy(real, {
+    get(target, prop) {
+      if (prop === "$queryRaw") {
+        return (...args: unknown[]) => {
+          mockRawCalls.push(args.slice(1))
+          return target.$queryRaw(...args)
+        }
+      }
+      const value = Reflect.get(target, prop)
+      if (prop === "billing_checkouts" && mockFail.checkoutReads) {
+        return new Proxy(value, {
+          get: (d, k) => (k === "findMany" ? () => Promise.reject(new Error("itest: read refused")) : Reflect.get(d, k)),
+        })
+      }
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+  return { ...actual, db }
+})
+
+import { createHmac, randomUUID } from "crypto"
+import { NextRequest } from "next/server"
+import { isValidElement, type ReactElement } from "react"
+
+import { hasEntitlement } from "@/lib/entitlements"
+import { logger } from "@/lib/logger"
+import { resetMemoryStore } from "@/lib/rate-limit-store"
+import { venueDayBounds, venueDayFor } from "@/lib/venue-day"
+import { decideVenueClaim } from "@/lib/venue-claim-actions"
+import { venueInsights } from "@/lib/venue-insights"
+import { venuePlanPage, venueReadiness } from "@/lib/venue-plan"
+
+import { cleanup, closeDb, db, makeEvent, makeUser, refusingWrites, testId } from "./helpers"
+
+/* eslint-disable @typescript-eslint/no-require-imports */
+const actions = require("@/lib/billing-actions") as typeof import("@/lib/billing-actions")
+const route = require("@/app/api/webhooks/razorpay/route") as typeof import("@/app/api/webhooks/razorpay/route")
+const venuePage = require("@/app/dashboard/venues/[id]/page") as typeof import("@/app/dashboard/venues/[id]/page")
+/* eslint-enable @typescript-eslint/no-require-imports */
+
+const DAY = 24 * 60 * 60 * 1000
+const SECRET = "whsec_itest_venue_plans_0123456789abcdef"
+const users: string[] = []
+const events: string[] = []
+const orgs: string[] = []
+const venues: string[] = []
+
+let owner = ""
+let staff = ""
+let stranger = ""
+let organiser = ""
+let admin = ""
+let orgId = ""
+
+const calls: { method: string; url: string; body: Record<string, unknown> | undefined }[] = []
+const realFetch = global.fetch
+let failCancel = false
+
+function stubRazorpay() {
+  global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
+    calls.push({ method: init?.method ?? "GET", url, body })
+    const json = (status: number, data: unknown) => new Response(JSON.stringify(data), { status })
+    if (url.includes("/plans")) {
+      return json(200, {
+        items: [
+          { id: "plan_vp_month", period: "monthly", interval: 1, item: { name: "x", amount: 353_900, currency: "INR" }, notes: { key: "venue_pro_monthly" } },
+          { id: "plan_vp_year", period: "yearly", interval: 1, item: { name: "x", amount: 3_538_800, currency: "INR" }, notes: { key: "venue_pro_yearly" } },
+        ],
+      })
+    }
+    if (url.endsWith("/subscriptions")) return json(200, { id: `sub_${randomUUID().slice(0, 12)}`, plan_id: body?.plan_id, status: "created" })
+    if (url.endsWith("/cancel")) {
+      if (failCancel) return json(500, { error: { description: "Razorpay is having a bad day" } })
+      return json(200, { id: url.split("/").at(-2), plan_id: "plan_vp_month", status: "cancelled" })
+    }
+    return json(404, { error: { description: "not stubbed" } })
+  }) as typeof fetch
+}
+
+const as = (id: string, role: "organizer" | "app_admin" | "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role } })
+
+async function venue(label: string, opts: { org?: string | null; claimedDaysAgo?: number; claimedAt?: Date; timezone?: string } = {}) {
+  const org = opts.org === undefined ? orgId : opts.org
+  const v = await db.venues.create({
+    data: {
+      name: testId(label),
+      city: "Bengaluru",
+      latitude: 12.97,
+      longitude: 77.64,
+      timezone: opts.timezone ?? "UTC",
+      day_reset_hour: 6,
+      owner_org_id: org,
+      claimed_at: org ? (opts.claimedAt ?? new Date(Date.now() - (opts.claimedDaysAgo ?? 100) * DAY)) : null,
+    },
+  })
+  venues.push(v.id)
+  return v.id
+}
+
+/** Somebody went live at the venue `daysAgo` days ago: its venue-day data starts then. */
+async function liveSince(venueId: string, daysAgo: number, kind: "attendee" | "staff" = "attendee") {
+  const day = await venueDayFor(venueId)
+  if (!day) throw new Error("no venue day")
+  events.push(day.id)
+  const person = await makeUser(testId("vp-live"))
+  users.push(person)
+  await db.event_check_ins.create({
+    data: {
+      event_id: day.id,
+      occurrence_id: day.occurrenceId,
+      user_id: person,
+      status: "checked_in",
+      kind,
+      check_in_time: new Date(Date.now() - daysAgo * DAY),
+    },
+  })
+}
+
+/** A night at the venue at `at`, with these people checked in. */
+async function night(venueId: string, at: Date, people: string[]) {
+  const id = await makeEvent(owner)
+  events.push(id)
+  await db.events.update({
+    where: { id },
+    data: { venue_id: venueId, start_time: at, end_time: new Date(at.getTime() + 3 * 60 * 60 * 1000), title: testId("vp-night") },
+  })
+  const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: id } })
+  for (const user_id of people) {
+    await db.event_check_ins.create({ data: { event_id: id, occurrence_id: occ.id, user_id, status: "checked_in", check_in_time: at } })
+  }
+  return id
+}
+
+async function guests(n: number, label: string) {
+  const out: string[] = []
+  for (let i = 0; i < n; i++) {
+    const id = await makeUser(testId(`${label}${i}`))
+    users.push(id)
+    out.push(id)
+  }
+  return out
+}
+
+/** `daysAgo` days back, moved to the nearest such weekday (0 = Monday) and hour, UTC. */
+function onWeekday(daysAgo: number, weekday: number, hour: number) {
+  const d = new Date(Date.now() - daysAgo * DAY)
+  const isoDow = (d.getUTCDay() + 6) % 7
+  d.setUTCDate(d.getUTCDate() - ((isoDow - weekday + 7) % 7))
+  d.setUTCHours(hour, 0, 0, 0)
+  return d
+}
+
+beforeAll(async () => {
+  owner = await makeUser(testId("vp-owner"), "organizer")
+  staff = await makeUser(testId("vp-staff"), "organizer")
+  stranger = await makeUser(testId("vp-stranger"), "organizer")
+  organiser = await makeUser(testId("vp-organiser"), "organizer")
+  admin = await makeUser(testId("vp-admin"), "app_admin")
+  users.push(owner, staff, stranger, organiser, admin)
+  for (const id of [owner, staff, stranger]) await db.user.update({ where: { id }, data: { role: "venue_owner" } })
+  const org = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-org"), status: "verified" } })
+  const other = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-other"), status: "verified" } })
+  orgs.push(org.id, other.id)
+  orgId = org.id
+  await db.organisation_members.createMany({
+    data: [
+      { org_id: org.id, user_id: owner, role: "owner" },
+      { org_id: org.id, user_id: staff, role: "staff" },
+      { org_id: org.id, user_id: organiser, role: "owner" },
+      { org_id: other.id, user_id: stranger, role: "owner" },
+    ],
+  })
+})
+
+beforeEach(() => {
+  resetMemoryStore()
+  calls.length = 0
+  failCancel = false
+  process.env.RAZORPAY_KEY_ID = "rzp_test_itestkey"
+  process.env.RAZORPAY_KEY_SECRET = "itest_key_secret_value_24"
+  process.env.RAZORPAY_WEBHOOK_SECRET = SECRET
+  stubRazorpay()
+})
+
+afterEach(() => {
+  global.fetch = realFetch
+  delete process.env.RAZORPAY_KEY_ID
+  delete process.env.RAZORPAY_KEY_SECRET
+  delete process.env.RAZORPAY_WEBHOOK_SECRET
+})
+
+afterAll(async () => {
+  await db.payment_events.deleteMany({ where: { provider_event_id: { startsWith: "itest_vp_" } } })
+  await db.billing_payments.deleteMany({ where: { checkout: { venue_id: { in: venues } } } })
+  await db.billing_checkouts.deleteMany({ where: { OR: [{ venue_id: { in: venues } }, { org_id: { in: orgs } }] } })
+  await db.entitlements.deleteMany({ where: { subject_id: { in: [...venues, ...orgs] } } })
+  await db.audit_logs.deleteMany({ where: { resource_id: { in: [...venues, ...orgs] } } })
+  await cleanup(users, events)
+  await db.venues.deleteMany({ where: { id: { in: venues } } })
+  await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
+  await db.organisations.deleteMany({ where: { id: { in: orgs } } })
+  await closeDb()
+})
+
+describe("no charge before four weeks of venue-day data", () => {
+  it("counts from the first person who went live there", async () => {
+    const fresh = await venue("vp-fresh")
+    expect(await venueReadiness(fresh)).toMatchObject({ dataSince: null, chargeable: false, dataDays: 0 })
+    await liveSince(fresh, 10)
+    expect(await venueReadiness(fresh)).toMatchObject({ chargeable: false, dataDays: 10 })
+    const ready = await venue("vp-ready")
+    await liveSince(ready, 29)
+    expect(await venueReadiness(ready)).toMatchObject({ chargeable: true, dataDays: 28 })
+  })
+
+  it("refuses to start Venue Pro before then: no row, nothing asked of Razorpay", async () => {
+    const young = await venue("vp-young")
+    await liveSince(young, 20)
+    as(owner, "venue_owner")
+    await expect(actions.startVenueProCheckout(young, "monthly")).rejects.toThrow(/Venue Pro can be bought from .*four weeks after people first went live here/)
+    expect(await db.billing_checkouts.count({ where: { venue_id: young } })).toBe(0)
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+  })
+
+  it("counts guests only: a staff member going live does not start the clock (review M4)", async () => {
+    const v = await venue("vp-staffclock")
+    await liveSince(v, 40, "staff")
+    expect(await venueReadiness(v)).toMatchObject({ dataSince: null, chargeable: false })
+    await liveSince(v, 10)
+    expect(await venueReadiness(v)).toMatchObject({ chargeable: false, dataDays: 10 })
+  })
+
+  it("refuses a venue nobody has gone live at yet", async () => {
+    const empty = await venue("vp-empty")
+    as(owner, "venue_owner")
+    await expect(actions.startVenueProCheckout(empty, "monthly")).rejects.toThrow("four weeks after people first go live")
+  })
+
+  it("past four weeks: a purchase for that venue, at the table's price, and no entitlement yet", async () => {
+    const v = await venue("vp-buy")
+    await liveSince(v, 35)
+    as(owner, "venue_owner")
+    const out = await actions.startVenueProCheckout(v, "monthly")
+    const row = await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: out.subscriptionId } })
+    expect(row).toMatchObject({ venue_id: v, org_id: orgId, plan_key: "venue_pro_monthly", amount_minor: 353_900, provider_plan_id: "plan_vp_month" })
+    expect(calls.find((c) => c.url.endsWith("/subscriptions"))?.body).toMatchObject({ notes: { org_id: orgId, venue_id: v } })
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+    // A second start resumes it; a second venue of the same organisation opens its own.
+    expect((await actions.startVenueProCheckout(v, "monthly")).subscriptionId).toBe(out.subscriptionId)
+    const v2 = await venue("vp-buy2")
+    await liveSince(v2, 35)
+    const out2 = await actions.startVenueProCheckout(v2, "monthly")
+    expect(out2.subscriptionId).not.toBe(out.subscriptionId)
+  })
+
+  it.each([
+    ["staff of the venue's organisation", () => staff, "venue_owner", "Only an owner or admin"],
+    ["another organisation's owner", () => stranger, "venue_owner", "isn't one of your organisation's"],
+    ["an organiser of the same organisation", () => organiser, "organizer", "Only an owner or admin"],
+  ] as const)("refuses %s", async (_label, who, role, sentence) => {
+    const v = await venue("vp-refuse")
+    await liveSince(v, 35)
+    as(who(), role)
+    await expect(actions.startVenueProCheckout(v, "monthly")).rejects.toThrow(sentence)
+    expect(await db.billing_checkouts.count({ where: { venue_id: v } })).toBe(0)
+  })
+
+  it("refuses while Venue Pro is already live from a founding grant", async () => {
+    const v = await venue("vp-granted")
+    await liveSince(v, 35)
+    as(admin, "app_admin")
+    await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
+    as(owner, "venue_owner")
+    await expect(actions.startVenueProCheckout(v, "monthly")).rejects.toThrow("already has Venue Pro until")
+  })
+})
+
+describe("the webhook settles a venue's Venue Pro onto the venue (MN-I05)", () => {
+  function post(body: unknown) {
+    const raw = JSON.stringify(body)
+    return route.POST(
+      new NextRequest("http://localhost/api/webhooks/razorpay", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-real-ip": "203.0.113.11",
+          "x-razorpay-signature": createHmac("sha256", SECRET).update(raw).digest("hex"),
+          "x-razorpay-event-id": `itest_vp_${randomUUID()}`,
+        },
+        body: raw,
+      })
+    )
+  }
+  const T0 = Math.floor(Date.now() / 1000) - 3600
+  const sub = (type: string, id: string, at: number, extra: Record<string, unknown> = {}) => ({
+    event: type,
+    created_at: at,
+    payload: {
+      subscription: {
+        entity: { id, plan_id: "plan_vp_month", status: "active", start_at: T0, current_start: at, current_end: at + 30 * 86_400, ...extra },
+      },
+      payment: { entity: { id: `pay_${randomUUID().slice(0, 10)}`, amount: 353_900, currency: "INR", status: "captured" } },
+    },
+  })
+
+  it("charged grants the venue, never the organisation; halted ends it; a wrong amount is refused", async () => {
+    const v = await venue("vp-webhook")
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: orgId, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900 },
+    })
+
+    const wrong = sub("subscription.charged", ref, T0)
+    ;(wrong.payload.payment.entity as { amount: number }).amount = 235_900
+    expect((await post(wrong)).status).toBe(200)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+
+    expect((await post(sub("subscription.charged", ref, T0 + 1))).status).toBe(200)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(true)
+    expect(await hasEntitlement({ kind: "org", id: orgId }, "analytics")).toBe(false)
+    const row = await db.entitlements.findFirstOrThrow({ where: { external_ref: ref } })
+    expect(row).toMatchObject({ subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay" })
+
+    // Audited on the venue, where its page and its log read it.
+    expect(await db.audit_logs.count({ where: { action: "entitlement.paid", resource: "venue", resource_id: v } })).toBe(1)
+
+    expect((await post(sub("subscription.halted", ref, T0 + 60, { status: "halted" }))).status).toBe(200)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).status).toBe("halted")
+  })
+
+  const checkout = (v: string, ref: string, status: string) =>
+    db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: orgId, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status },
+    })
+
+  it("a checkout paid after we expired it takes its place: 200, not a 500 Razorpay retries for a day (review M6)", async () => {
+    const v = await venue("vp-late")
+    const late = `sub_${randomUUID().slice(0, 12)}`
+    const newer = `sub_${randomUUID().slice(0, 12)}`
+    await checkout(v, late, "expired")
+    await checkout(v, newer, "created")
+    const res = await post(sub("subscription.charged", late, T0 + 5))
+    expect(res.status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: late } })).status).toBe("active")
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: newer } })).status).toBe("expired")
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${newer}/cancel`))).toBe(true)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(true)
+  })
+
+  it("a second mandate paid beside a live one is superseded, cancelled and flagged, still 200", async () => {
+    const v = await venue("vp-dup")
+    const live = `sub_${randomUUID().slice(0, 12)}`
+    const second = `sub_${randomUUID().slice(0, 12)}`
+    await checkout(v, live, "active")
+    await checkout(v, second, "expired")
+    expect((await post(sub("subscription.charged", second, T0 + 7))).status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: second } })).status).toBe("superseded")
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: live } })).status).toBe("active")
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${second}/cancel`))).toBe(true)
+    expect(await db.audit_logs.count({ where: { action: "billing.duplicate_subscription", resource_id: v } })).toBe(1)
+  })
+})
+
+describe("a venue changing hands (review M7)", () => {
+  let payerOwner = ""
+  let payerOrg = ""
+  let newOrg = ""
+  let newOwner = ""
+  beforeAll(async () => {
+    payerOwner = await makeUser(testId("vp-payer"), "organizer")
+    newOwner = await makeUser(testId("vp-newowner"), "organizer")
+    users.push(payerOwner, newOwner)
+    for (const id of [payerOwner, newOwner]) await db.user.update({ where: { id }, data: { role: "venue_owner" } })
+    const p = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-payer-org"), status: "verified" } })
+    const n = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-new-org"), status: "verified" } })
+    orgs.push(p.id, n.id)
+    payerOrg = p.id
+    newOrg = n.id
+    await db.organisation_members.createMany({
+      data: [
+        { org_id: p.id, user_id: payerOwner, role: "owner" },
+        { org_id: n.id, user_id: newOwner, role: "owner" },
+      ],
+    })
+  })
+
+  it("an approved dispute stops the previous owner's Venue Pro; only the payer sees or cancels its mandate", async () => {
+    const v = await venue("vp-transfer", { org: payerOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active", current_end: new Date(Date.now() + 20 * DAY) },
+    })
+    await db.entitlements.create({
+      data: { subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 23 * DAY) },
+    })
+    const checkoutRow = await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })
+    const invoice = `inv_${randomUUID().slice(0, 10)}`
+    const payId = `pay_${randomUUID().slice(0, 10)}`
+    await db.billing_payments.create({
+      data: { provider_payment_id: payId, checkout_id: checkoutRow.id, amount_minor: 353_900, currency: "INR", invoice_id: invoice, captured_at: new Date(Date.now() - DAY) },
+    })
+    const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: newOrg, filed_by: newOwner, status: "pending", is_dispute: true } })
+
+    as(admin, "app_admin")
+    await decideVenueClaim(claim.id, "approve")
+    expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+    // The new owner does not inherit the paid Pro; the mandate stops at its cycle's end.
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(true)
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+    expect(await db.audit_logs.count({ where: { action: "entitlement.ended_on_transfer", resource_id: v } })).toBe(1)
+
+    // The new owner sees the venue, and none of the previous owner's mandate:
+    // no subscription, no payment row, no reference, invoice or amount anywhere.
+    const asNew = await venuePlanPage({ id: newOwner, role: "venue_owner" })
+    expect(asNew.venues.find((r) => r.venueId === v)).toMatchObject({ owned: true, subscriptions: [] })
+    expect(asNew.payments).toEqual([])
+    const page = JSON.stringify(asNew)
+    for (const needle of [ref, invoice, payId, "353900"]) expect(page).not.toContain(needle)
+    // The payer still sees what it pays for, as no longer its own — and
+    // nothing of the new owner's: not its name, its plan or its data.
+    const asPayer = await venuePlanPage({ id: payerOwner, role: "venue_owner" })
+    expect(asPayer.venues.find((r) => r.venueId === v)).toMatchObject({
+      owned: false,
+      mayCancel: true,
+      mayBuy: false,
+      orgName: "",
+      pro: null,
+      date: null,
+      readiness: { dataSince: null, dataDays: 0 },
+    })
+    expect(asPayer.payments.map((p) => p.reference)).toContain(invoice)
+  })
+
+  /** A venue the payer owns and pays Pro on, live, and the new owner's pending dispute for it. */
+  async function paidVenueUnderDispute(label: string) {
+    const v = await venue(label, { org: payerOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active" },
+    })
+    const ent = await db.entitlements.create({
+      data: { subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 23 * DAY) },
+    })
+    const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: newOrg, filed_by: newOwner, status: "pending", is_dispute: true } })
+    return { v, ref, ent, claim: claim.id }
+  }
+  const markedCancelled = async (ref: string) => (await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end
+
+  describe("when one side fails (scan 3)", () => {
+    let errors: jest.SpyInstance
+    beforeEach(() => {
+      errors = jest.spyOn(logger, "error").mockImplementation(() => undefined)
+    })
+    afterEach(() => errors.mockRestore())
+    const logged = (ref: string) => errors.mock.calls.some(([, meta]) => (meta as Record<string, unknown> | undefined)?.providerRef === ref)
+
+    it("Razorpay refuses the cancel: the venue moves, the Pro still ends, the mandate stays open here and is audited", async () => {
+      const { v, ref, claim } = await paidVenueUnderDispute("vp-cancelfail")
+      failCancel = true
+      as(admin, "app_admin")
+      await decideVenueClaim(claim, "approve")
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+      expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+      expect(await markedCancelled(ref)).toBe(false)
+      const audit = await db.audit_logs.findFirstOrThrow({ where: { action: "billing.subscription.cancel_failed", resource_id: v } })
+      expect(audit.details).toMatchObject({ providerRef: ref, orgId: payerOrg })
+      expect(logged(ref)).toBe(true)
+    })
+
+    it("the database refuses the record after Razorpay cancelled: the venue moves, the Pro ends, the id is logged", async () => {
+      const { v, ref, claim } = await paidVenueUnderDispute("vp-recordfail")
+      as(admin, "app_admin")
+      await refusingWrites("billing_checkouts", "UPDATE", `NEW.provider_ref = '${ref}'`, () => decideVenueClaim(claim, "approve"))
+      expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+      expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+      expect(await markedCancelled(ref)).toBe(false)
+      expect(await db.audit_logs.count({ where: { action: "billing.subscription.cancelled", resource_id: v } })).toBe(0)
+      expect(logged(ref)).toBe(true)
+    })
+
+    it("reading the mandates fails after the transfer committed: the approval stands, the Pro has ended, and it is logged", async () => {
+      const { v, ref, claim } = await paidVenueUnderDispute("vp-readfail")
+      as(admin, "app_admin")
+      mockFail.checkoutReads = true
+      try {
+        await decideVenueClaim(claim, "approve")
+      } finally {
+        mockFail.checkoutReads = false
+      }
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+      expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+      expect(calls.some((c) => c.url.includes(ref))).toBe(false)
+      expect(errors.mock.calls.some(([, meta]) => (meta as Record<string, unknown> | undefined)?.venueId === v)).toBe(true)
+    })
+
+    it("the database fails inside the transfer: nothing moves, the Pro stays with its payer, Razorpay is never asked", async () => {
+      const { v, ref, ent, claim } = await paidVenueUnderDispute("vp-transferfail")
+      as(admin, "app_admin")
+      await refusingWrites("audit_logs", "INSERT", `NEW.action = 'entitlement.ended_on_transfer' AND NEW.resource_id = '${v}'`, () =>
+        expect(decideVenueClaim(claim, "approve")).rejects.toThrow()
+      )
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(payerOrg)
+      expect((await db.venue_claims.findUniqueOrThrow({ where: { id: claim } })).status).toBe("pending")
+      expect((await db.entitlements.findUniqueOrThrow({ where: { id: ent.id } })).expires_at).toEqual(ent.expires_at)
+      expect(calls.some((c) => c.url.includes(ref))).toBe(false)
+    })
+  })
+
+  it("a mandate that charges after its venue changed hands grants the new owner nothing", async () => {
+    const v = await venue("vp-afterhands", { org: newOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active" },
+    })
+    const T = Math.floor(Date.now() / 1000) - 120
+    const body = {
+      event: "subscription.charged",
+      created_at: T,
+      payload: {
+        subscription: { entity: { id: ref, plan_id: "plan_vp_month", status: "active", start_at: T, current_start: T, current_end: T + 30 * 86_400 } },
+        payment: { entity: { id: `pay_${randomUUID().slice(0, 10)}`, amount: 353_900, currency: "INR", status: "captured" } },
+      },
+    }
+    const raw = JSON.stringify(body)
+    const res = await route.POST(
+      new NextRequest("http://localhost/api/webhooks/razorpay", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-real-ip": "203.0.113.11",
+          "x-razorpay-signature": createHmac("sha256", SECRET).update(raw).digest("hex"),
+          "x-razorpay-event-id": `itest_vp_${randomUUID()}`,
+        },
+        body: raw,
+      })
+    )
+    expect(res.status).toBe(200)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+    expect(await db.audit_logs.count({ where: { action: "billing.payer_not_owner", resource_id: v } })).toBe(1)
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+  })
+
+  it("cancelling is the payer's: the new owner finds nothing of theirs to cancel", async () => {
+    const v = await venue("vp-cancel", { org: newOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active" },
+    })
+    as(newOwner, "venue_owner")
+    await expect(actions.cancelVenuePro(v)).rejects.toThrow("no subscription to cancel")
+    as(payerOwner, "venue_owner")
+    await actions.cancelVenuePro(v)
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(true)
+  })
+})
+
+describe("founding grants (admin)", () => {
+  it("grants 3 months to a claimed venue, audited; one at a time; then ends", async () => {
+    const v = await venue("vp-found")
+    as(admin, "app_admin")
+    const { expiresAt } = await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
+    expect(new Date(expiresAt).getTime() - Date.now()).toBeGreaterThan(85 * DAY)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(true)
+    const audit = await db.audit_logs.findFirstOrThrow({ where: { resource_id: v, action: "entitlement.granted" } })
+    expect(audit).toMatchObject({ resource: "venue", user_id: admin })
+    await expect(actions.grantVenuePro(v, 3, "Founding venue, a second time")).rejects.toThrow("already has a grant")
+    await actions.endVenueProGrant(v, "Granted to the wrong venue")
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+  })
+
+  it("limits an admin's money actions, refusals included (30 a minute)", async () => {
+    const v = await venue("vp-rate")
+    as(admin, "app_admin")
+    for (let i = 0; i < 30; i++) {
+      await expect(actions.endVenueProGrant(v, "Granted to the wrong venue")).rejects.toThrow("already ended")
+    }
+    await expect(actions.endVenueProGrant(v, "Granted to the wrong venue")).rejects.toThrow("Too many changes in a minute")
+    await expect(actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")).rejects.toThrow("Too many changes in a minute")
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+  })
+
+  it("refuses an unclaimed venue, and anyone but an admin", async () => {
+    const unclaimed = await venue("vp-unclaimed", { org: null })
+    as(admin, "app_admin")
+    await expect(actions.grantVenuePro(unclaimed, 3, "Founding venue, claimed in Bengaluru")).rejects.toThrow("unclaimed")
+    const v = await venue("vp-found2")
+    as(owner, "venue_owner")
+    await expect(actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")).rejects.toThrow("Forbidden")
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
+  })
+})
+
+describe("insights by plan", () => {
+  let v = ""
+  let preClaimNights: string[] = []
+
+  beforeAll(async () => {
+    // Claimed 100 days ago.
+    v = await venue("vp-insight", { claimedDaysAgo: 100 })
+    // In the last 30 days: five regulars (two nights) and five who came once.
+    const regulars = await guests(5, "vp-reg")
+    const once = await guests(5, "vp-once")
+    await night(v, onWeekday(9, 4, 20), [...regulars, ...once])
+    await night(v, onWeekday(16, 5, 20), regulars)
+    // Inside a year but not 30 days, after the claim: 23 people on a Monday morning. The 12-month canary.
+    await night(v, onWeekday(60, 0, 9), await guests(23, "vp-year"))
+    // Before the claim: 19 people over three nights. The pre-claim canary.
+    const before = await guests(19, "vp-before")
+    preClaimNights = [
+      await night(v, new Date(Date.now() - 150 * DAY), before.slice(0, 7)),
+      await night(v, new Date(Date.now() - 140 * DAY), before.slice(7, 13)),
+      await night(v, new Date(Date.now() - 130 * DAY), before.slice(13)),
+    ]
+  })
+
+  afterEach(async () => {
+    await db.entitlements.deleteMany({ where: { subject_id: v } })
+  })
+
+  it("Listed: 30 days, regulars and their complement both shown at 5, nothing paid computed", async () => {
+    mockRawCalls.length = 0
+    {
+      const view = await venueInsights(v)
+      expect(view).toMatchObject({ plan: "listed", recent: { window: "30d" }, preClaim: null })
+      expect(view!.recent.regulars).toEqual({ visitors: 10, regulars: 5, oneTimers: 5, sharePct: 50 })
+      // The Monday-morning 23 are outside 30 days.
+      expect(view!.recent.people[0][0]).toBe(0)
+      // No query asked for anything older than the free window, or before the claim.
+      expect(mockRawCalls.length).toBeGreaterThan(0)
+      const cutoff = Date.now() - 31 * DAY
+      const old = mockRawCalls.flat().filter((x): x is Date => x instanceof Date && x.getTime() < cutoff)
+      expect(old).toEqual([])
+    }
+  })
+
+  it("Venue Pro: the year and the pre-claim totals; pre-claim is three totals and nothing else", async () => {
+    as(admin, "app_admin")
+    await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
+    const view = await venueInsights(v)
+    expect(view).toMatchObject({ plan: "pro", recent: { window: "12m" } })
+    expect(view!.recent.people[0][0]).toBe(23)
+    expect(view!.preClaim).toEqual({ nights: 3, people: 19, since: expect.stringMatching(/^\d{4}-\d{2}$/) })
+    expect(Object.keys(view!.preClaim!).sort()).toEqual(["nights", "people", "since"])
+    // The year starts at the claim, never before it.
+    expect(new Date(view!.recent.from).getTime()).toBeGreaterThanOrEqual(Date.now() - 100 * DAY - 60_000)
+  })
+
+  it("the page tree (what the RSC payload carries) has no paid figure for Listed, and has them for Pro", async () => {
+    /*
+     * The page's tree with its server components rendered in place (the
+     * insights section is one), as the RSC payload would carry them. Client
+     * components stay as their props, which is what crosses the wire.
+     */
+    const expand = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(expand)
+      if (!isValidElement(node)) return node
+      const el = node as ReactElement<Record<string, unknown>>
+      if (typeof el.type === "function" && el.type.name === "VenueInsights") {
+        return expand((el.type as (p: unknown) => unknown)(el.props))
+      }
+      return { ...el, props: { ...el.props, children: expand(el.props.children) } }
+    }
+    const tree = async () => {
+      as(owner, "venue_owner")
+      const el = await venuePage.default({ params: Promise.resolve({ id: v }), searchParams: Promise.resolve({ range: "90d" }) })
+      // An element's `type` is code (a component, a forwardRef object), never data.
+      return JSON.stringify(expand(el), (k, value) => (k === "type" || k === "_owner" || typeof value === "function" ? undefined : value))
+    }
+    const listed = await tree()
+    // The 12-month cell and the pre-claim guests, as the payload would carry them.
+    expect(listed).not.toContain('"people":[[23,')
+    expect(listed).not.toContain('"people":19')
+    for (const id of preClaimNights) expect(listed).not.toContain(id)
+    // The sample is there instead.
+    expect(listed).toContain('"nights":37')
+
+    as(admin, "app_admin")
+    await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
+    const pro = await tree()
+    expect(pro).toContain('"people":[[23,')
+    expect(pro).toContain('"people":19')
+    // Aggregate only: the nights before the claim are counted, never named.
+    for (const id of preClaimNights) expect(pro).not.toContain(id)
+  })
+
+  it("holds back a cell under 5, and regulars with their complement when either is under it", async () => {
+    const small = await venue("vp-small")
+    const regulars = await guests(5, "vp-sreg")
+    const once = await guests(2, "vp-sonce")
+    await night(small, onWeekday(9, 4, 20), [...regulars, ...once])
+    await night(small, onWeekday(16, 5, 20), regulars)
+    await night(small, onWeekday(12, 1, 9), regulars.slice(0, 3))
+    const view = await venueInsights(small)
+    // 5 regulars and 2 who came once: the 5 would give the 2 back, so neither shows.
+    expect(view!.recent.regulars).toEqual({ visitors: 7, regulars: null, oneTimers: null, sharePct: null })
+    expect(view!.recent.people[1][0]).toBeNull()
+    expect(view!.recent.people[4][2]).toBe(7)
+  })
+
+  it("never lets the headline give a held-back cell back (review C1: 12 / 3 / 9)", async () => {
+    // The review's repro, on the venue's own clock: Friday 19:00 (12), Friday
+    // 22:15 (3, held), Saturday 19:00 (9). Counted over every row, guests
+    // were 24, and 24 − (12 + 9) = 3.
+    const ist = await venue("vp-c1", { claimedAt: new Date("2026-10-07T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    await night(ist, new Date("2026-10-09T19:00:00+05:30"), await guests(12, "vp-c1a"))
+    await night(ist, new Date("2026-10-09T22:15:00+05:30"), await guests(3, "vp-c1b"))
+    await night(ist, new Date("2026-10-10T19:00:00+05:30"), await guests(9, "vp-c1c"))
+    const view = (await venueInsights(ist, new Date("2026-10-11T20:00:00+05:30")))!
+    const shown = view.recent.people.flat().filter((n): n is number => n !== null && n > 0)
+    expect(shown.sort((a, b) => a - b)).toEqual([9, 12])
+    expect(view.recent.people.flat().filter((n) => n === null)).toHaveLength(1)
+    expect(view.recent.regulars.visitors).toBe(21)
+    expect((view.recent.regulars.visitors ?? 0) - shown.reduce((a, b) => a + b, 0)).toBe(0)
+  })
+
+  it("ends at the start of the venue's current day: nobody who came in today moves a figure (review M9)", async () => {
+    const today = await venue("vp-today", { claimedDaysAgo: 40 })
+    // A fixed "now", six hours into a venue day that has ended: a wall clock just past 06:00 UTC
+    // would put "a minute after the day began" in the future.
+    const now = new Date(venueDayBounds("UTC", 6, new Date()).start.getTime() - 18 * 3600_000)
+    const dayStart = venueDayBounds("UTC", 6, now).start
+    await night(today, new Date(dayStart.getTime() - 2 * 3600_000), await guests(6, "vp-yday"))
+    await night(today, new Date(dayStart.getTime() + 60_000), await guests(7, "vp-tday"))
+    const view = (await venueInsights(today, now))!
+    expect(view.recent.to).toBe(dayStart.toISOString())
+    expect(view.recent.regulars.visitors).toBe(6)
+  })
+
+  it("withholds the pre-claim nights and month with its guests when they are under 5", async () => {
+    const few = await venue("vp-fewbefore", { claimedDaysAgo: 10 })
+    await night(few, new Date(Date.now() - 20 * DAY), await guests(3, "vp-few"))
+    as(admin, "app_admin")
+    await actions.grantVenuePro(few, 3, "Founding venue, claimed in Bengaluru")
+    expect((await venueInsights(few))!.preClaim).toEqual({ nights: null, people: null, since: null })
+  })
+
+  it("is nobody's for an unclaimed venue", async () => {
+    expect(await venueInsights(await venue("vp-nobody", { org: null }))).toBeNull()
+  })
+})
+
+describe("the venue owner's Plan page", () => {
+  it("lists the organisation's venues with their plan and readiness, and who may buy", async () => {
+    const v = await venue("vp-page")
+    await liveSince(v, 10)
+    const page = await venuePlanPage({ id: owner, role: "venue_owner" })
+    const row = page.venues.find((r) => r.venueId === v)
+    expect(row).toMatchObject({ mayBuy: true, pro: null, readiness: { chargeable: false, dataDays: 10 } })
+    const asStaff = await venuePlanPage({ id: staff, role: "venue_owner" })
+    expect(asStaff.venues.find((r) => r.venueId === v)?.mayBuy).toBe(false)
+    const asStranger = await venuePlanPage({ id: stranger, role: "venue_owner" })
+    expect(asStranger.venues.find((r) => r.venueId === v)).toBeUndefined()
+  })
+})
+/* ------------------------------------------------------------------ */
+/* REVIEW GAP TESTS                                                    */
+/* ------------------------------------------------------------------ */
+describe("GAP insights: the venue's own clock (IST)", () => {
+  async function guestsAt(venueId: string, at: Date, n: number, kind: "attendee" | "staff" = "attendee") {
+    const id = await makeEvent(owner)
+    events.push(id)
+    await db.events.update({ where: { id }, data: { venue_id: venueId, start_time: at, end_time: new Date(at.getTime() + 3 * 3600_000), title: testId("vp-gap-night") } })
+    const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: id } })
+    for (let i = 0; i < n; i++) {
+      const u = await makeUser(testId(`gap${i}`))
+      users.push(u)
+      await db.event_check_ins.create({ data: { event_id: id, occurrence_id: occ.id, user_id: u, status: "checked_in", kind, check_in_time: at } })
+    }
+  }
+
+  it("GAP-Y01..Y03 puts each check-in in the right day and slot: the 06:00 night, and the 12/17/22 edges", async () => {
+    const v = await venue("vp-gap-ist", { claimedAt: new Date("2026-09-01T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    // [instant (IST), expected [dow Monday=0, slot morning/afternoon/evening/late = 0..3]]
+    const cases: [string, [number, number]][] = [
+      ["2026-10-05T05:59:00+05:30", [6, 3]], // Mon 05:59 is still SUNDAY's night, late
+      ["2026-10-06T06:00:00+05:30", [1, 0]], // Tue 06:00 starts Tuesday, morning
+      ["2026-10-08T11:59:00+05:30", [3, 0]], // Thu 11:59 is still morning
+      ["2026-10-07T12:00:00+05:30", [2, 1]], // Wed 12:00 is afternoon
+      ["2026-10-09T16:59:00+05:30", [4, 1]], // Fri 16:59 is still afternoon
+      ["2026-10-10T17:00:00+05:30", [5, 2]], // Sat 17:00 is evening
+      ["2026-10-04T21:59:00+05:30", [6, 2]], // Sun 21:59 is still evening
+      ["2026-10-05T22:00:00+05:30", [0, 3]], // Mon 22:00 is late
+    ]
+    for (const [at] of cases) await guestsAt(v, new Date(at), 5)
+    const view = (await venueInsights(v, new Date("2026-10-12T20:00:00+05:30")))!
+    const lit: string[] = []
+    view.recent.people.forEach((day, d) => day.forEach((n, s) => n && lit.push(`${d}/${s}:${n}`)))
+    expect(lit.sort()).toEqual(cases.map(([, [d, s]]) => `${d}/${s}:5`).sort())
+  })
+
+  it("GAP-X21 staff who went live are not guests in the grid or the headline", async () => {
+    const v = await venue("vp-gap-staff", { claimedAt: new Date("2026-09-01T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    await guestsAt(v, new Date("2026-10-07T20:00:00+05:30"), 6, "staff")
+    const view = (await venueInsights(v, new Date("2026-10-12T20:00:00+05:30")))!
+    expect(view.recent.people.flat().every((n) => n === 0)).toBe(true)
+    expect(view.recent.regulars.visitors).toBeNull()
+  })
+
+  it("GAP-X22 staff before the claim are not pre-claim guests", async () => {
+    const v = await venue("vp-gap-staff2", { claimedAt: new Date("2026-09-20T00:00:00+05:30"), timezone: "Asia/Kolkata" })
+    await guestsAt(v, new Date("2026-09-05T20:00:00+05:30"), 6, "staff")
+    as(admin, "app_admin")
+    await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
+    const view = (await venueInsights(v, new Date("2026-10-12T20:00:00+05:30")))!
+    expect(view.preClaim).toEqual({ nights: 0, people: 0, since: null })
+  })
+})
+
+describe("GAP venue Pro authority", () => {
+  let payerOrg = ""
+  let payerOwner = ""
+  let payerStaff = ""
+  beforeAll(async () => {
+    payerOwner = await makeUser(testId("vp-gap-payer"), "organizer")
+    payerStaff = await makeUser(testId("vp-gap-pstaff"), "organizer")
+    users.push(payerOwner, payerStaff)
+    for (const id of [payerOwner, payerStaff]) await db.user.update({ where: { id }, data: { role: "venue_owner" } })
+    const p = await db.organisations.create({ data: { kind: "company", display_name: testId("vp-gap-payer-org"), status: "verified" } })
+    orgs.push(p.id)
+    payerOrg = p.id
+    await db.organisation_members.createMany({
+      data: [
+        { org_id: p.id, user_id: payerOwner, role: "owner" },
+        { org_id: p.id, user_id: payerStaff, role: "staff" },
+      ],
+    })
+  })
+
+  async function paidPro(label: string) {
+    const v = await venue(label, { org: payerOrg })
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: payerOrg, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status: "active", current_end: new Date(Date.now() + 20 * DAY) },
+    })
+    await db.entitlements.create({
+      data: { subject_kind: "venue", subject_id: v, product: "venue_pro", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 23 * DAY) },
+    })
+    return { v, ref }
+  }
+
+  it("GAP-Y09 a staff member of the paying organisation cannot cancel its Venue Pro", async () => {
+    const { v, ref } = await paidPro("vp-gap-cancel")
+    as(payerStaff, "venue_owner")
+    await expect(actions.cancelVenuePro(v)).rejects.toThrow("Only an owner or admin")
+    expect(calls.some((c) => c.url.endsWith("/cancel"))).toBe(false)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+  })
+
+  it("GAP-X04/X05 approving a claim by the organisation that already owns the venue leaves its own Pro and mandate", async () => {
+    const { v, ref } = await paidPro("vp-gap-self")
+    const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: payerOrg, filed_by: payerOwner, status: "pending", is_dispute: false } })
+    as(admin, "app_admin")
+    await decideVenueClaim(claim.id, "approve")
+    expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(payerOrg)
+    expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(true)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(false)
+    expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(false)
+  })
+})
+
+describe("GAP clearOpenConflicts only runs for a subscription becoming open", () => {
+  function post(body: unknown) {
+    const raw = JSON.stringify(body)
+    return route.POST(
+      new NextRequest("http://localhost/api/webhooks/razorpay", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-real-ip": "203.0.113.11",
+          "x-razorpay-signature": createHmac("sha256", SECRET).update(raw).digest("hex"),
+          "x-razorpay-event-id": `itest_vp_${randomUUID()}`,
+        },
+        body: raw,
+      })
+    )
+  }
+  const T0 = Math.floor(Date.now() / 1000) - 3600
+  const event = (type: string, id: string, at: number, status: string, extra: Record<string, unknown> = {}) => ({
+    event: type,
+    created_at: at,
+    payload: {
+      subscription: { entity: { id, plan_id: "plan_vp_month", status, start_at: T0, current_start: at, current_end: at + 30 * 86_400, ...extra } },
+      payment: { entity: { id: `pay_${randomUUID().slice(0, 10)}`, amount: 353_900, currency: "INR", status: "captured" } },
+    },
+  })
+
+  it("GAP-X08 the cancel of a superseded mandate settles it without a second audit or a second cancel call", async () => {
+    const v = await venue("vp-gap-super")
+    const live = `sub_${randomUUID().slice(0, 12)}`
+    const second = `sub_${randomUUID().slice(0, 12)}`
+    for (const [ref, status] of [[live, "active"], [second, "expired"]] as const) {
+      await db.billing_checkouts.create({
+        data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_month", org_id: orgId, venue_id: v, plan_key: "venue_pro_monthly", amount_minor: 353_900, status },
+      })
+    }
+    expect((await post(event("subscription.charged", second, T0 + 7, "active"))).status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: second } })).status).toBe("superseded")
+    const cancelsBefore = calls.filter((c) => c.url.endsWith(`/subscriptions/${second}/cancel`)).length
+    // Razorpay confirms the cancel we asked for.
+    expect((await post(event("subscription.cancelled", second, T0 + 30, "cancelled", { ended_at: T0 + 30 }))).status).toBe(200)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: second } })).status).toBe("cancelled")
+    expect(await db.audit_logs.count({ where: { action: "billing.duplicate_subscription", resource_id: v } })).toBe(1)
+    expect(calls.filter((c) => c.url.endsWith(`/subscriptions/${second}/cancel`)).length).toBe(cancelsBefore)
+  })
+})

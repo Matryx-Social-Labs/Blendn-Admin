@@ -1553,6 +1553,7 @@ model venues {
   claims    venue_claims[]
   owner     User?          @relation("VenueOwner", fields: [owner_id], references: [id], onDelete: SetNull)
   owner_org      organisations? @relation("VenueOwnerOrg", fields: [owner_org_id], references: [id], onDelete: SetNull)
+  billing_checkouts billing_checkouts[]
   created_by_org organisations? @relation("VenueCreatedByOrg", fields: [created_by_org_id], references: [id], onDelete: SetNull)
   events         events[]
 
@@ -3976,7 +3977,9 @@ enum billing_checkout_kind {
 /// organisation from our own row and never from the payload's `notes`.
 ///
 /// `status` follows the provider's word for it (created, active, halted,
-/// cancelled, completed, paid, failed). `status_at` is the provider's time
+/// cancelled, completed, paid, failed), plus two of ours: `expired` (an unpaid
+/// checkout we stopped counting as open) and `superseded` (a second mandate,
+/// paid late beside a live one, cancelled; lib/razorpay-webhook.ts). `status_at` is the provider's time
 /// for the event that set it, so an older delivery arriving late changes
 /// nothing (out-of-order webhooks).
 model billing_checkouts {
@@ -3990,6 +3993,10 @@ model billing_checkouts {
   org_id              String                @db.Uuid
   /// The event an Event Pass order is for.
   event_id            String?               @db.Uuid
+  /// The venue a Venue Pro subscription is for (step 17). Null for an
+  /// organisation's own purchase. CHECK `billing_checkouts_venue_shape` in SQL:
+  /// only a subscription names a venue.
+  venue_id            String?               @db.Uuid
   /// A key of `BILLING_PLANS` (lib/billing-plans.ts).
   plan_key            String
   /// What the provider must charge, GST included, in paise.
@@ -4011,14 +4018,18 @@ model billing_checkouts {
   /// SetNull: an event that goes (its creator's account cascades it) keeps
   /// the purchase record and loses only the pointer.
   event          events?            @relation(fields: [event_id], references: [id], onDelete: SetNull)
+  /// Restrict: a purchase is a tax record; venues are retired, never deleted.
+  venue          venues?            @relation(fields: [venue_id], references: [id], onDelete: Restrict)
   payment_events payment_events[]
   payments       billing_payments[]
 
   /// Also, in migration SQL only: `billing_checkouts_one_open_subscription_per_org`
-  /// (a partial unique index) and the shape CHECKs.
+  /// and `…_per_venue` (partial unique indexes: one open subscription per
+  /// organisation for its own plan, and per venue) and the shape CHECKs.
   @@unique([provider, provider_ref])
   @@index([org_id, kind, created_at])
   @@index([event_id])
+  @@index([venue_id, kind, created_at])
 }
 
 /// One captured payment, with the columns the Plan page and refunds need, so

@@ -31,6 +31,16 @@ describe("the price table", () => {
     expect(rupees(23_588)).toBe("₹23,588")
   })
 
+  it("prices Venue Pro per venue: ₹2,999 a month, a year at ten months (step 17, §9.1b)", () => {
+    expect(BILLING_PLANS.venue_pro_monthly).toMatchObject({ product: "venue_pro", kind: "subscription", period: "monthly" })
+    expect(BILLING_PLANS.venue_pro_yearly).toMatchObject({ product: "venue_pro", kind: "subscription", period: "yearly" })
+    expect(gstSplit(BILLING_PLANS.venue_pro_monthly)).toBe("₹2,999 + ₹540 GST")
+    expect(grossRupees(BILLING_PLANS.venue_pro_monthly)).toBe(3_539)
+    // 29,990 × 1.18 = 35,388.2: two months free on twelve.
+    expect(grossRupees(BILLING_PLANS.venue_pro_yearly)).toBe(35_388)
+    expect(chargeMinor(BILLING_PLANS.venue_pro_monthly)).toBe(353_900)
+  })
+
   it("knows its own keys and nothing else", () => {
     expect(isBillingPlanKey("event_pass")).toBe(true)
     expect(isBillingPlanKey("toString")).toBe(false)
