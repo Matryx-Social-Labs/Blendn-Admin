@@ -39,6 +39,10 @@ import { cancelSubscription } from "./razorpay"
  *   - a halt ends access unless a later charge has already applied;
  *   - two events in the same second are decided by the lock and these rules.
  *
+ * When a payment was made is the payment's own `created_at`, never the
+ * delivery's: a `payment_link.paid` is stamped with the LINK's creation, up to
+ * 14 days before the sponsor paid (SCRUM-606).
+ *
  * The entitlement is written here and nowhere else on the paid path. The
  * browser's return from Checkout writes nothing.
  */
@@ -255,6 +259,9 @@ async function advance(tx: Tx, c: Checkout, eventAt: Date, next: string, current
   })
 }
 
+/** When the payment was made: its own time, else the delivery's. */
+const paidAt = (payment: Entity, eventAt: Date): Date => at(payment.created_at) ?? eventAt
+
 /** Remember a captured payment, once (a re-sent charge finds it). */
 async function recordPayment(tx: Tx, c: Checkout, payment: Entity, eventAt: Date) {
   const id = str(payment.id)
@@ -269,7 +276,7 @@ async function recordPayment(tx: Tx, c: Checkout, payment: Entity, eventAt: Date
         amount_minor: amount,
         currency: str(payment.currency) ?? "INR",
         invoice_id: str(payment.invoice_id),
-        captured_at: eventAt,
+        captured_at: paidAt(payment, eventAt),
       },
     ],
     skipDuplicates: true,
@@ -368,6 +375,7 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
   }
 
   if (d.event === "subscription.halted") {
+    // A payment made after the halt (`captured_at` is the payment's own time) keeps access.
     const laterCharge = await tx.billing_payments.count({
       where: { checkout_id: c.id, captured_at: { gt: eventAt }, status: "captured" },
     })
@@ -517,17 +525,50 @@ async function applyPaymentFailed(tx: Tx, d: Delivery): Promise<Outcome> {
 async function checkoutOfPayment(tx: Tx, paymentId: string) {
   const payment = await tx.billing_payments.findUnique({
     where: { provider_provider_payment_id: { provider: PROVIDER, provider_payment_id: paymentId } },
-    select: { id: true, amount_minor: true, checkout: { select: { provider_ref: true } } },
+    select: { id: true, amount_minor: true, status: true, checkout: { select: { provider_ref: true } } },
   })
   if (!payment) return null
   const c = await lockCheckout(tx, payment.checkout.provider_ref)
   return c ? { payment, c } : null
 }
 
+type StoredDelivery = { created_at?: number; payload?: { refund?: { entity?: Entity } } }
+
 /**
- * A refund. A full one ends what it paid for at Razorpay's time for it; a
- * refunded subscription is also cancelled at Razorpay (after the commit), so
- * it cannot charge again. A partial refund is goodwill and changes nothing.
+ * Every refund Razorpay has delivered for one payment, from our own
+ * `payment_events` (this delivery's row included: it was claimed first), each
+ * refund id once, so the same refund in a second body is not a second refund.
+ * Held by the checkout's lock, so two refunds of one payment add up one after
+ * the other.
+ */
+async function refundsOf(tx: Tx, paymentId: string) {
+  // ponytail: a JSON-path scan of payment_events; add an expression index on the refund's payment_id if that table grows large.
+  const rows = await tx.payment_events.findMany({
+    where: { provider: PROVIDER, type: "refund.processed", payload: { path: ["payload", "refund", "entity", "payment_id"], equals: paymentId } },
+    select: { id: true, payload: true, error: true },
+  })
+  const byRefund = new Map<string, { id: string | null; amount: number; at: Date | null }>()
+  for (const row of rows) {
+    const stored = row.payload as StoredDelivery
+    const refund = stored.payload?.refund?.entity
+    const amount = num(refund?.amount)
+    if (amount !== null) byRefund.set(str(refund?.id) ?? row.id, { id: str(refund?.id), amount, at: at(stored.created_at) })
+  }
+  const refunds = [...byRefund.values()]
+  return {
+    rows,
+    total: refunds.reduce((sum, r) => sum + r.amount, 0),
+    /** The latest of them, by Razorpay's time: the one after which the whole payment had gone back. */
+    last: refunds.reduce<(typeof refunds)[number] | null>((last, r) => (r.at && (!last?.at || r.at > last.at) ? r : last), null),
+  }
+}
+
+/**
+ * A refund. Refunds of one payment add up (SCRUM-610): once what went back
+ * reaches what was paid, in one refund or several, what the payment bought
+ * ends at Razorpay's time for the latest of them, and a refunded
+ * subscription is also cancelled at Razorpay (after the commit), so it cannot
+ * charge again. Until then a partial refund is goodwill and changes nothing.
  */
 async function applyRefund(tx: Tx, d: Delivery): Promise<Outcome> {
   const refund = entityOf(d, "refund")
@@ -539,15 +580,18 @@ async function applyRefund(tx: Tx, d: Delivery): Promise<Outcome> {
   if (!found) return refuse("unknown_ref")
   const { payment, c } = found
   const out: Outcome = { applied: true, checkoutId: c.id, audit: [], after: [] }
-  if (amount < payment.amount_minor) return out
+  if (payment.status === "refunded") return out
+  const refunds = await refundsOf(tx, paymentId)
+  if (refunds.total < payment.amount_minor) return out
+  const refundedAt = refunds.last?.at ?? eventAt
 
   await tx.billing_payments.update({ where: { id: payment.id }, data: { status: "refunded" } })
   if (c.kind === "payment_link") {
     // The money went back: the charge it settled is void, with the refund as the reason.
-    await voidRefundedCharge(tx, out, c, str(refund.id), eventAt)
+    await voidRefundedCharge(tx, out, c, refunds.last?.id ?? str(refund.id), refundedAt)
     return out
   }
-  await endAccess(tx, out, c, c.provider_ref, eventAt, d.event)
+  await endAccess(tx, out, c, c.provider_ref, refundedAt, d.event)
   if (c.kind === "subscription" && !TERMINAL.includes(c.status)) {
     const ref = c.provider_ref
     out.after.push(() => cancelSubscription(ref, false))
@@ -682,7 +726,7 @@ async function applyPaymentLinkPaid(tx: Tx, d: Delivery): Promise<Outcome> {
   if (charge.status === "agreed") {
     await tx.placement_charges.update({
       where: { id: charge.id },
-      data: { status: "settled", settled_at: eventAt, external_ref: linkId },
+      data: { status: "settled", settled_at: paidAt(payment, eventAt), external_ref: linkId },
     })
     out.audit.push({ action: "charge.settled", orgId: c.org_id, resource, details: { from: "agreed", source: "razorpay", ...details } })
     charge.status = "settled"
@@ -713,33 +757,26 @@ async function applyPaymentLinkPaid(tx: Tx, d: Delivery): Promise<Outcome> {
 }
 
 /**
- * A full refund of this payment that arrived before it (refused then as
- * `unknown_ref`), applied now: the payment is refunded and the charge it
- * settled is void. The earlier delivery is marked processed.
+ * Refunds of this payment that arrived before it (refused then as
+ * `unknown_ref`), applied now. They add up as in `applyRefund`: once they
+ * reach the payment, it is refunded and the charge it settled is void, at the
+ * latest refund's time. Each earlier delivery is marked processed.
  */
 async function applyEarlyRefund(tx: Tx, out: Outcome, c: Checkout, paymentId: string) {
-  const early = await tx.payment_events.findMany({
-    where: {
-      provider: PROVIDER,
-      type: "refund.processed",
-      error: "unknown_ref",
-      payload: { path: ["payload", "refund", "entity", "payment_id"], equals: paymentId },
-    },
-    orderBy: { received_at: "asc" },
-    select: { id: true, payload: true },
-  })
-  for (const e of early) {
-    const refund = (e.payload as { payload?: { refund?: { entity?: Entity } }; created_at?: number }).payload?.refund?.entity
-    const amount = num(refund?.amount)
-    const refundAt = at((e.payload as { created_at?: number }).created_at)
-    if (amount === null || amount < c.amount_minor || !refundAt) continue
+  const refunds = await refundsOf(tx, paymentId)
+  const early = refunds.rows.filter((r) => r.error === "unknown_ref")
+  if (early.length === 0) return
+  if (refunds.total >= c.amount_minor && refunds.last?.at) {
     await tx.billing_payments.updateMany({
       where: { provider: PROVIDER, provider_payment_id: paymentId },
       data: { status: "refunded" },
     })
-    await voidRefundedCharge(tx, out, c, str(refund?.id), refundAt)
-    await tx.payment_events.update({ where: { id: e.id }, data: { error: null, processed_at: new Date(), checkout_id: c.id } })
+    await voidRefundedCharge(tx, out, c, refunds.last.id, refunds.last.at)
   }
+  await tx.payment_events.updateMany({
+    where: { id: { in: early.map((r) => r.id) } },
+    data: { error: null, processed_at: new Date(), checkout_id: c.id },
+  })
 }
 
 /** A link Razorpay expired or cancelled: no longer open, so a new one can be sent. */

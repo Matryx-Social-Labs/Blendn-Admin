@@ -24,6 +24,12 @@ const T0 = Math.floor(Date.parse("2026-10-03T10:00:00Z") / 1000)
 const MONTH = 30 * 24 * 60 * 60
 /** The renewal grace, written out: three days in milliseconds. */
 const GRACE_MS = 259_200_000
+/**
+ * How long before its delivery's `created_at` a payment was made, by default:
+ * on staging, `order.paid` and `subscription.charged` arrived stamped 7 to 17
+ * seconds after their payment's own `created_at` (SCRUM-606).
+ */
+const PAID_BEFORE_DELIVERY = 15
 
 const users: string[] = []
 const events: string[] = []
@@ -86,7 +92,7 @@ async function orderCheckout(event?: string) {
 function subscriptionEvent(
   type: string,
   subId: string,
-  opts: { at?: number; amount?: number; currency?: string; status?: string; planId?: string; endedAt?: number | null; paymentId?: string; currentEnd?: number } = {}
+  opts: { at?: number; paidAt?: number; amount?: number; currency?: string; status?: string; planId?: string; endedAt?: number | null; paymentId?: string; currentEnd?: number } = {}
 ) {
   const at = opts.at ?? T0
   return {
@@ -117,6 +123,7 @@ function subscriptionEvent(
           currency: opts.currency ?? "INR",
           status: "captured",
           invoice_id: `inv_${randomUUID().slice(0, 10)}`,
+          created_at: opts.paidAt ?? at - PAID_BEFORE_DELIVERY,
           email: "payer@example.com",
           contact: "+919999999999",
         },
@@ -126,16 +133,25 @@ function subscriptionEvent(
   }
 }
 
-function orderPaid(orderId: string, opts: { amount?: number; paid?: number; currency?: string; status?: string; at?: number; paymentId?: string } = {}) {
+function orderPaid(orderId: string, opts: { amount?: number; paid?: number; currency?: string; status?: string; at?: number; paidAt?: number; paymentId?: string } = {}) {
   const amount = opts.amount ?? 58_900
+  const at = opts.at ?? T0
   return {
     entity: "event",
     event: "order.paid",
     payload: {
       order: { entity: { id: orderId, amount, amount_paid: opts.paid ?? amount, currency: opts.currency ?? "INR", status: opts.status ?? "paid", notes: { org_id: strangerOrgId } } },
-      payment: { entity: { id: opts.paymentId ?? `pay_${randomUUID().slice(0, 10)}`, amount, currency: opts.currency ?? "INR", order_id: orderId } },
+      payment: {
+        entity: {
+          id: opts.paymentId ?? `pay_${randomUUID().slice(0, 10)}`,
+          amount,
+          currency: opts.currency ?? "INR",
+          order_id: orderId,
+          created_at: opts.paidAt ?? at - PAID_BEFORE_DELIVERY,
+        },
+      },
     },
-    created_at: opts.at ?? T0,
+    created_at: at,
   }
 }
 
@@ -287,6 +303,16 @@ describe("a charged subscription grants Analytics, once (MN-I01, SEC-14, G4)", (
     expect(answers.map((a) => a.status)).toEqual([200, 200])
     expect(await entitlementsFor(order)).toHaveLength(1)
     expect(await db.audit_logs.count({ where: { action: "entitlement.paid", details: { path: ["externalRef"], equals: order } } })).toBe(1)
+  })
+
+  it.each([
+    ["subscription.charged", async (paymentId: string) => subscriptionEvent("subscription.charged", await subscriptionCheckout(), { paymentId, at: T0 + 20, paidAt: T0 + 3 })],
+    ["order.paid", async (paymentId: string) => orderPaid(await orderCheckout(), { paymentId, at: T0 + 20, paidAt: T0 + 3 })],
+  ])("%s records the payment at the payment's own time, not the delivery's (SCRUM-606)", async (_label, make) => {
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    expect((await post(await make(paymentId))).status).toBe(200)
+    const payment = await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })
+    expect(payment.captured_at.getTime()).toBe((T0 + 3) * 1000)
   })
 
   it("a renewal moves the end of the same row", async () => {
@@ -498,6 +524,21 @@ describe("refunds and disputes (sec H1)", () => {
     await post(refundEvent(paymentId, 58_900, T0 + 200))
     expect(await expiryOf(order)).toBe((T0 + 200) * 1000)
     expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).status).toBe("refunded")
+  })
+
+  it("partial refunds add up: a pass ends at the refund that makes the whole payment, each refund counted once (SCRUM-610)", async () => {
+    const order = await orderCheckout()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(orderPaid(order, { paymentId }))
+    const first = refundEvent(paymentId, 30_000, T0 + 100)
+    await post(first)
+    // The same refund again in another body is not a second refund.
+    await post({ ...first, created_at: T0 + 101 })
+    expect(await expiryOf(order)).toBeNull()
+    await post(refundEvent(paymentId, 28_900, T0 + 200))
+    expect(await expiryOf(order)).toBe((T0 + 200) * 1000)
+    expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).status).toBe("refunded")
+    expect(await db.audit_logs.count({ where: { action: "entitlement.ended", details: { path: ["externalRef"], equals: order } } })).toBe(1)
   })
 
   it("a refunded subscription charge ends access and cancels the subscription at Razorpay", async () => {

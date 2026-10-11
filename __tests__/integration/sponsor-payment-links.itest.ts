@@ -206,16 +206,27 @@ function post(body: unknown, eventId = `itest_pl_${randomUUID()}`) {
 }
 
 const T0 = Math.floor(Date.now() / 1000) - 600
-function linkPaid(linkId: string, opts: { amount?: number; paid?: number; currency?: string; status?: string; at?: number; paymentId?: string; notes?: Record<string, string> } = {}) {
+/**
+ * Razorpay's `payment_link.paid`, as staging received it (SCRUM-606): the
+ * top-level `created_at` is the LINK's creation time, the same as the link
+ * entity's; only the payment entity's `created_at` says when it was paid.
+ * `at` is the link's time, `paidAt` the payment's (by default the same).
+ */
+function linkPaid(
+  linkId: string,
+  opts: { amount?: number; paid?: number; currency?: string; status?: string; at?: number; paidAt?: number; paymentId?: string; notes?: Record<string, string> } = {}
+) {
   const amount = opts.amount ?? 250_000
+  const linkCreated = opts.at ?? T0
   return {
     entity: "event",
     event: "payment_link.paid",
-    created_at: opts.at ?? T0,
+    created_at: linkCreated,
     payload: {
       payment_link: {
         entity: {
           id: linkId,
+          created_at: linkCreated,
           amount,
           amount_paid: opts.paid ?? amount,
           currency: opts.currency ?? "INR",
@@ -225,7 +236,15 @@ function linkPaid(linkId: string, opts: { amount?: number; paid?: number; curren
           notes: opts.notes ?? {},
         },
       },
-      payment: { entity: { id: opts.paymentId ?? `pay_${randomUUID().slice(0, 10)}`, amount, currency: opts.currency ?? "INR", status: "captured" } },
+      payment: {
+        entity: {
+          id: opts.paymentId ?? `pay_${randomUUID().slice(0, 10)}`,
+          amount,
+          currency: opts.currency ?? "INR",
+          status: "captured",
+          created_at: opts.paidAt ?? linkCreated,
+        },
+      },
       order: { entity: { id: `order_${randomUUID().slice(0, 10)}`, amount, amount_paid: amount, currency: "INR", status: "paid" } },
     },
   }
@@ -366,6 +385,16 @@ describe("payment_link.paid settles the charge (MN-I01..I04)", () => {
     expect(kept).toContain(linkId)
     expect(kept).not.toContain("payer@example.com")
     expect(kept).not.toContain("+919999999999")
+  })
+
+  it("a link paid 13 days after it was sent is settled, and its payment recorded, at the payment's time (SCRUM-606)", async () => {
+    const { chargeId, linkId } = await sentLink()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    const sentAt = T0 - 13 * 24 * 60 * 60
+    expect((await post(linkPaid(linkId, { paymentId, at: sentAt, paidAt: T0 }))).status).toBe(200)
+    expect((await chargeRow(chargeId)).settled_at?.getTime()).toBe(T0 * 1000)
+    const payment = await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })
+    expect(payment.captured_at.getTime()).toBe(T0 * 1000)
   })
 
   it.each([
@@ -890,6 +919,39 @@ describe("GAP", () => {
     await post(refundEvent(paymentId, 100_000, T0 + 60))
     await post(linkPaid(linkId, { paymentId }))
     expect((await chargeRow(chargeId)).status).toBe("settled")
+  })
+
+  it("two partial refunds that add up to the payment void the charge at the second (SCRUM-610)", async () => {
+    const { chargeId, linkId } = await sentLink()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(linkPaid(linkId, { paymentId }))
+    const first = refundEvent(paymentId, 150_000, T0 + 60)
+    await post(first)
+    expect((await chargeRow(chargeId)).status).toBe("settled")
+    // The same refund delivered again in another body counts once.
+    await post({ ...first, created_at: T0 + 61 })
+    expect((await chargeRow(chargeId)).status).toBe("settled")
+    const second = refundEvent(paymentId, 100_000, T0 + 120)
+    await post(second)
+    const row = await chargeRow(chargeId)
+    expect(row).toMatchObject({ status: "void", void_reason: `Refunded at Razorpay (${second.payload.refund.entity.id})` })
+    expect(row.voided_at?.getTime()).toBe((T0 + 120) * 1000)
+    expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).status).toBe("refunded")
+    expect(await auditCount(chargeId, "charge.void")).toBe(1)
+  })
+
+  it("partial refunds that arrived before the payment and add up to it void the charge once it lands (SCRUM-610)", async () => {
+    const { chargeId, linkId } = await sentLink()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    const early = [`itest_pl_${randomUUID()}`, `itest_pl_${randomUUID()}`]
+    await post(refundEvent(paymentId, 100_000, T0 + 60), early[0])
+    await post(refundEvent(paymentId, 150_000, T0 + 90), early[1])
+    await post(linkPaid(linkId, { paymentId }))
+    const row = await chargeRow(chargeId)
+    expect(row.status).toBe("void")
+    expect(row.voided_at?.getTime()).toBe((T0 + 90) * 1000)
+    const rows = await db.payment_events.findMany({ where: { provider_event_id: { in: early } } })
+    expect(rows.map((r) => r.error)).toEqual([null, null])
   })
 
   it("GAP-Y12 a dispute lost on a link payment made twice leaves the hand settlement alone", async () => {
