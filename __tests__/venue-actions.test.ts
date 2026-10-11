@@ -11,7 +11,7 @@ const mockDb = {
   organisation_members: { findFirst: jest.fn() },
   events: { count: jest.fn() },
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
 }
 
 const mockAuth = jest.fn()

@@ -20,7 +20,7 @@ const tx = {
 
 const mockDb = {
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
   user_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   message_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   event_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },

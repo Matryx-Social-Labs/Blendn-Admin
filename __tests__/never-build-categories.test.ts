@@ -14,7 +14,7 @@ const mockDb = {
     update: jest.fn(),
   },
   // requireAdmin reads the caller's row (lib/current-user.ts): a live admin.
-  user: { findUnique: jest.fn(async () => ({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))

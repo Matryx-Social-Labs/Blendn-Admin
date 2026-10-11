@@ -20,7 +20,7 @@ import { hasPlus, plusRequired, plusRequiredForPing, threeOnDistinctEvents, tria
 import { flushProductEvents } from "@/lib/product-events"
 
 import { closeDb, db, makeEvent, makeUser, occurrenceOf, refusingWrites, testId } from "./helpers"
-import { checkInOf, cleanupWorld, eventParams, goLive, INSIDE, person, req, routes, venue, world } from "./go-live-world"
+import { checkInOf, cleanupWorld, eventParams, goLive, INSIDE, person, req, routes, until, venue, world } from "./go-live-world"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const plusRoute = require("@/app/api/mobile/me/plus/route") as typeof import("@/app/api/mobile/me/plus/route")
@@ -300,6 +300,16 @@ async function nightAt(userId: string, eventId: string, daysAgo = 4) {
   })
 }
 
+/** How many requests are waiting on this person's grant lock (`grantOwed` in lib/plus.ts). */
+async function queuedOnGrantLock(userId: string): Promise<number> {
+  const [row] = await db.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n
+      FROM pg_locks l, (SELECT hashtextextended(${`plus-owed:${userId}`}, 0) AS k) h
+     WHERE l.locktype = 'advisory' AND NOT l.granted AND l.objsubid = 1
+       AND l.classid = ((h.k >> 32) & 4294967295)::oid AND l.objid = (h.k & 4294967295)::oid`
+  return row.n
+}
+
 /** `n` new people who joined through the inviter's link ten days ago. */
 async function invited(inviter: { id: string }, n: number) {
   const token = await inviteTokenFor(inviter.id)
@@ -398,16 +408,31 @@ describe("the referral month: three new people, three real nights (MN-I09, revie
     expect(await grants(inviter.id)).toHaveLength(3)
   })
 
-  it("grants one thing when a trial and a banked month are both owed and three requests arrive at once (review M3)", async () => {
+  it("grants one thing when a trial and a banked month are both owed and three requests queue at once, the latest clock first (review M3, SCRUM-602)", async () => {
     process.env.PLUS_GATING = FLIPPED_TODAY
     const inviter = await oldHand("plusinviter")
     await nightsOut(inviter.id, 1)
     const friends = await invited(inviter, 3)
     for (const f of friends) await nightAt(f.id, await crowdedEvent())
-    const answers = await Promise.all([1, 2, 3].map(() => plusRequired(inviter.id, "Bengaluru")))
+    // Hold the person's grant lock and queue three requests behind it, each
+    // with a clock 1 ms behind the one before. Postgres hands the lock on in
+    // queue order, so the trial is written starting at the LATEST clock and
+    // the two after it are earlier than its start. Before the fix they read
+    // "no Plus yet" and paid the referral month on top (CI flake, #654/#656).
+    const base = Date.now()
+    const asked: Promise<boolean>[] = []
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`plus-owed:${inviter.id}`}, 0))`
+      for (const ms of [2, 1, 0]) {
+        asked.push(plusRequired(inviter.id, "Bengaluru", new Date(base + ms)))
+        expect(await until(() => queuedOnGrantLock(inviter.id), (n) => n === asked.length)).toBe(asked.length)
+      }
+    })
+    const answers = await Promise.all(asked)
+    // The trial, and the month still banked until it is over.
+    expect((await grants(inviter.id)).map((g) => g.external_ref)).toEqual([trialRef(inviter.id)])
+    // And none of the three is refused: a request whose clock is behind the trial's start still sees it.
     expect(answers).toEqual([false, false, false])
-    const owed = await grants(inviter.id)
-    expect(owed.map((g) => g.external_ref)).toEqual([trialRef(inviter.id)])
     expect(await hasPlus(inviter.id)).toBe(true)
   })
 

@@ -6,7 +6,7 @@ import { Prisma } from "@prisma/client"
 import { attendedEventIds } from "./attendee-counts"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
-import { addMonths, grantPlusOnce, hasEntitlement, plusGrantsSince } from "./entitlements"
+import { addMonths, grantPlusOnce, hasEntitlement, plusGrantsSince, plusNotEnded } from "./entitlements"
 import { plusGateFor, plusGatedAnywhere, plusGatedEverywhere } from "./env"
 import { PING_INTERVAL_MINUTES } from "./presence"
 
@@ -178,35 +178,40 @@ export function threeOnDistinctEvents(eventsOf: Map<string, Set<string>>): strin
  * Grant whatever this account is owed and has not had — the trial first, a
  * referral month after it (banked until the trial is over) — under the
  * account's own lock, Plus read again inside it: two requests at once grant
- * one thing at most.
+ * one thing at most. True when the account holds Plus once this is done.
+ *
+ * Inside the lock a Plus row counts from the moment it exists, not from its
+ * `starts_at`: a twin request that took its clock a few ms later wrote the
+ * trial starting then, and "live at my now" would miss it (SCRUM-602).
  */
-async function grantOwed(userId: string, flippedAt: Date | null, now: Date): Promise<void> {
-  await db.$transaction(async (tx) => {
+async function grantOwed(userId: string, flippedAt: Date | null, now: Date): Promise<boolean> {
+  return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`plus-owed:${userId}`}, 0))`
-    if (await hasPlus(userId, now, tx)) return
+    if ((await plusNotEnded(tx, userId, now)) || (await hasPlus(userId, now, tx))) return true
 
     if (flippedAt && (await trialEligible(tx, userId, flippedAt))) {
       const ref = trialRef(userId)
       const until = new Date(now.getTime() + PLUS.TRIAL_DAYS * DAY_MS)
       if (await grantPlusOnce(tx, { userId, ref, startsAt: now, expiresAt: until })) {
         await audit(tx, userId, "entitlement.trial", ref, until, { flippedAt: flippedAt.toISOString() })
-        return
+        return true
       }
     }
 
     const yearAgo = new Date(now.getTime() - 365 * DAY_MS)
-    if ((await plusGrantsSince(tx, userId, REFERRAL_REF_PREFIX, yearAgo)) >= PLUS.REFERRAL_MONTHS_PER_YEAR) return
+    if ((await plusGrantsSince(tx, userId, REFERRAL_REF_PREFIX, yearAgo)) >= PLUS.REFERRAL_MONTHS_PER_YEAR) return false
     const invitees = await referralTriple(tx, userId, now)
-    if (!invitees) return
+    if (!invitees) return false
     const ref = referralRef(userId, invitees)
     const until = addMonths(now, PLUS.REFERRAL_MONTHS)
-    if (!(await grantPlusOnce(tx, { userId, ref, startsAt: now, expiresAt: until }))) return
+    if (!(await grantPlusOnce(tx, { userId, ref, startsAt: now, expiresAt: until }))) return false
     const marked = await tx.referrals.updateMany({
       where: { inviter_id: userId, invitee_id: { in: invitees }, rewarded_at: null },
       data: { rewarded_at: now, rewarded_ref: ref },
     })
     if (marked.count !== invitees.length) throw new Error("referral invitees changed while being rewarded")
     await audit(tx, userId, "entitlement.referral", ref, until, { invitees: invitees.length })
+    return true
   })
 }
 
@@ -229,9 +234,9 @@ async function audit(
 /**
  * The one Blendn+ gate: is Plus needed here and missing? False in a city's
  * launch season, and false for anyone holding Plus or a live Night Pass.
- * Before answering yes, pays out a trial or referral month that is owed —
- * then reads again, so a twin request that granted it a moment earlier is
- * seen too.
+ * Before answering yes, pays out a trial or referral month that is owed, and
+ * answers from that read under the lock — so a twin request that granted it a
+ * moment earlier is seen too, whichever of the two clocks is ahead.
  *
  * Read from the database every time: no JWT claim, header, query flag or
  * cached response says who has Plus (test plan MN-I10, SEC-15).
@@ -240,8 +245,7 @@ export async function plusRequired(userId: string, city: string | null, now: Dat
   const gate = plusGateFor(city)
   if (!gate.gated) return false
   if (await hasPlus(userId, now)) return false
-  await grantOwed(userId, gate.flippedAt, now)
-  return !(await hasPlus(userId, now))
+  return !(await grantOwed(userId, gate.flippedAt, now))
 }
 
 /**
