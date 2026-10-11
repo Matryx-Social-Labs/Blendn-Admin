@@ -470,7 +470,7 @@ describe("payment_link.paid settles the charge (MN-I01..I04)", () => {
   })
 
   it("a full refund of the link's payment voids the charge it settled", async () => {
-    const { chargeId, linkId } = await sentLink()
+    const { chargeId, linkId, eventId } = await sentLink()
     const paymentId = `pay_${randomUUID().slice(0, 10)}`
     await post(linkPaid(linkId, { paymentId }))
     const refundId = `rfnd_${randomUUID().slice(0, 8)}`
@@ -483,6 +483,10 @@ describe("payment_link.paid settles the charge (MN-I01..I04)", () => {
     expect((await post(refund)).status).toBe(200)
     const row = await chargeRow(chargeId)
     expect(row).toMatchObject({ status: "void", voided_by: null, void_reason: `Refunded at Razorpay (${refundId})` })
+    // The ledger names Razorpay as the voider, not "someone since deleted" (SCRUM-611).
+    as(admin, "app_admin")
+    const voided = (await getChargeLedger()).placements.find((p) => p.eventId === eventId)?.voided
+    expect(voided).toMatchObject([{ reason: `Refunded at Razorpay (${refundId})`, voidedByName: "Razorpay (refund)" }])
     expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).status).toBe("refunded")
   })
 })

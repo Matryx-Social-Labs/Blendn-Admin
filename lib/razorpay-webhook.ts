@@ -4,6 +4,7 @@ import { auditInTx } from "./audit-log"
 import { Prisma } from "@prisma/client"
 import { z } from "zod"
 
+import { disputeVoidReason, refundVoidReason } from "./charge-void-source"
 import { db } from "./db"
 import { endPaidEntitlement, passHeldElsewhere, recordPaidEntitlement, type Subject } from "./entitlements"
 import { logger } from "./logger"
@@ -885,7 +886,7 @@ async function disputedLinkPayment(tx: Tx, out: Outcome, c: Checkout, paymentId:
   if (event === "payment.dispute.lost" && charge.status === "settled" && charge.external_ref === c.provider_ref) {
     await tx.placement_charges.update({
       where: { id: charge.id },
-      data: { status: "void", voided_at: eventAt, voided_by: null, void_reason: `Dispute lost at Razorpay (${paymentId})` },
+      data: { status: "void", voided_at: eventAt, voided_by: null, void_reason: disputeVoidReason(paymentId) },
     })
     out.audit.push({ action: "charge.void", orgId: c.org_id, resource, details: { from: "settled", source: "razorpay", reason: event, paymentId } })
   }
@@ -903,7 +904,7 @@ async function voidRefundedCharge(tx: Tx, out: Outcome, c: Checkout, refundId: s
   if (!charge || charge.status !== "settled" || charge.external_ref !== c.provider_ref) return
   await tx.placement_charges.update({
     where: { id: charge.id },
-    data: { status: "void", voided_at: eventAt, voided_by: null, void_reason: `Refunded at Razorpay${refundId ? ` (${refundId})` : ""}` },
+    data: { status: "void", voided_at: eventAt, voided_by: null, void_reason: refundVoidReason(refundId) },
   })
   out.audit.push({
     action: "charge.void",
