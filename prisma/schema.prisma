@@ -138,6 +138,12 @@ model User {
   blends_as_solo           blends[]          @relation("BlendSolo")
   blend_reveals            blend_reveals[]
 
+  // Regulars and offers (step 12) — see `venue_offers`
+  venue_offers_written     venue_offers[]         @relation("VenueOfferAuthor")
+  venue_offer_sends        venue_offer_sends[]
+  venue_regular_optins     venue_regular_optins[]
+  venue_offer_mutes        venue_offer_mutes[]
+
   // Announcements
   sent_announcements event_announcements[]
 
@@ -346,6 +352,9 @@ model profiles {
   /// Default true because that is what the UI has been claiming, so nobody's
   /// apparent settings change on the day these start being honoured.
   push_enabled   Boolean  @default(true)
+  /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
+  /// default (the coordinator's default, flagged to the owner).
+  offers_from_places Boolean @default(true)
   /// Honoured on the two surfaces where another attendee can see you are in
   /// a room: the roster (`GET /events/:id/checkins`) and the grid
   /// (`lib/matches.ts`). Off means counted and not listed — the numbers
@@ -1257,6 +1266,9 @@ enum notification_kind {
   crew_here
   /// Two crews (or a crew and a person) liked each other: a Blend room is open.
   blend
+  /// A venue sent its regulars an offer (step 12). The push names no venue:
+  /// the app shows it on open.
+  venue_offer
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.
@@ -1624,6 +1636,10 @@ model venues {
   billing_checkouts billing_checkouts[]
   created_by_org organisations? @relation("VenueCreatedByOrg", fields: [created_by_org_id], references: [id], onDelete: SetNull)
   events         events[]
+  offers         venue_offers[]
+  offer_sends    venue_offer_sends[]
+  regular_optins venue_regular_optins[]
+  offer_mutes    venue_offer_mutes[]
 
   @@index([owner_id])
   @@index([owner_org_id])
@@ -1698,6 +1714,8 @@ model organisations {
   sponsor_claims sponsor_claims[]
   upload_grants  upload_grants[]
   billing_checkouts billing_checkouts[]
+  venue_offers   venue_offers[]
+  regular_optins venue_regular_optins[]
 
   @@index([status])
 }
@@ -4178,4 +4196,106 @@ model billing_payments {
 
   @@unique([provider, provider_payment_id])
   @@index([checkout_id, captured_at])
+}
+
+/// Who a venue's offer is for (step 12). Regulars only for now: lapsed and
+/// first-timers are the plan's other audiences and wait for the owner.
+enum venue_offer_audience {
+  regulars
+}
+
+/// An offer a venue on Venue Pro sent its regulars (plan v2 §2): blind.
+///
+/// The venue writes it and picks the audience by a rule; we deliver it. The
+/// venue sees how many it was sent to, opened and redeemed, never who
+/// (`lib/offers/venue.ts`, `__tests__/regulars-never-listed.test.ts`).
+/// The migration's CHECKs (which `db push` drops) hold `audience_size >= 5`
+/// and `ends_at > created_at`.
+model venue_offers {
+  id            String               @id @default(uuid()) @db.Uuid
+  venue_id      String               @db.Uuid
+  /// The organisation that owned the venue when it sent this. Results and the
+  /// door read only the current owner's offers.
+  org_id        String               @db.Uuid
+  created_by    String?
+  text          String               @db.VarChar(140)
+  audience      venue_offer_audience @default(regulars)
+  /// How many it went to, at send time. Never under 5 (CHECK in SQL).
+  audience_size Int
+  ends_at       DateTime             @db.Timestamptz(6)
+  created_at    DateTime             @default(now()) @db.Timestamptz(6)
+
+  venue  venues              @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  org    organisations       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  author User?               @relation("VenueOfferAuthor", fields: [created_by], references: [id], onDelete: SetNull)
+  sends  venue_offer_sends[]
+
+  @@index([venue_id, created_at])
+  @@index([org_id])
+  @@index([created_by])
+}
+
+/// One person an offer went to, and what became of it. Only the push sender
+/// and the person themselves read `user_id`; the venue reads counts.
+///
+/// Not expressible here, in the migration: a CHECK that `redeemed_at` and
+/// `redeemed_night` are set together and only after `opened_at`; a partial
+/// unique `(venue_id, user_id, redeemed_night)` — one pass a night per person
+/// per venue, whichever offer it is; and the door's partial index on
+/// `(venue_id, pass_seen_at)`.
+model venue_offer_sends {
+  id             String    @id @default(uuid()) @db.Uuid
+  offer_id       String    @db.Uuid
+  /// The offer's venue, copied so "one pass a night" can be a unique index.
+  venue_id       String    @db.Uuid
+  /// Null once the person's account is erased: the row stays as a count.
+  user_id        String?
+  sent_at        DateTime  @default(now()) @db.Timestamptz(6)
+  opened_at      DateTime? @db.Timestamptz(6)
+  /// The last time the pass was on their screen; the door matches only those.
+  pass_seen_at   DateTime? @db.Timestamptz(6)
+  redeemed_at    DateTime? @db.Timestamptz(6)
+  /// The venue's night (its day_reset_hour) it was redeemed on.
+  redeemed_night DateTime? @db.Date
+
+  offer venue_offers @relation(fields: [offer_id], references: [id], onDelete: Cascade)
+  venue venues       @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  user  User?        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([offer_id, user_id])
+  @@index([user_id, sent_at])
+}
+
+/// "Let this venue know I'm a regular" (step 12): a row is an explicit yes,
+/// given to the organisation that ran the venue then (`org_id`); revoking
+/// deletes it. That organisation sees the person's first name and their
+/// nights in the last 30, and nobody else's; after a transfer the new owner
+/// sees none of the old yeses. `created_at` is the record of consent — a
+/// person's own choices are never written to audit_logs.
+model venue_regular_optins {
+  venue_id   String   @db.Uuid
+  user_id    String
+  org_id     String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  venue venues        @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  org   organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@id([venue_id, user_id, org_id])
+  @@index([user_id])
+  @@index([org_id, venue_id])
+}
+
+/// "No offers from this venue": a row mutes it (step 12, RG-I07).
+model venue_offer_mutes {
+  venue_id   String   @db.Uuid
+  user_id    String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  venue venues @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([venue_id, user_id])
+  @@index([user_id])
 }

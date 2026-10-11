@@ -66,6 +66,8 @@ const ROUTES = [
   "/api/mobile/blends",
   // Do I have Blendn+ (step 11): what the paywall polls after a purchase.
   "/api/mobile/me/plus",
+  // The offers venues sent me (step 12): \`{ offers }\`. The venue's side is counts, on the dashboard.
+  "/api/mobile/offers",
 ]
 
 /**

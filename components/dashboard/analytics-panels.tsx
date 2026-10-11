@@ -39,7 +39,10 @@ export function ComparisonTable({ rows }: { rows: ComparisonRow[] }) {
       {rows.length === 0 ? (
         <p className="text-[0.8125rem] text-muted-foreground">No event has ended in this range yet.</p>
       ) : (
-        <div className="overflow-x-auto">
+        // Focusable and named, so a keyboard can scroll it: under ~700 px the
+        // 640 px table scrolls sideways (axe scrollable-region-focusable, measured
+        // on staging at 375 and 768 for TQ-X09).
+        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Every event side by side">
           <table className="w-full min-w-[640px] text-[0.8125rem]">
             <caption className="sr-only">Past events in range, side by side</caption>
             <thead>

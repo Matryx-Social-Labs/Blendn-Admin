@@ -14,6 +14,12 @@ import { OrgAnalyticsGrantControl } from "@/app/dashboard/organisations/analytic
 import { liveGrantAndPaid } from "@/lib/entitlements"
 import { SAMPLE_PRE_CLAIM, SAMPLE_VENUE_INSIGHTS, SAMPLE_VENUE_OFFERS } from "@/lib/sample-analytics"
 import { venueInsights, type VenueInsightsView } from "@/lib/venue-insights"
+import { venueOffersView, type VenueOffersView } from "@/lib/offers/venue"
+import { REGULAR_NIGHTS, REGULAR_WINDOW_DAYS } from "@/lib/regulars"
+import { MIN_CELL } from "@/lib/disclosure"
+import { maySendVenueOffers } from "@/lib/rbac"
+import { OfferComposer } from "./offer-composer"
+import { EndOfferButton } from "./end-offer-button"
 import { RatingBars } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
 import { OpenOnBlendn } from "./open-on-blendn"
@@ -103,7 +109,7 @@ export default async function VenueDetailPage({
   const memberOf = (orgId: string) =>
     db.organisation_members.findFirst({
       where: { user_id: session.user.id, org_id: orgId, ...activeMembership },
-      select: { id: true },
+      select: { id: true, role: true },
     })
   const record = {
     id: venue.id,
@@ -120,7 +126,8 @@ export default async function VenueDetailPage({
     floors: venue.floors,
   }
 
-  if (!isAdmin && !(venue.owner_org && (await memberOf(venue.owner_org.id)))) {
+  const ownerMember = venue.owner_org && !isAdmin ? await memberOf(venue.owner_org.id) : null
+  if (!isAdmin && !ownerMember) {
     // Not the owner: the organisation that added it may correct the place
     // while nobody has claimed it, and sees nothing else (SCRUM-361).
     const creator =
@@ -175,9 +182,11 @@ export default async function VenueDetailPage({
 
   // The venue's own insights by its plan, and an admin's view of that plan.
   // Nothing paid is computed unless the venue holds Venue Pro (lib/venue-insights.ts).
-  const [insights, proRows] = await Promise.all([
+  // Regulars & offers: counts, and the regulars who said yes; null without Venue Pro (lib/offers/venue.ts).
+  const [insights, proRows, offers] = await Promise.all([
     venue.owner_org && !venue.deleted_at ? venueInsights(id) : null,
     isAdmin && venue.owner_org ? liveGrantAndPaid({ kind: "venue", id }, "venue_pro") : null,
+    venue.owner_org && !venue.deleted_at ? venueOffersView(id, session.user) : null,
   ])
 
   const [events, ratingRows] = await Promise.all([
@@ -336,7 +345,16 @@ export default async function VenueDetailPage({
         </Panel>
       </div>
 
-      {insights ? <VenueInsights insights={insights} isAdmin={isAdmin} /> : null}
+      {insights ? (
+        <VenueInsights
+          insights={insights}
+          isAdmin={isAdmin}
+          venueId={venue.id}
+          venueName={venue.name}
+          offers={offers}
+          mayCompose={!!ownerMember && maySendVenueOffers(session.user.role, ownerMember.role)}
+        />
+      ) : null}
 
       {isAdmin && venue.owner_org && proRows ? (
         <Panel title="Venue Pro" hint="founding grant: 3 months per claimed Bengaluru venue">
@@ -378,9 +396,24 @@ const SINCE = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short",
  * The venue's insights by plan (plan v2 §9.1b): Listed sees 30 days; Venue
  * Pro a year, and the nights before the claim as three totals. What Pro adds
  * is previewed from the static sample, never this venue's figures. Regulars &
- * offers is a placeholder until blind offers land (step 12).
+ * offers (step 12) is Venue Pro: the real panel with Pro, the sample's preview
+ * without it.
  */
-function VenueInsights({ insights, isAdmin }: { insights: VenueInsightsView; isAdmin: boolean }) {
+function VenueInsights({
+  insights,
+  isAdmin,
+  venueId,
+  venueName,
+  offers,
+  mayCompose,
+}: {
+  insights: VenueInsightsView
+  isAdmin: boolean
+  venueId: string
+  venueName: string
+  offers: VenueOffersView | null
+  mayCompose: boolean
+}) {
   const pro = insights.plan === "pro"
   const toPlan = isAdmin ? null : (
     <Button asChild size="sm" variant="outline">
@@ -413,14 +446,146 @@ function VenueInsights({ insights, isAdmin }: { insights: VenueInsightsView; isA
         />
       ) : null}
 
-      <Locked
-        plan="Venue Pro"
-        title="Regulars & offers — coming soon"
-        body="Send an offer to the people who keep coming back. They get it in the app; you see sent, opened and redeemed, never who."
-        height={200}
-        sample={<OfferPreview offer={SAMPLE_VENUE_OFFERS} />}
-      />
+      {offers ? (
+        <RegularsOffers offers={offers} venueId={venueId} venueName={venueName} mayCompose={mayCompose} isAdmin={isAdmin} />
+      ) : (
+        <Locked
+          plan="Venue Pro"
+          title="Regulars & offers"
+          body="Send an offer to the people who keep coming back. They get it in the app; you see sent, opened and redeemed, never who."
+          action={toPlan}
+          height={200}
+          sample={<OfferPreview offer={SAMPLE_VENUE_OFFERS} />}
+        />
+      )}
     </>
+  )
+}
+
+const OFFER_DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
+const NEXT_AT = new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })
+
+/**
+ * Regulars & offers, for a venue on Venue Pro (step 12). The composer for
+ * its owners and admins; each offer with how many it went to; what they did
+ * as totals across offers, up to this morning (lib/offers/venue.ts says why
+ * never per offer, never live); and the regulars who chose to let it know
+ * them — by first name, from their own yes.
+ */
+function RegularsOffers({
+  offers,
+  venueId,
+  venueName,
+  mayCompose,
+  isAdmin,
+}: {
+  offers: VenueOffersView
+  venueId: string
+  venueName: string
+  mayCompose: boolean
+  isAdmin: boolean
+}) {
+  return (
+    <Panel
+      title="Regulars & offers"
+      hint={`${offers.sentThisWeek} of ${offers.perWeek} this week · counts, never who`}
+      action={<ProTag plan="Venue Pro" />}
+    >
+      <div className="grid gap-5 @3xl/main:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] @3xl/main:items-start">
+        <div className="flex min-w-0 flex-col gap-3">
+          {mayCompose ? (
+            offers.nextAt ? (
+              <p className="text-[0.8125rem] text-muted-foreground">
+                {offers.perWeek} offers a week. The next can go {NEXT_AT.format(new Date(offers.nextAt))}.
+              </p>
+            ) : (
+              <OfferComposer venueId={venueId} />
+            )
+          ) : null}
+          <p id="offer-rule" className="text-[0.8125rem] text-muted-foreground">
+            An offer goes to people who came on {REGULAR_NIGHTS}+ nights in the last {REGULAR_WINDOW_DAYS}. Under {MIN_CELL}, nothing
+            is sent. You see how many — never who.
+          </p>
+          {offers.offers.length === 0 ? (
+            <p className="text-[0.8125rem] text-muted-foreground">No offers sent yet.</p>
+          ) : (
+            <>
+              <dl className="grid grid-cols-3 gap-3 border-t border-border pt-3">
+                {(
+                  [
+                    ["Sent", offers.totals.sent],
+                    ["Opened", offers.totals.opened === null ? null : formatNumber(offers.totals.opened)],
+                    ["Redeemed", offers.totals.redeemed === null ? null : formatNumber(offers.totals.redeemed)],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label} className="flex flex-col gap-0.5">
+                    <dt className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</dt>
+                    <dd className={value === null ? "text-[0.8125rem] text-faint-foreground" : "text-[1.375rem] font-bold tabular-nums"}>
+                      {value === null ? "held back" : value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="text-[0.75rem] text-faint-foreground">
+                {offers.totals.asOf
+                  ? `All your offers here, as of the week starting ${OFFER_DAY.format(new Date(offers.totals.asOf))}: weekly totals, never per offer or per person.`
+                  : "Totals appear once a week has enough in it to show without pointing at anyone."}
+              </p>
+              <table className="w-full text-[0.8125rem]">
+                <caption className="sr-only">Offers sent</caption>
+                <thead>
+                  <tr className="text-[0.6875rem] uppercase tracking-[0.06em] text-muted-foreground">
+                    <th scope="col" className="py-2 text-left font-medium">Offer</th>
+                    <th scope="col" className="w-16 py-2 text-right font-medium">To</th>
+                    {isAdmin ? <th scope="col" className="w-20 py-2 text-right font-medium"><span className="sr-only">End</span></th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {offers.offers.map((o) => (
+                    <tr key={o.id} className="border-t border-border align-middle">
+                      <td className="py-3 pr-3">
+                        <span className="block">{o.text}</span>
+                        <span className="text-[0.75rem] text-faint-foreground">
+                          {OFFER_DAY.format(new Date(o.createdAt))} · {o.live ? `live until ${OFFER_DAY.format(new Date(o.endsAt))}` : "ended"}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right font-bold tabular-nums">{o.reached ?? "—"}</td>
+                      {isAdmin ? (
+                        <td className="py-3 text-right">{o.live ? <EndOfferButton offerId={o.id} /> : null}</td>
+                      ) : null}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+        <div className="flex min-w-0 flex-col gap-2.5">
+          <span className="text-[0.75rem] text-muted-foreground">They let you know</span>
+          {offers.known.length === 0 ? (
+            <p className="text-[0.8125rem] text-muted-foreground">Nobody yet. Anyone can choose to let {venueName} know they&apos;re a regular, in the app.</p>
+          ) : (
+            <ul className="flex flex-wrap gap-2">
+              {offers.known.map((k, i) => (
+                <li key={`${k.firstName}-${i}`} className="rounded-full border border-border px-2.5 py-1 text-[0.8125rem]">
+                  <b className="font-semibold">{k.firstName}</b> · {k.nights} {k.nights === 1 ? "night" : "nights"}
+                </li>
+              ))}
+            </ul>
+          )}
+          {offers.known.length > 0 ? (
+            <p className="text-[0.8125rem] text-muted-foreground">
+              People who chose &ldquo;Let {venueName} know I&apos;m a regular&rdquo; in the app. They can take it back any time.
+            </p>
+          ) : null}
+          {!isAdmin ? (
+            <Link href={`/dashboard/venues/${venueId}/door`} className="text-[0.8125rem] underline underline-offset-4">
+              Redeem a pass at the door →
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    </Panel>
   )
 }
 

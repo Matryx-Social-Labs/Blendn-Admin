@@ -6,7 +6,7 @@ import { analyticsAccess, mayOpenEvent, type AnalyticsAccess } from "./analytics
 import { planBadgeFor, type PlanDate } from "./billing"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
-import { discloseBreakdown, discloseRating, MIN_CELL } from "./disclosure"
+import { discloseRating, heldPart, MIN_CELL } from "./disclosure"
 import type { PacingPoint } from "./dashboard-types"
 import { realEventsWhere } from "./event-kind"
 import { buildPacing, pacingWindowDays } from "./pacing"
@@ -73,13 +73,8 @@ function istMonth(at: Date): string {
 /** A plain count of people, at the minimum cell. */
 export const held = (n: number): number | null => (n >= MIN_CELL ? n : null)
 
-/**
- * A part of a known group, shown only when the part and the rest both reach
- * the floor. The rest is never shown beside it, so neither can be subtracted
- * from a total to recover the other.
- */
-export const heldPart = (part: number, whole: number): number | null =>
-  whole < MIN_CELL ? null : discloseBreakdown([part, whole - part]).cells[0]
+/** The complement rule, kept in lib/disclosure.ts with the other floors. */
+export { heldPart }
 
 const pct = (part: number | null, whole: number): number | null =>
   part === null || whole === 0 ? null : Math.round((part / whole) * 100)
@@ -299,31 +294,47 @@ async function comparisonRows(orgId: string, from: Date, now: Date): Promise<Com
   })
 }
 
-/** Per person, the time inside across their sessions; per event, the spread of it. */
+/**
+ * How long people stay, per event: the spread of their VISITS.
+ *
+ * A visit is one person at one occurrence, summed across the sessions of it
+ * (stepping out and back is still one visit). It is not one person across the
+ * event: grouping by event summed every day a person came, so a three-hour
+ * coffee morning that ran four times read a 16 h 08 m median on staging.
+ *
+ * A visit ends when the room did. A session closed by the sweeper carries the
+ * sweeper's clock, an hour or more after the end, and one nobody closed carries
+ * its last heartbeat, which can be any time after it; neither is time the
+ * person spent there, so both are capped at the occurrence's `end_time`.
+ *
+ * The floors count PEOPLE (`DISTINCT user_id`), never visits: four people over
+ * three days are twelve visits and still four people (MN-I12).
+ */
 async function stayByEvent(eventIds: string[]) {
   if (eventIds.length === 0) return []
   return db.$queryRaw<
     { event_id: string; people: bigint; p25: number; p50: number; p75: number; soft: bigint; left_early: bigint }[]
   >`
-    WITH stay AS (
-      SELECT ps.event_id, ps.user_id,
-             SUM(GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(ps.departed_at, ps.last_seen_at, ps.arrived_at) - ps.arrived_at)))) AS seconds,
+    WITH visit AS (
+      SELECT ps.event_id, ps.user_id, o.end_time,
+             SUM(GREATEST(0, EXTRACT(EPOCH FROM (LEAST(COALESCE(ps.departed_at, ps.last_seen_at, ps.arrived_at), o.end_time) - ps.arrived_at)))) AS seconds,
              bool_or(ps.departed_source = 'sweeper') AS soft,
-             MAX(COALESCE(ps.departed_at, ps.last_seen_at, ps.arrived_at)) AS left_at
+             MAX(LEAST(COALESCE(ps.departed_at, ps.last_seen_at, ps.arrived_at), o.end_time)) AS left_at
         FROM presence_sessions ps
+        JOIN event_occurrences o ON o.id = ps.occurrence_id
        WHERE ps.event_id IN (${Prisma.join(eventIds)})
          AND ps.kind = 'attendee'
-    GROUP BY ps.event_id, ps.user_id
+    GROUP BY ps.event_id, ps.user_id, ps.occurrence_id, o.end_time
     )
-    SELECT s.event_id,
-           count(*) AS people,
-           percentile_cont(0.25) WITHIN GROUP (ORDER BY s.seconds) AS p25,
-           percentile_cont(0.5)  WITHIN GROUP (ORDER BY s.seconds) AS p50,
-           percentile_cont(0.75) WITHIN GROUP (ORDER BY s.seconds) AS p75,
-           count(*) FILTER (WHERE s.soft) AS soft,
-           count(*) FILTER (WHERE s.left_at < e.end_time - ${`${LEFT_EARLY_MS / 1000} seconds`}::interval) AS left_early
-      FROM stay s JOIN events e ON e.id = s.event_id AND e.kind = 'event'
-  GROUP BY s.event_id
+    SELECT v.event_id,
+           count(DISTINCT v.user_id) AS people,
+           percentile_cont(0.25) WITHIN GROUP (ORDER BY v.seconds) AS p25,
+           percentile_cont(0.5)  WITHIN GROUP (ORDER BY v.seconds) AS p50,
+           percentile_cont(0.75) WITHIN GROUP (ORDER BY v.seconds) AS p75,
+           count(DISTINCT v.user_id) FILTER (WHERE v.soft) AS soft,
+           count(DISTINCT v.user_id) FILTER (WHERE v.left_at < v.end_time - ${`${LEFT_EARLY_MS / 1000} seconds`}::interval) AS left_early
+      FROM visit v JOIN events e ON e.id = v.event_id AND e.kind = 'event'
+  GROUP BY v.event_id
   `
 }
 

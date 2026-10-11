@@ -76,10 +76,10 @@ export const SAMPLE_VENUE_INSIGHTS: VenueInsight = {
 
 export const SAMPLE_PRE_CLAIM: PreClaimHistory = { nights: 37, people: 680, since: "2024-11" }
 
-/** What the regulars & offers composer will report (step 12), for its placeholder. */
+/** What an offer to regulars reports (step 12), for the Listed venue's locked preview. */
 export const SAMPLE_VENUE_OFFERS = {
   offer: "Sample: a free pint with your second visit this month",
-  audience: "Regulars · came 2+ nights in the last 60 days",
+  audience: "Regulars · came 3+ nights in the last 30 days",
   sent: 96,
   opened: 71,
   redeemed: 23,
