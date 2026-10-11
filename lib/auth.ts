@@ -111,7 +111,7 @@ export const authOptions: NextAuthOptions = {
       const account = token.sub
         ? await db.user.findUnique({
             where: { id: token.sub },
-            select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true },
+            select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
           })
         : null
       if (!account || isRevoked(token, account)) throw new SessionEnded()

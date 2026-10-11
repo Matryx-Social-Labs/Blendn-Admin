@@ -50,16 +50,20 @@ import { GET as nextAuthRoute } from "@/app/api/auth/[...nextauth]/route"
 import { POST as resetPassword } from "@/app/api/auth/reset-password/route"
 import { GET as search } from "@/app/api/search/route"
 import DashboardLayout from "@/app/dashboard/layout"
-import { changePassword, updateProfile } from "@/lib/account-actions"
+import { changePassword, endDashboardSessions, revokeMobileSessions, updateProfile } from "@/lib/account-actions"
 import { authOptions, getAuth } from "@/lib/auth"
 import { currentUser } from "@/lib/current-user"
 import { db as appDb } from "@/lib/db"
+import { signRefreshToken, storeRefreshToken } from "@/lib/mobile-auth"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { authenticateDashboardSocket } from "@/lib/socket-ops-auth"
 import { middleware } from "@/middleware"
 
 import { closeDb, db, makeUser } from "./helpers"
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const refreshRoute = require("@/app/api/mobile/auth/refresh/route") as typeof import("@/app/api/mobile/auth/refresh/route")
 
 const SECRET = process.env.NEXTAUTH_SECRET!
 const COOKIE = (process.env.NEXTAUTH_URL ?? "").startsWith("https://")
@@ -72,6 +76,8 @@ type JwtCallback = (a: { token: JWT; user?: unknown; account?: unknown; trigger?
 const jwt = authOptions.callbacks!.jwt! as unknown as JwtCallback
 
 afterAll(async () => {
+  await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
+  await db.mobile_refresh_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.password_reset_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.user.deleteMany({ where: { id: { in: users } } })
   await closeDb()
@@ -170,6 +176,64 @@ describe("a reset ends the sessions signed in before it", () => {
     expect(await changePassword(OLD, "Turquoise-Lantern-Harbour-91")).toMatchObject({ ok: true })
     holding(cookie)
     expect(await getAuth()).toBeNull()
+  })
+})
+
+describe("Settings → Sessions ends what it says (SCRUM-603)", () => {
+  it("Dashboard: ending from one browser ends every browser, this one included, wherever a cookie is read", async () => {
+    const id = await host()
+    const here = await signedInCookie(id)
+    const elsewhere = await signedInCookie(id)
+    holding(here)
+    expect(await currentUser()).toEqual({ id, role: "organizer" })
+
+    await endDashboardSessions()
+
+    // Read back: the stamp the rule judges by.
+    const { sessions_revoked_at } = await db.user.findUniqueOrThrow({ where: { id }, select: { sessions_revoked_at: true } })
+    expect(sessions_revoked_at).toBeInstanceOf(Date)
+    for (const cookie of [here, elsewhere]) {
+      holding(cookie)
+      expect(await getAuth()).toBeNull()
+      expect(await currentUser()).toBeNull()
+      expect(await authenticateDashboardSocket(`${COOKIE}=${cookie}`)).toBeNull()
+      const res = await sessionRoute()
+      expect(await res.json()).toEqual({})
+      expect(res.headers.get("set-cookie")).toMatch(new RegExp(`${COOKIE.replace(/\./g, "\\.")}=;`))
+    }
+
+    // Signing in again is a session; the password did not change.
+    holding(await signedInCookie(id))
+    expect(await currentUser()).toEqual({ id, role: "organizer" })
+  })
+
+  it("Mobile app: every phone's refresh is refused and its push token is gone; nobody else's", async () => {
+    const id = await makeUser("m6_phone")
+    const other = await makeUser("m6_other")
+    users.push(id, other)
+    const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
+    const phone = signRefreshToken(id, email)
+    await storeRefreshToken(id, phone)
+    await db.push_tokens.createMany({
+      data: [
+        { user_id: id, token: `ExponentPushToken[m6-${id}]`, platform: "ios" },
+        { user_id: other, token: `ExponentPushToken[m6-${other}]`, platform: "ios" },
+      ],
+    })
+    mockSession = { user: { id, role: "attendee", signedInAt: Date.now() } }
+
+    expect(await revokeMobileSessions()).toBe(1)
+
+    const res = await refreshRoute.POST(
+      new NextRequest("http://localhost/api/mobile/auth/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": "203.0.113.67" },
+        body: JSON.stringify({ refreshToken: phone }),
+      })
+    )
+    expect(res.status).toBe(401)
+    expect(await db.push_tokens.count({ where: { user_id: id } })).toBe(0)
+    expect(await db.push_tokens.count({ where: { user_id: other } })).toBe(1)
   })
 })
 

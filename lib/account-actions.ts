@@ -131,59 +131,46 @@ export async function changePassword(
   return { ok: true, revokedSessions: revoked }
 }
 
-export interface SessionRow {
-  id: string
-  expires: Date
-  current: boolean
-}
-
 /**
- * Active dashboard sessions.
+ * End every dashboard session on this account, this one included (SCRUM-603).
  *
- * NextAuth's `Session` table is all there is — no device or location is
- * recorded, so the screen shows what exists (when it expires) rather than
- * inventing a "Chrome · macOS · Bengaluru" line from nothing.
+ * A dashboard session is a JWT with nothing stored behind it, so this used to
+ * delete NextAuth `Session` rows that the JWT strategy never writes: it ended
+ * nothing and said "No other sessions to end". The stamp is what `isRevoked`
+ * (lib/session-revocation.ts) judges every session by, as it does a password
+ * change. This browser's session signed in before it too, so it ends as well
+ * and the screen signs out; keeping it would mean re-minting a cookie that
+ * never proved the password again.
  */
-export async function listSessions(): Promise<SessionRow[]> {
+export async function endDashboardSessions(): Promise<void> {
   const user = await requireUser()
-  const rows = await db.session.findMany({
-    where: { userId: user.id, expires: { gt: new Date() } },
-    orderBy: { expires: "desc" },
-    select: { id: true, expires: true },
-  })
-  // The JWT strategy means the current session may not be a row at all, so
-  // nothing is marked "this device" rather than marking the wrong one.
-  return rows.map((r) => ({ ...r, current: false }))
-}
+  await db.user.update({ where: { id: user.id }, data: { sessions_revoked_at: new Date() } })
 
-export async function signOutEverywhereElse(): Promise<number> {
-  const user = await requireUser()
-  const { count } = await db.session.deleteMany({ where: { userId: user.id } })
-
-  auditLog({
-    userId: user.id,
-    action: "account.sessions_revoked",
-    resource: "user",
-    resourceId: user.id,
-    details: { count },
-  })
+  auditLog({ userId: user.id, action: "account.sessions_revoked", resource: "user", resourceId: user.id })
   revalidatePath("/dashboard/settings")
-  return count
 }
 
 /**
- * Revoke every mobile refresh token for this account.
+ * Revoke every mobile refresh token for this account, and its push tokens.
  *
  * Separate from dashboard sessions because they are separate auth systems — the
  * mobile app holds 30-day refresh tokens that a dashboard sign-out does not
  * touch, and someone who has lost a phone needs exactly this.
+ *
+ * The push tokens go with them, as they do on the app's own sign-out from
+ * everywhere (app/api/mobile/auth/signout): a phone signed out from here can no
+ * longer delete its own token, and kept receiving the account's notifications,
+ * DM text included. Its access token still lives out its 15 minutes.
  */
 export async function revokeMobileSessions(): Promise<number> {
   const user = await requireUser()
-  const { count } = await db.mobile_refresh_tokens.updateMany({
-    where: { user_id: user.id, revoked_at: null },
-    data: { revoked_at: new Date() },
-  })
+  const [{ count }] = await db.$transaction([
+    db.mobile_refresh_tokens.updateMany({
+      where: { user_id: user.id, revoked_at: null },
+      data: { revoked_at: new Date() },
+    }),
+    db.push_tokens.deleteMany({ where: { user_id: user.id } }),
+  ])
 
   auditLog({
     userId: user.id,

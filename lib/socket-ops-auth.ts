@@ -79,7 +79,7 @@ export async function authenticateDashboardSocket(
      */
     const user = await db.user.findUnique({
       where: { id: token.sub },
-      select: { id: true, email: true, role: true, suspended_at: true, deletedAt: true, password_changed_at: true },
+      select: { id: true, email: true, role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
     })
     // The pages' rule (lib/session-revocation.ts): suspended, deleted — an
     // erased account's cookie can outlive it; deletion evicts the socket and
