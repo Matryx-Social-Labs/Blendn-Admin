@@ -168,6 +168,22 @@ export async function blockCounterparties(userId: string): Promise<string[]> {
   return [...new Set(rows.map((r) => (r.blocker_id === userId ? r.blocked_id : r.blocker_id)))]
 }
 
+/**
+ * Who this person must not share a room with, for the room's delivery, its
+ * history, its typing and its roster: everybody in a block with them, in every
+ * kind of room — and in a board post's room, everybody they closed a
+ * conversation with too (step 10 review H2). An unmatch is permanent, and a
+ * car of three is no place to undo it; the post's seating keeps such a pair
+ * apart (`seatBoardRoom`), this keeps an unmatch made after seating from
+ * putting them back in front of each other. A crew's and a Blend's rooms keep
+ * closed pairs out at their doors.
+ */
+export async function keptApartIn(userId: string, roomKind: string): Promise<string[]> {
+  if (roomKind !== "board_post") return blockCounterparties(userId)
+  const [blocked, closed] = await Promise.all([blockCounterparties(userId), closedPairKeys(userId)])
+  return [...new Set([...blocked, ...closed])]
+}
+
 /** Did these two leave each other? Checked in both directions, like a block. */
 export async function pairIsClosed(a: string, b: string): Promise<boolean> {
   const [user1_id, user2_id] = conversationPair(a, b)

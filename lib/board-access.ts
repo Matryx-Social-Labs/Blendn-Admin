@@ -1,6 +1,6 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
-import type { board_request_status } from "@prisma/client"
+import type { board_request_status, Prisma } from "@prisma/client"
 
 import { ageFrom } from "./age"
 import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
@@ -13,6 +13,7 @@ import { BOARD } from "./constants"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
 import { closePostRooms } from "./room-close"
+import { blocksBetween } from "./crews/blocks"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
@@ -231,12 +232,15 @@ export async function boardWriteDenial(
  */
 export async function boardPseudonyms(
   eventId: string,
-  userIds: readonly string[]
+  userIds: readonly string[],
+  // Inside a transaction, its client: a second pool connection from inside one
+  // can wait on the pool the transaction holds (step 10 review L2).
+  client: Pick<Prisma.TransactionClient, "chat_group_members" | "events"> = db
 ): Promise<Map<string, string>> {
   const ids = [...new Set(userIds)]
   if (ids.length === 0) return new Map()
 
-  const members = await db.chat_group_members.findMany({
+  const members = await client.chat_group_members.findMany({
     where: { chat_group: { event_id: eventId }, user_id: { in: ids } },
     select: { user_id: true, anonymous_name: true },
   })
@@ -246,7 +250,7 @@ export async function boardPseudonyms(
       .map((m) => [m.user_id, m.anonymous_name as string])
   )
 
-  const scheme = await pseudonymSchemeFor(eventId)
+  const scheme = await pseudonymSchemeFor(eventId, client)
   return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id, scheme)]))
 }
 
@@ -414,4 +418,101 @@ export async function boardRequestCounterpart(
   if (r?.from_user_id === viewerId) return r.to_user_id
   if (r?.to_user_id === viewerId) return r.from_user_id
   return null
+}
+
+/* -------------------------------------------------------------------------- */
+/* The post's room                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Accepted askers a post needs before it has a room. One asker and the author
+ * already have their conversation (the accept opens it); a room is for the
+ * car of three, the table of four — CR-I16, "an offer with 2 accepted → the
+ * post's group".
+ */
+export const BOARD_ROOM_MIN_ACCEPTED = 2
+
+/** A post's room is named by what the post offered, cut to a line. */
+const ROOM_NAME_MAX = 60
+
+/**
+ * Seat everybody a post's room admits — its author and every accepted asker —
+ * creating the room on the accept that makes it worth having (step 10,
+ * SCRUM-535). Inside the accept's transaction, after the claim, under the
+ * post's row lock, so two accepts at once count each other and make one room.
+ *
+ * **Nobody is seated beside somebody they are kept apart from** (step 10
+ * review H2): a block either way, or a closed conversation — an unmatch is
+ * permanent, the same "kept apart" crews use (`blocksBetween`). In accept
+ * order, an asker kept apart from anyone already in the room or seated before
+ * them is not seated, silently: their accept still stands and their 1:1
+ * conversation still opens, and nothing tells either of them why there is no
+ * room. A suspended or erased asker is not seated either (L1).
+ *
+ * The member row is what the room's socket, roster and pseudonym read; the
+ * door is still the post (`roomOwnerDenial` in lib/room-kind.ts) — a row never
+ * admits anybody the owner does not. A row that already exists is left as it
+ * is: somebody who left the room or was banned from it is not put back by the
+ * next accept.
+ *
+ * Pseudonyms are the event room's (`boardPseudonyms`), the names the board
+ * already showed them by. One name per room: should two people somehow carry
+ * the same one, the later goes unnamed ("Attendee") rather than failing the
+ * accept on the room's unique name.
+ */
+export async function seatBoardRoom(
+  tx: Prisma.TransactionClient,
+  post: { id: string; event_id: string; author_id: string; body: string }
+): Promise<string | null> {
+  const accepted = await tx.board_requests.findMany({
+    where: { post_id: post.id, status: "accepted", from: { suspended_at: null, deletedAt: null } },
+    select: { from_user_id: true },
+    orderBy: [{ decided_at: "asc" }, { id: "asc" }],
+  })
+  const people = [post.author_id, ...accepted.map((a) => a.from_user_id)]
+  const [apart, existing] = await Promise.all([
+    blocksBetween(people, people, tx),
+    tx.chat_groups.findUnique({
+      where: { board_post_id: post.id },
+      select: { id: true, members: { select: { user_id: true, anonymous_name: true } } },
+    }),
+  ])
+
+  // In accept order: a seat for each person kept apart from nobody already in.
+  const inRoom = existing?.members.map((m) => m.user_id) ?? []
+  const seats: string[] = []
+  for (const id of people) {
+    if (inRoom.includes(id)) continue
+    if ([...inRoom, ...seats].some((other) => apart.has(`${id}|${other}`))) continue
+    seats.push(id)
+  }
+  const askers = [...inRoom, ...seats].filter((id) => id !== post.author_id)
+  if (!existing && askers.length < BOARD_ROOM_MIN_ACCEPTED) return null
+  if (seats.length === 0) return existing?.id ?? null
+
+  const room =
+    existing ??
+    (await tx.chat_groups.upsert({
+      where: { board_post_id: post.id },
+      create: {
+        kind: "board_post",
+        board_post_id: post.id,
+        name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Board",
+        status: "active",
+      },
+      update: {},
+      select: { id: true, members: { select: { user_id: true, anonymous_name: true } } },
+    }))
+
+  const names = await boardPseudonyms(post.event_id, seats, tx)
+  const taken = new Set(room.members.flatMap((m) => (m.anonymous_name ? [m.anonymous_name] : [])))
+  for (const userId of seats) {
+    const name = names.get(userId)
+    const seatName = name && !taken.has(name) ? name : null
+    if (seatName) taken.add(seatName)
+    await tx.chat_group_members.create({
+      data: { chat_group_id: room.id, user_id: userId, status: "active", anonymous_name: seatName },
+    })
+  }
+  return room.id
 }

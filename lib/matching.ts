@@ -166,18 +166,63 @@ export const MAX_SHARED_LABELS = 2
  * music-event room "Techno" outranks "Music", so the distinguishing overlap
  * leads and the universal one only appears when it is genuinely all they share.
  */
-function orderLabels(
+export function orderLabels<T extends Label>(labels: readonly T[], budget: LabelBudget): T[] {
+  const out: T[] = []
+  let tierB = 0
+  // Ties keep their original order, which is the viewer's own interest order.
+  for (const label of [...labels].sort((a, b) => b.weight - a.weight)) {
+    if (out.length >= budget.max) break
+    if (label.tier === "B") {
+      if (tierB >= budget.tierB) continue
+      tierB += 1
+    }
+    out.push(label)
+  }
+  return out
+}
+
+/**
+ * A line a card may print, with how distinguishing it is in this room.
+ *
+ * **Tier A** is what people chose — interests, an IPL team, a this-or-that
+ * answer. **Tier B** is origin-like — a language, a home state, a sign — and
+ * each one narrows who a card could be (§8.5). The weight orders; the tier
+ * spends the budget.
+ */
+export interface Label {
+  tier: "A" | "B"
+  weight: number
+}
+
+/**
+ * How many lines, and how many of them Tier B.
+ *
+ * Before a reveal: no Tier B at all in a room below `MIN_ROOM_FOR_WORK_FIELD`,
+ * and **one** above it — "from Kerala" is an icebreaker, "from Kerala, speaks
+ * Tulu, a Leo" beside an age is a person. After a reveal the name is already
+ * out, so the budget no longer protects anybody (`tierBBudget`).
+ */
+export interface LabelBudget {
+  max: number
+  tierB: number
+}
+
+/** The Tier B allowance for one card (§8.5). */
+export function tierBBudget(opts: { roomIsBigEnough: boolean; revealed: boolean }): number {
+  if (opts.revealed) return Number.POSITIVE_INFINITY
+  return opts.roomIsBigEnough ? 1 : 0
+}
+
+function orderInterestLabels(
   sharedIds: readonly string[],
   holders: ReadonlyMap<string, number>,
   population: number
 ): string[] {
   if (sharedIds.length <= 1) return [...sharedIds]
-  return [...sharedIds]
-    .map((id) => ({ id, w: interestWeight(id, holders, population) }))
-    // Ties keep their original order, which is the viewer's own interest order.
-    .sort((a, b) => b.w - a.w)
-    .slice(0, MAX_SHARED_LABELS)
-    .map((x) => x.id)
+  return orderLabels(
+    sharedIds.map((id) => ({ id, tier: "A" as const, weight: interestWeight(id, holders, population) })),
+    { max: MAX_SHARED_LABELS, tierB: 0 }
+  ).map((x) => x.id)
 }
 
 export interface MatchCandidate {
@@ -320,7 +365,24 @@ export interface Match {
    */
   age: number | null
   insideNow: boolean
+  /**
+   * What this card may print beyond the score (`lib/overlaps.ts`): how many
+   * display lines, and how many of them Tier B (§8.5). Decided here, beside
+   * the reveal and the room floor it depends on, so the caller composing the
+   * lines cannot pick its own allowance.
+   */
+  labelBudget: LabelBudget
+  /**
+   * Whether attendance facts may be said on this card — the same floor as
+   * `sharedEvents`. Badges are attendance facts ("Regular here" narrows a
+   * card to the regulars), so they follow it.
+   */
+  roomIsBigEnough: boolean
 }
+
+/** Display lines on a card before a reveal, and after one. */
+export const MAX_DISPLAY_LINES = 2
+export const MAX_DISPLAY_LINES_REVEALED = 4
 
 /**
  * How much a shared interest is worth, by how rare it is.
@@ -419,6 +481,14 @@ export function rankMatches(
     parentOf?: ReadonlyMap<string, string>
     /** People in the room — the denominator for rarity. */
     population: number
+    /**
+     * People inside the room NOW, counting the viewer — the floor's count
+     * (step 10 review M1). The deck keeps everyone who came, so `population`
+     * counts people who have gone home; an anonymity set is the people a card
+     * could be standing beside you, and two left in a room of twenty is two.
+     * Absent: `population`, as before.
+     */
+    peopleInside?: number
     limit?: number
   }
 ): Match[] {
@@ -506,7 +576,7 @@ export function rankMatches(
        * full collapsed set — truncating it would make the ranking depend on how
        * much fits on a card.
        */
-      const labelIds = orderLabels(sharedInterestIds, opts.interestHolders, opts.population)
+      const labelIds = orderInterestLabels(sharedInterestIds, opts.interestHolders, opts.population)
 
       return { candidate, sharedInterestIds: labelIds, sharedIntents, score }
     })
@@ -527,13 +597,14 @@ export function rankMatches(
    * fintech, into techno and board games" is one specific person in a room of
    * eight — at which point the pseudonym is doing nothing.
    *
-   * `population` is the room, not the page, so paging cannot shrink it into
-   * suppression. It counts everyone but the viewer, which is the right set:
-   * the anonymity set is the people a card *could* be, and the reader is not
-   * one of them. Same number and reasoning as the organiser metrics floor; a
-   * test asserts the two constants are equal.
+   * The count is the people inside now plus the viewer (`peopleInside`, step
+   * 10 review M1), not everyone who ever checked in: the anonymity set is who
+   * a card could be, here, tonight. It is the room, not the page, so paging
+   * cannot shrink it into suppression. Same number and reasoning as the
+   * organiser metrics floor; a test asserts the two constants are equal.
+   * Rarity keeps the whole deck (`population`).
    */
-  const roomIsBigEnough = opts.population >= MIN_ROOM_FOR_WORK_FIELD
+  const roomIsBigEnough = (opts.peopleInside ?? opts.population) >= MIN_ROOM_FOR_WORK_FIELD
 
   return scored.slice(0, opts.limit ?? scored.length).map(({ candidate, sharedInterestIds, sharedIntents }) => ({
     userId: candidate.userId,
@@ -561,5 +632,10 @@ export function rankMatches(
     sharedPlans: roomIsBigEnough ? (candidate.sharedPlans ?? 0) : 0,
     age: candidate.age ?? null,
     insideNow: candidate.insideNow,
+    labelBudget: {
+      max: candidate.revealed ? MAX_DISPLAY_LINES_REVEALED : MAX_DISPLAY_LINES,
+      tierB: tierBBudget({ roomIsBigEnough, revealed: candidate.revealed }),
+    },
+    roomIsBigEnough,
   }))
 }

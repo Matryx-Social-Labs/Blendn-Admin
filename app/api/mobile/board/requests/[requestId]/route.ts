@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { boardPseudonyms, isLiveRequest, liveRequest } from "@/lib/board-access"
+import { boardPseudonyms, isLiveRequest, liveRequest, seatBoardRoom } from "@/lib/board-access"
 import {
   blockCounterparties,
   conversationPair,
@@ -97,7 +97,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         from_user_id: true,
         to_user_id: true,
         event: { select: { end_time: true } },
-        post: { select: { deleted_at: true, spaces_left: true } },
+        post: { select: { deleted_at: true, spaces_left: true, body: true } },
       },
     })
     if (!boardRequest) return notFoundResponse("Request not found")
@@ -243,6 +243,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     try {
       conversation = await db.$transaction(async (tx) => {
         const now = new Date()
+        /*
+         * Accepts on one post queue here: the room below counts the accepted
+         * asks, and two accepts at once must each see the other.
+         */
+        await tx.$executeRaw`SELECT 1 FROM board_posts WHERE id = ${boardRequest.post_id}::uuid FOR UPDATE`
         const claim = await tx.board_requests.updateMany({
           where: { id: requestId, ...liveRequest(now) },
           data: { status: "accepted", decided_at: now },
@@ -262,12 +267,20 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           })
           if (seat.count === 0) throw new AcceptRefused("That offer is full")
         }
-        return openConversation(
+        const opened = await openConversation(
           boardRequest.from_user_id,
           boardRequest.to_user_id,
           { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId },
           tx
         )
+        // The post's room, once a second asker is in (CR-I16, SCRUM-535).
+        await seatBoardRoom(tx, {
+          id: boardRequest.post_id,
+          event_id: boardRequest.event_id,
+          author_id: boardRequest.to_user_id,
+          body: boardRequest.post.body,
+        })
+        return opened
       })
     } catch (error) {
       if (error instanceof AcceptRefused) return conflictResponse(error.message)

@@ -1,0 +1,529 @@
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+import { NextRequest } from "next/server"
+
+import { matchesForEvent, type MatchCard } from "@/lib/matches"
+import { signAccessToken } from "@/lib/mobile-auth"
+import { resolveUserRef } from "@/lib/room-handle"
+import { resetMemoryStore } from "@/lib/rate-limit-store"
+
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
+
+/* eslint-disable @typescript-eslint/no-require-imports */
+const profileRoute = require("@/app/api/mobile/profiles/[userId]/route") as typeof import("@/app/api/mobile/profiles/[userId]/route")
+const userRoute = require("@/app/api/mobile/users/[userId]/route") as typeof import("@/app/api/mobile/users/[userId]/route")
+const thisOrThatRoute = require("@/app/api/mobile/me/this-or-that/route") as typeof import("@/app/api/mobile/me/this-or-that/route")
+const optionsRoute = require("@/app/api/mobile/profile-options/route") as typeof import("@/app/api/mobile/profile-options/route")
+const preferencesRoute = require("@/app/api/mobile/events/[eventId]/matches/preferences/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/preferences/route")
+const signupRoute = require("@/app/api/mobile/auth/signup/route") as typeof import("@/app/api/mobile/auth/signup/route")
+/* eslint-enable @typescript-eslint/no-require-imports */
+
+/**
+ * Matching v2 against a real database built with `db:migrate` (step 10,
+ * MV-I01..I06): the IPL leaves the migration writes, the room's own rarity,
+ * the Tier B budget at seven and at eight, zodiac and origin never moving a
+ * ranking, badges from check-ins, the profile fields and this-or-that.
+ */
+
+const users: string[] = []
+const events: string[] = []
+
+afterAll(async () => {
+  await db.event_rsvps.deleteMany({ where: { user_id: { in: users } } })
+  await db.user_interests.deleteMany({ where: { user_id: { in: users } } })
+  await db.presence_sessions.deleteMany({ where: { user_id: { in: users } } })
+  await cleanup(users, events)
+  await db.venues.deleteMany({ where: { owner_id: { in: users } } })
+  await closeDb()
+})
+
+async function adult(label: string) {
+  const id = await makeUser(testId(label))
+  users.push(id)
+  await onboard(id)
+  await db.profiles.update({ where: { id }, data: { age: 28, intent_default: ["friendship"] } })
+  return id
+}
+
+async function room(venueId: string | null = null) {
+  const host = await makeUser(testId("mv-host"), "organizer")
+  users.push(host)
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+  if (venueId) await db.events.update({ where: { id: eventId }, data: { venue_id: venueId } })
+  await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active" } })
+  return { eventId, occurrenceId: await occurrenceOf(eventId) }
+}
+
+/** Checked in now; `minutesAgo` sets who arrived last, which leads a tie. */
+async function arrive(r: { eventId: string; occurrenceId: string }, userId: string, minutesAgo = 30) {
+  await putInRoom({ ...r, userId, at: new Date(Date.now() - minutesAgo * 60_000) })
+}
+
+const leaf = async (slug: string) => (await db.categories.findUniqueOrThrow({ where: { slug }, select: { id: true } })).id
+const likes = async (userId: string, ...slugs: string[]) => {
+  for (const slug of slugs) await db.user_interests.create({ data: { user_id: userId, category_id: await leaf(slug) } })
+}
+
+const cardOf = (cards: MatchCard[], userId: string) => cards.find((c) => resolveUserRef(c.userId)?.userId === userId)!
+const order = (cards: MatchCard[]) => cards.map((c) => resolveUserRef(c.userId)?.userId)
+const TIER_B = ["language", "home_state", "sign"]
+
+/**
+ * `n` more people who share nothing. The floor counts who is inside now plus
+ * the viewer (step 10 review M1), so "a room of seven" is the viewer and six
+ * others inside. `gone` fillers checked in and went home: in the deck, not in
+ * the count.
+ */
+async function fill(r: { eventId: string; occurrenceId: string }, n: number, gone = false) {
+  for (let i = 0; i < n; i++) {
+    const id = await adult(`mv-fill-${i}`)
+    await arrive(r, id, 90 + i)
+    if (gone) await db.event_check_ins.updateMany({ where: { event_id: r.eventId, user_id: id }, data: { status: "checked_out", check_out_time: new Date() } })
+  }
+}
+
+describe("Both CSK — in RCB country outranks Both RCB (MV-I01)", () => {
+  it("ranks the rare team first and says why, on the leaves the migration wrote", async () => {
+    const r = await room()
+    const me = await adult("mv-csk-me")
+    await likes(me, "ipl-csk", "ipl-rcb")
+    await arrive(r, me, 120)
+
+    const cskFan = await adult("mv-csk")
+    await likes(cskFan, "ipl-csk")
+    await arrive(r, cskFan, 60)
+    // Arrived last, so on an equal score this RCB fan would lead.
+    const rcbFan = await adult("mv-rcb")
+    await likes(rcbFan, "ipl-rcb")
+    await arrive(r, rcbFan, 1)
+    for (let i = 0; i < 6; i++) {
+      const fan = await adult(`mv-rcb-${i}`)
+      await likes(fan, "ipl-rcb")
+      await arrive(r, fan, 100 + i)
+    }
+
+    const cards = (await matchesForEvent(r.eventId, me))!
+    expect(order(cards)[0]).toBe(cskFan)
+    expect(order(cards).indexOf(rcbFan)).toBeGreaterThan(0)
+    expect(cardOf(cards, cskFan).overlaps).toContainEqual({ kind: "ipl", text: "Both CSK — in RCB country 💛" })
+    expect(cardOf(cards, rcbFan).overlaps).toContainEqual({ kind: "ipl", text: "Both RCB fans ❤️" })
+  })
+})
+
+describe("the Tier B budget, at seven and at eight (MV-I02)", () => {
+  const shared = { languages: ["malayalam"], home_state: "kerala", sun_sign: "leo", sign_system: "western" }
+
+  it("no Tier B line and no sign in a room of seven; one at eight; all of them once revealed", async () => {
+    const r = await room()
+    const me = await adult("mv-b-me")
+    const them = await adult("mv-b-them")
+    await db.profiles.updateMany({ where: { id: { in: [me, them] } }, data: shared })
+    await db.this_or_that_answers.createMany({
+      data: [me, them].map((user_id) => ({ user_id, question: "coffee_or_chai", choice: "a" })),
+    })
+    await arrive(r, me)
+    await arrive(r, them)
+    await fill(r, 5) // seven inside, counting the viewer
+    // Ten more came and went home: in the deck, never in the count (M1).
+    await fill(r, 10, true)
+
+    const seven = cardOf((await matchesForEvent(r.eventId, me))!, them)
+    expect(seven.overlaps.filter((o) => TIER_B.includes(o.kind))).toEqual([])
+    expect(seven.overlaps).toEqual([{ kind: "this_or_that", text: "You both picked filter coffee over chai" }])
+    expect(seven.sign).toBeNull()
+
+    await fill(r, 1) // eight inside
+    const eight = cardOf((await matchesForEvent(r.eventId, me))!, them)
+    expect(eight.overlaps.filter((o) => TIER_B.includes(o.kind))).toHaveLength(1)
+    // The budget is spent on the line, so no sign chip beside it.
+    expect(eight.sign).toBeNull()
+
+    await db.event_match_preferences.upsert({
+      where: { event_id_user_id: { event_id: r.eventId, user_id: them } },
+      create: { event_id: r.eventId, user_id: them, revealed: true },
+      update: { revealed: true },
+    })
+    const revealed = cardOf((await matchesForEvent(r.eventId, me))!, them)
+    expect(revealed.overlaps.filter((o) => TIER_B.includes(o.kind)).map((o) => o.kind).sort()).toEqual([
+      "home_state",
+      "language",
+      "sign",
+    ])
+  })
+})
+
+describe("zodiac, origin and this-or-that never move a ranking (MV-I03)", () => {
+  it("the room ranks the same whatever is shared that is display only", async () => {
+    const r = await room()
+    const me = await adult("mv-z-me")
+    const plain = await adult("mv-z-plain")
+    const twin = await adult("mv-z-twin")
+    await db.profiles.updateMany({
+      where: { id: { in: [me, twin] } },
+      data: { languages: ["tulu", "kannada"], home_state: "karnataka", sun_sign: "scorpio", sign_system: "rashi" },
+    })
+    await db.this_or_that_answers.createMany({
+      data: [me, twin].flatMap((user_id) => [
+        { user_id, question: "metro_or_auto", choice: "a" },
+        { user_id, question: "early_or_night", choice: "b" },
+      ]),
+    })
+    await arrive(r, me, 200)
+    await arrive(r, twin, 50)
+    // Arrived after the twin: everything that ranks is equal, so recency leads.
+    await arrive(r, plain, 5)
+    await fill(r, 8)
+
+    const withTraits = order((await matchesForEvent(r.eventId, me))!)
+    expect(withTraits.indexOf(plain)).toBeLessThan(withTraits.indexOf(twin))
+
+    await db.this_or_that_answers.deleteMany({ where: { user_id: twin } })
+    await db.profiles.update({
+      where: { id: twin },
+      data: { languages: [], home_state: null, sun_sign: null, sign_system: null },
+    })
+    expect(order((await matchesForEvent(r.eventId, me))!)).toEqual(withTraits)
+  })
+})
+
+describe("badges from check-ins (MV-I04)", () => {
+  it("Regular here at this venue, 5+ nights, Shows up only when turned on — and none in a room of seven", async () => {
+    const owner = await makeUser(testId("mv-v-owner"), "organizer")
+    users.push(owner)
+    const venue = await db.venues.create({ data: { name: testId("Toit"), owner_id: owner }, select: { id: true } })
+    const r = await room(venue.id)
+    const me = await adult("mv-bd-me")
+    const regular = await adult("mv-bd-regular")
+    const keen = await adult("mv-bd-keen")
+    await db.profiles.update({ where: { id: keen }, data: { shows_up_badge: true } })
+
+    // Two earlier nights at this venue for the regular, and four more nights
+    // out anywhere; the keen one kept three RSVPs of three, all past, elsewhere.
+    const day = 24 * 3600_000
+    for (let i = 1; i <= 6; i++) {
+      const past = await room(i <= 2 ? venue.id : null)
+      const at = new Date(Date.now() - i * day)
+      await db.events.update({ where: { id: past.eventId }, data: { start_time: new Date(at.getTime() - 3600_000), end_time: at } })
+      await putInRoom({ ...past, userId: regular, at })
+      if (i >= 3 && i <= 5) {
+        await db.event_rsvps.create({ data: { event_id: past.eventId, user_id: keen, status: "going" } })
+        await putInRoom({ ...past, userId: keen, at })
+      }
+    }
+    await arrive(r, me)
+    await arrive(r, regular)
+    await arrive(r, keen)
+    await fill(r, 4) // seven inside, counting the viewer
+
+    const small = (await matchesForEvent(r.eventId, me))!
+    expect(cardOf(small, regular).badges).toEqual([])
+
+    await fill(r, 1) // eight inside
+    const cards = (await matchesForEvent(r.eventId, me))!
+    expect(cardOf(cards, regular).badges.map((b) => b.label)).toEqual(["Regular here", "5+ nights this month"])
+    expect(cardOf(cards, keen).badges.map((b) => b.kind)).toEqual(["shows_up"])
+
+    await db.profiles.update({ where: { id: keen }, data: { shows_up_badge: false } })
+    expect(cardOf((await matchesForEvent(r.eventId, me))!, keen).badges).toEqual([])
+
+    // "Show my badges" off (M3): none at all, earned or not.
+    await db.profiles.update({ where: { id: regular }, data: { show_badges: false } })
+    expect(cardOf((await matchesForEvent(r.eventId, me))!, regular).badges).toEqual([])
+  })
+})
+
+describe("the work field spends the Tier B slot (step 10 review M3)", () => {
+  it("a shared language takes the slot from their field; with nothing shared, their field takes it", async () => {
+    const r = await room()
+    const me = await adult("mv-w-me")
+    const speaker = await adult("mv-w-speaker")
+    const other = await adult("mv-w-other")
+    await db.profiles.updateMany({ where: { id: { in: [me, speaker] } }, data: { languages: ["tulu"] } })
+    await db.profiles.updateMany({ where: { id: { in: [speaker, other] } }, data: { work_field: "design" } })
+    for (const id of [me, speaker, other]) await arrive(r, id)
+    await fill(r, 6)
+
+    const cards = (await matchesForEvent(r.eventId, me))!
+    expect(cardOf(cards, speaker).overlaps.map((o) => o.kind)).toEqual(["language"])
+    expect(cardOf(cards, speaker).workField).toBeNull()
+    expect(cardOf(cards, other).workField).toBe("Design")
+  })
+})
+
+/* -------------------------------------------------------------------------- */
+/* The profile fields and this-or-that, through the routes                    */
+/* -------------------------------------------------------------------------- */
+
+type Who = { id: string; token: string }
+async function who(label: string): Promise<Who> {
+  const id = await adult(label)
+  return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
+}
+async function call(handler: unknown, path: string, as: Who, opts: { method?: string; body?: unknown; params?: object } = {}) {
+  const res = await (handler as (r: NextRequest, c: { params: Promise<unknown> }) => Promise<Response>)(
+    new NextRequest(`http://localhost${path}`, {
+      method: opts.method ?? "GET",
+      headers: { authorization: `Bearer ${as.token}`, "content-type": "application/json" },
+      ...(opts.body !== undefined && { body: JSON.stringify(opts.body) }),
+    }),
+    { params: Promise.resolve(opts.params ?? {}) }
+  )
+  return { status: res.status, body: await res.json() }
+}
+const put = (as: Who, body: object) =>
+  call(profileRoute.PUT, `/api/mobile/profiles/${as.id}`, as, { method: "PUT", body, params: { userId: as.id } })
+
+describe("the about-you fields on the profile (MV-I05)", () => {
+  it("stores the picks, refuses a sign without its calendar, and shows them only to who may see", async () => {
+    const me = await who("mv-p-me")
+    await db.profiles.update({ where: { id: me.id }, data: { date_of_birth: new Date("1996-08-01T00:00:00Z") } })
+
+    expect((await put(me, { sun_sign: "leo" })).status).toBe(400)
+    expect((await put(me, { languages: ["klingon"] })).status).toBe(400)
+    const saved = await put(me, {
+      languages: ["malayalam", "kannada_learning"],
+      home_state: "kerala",
+      sun_sign: "leo",
+      sign_system: "rashi",
+      shows_up_badge: true,
+    })
+    expect(saved.status).toBe(200)
+    expect(
+      await db.profiles.findUnique({
+        where: { id: me.id },
+        select: { languages: true, home_state: true, sun_sign: true, sign_system: true, shows_up_badge: true },
+      })
+    // Stored each once, in one order: a reorder is no change (lib/tier-b.ts).
+    ).toEqual({ languages: ["kannada_learning", "malayalam"], home_state: "kerala", sun_sign: "leo", sign_system: "rashi", shows_up_badge: true })
+
+    const self = await call(profileRoute.GET, `/api/mobile/profiles/${me.id}`, me, { params: { userId: me.id } })
+    expect(self.body.data.profile).toMatchObject({ sun_sign: "leo", sign_system: "rashi", suggested_sun_sign: "leo" })
+    expect(self.body.data.profile.date_of_birth).toBeUndefined()
+    // The cooldown's ledger is not the person's to read back.
+    expect(self.body.data.profile).not.toHaveProperty("tier_b_changes")
+
+    // A stranger who cannot see who this is gets none of it, on either route.
+    const stranger = await who("mv-p-stranger")
+    const asStranger = await call(profileRoute.GET, `/api/mobile/profiles/${me.id}`, stranger, { params: { userId: me.id } })
+    expect(asStranger.status).toBe(200)
+    for (const k of ["languages", "home_state", "sun_sign", "sign_system", "sign", "suggested_sun_sign"]) {
+      expect(asStranger.body.data.profile).not.toHaveProperty(k)
+    }
+    const user = await call(userRoute.GET, `/api/mobile/users/${me.id}`, stranger, { params: { userId: me.id } })
+    for (const k of ["languages", "homeState", "sign"]) expect(user.body.data).not.toHaveProperty(k)
+
+    // Off again: both null.
+    expect((await put(me, { sun_sign: null, sign_system: null })).status).toBe(200)
+    expect(await db.profiles.findUnique({ where: { id: me.id }, select: { sun_sign: true, sign_system: true } })).toEqual({
+      sun_sign: null,
+      sign_system: null,
+    })
+  })
+
+  it("the table holds a sign and its calendar together (profiles_sign_shape)", async () => {
+    const id = await adult("mv-p-check")
+    await expect(db.$executeRaw`UPDATE profiles SET sun_sign = 'leo' WHERE id = ${id}`).rejects.toThrow(/profiles_sign_shape|23514/)
+    await expect(
+      db.$executeRaw`UPDATE profiles SET sun_sign = 'leo', sign_system = 'vedic' WHERE id = ${id}`
+    ).rejects.toThrow(/profiles_sign_shape|23514/)
+  })
+})
+
+describe("the Tier B oracle is closed (step 10 review H1)", () => {
+  it("a viewer who edits their home state mid-event sees no new line, and the fourth change in a day is refused", async () => {
+    const r = await room()
+    const me = await who("mv-o-me")
+    const them = await adult("mv-o-them")
+    await db.profiles.update({ where: { id: them }, data: { home_state: "kerala" } })
+    await arrive(r, me.id)
+    await arrive(r, them)
+    await fill(r, 7)
+
+    // Before: nothing shared.
+    expect(cardOf((await matchesForEvent(r.eventId, me.id))!, them).overlaps).toEqual([])
+
+    // Mid-event, the viewer becomes "from Kerala": the room ignores it.
+    expect((await put(me, { home_state: "kerala" })).status).toBe(200)
+    const stamped = await db.profiles.findUnique({ where: { id: me.id }, select: { tier_b_changed_at: true } })
+    expect(stamped?.tier_b_changed_at).toBeInstanceOf(Date)
+    expect(cardOf((await matchesForEvent(r.eventId, me.id))!, them).overlaps).toEqual([])
+
+  })
+
+  it("a change made before checking in counts", async () => {
+    const r = await room()
+    const me = await adult("mv-o2-me")
+    const them = await adult("mv-o2-them")
+    await db.profiles.updateMany({ where: { id: { in: [me, them] } }, data: { home_state: "kerala" } })
+    await db.profiles.update({ where: { id: me }, data: { tier_b_changed_at: new Date(Date.now() - 3600_000) } })
+    await arrive(r, me, 10)
+    await arrive(r, them)
+    await fill(r, 7)
+    expect(cardOf((await matchesForEvent(r.eventId, me))!, them).overlaps).toEqual([{ kind: "home_state", text: "Both from Kerala" }])
+  })
+})
+
+describe("the Tier B cooldown cannot be sidestepped (H1, the rate-limit scan)", () => {
+  const changes = async (id: string) =>
+    (await db.profiles.findUniqueOrThrow({ where: { id }, select: { tier_b_changes: true } })).tier_b_changes.length
+
+  it("counts changes per person, split or together; a no-op is not one; the fourth is refused with a sentence", async () => {
+    const me = await who("mv-cd-me")
+    // One request changing two facts is one change.
+    expect((await put(me, { home_state: "kerala", languages: ["tulu"] })).status).toBe(200)
+    expect(await changes(me.id)).toBe(1)
+    // Re-saving the same values changes nothing, so it is neither counted nor refused — now or later.
+    expect((await put(me, { home_state: "kerala", languages: ["tulu"] })).status).toBe(200)
+    expect(await changes(me.id)).toBe(1)
+    // The calendar alone, the same sign: a change.
+    expect((await put(me, { sun_sign: "leo", sign_system: "western" })).status).toBe(200)
+    expect((await put(me, { sun_sign: "leo", sign_system: "rashi" })).status).toBe(200)
+    expect(await changes(me.id)).toBe(3)
+    // Split across requests, the fourth is refused whichever field it is.
+    for (const body of [{ work_field: "design" }, { home_state: "goa" }, { sun_sign: null, sign_system: null }]) {
+      const refused = await put(me, body)
+      expect(refused.status).toBe(429)
+      expect(refused.body.error).toBe("You can change your languages, home state, sign or field of work three times a day. Try again tomorrow.")
+    }
+    // Refused means unwritten.
+    expect(await db.profiles.findUniqueOrThrow({ where: { id: me.id }, select: { home_state: true, work_field: true } })).toEqual({
+      home_state: "kerala",
+      work_field: null,
+    })
+    // Still a no-op: allowed after the limit too.
+    expect((await put(me, { home_state: "kerala" })).status).toBe(200)
+
+    // Per person: somebody else's day is their own.
+    const other = await who("mv-cd-other")
+    expect((await put(other, { home_state: "goa" })).status).toBe(200)
+  })
+
+  it("is counted in the database: clearing the in-process limiter (as a Redis outage would) changes nothing", async () => {
+    const me = await who("mv-cd-db")
+    for (const state of ["kerala", "goa", "assam"]) expect((await put(me, { home_state: state })).status).toBe(200)
+    resetMemoryStore()
+    expect((await put(me, { home_state: "punjab" })).status).toBe(429)
+  })
+
+  it("two changes at once cannot both take the last one", async () => {
+    const me = await who("mv-cd-race")
+    for (const state of ["kerala", "goa"]) expect((await put(me, { home_state: state })).status).toBe(200)
+    const both = await Promise.all([put(me, { languages: ["tulu"] }), put(me, { work_field: "design" })])
+    expect(both.map((r) => r.status).sort()).toEqual([200, 429])
+    expect(await changes(me.id)).toBe(3)
+  })
+
+  it("ten PUTs at once, alternating values: at most three changes land, each counted, the stamp on the last", async () => {
+    const me = await who("mv-cd-ten")
+    await db.profiles.update({ where: { id: me.id }, data: { home_state: "kerala" } })
+    // Every change that actually lands on the row, logged by the database itself.
+    const log = testId("tierb_log").toLowerCase()
+    await db.$executeRawUnsafe(`CREATE TABLE ${log} (at timestamptz DEFAULT clock_timestamp(), was text, now text)`)
+    await db.$executeRawUnsafe(
+      `CREATE FUNCTION ${log}_fn() RETURNS trigger AS $$ BEGIN INSERT INTO ${log}(was, now) VALUES (OLD.home_state, NEW.home_state); RETURN NEW; END $$ LANGUAGE plpgsql`
+    )
+    await db.$executeRawUnsafe(
+      `CREATE TRIGGER ${log}_tr AFTER UPDATE ON profiles FOR EACH ROW WHEN (NEW.id = '${me.id}' AND OLD.home_state IS DISTINCT FROM NEW.home_state) EXECUTE FUNCTION ${log}_fn()`
+    )
+    try {
+      const values = ["goa", "kerala", "assam", "kerala", "punjab", "kerala", "goa", "kerala", "assam", "kerala"]
+      const answers = await Promise.all(values.map((home_state) => put(me, { home_state })))
+      expect(answers.every((a) => a.status === 200 || a.status === 429)).toBe(true)
+
+      const landed = (await db.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM ${log}`))[0].n
+      const row = await db.profiles.findUniqueOrThrow({ where: { id: me.id }, select: { tier_b_changes: true, tier_b_changed_at: true } })
+      expect(landed).toBeLessThanOrEqual(3)
+      expect(row.tier_b_changes).toHaveLength(landed)
+      expect(row.tier_b_changed_at?.getTime()).toBe(Math.max(...row.tier_b_changes.map((t) => t.getTime())))
+    } finally {
+      await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${log}_tr ON profiles`)
+      await db.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${log}_fn()`)
+      await db.$executeRawUnsafe(`DROP TABLE IF EXISTS ${log}`)
+    }
+  })
+
+  it("no other route writes Tier B: this-or-that, the room's preferences, sign-up", async () => {
+    const r = await room()
+    const me = await who("mv-cd-routes")
+    await arrive(r, me.id)
+    const before = { home_state: null, languages: [], work_field: null, sun_sign: null }
+    const tierB = async (id: string) =>
+      db.profiles.findUniqueOrThrow({ where: { id }, select: { home_state: true, languages: true, work_field: true, sun_sign: true } })
+
+    const tot = await call(thisOrThatRoute.PUT, "/api/mobile/me/this-or-that", me, {
+      method: "PUT",
+      body: { answers: { metro_or_auto: "a" }, home_state: "goa", languages: ["tulu"] },
+    })
+    expect(tot.status).toBe(200)
+    const prefs = await call(preferencesRoute.PUT, `/api/mobile/events/${r.eventId}/matches/preferences`, me, {
+      method: "PUT",
+      body: { intent: ["friendship"], remember: true, home_state: "goa", work_field: "design" },
+      params: { eventId: r.eventId },
+    })
+    expect(prefs.status).toBe(200)
+    expect(await tierB(me.id)).toEqual(before)
+
+    const email = `${testId("mv-signup")}@itest.invalid`.toLowerCase()
+    const signup = await signupRoute.POST(
+      new NextRequest("http://localhost/api/mobile/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": `10.9.${Math.floor(Math.random() * 250)}.1` },
+        body: JSON.stringify({ email, password: "a-long-enough-password-123", name: "Signup", age: 25, home_state: "goa", sun_sign: "leo", sign_system: "western" }),
+      })
+    )
+    expect(signup.status).toBe(201)
+    const made = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } })
+    users.push(made.id)
+    expect(await tierB(made.id)).toEqual(before)
+  })
+
+  it("every effective change is stamped server-side, onboarding's first answers too", async () => {
+    const id = await makeUser(testId("mv-cd-new"))
+    users.push(id)
+    const fresh = { id, token: signAccessToken(id, `${id}@itest.invalid`) }
+    expect((await put(fresh, { home_state: "kerala" })).status).toBe(200)
+    const row = await db.profiles.findUniqueOrThrow({ where: { id }, select: { tier_b_changed_at: true, tier_b_changes: true } })
+    expect(row.tier_b_changed_at).toBeInstanceOf(Date)
+    // Not onboarded: not counted (nobody is in a room yet), still stamped.
+    expect(row.tier_b_changes).toEqual([])
+  })
+})
+
+describe("this-or-that answers (MV-I06)", () => {
+  it("sets, takes back, and refuses the whole request on an unknown question", async () => {
+    const me = await who("mv-t-me")
+    const path = "/api/mobile/me/this-or-that"
+    const set = await call(thisOrThatRoute.PUT, path, me, { method: "PUT", body: { answers: { coffee_or_chai: "b", metro_or_auto: "a" } } })
+    expect(set.status).toBe(200)
+    expect(set.body.data.answers).toEqual({ coffee_or_chai: "b", metro_or_auto: "a" })
+
+    const bad = await call(thisOrThatRoute.PUT, path, me, { method: "PUT", body: { answers: { metro_or_auto: "b", veg_or_nonveg: "a" } } })
+    expect(bad.status).toBe(400)
+    const choiceBad = await call(thisOrThatRoute.PUT, path, me, { method: "PUT", body: { answers: { metro_or_auto: "c" } } })
+    expect(choiceBad.status).toBe(400)
+
+    const back = await call(thisOrThatRoute.PUT, path, me, { method: "PUT", body: { answers: { coffee_or_chai: null } } })
+    expect(back.body.data.answers).toEqual({ metro_or_auto: "a" })
+    expect(await db.this_or_that_answers.findMany({ where: { user_id: me.id }, select: { question: true, choice: true } })).toEqual([
+      { question: "metro_or_auto", choice: "a" },
+    ])
+    expect((await call(thisOrThatRoute.GET, path, me)).body.data.answers).toEqual({ metro_or_auto: "a" })
+  })
+
+  it("serves the vocabulary", async () => {
+    const me = await who("mv-o-me")
+    const res = await call(optionsRoute.GET, "/api/mobile/profile-options", me)
+    expect(res.status).toBe(200)
+    expect(res.body.data.thisOrThat).toHaveLength(12)
+    expect(res.body.data.signs).toContainEqual({ slug: "leo", western: "Leo", rashi: "Simha", symbol: "♌" })
+    expect(res.body.data.maxLanguages).toBe(5)
+  })
+})
+
+describe("one person's nights are indexed (step 10 review M6)", () => {
+  it("event_check_ins has (user_id, check_in_time)", async () => {
+    const rows = await db.$queryRaw<{ indexdef: string }[]>`
+      SELECT indexdef FROM pg_indexes WHERE tablename = 'event_check_ins' AND indexname = 'event_check_ins_user_id_check_in_time_idx'`
+    expect(rows.map((r) => r.indexdef.replace(/.*USING btree /, ""))).toEqual(["(user_id, check_in_time)"])
+  })
+})
