@@ -17,6 +17,7 @@ jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { randomUUID } from "crypto"
+import { isValidElement, type ReactElement } from "react"
 
 import { billingOrgFor, planBadgeFor, planPageData } from "@/lib/billing"
 
@@ -190,6 +191,58 @@ describe("GAP an organisation that also pays Venue Pro", () => {
       await db.billing_payments.deleteMany({ where: { checkout_id: venuePro.id } })
       await db.billing_checkouts.deleteMany({ where: { id: venuePro.id } })
       await db.venues.delete({ where: { id: venue.id } })
+    }
+  })
+})
+
+describe("a mandate on a plan key the price table has retired", () => {
+  /**
+   * The page's tree with the Plan page's own sections rendered in place, as
+   * the RSC payload carries them: StatusPanel and Subscriptions index nothing
+   * the loader did not hand them, or a retired key would crash the page.
+   */
+  const expand = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(expand)
+    if (!isValidElement(node)) return node
+    const el = node as ReactElement<Record<string, unknown>>
+    if (typeof el.type === "function" && ["StatusPanel", "Subscriptions"].includes(el.type.name)) {
+      return expand((el.type as (p: unknown) => unknown)(el.props))
+    }
+    return { ...el, props: { ...el.props, children: expand(el.props.children) } }
+  }
+  const rendered = async () => {
+    const el = await page.default({ searchParams: Promise.resolve({}) })
+    return JSON.stringify(expand(el), (k, value) => (k === "type" || k === "_owner" || typeof value === "function" ? undefined : value))
+  }
+
+  it("is listed with its stored price and period, never dropped, and the page renders it", async () => {
+    const retiredOwner = await makeUser(testId("plan-retired"), "organizer")
+    users.push(retiredOwner)
+    const org = await db.organisations.create({ data: { kind: "company", display_name: testId("plan-retired-org"), status: "verified" } })
+    orgs.push(org.id)
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: retiredOwner, role: "owner" } })
+    const ref = `sub_${randomUUID().slice(0, 10)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_2025", org_id: org.id, plan_key: "analytics_yearly_2025", amount_minor: 1_499_000, status: "active", current_end: new Date("2027-03-01T10:00:00Z") },
+    })
+    await db.entitlements.create({
+      data: { subject_kind: "org", subject_id: org.id, product: "analytics", source: "razorpay", external_ref: ref, starts_at: new Date(Date.now() - 1000), expires_at: new Date(Date.now() + 40 * 86_400_000) },
+    })
+    mockGetAuth.mockResolvedValue({ user: { id: retiredOwner, role: "organizer" } })
+    try {
+      const view = await planPageData((await billingOrgFor({ id: retiredOwner, role: "organizer" }))!)
+      expect(view.subscriptions).toMatchObject([{ providerRef: ref, planKey: "analytics_yearly_2025", period: "yearly", amountMinor: 1_499_000, status: "active" }])
+
+      const html = await rendered()
+      // Its price and period are the ones stored: ₹14,990 a year, not a table price.
+      expect(html).toContain(ref)
+      expect(html).toContain("Analytics, yearly, ₹14,990 (earlier plan)")
+      expect(html).toContain("Analytics · yearly")
+      expect(html).toContain("Renews 1 Mar 2027 for ₹14,990.")
+    } finally {
+      mockGetAuth.mockResolvedValue({ user: { id: owner, role: "organizer" } })
+      await db.entitlements.deleteMany({ where: { subject_id: org.id } })
+      await db.billing_checkouts.deleteMany({ where: { org_id: org.id } })
     }
   })
 })

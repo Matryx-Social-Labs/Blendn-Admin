@@ -109,6 +109,18 @@ Analytics keeps its own index.
   Razorpay dashboard**. If it charges anyway the webhook grants nothing
   (`billing.payer_not_owner`) and cancels it; refund that payment. Grants
   stay; end them on the venue page.
+- **The new owner never resumes the previous owner's unpaid checkout.** A
+  `created` checkout is resumed only by the organisation that opened it. When
+  the new owner starts Venue Pro and a previous owner's `created` one is still
+  there (the transfer's cancel was refused, or it was opened as the venue
+  moved), starting expires it and cancels it at Razorpay before making the new
+  one, under the same lock. That cancel is best effort: a refusal is logged
+  (`Cancelling the previous owner's unpaid checkout at Razorpay failed`, with
+  `providerRef`) and Razorpay's own `expire_by` ends it; a payment that still
+  lands grants the payer nothing (`billing.payer_not_owner`): refund it.
+- **A mandate on a retired plan key stays on the Plan page.** The organisation's
+  Subscriptions list shows it as "Analytics, <period>, ₹<stored price> (earlier
+  plan)" so it can be cancelled, and Buy stays refused while it is open.
 - **Cancels: Razorpay first, then us.** A cancel Razorpay refused changes
   nothing here and the user is told so. One Razorpay confirmed whose record
   here failed is logged (`providerRef`) and refused; Razorpay's
