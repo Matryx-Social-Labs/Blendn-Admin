@@ -17,7 +17,7 @@ export interface RouteContent {
 export const routeContent: Record<string, RouteContent> = {
   "/dashboard/moderation": {
     title: "Moderation",
-    description: "Flags and reports across the platform, oldest first.",
+    description: "Flags and reports across the platform, oldest first. Age is the SLA — 24 hours.",
   },
   "/dashboard/events": {
     title: "Events",
@@ -38,23 +38,29 @@ export const routeContent: Record<string, RouteContent> = {
    */
   "/dashboard/events/curate": {
     title: "Curation",
-    description: "Events we added from public listings — and which of them nobody could get into.",
+    // The kit's line: the screen's one reading rule, which used to sit under a
+    // second, in-page "Curation health" heading.
+    description:
+      "Events we added from public listings. Whether anybody tried is the difference between a wrong pin and a dead listing.",
   },
   "/dashboard/claims": {
     title: "Claims",
-    description: "Somebody wants ownership of an event or a venue. Decide, oldest first.",
+    description:
+      "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
   },
   "/dashboard/claims/venues": {
     title: "Claims",
-    description: "Somebody wants ownership of an event, a venue or a brand. Decide, oldest first.",
+    description:
+      "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
   },
   "/dashboard/claims/brands": {
     title: "Claims",
-    description: "Somebody wants ownership of an event, a venue or a brand. Decide, oldest first.",
+    description:
+      "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
   },
   "/dashboard/moderation/reports": {
     title: "Reports",
-    description: "What people reported about each other, and what was decided.",
+    description: "What people reported about each other, oldest first. Age is the SLA — 24 hours.",
   },
   "/dashboard/venues/new": {
     title: "Add a venue",
@@ -89,7 +95,8 @@ export const routeContent: Record<string, RouteContent> = {
   },
   "/dashboard/creative-review": {
     title: "Creative review",
-    description: "Sponsored copy waiting to be read by a person. Oldest first.",
+    description:
+      "Sponsored copy waiting to be read by a person, oldest first. Nothing sponsored runs in a room until it is approved here.",
   },
   "/dashboard/sponsors": {
     title: "Brands",
@@ -126,7 +133,7 @@ export const routeContent: Record<string, RouteContent> = {
   },
   "/dashboard/onboarding": {
     title: "Applications",
-    description: "Host applications awaiting review. Every one is read by a person.",
+    description: "Host applications awaiting review. Every one is read by a person. The window is 72 hours.",
   },
   "/dashboard/organisations": {
     title: "Organisations",

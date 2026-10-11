@@ -511,8 +511,11 @@ describe("\"We're here\" and presence at an event (CR-I04, CR-I05)", () => {
     const card = seen.body.data.crews.find((c: { crewId: string }) => c.crewId === them.crewId)
     expect(card).toMatchObject({ name: "Two Here", size: 3, presentCount: 2 })
     // Counts, never people (C4): no ids, names, photos or pseudonyms — the
-    // card's keys are exactly these.
-    expect(Object.keys(card).sort()).toEqual(["bio", "crewId", "emblemSeed", "intent", "name", "presentCount", "size", "tags", "youLiked"])
+    // card's keys are exactly these. `overlaps` and `badges` (step 10) are
+    // crew-held lines and crew nights, never a member (crew-signals.itest.ts).
+    expect(Object.keys(card).sort()).toEqual([
+      "badges", "bio", "crewId", "emblemSeed", "intent", "name", "overlaps", "presentCount", "size", "tags", "youLiked",
+    ])
     expect(JSON.stringify(card)).not.toMatch(new RegExp([p1.id, p2.id, p3.id, "Asha"].join("|")))
     expect(seen.body.data).toMatchObject({ total: 1, hasMore: false })
     // Derived: the crew and its rows are exactly as they were.
@@ -1100,7 +1103,11 @@ describe("reports and the moderator's levers (C12)", () => {
     expect(await sees()).toBe(false)
     // Its members keep their crew and its chat.
     expect((await api.detail(a, reported.crewId)).status).toBe(200)
-    expect(await db.audit_logs.count({ where: { action: "report.hide_crew", resource_id: reports[0].id } })).toBe(1)
+    // `auditLog` is fire-and-forget: the row lands after `resolveReport` returns, so wait for it
+    // rather than read it once (the nightly of 2026-10-11 read it first and found 0).
+    const hideAudit = () => db.audit_logs.count({ where: { action: "report.hide_crew", resource_id: reports[0].id } })
+    expect(await until(async () => (await hideAudit()) > 0)).toBe(true)
+    expect(await hideAudit()).toBe(1)
 
     // A second report, then a dissolve: the crew ends and its chat closes.
     const second = await person("mod-second")

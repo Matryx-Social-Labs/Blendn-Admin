@@ -1,25 +1,26 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
-import { IconAlertTriangle, IconLoader2, IconMicrophone2 } from "@tabler/icons-react"
+import { IconMicrophone2, IconSpeakerphone } from "@tabler/icons-react"
 
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { DecideBox } from "@/components/dashboard/decide-box"
+import { Callout, Panel } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { decideCreative, type CreativeQueueRow } from "@/lib/creative-review-actions"
 import { formatDay } from "@/lib/dashboard-format"
 import { refusalMessage } from "@/lib/refusal"
 
 /**
- * Sponsored copy awaiting review.
+ * Sponsored copy awaiting review, one bordered card per revision.
  *
- * The copy is shown as it will appear in the room, prefix included, because that
- * is what is being approved. Reading raw content in a form field and imagining
- * the "📣 [Sponsored]" line is how a reviewer approves something that lands
- * differently than it read.
+ * The copy is shown as the room draws it, because that is what is being
+ * approved: the megaphone and "Sponsored" in place of the author, the brand
+ * beside it, the words under. The server's "📣 [Sponsored]" line is not drawn —
+ * the dashboard's room feed drops it for the same badge (`chat-feed.tsx`), and
+ * reading it here as text was reviewing something no room shows.
  */
 export function CreativeQueue({ rows }: { rows: CreativeQueueRow[] }) {
   if (rows.length === 0) {
@@ -33,7 +34,7 @@ export function CreativeQueue({ rows }: { rows: CreativeQueueRow[] }) {
   }
 
   return (
-    <div className="flex flex-col gap-6 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-0">
+    <div className="flex flex-col gap-3.5">
       {rows.map((row) => (
         <CreativeCard key={row.id} row={row} />
       ))}
@@ -44,10 +45,9 @@ export function CreativeQueue({ rows }: { rows: CreativeQueueRow[] }) {
 function CreativeCard({ row }: { row: CreativeQueueRow }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [note, setNote] = useState("")
-  const [rejecting, setRejecting] = useState(false)
+  const brand = row.brandName ?? "No brand"
 
-  function decide(decision: "approve" | "reject") {
+  function decide(decision: "approve" | "reject", note?: string) {
     startTransition(async () => {
       try {
         await decideCreative(row.id, decision, note)
@@ -64,13 +64,11 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
   }
 
   return (
-    <section className="flex flex-col gap-4 border-t border-border pt-5">
+    <Panel>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem] text-muted-foreground">
-            <span className="text-[0.9375rem] font-bold text-foreground">
-              {row.brandName ?? "No brand"}
-            </span>
+            <h2 className="text-[0.9375rem] font-bold text-foreground">{brand}</h2>
             {row.campaignActive ? (
               /*
                 Live means this campaign is sending an EARLIER approved revision
@@ -82,105 +80,61 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
             {row.isLatest ? null : <span>· superseded</span>}
             {row.hadRejection ? <span>· refused before</span> : null}
           </div>
-          <p className="text-[0.78125rem] text-muted-foreground">
+          <p className="text-[0.8125rem] text-muted-foreground">
             {row.ownerName ?? "Unclaimed brand"} ·{" "}
-            <Link
-              href={`/dashboard/events/${row.eventId}`}
-              className="underline-offset-4 hover:underline"
-            >
+            <Link href={`/dashboard/events/${row.eventId}`} className="underline-offset-4 hover:underline">
               {row.eventTitle}
             </Link>{" "}
             · {formatDay(row.eventStart.toISOString())}
           </p>
         </div>
-        <p className="text-[0.75rem] text-faint-foreground">
-          Submitted {formatDay(row.createdAt.toISOString())}
-        </p>
+        <p className="text-[0.75rem] text-faint-foreground">Submitted {formatDay(row.createdAt.toISOString())}</p>
       </div>
 
       {/* As the room will render it. */}
-      <div className="whitespace-pre-wrap rounded-md border border-border-strong bg-surface-raised px-3.5 py-3 text-[0.875rem] leading-6">
-        {`📣 [Sponsored]\n${row.content}`}
-      </div>
-
-      {row.mediaUrl ? (
-        <div className="flex flex-col gap-1.5">
-          <p className="text-[0.75rem] font-bold uppercase tracking-wide text-faint-foreground">
-            Media {row.mediaType ? `· ${row.mediaType}` : null}
-          </p>
-          <a
-            href={row.mediaUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[0.78125rem] underline underline-offset-4"
-          >
-            {row.mediaUrl}
-          </a>
-        </div>
-      ) : null}
+      <figure className="flex max-w-[520px] flex-col gap-1.5 rounded-[10px] border border-chart-3/40 bg-chart-3/12 px-3.5 py-3">
+        <figcaption className="inline-flex items-center gap-1.5 text-[0.71875rem] font-bold uppercase tracking-[0.06em] text-muted-foreground">
+          <IconSpeakerphone aria-hidden className="size-3.5" />
+          Sponsored · {brand}
+        </figcaption>
+        <p className="whitespace-pre-wrap break-words text-[0.875rem] leading-[22px]">{row.content}</p>
+      </figure>
+      <p className="text-[0.75rem] text-faint-foreground">
+        As it will appear in the room
+        {row.mediaUrl ? (
+          <>
+            {" "}
+            · media{row.mediaType ? ` (${row.mediaType})` : ""}:{" "}
+            <a href={row.mediaUrl} target="_blank" rel="noopener noreferrer" className="break-all underline underline-offset-4">
+              {row.mediaUrl}
+            </a>
+          </>
+        ) : null}
+      </p>
 
       {row.isLatest ? null : (
-        <p className="flex items-center gap-2 text-[0.78125rem] text-muted-foreground">
-          <IconAlertTriangle className="size-3.5 shrink-0 text-warning" />
-          A newer revision of this campaign exists. Deciding this one records the
-          verdict but does not change what runs.
-        </p>
+        <Callout>
+          A newer revision of this campaign exists. Deciding this one records the verdict but does not change what
+          runs.
+        </Callout>
       )}
 
-      {rejecting ? (
-        <div className="flex flex-col gap-2">
-          <Textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="What has to change — it is sent to the organiser, and a refusal with no reason comes back word for word."
-            rows={3}
-            autoFocus
-          />
-          <p className="text-[0.75rem] text-faint-foreground">
-            {note.trim().length < 10
-              ? `${10 - note.trim().length} more characters needed.`
-              : "Ready to send."}
-          </p>
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        {/* What the two buttons actually do, which is not what they say:
-            neither starts a campaign, and one stops a running one. Beside the
-            buttons, where the decision is made, not as a paragraph above the
-            queue. */}
-        <p className="text-[0.75rem] text-faint-foreground">
-          Approve lets the organiser switch it on · Reject stops it now
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-        {rejecting ? (
-          <>
-            <Button type="button" variant="ghost" onClick={() => setRejecting(false)}>
-              Back
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={pending || note.trim().length < 10}
-              onClick={() => decide("reject")}
-            >
-              {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}
-              Send rejection
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button type="button" variant="outline" onClick={() => setRejecting(true)}>
-              Reject
-            </Button>
-            <Button type="button" disabled={pending} onClick={() => decide("approve")}>
-              {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}
-              Approve
-            </Button>
-          </>
-        )}
-        </div>
+      <div className="border-t border-border pt-3.5">
+        <DecideBox
+          approveLabel="Approve"
+          declineLabel="Reject"
+          sendLabel="Send rejection"
+          reasonLabel={`What has to change in ${brand}'s copy`}
+          placeholder="What has to change — it is sent to the organiser, and a refusal with no reason comes back word for word."
+          pending={pending}
+          /* What the two buttons actually do, which is not what they say:
+             neither starts a campaign, and one stops a running one. Beside the
+             buttons, where the decision is made, not above the queue. */
+          hint="Approve lets the organiser switch it on · Reject stops it now"
+          onApprove={() => decide("approve")}
+          onDecline={(reason) => decide("reject", reason)}
+        />
       </div>
-    </section>
+    </Panel>
   )
 }

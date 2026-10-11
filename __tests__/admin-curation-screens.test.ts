@@ -40,7 +40,9 @@ describe("DESIGN_SYSTEM rules the docs already settled", () => {
     for (const rel of [CURATE, CLAIMS, "app/dashboard/claims/venues/page.tsx"]) {
       expect(code(rel)).not.toMatch(/<h1[\s>]/)
     }
-    expect(code(CURATE)).toMatch(/<h2/)
+    // Since step 18 the body's first heading is a kit Panel's title (an h2 in
+    // `components/dashboard/kit.tsx`), not a hand-written one.
+    expect(code(CURATE)).toMatch(/<h2|<Panel\s+title=/)
   })
 
   it("uses container queries, never viewport breakpoints", () => {
@@ -50,7 +52,9 @@ describe("DESIGN_SYSTEM rules the docs already settled", () => {
      * different systems and visibly fell out of step when it collapsed.
      */
     const src = code(CURATE)
-    expect(src).toMatch(/@\w+\/main:/)
+    // The KPI grid is the kit's KpiStrip since step 18 (auto-fit, no
+    // breakpoint); a grid written on the page itself must key off `main`.
+    expect(src).toMatch(/@\w+\/main:|<KpiStrip/)
     expect(src).not.toMatch(/\b(sm|md|lg|xl|2xl):grid-cols/)
   })
 
@@ -198,8 +202,9 @@ describe("curation health separates a wrong pin from a dead listing", () => {
      * and the action returning the sensitive data did not. This returns contact
      * emails and free-text notes for every pending claim on the platform.
      */
-    expect(code("lib/event-claim-actions.ts")).toMatch(/role !== "app_admin"\) throw new Refusal\("Not authorised"\)/)
-    expect(code("app/dashboard/events/curate/queue-actions.ts")).toMatch(/throw new Refusal\("Not authorised"\)/)
+    const queue = (src: string, fn: string) => src.slice(src.indexOf(`export async function ${fn}(`)).slice(0, 1200)
+    expect(queue(code("lib/event-claim-actions.ts"), "getEventClaimQueue")).toMatch(/await requireAdmin\(\)/)
+    expect(queue(code("app/dashboard/events/curate/queue-actions.ts"), "getCurationQueue")).toMatch(/await requireAdmin\(\)/)
   })
 })
 
@@ -373,7 +378,11 @@ describe("what the design review found", () => {
      * trailing report.
      */
     const src = code(CURATE)
-    expect(src.indexOf("Likely a wrong pin")).toBeLessThan(src.indexOf('label="Curated"'))
+    // The tiles are a KpiStrip's items since step 18: `label: "…"`, not a prop.
+    const curated = src.indexOf('label: "Curated"')
+    expect(curated).toBeGreaterThan(-1)
+    expect(src.indexOf('label: "Likely a wrong pin"')).toBeGreaterThan(-1)
+    expect(src.indexOf('label: "Likely a wrong pin"')).toBeLessThan(curated)
   })
 })
 

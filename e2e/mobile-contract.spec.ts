@@ -45,6 +45,9 @@ const ROUTES = [
   "/api/mobile/categories",
   "/api/mobile/amenities",
   "/api/mobile/work-fields",
+  // Matching v2's vocabulary and your this-or-that answers (step 10).
+  "/api/mobile/profile-options",
+  "/api/mobile/me/this-or-that",
   "/api/mobile/venues",
   "/api/mobile/conversations",
   "/api/mobile/notifications",
@@ -61,6 +64,8 @@ const ROUTES = [
   "/api/mobile/crews",
   // My open Blends (step 8): `{ blends }`.
   "/api/mobile/blends",
+  // Do I have Blendn+ (step 11): what the paywall polls after a purchase.
+  "/api/mobile/me/plus",
 ]
 
 /**

@@ -38,7 +38,11 @@ jest.mock("@/lib/auth", () => ({
     return session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session
   },
 }))
-jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
+// The in-transaction writer, as lib/audit-log.ts writes it: through the transaction's audit_logs.
+jest.mock("@/lib/audit-log", () => ({
+  auditLog: jest.fn(),
+  auditInTx: (tx: { audit_logs: { create: (a: unknown) => unknown } }, entry: unknown) => tx.audit_logs.create({ data: entry }),
+}))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { advanceCharge, getChargeLedger, pricePlacement } from "@/lib/charge-actions"

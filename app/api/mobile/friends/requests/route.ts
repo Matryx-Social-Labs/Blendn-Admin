@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { participationRefusal } from "@/lib/event-access"
 import { INVITE_TOKEN, mayConnect, personCard, personSelect, requestFriend } from "@/lib/friends"
 import { identityForRef } from "@/lib/identity"
+import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -113,7 +114,11 @@ export async function POST(request: NextRequest) {
     if (recipientId === me) return errorResponse("You can't add yourself")
     if (!connectable) return notFound()
 
-    return successResponse({ state: await requestFriend(me, recipientId) })
+    const state = await requestFriend(me, recipientId)
+    // Their invite link brought me: the first link a person uses is the one
+    // that counts toward its owner's Blendn+ referral month (lib/plus.ts).
+    if ("token" in parsed.data) await recordReferral(me, recipientId)
+    return successResponse({ state })
   } catch (error) {
     logger.error("Create friend request error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to send friend request")

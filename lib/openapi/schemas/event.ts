@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema } from "./common"
+import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema } from "./common"
 
 /** Likes and waves name somebody only by this event's handle (SCRUM-371). */
 const ThisRoomRefSchema = z.string().min(1).openapi({
@@ -494,6 +494,18 @@ export const MatchListResponseSchema = z
         insideNow: z.boolean(),
         /** Whether you liked them. Never whether they liked you. */
         youLiked: z.boolean(),
+        sharedEvents: z.number().int().describe("Nights you were both at before this one. 0 below the eight-person floor."),
+        sharedPlans: z.number().int().describe("Future events you are both going to. 0 below the floor."),
+        overlaps: z
+          .array(OverlapSchema)
+          .describe(
+            "Matching v2: display-only lines you share, as sentences, rarest first — an IPL team (\"Both CSK — in RCB country 💛\"), a this-or-that answer, and at most ONE Tier B line (a language, a home state or a sign) before a reveal, none in a room below eight people. At most two lines before a reveal, four after. Never scored."
+          ),
+        sign: z
+          .string()
+          .nullable()
+          .describe("Their own sign, \"Leo ♌\", when they chose to show one and the card has Tier B left — never beside a Tier B line before a reveal, never below eight people."),
+        badges: z.array(BadgeSchema).describe("Earned by check-ins. Empty below the eight-person floor (they are attendance facts)."),
       })
     ),
   })

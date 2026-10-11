@@ -125,8 +125,9 @@ describe("filing a claim", () => {
 describe("deciding one", () => {
   const src = code(ACTIONS)
 
-  it("is app_admin only", () => {
-    expect(src).toMatch(/session\?\.user\?\.role !== "app_admin"/)
+  it("is app_admin only, on the role the database holds", () => {
+    const decide = src.slice(src.indexOf("export async function decideEventClaim("))
+    expect(decide).toMatch(/^[\s\S]{0,400}const admin = await requireAdmin\(\)/)
   })
 
   it("re-checks claimability at decision time, not only at filing", () => {

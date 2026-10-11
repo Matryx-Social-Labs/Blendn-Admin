@@ -4,8 +4,8 @@ import { isDeepStrictEqual } from "node:util"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { currentUser } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { currentUser, requireAdmin } from "@/lib/current-user"
+import { auditInTx, auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
 import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
@@ -472,14 +472,13 @@ export async function setVenueOpenOnBlendn(id: string, open: boolean): Promise<v
       data: { open_on_blendn: open },
     })
     if (count === 0) return false
-    await tx.audit_logs.create({
-      data: {
-        user_id: user.id,
-        action: open ? "venue.opened_on_blendn" : "venue.closed_on_blendn",
-        resource: "venue",
-        resource_id: id,
-        details: { open_on_blendn: open },
-      },
+    await auditInTx(tx, {
+      userId: user.id,
+      action: open ? "venue.opened_on_blendn" : "venue.closed_on_blendn",
+      resource: "venue",
+      resourceId: id,
+      details: { open_on_blendn: open },
+      orgId: venue.owner_org_id,
     })
     return true
   })
@@ -572,8 +571,7 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
  * catalogue rather than about one organisation.
  */
 export async function restoreVenue(id: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const { count } = await db.venues.updateMany({
     where: { id, deleted_at: { not: null } },
@@ -599,8 +597,7 @@ export async function restoreVenue(id: string): Promise<void> {
  * that is a dispute, and a dispute has a person in it.
  */
 export async function assignVenueOwner(venueId: string, orgId: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const venue = await db.venues.findUnique({
     where: { id: venueId, deleted_at: null },

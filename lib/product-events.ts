@@ -38,7 +38,21 @@ export const PRODUCT_EVENTS = {
   event_viewed: "event_viewed",
   /** Somebody searched. Never what for — see `props` on the model. */
   searched: "searched",
+  /**
+   * The Blendn+ paywall (step 11), with what opened it as `entity_kind`
+   * (`PAYWALL_TRIGGERS`): shown, dismissed with "Not now", a purchase started,
+   * bought, restored. The app keeps the cooldowns; this is how they are
+   * measured. One row per person, day, step and trigger.
+   */
+  paywall_shown: "paywall_shown",
+  paywall_dismissed: "paywall_dismissed",
+  paywall_purchase_started: "paywall_purchase_started",
+  paywall_purchased: "paywall_purchased",
+  paywall_restored: "paywall_restored",
 } as const
+
+/** What may open the paywall (plan v1 "Upgrade prompts", plus the app's own Plus entry). */
+export const PAYWALL_TRIGGERS = ["go_live_expiry", "second_event", "first_match", "recap", "perk", "profile"] as const
 
 export type ProductEventName = (typeof PRODUCT_EVENTS)[keyof typeof PRODUCT_EVENTS]
 
@@ -190,7 +204,8 @@ export function record(input: {
 
     const at = input.at ?? new Date()
     const day = dayKey(at)
-    const key = [input.userId, day, input.name, input.entityId ?? ""].join(":")
+    // An entity's id, else its kind (a paywall's trigger), so each counts apart.
+    const key = [input.userId, day, input.name, input.entityId ?? input.entityKind ?? ""].join(":")
 
     if (day !== seenDay) {
       seenDay = day

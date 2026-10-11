@@ -11,12 +11,17 @@ import { IconMapPin, IconMicrophone2 } from "@tabler/icons-react"
 import { AttentionStrip } from "@/components/dashboard/attention-strip"
 import { Funnel } from "@/components/dashboard/charts"
 import { DataTable, type Column } from "@/components/dashboard/data-table"
-import { EmptyState, HeroMetric, SectionTitle } from "@/components/dashboard/primitives"
+import { Panel } from "@/components/dashboard/kit"
+import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
 import type { AdminOverview, CityRow, OrganiserSupplyRow } from "@/lib/dashboard-types"
-import { formatCompact, formatNumber, formatSince } from "@/lib/dashboard-format"
+import { formatCompact, formatNumber } from "@/lib/dashboard-format"
 
 /**
  * Admin overview — five panels, derived from what an admin needs answered.
+ * On the kit since step 18 (`admin-decisions.jsx` AdminOverview): bordered
+ * Panels for the loop, turn-up, supply and cities, in this order. The kit's
+ * 7d/30d/90d tabs are not here — the top bar's range control already drives
+ * this screen, and two controls for one range would disagree.
  *
  * ## The board, and what it replaced
  *
@@ -37,34 +42,26 @@ import { formatCompact, formatNumber, formatSince } from "@/lib/dashboard-format
  *
  * `DESIGN_SYSTEM.md` allows exactly one `HeroMetric` per screen and the admin
  * overview had none, which is why eleven tiles at identical weight had nowhere
- * for the eye to land. The hero is the last stage of the loop: how many people
- * this product has actually introduced to somebody. It is the only figure here
- * that says whether the thesis holds, and on staging it is zero.
+ * for the eye to land. The hero is "came back": people who returned for a
+ * second event, read by name rather than as the last stage (SCRUM-313). It is
+ * the only figure here that says whether the thesis holds.
  */
 /* Columns are static — hoisted to module scope so the two tables can live in
  * their own panel components without either re-creating them per render. */
+/*
+ * Organiser, Published, Share — the kit's three. Drafts and Last event were
+ * here too and are the Organisers screen's (a row opens it); in a half-width
+ * Supply panel they pushed the table into a sideways scroll at 1280.
+ */
 const supplyColumns: Column<OrganiserSupplyRow>[] = [
   { key: "name", label: "Organiser", sortType: "string", primary: true },
   { key: "published", label: "Published", align: "right", sortType: "number" },
-  { key: "drafts", label: "Drafts", align: "right", secondary: true, sortType: "number" },
   {
     key: "sharePct",
     label: "Share",
     align: "right",
     sortType: "number",
     render: (r) => `${r.sharePct}%`,
-  },
-  {
-    key: "lastEventAt",
-    label: "Last event",
-    align: "right",
-    // Sorting the rendered "31d ago" string puts 31d before 3d. Sort the
-    // date; a host who has never run one sorts last either way, which is
-    // what you want when hunting for the most recent.
-    sortType: "date",
-    sortValue: (r) => (r.lastEventAt ? new Date(r.lastEventAt) : null),
-    render: (r) => formatSince(r.lastEventAt),
-    secondary: true,
   },
 ]
 
@@ -131,12 +128,12 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
   const topHost = data.supply[0]
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {/* 1 — is anything waiting on me */}
       <AttentionStrip queues={data.attention} now={new Date(data.generatedAt)} />
 
       {/* 2 — is the loop closing */}
-      <div className="grid gap-6 @3xl/main:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="grid items-start gap-5 @3xl/main:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         {/*
           First in DOM, `order-last` inside the container: the hero reads first
           on a narrow column and sits to the right of the bars on a wide one.
@@ -163,8 +160,8 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
           }
           className="@3xl/main:order-last"
         />
-        <Funnel
-          stages={data.funnel}
+        <Panel
+          title="The loop"
           /*
             The liveness signal rides here rather than on its own tile.
             Alone it answered nothing; against "signed up" it answers how much
@@ -173,26 +170,28 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
             refresh-token proxy while `product_events` is still filling — and a
             figure that can come from either has to say which.
           */
-          hint={`all time · distinct people · ${formatNumber(
-            data.activeThisWeek.count
-          )} ${
+          hint={`all time · distinct people · ${formatNumber(data.activeThisWeek.count)} ${
             data.activeThisWeek.source === "app_opens"
               ? "opened the app in the last 7 days"
               : "held a session in the last 7 days"
           }`}
-          empty={signedUp === 0}
-        />
+        >
+          <Funnel stages={data.funnel} empty={signedUp === 0} />
+          {/* The screen's one memorable line: why the last stages are drawn apart. */}
+          <p className="text-[0.75rem] text-faint-foreground">
+            The stages after checked in need verified attendance — nobody else can measure them.
+          </p>
+        </Panel>
       </div>
 
       {/* 3 and 4 — did they turn up, and is there anything to turn up to */}
-      <div className="grid gap-8 @3xl/main:grid-cols-2">
+      <div className="grid items-start gap-5 @3xl/main:grid-cols-2">
         <TurnUp data={data} />
         <Supply data={data} topHost={topHost} />
       </div>
 
       {/* 5 — where next */}
-      <div className="flex flex-col gap-3">
-        <SectionTitle hint="demand against supply">Cities</SectionTitle>
+      <Panel title="Cities" hint="demand against supply · a row opens curation for that city">
         <DataTable
           columns={cityColumns}
           rows={data.cities.map((city) => ({ ...city, id: city.city }))}
@@ -212,9 +211,14 @@ export function OverviewAdmin({ data }: { data: AdminOverview }) {
             no Saves column in it, defining a word the reader could not see.
             The same class on both keeps the legend and its column together.
           */
-          footer={<span className="hidden @2xl/main:inline">saves = demand ahead of RSVP</span>}
+          footer={
+            <span>
+              Waiting = distinct people who looked here and found nothing
+              <span className="hidden @2xl/main:inline"> · saves = demand ahead of RSVP</span>
+            </span>
+          }
         />
-      </div>
+      </Panel>
     </div>
   )
 }
@@ -234,8 +238,7 @@ function TurnUp({ data }: { data: AdminOverview }) {
   const total = refusals.byReason.reduce((sum, r) => sum + r.people, 0)
 
   return (
-    <section className="flex flex-col gap-3">
-      <SectionTitle hint={data.rangeLabel}>Turn-up</SectionTitle>
+    <Panel title="Turn-up" hint={data.rangeLabel}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-[length:var(--text-metric)] font-bold leading-tight tabular-nums">
           {formatCompact(data.checkIns)}
@@ -265,7 +268,7 @@ function TurnUp({ data }: { data: AdminOverview }) {
           Nobody was turned away at a door this window.
         </p>
       ) : (
-        <div className="flex flex-col gap-2.5 pt-1">
+        <div className="flex flex-col gap-2.5 border-t border-border pt-3.5">
           <div className="flex items-baseline justify-between gap-3 text-[0.8125rem]">
             <span className="font-medium">
               {formatNumber(refusals.total)} turned away
@@ -304,7 +307,7 @@ function TurnUp({ data }: { data: AdminOverview }) {
           </ul>
         </div>
       )}
-    </section>
+    </Panel>
   )
 }
 
@@ -315,8 +318,7 @@ function Supply({ data, topHost }: { data: AdminOverview; topHost?: OrganiserSup
   const { publishing, total } = data.publishingHosts
 
   return (
-    <section className="flex flex-col gap-3">
-      <SectionTitle hint="forward-looking">Supply</SectionTitle>
+    <Panel title="Supply" hint="forward-looking">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-[length:var(--text-metric)] font-bold leading-tight tabular-nums">
           {formatCompact(data.upcomingEvents)}
@@ -349,27 +351,20 @@ function Supply({ data, topHost }: { data: AdminOverview; topHost?: OrganiserSup
         />
       </div>
 
-      <div className="flex flex-col gap-3 pt-2">
-        <SectionTitle
-          hint={data.supply.length ? `${data.supply.length} publishing` : undefined}
-        >
-          By organiser
-        </SectionTitle>
-        <DataTable
-          columns={supplyColumns}
-          rows={data.supply}
-          sortable
-          rowHref={(row) => `/dashboard/organisers/${row.id}`}
-          emptyState={
-            <EmptyState
-              icon={<IconMicrophone2 />}
-              title="No organisers publishing yet"
-              description="Rows appear as organiser accounts publish events — concentration here is the host-liquidity risk signal."
-            />
-          }
-        />
-      </div>
-    </section>
+      <DataTable
+        columns={supplyColumns}
+        rows={data.supply}
+        sortable
+        rowHref={(row) => `/dashboard/organisers/${row.id}`}
+        emptyState={
+          <EmptyState
+            icon={<IconMicrophone2 />}
+            title="No organisers publishing yet"
+            description="Rows appear as organiser accounts publish events — concentration here is the host-liquidity risk signal."
+          />
+        }
+      />
+    </Panel>
   )
 }
 

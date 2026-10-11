@@ -4,8 +4,9 @@ import { Refusal } from "@/lib/refusal"
 import { revalidatePath } from "next/cache"
 import type { report_status } from "@prisma/client"
 
-import { auditLog } from "@/lib/audit-log"
-import { getAuth } from "@/lib/auth"
+import { auditInTx } from "@/lib/audit-log"
+import { ALREADY_DECIDED, decisionFrom, refuseUnlessDecided } from "@/lib/decision"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
 import { closePostRooms, closeRoomSockets } from "@/lib/room-close"
@@ -78,14 +79,8 @@ export interface ReportRow {
   reviewedBy: string | null
 }
 
-export type ReportDecision =
-  | "dismiss"
-  | "remove_message"
-  | "suspend"
-  | "reinstate"
-  | "delist"
-  | "hide_crew"
-  | "dissolve_crew"
+const REPORT_DECISIONS = ["dismiss", "remove_message", "suspend", "reinstate", "delist", "hide_crew", "dissolve_crew"] as const
+export type ReportDecision = (typeof REPORT_DECISIONS)[number]
 
 /**
  * `report_status` has three values and this uses two of them.
@@ -117,8 +112,7 @@ export async function getReportQueue(status: report_status = "pending") {
   // view, not this function. A server action is a POST endpoint dispatched by
   // action id with no page component in the path, and this one returns private
   // message content beside real names and email addresses.
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") throw new Refusal("Not authorised")
+  await requireAdmin()
 
   const now = Date.now()
 
@@ -478,14 +472,15 @@ export async function getReportQueue(status: report_status = "pending") {
  *   from every surface outside the crew, or ended. Crew reports only.
  */
 export async function resolveReport(
-  kind: "user" | "message" | "event",
+  kindInput: "user" | "message" | "event",
   reportId: string,
-  decision: ReportDecision
+  decisionInput: ReportDecision
 ) {
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") {
-    throw new Refusal("Only platform admins can resolve reports")
-  }
+  const admin = await requireAdmin()
+  // Before anything else: the kind picks the table and the decision the outcome,
+  // and neither may be a word this queue does not take (M2).
+  const kind = decisionFrom(["user", "message", "event"], kindInput)
+  const decision = decisionFrom(REPORT_DECISIONS, decisionInput)
 
   const report =
     kind === "user"
@@ -513,9 +508,7 @@ export async function resolveReport(
    * be lifted by somebody with database access. Found by suspending and then
    * trying to undo it.
    */
-  if (decision !== "reinstate" && report.status !== "pending") {
-    throw new Refusal("This report has already been reviewed")
-  }
+  if (decision !== "reinstate" && report.status !== "pending") throw new Refusal(ALREADY_DECIDED)
 
   const subject =
     kind === "user"
@@ -557,7 +550,7 @@ export async function resolveReport(
 
   const reviewed = {
     status: OUTCOME[decision === "reinstate" ? "dismiss" : decision],
-    reviewed_by: session.user.id,
+    reviewed_by: admin.id,
     reviewed_at: new Date(),
   }
 
@@ -571,13 +564,16 @@ export async function resolveReport(
     // A reinstate after the fact leaves the report's own verdict alone: the
     // report was upheld, the suspension is what is being lifted.
     if (decision !== "reinstate" || report.status === "pending") {
-      if (kind === "user") {
-        await tx.user_reports.update({ where: { id: reportId }, data: reviewed })
-      } else if (kind === "event") {
-        await tx.event_reports.update({ where: { id: reportId }, data: reviewed })
-      } else {
-        await tx.message_reports.update({ where: { id: reportId }, data: reviewed })
-      }
+      // Conditional on still pending: of two admins acting on one report, one
+      // writes and the other is refused before anything else changes (H1).
+      const pending = { id: reportId, status: "pending" as const }
+      const decided =
+        kind === "user"
+          ? await tx.user_reports.updateMany({ where: pending, data: reviewed })
+          : kind === "event"
+            ? await tx.event_reports.updateMany({ where: pending, data: reviewed })
+            : await tx.message_reports.updateMany({ where: pending, data: reviewed })
+      refuseUnlessDecided(decided.count)
     }
 
     /*
@@ -621,7 +617,7 @@ export async function resolveReport(
     } else if (decision === "remove_message") {
       await tx.chat_messages.update({
         where: { id: (report as { message_id: string }).message_id },
-        data: { deleted_at: new Date(), deleted_by: session.user.id },
+        data: { deleted_at: new Date(), deleted_by: admin.id },
       })
     }
 
@@ -671,12 +667,27 @@ export async function resolveReport(
     }
 
     if (decision === "suspend" && subjectId) {
-      await applySuspension(tx, subjectId, session.user.id)
+      await applySuspension(tx, subjectId, admin.id)
     }
 
     if (decision === "reinstate" && subjectId) {
       await liftSuspension(tx, subjectId)
     }
+
+    // With the decision, so a refused race writes no record and a recorded one was made.
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: `report.${decision}`,
+      resource: kind === "user" ? "user_report" : kind === "event" ? "event_report" : "message_report",
+      resourceId: reportId,
+      details: {
+        subjectId,
+        // Which board post came down, so the audit row names it without a join.
+        ...(subject.boardPost && { boardPostId: (report as { message_id: string }).message_id }),
+        ...(crewReport && { crewId: (report as { message_id: string }).message_id }),
+        ...(removed !== null && { removed }),
+      },
+    })
   })
 
   /*
@@ -700,23 +711,6 @@ export async function resolveReport(
     // Their access token stops working now, not one lifetime from now.
     blockAccountNow(subjectId)
   }
-
-  // Fire-and-forget by design (see lib/audit-log.ts): the decision is already
-  // committed, so a failed audit write must not make the admin think their
-  // action failed.
-  auditLog({
-    userId: session.user.id,
-    action: `report.${decision}`,
-    resource: kind === "user" ? "user_report" : kind === "event" ? "event_report" : "message_report",
-    resourceId: reportId,
-    details: {
-      subjectId,
-      // Which board post came down, so the audit row names it without a join.
-      ...(subject.boardPost && { boardPostId: (report as { message_id: string }).message_id }),
-      ...(crewReport && { crewId: (report as { message_id: string }).message_id }),
-      ...(removed !== null && { removed }),
-    },
-  })
 
   revalidatePath("/dashboard/moderation/reports")
   revalidatePath("/dashboard/moderation")

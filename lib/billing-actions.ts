@@ -1,5 +1,6 @@
 "use server"
 
+import { auditInTx } from "./audit-log"
 import { revalidatePath } from "next/cache"
 import type { Prisma } from "@prisma/client"
 import { z } from "zod"
@@ -7,9 +8,9 @@ import { z } from "zod"
 import { analyticsAccess, mayOpenEvent } from "@/lib/analytics-access"
 import { billingOrgFor, ONE_OPEN_PER_ORG, ONE_OPEN_PER_VENUE, OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { BILLING_PLANS, chargeMinor, type BillingPlanKey } from "@/lib/billing-plans"
-import { currentUser } from "@/lib/current-user"
+import { currentUser, requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
-import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, revokePaid } from "@/lib/entitlements"
+import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, livePlus, revokePaid } from "@/lib/entitlements"
 import { razorpayKeys } from "@/lib/env"
 import { realEventsWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
@@ -247,15 +248,15 @@ async function startSubscription(
           created_by: user.id,
         },
       })
-      await tx.audit_logs.create({
-        data: {
-          user_id: user.id,
+      await auditInTx(tx, {
+          userId: user.id,
           action: "billing.checkout.started",
           resource: scope.venueId ? "venue" : "organisation",
-          resource_id: scope.venueId ?? scope.orgId,
+          resourceId: scope.venueId ?? scope.orgId,
           details: { plan: plan.key, providerRef: sub.id, orgId: scope.orgId },
-        },
-      })
+          // The payer's (step 18, M3): a venue's checkout is its payer's business.
+          orgId: scope.orgId,
+        })
       return sub.id
     }, TX)
     return { kind: "subscription", keyId, subscriptionId }
@@ -374,15 +375,14 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
           created_by: user.id,
         },
       })
-      await tx.audit_logs.create({
-        data: {
-          user_id: user.id,
+      await auditInTx(tx, {
+          userId: user.id,
           action: "billing.checkout.started",
           resource: "organisation",
-          resource_id: org.orgId,
+          resourceId: org.orgId,
           details: { plan: plan.key, providerRef: created.id, eventId: id },
-        },
-      })
+          orgId: org.orgId,
+        })
       return { orderId: created.id, amountMinor: chargeMinor(plan) }
     }, TX)
     return { kind: "order", keyId, ...order }
@@ -467,9 +467,9 @@ async function cancelOpen(
 /** An admin's money actions: grants, ends and revokes, per admin. */
 const ADMIN_ACTIONS = { max: 30, windowMs: 60_000 }
 
-async function requireAdmin() {
-  const user = await currentUser()
-  if (!user || user.role !== "app_admin") throw new Refusal("Forbidden")
+/** `requireAdmin`, then the admin's own limit on money changes. */
+async function requireAdminWithinLimit() {
+  const user = await requireAdmin()
   // Counted before the action runs, refusals included: a script holding an
   // admin session cannot loop grants.
   const { count } = await hit(`billing:admin:${user.id}`, ADMIN_ACTIONS.windowMs)
@@ -477,27 +477,25 @@ async function requireAdmin() {
   return user
 }
 
-const RESOURCE = { org: "organisation", venue: "venue" } as const
+const RESOURCE = { org: "organisation", venue: "venue", user: "user" } as const
 
 /** End the subject's live grants and audit it, in one transaction: neither happens alone. */
 async function endGrantAudited(
   adminId: string,
-  subject: { kind: "org" | "venue"; id: string },
-  product: "analytics" | "venue_pro",
+  subject: { kind: "org" | "venue" | "user"; id: string },
+  product: "analytics" | "venue_pro" | "plus",
   reason: string
 ): Promise<void> {
   await db.$transaction(async (tx) => {
     const ended = await endGrants(subject, product, new Date(), tx)
     if (ended === 0) throw new Refusal("That grant has already ended.")
-    await tx.audit_logs.create({
-      data: {
-        user_id: adminId,
+    await auditInTx(tx, {
+        userId: adminId,
         action: "entitlement.grant_ended",
         resource: RESOURCE[subject.kind],
-        resource_id: subject.id,
+        resourceId: subject.id,
         details: { product: product, ended: ended, reason: reason },
-      },
-    })
+      })
   })
 }
 
@@ -511,21 +509,25 @@ async function revokePaidAudited(
   await db.$transaction(async (tx) => {
     const revoked = await revokePaid(subject, entitlementId, new Date(), tx)
     if (!revoked) throw new Refusal("That entitlement isn't live, or isn't a paid one.")
-    await tx.audit_logs.create({
-      data: {
-        user_id: adminId,
+    // The payer's — the checkout's organisation, never the venue's owner now
+    // (step 18, M3). A paid entitlement with no checkout here is the platform's alone.
+    const payer = revoked.externalRef
+      ? await tx.billing_checkouts.findFirst({ where: { provider_ref: revoked.externalRef }, select: { org_id: true } })
+      : null
+    await auditInTx(tx, {
+        userId: adminId,
         action: "entitlement.revoked",
         resource: RESOURCE[subject.kind],
-        resource_id: subject.id,
+        resourceId: subject.id,
         details: { product: revoked.product, externalRef: revoked.externalRef, entitlementId: revoked.id, reason: reason },
-      },
-    })
+        orgId: subject.kind === "org" ? subject.id : (payer?.org_id ?? null),
+      })
   })
 }
 
 /** The founding grant is six months (plan v2 §9.1b); an admin may choose 1–24. */
 export async function grantAnalytics(orgId: string, months: number, reason: string): Promise<{ expiresAt: string }> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, orgId, "Organisation not found")
   const length = parse(monthsSchema, months, "A grant runs between 1 and 24 months.")
   const why = parse(reasonSchema, reason, "Record why this organisation is being given Analytics (10 to 500 characters).")
@@ -541,15 +543,13 @@ export async function grantAnalytics(orgId: string, months: number, reason: stri
       throw new Refusal("This organisation already has a grant. End it before giving a new one.")
     }
     const made = await grantEntitlement(tx, { subject: { kind: "org", id }, product: "analytics", months: length })
-    await tx.audit_logs.create({
-      data: {
-        user_id: admin.id,
+    await auditInTx(tx, {
+        userId: admin.id,
         action: "entitlement.granted",
         resource: "organisation",
-        resource_id: id,
+        resourceId: id,
         details: { product: "analytics", months: length, expiresAt: made.expiresAt.toISOString(), reason: why, orgName: org.display_name },
-      },
-    })
+      })
     return made
   })
   revalidatePath("/dashboard/organisations")
@@ -558,7 +558,7 @@ export async function grantAnalytics(orgId: string, months: number, reason: stri
 
 /** End every live Analytics grant on the organisation, now. */
 export async function endAnalyticsGrant(orgId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, orgId, "Organisation not found")
   const why = parse(reasonSchema, reason, "Give a reason for ending this grant (10 to 500 characters).")
   await endGrantAudited(admin.id, { kind: "org", id }, "analytics", why)
@@ -571,7 +571,7 @@ export async function endAnalyticsGrant(orgId: string, reason: string): Promise<
  * Razorpay's dashboard, and the reason says so.
  */
 export async function revokePaidEntitlement(orgId: string, entitlementId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, orgId, "Organisation not found")
   const ent = parse(idSchema, entitlementId, "That entitlement isn't live.")
   const why = parse(reasonSchema, reason, "Give a reason for revoking it (10 to 500 characters).")
@@ -589,7 +589,7 @@ export async function revokePaidEntitlement(orgId: string, entitlementId: string
  * venue: Pro is for the owner, and an unclaimed venue has none.
  */
 export async function grantVenuePro(venueId: string, months: number, reason: string): Promise<{ expiresAt: string }> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, venueId, "Venue not found")
   const length = parse(monthsSchema, months, "A grant runs between 1 and 24 months.")
   const why = parse(reasonSchema, reason, "Record why this venue is being given Venue Pro (10 to 500 characters).")
@@ -605,12 +605,11 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
       throw new Refusal("This venue already has a grant. End it before giving a new one.")
     }
     const made = await grantEntitlement(tx, { subject: { kind: "venue", id }, product: "venue_pro", months: length })
-    await tx.audit_logs.create({
-      data: {
-        user_id: admin.id,
+    await auditInTx(tx, {
+        userId: admin.id,
         action: "entitlement.granted",
         resource: "venue",
-        resource_id: id,
+        resourceId: id,
         details: {
           product: "venue_pro",
           months: length,
@@ -619,8 +618,9 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
           venueName: venue.name,
           orgId: venue.owner_org_id,
         },
-      },
-    })
+        // Given to the owner it was given to.
+        orgId: venue.owner_org_id,
+      })
     return made
   })
   revalidatePath(`/dashboard/venues/${id}`)
@@ -629,7 +629,7 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
 
 /** End every live Venue Pro grant on the venue, now. */
 export async function endVenueProGrant(venueId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, venueId, "Venue not found")
   const why = parse(reasonSchema, reason, "Give a reason for ending this grant (10 to 500 characters).")
   await endGrantAudited(admin.id, { kind: "venue", id }, "venue_pro", why)
@@ -638,10 +638,82 @@ export async function endVenueProGrant(venueId: string, reason: string): Promise
 
 /** End a venue's live PAID Venue Pro now (as `revokePaidEntitlement`). Nothing is cancelled at Razorpay. */
 export async function revokeVenueProPaid(venueId: string, entitlementId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, venueId, "Venue not found")
   const ent = parse(idSchema, entitlementId, "That entitlement isn't live.")
   const why = parse(reasonSchema, reason, "Give a reason for revoking it (10 to 500 characters).")
   await revokePaidAudited(admin.id, { kind: "venue", id }, ent, why)
   revalidatePath(`/dashboard/venues/${id}`)
 }
+
+/* -------------------------------------------------------------------------- */
+/* Platform admin: a person's Blendn+ (SCRUM-583)                               */
+/* -------------------------------------------------------------------------- */
+
+/** User ids are cuids, not uuids. */
+const userIdSchema = z.string().trim().min(1).max(64)
+
+/**
+ * A person's Blendn+, for the admin's control on the Users page: the live
+ * admin grant (theirs to end), and what the person holds now, from wherever
+ * (a store, a trial, a referral month) — shown, never ended here: a store's
+ * purchase is the store's.
+ */
+export async function personPlus(userId: string): Promise<{
+  grant: { expiresAt: string | null } | null
+  held: { product: string; source: string; expiresAt: string | null } | null
+}> {
+  await requireAdmin()
+  const id = parse(userIdSchema, userId, "Person not found")
+  const subject = { kind: "user" as const, id }
+  const [grant, held] = await Promise.all([liveGrant(subject, "plus"), livePlus(id)])
+  return {
+    grant: grant ? { expiresAt: grant.expiresAt?.toISOString() ?? null } : null,
+    held: held ? { product: held.product, source: held.source, expiresAt: held.expiresAt?.toISOString() ?? null } : null,
+  }
+}
+
+/**
+ * Blendn+ at no charge, for 1–24 months: the App Review account (Apple's
+ * reviewers buy in the sandbox, which production never grants), a Night Pass
+ * whose delivery was lost, goodwill. One live admin grant per person; the
+ * grant and its audit row are one transaction.
+ */
+export async function grantPlus(userId: string, months: number, reason: string): Promise<{ expiresAt: string }> {
+  const admin = await requireAdmin()
+  const id = parse(userIdSchema, userId, "Person not found")
+  const length = parse(monthsSchema, months, "A grant runs between 1 and 24 months.")
+  const why = parse(reasonSchema, reason, "Record why this person is being given Blendn+ (10 to 500 characters).")
+
+  const person = await db.user.findFirst({ where: { id, deletedAt: null }, select: { id: true, email: true, suspended_at: true } })
+  if (!person) throw new Refusal("Person not found")
+  if (person.suspended_at) throw new Refusal("A suspended account can't be given Blendn+.")
+
+  const grant = await db.$transaction(async (tx) => {
+    await lockOrg(tx, "grant-user", id)
+    if (await liveGrant({ kind: "user", id }, "plus", new Date(), tx)) {
+      throw new Refusal("This person already has a grant. End it before giving a new one.")
+    }
+    const made = await grantEntitlement(tx, { subject: { kind: "user", id }, product: "plus", months: length })
+    await auditInTx(tx, {
+        userId: admin.id,
+        action: "entitlement.granted",
+        resource: "user",
+        resourceId: id,
+        details: { product: "plus", months: length, expiresAt: made.expiresAt.toISOString(), reason: why },
+      })
+    return made
+  })
+  revalidatePath("/dashboard/users")
+  return { expiresAt: grant.expiresAt.toISOString() }
+}
+
+/** End the person's live admin grant of Blendn+, now. Never a store purchase, a trial or a referral month. */
+export async function endPlusGrant(userId: string, reason: string): Promise<void> {
+  const admin = await requireAdmin()
+  const id = parse(userIdSchema, userId, "Person not found")
+  const why = parse(reasonSchema, reason, "Give a reason for ending this grant (10 to 500 characters).")
+  await endGrantAudited(admin.id, { kind: "user", id }, "plus", why)
+  revalidatePath("/dashboard/users")
+}
+

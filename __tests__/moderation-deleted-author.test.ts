@@ -14,6 +14,8 @@ const mockDb = {
   },
   chat_messages: { count: jest.fn().mockResolvedValue(0) },
   photo_checks: { count: jest.fn().mockResolvedValue(0) },
+  // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
+  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))

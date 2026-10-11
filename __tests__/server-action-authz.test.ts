@@ -47,7 +47,7 @@ function serverActionFiles(): string[] {
 
 /** Any of the ways this codebase establishes who is calling. */
 const READS_SESSION =
-  /getAuth\(|await auth\(\)|requireUser\(|requireAdmin\(|requireOrgRole\(|actorFor\(/
+  /getAuth\(|await auth\(\)|requireUser\(|requireAdmin\(|requireOrgRole\(|actorFor\(|currentUser\(/
 
 describe("server actions authorise themselves", () => {
   const files = serverActionFiles()

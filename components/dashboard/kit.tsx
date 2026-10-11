@@ -250,10 +250,16 @@ export function DateBlock({ day, month, live }: { day: string | number; month: s
         live ? "border-destructive/50" : "border-border"
       )}
     >
+      {/*
+        Live is ink on the red, not red on the tile: red 10px text on
+        surface-raised measured 4.25:1 (axe, step 18, an admin's events list
+        with a night running), and ink on --destructive is 5.1:1 — the nav
+        badge's reasoning in globals.css.
+      */}
       <span
         className={cn(
           "text-[0.625rem] font-medium uppercase tracking-[0.08em]",
-          live ? "text-destructive" : "text-muted-foreground"
+          live ? "rounded-[3px] bg-destructive px-1 font-bold text-destructive-foreground" : "text-muted-foreground"
         )}
       >
         {live ? "Live" : month}

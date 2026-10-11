@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { blockCounterparties } from "@/lib/conversations"
+import { keptApartIn } from "@/lib/conversations"
 import { NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { ownerDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
@@ -87,7 +87,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * the count as well as the page: a filtered list under an unfiltered total
      * says "50 members" over 49 rows, which is its own quiet tell.
      */
-    const hidden = await blockCounterparties(authUser.userId)
+    // In a board post's room, a closed conversation too (`keptApartIn`, step 10 review H2).
+    const hidden = await keptApartIn(authUser.userId, chatGroup.kind)
     /*
      * In a room that is not an event's, only the people its owner admits: a
      * member row is not membership there (F8). Null for an event's room.
