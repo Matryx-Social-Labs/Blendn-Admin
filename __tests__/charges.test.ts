@@ -23,7 +23,10 @@ const mockDb = {
   // A transaction runs its callback against the same client.
   $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>): Promise<unknown> => cb(mockDb)),
   // The role is read from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
+  user: {
+    findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })),
+    findMany: jest.fn(),
+  },
   audit_logs: { create: jest.fn() },
   billing_checkouts: { update: jest.fn() },
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },
@@ -278,6 +281,50 @@ describe("the ledger", () => {
     ])
     // Money that was voided is not money settled.
     expect(ledger.totals).toEqual([{ currency: "INR", settledMinor: 0, agreedMinor: 0 }])
+  })
+
+  it("names who voided a charge: the admin, Razorpay for a webhook void, nobody for a deleted admin (SCRUM-611)", async () => {
+    const voidRow = (id: string, voided_by: string | null, void_reason: string | null) => ({
+      id,
+      amount_minor: 100000,
+      currency: "INR",
+      status: "void",
+      agreed_at: new Date(),
+      settled_at: new Date(),
+      external_ref: "plink_1",
+      created_at: new Date(),
+      voided_at: new Date(),
+      voided_by,
+      void_reason,
+      pricer: null,
+    })
+    mockDb.user.findMany.mockResolvedValue([{ id: "admin-1", name: "Ada Admin" }])
+    placements([
+      {
+        ...base,
+        charges: [
+          voidRow("refund", null, "Refunded at Razorpay (rfnd_1)"),
+          voidRow("dispute", null, "Dispute lost at Razorpay (pay_1)"),
+          voidRow("by-admin", "admin-1", "duplicate invoice"),
+          // An admin typed a reason that happens to open like the webhook's: still an admin's void.
+          voidRow("deleted-admin", "gone-1", "Refunded at Razorpay by hand, the sponsor asked"),
+          // Not worded by the webhook and no voider: nothing to name.
+          voidRow("unknown", null, "something else"),
+          voidRow("before-reasons", null, null),
+        ],
+      },
+    ])
+
+    const ledger = await getChargeLedger()
+
+    expect(Object.fromEntries(ledger.placements[0].voided.map((v) => [v.id, v.voidedByName]))).toEqual({
+      refund: "Razorpay (refund)",
+      dispute: "Razorpay (dispute lost)",
+      "by-admin": "Ada Admin",
+      "deleted-admin": null,
+      unknown: null,
+      "before-reasons": null,
+    })
   })
 
   it("totals per currency, never across them", async () => {

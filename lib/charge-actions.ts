@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { paymentsOn } from "@/lib/billing"
+import { webhookVoider } from "@/lib/charge-void-source"
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
@@ -130,6 +131,11 @@ export interface VoidedCharge {
   /** Null only on a void from before reasons were kept — those have no voider either. */
   reason: string | null
   voidedAt: Date | null
+  /**
+   * The admin's name; "Razorpay (refund)" / "Razorpay (dispute lost)" for a void
+   * the webhook made (`voided_by` NULL by design, SCRUM-611); null when the admin
+   * was since deleted, or the void predates reasons.
+   */
   voidedByName: string | null
 }
 
@@ -263,7 +269,7 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
           externalRef: c.settled_at ? c.external_ref : null,
           reason: c.void_reason,
           voidedAt: c.voided_at,
-          voidedByName: (c.voided_by && voiders.get(c.voided_by)) ?? null,
+          voidedByName: (c.voided_by && voiders.get(c.voided_by)) || webhookVoider(c.voided_by, c.void_reason),
         })),
     }
   })
