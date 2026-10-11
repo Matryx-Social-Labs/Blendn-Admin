@@ -1,6 +1,9 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
+// The alert history's "Mark as seen" is a server action; rendering never runs it.
+jest.mock("@/app/dashboard/events/[id]/issue-actions", () => ({ acknowledgeIssue: jest.fn() }))
+
 import { Overview } from "@/app/dashboard/events/[id]/overview"
 import type { EventOverview } from "@/lib/event-overview"
 

@@ -203,7 +203,7 @@ export default async function EventDetailPage({
    * the future.
    */
   const hasRun = overview.state === "live" || overview.state === "over"
-  const [attendance, connections, turnedAway, history] = await Promise.all([
+  const [attendance, connections, turnedAway] = await Promise.all([
     // Day by day, newcomers and returning: cells of a few people. Not a venue's.
     hasRun && !venueView ? getEventAttendance(event.id) : null,
     // Not the venue's either: its suppressed state names the attendee count
@@ -224,15 +224,17 @@ export default async function EventDetailPage({
      * unchanged. A draft cannot be checked in to at all.
      */
     overview.state !== "draft" ? eventRefusals(event.id) : null,
-    /*
-     * The record of what the room's watch saw while it ran (F6). The Live tab
-     * lists it and exists only while the event does, so once it is over this is
-     * the one place a person can ask "did anything go wrong". Read for whoever
-     * may operate the event, and nobody else: a venue gets the sentences it is
-     * sent live, with no figure in them, as there.
-     */
-    overview.state === "over" && permissions.canOperate ? issuesFor(event.id) : null,
   ])
+
+  /*
+   * The record of what the room's watch saw while it ran (F6). The Live tab
+   * lists it and exists only while the event does, so once it is over this is
+   * the one place a person can ask "did anything go wrong". Read for whoever
+   * may operate the event, and nobody else: a venue gets the sentences it is
+   * sent live, with no figure in them, as there. After the batch above, which
+   * a guard pins as the one place the page's counts are read together.
+   */
+  const history = overview.state === "over" && permissions.canOperate ? await issuesFor(event.id) : null
   const alertHistory = history && (permissions.canEdit ? history : alertsForVenue(history))
 
   /*
