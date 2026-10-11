@@ -36,6 +36,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { OFFER_PUSH_BODY, OFFER_PUSH_TITLE } from "@/lib/offers/deliver"
 import * as entitlementsModule from "@/lib/entitlements"
 import * as passCodeModule from "@/lib/offers/pass-code"
+import * as rateLimitStore from "@/lib/rate-limit-store"
 import { passCode, passStep } from "@/lib/offers/pass-code"
 import { venueOffersView, weekStart } from "@/lib/offers/venue"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
@@ -651,15 +652,59 @@ describe("review pass 2", () => {
     expect(await db.venue_offer_sends.count({ where: { offer_id: offer.id, redeemed_at: { not: null } } })).toBe(1)
   })
 
-  it("ten wrong codes lock a venue's door for five minutes, even to a right one (L1)", async () => {
+  it("twenty wrong codes at once lock the door — every one counted, answered after counting — and a right code is refused while it is locked (L1, race scan)", async () => {
     const offer = await db.venue_offers.findFirstOrThrow({ where: { venue_id: A }, orderBy: { created_at: "asc" } })
     const { json } = await openOffer(R[1].token, offer.id)
     as(staff)
-    for (let i = 0; i < 10; i++) {
-      expect(await refusal(actions.redeemPass({ venueId: A, code: "ZZZZZ2" }))).toBe("That code isn't a live pass here. Ask them to open the pass again.")
-    }
+    const answers = await Promise.all(Array.from({ length: 20 }, () => refusal(actions.redeemPass({ venueId: A, code: "ZZZZZ2" }))))
+    // The tenth to be counted and every one after it say locked, however they interleaved.
+    expect(answers.filter((a) => a === "Too many wrong codes at this door. Wait five minutes, then try again.").length).toBeGreaterThanOrEqual(11)
+    expect(answers.every((a) => a !== null)).toBe(true)
     expect(await refusal(actions.redeemPass({ venueId: A, code: json.data.offer.pass.code }))).toBe("Too many wrong codes at this door. Wait five minutes, then try again.")
     expect(await db.venue_offer_sends.count({ where: { offer_id: offer.id, user_id: R[1].id, redeemed_at: { not: null } } })).toBe(0)
+  })
+
+  it("a right code already in flight when the door locks is refused at the write (L1, race scan)", async () => {
+    const offer = await db.venue_offers.findFirstOrThrow({ where: { venue_id: A }, orderBy: { created_at: "asc" } })
+    const { json } = await openOffer(R[1].token, offer.id)
+    // Clear on arrival; ten wrong codes landed before its write.
+    const spy = jest.spyOn(rateLimitStore, "peekStrict").mockResolvedValueOnce(0).mockResolvedValueOnce(10)
+    try {
+      as(staff)
+      expect(await refusal(actions.redeemPass({ venueId: A, code: json.data.offer.pass.code }))).toBe("Too many wrong codes at this door. Wait five minutes, then try again.")
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await db.venue_offer_sends.count({ where: { offer_id: offer.id, user_id: R[1].id, redeemed_at: { not: null } } })).toBe(0)
+  })
+
+  it("a limit store that cannot answer refuses the door and the send (fail closed)", async () => {
+    const spy = jest.spyOn(rateLimitStore, "hitStrict").mockRejectedValue(new Error("redis down"))
+    try {
+      as(staff)
+      expect(await refusal(actions.redeemPass({ venueId: A, code: "ZZZZZ2" }))).toBe("This can't be checked right now. Try again in a minute.")
+      as(owner)
+      expect(await refusal(actions.sendOffer({ venueId: A, text: "While the store is down", days: 3 }))).toBe("This can't be checked right now. Try again in a minute.")
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await db.venue_offers.count({ where: { venue_id: A, text: "While the store is down" } })).toBe(0)
+  })
+
+  it("ten sends at once produce at most the week's two (race scan)", async () => {
+    const Q = await venue(orgA)
+    await pro(Q)
+    for (let i = 0; i < 5; i++) await regular(Q, R[i].id)
+    as(owner)
+    // Ten different offers, so the room's repeat check stays out of it: the limit (5 a minute
+    // per organisation and venue) and the week's quota (2, counted under the lock) decide.
+    const words = ["Free nachos Monday", "Two for one on Tuesday", "Quiz night shots", "Brunch coffee on us", "Live jazz entry free",
+      "Dessert with any main", "Early bird pints", "Vinyl night mocktail", "Late night pizza slice", "Sunday roast discount"]
+    const results = await Promise.allSettled(words.map((text) => actions.sendOffer({ venueId: Q, text, days: 3 })))
+    const reasons = results.flatMap((r) => (r.status === "rejected" ? [(r.reason as Error).message] : []))
+    expect(reasons.every((m) => /sent its 2 offers this week|Too many tries/.test(m))).toBe(true)
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2)
+    expect(await db.venue_offers.count({ where: { venue_id: Q } })).toBe(2)
   })
 
   it("Venue Pro is asked again under the lock: a plan that ends between the check and the send sends nothing (L4)", async () => {

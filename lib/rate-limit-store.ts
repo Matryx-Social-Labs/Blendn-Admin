@@ -156,23 +156,40 @@ export async function forget(key: string): Promise<void> {
 }
 
 /**
- * The count a key holds now, without adding to it: zero when it has none or
- * its window has passed. For a lock that only failures set (the offer door,
- * step 12 review L1): every attempt asks, only a failure counts.
+ * `hit`, failing closed (step 12 review): with Redis configured and failing,
+ * this throws rather than counting in this process's memory, where another
+ * replica would never see the count. For limits that guard something a
+ * script would brute-force — the offer door, offer sends — not for ordinary
+ * rate limits, where a forgotten count costs one extra request.
+ *
+ * ponytail: with no REDIS_URL at all the count is this process's, as every
+ * limiter here is; a second replica needs REDIS_URL set (it is the documented
+ * precondition for running more than one).
  */
-export async function peek(key: string): Promise<number> {
+export async function hitStrict(key: string, windowMs: number): Promise<HitResult> {
   const now = Date.now()
   const redis = await getRedis()
-  if (redis) {
-    try {
-      const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
-      return value ? Number(value) || 0 : 0
-    } catch (error) {
-      logger.warn("Rate limit Redis peek failed, falling back to memory", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
+  if (!redis) {
+    if (process.env.REDIS_URL) throw new Error("Rate limit store unavailable")
+    return hitMemory(key, windowMs, now)
   }
-  const existing = memory.get(key)
-  return existing && now <= existing.resetAt ? existing.count : 0
+  const count = await redis.incr(key)
+  if (count === 1) {
+    await redis.pExpire(key, windowMs)
+    return { count, resetAt: now + windowMs }
+  }
+  const ttl = await redis.pTTL(key)
+  return { count, resetAt: now + (ttl > 0 ? ttl : windowMs) }
+}
+
+/** The count a key holds now, without adding to it, failing closed as `hitStrict` does. Zero when it has none or its window has passed. */
+export async function peekStrict(key: string): Promise<number> {
+  const redis = await getRedis()
+  if (!redis) {
+    if (process.env.REDIS_URL) throw new Error("Rate limit store unavailable")
+    const existing = memory.get(key)
+    return existing && Date.now() <= existing.resetAt ? existing.count : 0
+  }
+  const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
+  return value ? Number(value) || 0 : 0
 }

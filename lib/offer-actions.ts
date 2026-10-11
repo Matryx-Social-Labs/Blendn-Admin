@@ -18,8 +18,7 @@ import { codeMatches, normaliseCode } from "@/lib/offers/pass-code"
 import { audienceBand, nextOfferAt, OFFERS_PER_WEEK, sentThisWeek, type AudienceBand } from "@/lib/offers/venue"
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
-import { overUserLimit } from "@/lib/rate-limit"
-import { hit, peek } from "@/lib/rate-limit-store"
+import { hitStrict, peekStrict } from "@/lib/rate-limit-store"
 import { mayRedeemAtVenue, maySendVenueOffers } from "@/lib/rbac"
 import { Refusal } from "@/lib/refusal"
 import { audienceSql, REGULAR_NIGHTS, REGULAR_WINDOW_DAYS } from "@/lib/regulars"
@@ -53,11 +52,26 @@ import { venueDayBounds } from "@/lib/venue-day"
  *
  * Staff type the code on the person's pass and tap "Redeemed". The code is
  * matched only against passes on screen at this venue in the last minutes;
- * two passes matching the same code is refused rather than guessed (L3). It
- * is redeemed by `updateMany … WHERE redeemed_at IS NULL`: two taps at once
- * redeem once. One pass a night per person per venue is a unique index. Ten
- * wrong codes at a venue lock its door for five minutes (L1). Staff learn the
- * offer's words — the person is standing in front of them — and nothing else.
+ * two passes matching the same code is refused rather than guessed (L3),
+ * without saying whose. It is redeemed by `updateMany … WHERE redeemed_at IS
+ * NULL`: two taps at once redeem once. One pass a night per person per venue
+ * is a unique index. Staff learn the offer's words — the person is standing
+ * in front of them — and nothing else.
+ *
+ * ## The door's lock, and the limits (review L1, the race scan)
+ *
+ * Every wrong code at a venue is counted atomically (Redis INCR, or this
+ * process when there is no Redis), and the answer is decided AFTER counting:
+ * the tenth wrong code inside five minutes and every one after it is told the
+ * door is locked, however many arrive at once. A right code is refused while
+ * the door is locked — checked when it arrives and again just before it is
+ * written, so a burst that locks the door while it is in flight still stops
+ * it. Nothing clears the count: a valid pass of one's own is not a reset
+ * button. It expires with its window.
+ *
+ * Sends are limited per organisation and venue; the door per venue and staff
+ * member. With Redis configured and failing, both refuse (fail closed) rather
+ * than counting where no other replica can see it.
  */
 
 const NOT_YOUR_VENUE = "This venue isn't yours to send offers from."
@@ -71,6 +85,32 @@ const DOOR_FAILURES = 10
 const DOOR_LOCK_MS = 5 * 60 * 1000
 /** How long OpenAI may hold a send. The deterministic checks have run by then. */
 const OPENAI_BOUND_MS = 3000
+const DOOR_LOCKED = "Too many wrong codes at this door. Wait five minutes, then try again."
+const STORE_DOWN = "This can't be checked right now. Try again in a minute."
+/** Sends a minute per organisation and venue, and door attempts a minute per venue and staff member. */
+const SENDS_PER_MINUTE = 5
+const DOOR_TRIES_PER_MINUTE = 30
+const MINUTE_MS = 60 * 1000
+
+/** Over a limit, counted fail-closed: a limit store that cannot answer refuses. */
+async function overLimit(key: string, max: number, windowMs: number): Promise<boolean> {
+  try {
+    return (await hitStrict(key, windowMs)).count > max
+  } catch (error) {
+    logger.error("Offer limit store unavailable", { key, error: error instanceof Error ? error.message : String(error) })
+    throw new Refusal(STORE_DOWN)
+  }
+}
+
+/** Wrong codes at this venue's door in the current window, fail-closed. */
+async function doorFailures(venueId: string): Promise<number> {
+  try {
+    return await peekStrict(`door-fail:${venueId}`)
+  } catch (error) {
+    logger.error("Offer door store unavailable", { venueId, error: error instanceof Error ? error.message : String(error) })
+    throw new Refusal(STORE_DOWN)
+  }
+}
 
 const sendInput = z.object({
   venueId: z.uuid(),
@@ -126,10 +166,13 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
   const parsed = sendInput.safeParse(input)
   if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "That offer can't be sent.")
   const { venueId, text, days } = parsed.data
-  if (await overUserLimit("heavy", "offer-send", user.id)) throw new Refusal("Too many tries. Wait a minute and send again.")
 
   const gate = await senderAt(db, venueId, user.id)
   if (!gate) throw new Refusal(NOT_YOUR_VENUE)
+  // Per organisation and venue: colleagues share it, and another venue of theirs has its own.
+  if (await overLimit(`offer-send:${gate.place.owner_org_id}:${venueId}`, SENDS_PER_MINUTE, MINUTE_MS)) {
+    throw new Refusal("Too many tries. Wait a minute and send again.")
+  }
   if (!maySendVenueOffers(user.role, gate.member.role)) throw new Refusal("Only an owner or admin of the venue's organisation can send offers.")
   if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) {
     throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
@@ -198,7 +241,6 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
   if (!user) throw new Refusal("Unauthorized")
   const parsed = redeemInput.safeParse(input)
   if (!parsed.success) throw new Refusal(NOT_A_PASS_HERE)
-  if (await overUserLimit("write", "offer-redeem", user.id)) throw new Refusal("Too many tries. Wait a minute and try again.")
   const code = normaliseCode(parsed.data.code)
   if (!code) throw new Refusal("A pass code is six letters and numbers.")
   const { venueId } = parsed.data
@@ -217,12 +259,22 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
         })
       : null
   if (!venue?.owner_org_id || !member) throw new Refusal(NOT_A_PASS_HERE)
+  if (await overLimit(`offer-redeem:${venueId}:${user.id}`, DOOR_TRIES_PER_MINUTE, MINUTE_MS)) {
+    throw new Refusal("Too many tries. Wait a minute and try again.")
+  }
 
-  const failKey = `door-fail:${venueId}`
-  if ((await peek(failKey)) >= DOOR_FAILURES) throw new Refusal("Too many wrong codes at this door. Wait five minutes, then try again.")
+  if ((await doorFailures(venueId)) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
+  // A wrong code counts first and is answered after: the one that reaches the
+  // limit, and every one after it, however many are in flight, says locked.
   const wrong = async (message: string): Promise<never> => {
-    await hit(failKey, DOOR_LOCK_MS)
-    throw new Refusal(message)
+    let count: number
+    try {
+      count = (await hitStrict(`door-fail:${venueId}`, DOOR_LOCK_MS)).count
+    } catch (error) {
+      logger.error("Offer door store unavailable", { venueId, error: error instanceof Error ? error.message : String(error) })
+      throw new Refusal(STORE_DOWN)
+    }
+    throw new Refusal(count >= DOOR_FAILURES ? DOOR_LOCKED : message)
   }
 
   const now = new Date()
@@ -238,6 +290,8 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
   if (pass.redeemed_at) throw new Refusal("This pass was already redeemed.")
   if (pass.offer.ends_at <= now) throw new Refusal("This offer has ended.")
 
+  // Again just before the write: wrong codes in flight may have locked the door since this one arrived.
+  if ((await doorFailures(venueId)) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
   const tonight = new Date(`${venueDayBounds(venue.timezone, venue.day_reset_hour, now).localDate}T00:00:00Z`)
   try {
     await db.$transaction(async (tx) => {
