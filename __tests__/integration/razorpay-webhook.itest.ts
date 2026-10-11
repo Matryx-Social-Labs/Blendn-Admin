@@ -155,10 +155,20 @@ function orderPaid(orderId: string, opts: { amount?: number; paid?: number; curr
   }
 }
 
-const refundEvent = (paymentId: string, amount: number, at: number) => ({
+const refundEvent = (paymentId: string, amount: number, at: number, opts: { id?: string | null; status?: string } = {}) => ({
   entity: "event",
   event: "refund.processed",
-  payload: { refund: { entity: { id: `rfnd_${randomUUID().slice(0, 8)}`, payment_id: paymentId, amount, currency: "INR", status: "processed" } } },
+  payload: {
+    refund: {
+      entity: {
+        ...(opts.id === null ? {} : { id: opts.id ?? `rfnd_${randomUUID().slice(0, 8)}` }),
+        payment_id: paymentId,
+        amount,
+        currency: "INR",
+        status: opts.status ?? "processed",
+      },
+    },
+  },
   created_at: at,
 })
 
@@ -582,6 +592,152 @@ describe("refunds and disputes (sec H1)", () => {
     await post(subscriptionEvent("subscription.charged", sub, { paymentId }))
     await post(disputeEvent("payment.dispute.lost", paymentId, T0 + 700))
     expect(await expiryOf(sub)).toBe((T0 + 700) * 1000)
+  })
+})
+
+describe("review of #673: the delivery clock, old periods, refunds and early refunds (M1, M2, L1–L4)", () => {
+  /** Razorpay's API stubbed for a cancel; returns the calls made. */
+  async function withRazorpay<T>(run: (cancels: string[]) => Promise<T>): Promise<T> {
+    process.env.RAZORPAY_KEY_ID = "rzp_test_itestkey"
+    process.env.RAZORPAY_KEY_SECRET = "itest_key_secret_value_24"
+    const cancels: string[] = []
+    const realFetch = global.fetch
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/cancel")) cancels.push(String(input))
+      return new Response(JSON.stringify({ id: "sub_x", plan_id: PLAN_ID, status: "cancelled" }), { status: 200 })
+    }) as typeof fetch
+    try {
+      return await run(cancels)
+    } finally {
+      global.fetch = realFetch
+      delete process.env.RAZORPAY_KEY_ID
+      delete process.env.RAZORPAY_KEY_SECRET
+    }
+  }
+  const ended = (ref: string) => db.audit_logs.count({ where: { action: "entitlement.ended", details: { path: ["externalRef"], equals: ref } } })
+
+  it("M1: a charge paid before a halt's stamp but delivered after it keeps access when the halt lands later", async () => {
+    const sub = await subscriptionCheckout()
+    await post(subscriptionEvent("subscription.charged", sub, { at: T0 + 50, paidAt: T0 + 35 }))
+    await post(subscriptionEvent("subscription.halted", sub, { at: T0 + 40, status: "halted" }))
+    expect(await expiryOf(sub)).toBe((T0 + 50 + MONTH) * 1000 + GRACE_MS)
+    expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: sub } })).status).toBe("active")
+  })
+
+  it("M2: a full refund of an old period after two renewals ends nothing and keeps the mandate", async () => {
+    await withRazorpay(async (cancels) => {
+      const sub = await subscriptionCheckout()
+      const first = `pay_${randomUUID().slice(0, 10)}`
+      await post(subscriptionEvent("subscription.charged", sub, { paymentId: first }))
+      await post(subscriptionEvent("subscription.charged", sub, { at: T0 + MONTH }))
+      await post(subscriptionEvent("subscription.charged", sub, { at: T0 + 2 * MONTH }))
+      await post(refundEvent(first, 235_900, T0 + 2 * MONTH + 100))
+      expect(await expiryOf(sub)).toBe((T0 + 3 * MONTH) * 1000 + GRACE_MS)
+      expect(cancels).toHaveLength(0)
+      expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: first } })).status).toBe("refunded")
+      const audit = await db.audit_logs.findMany({ where: { resource_id: orgOfRef.get(sub), action: "entitlement.refund_old_period" } })
+      expect(audit).toHaveLength(1)
+      expect(audit[0].details).toMatchObject({ externalRef: sub, refundedPaymentId: first })
+      expect(await ended(sub)).toBe(0)
+    })
+  })
+
+  it.each([
+    ["more than a minute ahead of our clock", () => Math.floor(Date.now() / 1000) + 86_400],
+    ["zero", () => 0],
+    ["negative", () => -5],
+  ])("L1: a payment whose own time is %s is recorded at the delivery's", async (_label, paidAt) => {
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(orderPaid(await orderCheckout(), { paymentId, at: T0 + 20, paidAt: paidAt() }))
+    expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).captured_at.getTime()).toBe((T0 + 20) * 1000)
+  })
+
+  it("L2/L4: one full refund delivered twice at once in two bodies ends access and cancels once", async () => {
+    await withRazorpay(async (cancels) => {
+      const sub = await subscriptionCheckout()
+      const paymentId = `pay_${randomUUID().slice(0, 10)}`
+      await post(subscriptionEvent("subscription.charged", sub, { paymentId }))
+      const refund = refundEvent(paymentId, 235_900, T0 + 300)
+      // Same stamp, another body (a field we do not read), so neither the event id nor the body hash dedupes it.
+      const answers = await Promise.all([post(refund), post({ ...refund, account_id: "acc_itest_resent" })])
+      expect(answers.map((a) => a.status)).toEqual([200, 200])
+      expect(await expiryOf(sub)).toBe((T0 + 300) * 1000)
+      expect(await ended(sub)).toBe(1)
+      expect(cancels).toHaveLength(1)
+    })
+  })
+
+  it.each([
+    ["order.paid", async (paymentId: string) => ({ ref: await orderCheckout(), make: (ref: string) => orderPaid(ref, { paymentId }) })],
+    ["subscription.charged", async (paymentId: string) => ({ ref: await subscriptionCheckout(), make: (ref: string) => subscriptionEvent("subscription.charged", ref, { paymentId }) })],
+  ])("L4: a full refund that arrived before its %s is applied when the payment lands", async (_label, setup) => {
+    await withRazorpay(async () => {
+      const paymentId = `pay_${randomUUID().slice(0, 10)}`
+      const { ref, make } = await setup(paymentId)
+      const early = newEventId()
+      await post(refundEvent(paymentId, _label === "order.paid" ? 58_900 : 235_900, T0 + 100), { eventId: early })
+      expect((await deliveries(early))[0].error).toBe("unknown_ref")
+      await post(make(ref))
+      expect(await expiryOf(ref)).toBe((T0 + 100) * 1000)
+      expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).status).toBe("refunded")
+      expect((await deliveries(early))[0]).toMatchObject({ error: null })
+    })
+  })
+
+  it("L4: a refund that found no payment, still committing while the payment lands, is not lost", async () => {
+    // Hold the refund's transaction open after it decided `unknown_ref`, so
+    // the payment's delivery runs inside that window.
+    await db.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION itest_slow_refund() RETURNS trigger AS $$ BEGIN PERFORM pg_sleep(0.6); RETURN NEW; END $$ LANGUAGE plpgsql`)
+    await db.$executeRawUnsafe(
+      `CREATE TRIGGER itest_slow_refund AFTER UPDATE ON payment_events FOR EACH ROW WHEN (NEW.provider_event_id LIKE 'itest_evt_slow_%' AND NEW.error = 'unknown_ref') EXECUTE FUNCTION itest_slow_refund()`
+    )
+    try {
+      const order = await orderCheckout()
+      const paymentId = `pay_${randomUUID().slice(0, 10)}`
+      const refund = post(refundEvent(paymentId, 58_900, T0 + 100), { eventId: `itest_evt_slow_${randomUUID()}` })
+      for (let waited = 0; waited < 5000; waited += 20) {
+        const [{ n }] = await db.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event = 'PgSleep'`
+        if (n > 0) break
+        await new Promise((r) => setTimeout(r, 20))
+      }
+      const [r1, r2] = await Promise.all([refund, post(orderPaid(order, { paymentId }))])
+      expect([r1.status, r2.status]).toEqual([200, 200])
+      expect(await expiryOf(order)).toBe((T0 + 100) * 1000)
+      expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).status).toBe("refunded")
+    } finally {
+      await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS itest_slow_refund ON payment_events`)
+      await db.$executeRawUnsafe(`DROP FUNCTION IF EXISTS itest_slow_refund()`)
+    }
+  })
+
+  it("L3: a refund with no id is refused as malformed, and changes nothing", async () => {
+    const order = await orderCheckout()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(orderPaid(order, { paymentId }))
+    const id = newEventId()
+    await post(refundEvent(paymentId, 58_900, T0 + 100, { id: null }), { eventId: id })
+    expect((await deliveries(id))[0].error).toBe("malformed")
+    expect(await expiryOf(order)).toBeNull()
+  })
+
+  it("L3: a refund delivered again later keeps its first time; access ends when the last refund made it whole", async () => {
+    const order = await orderCheckout()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(orderPaid(order, { paymentId }))
+    const a = refundEvent(paymentId, 30_000, T0 + 100, { id: `rfnd_${randomUUID().slice(0, 8)}` })
+    await post(a)
+    await post({ ...a, created_at: T0 + 300 })
+    await post(refundEvent(paymentId, 28_900, T0 + 200))
+    expect(await expiryOf(order)).toBe((T0 + 200) * 1000)
+  })
+
+  it("L3: a refund Razorpay does not call processed is not counted", async () => {
+    const order = await orderCheckout()
+    const paymentId = `pay_${randomUUID().slice(0, 10)}`
+    await post(orderPaid(order, { paymentId }))
+    await post(refundEvent(paymentId, 58_900, T0 + 100, { status: "pending" }))
+    expect(await expiryOf(order)).toBeNull()
+    expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })).status).toBe("captured")
   })
 })
 

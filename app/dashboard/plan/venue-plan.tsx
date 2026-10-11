@@ -36,11 +36,12 @@ const PRO = [
 
 /**
  * Venue Pro can be bought for this venue now (SCRUM-609): it is not on Pro,
- * paid or a founding grant, and no mandate past `created` holds its one open
- * subscription. The checkout refuses both (`lib/billing-actions.ts`); an
- * abandoned `created` one is replaced by a new purchase.
+ * paid or a founding grant, no mandate of ours past `created` holds its one
+ * open subscription, and no other organisation's is still open here (review
+ * L7). The checkout refuses all three (`lib/billing-actions.ts`); an
+ * abandoned `created` one of ours is replaced by a new purchase.
  */
-const proBuyable = (v: VenuePlanRow) => !v.pro && v.subscriptions.every((s) => s.status === "created")
+const proBuyable = (v: VenuePlanRow) => !v.pro && !v.openElsewhere && v.subscriptions.every((s) => s.status === "created")
 
 export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boolean }) {
   const monthly = BILLING_PLANS.venue_pro_monthly
@@ -159,7 +160,10 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col gap-2 @3xl/main:w-[300px]">
-        {!proBuyable(venue) || !venue.owned ? (
+        {venue.owned && venue.openElsewhere && !pro ? (
+          // Another organisation's mandate, still closing: said without whose, which plan or how much.
+          <p className="text-[0.75rem] text-faint-foreground">A previous plan on this venue is still being closed — contact support.</p>
+        ) : !proBuyable(venue) || !venue.owned ? (
           cancellable.length > 0 && venue.mayCancel && paymentsOn ? (
             <CancelAnalytics running={cancellable.some((s) => s.status === "active")} venueId={venue.venueId} />
           ) : null
