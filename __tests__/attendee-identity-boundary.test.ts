@@ -171,11 +171,13 @@ describe("no host surface reads a person's identity without an admin gate", () =
 
 describe("the Events list names a host only where a host is the point (step 15)", () => {
   /*
-   * The row's host is the event's creator — a colleague or a founder, never
-   * an attendee — and still a person. It is selected for an admin and for a
-   * venue, never for an organiser (whose list is their own organisation's),
-   * never with an email, and never for an unclaimed listing, where the
-   * creator is the founder who curated it (T83).
+   * The row's host is `eventHost`'s answer: the owning organisation, which is
+   * a name an attendee would recognise and no person's. `organizer` is
+   * selected for an admin and for a venue, never for an organiser (whose list
+   * is their own organisation's), never with an email, and the row says
+   * nothing for an unclaimed listing, where the creator is the founder who
+   * curated it (T83). The row used to read the creator's name for everything
+   * else, so a claimed listing named the founder as its host (SCRUM-612).
    */
   const page = code("app/dashboard/events/page.tsx")
   const table = code("app/dashboard/events/events-table.tsx")
@@ -187,8 +189,11 @@ describe("the Events list names a host only where a host is the point (step 15)"
     expect(page).not.toMatch(/db\.user\b/)
   })
 
-  it("sends no host for an unclaimed listing", () => {
-    expect(page).toMatch(/host: curationState\(event\) === "curated_open" \? null : \(event\.organizer\?\.name \?\? null\)/)
+  it("sends no host for an unclaimed listing, and the owning organisation's name for the rest", () => {
+    expect(page).toMatch(/host: !names \|\| curationState\(event\) === "curated_open" \? null : eventHost\(event\)\.name/)
+    // The organisation is selected on the same terms as the creator, and the creator is never the label.
+    expect(page).toMatch(/organizer_org: names \? \{ select: \{ display_name: true \} \} : false,/)
+    expect(page).not.toMatch(/host:[^\n]*event\.organizer\?\.name/)
   })
 
   it("renders no person but the host it was given", () => {
