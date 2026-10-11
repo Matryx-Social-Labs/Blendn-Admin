@@ -241,11 +241,48 @@ describe("a venue never gets a list of its regulars (RG-G01)", () => {
       const body = matched(venue, venue.indexOf("{", at), "{", "}")
       return [...body.slice(1, -1).matchAll(/^\s*(\w+)\??\s*:/gm)].map((m) => m[1])
     }
-    expect(fields("OfferResult")).toEqual(["id", "text", "createdAt", "endsAt", "live", "sent", "opened", "redeemed"])
+    // No results of its own per offer (the overlapping-sends rule): opened and redeemed only as totals.
+    expect(fields("OfferResult")).toEqual(["id", "text", "createdAt", "endsAt", "live", "sent"])
+    expect(fields("OfferTotals")).toEqual(["asOf", "sent", "opened", "redeemed"])
     expect(fields("KnownRegular")).toEqual(["firstName", "nights"])
-    expect(fields("VenueOffersView")).toEqual(["perWeek", "sentThisWeek", "nextAt", "offers", "known"])
+    expect(fields("VenueOffersView")).toEqual(["perWeek", "sentThisWeek", "nextAt", "offers", "totals", "known"])
     const actions = file("lib/offer-actions.ts")
     expect(actions).toMatch(/export async function sendOffer\([\s\S]*?\): Promise<\{ offerId: string; sent: number \}>/)
     expect(actions).toMatch(/export async function redeemPass\([\s\S]*?\): Promise<\{ text: string \}>/)
+  })
+
+  it("the view is asked whose it is, and counts stop where the venue's day began (the differencing rule)", () => {
+    const venue = file("lib/offers/venue.ts")
+    expect(venue).toMatch(/export async function venueOffersView\(\s*venueId: string,\s*viewer:/)
+    expect(venue).toMatch(/\(await actorFor\(viewer\)\)\.orgIds\.includes\(v\.owner_org_id\)/)
+    // The totals read only what happened before `to`, the start of the venue's today.
+    const totals = templates(venue).find((t) => /count\(s\.opened_at\)/.test(t))
+    expect(totals).toBeDefined()
+    expect(totals).toMatch(/FILTER \(WHERE s\.opened_at < \$\{\}\)/)
+    expect(totals).toMatch(/FILTER \(WHERE s\.redeemed_at < \$\{\}\)/)
+    expect(totals).toMatch(/o\.created_at < \$\{\}/)
+    // Offers are the sending organisation's: every read names the owner org.
+    for (const t of templates(venue).filter((x) => /venue_offers/.test(x))) expect(t).toMatch(/org_id = \$\{\}::uuid/)
+  })
+
+  it("no route hands a venue a recipient: each side imports only its own module (e)", () => {
+    const imports = (code: string) => [...code.matchAll(/from\s+["'](@\/lib\/offers\/[\w-]+|@\/lib\/offer-actions)["']/g)].map((m) => m[1])
+    const wrong: string[] = []
+    for (const f of files.filter((x) => x.rel.startsWith("app/"))) {
+      const used = imports(f.code)
+      const allowed = f.rel.startsWith("app/api/mobile/")
+        ? ["@/lib/offers/person"]
+        : f.rel.startsWith("app/dashboard/")
+          ? ["@/lib/offers/venue", "@/lib/offer-actions"]
+          : []
+      for (const u of used) if (!allowed.includes(u)) wrong.push(`${f.rel} imports ${u}`)
+    }
+    expect(wrong).toEqual([])
+    // Nothing a venue reads carries a push token, a room handle or a pseudonym.
+    const carrying = files
+      .filter((f) => VENUE_FACING(f.rel) && /offer|regular/i.test(f.rel + f.code.slice(0, 2000)))
+      .filter((f) => /\bpush_tokens\b|\broomHandle\(|\bpseudonym/.test(f.code) && /venue_offer|offers\//.test(f.code))
+      .map((f) => f.rel)
+    expect(carrying).toEqual([])
   })
 })

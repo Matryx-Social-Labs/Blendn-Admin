@@ -183,7 +183,7 @@ export default async function VenueDetailPage({
   const [insights, proRows, offers] = await Promise.all([
     venue.owner_org && !venue.deleted_at ? venueInsights(id) : null,
     isAdmin && venue.owner_org ? liveGrantAndPaid({ kind: "venue", id }, "venue_pro") : null,
-    venue.owner_org && !venue.deleted_at ? venueOffersView(id) : null,
+    venue.owner_org && !venue.deleted_at ? venueOffersView(id, session.user) : null,
   ])
 
   const [events, ratingRows] = await Promise.all([
@@ -457,19 +457,12 @@ function VenueInsights({
 const OFFER_DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
 const NEXT_AT = new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })
 
-/** A count, or "held back" when it or the rest of its group is under the floor. */
-function OfferCount({ value }: { value: number | null }) {
-  return value === null ? (
-    <span className="text-right text-[0.75rem] text-faint-foreground">held back</span>
-  ) : (
-    <span className="text-right font-bold tabular-nums">{formatNumber(value)}</span>
-  )
-}
-
 /**
  * Regulars & offers, for a venue on Venue Pro (step 12). The composer for
- * its owners and admins, what each offer did as three counts, and the
- * regulars who chose to let it know them — by first name, from their own yes.
+ * its owners and admins; each offer with how many it went to; what they did
+ * as totals across offers, up to this morning (lib/offers/venue.ts says why
+ * never per offer, never live); and the regulars who chose to let it know
+ * them — by first name, from their own yes.
  */
 function RegularsOffers({
   offers,
@@ -508,32 +501,49 @@ function RegularsOffers({
           {offers.offers.length === 0 ? (
             <p className="text-[0.8125rem] text-muted-foreground">No offers sent yet.</p>
           ) : (
-            <table className="w-full text-[0.8125rem]">
-              <caption className="sr-only">What each offer did</caption>
-              <thead>
-                <tr className="text-[0.6875rem] uppercase tracking-[0.06em] text-muted-foreground">
-                  <th scope="col" className="py-2 text-left font-medium">Offer</th>
-                  <th scope="col" className="w-16 py-2 text-right font-medium">To</th>
-                  <th scope="col" className="w-20 py-2 text-right font-medium">Opened</th>
-                  <th scope="col" className="w-24 py-2 text-right font-medium">Redeemed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {offers.offers.map((o) => (
-                  <tr key={o.id} className="border-t border-border align-middle">
-                    <td className="py-3 pr-3">
-                      <span className="block">{o.text}</span>
-                      <span className="text-[0.75rem] text-faint-foreground">
-                        {OFFER_DAY.format(new Date(o.createdAt))} · {o.live ? `live until ${OFFER_DAY.format(new Date(o.endsAt))}` : "ended"}
-                      </span>
-                    </td>
-                    <td className="py-3 text-right font-bold tabular-nums">{formatNumber(o.sent)}</td>
-                    <td className="py-3 text-right"><OfferCount value={o.opened} /></td>
-                    <td className="py-3 text-right"><OfferCount value={o.redeemed} /></td>
-                  </tr>
+            <>
+              <dl className="grid grid-cols-3 gap-3 border-t border-border pt-3">
+                {(
+                  [
+                    ["Sent", offers.totals.sent],
+                    ["Opened", offers.totals.opened],
+                    ["Redeemed", offers.totals.redeemed],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label} className="flex flex-col gap-0.5">
+                    <dt className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</dt>
+                    <dd className={value === null ? "text-[0.8125rem] text-faint-foreground" : "text-[1.375rem] font-bold tabular-nums"}>
+                      {value === null ? "held back" : formatNumber(value)}
+                    </dd>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </dl>
+              <p className="text-[0.75rem] text-faint-foreground">
+                All your offers here, up to {OFFER_DAY.format(new Date(offers.totals.asOf))} this morning: totals only, never per offer or per person.
+              </p>
+              <table className="w-full text-[0.8125rem]">
+                <caption className="sr-only">Offers sent</caption>
+                <thead>
+                  <tr className="text-[0.6875rem] uppercase tracking-[0.06em] text-muted-foreground">
+                    <th scope="col" className="py-2 text-left font-medium">Offer</th>
+                    <th scope="col" className="w-16 py-2 text-right font-medium">To</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {offers.offers.map((o) => (
+                    <tr key={o.id} className="border-t border-border align-middle">
+                      <td className="py-3 pr-3">
+                        <span className="block">{o.text}</span>
+                        <span className="text-[0.75rem] text-faint-foreground">
+                          {OFFER_DAY.format(new Date(o.createdAt))} · {o.live ? `live until ${OFFER_DAY.format(new Date(o.endsAt))}` : "ended"}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right font-bold tabular-nums">{formatNumber(o.sent)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
         </div>
         <div className="flex min-w-0 flex-col gap-2.5">

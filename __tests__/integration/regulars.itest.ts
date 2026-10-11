@@ -162,6 +162,8 @@ let staff = ""
 let admin = ""
 let otherOwner = ""
 let orgA = ""
+let orgB = ""
+const asViewer = (id: string, role: "venue_owner" | "app_admin" = "venue_owner") => ({ id, role })
 let A = ""
 const R: { id: string; token: string }[] = []
 const misses: Record<string, string> = {}
@@ -176,7 +178,8 @@ beforeAll(async () => {
   orgA = await org(owner, [staff])
   A = await venue(orgA)
   // Another venue, with its own owner: the staff of somewhere else.
-  await venue(await org(otherOwner))
+  orgB = await org(otherOwner)
+  await venue(orgB)
 
   for (let i = 0; i < 5; i++) {
     const p = await person(`rg_r${i}`, { first: `Zqcanary${i}` })
@@ -311,6 +314,23 @@ describe("the send", () => {
     expect(await db.audit_logs.count({ where: { resource: "venue", resource_id: D } })).toBe(0)
   })
 
+  it("an audience of 1 and an audience of 4 are refused with the same sentence (c)", async () => {
+    const one = await venue(orgA)
+    const four = await venue(orgA)
+    await pro(one)
+    await pro(four)
+    await regular(one, R[0].id)
+    for (let i = 0; i < 4; i++) await regular(four, R[i].id)
+    as(owner)
+    const [a, b] = [
+      await refusal(actions.sendOffer({ venueId: one, text: "An offer", days: 7 })),
+      await refusal(actions.sendOffer({ venueId: four, text: "An offer", days: 7 })),
+    ]
+    expect(a).toBe("Fewer than 5 regulars right now, so nothing was sent. A regular has come on 3 or more nights in the last 30.")
+    expect(b).toBe(a)
+    expect(await db.venue_offers.count({ where: { venue_id: { in: [one, four] } } })).toBe(0)
+  })
+
   it("a person who muted the venue receives nothing (RG-I07)", async () => {
     const E = await venue(orgA)
     await pro(E)
@@ -389,20 +409,57 @@ describe("the person's side and the pass", () => {
     )
   })
 
-  it("the venue sees counts held back by the complement rule, never who", async () => {
+  it("opened and redeemed are totals across offers, up to where today began, held back by the complement rule (d, f)", async () => {
     for (const r of R.slice(1)) await openOffer(r.token, offerId)
+    const view = async () => (await venueOffersView(A, asViewer(owner)))!
+    // Per offer: words, dates and how many it went to — no results of its own.
+    for (const o of (await view()).offers) expect(Object.keys(o).sort()).toEqual(["createdAt", "endsAt", "id", "live", "sent", "text"])
+    // Both offers went out today: nothing counts until tomorrow.
+    expect((await view()).totals).toMatchObject({ sent: 0, opened: null, redeemed: null })
+
+    // Yesterday's offers, today's opens: still nothing (f — the day is the step).
+    await db.$executeRaw`UPDATE venue_offers SET created_at = created_at - interval '1 day' WHERE venue_id = ${A}::uuid`
+    expect((await view()).totals).toMatchObject({ sent: 10, opened: null, redeemed: null })
+
+    // The five opens of the first offer move into yesterday: 5 of 10 opened, and 5 not — both at the floor.
+    await db.$executeRaw`UPDATE venue_offer_sends SET opened_at = opened_at - interval '1 day', redeemed_at = redeemed_at - interval '1 day' WHERE offer_id = ${offerId}::uuid`
+    expect((await view()).totals).toMatchObject({ sent: 10, opened: 5, redeemed: null }) // 1 redeemed of 5 opened: held (d)
+
+    // A sixth open: 6 of 10, and the 4 who did not are under the floor — held (d).
+    const second = await db.venue_offers.findFirstOrThrow({ where: { venue_id: A, text: "Second offer" } })
+    await db.venue_offer_sends.updateMany({ where: { offer_id: second.id, user_id: R[1].id }, data: { opened_at: new Date(Date.now() - 2 * 86_400_000) } })
+    expect((await view()).totals.opened).toBeNull()
+  })
+
+  it("another organisation's owner gets no view of this venue; an admin does (a)", async () => {
+    expect(await venueOffersView(A, asViewer(otherOwner))).toBeNull()
+    expect(await venueOffersView(A, asViewer(staff))).not.toBeNull()
+    expect(await venueOffersView(A, asViewer(admin, "app_admin"))).not.toBeNull()
+  })
+
+  it("a venue that changes hands shows its new owner none of the last owner's offers, and their passes end (b)", async () => {
+    const T = await venue(orgA)
+    await pro(T)
+    for (let i = 0; i < 5; i++) await regular(T, R[i].id)
     as(owner)
-    const view = await venueOffersView(A)
-    const first = view?.offers.find((o) => o.id === offerId)
-    // 5 sent, 5 opened: "everyone opened" names everyone; 1 redeemed: under 5.
-    expect(first).toMatchObject({ sent: 5, opened: null, redeemed: null })
+    const sent = await actions.sendOffer({ venueId: T, text: "Old owner's offer", days: 7 })
+    await db.venues.update({ where: { id: T }, data: { owner_org_id: orgB, claimed_at: new Date(Date.now() - 60 * 86_400_000) } })
+
+    const theirs = await venueOffersView(T, asViewer(otherOwner))
+    expect(theirs?.offers).toEqual([])
+    expect(theirs?.totals).toMatchObject({ sent: 0, opened: null, redeemed: null })
+    expect(JSON.stringify(theirs)).not.toContain("Old owner's offer")
+    // The old owner no longer owns it: no view at all.
+    expect(await venueOffersView(T, asViewer(owner))).toBeNull()
+    // The person's pass ends with the change.
+    expect((await openOffer(R[2].token, sent.offerId)).json.data.offer).toMatchObject({ state: "ended", pass: null })
   })
 })
 
 describe("being known as a regular (RG-I02, RG-I03, SEC-09)", () => {
   const venueFacing = async () => {
     as(owner)
-    const view = JSON.stringify(await venueOffersView(A))
+    const view = JSON.stringify(await venueOffersView(A, asViewer(owner)))
     // The page tree as the server renders it, props and all: what the RSC payload would carry.
     const expand = (node: unknown): unknown => {
       if (Array.isArray(node)) return node.map(expand)
@@ -437,14 +494,14 @@ describe("being known as a regular (RG-I02, RG-I03, SEC-09)", () => {
     const yes = await prefs(R[1].token, A, { known: true })
     expect(yes).toMatchObject({ status: 200, json: { data: { known: true, offersMuted: false } } })
     as(owner)
-    expect((await venueOffersView(A))?.known).toEqual([{ firstName: "Zqcanary1", nights: 3 }])
+    expect((await venueOffersView(A, asViewer(owner)))?.known).toEqual([{ firstName: "Zqcanary1", nights: 3 }])
     const seen = await venueFacing()
     expect(seen).toContain("Zqcanary1")
     expect(seen).not.toMatch(/Zqcanary[02-4]/)
     expect(seen).not.toContain(R[1].id)
 
     expect((await prefs(R[1].token, A, { known: false })).json.data.known).toBe(false)
-    expect((await venueOffersView(A))?.known).toEqual([])
+    expect((await venueOffersView(A, asViewer(owner)))?.known).toEqual([])
     expect(await venueFacing()).not.toMatch(/Zqcanary/)
     const logged = await db.audit_logs.findMany({ where: { resource: "venue", resource_id: A, user_id: R[1].id }, orderBy: { created_at: "asc" } })
     expect(logged.map((a) => a.action)).toEqual(["venue_regular.optin", "venue_regular.optout"])

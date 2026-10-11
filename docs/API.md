@@ -2949,8 +2949,10 @@ A venue on Venue Pro can send an offer — "First drink on the house, Thu–Sun
 before 10" — to its **regulars**: people who came on 3 or more nights in the
 last 30, counted from the venue's claim on (a host's event there or its own
 live room; staff never count). The venue picks the words; we pick who, and the
-venue never learns who. It sees how many an offer reached, opened and redeemed,
-each held back under 5. An audience under 5 is refused with nothing sent.
+venue never learns who. It sees how many each offer reached, and how many were
+opened and redeemed only as totals across its offers, up to the start of its
+day, each held back when it or the rest is under 5. An audience under 5 is
+refused with one fixed sentence and nothing sent.
 
 The push names no venue and quotes no offer — a lock screen is read by whoever
 holds the phone: **"An offer for you" / "A place you keep going back to sent you
