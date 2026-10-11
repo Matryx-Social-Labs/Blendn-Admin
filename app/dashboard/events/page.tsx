@@ -8,6 +8,7 @@ import { eventRowFields } from "@/lib/event-row"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { db } from "@/lib/db"
 import { discloseVenueCounts } from "@/lib/disclosure"
+import { eventHost } from "@/lib/event-host"
 import { stillArriving } from "@/lib/occurrences"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { canAccessDashboard } from "@/lib/rbac"
@@ -74,6 +75,8 @@ export default async function EventsPage() {
        * selected for them, and never an email.
        */
       organizer: names ? { select: { name: true } } : false,
+      // The owning organisation: after a claim it, not the founder in `organizer`, is the host (`eventHost`).
+      organizer_org: names ? { select: { display_name: true } } : false,
       // Going, as every other screen counts it: `not_going` is a decline, and
       // "maybe" is not a seat (the overview's hero names it separately).
       _count: { select: { rsvps: { where: { status: "going" } } } },
@@ -125,8 +128,13 @@ export default async function EventsPage() {
      * Null for a curated listing nobody has claimed: `organizer_id` there is
      * the admin who curated it, and the founder's name must not reach the page
      * payload as its host (T83). The row says "Listed by us" instead.
+     *
+     * Once it is claimed the host is the organisation, as everywhere else
+     * (`eventHost`): `organizer_id` still names the founder, and this list read
+     * it, so a claimed listing said "Priya Menon" (SCRUM-612). Null for an
+     * organiser, who is not selected `names` and whose list is their own.
      */
-    host: curationState(event) === "curated_open" ? null : (event.organizer?.name ?? null),
+    host: !names || curationState(event) === "curated_open" ? null : eventHost(event).name,
     ...counts(event),
     curation: curationState(event),
   }))

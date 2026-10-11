@@ -141,6 +141,7 @@ describe("the Events list's rows", () => {
   let creator: string
   let ahead: string
   let listing: string
+  let claimedListing: string
   let admin: string
 
   beforeAll(async () => {
@@ -151,6 +152,9 @@ describe("the Events list's rows", () => {
     ahead = await event(creator, hostOrg, { start: new Date(Date.now() + 3 * DAY), capacity: 10 })
     // A listing an admin curated: its organizer_id is the founder.
     listing = await event(admin, null, { start: new Date(Date.now() + 4 * DAY), curated: true })
+    // The same kind of listing after a claim was approved: the organisation owns it, `organizer_id` is still the founder (SCRUM-612).
+    claimedListing = await event(admin, hostOrg, { start: new Date(Date.now() + 5 * DAY), curated: true })
+    await db.events.update({ where: { id: claimedListing }, data: { claimed_at: new Date() } })
     const people = await Promise.all(["g1", "g2", "m1", "n1"].map((l) => makeUser(`rows_${l}`)))
     users.push(...people)
     await db.event_rsvps.createMany({
@@ -183,12 +187,17 @@ describe("the Events list's rows", () => {
     expect(mine.every((r) => r.host === null)).toBe(true)
   })
 
-  it("names the host for an admin, but never the founder behind an unclaimed listing", async () => {
+  it("names the owning organisation as the host for an admin, never the founder behind a listing, claimed or not (SCRUM-612)", async () => {
     as("app_admin", admin)
     const all = await rows()
-    const creatorName = (await db.user.findUniqueOrThrow({ where: { id: creator } })).name
-    expect(all.find((r) => r.id === ahead)?.host).toBe(creatorName)
+    const hostName = (await db.organisations.findUniqueOrThrow({ where: { id: hostOrg } })).display_name
+    const founderName = (await db.user.findUniqueOrThrow({ where: { id: admin } })).name
+    // An organisation's own event: the organisation, not the member who made it.
+    expect(all.find((r) => r.id === ahead)?.host).toBe(hostName)
+    // A listing nobody has claimed says nobody, and one that was claimed says who now owns it.
     expect(all.find((r) => r.id === listing)?.host).toBeNull()
+    expect(all.find((r) => r.id === claimedListing)?.host).toBe(hostName)
+    expect(all.map((r) => r.host)).not.toContain(founderName)
   })
 })
 
