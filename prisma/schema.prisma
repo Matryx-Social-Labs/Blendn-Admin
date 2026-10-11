@@ -4193,7 +4193,7 @@ model billing_payments {
   /// Razorpay Invoices' id, for a subscription charge.
   invoice_id          String?
   status              String    @default("captured")
-  /// Razorpay's time for the delivery that recorded the capture.
+  /// When the payment was made: Razorpay's `created_at` for the payment itself, never the delivery's (SCRUM-606).
   captured_at         DateTime  @db.Timestamptz(6)
   created_at          DateTime  @default(now()) @db.Timestamptz(6)
   updated_at          DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
