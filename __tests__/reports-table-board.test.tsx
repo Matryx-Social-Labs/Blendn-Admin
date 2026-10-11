@@ -63,6 +63,13 @@ it("offers Remove post only on a board post that a moderator can still take down
   expect(removeButtons(render([row("d", { messageType: "board_request", removable: false })]))).toBe(0)
 })
 
+it("writes (removed) in a colour that clears 4.5:1 on the card, not the faint token (SCRUM-613)", () => {
+  // axe color-contrast measured the faint token at 4.1:1 on a report card (staging, Resolved tab, 375 and 1440).
+  const label = /<span class="([^"]*)">\(removed\)<\/span>/.exec(render([row("a", { messageDeleted: true })]))?.[1] ?? ""
+  expect(label.split(" ")).toContain("text-muted-foreground")
+  expect(label).not.toContain("text-faint-foreground")
+})
+
 it("tells an erased ask from one that never had a message", () => {
   expect(render([row("d", { messageType: "board_request", removable: false, excerpt: null })])).toContain(
     "asked without a message"
