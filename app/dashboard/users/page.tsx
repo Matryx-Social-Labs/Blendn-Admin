@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { getUsers, getUserStats } from "./actions"
 import { UsersTable } from "./users-table"
+import { StatLine } from "@/components/dashboard/kit"
 import { getAuth } from "@/lib/auth"
 
 import { routeMetadata } from "@/lib/dashboard-route-content"
@@ -56,30 +57,15 @@ export default async function UsersPage({
         `deleted` is the opposite — the system having worked — so it sits last,
         fainter than the rest, and also only when it is not zero.
       */}
-      <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground">
-        <span>
-          <b className="font-bold text-foreground tabular-nums">
-            {stats.total.toLocaleString()}
-          </b>{" "}
-          account{stats.total === 1 ? "" : "s"}
-        </span>
-        <span>
-          <span className="tabular-nums">{stats.onboarded.toLocaleString()}</span> onboarded
-        </span>
-        <span>
-          <span className="tabular-nums">{stats.verified.toLocaleString()}</span> verified
-        </span>
-        {stats.suspended > 0 ? (
-          <span className="font-medium text-destructive">
-            <span className="tabular-nums">{stats.suspended.toLocaleString()}</span> suspended
-          </span>
-        ) : null}
-        {stats.deleted > 0 ? (
-          <span className="text-faint-foreground">
-            <span className="tabular-nums">{stats.deleted.toLocaleString()}</span> deleted
-          </span>
-        ) : null}
-      </div>
+      <StatLine
+        items={[
+          { value: stats.total.toLocaleString(), label: stats.total === 1 ? "account" : "accounts" },
+          { value: stats.onboarded.toLocaleString(), label: "onboarded" },
+          { value: stats.verified.toLocaleString(), label: "verified" },
+          stats.suspended > 0 && { value: stats.suspended.toLocaleString(), label: "suspended", tone: "destructive" },
+          stats.deleted > 0 && { value: stats.deleted.toLocaleString(), label: "deleted", tone: "faint" },
+        ]}
+      />
 
       <UsersTable
         data={users}

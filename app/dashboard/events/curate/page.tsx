@@ -2,7 +2,8 @@ import { redirect } from "next/navigation"
 import Link from "next/link"
 import { IconExternalLink, IconMapPinOff } from "@tabler/icons-react"
 
-import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
+import { KpiStrip, Panel } from "@/components/dashboard/kit"
+import { EmptyState } from "@/components/dashboard/primitives"
 import { Badge } from "@/components/ui/badge"
 import { getAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
@@ -37,8 +38,8 @@ export const dynamic = "force-dynamic"
  * `DESIGN_SYSTEM.md` allows exactly one gradient-carrying `HeroMetric` per
  * screen, and this screen's most important figure is a *failure* count —
  * putting the brand gradient behind "3 dead listings" would be celebrating it.
- * `MetricTile` has no card chrome and lets type do the hierarchy, which is the
- * same rule.
+ * The kit's `KpiStrip` holds chrome-less tiles in one hairline-divided strip,
+ * which is the same rule.
  */
 export default async function CuratePage({
   searchParams,
@@ -59,20 +60,17 @@ export default async function CuratePage({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-[length:var(--text-h2)] font-bold">
-          Curation health{city ? <span className="font-normal text-muted-foreground"> · {city}</span> : null}
-        </h2>
-        {/* The header already names the number that matters. What it cannot fit
-            is how to read it, which is the only thing this line adds. */}
-        <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-          Whether anybody tried is the difference between a wrong pin and a dead
-          listing.
+      {/* Reached from a city row on the admin overview (?city=). The header's
+          sentence says how to read the screen; this says which city it is. */}
+      {city ? (
+        <p className="text-[0.8125rem] text-muted-foreground">
+          In <b className="font-bold text-foreground">{city}</b> ·{" "}
+          <Link href="/dashboard/events/curate" className="underline-offset-4 hover:underline">
+            all cities
+          </Link>
         </p>
-      </div>
+      ) : null}
 
-      {/* Container queries, per DESIGN_SYSTEM.md: the sidebar is collapsible, so
-          viewport breakpoints reflow out of step with the rest of the grid. */}
       {/*
         * Actionable first, vanity last.
         *
@@ -81,20 +79,22 @@ export default async function CuratePage({
         * question comes before any trailing report, and the forward-looking
         * question here is "which pin do I have to move today".
         */}
-      <div className="grid grid-cols-2 gap-4 @2xl/main:grid-cols-4">
-        <MetricTile
-          label="Likely a wrong pin"
-          value={misPinned.length}
-          hint={misPinned.length > 0 ? "people tried and were refused" : "no refusals recorded"}
-        />
-        <MetricTile
-          label="Ended with nobody in"
-          value={dead.length}
-          hint={ended.length > 0 ? `of ${ended.length} finished` : "none finished yet"}
-        />
-        <MetricTile label="Claimed" value={claimed} hint="handed to a real organiser" />
-        <MetricTile label="Curated" value={total} />
-      </div>
+      <KpiStrip
+        items={[
+          {
+            label: "Likely a wrong pin",
+            value: misPinned.length,
+            hint: misPinned.length > 0 ? "people tried and were refused" : "no refusals recorded",
+          },
+          {
+            label: "Ended with nobody in",
+            value: dead.length,
+            hint: ended.length > 0 ? `of ${ended.length} finished` : "none finished yet",
+          },
+          { label: "Claimed", value: claimed, hint: "handed to a real organiser" },
+          { label: "Curated", value: total },
+        ]}
+      />
 
       {/*
         * The form sits above the queue, not behind a button.
@@ -106,7 +106,12 @@ export default async function CuratePage({
         * different pages again. That is exactly how `city_demand` came to be
         * written for months and read never.
         */}
-      <CurateForm defaultCity={city} />
+      <Panel
+        title="Add an event from a public listing"
+        hint="it appears in the city feed as “Listed by us” until someone claims it"
+      >
+        <CurateForm defaultCity={city} />
+      </Panel>
 
       {rows.length === 0 ? (
         <EmptyState
