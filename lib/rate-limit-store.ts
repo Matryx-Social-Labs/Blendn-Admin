@@ -102,9 +102,38 @@ async function getRedis(): Promise<RedisLike | null> {
  * them, and it certainly should not fail requests. Failing open entirely would
  * hand an attacker a way to disable every limit by taking Redis down.
  */
-export async function hit(key: string, windowMs: number): Promise<HitResult> {
-  const now = Date.now()
+/**
+ * How a limiter behaves when Redis is configured and cannot answer.
+ *
+ * Fail-open (the default, every limiter that predates this): count in this
+ * process's memory instead, so a Redis blip never locks anyone out of sign-in.
+ *
+ * Fail-closed (`{ failClosed: true }`, step 12: the offer door and offer
+ * sends): refuse by throwing `StoreUnavailable`, and NEVER touch the
+ * in-process map — each replica would keep its own count and a restart would
+ * reset it, so a key that fell back and later recovered could come back with
+ * a fresh budget. A fail-closed key lives in Redis or nowhere. With no
+ * REDIS_URL at all there is one store, this process's, for every key alike.
+ */
+export interface StoreOptions {
+  failClosed?: boolean
+}
+
+export class StoreUnavailable extends Error {}
+
+/** Redis for a fail-closed key, or the reason it cannot be had. */
+async function redisFor(key: string, opts: StoreOptions): Promise<RedisLike | null> {
   const redis = await getRedis()
+  if (!redis && opts.failClosed && process.env.REDIS_URL) {
+    logger.warn("Fail-closed limiter refused: rate limit store unavailable", { key })
+    throw new StoreUnavailable("rate limit store unavailable")
+  }
+  return redis
+}
+
+export async function hit(key: string, windowMs: number, opts: StoreOptions = {}): Promise<HitResult> {
+  const now = Date.now()
+  const redis = await redisFor(key, opts)
   if (!redis) return hitMemory(key, windowMs, now)
 
   try {
@@ -119,6 +148,10 @@ export async function hit(key: string, windowMs: number): Promise<HitResult> {
     const ttl = await redis.pTTL(key)
     return { count, resetAt: now + (ttl > 0 ? ttl : windowMs) }
   } catch (error) {
+    if (opts.failClosed) {
+      logger.warn("Fail-closed limiter refused: Redis hit failed", { key, error: error instanceof Error ? error.message : String(error) })
+      throw new StoreUnavailable("rate limit store unavailable")
+    }
     logger.warn("Rate limit Redis hit failed, falling back to memory", {
       error: error instanceof Error ? error.message : String(error),
     })
@@ -126,7 +159,30 @@ export async function hit(key: string, windowMs: number): Promise<HitResult> {
   }
 }
 
-/** Test seam — clears the in-process counters. */
+/**
+ * The count a key holds now, without adding to it; zero when it has none or
+ * its window has passed. Same rules as `hit`, `failClosed` included.
+ */
+export async function peek(key: string, opts: StoreOptions = {}): Promise<number> {
+  const redis = await redisFor(key, opts)
+  if (redis) {
+    try {
+      const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
+      return value ? Number(value) || 0 : 0
+    } catch (error) {
+      if (opts.failClosed) {
+        logger.warn("Fail-closed limiter refused: Redis read failed", { key, error: error instanceof Error ? error.message : String(error) })
+        throw new StoreUnavailable("rate limit store unavailable")
+      }
+      logger.warn("Rate limit Redis peek failed, falling back to memory", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  const existing = memory.get(key)
+  return existing && Date.now() <= existing.resetAt ? existing.count : 0
+}
+
 export function resetMemoryStore(): void {
   memory.clear()
 }
@@ -154,53 +210,3 @@ export async function forget(key: string): Promise<void> {
     })
   }
 }
-
-/**
- * `hit`, failing closed (step 12 review): with Redis configured and failing,
- * this throws rather than counting in this process's memory, where another
- * replica would never see the count. For limits that guard something a
- * script would brute-force — the offer door, offer sends — not for ordinary
- * rate limits, where a forgotten count costs one extra request.
- *
- * ponytail: with no REDIS_URL at all the count is this process's, as every
- * limiter here is; a second replica needs REDIS_URL set (it is the documented
- * precondition for running more than one).
- */
-export async function hitStrict(key: string, windowMs: number): Promise<HitResult> {
-  const now = Date.now()
-  const redis = await getRedis()
-  if (!redis) {
-    if (process.env.REDIS_URL) throw new Error("Rate limit store unavailable")
-    return hitMemory(key, windowMs, now)
-  }
-  const count = await redis.incr(key)
-  if (count === 1) {
-    await redis.pExpire(key, windowMs)
-    return { count, resetAt: now + windowMs }
-  }
-  const ttl = await redis.pTTL(key)
-  return { count, resetAt: now + (ttl > 0 ? ttl : windowMs) }
-}
-
-/**
- * The count a key holds now, without adding to it, counted as `hit` counts:
- * Redis when it answers, this process when it does not — never "unknown".
- * For the offer door (step 12), where a store outage must neither lock staff
- * out nor leave the count unbounded.
- */
-export async function peek(key: string): Promise<number> {
-  const redis = await getRedis()
-  if (redis) {
-    try {
-      const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
-      return value ? Number(value) || 0 : 0
-    } catch (error) {
-      logger.warn("Rate limit Redis peek failed, falling back to memory", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-  const existing = memory.get(key)
-  return existing && Date.now() <= existing.resetAt ? existing.count : 0
-}
-

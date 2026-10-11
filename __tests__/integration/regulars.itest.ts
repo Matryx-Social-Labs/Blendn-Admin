@@ -679,19 +679,54 @@ describe("review pass 2", () => {
     expect(await db.venue_offer_sends.count({ where: { offer_id: offer.id, user_id: R[1].id, redeemed_at: { not: null } } })).toBe(0)
   })
 
-  it("a limit store that cannot answer refuses a send (fail closed) — and an authorised right code at the door still works", async () => {
+  it("with the store unable to answer, every offers limiter refuses while an ordinary limiter still allows (fail closed, store scan)", async () => {
     const offer = await db.venue_offers.findFirstOrThrow({ where: { venue_id: A }, orderBy: { created_at: "asc" } })
     const { json } = await openOffer(R[2].token, offer.id)
-    const spy = jest.spyOn(rateLimitStore, "hitStrict").mockRejectedValue(new Error("redis down"))
+    const realHit = rateLimitStore.hit
+    const realPeek = rateLimitStore.peek
+    const down = new rateLimitStore.StoreUnavailable("redis down")
+    const hitSpy = jest.spyOn(rateLimitStore, "hit").mockImplementation((key, ms, opts) => (opts?.failClosed ? Promise.reject(down) : realHit(key, ms, opts)))
+    const peekSpy = jest.spyOn(rateLimitStore, "peek").mockImplementation((key, opts) => (opts?.failClosed ? Promise.reject(down) : realPeek(key, opts)))
     try {
       as(owner)
       expect(await refusal(actions.sendOffer({ venueId: A, text: "While the store is down", days: 3 }))).toBe("This can't be checked right now. Try again in a minute.")
       as(staff)
-      expect(await actions.redeemPass({ venueId: A, code: json.data.offer.pass.code })).toEqual({ text: "First drink on the house, Thu–Sun before 10" })
+      expect(await refusal(actions.redeemPass({ venueId: A, code: json.data.offer.pass.code }))).toBe("This can't be checked right now. Try again in a minute.")
+      // An ordinary (fail-open) limiter on the same store still lets people through.
+      expect((await offersRoute.GET(req("/api/mobile/offers", R[2].token))).status).toBe(200)
     } finally {
-      spy.mockRestore()
+      hitSpy.mockRestore()
+      peekSpy.mockRestore()
     }
     expect(await db.venue_offers.count({ where: { venue_id: A, text: "While the store is down" } })).toBe(0)
+    expect(await db.venue_offer_sends.count({ where: { offer_id: offer.id, user_id: R[2].id, redeemed_at: { not: null } } })).toBe(0)
+  })
+
+  it("every offers entry point is limited, keyed on what the server derived (store scan)", async () => {
+    const L = await venue(orgA)
+    await pro(L)
+    as(owner)
+    const sends = ["One", "Two quiz", "Three brunch", "Four jazz", "Five pizza", "Six roast"]
+    const answers = []
+    for (const text of sends) answers.push(await refusal(actions.sendOffer({ venueId: L, text: `${text} night offer`, days: 3 })))
+    // The sixth in a minute is refused before anything is written or audited.
+    expect(answers[5]).toBe("Too many tries. Wait a minute and send again.")
+    expect(await db.audit_logs.count({ where: { resource: "venue", resource_id: L } })).toBe(0)
+    as(staff)
+    let door = ""
+    for (let i = 0; i < 31; i++) door = (await refusal(actions.redeemPass({ venueId: L, code: "ZZZZZ2" }))) ?? ""
+    expect(door).toBe("Too many tries. Wait a minute and try again.")
+    const offer = await db.venue_offers.findFirstOrThrow({ where: { venue_id: A }, orderBy: { created_at: "asc" } })
+    const statusAfter = async (n: number, call: () => Promise<Response>) => {
+      let last = 0
+      for (let i = 0; i < n; i++) last = (await call()).status
+      return last
+    }
+    expect(await statusAfter(61, () => offerRoute.GET(req(`/api/mobile/offers/${offer.id}`, R[4].token), { params: Promise.resolve({ offerId: offer.id }) }))).toBe(429)
+    expect(await statusAfter(61, () => offersRoute.GET(req("/api/mobile/offers", R[4].token)))).toBe(429)
+    expect(await statusAfter(31, () => regularRoute.PUT(req(`/api/mobile/venues/${A}/regular`, R[4].token, "PUT", { offersMuted: false }), { params: Promise.resolve({ venueId: A }) }))).toBe(429)
+    expect(await statusAfter(31, () => meOffersRoute.PUT(req("/api/mobile/me/offers", R[4].token, "PUT", { enabled: true })))).toBe(429)
+    expect(await statusAfter(21, () => reportRoute.POST(req(`/api/mobile/offers/${offer.id}/report`, R[4].token, "POST", { reason: "spam" }), { params: Promise.resolve({ offerId: offer.id }) }))).toBe(429)
   })
 
   it("someone outside the venue's organisation never touches its counters (DoS scan)", async () => {

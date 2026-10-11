@@ -18,7 +18,7 @@ import { codeMatches, normaliseCode } from "@/lib/offers/pass-code"
 import { audienceBand, nextOfferAt, OFFERS_PER_WEEK, sentThisWeek, type AudienceBand } from "@/lib/offers/venue"
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
-import { hit, hitStrict, peek } from "@/lib/rate-limit-store"
+import { hit, peek, StoreUnavailable } from "@/lib/rate-limit-store"
 import { mayRedeemAtVenue, maySendVenueOffers } from "@/lib/rbac"
 import { Refusal } from "@/lib/refusal"
 import { audienceSql, REGULAR_NIGHTS, REGULAR_WINDOW_DAYS } from "@/lib/regulars"
@@ -65,8 +65,8 @@ import { venueDayBounds } from "@/lib/venue-day"
  * holds. Anyone else is refused first and never touches a counter.
  *
  * Wrong codes are counted **per staff account at this venue**: atomically
- * (Redis INCR, or this process when Redis is absent or failing — never
- * uncounted), and answered AFTER counting, so the tenth inside five minutes
+ * (Redis INCR; this process's map only where there is no Redis at all), and
+ * answered AFTER counting, so the tenth inside five minutes
  * and every one after it say "locked", however many arrive at once. The lock
  * is that account's alone: one staff member cannot shut the door on every
  * regular, and a colleague's valid pass still works. A right code from a
@@ -80,9 +80,13 @@ import { venueDayBounds } from "@/lib/venue-day"
  * audited for admins. Slowed, never blocked: the regulars at the door are not
  * the attacker.
  *
- * Sends are limited per organisation and venue, and fail closed: with Redis
- * configured and failing, a send is refused rather than counted where no
- * other replica can see it.
+ * Every offers counter is fail-closed (`{ failClosed: true }`,
+ * lib/rate-limit-store.ts): with Redis configured and unable to answer, the
+ * door and sends refuse rather than count in one replica's memory, where the
+ * count would drift and a restart would hand out a fresh budget. Each limit
+ * sits after authorisation and before any side effect, keyed on what the
+ * server derived: the organisation and venue for a send, the venue and staff
+ * member at the door.
  */
 
 const NOT_YOUR_VENUE = "This venue isn't yours to send offers from."
@@ -108,22 +112,31 @@ const SENDS_PER_MINUTE = 5
 const DOOR_TRIES_PER_MINUTE = 30
 const MINUTE_MS = 60 * 1000
 
-/** Over a limit, counted fail-closed: a limit store that cannot answer refuses. */
-async function overLimit(key: string, max: number, windowMs: number): Promise<boolean> {
+const CLOSED = { failClosed: true } as const
+
+/** A fail-closed counter's answer, or the refusal when its store cannot give one. */
+async function counted<T>(work: () => Promise<T>): Promise<T> {
   try {
-    return (await hitStrict(key, windowMs)).count > max
+    return await work()
   } catch (error) {
-    logger.error("Offer limit store unavailable", { key, error: error instanceof Error ? error.message : String(error) })
-    throw new Refusal(STORE_DOWN)
+    if (error instanceof StoreUnavailable) {
+      logger.error("Offer limit store unavailable: refusing", { error: error.message })
+      throw new Refusal(STORE_DOWN)
+    }
+    throw error
   }
 }
+
+/** Over a limit, counted fail-closed. */
+const overLimit = async (key: string, max: number, windowMs: number): Promise<boolean> =>
+  (await counted(() => hit(key, windowMs, CLOSED))).count > max
 
 const staffKey = (venueId: string, userId: string) => `door-fail:${venueId}:${userId}`
 const venueKey = (venueId: string) => `door-fail-venue:${venueId}`
 
 /** Past the venue-wide backstop, every attempt waits — longer the further past (review DoS scan). */
 async function backstopDelay(venueId: string): Promise<void> {
-  const over = (await peek(venueKey(venueId))) - VENUE_BACKSTOP
+  const over = (await counted(() => peek(venueKey(venueId), CLOSED))) - VENUE_BACKSTOP
   if (over > 0) await new Promise((r) => setTimeout(r, Math.min(over * BACKSTOP_DELAY_STEP_MS, BACKSTOP_DELAY_MAX_MS)))
 }
 
@@ -275,17 +288,17 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
       : null
   // Authorised before anything is counted: nobody outside the venue's organisation touches its counters.
   if (!venue?.owner_org_id || !member) throw new Refusal(NOT_A_PASS_HERE)
-  if ((await hit(`offer-redeem:${venueId}:${user.id}`, MINUTE_MS)).count > DOOR_TRIES_PER_MINUTE) {
+  if (await overLimit(`offer-redeem:${venueId}:${user.id}`, DOOR_TRIES_PER_MINUTE, MINUTE_MS)) {
     throw new Refusal("Too many tries. Wait a minute and try again.")
   }
-  if ((await peek(staffKey(venueId, user.id))) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
+  if ((await counted(() => peek(staffKey(venueId, user.id), CLOSED))) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
   await backstopDelay(venueId)
 
   // A wrong code counts first and is answered after: the one that reaches this
   // account's limit, and every one after it, however many are in flight, says locked.
   const wrong = async (message: string): Promise<never> => {
-    const mine = (await hit(staffKey(venueId, user.id), DOOR_LOCK_MS)).count
-    const all = (await hit(venueKey(venueId), VENUE_BACKSTOP_WINDOW_MS)).count
+    const mine = (await counted(() => hit(staffKey(venueId, user.id), DOOR_LOCK_MS, CLOSED))).count
+    const all = (await counted(() => hit(venueKey(venueId), VENUE_BACKSTOP_WINDOW_MS, CLOSED))).count
     if (all === VENUE_BACKSTOP) {
       logger.error("Offer door backstop crossed: wrong codes across staff accounts", { venueId, failures: all })
       // The platform's, not the venue's: org null.
@@ -308,7 +321,7 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
   if (pass.offer.ends_at <= now) throw new Refusal("This offer has ended.")
 
   // Again just before the write: this account's wrong codes in flight may have locked it since this one arrived.
-  if ((await peek(staffKey(venueId, user.id))) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
+  if ((await counted(() => peek(staffKey(venueId, user.id), CLOSED))) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
   const tonight = new Date(`${venueDayBounds(venue.timezone, venue.day_reset_hour, now).localDate}T00:00:00Z`)
   try {
     await db.$transaction(async (tx) => {
