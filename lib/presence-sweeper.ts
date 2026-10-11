@@ -9,6 +9,7 @@ import { performCheckout } from "./checkout"
 import { realEventsWhere, venueDaysWhere } from "./event-kind"
 import { resolveFence, fenceSelect } from "./geofence"
 import { evaluatePresence, type PresenceState } from "./presence"
+import { closeStrandedSessions } from "./presence-sessions"
 import { sendBulkPushNotifications } from "./push-notifications"
 import { hit } from "./rate-limit-store"
 import { atTheVenue, takeoverSelect, venueTakeoverWhere } from "./venue-visibility"
@@ -91,6 +92,12 @@ export interface SweepResult {
   checkedOut: number
   /** Events where the guard tripped and nothing was done. */
   guarded: string[]
+  /**
+   * Sessions closed because their occurrence ended and no check-in row was left
+   * for the sweep above to find (`closeStrandedSessions`). Only the events pass
+   * runs it; a venue day's pass reports 0.
+   */
+  stranded: number
 }
 
 /**
@@ -100,7 +107,15 @@ export interface SweepResult {
  * 200 would let them crowd the events out (F5).
  */
 export async function sweepPresence(now: Date = new Date()): Promise<SweepResult> {
-  return sweepRooms(realEventsWhere, MAX_EVENTS_PER_SWEEP, now)
+  const rooms = await sweepRooms(realEventsWhere, MAX_EVENTS_PER_SWEEP, now)
+  /*
+   * After the rooms, so the checkout path gets first claim on anyone still
+   * checked in. Not kind-filtered: a venue day's session stranded past its
+   * reset is the same defect, and one pass covers both kinds.
+   */
+  const stranded = await closeStrandedSessions(now)
+  if (stranded > 0) logger.info("Presence sweep closed stranded sessions", { stranded })
+  return { ...rooms, stranded }
 }
 
 /**
@@ -112,7 +127,7 @@ async function sweepRooms(
   cap: number,
   now: Date
 ): Promise<SweepResult> {
-  const result: SweepResult = { examined: 0, checkedOut: 0, guarded: [] }
+  const result: SweepResult = { examined: 0, checkedOut: 0, guarded: [], stranded: 0 }
 
   /*
    * Which rooms, before which rows. See MAX_EVENTS_PER_SWEEP.

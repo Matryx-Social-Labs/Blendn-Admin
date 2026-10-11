@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client"
 // green and the container dies on boot with MODULE_NOT_FOUND. This module is
 // reachable from server.ts through the presence sweeper, so the rule applies.
 import { db } from "./db"
+import { OCCURRENCE_GRACE_MINUTES } from "./presence"
 
 /**
  * Presence, asked once.
@@ -119,6 +120,63 @@ export async function closeSession(
     data: { departed_at: at, departed_source: source, updated_at: at },
   })
   return count
+}
+
+/** The most sessions one sweep closes this way; the rest wait for the next. */
+export const MAX_STRANDED_PER_SWEEP = 1000
+
+/**
+ * Close the sessions nothing else can reach, once their occurrence is over.
+ *
+ * The sweeper finds people through `event_check_ins.status = 'checked_in'` and
+ * closes the session beside the check-in. "Inside" is the session's own
+ * `departed_at IS NULL`, so a session whose check-in row is anything else — a
+ * `cancelled` one from before cancelling closed sessions (SCRUM-490), a
+ * `checked_out` one a racing check-in re-opened a session under, or no row —
+ * is reached by nothing and counts as present for ever. Found on staging: 8
+ * open sessions on 4 events that ended up to 20 days earlier.
+ *
+ * Deliberately NOT a session whose check-in is still `checked_in`: the checkout
+ * path owns those, and it also stamps the row, cuts chat access and tells the
+ * live screen. Closing only the session here would strand the rest.
+ *
+ * Stamped at the occurrence's end, never later: the room closed then, and a
+ * departure invented at the sweeper's clock is a stay the person did not have.
+ * `GREATEST` against the arrival because `departed_at >= arrived_at` is a CHECK
+ * and one row arriving after the end must not fail the statement for the rest.
+ * `sweeper` because when they really left is inference, so `departureQuality`
+ * says so.
+ *
+ * Oldest room first and bounded, like every other pass.
+ */
+export async function closeStrandedSessions(
+  now: Date = new Date(),
+  limit: number = MAX_STRANDED_PER_SWEEP
+): Promise<number> {
+  const endedBefore = new Date(now.getTime() - OCCURRENCE_GRACE_MINUTES * 60_000)
+  return db.$executeRaw`
+    UPDATE presence_sessions ps
+       SET departed_at = GREATEST(ps.arrived_at, o.end_time),
+           departed_source = 'sweeper',
+           updated_at = ${now}
+      FROM event_occurrences o
+     WHERE o.id = ps.occurrence_id
+       AND ps.id IN (
+         SELECT s.id
+           FROM presence_sessions s
+           JOIN event_occurrences so ON so.id = s.occurrence_id
+          WHERE s.departed_at IS NULL
+            AND so.end_time < ${endedBefore}
+            AND NOT EXISTS (
+              SELECT 1 FROM event_check_ins c
+               WHERE c.occurrence_id = s.occurrence_id
+                 AND c.user_id = s.user_id
+                 AND c.status = 'checked_in'
+            )
+          ORDER BY so.end_time
+          LIMIT ${limit}
+       )
+  `
 }
 
 /**

@@ -12,6 +12,9 @@
  *       written once, and a soft-deleted event cannot restart it.
  *   G9  floors: the complement rule (20/18, 12/11, 12 = 7 + 5), quartiles at
  *       7 vs 8 stays, merged arrival bars, the funnel's floors and filters.
+ *   G10 stay: a visit is one person at one occurrence, and ends when the room
+ *       did. A staging coffee morning read a 16 h 08 m median because it summed
+ *       four occurrences and counted the sweeper's hour of lag on each.
  */
 import { randomUUID } from "crypto"
 
@@ -291,5 +294,95 @@ describe("G9 floors", () => {
     for (const u of viewers.slice(10, 12)) await db.event_rsvps.create({ data: { event_id: e.id, user_id: u, status: "going", created_at: NOW } })
     got = await eventAnalytics(await openAccess(orgF), e.id)
     expect(got!.funnel).toEqual({ viewers: 12, viewersWhoRsvpd: null, conversionPct: null })
+  })
+})
+
+describe("G10 stay is a visit, and ends when the room did", () => {
+  let orgS = ""
+  beforeAll(async () => {
+    orgS = await org("af-stay")
+  })
+
+  /** An event of `days` occurrences a day apart, each 3 h, the last of them over by NOW. */
+  async function recurring(days: number) {
+    const first = await event(orgS, new Date(NOW.getTime() - (days + 1) * DAY), 3)
+    const occs = [{ id: first.occ, start: first.start, end: first.end }]
+    for (let d = 1; d < days; d++) {
+      const start = new Date(first.start.getTime() + d * DAY)
+      const end = new Date(start.getTime() + 3 * 60 * MIN)
+      const o = await db.event_occurrences.create({ data: { event_id: first.id, occurs_on: new Date(start.toISOString().slice(0, 10)), start_time: start, end_time: end } })
+      occs.push({ id: o.id, start, end })
+    }
+    // The event row ends with its last occurrence, as a recurring one does.
+    await db.events.update({ where: { id: first.id }, data: { end_time: occs[occs.length - 1].end } })
+    return { id: first.id, occs }
+  }
+
+  async function session(
+    e: { id: string },
+    occ: { id: string; start: Date },
+    userId: string,
+    s: { departedAfter?: number; source?: "sweeper" | "user"; seenAfter?: number }
+  ) {
+    await db.event_check_ins.upsert({
+      where: { occurrence_id_user_id: { occurrence_id: occ.id, user_id: userId } },
+      create: { event_id: e.id, occurrence_id: occ.id, user_id: userId, status: "checked_out", check_in_time: occ.start },
+      update: {},
+    })
+    await db.presence_sessions.create({
+      data: {
+        event_id: e.id,
+        occurrence_id: occ.id,
+        user_id: userId,
+        arrived_at: occ.start,
+        last_seen_at: s.seenAfter === undefined ? null : new Date(occ.start.getTime() + s.seenAfter * MIN),
+        ...(s.departedAfter === undefined
+          ? {}
+          : { departed_at: new Date(occ.start.getTime() + s.departedAfter * MIN), departed_source: s.source ?? "user" }),
+      },
+    })
+  }
+
+  it("counts a session the sweeper closed an hour late only to the end of the room", async () => {
+    const e = await recurring(1)
+    for (const u of await people(6, "s1")) await session(e, e.occs[0], u, { departedAfter: 180 + 65, source: "sweeper" })
+    const got = await eventAnalytics(await openAccess(orgS), e.id)
+    expect(got!.stay?.p50Min).toBe(180)
+  })
+
+  it("counts a session nobody closed only to the end of the room, however late it was last seen", async () => {
+    const e = await recurring(1)
+    for (const u of await people(6, "s2")) await session(e, e.occs[0], u, { seenAfter: 180 + 6 * 60 })
+    const got = await eventAnalytics(await openAccess(orgS), e.id)
+    expect(got!.stay?.p50Min).toBe(180)
+  })
+
+  it("takes the median of visits, not of the days a person came put together", async () => {
+    const e = await recurring(4)
+    const who = await people(6, "s3")
+    for (const occ of e.occs) for (const u of who) await session(e, occ, u, { departedAfter: 60 })
+    const got = await eventAnalytics(await openAccess(orgS), e.id)
+    expect(got!.stay?.p50Min).toBe(60)
+    const row = (await orgAnalytics(await openAccess(orgS), "all", NOW))!.comparison.find((r) => r.eventId === e.id)
+    expect(row?.medianStayMin).toBe(60)
+  })
+
+  it("judges leaving early against the room the person was in, not the event's last day", async () => {
+    // Two days; everyone here came on day 1 only. Six stay to its end, six leave
+    // 40 minutes before it. Against the event row's end (day 2) all twelve would
+    // be early, which is 12 of 12 and held back.
+    const e = await recurring(2)
+    for (const u of await people(6, "s4a")) await session(e, e.occs[0], u, { departedAfter: 180 })
+    for (const u of await people(6, "s4b")) await session(e, e.occs[0], u, { departedAfter: 140 })
+    const got = await eventAnalytics(await openAccess(orgS), e.id)
+    expect(got!.stay?.leftEarlyPct).toBe(50)
+  })
+
+  it("still counts people, not visits, against the floor: 4 people over 3 days stay held back", async () => {
+    const e = await recurring(3)
+    const who = await people(4, "s5")
+    for (const occ of e.occs) for (const u of who) await session(e, occ, u, { departedAfter: 90 })
+    const got = await eventAnalytics(await openAccess(orgS), e.id)
+    expect(got!.stay).toBeNull()
   })
 })
