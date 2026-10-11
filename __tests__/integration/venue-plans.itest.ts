@@ -453,7 +453,8 @@ describe("a venue changing hands (review M7)", () => {
     // The new owner sees the venue, and none of the previous owner's mandate:
     // no subscription, no payment row, no reference, invoice or amount anywhere.
     const asNew = await venuePlanPage({ id: newOwner, role: "venue_owner" })
-    expect(asNew.venues.find((r) => r.venueId === v)).toMatchObject({ owned: true, subscriptions: [] })
+    // ...only that one is still closing here (review L7): Buy is held back with a neutral line, not refused at checkout.
+    expect(asNew.venues.find((r) => r.venueId === v)).toMatchObject({ owned: true, subscriptions: [], openElsewhere: true })
     expect(asNew.payments).toEqual([])
     const page = JSON.stringify(asNew)
     for (const needle of [ref, invoice, payId, "353900"]) expect(page).not.toContain(needle)
@@ -464,6 +465,7 @@ describe("a venue changing hands (review M7)", () => {
       owned: false,
       mayCancel: true,
       mayBuy: false,
+      openElsewhere: false,
       orgName: "",
       pro: null,
       date: null,
@@ -793,6 +795,17 @@ describe("the venue owner's Plan page", () => {
     expect(asStaff.venues.find((r) => r.venueId === v)?.mayBuy).toBe(false)
     const asStranger = await venuePlanPage({ id: stranger, role: "venue_owner" })
     expect(asStranger.venues.find((r) => r.venueId === v)).toBeUndefined()
+  })
+
+  it("review L7: a mandate on a plan key the price table has retired is still listed, to cancel and to hold Buy back", async () => {
+    const v = await venue("vp-retired")
+    const ref = `sub_${randomUUID().slice(0, 12)}`
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: ref, provider_plan_id: "plan_vp_2025", org_id: orgId, venue_id: v, plan_key: "venue_pro_monthly_2025", amount_minor: 299_900, status: "active" },
+    })
+    const row = (await venuePlanPage({ id: owner, role: "venue_owner" })).venues.find((r) => r.venueId === v)
+    expect(row?.subscriptions).toMatchObject([{ providerRef: ref, status: "active" }])
+    expect(row?.openElsewhere).toBe(false)
   })
 })
 /* ------------------------------------------------------------------ */

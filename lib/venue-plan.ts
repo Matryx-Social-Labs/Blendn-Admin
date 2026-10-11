@@ -76,9 +76,22 @@ export interface VenuePlanRow {
   pro: LiveEntitlement | null
   date: PlanDate | null
   readiness: VenueReadiness
-  /** Every Venue Pro subscription this person's organisations pay for here that could still charge. */
-  subscriptions: SubscriptionState[]
+  /**
+   * Every Venue Pro subscription this person's organisations pay for here that
+   * could still charge, a retired plan key included (review L7): a mandate
+   * dropped here was one nobody could see, cancel, or be refused a second beside.
+   */
+  subscriptions: VenueSubscription[]
+  /**
+   * Another organisation's Venue Pro mandate here can still charge (a previous
+   * owner's, closing after a transfer). Checkout refuses a new one until it
+   * closes. A yes or no, never whose, which plan or how much.
+   */
+  openElsewhere: boolean
 }
+
+/** A venue's mandate as its row needs it; the plan key may be one the price table has retired. */
+export type VenueSubscription = Omit<SubscriptionState, "planKey">
 
 export interface VenuePlanPage {
   paymentsOn: boolean
@@ -118,7 +131,8 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
     venueDataSince(ids),
     ids.length
       ? db.billing_checkouts.findMany({
-          where: { venue_id: { in: ids }, org_id: { in: orgIds }, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
+          // Every organisation's: whether another one's is open here is said, as a yes or no.
+          where: { venue_id: { in: ids }, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
           orderBy: { created_at: "desc" },
           select: { venue_id: true, org_id: true, provider_ref: true, plan_key: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
         })
@@ -145,12 +159,15 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
   return {
     paymentsOn: paymentsOn(),
     venues: venues.map((v, i) => {
-      const mine = subs.filter((s) => s.venue_id === v.id)
-      const subscriptions = mine.flatMap((s) =>
-        isBillingPlanKey(s.plan_key)
-          ? [{ providerRef: s.provider_ref, planKey: s.plan_key, status: s.status, currentEnd: s.current_end, cancelAtCycleEnd: s.cancel_at_cycle_end, createdAt: s.created_at }]
-          : []
-      )
+      const here = subs.filter((s) => s.venue_id === v.id)
+      const mine = here.filter((s) => roleIn.has(s.org_id))
+      const subscriptions = mine.map((s) => ({
+        providerRef: s.provider_ref,
+        status: s.status,
+        currentEnd: s.current_end,
+        cancelAtCycleEnd: s.cancel_at_cycle_end,
+        createdAt: s.created_at,
+      }))
       const memberRole = v.owner_org_id ? roleIn.get(v.owner_org_id) : undefined
       const payerRoles = mine.map((s) => roleIn.get(s.org_id))
       const owned = memberRole !== undefined
@@ -168,6 +185,7 @@ export async function venuePlanPage(user: { id: string; role: user_role }, now: 
         date: owned ? planDate(pros[i], mine[0] ?? null) : null,
         readiness: owned ? readinessFrom(since.get(v.id) ?? null, now) : readinessFrom(null, now),
         subscriptions,
+        openElsewhere: here.some((s) => !roleIn.has(s.org_id)),
       }
     }),
     payments: paid.map((p) => ({

@@ -259,8 +259,34 @@ async function advance(tx: Tx, c: Checkout, eventAt: Date, next: string, current
   })
 }
 
-/** When the payment was made: its own time, else the delivery's. */
-const paidAt = (payment: Entity, eventAt: Date): Date => at(payment.created_at) ?? eventAt
+/** How far ahead of our clock a payment's own time is still believed (Razorpay's clock and ours). */
+const PAID_AT_SKEW_MS = 60_000
+
+/**
+ * When the payment was made: its own time, unless that is missing, not
+ * positive, or more than a minute ahead of our clock (review L1); then the
+ * delivery's. Never clamped to the delivery's: for a link that is its
+ * creation, days early (SCRUM-606).
+ */
+function paidAt(payment: Entity, eventAt: Date): Date {
+  const own = num(payment.created_at)
+  return own !== null && own > 0 && own * 1000 <= Date.now() + PAID_AT_SKEW_MS ? new Date(own * 1000) : eventAt
+}
+
+/**
+ * One payment's deliveries one at a time (review L4): its recording
+ * (`subscription.charged`, `order.paid`, `payment_link.paid`) and its refunds
+ * and disputes. Taken before any row lock on every path, so the order is
+ * always this, the checkout, then the charge. Without it a refund that found
+ * no payment yet and the payment's own delivery could each miss the other,
+ * and the refund was never applied.
+ */
+async function lockPayment(tx: Tx, paymentId: string | null) {
+  if (paymentId) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`rzp-payment:${paymentId}`}))`
+}
+
+/** The deliveries that record a payment. */
+const PAYMENT_DELIVERIES = new Set(["subscription.charged", "order.paid", "payment_link.paid"])
 
 /** Remember a captured payment, once (a re-sent charge finds it). */
 async function recordPayment(tx: Tx, c: Checkout, payment: Entity, eventAt: Date) {
@@ -294,6 +320,7 @@ const subscriptionProduct = (c: Checkout): "analytics" | "venue_pro" => (c.venue
 const auditResource = (c: Checkout) => (c.venue_id ? { resource: { kind: "venue", id: c.venue_id } } : {})
 
 async function apply(tx: Tx, d: Delivery): Promise<Outcome> {
+  if (PAYMENT_DELIVERIES.has(d.event)) await lockPayment(tx, str(entityOf(d, "payment")?.id))
   if (d.event.startsWith("subscription.")) return applySubscription(tx, d)
   if (d.event === "order.paid") return applyOrderPaid(tx, d)
   if (d.event === "payment_link.paid") return applyPaymentLinkPaid(tx, d)
@@ -372,14 +399,25 @@ async function applySubscription(tx: Tx, d: Delivery): Promise<Outcome> {
         },
       })
     }
+    await applyEarlyRefund(tx, out, c, str(payment.id))
   }
 
   if (d.event === "subscription.halted") {
-    // A payment made after the halt (`captured_at` is the payment's own time) keeps access.
-    const laterCharge = await tx.billing_payments.count({
-      where: { checkout_id: c.id, captured_at: { gt: eventAt }, status: "captured" },
-    })
-    if (laterCharge === 0) await endAccess(tx, out, c, subId, eventAt, d.event)
+    // A charge Razorpay sent after the halt keeps access, on the delivery
+    // clock both sides (review M1): a payment's own time is earlier than its
+    // delivery's, so a charge paid before the halt's stamp but delivered
+    // after it read as older and the halt ended paid access.
+    const [{ later }] = await tx.$queryRaw<{ later: number }[]>`
+      SELECT count(*)::int AS later
+        FROM payment_events pe
+        JOIN billing_payments bp
+          ON bp.provider = ${PROVIDER} AND bp.provider_payment_id = pe.payload #>> '{payload,payment,entity,id}'
+       WHERE pe.checkout_id = ${c.id}::uuid
+         AND pe.type = 'subscription.charged'
+         AND pe.processed_at IS NOT NULL
+         AND (pe.payload ->> 'created_at')::bigint > ${d.created_at}::bigint
+         AND bp.status = 'captured'`
+    if (later === 0) await endAccess(tx, out, c, subId, eventAt, d.event)
   }
 
   if (d.event === "subscription.cancelled" || d.event === "subscription.completed") {
@@ -506,6 +544,7 @@ async function applyOrderPaid(tx: Tx, d: Delivery): Promise<Outcome> {
       details: { product: "event_pass", eventId: c.event_id, source: "razorpay", externalRef: orderId, paymentId: str(payment?.id) },
     })
   }
+  await applyEarlyRefund(tx, out, c, str(payment?.id))
   await advance(tx, c, eventAt, "paid")
   return out
 }
@@ -521,81 +560,120 @@ async function applyPaymentFailed(tx: Tx, d: Delivery): Promise<Outcome> {
   return { applied: true, checkoutId: c.id, audit: [], after: [] }
 }
 
-/** The purchase a payment belongs to, locked. */
-async function checkoutOfPayment(tx: Tx, paymentId: string) {
-  const payment = await tx.billing_payments.findUnique({
-    where: { provider_provider_payment_id: { provider: PROVIDER, provider_payment_id: paymentId } },
-    select: { id: true, amount_minor: true, status: true, checkout: { select: { provider_ref: true } } },
-  })
-  if (!payment) return null
-  const c = await lockCheckout(tx, payment.checkout.provider_ref)
-  return c ? { payment, c } : null
+/** What a refund or a dispute reads of the payment it is about. */
+const PAYMENT_ROW = { id: true, provider_payment_id: true, amount_minor: true, status: true, captured_at: true } as const
+type PaymentRow = { id: string; provider_payment_id: string; amount_minor: number; status: string; captured_at: Date }
+
+/**
+ * The purchase a payment belongs to, locked, and the payment as it stands
+ * under those locks: the payment's own lock first (`lockPayment`), then the
+ * checkout's, then the row read again, since a status read before the locks
+ * may be one another delivery has since changed (review L2).
+ */
+async function checkoutOfPayment(tx: Tx, paymentId: string): Promise<{ payment: PaymentRow; c: Checkout } | null> {
+  await lockPayment(tx, paymentId)
+  const where = { provider_provider_payment_id: { provider: PROVIDER, provider_payment_id: paymentId } }
+  const found = await tx.billing_payments.findUnique({ where, select: { checkout: { select: { provider_ref: true } } } })
+  if (!found) return null
+  const c = await lockCheckout(tx, found.checkout.provider_ref)
+  if (!c) return null
+  return { payment: await tx.billing_payments.findUniqueOrThrow({ where, select: PAYMENT_ROW }), c }
 }
 
 type StoredDelivery = { created_at?: number; payload?: { refund?: { entity?: Entity } } }
+type Refund = { id: string; amount: number; at: Date | null }
 
 /**
  * Every refund Razorpay has delivered for one payment, from our own
- * `payment_events` (this delivery's row included: it was claimed first), each
- * refund id once, so the same refund in a second body is not a second refund.
- * Held by the checkout's lock, so two refunds of one payment add up one after
- * the other.
+ * `payment_events` (this delivery's row included: it was claimed first).
+ * Each refund id counts once, at its earliest delivery's time, and only one
+ * Razorpay calls processed; a refund with no id is refused as malformed
+ * before it gets here (review L3). Held by the payment's and the checkout's
+ * locks, so two refunds of one payment add up one after the other.
  */
 async function refundsOf(tx: Tx, paymentId: string) {
-  // ponytail: a JSON-path scan of payment_events; add an expression index on the refund's payment_id if that table grows large.
+  // ponytail: a JSON-path scan of payment_events, fine at today's volume. Past
+  // ~100k refund.processed rows, add (and EXPLAIN that the path filter uses it):
+  //   CREATE INDEX CONCURRENTLY payment_events_refund_payment_idx ON payment_events
+  //     ((payload #> '{payload,refund,entity,payment_id}')) WHERE type = 'refund.processed';
   const rows = await tx.payment_events.findMany({
     where: { provider: PROVIDER, type: "refund.processed", payload: { path: ["payload", "refund", "entity", "payment_id"], equals: paymentId } },
+    orderBy: [{ received_at: "asc" }, { id: "asc" }],
     select: { id: true, payload: true, error: true },
   })
-  const byRefund = new Map<string, { id: string | null; amount: number; at: Date | null }>()
+  const byRefund = new Map<string, Refund>()
   for (const row of rows) {
     const stored = row.payload as StoredDelivery
     const refund = stored.payload?.refund?.entity
+    const id = str(refund?.id)
     const amount = num(refund?.amount)
-    if (amount !== null) byRefund.set(str(refund?.id) ?? row.id, { id: str(refund?.id), amount, at: at(stored.created_at) })
+    if (!id || amount === null || str(refund?.status) !== "processed") continue
+    const when = at(stored.created_at)
+    const seen = byRefund.get(id)
+    if (!seen || (when && (!seen.at || when < seen.at))) byRefund.set(id, { id, amount, at: when })
   }
   const refunds = [...byRefund.values()]
   return {
     rows,
     total: refunds.reduce((sum, r) => sum + r.amount, 0),
     /** The latest of them, by Razorpay's time: the one after which the whole payment had gone back. */
-    last: refunds.reduce<(typeof refunds)[number] | null>((last, r) => (r.at && (!last?.at || r.at > last.at) ? r : last), null),
+    last: refunds.reduce<Refund | null>((last, r) => (r.at && (!last?.at || r.at > last.at) ? r : last), null),
   }
 }
 
 /**
- * A refund. Refunds of one payment add up (SCRUM-610): once what went back
- * reaches what was paid, in one refund or several, what the payment bought
- * ends at Razorpay's time for the latest of them, and a refunded
- * subscription is also cancelled at Razorpay (after the commit), so it cannot
- * charge again. Until then a partial refund is goodwill and changes nothing.
+ * A payment's refunds, applied once they add up to it (SCRUM-610), at the
+ * latest refund's time. The payment is refunded, and then:
+ *
+ *   - a payment of an earlier period, with a newer one captured on the same
+ *     purchase, ends nothing: the running period was paid for, so access and
+ *     the mandate stay (review M2; RevenueCat's `old_period_refund`);
+ *   - a link's charge is void;
+ *   - otherwise what it bought ends, and a subscription is cancelled at
+ *     Razorpay after the commit, so it cannot charge again.
+ *
+ * Nothing more once the payment is refunded.
  */
-async function applyRefund(tx: Tx, d: Delivery): Promise<Outcome> {
-  const refund = entityOf(d, "refund")
-  const paymentId = str(refund?.payment_id)
-  const amount = num(refund?.amount)
-  const eventAt = at(d.created_at)
-  if (!refund || !paymentId || amount === null || !eventAt) return refuse("malformed")
-  const found = await checkoutOfPayment(tx, paymentId)
-  if (!found) return refuse("unknown_ref")
-  const { payment, c } = found
-  const out: Outcome = { applied: true, checkoutId: c.id, audit: [], after: [] }
-  if (payment.status === "refunded") return out
-  const refunds = await refundsOf(tx, paymentId)
-  if (refunds.total < payment.amount_minor) return out
-  const refundedAt = refunds.last?.at ?? eventAt
-
+async function applyRefunds(tx: Tx, out: Outcome, c: Checkout, payment: PaymentRow, refunds: Awaited<ReturnType<typeof refundsOf>>) {
+  const last = refunds.last
+  if (payment.status === "refunded" || refunds.total < payment.amount_minor || !last?.at) return
   await tx.billing_payments.update({ where: { id: payment.id }, data: { status: "refunded" } })
+  const newer = await tx.billing_payments.findFirst({
+    where: { checkout_id: c.id, id: { not: payment.id }, status: "captured", captured_at: { gt: payment.captured_at } },
+    orderBy: { captured_at: "desc" },
+    select: { provider_payment_id: true },
+  })
+  if (newer) {
+    out.audit.push({
+      action: "entitlement.refund_old_period",
+      orgId: c.org_id,
+      ...auditResource(c),
+      details: { externalRef: c.provider_ref, refundId: last.id, refundedPaymentId: payment.provider_payment_id, runningPaymentId: newer.provider_payment_id },
+    })
+    return
+  }
   if (c.kind === "payment_link") {
     // The money went back: the charge it settled is void, with the refund as the reason.
-    await voidRefundedCharge(tx, out, c, refunds.last?.id ?? str(refund.id), refundedAt)
-    return out
+    await voidRefundedCharge(tx, out, c, last.id, last.at)
+    return
   }
-  await endAccess(tx, out, c, c.provider_ref, refundedAt, d.event)
+  await endAccess(tx, out, c, c.provider_ref, last.at, "refund.processed")
   if (c.kind === "subscription" && !TERMINAL.includes(c.status)) {
     const ref = c.provider_ref
     out.after.push(() => cancelSubscription(ref, false))
   }
+}
+
+/** A refund. Refunds of one payment add up; see `applyRefunds`. */
+async function applyRefund(tx: Tx, d: Delivery): Promise<Outcome> {
+  const refund = entityOf(d, "refund")
+  const paymentId = str(refund?.payment_id)
+  // An id-less refund cannot be told from a second delivery of another one (review L3).
+  if (!refund || !paymentId || !str(refund.id) || num(refund.amount) === null || !at(d.created_at)) return refuse("malformed")
+  const found = await checkoutOfPayment(tx, paymentId)
+  if (!found) return refuse("unknown_ref")
+  const out: Outcome = { applied: true, checkoutId: found.c.id, audit: [], after: [] }
+  await applyRefunds(tx, out, found.c, found.payment, await refundsOf(tx, paymentId))
   return out
 }
 
@@ -758,21 +836,20 @@ async function applyPaymentLinkPaid(tx: Tx, d: Delivery): Promise<Outcome> {
 
 /**
  * Refunds of this payment that arrived before it (refused then as
- * `unknown_ref`), applied now. They add up as in `applyRefund`: once they
- * reach the payment, it is refunded and the charge it settled is void, at the
- * latest refund's time. Each earlier delivery is marked processed.
+ * `unknown_ref`), applied now that it is recorded, by every delivery that
+ * records a payment: a subscription's charge, an order, a link (review L4).
+ * They add up as in `applyRefunds`. Each earlier delivery is marked processed.
  */
-async function applyEarlyRefund(tx: Tx, out: Outcome, c: Checkout, paymentId: string) {
+async function applyEarlyRefund(tx: Tx, out: Outcome, c: Checkout, paymentId: string | null) {
+  if (!paymentId) return
   const refunds = await refundsOf(tx, paymentId)
   const early = refunds.rows.filter((r) => r.error === "unknown_ref")
   if (early.length === 0) return
-  if (refunds.total >= c.amount_minor && refunds.last?.at) {
-    await tx.billing_payments.updateMany({
-      where: { provider: PROVIDER, provider_payment_id: paymentId },
-      data: { status: "refunded" },
-    })
-    await voidRefundedCharge(tx, out, c, refunds.last.id, refunds.last.at)
-  }
+  const payment = await tx.billing_payments.findUnique({
+    where: { provider_provider_payment_id: { provider: PROVIDER, provider_payment_id: paymentId } },
+    select: PAYMENT_ROW,
+  })
+  if (payment) await applyRefunds(tx, out, c, payment, refunds)
   await tx.payment_events.updateMany({
     where: { id: { in: early.map((r) => r.id) } },
     data: { error: null, processed_at: new Date(), checkout_id: c.id },

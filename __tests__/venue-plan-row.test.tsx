@@ -32,13 +32,13 @@ function row(overrides: Partial<VenuePlanRow>): VenuePlanRow {
     date: null,
     readiness: READY,
     subscriptions: [],
+    openElsewhere: false,
     ...overrides,
   }
 }
 
 const subscription = (status: string) => ({
   providerRef: "sub_1",
-  planKey: "venue_pro_monthly" as const,
   status,
   currentEnd: UNTIL,
   cancelAtCycleEnd: false,
@@ -70,4 +70,13 @@ it.each([
   expect(html).not.toContain("can be bought")
   expect(offersBuy(html)).toBe(false)
   expect(html).toContain("28 of 28 days of data")
+})
+
+it("review L7: another organisation's mandate still open here: a neutral line in place of Buy, and nothing about it", () => {
+  const html = render(row({ openElsewhere: true }))
+  expect(html).toContain("A previous plan on this venue is still being closed — contact support.")
+  expect(html).not.toContain("can be bought")
+  expect(offersBuy(html)).toBe(false)
+  // Whose, which plan, or how much is never said.
+  expect(html).not.toMatch(/sub_|renews|cancel/i)
 })
