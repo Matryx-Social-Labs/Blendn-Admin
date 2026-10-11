@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useMemo } from "react"
 import {
   IconBroadcast,
@@ -13,6 +14,7 @@ import {
 import { ArrivalCurve, CategoryBars, type ArrivalPoint } from "@/components/dashboard/charts"
 import { OccupancyHero } from "@/components/dashboard/occupancy-hero"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
+import { Button } from "@/components/ui/button"
 import {
   occupancyMostlyInferred,
   type LiveAlert,
@@ -139,6 +141,18 @@ export function LiveTab({
         icon={<IconBroadcastOff />}
         title="The event has ended"
         description="Live aggregates stop at the scheduled end. What attendees are saying now lands in Feedback while the chat window is still open."
+        /*
+         * The alerts it recorded do not go with it. They are the Overview's
+         * Alert history now (F6): this tab is offered only while the event
+         * runs, so a person who was on it when it ended is told where they went.
+         */
+        action={
+          issues.length > 0 ? (
+            <Button asChild size="sm" variant="outline" className="pointer-coarse:h-11">
+              <Link href={`/dashboard/events/${eventId}`}>See the alert history</Link>
+            </Button>
+          ) : undefined
+        }
       />
     )
   }
