@@ -270,11 +270,12 @@ describe("a venue never gets a list of its regulars (RG-G01)", () => {
   })
 
   it("a person's own choices about a venue are never written to the audit log (H1)", () => {
-    // The only place these action names may appear: the filter that keeps old rows from organisations.
+    // The only places these action names may appear: the filters that keep such rows from organisations.
     const naming = files
       .filter((f) => /["'`]venue_regular\.|["'`]venue_offer\.(?:mute|unmute)["'`]/.test(f.code))
       .map((f) => f.rel)
-    expect(naming).toEqual(["lib/audit-actions.ts"])
+    // The read filter (here) and the writer's own refusal to attribute them to an organisation (step 18).
+    expect(naming).toEqual(["lib/audit-actions.ts", "lib/audit-log.ts"])
     // No module a person's own request reaches writes an audit row on a venue.
     const personSide = files.filter((f) => f.rel.startsWith("app/api/mobile/") || f.rel === "lib/offers/person.ts")
     const writes: string[] = []

@@ -182,14 +182,25 @@ export async function hitStrict(key: string, windowMs: number): Promise<HitResul
   return { count, resetAt: now + (ttl > 0 ? ttl : windowMs) }
 }
 
-/** The count a key holds now, without adding to it, failing closed as `hitStrict` does. Zero when it has none or its window has passed. */
-export async function peekStrict(key: string): Promise<number> {
+/**
+ * The count a key holds now, without adding to it, counted as `hit` counts:
+ * Redis when it answers, this process when it does not — never "unknown".
+ * For the offer door (step 12), where a store outage must neither lock staff
+ * out nor leave the count unbounded.
+ */
+export async function peek(key: string): Promise<number> {
   const redis = await getRedis()
-  if (!redis) {
-    if (process.env.REDIS_URL) throw new Error("Rate limit store unavailable")
-    const existing = memory.get(key)
-    return existing && Date.now() <= existing.resetAt ? existing.count : 0
+  if (redis) {
+    try {
+      const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
+      return value ? Number(value) || 0 : 0
+    } catch (error) {
+      logger.warn("Rate limit Redis peek failed, falling back to memory", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
-  const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
-  return value ? Number(value) || 0 : 0
+  const existing = memory.get(key)
+  return existing && Date.now() <= existing.resetAt ? existing.count : 0
 }
+

@@ -18,7 +18,7 @@ import { codeMatches, normaliseCode } from "@/lib/offers/pass-code"
 import { audienceBand, nextOfferAt, OFFERS_PER_WEEK, sentThisWeek, type AudienceBand } from "@/lib/offers/venue"
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
-import { hitStrict, peekStrict } from "@/lib/rate-limit-store"
+import { hit, hitStrict, peek } from "@/lib/rate-limit-store"
 import { mayRedeemAtVenue, maySendVenueOffers } from "@/lib/rbac"
 import { Refusal } from "@/lib/refusal"
 import { audienceSql, REGULAR_NIGHTS, REGULAR_WINDOW_DAYS } from "@/lib/regulars"
@@ -58,20 +58,31 @@ import { venueDayBounds } from "@/lib/venue-day"
  * is a unique index. Staff learn the offer's words — the person is standing
  * in front of them — and nothing else.
  *
- * ## The door's lock, and the limits (review L1, the race scan)
+ * ## The door's lock, and the limits (review L1, the race and DoS scans)
  *
- * Every wrong code at a venue is counted atomically (Redis INCR, or this
- * process when there is no Redis), and the answer is decided AFTER counting:
- * the tenth wrong code inside five minutes and every one after it is told the
- * door is locked, however many arrive at once. A right code is refused while
- * the door is locked — checked when it arrives and again just before it is
- * written, so a burst that locks the door while it is in flight still stops
- * it. Nothing clears the count: a valid pass of one's own is not a reset
- * button. It expires with its window.
+ * Only the venue's own people reach the counting: an active owner, admin or
+ * staff member of the organisation that owns it, on the role the database
+ * holds. Anyone else is refused first and never touches a counter.
  *
- * Sends are limited per organisation and venue; the door per venue and staff
- * member. With Redis configured and failing, both refuse (fail closed) rather
- * than counting where no other replica can see it.
+ * Wrong codes are counted **per staff account at this venue**: atomically
+ * (Redis INCR, or this process when Redis is absent or failing — never
+ * uncounted), and answered AFTER counting, so the tenth inside five minutes
+ * and every one after it say "locked", however many arrive at once. The lock
+ * is that account's alone: one staff member cannot shut the door on every
+ * regular, and a colleague's valid pass still works. A right code from a
+ * locked account is refused — on arrival and again just before the write, so
+ * a lock that lands mid-flight still stops it. Nothing clears a count (a
+ * valid pass is no reset button); counts expire with their windows.
+ *
+ * A venue-wide count is the backstop against brute force spread over many
+ * accounts: past 100 wrong codes in ten minutes every attempt at the venue is
+ * slowed, more the further past it goes, and the crossing is logged and
+ * audited for admins. Slowed, never blocked: the regulars at the door are not
+ * the attacker.
+ *
+ * Sends are limited per organisation and venue, and fail closed: with Redis
+ * configured and failing, a send is refused rather than counted where no
+ * other replica can see it.
  */
 
 const NOT_YOUR_VENUE = "This venue isn't yours to send offers from."
@@ -85,7 +96,12 @@ const DOOR_FAILURES = 10
 const DOOR_LOCK_MS = 5 * 60 * 1000
 /** How long OpenAI may hold a send. The deterministic checks have run by then. */
 const OPENAI_BOUND_MS = 3000
-const DOOR_LOCKED = "Too many wrong codes at this door. Wait five minutes, then try again."
+const DOOR_LOCKED = "Too many wrong codes from this account. Wait five minutes, then try again."
+/** The venue-wide backstop: wrong codes in its window before attempts slow down, and by how much. */
+const VENUE_BACKSTOP = 100
+const VENUE_BACKSTOP_WINDOW_MS = 10 * 60 * 1000
+const BACKSTOP_DELAY_STEP_MS = 200
+const BACKSTOP_DELAY_MAX_MS = 5000
 const STORE_DOWN = "This can't be checked right now. Try again in a minute."
 /** Sends a minute per organisation and venue, and door attempts a minute per venue and staff member. */
 const SENDS_PER_MINUTE = 5
@@ -102,14 +118,13 @@ async function overLimit(key: string, max: number, windowMs: number): Promise<bo
   }
 }
 
-/** Wrong codes at this venue's door in the current window, fail-closed. */
-async function doorFailures(venueId: string): Promise<number> {
-  try {
-    return await peekStrict(`door-fail:${venueId}`)
-  } catch (error) {
-    logger.error("Offer door store unavailable", { venueId, error: error instanceof Error ? error.message : String(error) })
-    throw new Refusal(STORE_DOWN)
-  }
+const staffKey = (venueId: string, userId: string) => `door-fail:${venueId}:${userId}`
+const venueKey = (venueId: string) => `door-fail-venue:${venueId}`
+
+/** Past the venue-wide backstop, every attempt waits — longer the further past (review DoS scan). */
+async function backstopDelay(venueId: string): Promise<void> {
+  const over = (await peek(venueKey(venueId))) - VENUE_BACKSTOP
+  if (over > 0) await new Promise((r) => setTimeout(r, Math.min(over * BACKSTOP_DELAY_STEP_MS, BACKSTOP_DELAY_MAX_MS)))
 }
 
 const sendInput = z.object({
@@ -258,23 +273,25 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
           select: { id: true },
         })
       : null
+  // Authorised before anything is counted: nobody outside the venue's organisation touches its counters.
   if (!venue?.owner_org_id || !member) throw new Refusal(NOT_A_PASS_HERE)
-  if (await overLimit(`offer-redeem:${venueId}:${user.id}`, DOOR_TRIES_PER_MINUTE, MINUTE_MS)) {
+  if ((await hit(`offer-redeem:${venueId}:${user.id}`, MINUTE_MS)).count > DOOR_TRIES_PER_MINUTE) {
     throw new Refusal("Too many tries. Wait a minute and try again.")
   }
+  if ((await peek(staffKey(venueId, user.id))) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
+  await backstopDelay(venueId)
 
-  if ((await doorFailures(venueId)) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
-  // A wrong code counts first and is answered after: the one that reaches the
-  // limit, and every one after it, however many are in flight, says locked.
+  // A wrong code counts first and is answered after: the one that reaches this
+  // account's limit, and every one after it, however many are in flight, says locked.
   const wrong = async (message: string): Promise<never> => {
-    let count: number
-    try {
-      count = (await hitStrict(`door-fail:${venueId}`, DOOR_LOCK_MS)).count
-    } catch (error) {
-      logger.error("Offer door store unavailable", { venueId, error: error instanceof Error ? error.message : String(error) })
-      throw new Refusal(STORE_DOWN)
+    const mine = (await hit(staffKey(venueId, user.id), DOOR_LOCK_MS)).count
+    const all = (await hit(venueKey(venueId), VENUE_BACKSTOP_WINDOW_MS)).count
+    if (all === VENUE_BACKSTOP) {
+      logger.error("Offer door backstop crossed: wrong codes across staff accounts", { venueId, failures: all })
+      // The platform's, not the venue's: org null.
+      auditLog({ userId: user.id, action: "venue_offer.door_backstop", resource: "venue", resourceId: venueId, orgId: null, details: { failures: all } })
     }
-    throw new Refusal(count >= DOOR_FAILURES ? DOOR_LOCKED : message)
+    throw new Refusal(mine >= DOOR_FAILURES ? DOOR_LOCKED : message)
   }
 
   const now = new Date()
@@ -290,8 +307,8 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
   if (pass.redeemed_at) throw new Refusal("This pass was already redeemed.")
   if (pass.offer.ends_at <= now) throw new Refusal("This offer has ended.")
 
-  // Again just before the write: wrong codes in flight may have locked the door since this one arrived.
-  if ((await doorFailures(venueId)) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
+  // Again just before the write: this account's wrong codes in flight may have locked it since this one arrived.
+  if ((await peek(staffKey(venueId, user.id))) >= DOOR_FAILURES) throw new Refusal(DOOR_LOCKED)
   const tonight = new Date(`${venueDayBounds(venue.timezone, venue.day_reset_hour, now).localDate}T00:00:00Z`)
   try {
     await db.$transaction(async (tx) => {
