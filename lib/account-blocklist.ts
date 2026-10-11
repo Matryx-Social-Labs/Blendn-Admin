@@ -14,11 +14,38 @@ import { logger } from "./logger"
  */
 const BLOCKLIST_REFRESH_MS = 30 * 1000
 const BLOCKLIST_LOOKBACK_MS = 20 * 60 * 1000 // an access token's life, plus a margin
-let blocklist = new Set<string>()
-/** userId → when its phones were signed out, in ms. */
-let phonesEndedAt = new Map<string, number>()
-let blocklistFetchedAt = 0
-let blocklistRefresh: Promise<void> | null = null
+
+/*
+ * On globalThis, not in module scope (SCRUM-603). Next bundles its own copy of
+ * this module per layer, so the dashboard action that suspended somebody or
+ * signed their phones out told a different copy from the one the mobile
+ * routes read: driven on staging, a signed-out phone's access token still
+ * answered 200 four seconds later and 401 only at the next refresh, 29 s on.
+ * The socket server's `io` is shared the same way, for the same reason.
+ *
+ * What an action says at once is kept apart from what the database last said,
+ * so a refresh that started before the action committed cannot drop it.
+ */
+interface BlocklistState {
+  /** From the database: deleted or suspended in the lookback. */
+  blocked: Set<string>
+  /** From the database: userId → when its phones were signed out, in ms. */
+  phonesEndedAt: Map<string, number>
+  /** Said by an action in this process: userId → when, in ms. */
+  blockedNow: Map<string, number>
+  phonesEndedNow: Map<string, number>
+  fetchedAt: number
+  refresh: Promise<void> | null
+}
+const shared = globalThis as typeof globalThis & { __blendnBlocklist?: BlocklistState }
+const state: BlocklistState = (shared.__blendnBlocklist ??= {
+  blocked: new Set(),
+  phonesEndedAt: new Map(),
+  blockedNow: new Map(),
+  phonesEndedNow: new Map(),
+  fetchedAt: 0,
+  refresh: null,
+})
 
 async function refreshBlocklist(): Promise<void> {
   const since = new Date(Date.now() - BLOCKLIST_LOOKBACK_MS)
@@ -27,21 +54,24 @@ async function refreshBlocklist(): Promise<void> {
     select: { id: true, deletedAt: true, suspended_at: true, mobile_sessions_revoked_at: true },
   })
   const recent = (at: Date | null) => at !== null && at >= since
-  blocklist = new Set(rows.filter((r) => recent(r.deletedAt) || recent(r.suspended_at)).map((r) => r.id))
-  phonesEndedAt = new Map(
+  state.blocked = new Set(rows.filter((r) => recent(r.deletedAt) || recent(r.suspended_at)).map((r) => r.id))
+  state.phonesEndedAt = new Map(
     rows.filter((r) => recent(r.mobile_sessions_revoked_at)).map((r) => [r.id, r.mobile_sessions_revoked_at!.getTime()])
   )
-  blocklistFetchedAt = Date.now()
+  for (const said of [state.blockedNow, state.phonesEndedNow]) {
+    for (const [id, at] of said) if (at < since.getTime()) said.delete(id)
+  }
+  state.fetchedAt = Date.now()
 }
 
 /** The action that signed somebody's phones out tells this process at once. */
 export function phonesSignedOutNow(userId: string, at: Date): void {
-  phonesEndedAt.set(userId, Math.max(phonesEndedAt.get(userId) ?? 0, at.getTime()))
+  state.phonesEndedNow.set(userId, Math.max(state.phonesEndedNow.get(userId) ?? 0, at.getTime()))
 }
 
 /** The route that deleted or suspended somebody tells this process at once. */
 export function blockAccountNow(userId: string): void {
-  blocklist.add(userId)
+  state.blockedNow.set(userId, Date.now())
 }
 
 /**
@@ -50,23 +80,22 @@ export function blockAccountNow(userId: string): void {
  * a tie goes to the sign-out, as in lib/session-revocation.ts).
  */
 export async function recentlyBlocked(userId: string, issuedAt: number): Promise<boolean> {
-  if (Date.now() - blocklistFetchedAt > BLOCKLIST_REFRESH_MS) {
+  if (Date.now() - state.fetchedAt > BLOCKLIST_REFRESH_MS) {
     // One refresh at a time; a failure keeps the previous set rather than
     // failing every request, and is retried on the next.
-    blocklistRefresh ??= refreshBlocklist()
+    state.refresh ??= refreshBlocklist()
       .catch((error) => {
         logger.warn("Could not refresh the blocked-accounts set", {
           error: error instanceof Error ? error.message : String(error),
         })
-        blocklistFetchedAt = Date.now()
+        state.fetchedAt = Date.now()
       })
       .finally(() => {
-        blocklistRefresh = null
+        state.refresh = null
       })
-    await blocklistRefresh
+    await state.refresh
   }
-  if (blocklist.has(userId)) return true
-  const phonesEnded = phonesEndedAt.get(userId)
-  return phonesEnded !== undefined && issuedAt * 1000 <= phonesEnded
+  if (state.blocked.has(userId) || state.blockedNow.has(userId)) return true
+  const phonesEnded = Math.max(state.phonesEndedAt.get(userId) ?? 0, state.phonesEndedNow.get(userId) ?? 0)
+  return phonesEnded > 0 && issuedAt * 1000 <= phonesEnded
 }
-
