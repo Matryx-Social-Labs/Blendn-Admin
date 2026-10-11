@@ -207,8 +207,8 @@ describe("POST /venues/:id/live", () => {
     /*
      * The whole sentence, with the venue's own name and nothing after it. This
      * was a pattern for "no distance in it" (`\d+\s?m\b`), and the fixture's
-     * venue is named `itest_Venue_<8 random characters>`: one name in about a
-     * hundred ends in a digit and an "m", reads as "45m", and failed the run.
+     * venue is named `itest_Venue_<8 random characters>`: one name in about 130
+     * ends in a digit and an "m", reads as "45m", and failed the run.
      * An exact sentence cannot carry a distance, and has no such name.
      */
     const { name } = await db.venues.findUniqueOrThrow({ where: { id: v }, select: { name: true } })
