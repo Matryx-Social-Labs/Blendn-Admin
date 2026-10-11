@@ -201,10 +201,42 @@ function unattributed(entry: AuditLogEntry, why: string): null {
 }
 
 /**
+ * A person's own preferences, about a place or its offers: never an
+ * organisation's to read — not the venue's, not their employer's — whoever
+ * the person works for (step 12 review). Named, because a member of the
+ * venue's own organisation passes the membership test below.
+ */
+const PERSONAL_ACTIONS = new Set(["venue_regular.optin", "venue_regular.optout", "venue_offer.mute", "venue_offer.unmute"])
+
+/**
+ * Whether the actor was acting for `org` (step 18, M3, after the step 12
+ * review): the platform itself (no actor — a webhook, a sweep), a Blend'n
+ * admin, or a member of that organisation when the row is written. Anyone
+ * else — an attendee, a member of another organisation, someone asking to
+ * join — acted as themselves, and their row is the platform's alone: an
+ * organisation reads what its people did for it, never what a person did
+ * near it.
+ */
+async function actsFor(client: Client, userId: string | null | undefined, org: string): Promise<boolean> {
+  if (!userId) return true
+  const member = await client.organisation_members.findFirst({ where: { user_id: userId, org_id: org }, select: { id: true } })
+  if (member) return true
+  const actor = await client.user.findUnique({ where: { id: userId }, select: { role: true } })
+  return actor?.role === "app_admin"
+}
+
+/**
  * The organisation a row belongs to. Never "everyone": a row that cannot be
- * attributed is written with no organisation, which only the platform reads.
+ * attributed is written with no organisation, which only the platform reads;
+ * nor is a row an organisation's when its actor was not acting for it.
  */
 async function orgForEntry(client: Client, entry: AuditLogEntry): Promise<string | null> {
+  if (PERSONAL_ACTIONS.has(entry.action)) return null
+  const org = await resourceOrg(client, entry)
+  return org && (await actsFor(client, entry.userId, org)) ? org : null
+}
+
+async function resourceOrg(client: Client, entry: AuditLogEntry): Promise<string | null> {
   if (entry.orgId !== undefined) return entry.orgId
   if (!isOrgResource(entry.resource)) return null
   const kind = ORG_RESOURCES[entry.resource]
