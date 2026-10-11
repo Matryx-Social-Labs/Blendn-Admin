@@ -6,6 +6,7 @@ import { EventPassPanels, OrgPanels } from "@/components/dashboard/analytics-pan
 import { Locked, Panel, PillTabs } from "@/components/dashboard/kit"
 import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
+import { analyticsAccessLine } from "@/lib/access-line-copy"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor } from "@/lib/billing"
 import { BILLING_PLANS, grossRupees, rupees } from "@/lib/billing-plans"
@@ -112,28 +113,7 @@ export default async function AnalyticsPage({
 
 function AccessLine({ view }: { view: AnalyticsPageView }) {
   const { access } = view
-  const first = access.firstFreeEvent
-  let headline: string
-  let detail: string
-  const dated = access.date ? `${access.date.word} ${day(access.date.at)}` : null
-  if (access.reason === "grant") {
-    headline = dated ? `Founding grant, ${dated}` : "Founding grant"
-    detail = "Blend'n has given your organisation Analytics. Nothing is charged."
-  } else if (access.reason === "analytics") {
-    headline = dated ? `Analytics, ${dated}` : "Analytics"
-    detail = "Every view, for every event."
-  } else if (access.reason === "free_window" && access.freeUntil && first) {
-    headline = `Free until ${day(access.freeUntil)}`
-    detail = `Your first event that cleared the privacy floor, ${first.title}, ended ${day(first.endedAt)}. Everything here is open until 30 days after it; that event stays open for good.`
-  } else if (access.reason === "free_window") {
-    headline = "Free for now"
-    detail = "Everything here is open until 30 days after your first event with at least 5 people checked in."
-  } else {
-    headline = "Free plan"
-    detail = first
-      ? `${first.title} stays open for good. An Event Pass opens another event; Analytics opens everything.`
-      : "An Event Pass opens one event; Analytics opens everything."
-  }
+  const { headline, detail } = analyticsAccessLine(access, day)
   return (
     <Panel>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1" role="status">

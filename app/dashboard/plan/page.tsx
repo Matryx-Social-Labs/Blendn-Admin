@@ -4,6 +4,7 @@ import { IconBuilding } from "@tabler/icons-react"
 import { Panel, ProTag } from "@/components/dashboard/kit"
 import { PlanCard } from "@/components/dashboard/plan-card"
 import { EmptyState } from "@/components/dashboard/primitives"
+import { FIRST_EVENT_RULE } from "@/lib/access-line-copy"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor, planPageData, type PlanDate, type PlanPageData } from "@/lib/billing"
 import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
@@ -199,10 +200,11 @@ function StatusPanel({ view, pending, pendingFor }: { view: PlanPageData; pendin
         : "Analytics switches on as soon as Razorpay confirms the payment, usually within a minute."
   } else if (view.free.reason === "free_window" && view.free.until) {
     headline = `Free · Analytics open until ${day(view.free.until)}`
-    detail = `Your first event that cleared the privacy floor${view.free.firstEventTitle ? `, ${view.free.firstEventTitle},` : ""} opened every Analytics view for 30 days. That event stays open for good.`
+    const first = view.free.firstEventTitle ? `${view.free.firstEventTitle}, ${FIRST_EVENT_RULE},` : `Your first event with at least 5 people checked in`
+    detail = `${first} opened every Analytics view for 30 days. That event stays open for good.`
   } else if (view.free.reason === "free_window") {
     headline = "Free · Analytics open for now"
-    detail = "Every Analytics view is open until 30 days after your first event with at least 5 people checked in."
+    detail = `Every Analytics view is open until 30 days after ${FIRST_EVENT_RULE}.`
   } else {
     headline = "Free"
     detail = view.free.firstEventTitle

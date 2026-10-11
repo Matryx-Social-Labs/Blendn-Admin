@@ -1,10 +1,10 @@
 "use client"
 
-import Script from "next/script"
 import { useRouter } from "next/navigation"
 import { createContext, useContext, useEffect, useRef, useState, useTransition, type ReactNode } from "react"
 import { toast } from "sonner"
 
+import { Callout } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
 import {
   cancelAnalytics,
@@ -14,13 +14,15 @@ import {
   startVenueProCheckout,
 } from "@/lib/billing-actions"
 import { BILLING_PLANS, grossRupees, gstSplit, rupees } from "@/lib/billing-plans"
+import { loadScript } from "@/lib/load-script"
 import { refusalMessage } from "@/lib/refusal"
 
 /**
  * Razorpay Checkout on the Plan page.
  *
- * The script loads once (`CheckoutProvider`); Buy stays unavailable until it
- * is ready, and says so if it could not load. The server action is called only
+ * The script loads with the page (`CheckoutProvider`) and again on "Try again"
+ * (`lib/load-script.ts`); Buy stays unavailable until it is ready, and says so
+ * if it could not load. The server action is called only
  * once `window.Razorpay` exists, so a click never leaves an unpaid purchase
  * behind for a sheet that cannot open. The action returns only an id and the
  * publishable key id; Checkout takes the payment in its own frame.
@@ -49,21 +51,21 @@ declare global {
 type ScriptState = "loading" | "ready" | "failed"
 const CheckoutContext = createContext<{ state: ScriptState; retry: () => void }>({ state: "loading", retry: () => {} })
 
-/** Loads Checkout.js once for the page (CSP: lib/csp-report.ts). Only rendered for someone who can buy. */
+const CHECKOUT_SRC = "https://checkout.razorpay.com/v1/checkout.js"
+
+/** Loads Checkout.js for the page (CSP: lib/csp-report.ts), again on retry. Only rendered for someone who can buy. */
 export function CheckoutProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ScriptState>(() =>
     typeof window !== "undefined" && window.Razorpay ? "ready" : "loading"
   )
   const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    // Already there (the state started "ready"): nothing to load.
+    if (window.Razorpay) return
+    return loadScript(CHECKOUT_SRC, document, (loaded) => setState(loaded && window.Razorpay ? "ready" : "failed"))
+  }, [attempt])
   return (
     <CheckoutContext.Provider value={{ state, retry: () => (setState("loading"), setAttempt((n) => n + 1)) }}>
-      <Script
-        key={attempt}
-        src="https://checkout.razorpay.com/v1/checkout.js"
-        strategy="afterInteractive"
-        onReady={() => setState("ready")}
-        onError={() => setState("failed")}
-      />
       {children}
     </CheckoutContext.Provider>
   )
@@ -84,16 +86,26 @@ function useBuy(enabled: boolean, pending: boolean) {
   return { usable: enabled && !pending && state === "ready", reason, failed: enabled && state === "failed", retry }
 }
 
-function Unavailable({ reason, failed, retry }: { reason: string | null; failed: boolean; retry: () => void }) {
+/**
+ * Why Buy cannot be pressed now. Loading and "being confirmed" are waiting, said
+ * quietly; a script that could not load is the one state a person can act on, so
+ * it is an alert in the destructive tone with a real button.
+ */
+export function Unavailable({ reason, failed, retry }: { reason: string | null; failed: boolean; retry: () => void }) {
   if (!reason) return null
+  if (!failed) {
+    return (
+      <p role="status" className="text-[0.75rem] text-muted-foreground">
+        {reason}
+      </p>
+    )
+  }
   return (
-    <p className="text-[0.75rem] text-muted-foreground">
-      {reason}{" "}
-      {failed ? (
-        <button type="button" className="underline underline-offset-2" onClick={retry}>
-          Try again
-        </button>
-      ) : null}
+    <p role="alert" className="flex flex-wrap items-center gap-2.5 text-[0.75rem] text-destructive">
+      <span>{reason}</span>
+      <Button type="button" size="sm" variant="outline" className="text-foreground" onClick={retry}>
+        Try again
+      </Button>
     </p>
   )
 }
@@ -276,6 +288,16 @@ export function EventPassBuy({
 const WATCH_EVERY_MS = 4_000
 const WATCH_FOR_MS = 90_000
 
+/** The late state: a status callout under the "Payment sent" panel, naming the reference support will ask for. */
+export function LateNotice({ reference }: { reference: string | null }) {
+  return (
+    <Callout role="status" title="Taking longer than usual">
+      Razorpay&apos;s reference is <span className="font-mono text-foreground">{reference ?? "on your receipt"}</span>. If this page
+      hasn&apos;t changed in an hour, write to support@blendn.app with it.
+    </Callout>
+  )
+}
+
 export function PendingWatcher({ reference }: { reference: string | null }) {
   const router = useRouter()
   const [late, setLate] = useState(false)
@@ -291,13 +313,7 @@ export function PendingWatcher({ reference }: { reference: string | null }) {
     }, WATCH_EVERY_MS)
     return () => clearInterval(timer)
   }, [router])
-  if (!late) return null
-  return (
-    <p className="text-[0.8125rem] text-muted-foreground">
-      Taking longer than usual. Razorpay&apos;s reference is <span className="font-mono">{reference ?? "on your receipt"}</span>; if
-      this page hasn&apos;t changed in an hour, write to support@blendn.app with it.
-    </p>
-  )
+  return late ? <LateNotice reference={reference} /> : null
 }
 
 export function CancelAnalytics({ running, venueId }: { running: boolean; venueId?: string }) {
