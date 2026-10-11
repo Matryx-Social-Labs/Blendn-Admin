@@ -5,7 +5,8 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 const mockGetAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+// As getAuth() returns it: the jwt callback always writes signedInAt (lib/session-revocation.ts).
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { getDashboardOverview } from "@/app/dashboard/actions"

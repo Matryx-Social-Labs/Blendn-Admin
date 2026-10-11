@@ -4,6 +4,7 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
 import { APP_ONLY_SIGNIN, canAccessDashboard } from "./rbac"
+import { SessionEnded, isRevoked, provenAt } from "./session-revocation"
 import type { user_role } from "@prisma/client"
 
 export const authOptions: NextAuthOptions = {
@@ -72,57 +73,52 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async session({ session, token }) {
-      if (token && session.user) {
-        session.user.id = token.sub!
-        session.user.role = token.role
-      }
-      return session
+      if (!token || !session.user) return session
+      return { ...session, user: { ...session.user, id: token.sub!, role: token.role, signedInAt: token.signedInAt } }
     },
     /*
-     * Re-read the role rather than trusting the claim minted at sign-in.
+     * Every read of a session answers to the database, and ends it when
+     * `isRevoked` says so (lib/session-revocation.ts).
      *
-     * With the JWT strategy there is no session table to clear, and the default
-     * session is 30 days. This callback used to write `role` only when `user`
-     * was set -- i.e. once, at sign-in -- so a demoted or offboarded admin kept
-     * `role: "app_admin"` in a live cookie for up to a month. `middleware.ts`
-     * and every server action authorise on that claim, and `actorFor`
-     * short-circuits on `app_admin` without touching the database, so nothing
-     * downstream would have caught it. They could re-promote themselves with
-     * `updateUserRole` and make it permanent.
+     * With the JWT strategy there is no session table to clear, and the
+     * default session is 30 days. This callback used to write `role` only at
+     * sign-in, so a demoted admin kept `app_admin` in a live cookie for a
+     * month; it was made to re-read the role. Suspension and deletion were the
+     * next: blocking `authorize()` stops only the next sign-in, and the
+     * suspend transaction's `session.deleteMany()` had no rows to delete.
+     * Then the password (step 18 security review, M6): a reset is how the
+     * owner locks out whoever holds their session.
      *
-     * `lib/socket-ops-auth.ts` already re-reads role per connection for exactly
-     * this reason; the HTTP path was the one left on the stale claim. The cost
-     * is one primary-key lookup per navigation, which is what the socket path
-     * has been paying all along.
+     * The first version of that demoted an ended session to `attendee` and
+     * kept the cookie, and it was open three ways: a token without
+     * `signedInAt` was judged by `iat`, which every refresh re-stamps, so one
+     * refresh revived it; a database read that failed was not a refusal; and
+     * a demoted cookie still read as the old role to the Edge middleware. It
+     * throws now, and NextAuth turns a throwing callback into no session for
+     * `getServerSession` and a cleared cookie from its session route. So does
+     * a read that fails: no answer from the database is no privileges.
+     *
+     * `trigger: "update"` and whatever `session` it carries are not read: an
+     * update is a refresh like any other, and nothing the client sends can
+     * move `signedInAt`.
      */
     async jwt({ token, user }) {
       if (user) {
-        token.sub = user.id
-        token.role = (user as User & { role: user_role }).role
-        return token
+        // A new session, from whichever provider: it has just proved who it is.
+        return { ...token, sub: user.id, role: (user as User & { role: user_role }).role, signedInAt: Date.now() }
       }
 
-      if (token.sub) {
-        const fresh = await db.user.findUnique({
-          where: { id: token.sub },
-          select: { role: true, suspended_at: true, deletedAt: true },
-        })
-        /*
-         * A deleted user keeps no privilege; `canAccessDashboard` rejects
-         * `attendee`, so this fails closed rather than throwing mid-request.
-         *
-         * Suspension is read here too, and this is the half that actually ends
-         * a live session. Blocking `authorize()` only stops the *next* sign-in;
-         * with the JWT strategy there is no session table to clear, so a
-         * suspended admin's existing cookie stayed valid for up to thirty days.
-         * The suspend transaction called `session.deleteMany()` believing it
-         * handled this. There were no rows.
-         */
-        const blocked = !fresh || fresh.deletedAt !== null || fresh.suspended_at !== null
-        token.role = blocked ? ("attendee" as user_role) : fresh.role
-      }
+      const account = token.sub
+        ? await db.user.findUnique({
+            where: { id: token.sub },
+            select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true },
+          })
+        : null
+      if (!account || isRevoked(token, account)) throw new SessionEnded()
 
-      return token
+      // `provenAt` written back, so a session that only had `iat` keeps the
+      // first one it was judged by rather than its next re-encode's.
+      return { ...token, role: account.role, signedInAt: provenAt(token)! }
     },
   },
 }

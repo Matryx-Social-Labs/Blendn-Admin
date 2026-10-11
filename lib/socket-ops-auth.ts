@@ -10,6 +10,7 @@ import { db } from "./db"
 import { logger } from "./logger"
 import { eventPermissions } from "./rbac"
 import { actorFor } from "./org-membership"
+import { isRevoked } from "./session-revocation"
 
 /**
  * Dashboard authentication for Socket.io.
@@ -78,13 +79,14 @@ export async function authenticateDashboardSocket(
      */
     const user = await db.user.findUnique({
       where: { id: token.sub },
-      select: { id: true, email: true, role: true, suspended_at: true, deletedAt: true },
+      select: { id: true, email: true, role: true, suspended_at: true, deletedAt: true, password_changed_at: true },
     })
-    if (!user) return null
-    if (user.suspended_at) return null
-    // An erased account's cookie can outlive it; deletion evicts the socket,
-    // and this keeps the reconnect out (SCRUM-449).
-    if (user.deletedAt) return null
+    // The pages' rule (lib/session-revocation.ts): suspended, deleted — an
+    // erased account's cookie can outlive it; deletion evicts the socket and
+    // this keeps the reconnect out (SCRUM-449) — or signed in before the
+    // password changed (step 18, M6). The cookie here is the raw one, never
+    // re-minted, so a session from before `signedInAt` is judged by its iat.
+    if (!user || isRevoked(token, user)) return null
 
     return { userId: user.id, email: user.email, role: user.role }
   } catch (error) {

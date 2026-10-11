@@ -22,7 +22,7 @@ const tx = {
 const mockDb = {
   categories: { findUniqueOrThrow: jest.fn(), findMany: jest.fn() },
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
   $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
 }
 
@@ -32,7 +32,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 // `requireAdmin` reads the caller's row through `db.user`, which answers with
 // the session's role, so the session is what gets mocked.
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 
 import { mergeCategory } from "@/lib/category-actions"
 

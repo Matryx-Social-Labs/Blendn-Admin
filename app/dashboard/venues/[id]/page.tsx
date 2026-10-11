@@ -16,6 +16,7 @@ import { SAMPLE_PRE_CLAIM, SAMPLE_VENUE_INSIGHTS, SAMPLE_VENUE_OFFERS } from "@/
 import { venueInsights, type VenueInsightsView } from "@/lib/venue-insights"
 import { RatingBars } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
+import { OpenOnBlendn } from "./open-on-blendn"
 import { VenueManage } from "./venue-manage"
 import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
 import { getAuth } from "@/lib/auth"
@@ -91,6 +92,7 @@ export default async function VenueDetailPage({
       venue_type: true,
       geofence: true,
       floors: true,
+      open_on_blendn: true,
       created_by_org_id: true,
       owner_org: { select: { id: true, display_name: true } },
     },
@@ -347,6 +349,11 @@ export default async function VenueDetailPage({
             paid={proRows.paid ? { id: proRows.paid.id, expiresAt: proRows.paid.expiresAt?.toISOString() ?? null } : null}
           />
         </Panel>
+      ) : null}
+
+      {/* Only a claimed venue has an owner to opt out (D-13); an unclaimed one is always listed. */}
+      {venue.owner_org && !venue.deleted_at ? (
+        <OpenOnBlendn venueId={venue.id} name={venue.name} open={venue.open_on_blendn} />
       ) : null}
 
       {/* The record last. "Is the pin right" is the third question a venue

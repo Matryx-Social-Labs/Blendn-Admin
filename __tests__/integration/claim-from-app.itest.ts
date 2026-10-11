@@ -14,7 +14,7 @@
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 const mockGetAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 // One network per test, so the limiter's IP window (10 an hour) never trips a
 // test that is not about it, and the one that is starts from zero.

@@ -1,13 +1,15 @@
 import { clientNetworkFrom } from "@/lib/client-ip"
+import { randomUUID } from "crypto"
 import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
+import { hit } from "@/lib/rate-limit-store"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { canSubmitApplication, onboardingTier, hashInviteToken, newInviteToken } from "@/lib/org-invites"
 import { validateGstin } from "@/lib/gstin"
-import { sendEmail, onboardingVerifyEmail, applyUrl, emailConfigured } from "@/lib/email"
+import { sendEmail, onboardingVerifyEmail, applyAgainEmail, applyUrl, appUrl, emailConfigured } from "@/lib/email"
 import { readJson } from "@/lib/api-input"
 
 /**
@@ -45,7 +47,37 @@ const applySchema = z.object({
 /** Blank strings arrive from empty form fields; treat them as absent. */
 const blankToUndefined = (v: string | undefined) => (v?.trim() ? v.trim() : undefined)
 
+/**
+ * Every answer from here takes at least this long (M4): the branch that writes
+ * an application and the one that finds an existing address do different
+ * work, and the difference must not be a clock somebody can read.
+ */
+const MIN_RESPONSE_MS = 600
+
+/** One "you already have an account / an application" email per address a day, whoever asks for it (M4). */
+const APPLY_AGAIN_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Sent after the response, never awaited by it, the same way on both branches
+ * (M4): a mail provider's latency is the other clock.
+ */
+function sendLater(message: Parameters<typeof sendEmail>[0], what: string): void {
+  void sendEmail(message)
+    .then((result) => {
+      if (!result.sent) logger.error(`${what} email failed`, { reason: result.reason })
+    })
+    .catch((error: unknown) => logger.error(`${what} email failed`, { error: String(error) }))
+}
+
+/** Hold an answer until `MIN_RESPONSE_MS` has passed since `started`. */
+async function padded(started: number, body: ReturnType<typeof appliedBody>): Promise<NextResponse> {
+  const wait = MIN_RESPONSE_MS - (Date.now() - started)
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+  return NextResponse.json(body)
+}
+
 export async function POST(req: NextRequest) {
+  const started = Date.now()
   // 3 per hour per IP. An honest applicant submits once.
   const limited = await rateLimit(req, {
     windowMs: 60 * 60 * 1000,
@@ -92,33 +124,36 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Already a host? Say so plainly rather than queueing a duplicate.
+    /*
+     * Already a host, or already applied: the same answer as a new application
+     * (step 18 security review, M4). The page used to say "This email already
+     * has a Blend'n host account" with a 409, which told anyone who typed an
+     * address whether it was an operator's. Now the page says "check your
+     * email" to everyone, and the email to an existing address says what is
+     * true for it — sign in, or we have your application. Nothing is queued
+     * twice, and the id handed back names no application.
+     */
     const existingUser = await db.user.findUnique({
       where: { email: input.contact_email },
-      select: { role: true },
+      select: { role: true, email: true },
     })
-    if (existingUser && existingUser.role !== "attendee") {
-      return NextResponse.json(
-        { success: false, error: "This email already has a Blend'n host account. Sign in instead." },
-        { status: 409 }
-      )
-    }
-
     const pending = await db.organiser_onboarding_requests.findFirst({
       where: { contact_email: input.contact_email, status: { in: ["pending", "email_pending"] } },
-      select: { id: true, status: true },
+      select: { contact_email: true },
     })
-    if (pending) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            pending.status === "email_pending"
-              ? "We've already emailed you a confirmation link for this address. Check your inbox."
-              : "We already have an application from this address and it's being reviewed.",
-        },
-        { status: 409 }
-      )
+    const already: "account" | "pending" | null =
+      existingUser && existingUser.role !== "attendee" ? "account" : pending ? "pending" : null
+    if (already) {
+      /*
+       * To the address we hold, never the one typed (the lookup matched it, but
+       * only our stored copy is sent to); with nothing the request wrote in it;
+       * and once a day per address, so this cannot be pointed at a host to
+       * flood their inbox — the per-network limit above is the other half.
+       */
+      const to = already === "account" ? existingUser!.email : pending!.contact_email
+      const { count } = await hit(`onboarding:apply-again:${to}`, APPLY_AGAIN_WINDOW_MS)
+      if (emailConfigured() && count === 1) sendLater({ to, ...applyAgainEmail(already, `${appUrl()}/login`) }, "Apply-again")
+      return padded(started, appliedBody(randomUUID(), emailConfigured()))
     }
 
     const tier = onboardingTier(input.contact_email)
@@ -174,20 +209,11 @@ export async function POST(req: NextRequest) {
       // applyUrl(), not appUrl(): the confirmation lands on a public page that
       // needs no session, so it can live on the organiser marketing host.
       const link = `${applyUrl()}/apply/verify?token=${encodeURIComponent(token)}`
-      const result = await sendEmail({
-        to: input.contact_email,
-        ...onboardingVerifyEmail(request.contact_name, link, request.display_name),
-      })
-      emailSent = result.sent
-      if (!result.sent) {
-        // The row exists and a reviewer can still act on it — surfacing a
-        // failure to the applicant here would strand an application that is
-        // actually fine.
-        logger.error("Onboarding verification email failed", {
-          requestId: request.id,
-          reason: result.reason,
-        })
-      }
+      // After the response, as the existing-address branch sends (M4). A
+      // failure is logged: the row exists and a reviewer can still act on it,
+      // and surfacing it here would strand an application that is fine.
+      sendLater({ to: input.contact_email, ...onboardingVerifyEmail(request.contact_name, link, request.display_name) }, "Onboarding verification")
+      emailSent = true
     }
 
     auditLog({
@@ -198,18 +224,23 @@ export async function POST(req: NextRequest) {
       ipAddress: getRequestIp(req),
     })
 
-    return NextResponse.json({
-      success: true,
-      requestId: request.id,
-      emailSent,
-      message: emailSent
-        ? "Check your email for a confirmation link."
-        : "Application received. Our team will review it and get back to you by email.",
-    })
+    return padded(started, appliedBody(request.id, emailSent))
   } catch (err) {
     logger.error("Onboarding apply failed", {
       error: err instanceof Error ? err.message : String(err),
     })
     return NextResponse.json({ success: false, error: "Something went wrong." }, { status: 500 })
+  }
+}
+
+/** What an application gets back — the same shape, and the same words, whatever the address already has (M4). */
+function appliedBody(requestId: string, emailSent: boolean) {
+  return {
+    success: true,
+    requestId,
+    emailSent,
+    message: emailSent
+      ? "Check your email for a confirmation link."
+      : "Application received. Our team will review it and get back to you by email.",
   }
 }

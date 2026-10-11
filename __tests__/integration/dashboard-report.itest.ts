@@ -7,7 +7,7 @@ import type { DashboardRole } from "@/lib/dashboard-types"
  * which is also the only way left to exercise the three overviews.
  */
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 
 const as = (role: DashboardRole, id = "no-user") => {
   session = { user: { id, role } }

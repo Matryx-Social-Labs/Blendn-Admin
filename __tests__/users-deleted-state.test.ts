@@ -23,7 +23,7 @@ const mockDb = {
 }
 const mockAuth = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("@/lib/location", () => ({ normalizeLocationToCity: jest.fn(async (s: string) => s) }))
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
@@ -46,7 +46,7 @@ beforeEach(() => {
   mockDb.user.findUnique.mockImplementation(async (args: { select?: { suspended_at?: true } }) =>
     // requireAdmin's read of the caller's own row (lib/current-user.ts).
     args.select?.suspended_at
-      ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null }
+      ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null }
       : { name: "Old", email: "old@x", role: "attendee", profile: null }
   )
   mockDb.audit_logs.create.mockReturnValue({ catch: () => undefined, then: () => undefined })

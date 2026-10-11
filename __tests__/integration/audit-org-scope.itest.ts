@@ -13,7 +13,7 @@ import { readFileSync } from "fs"
 import { join } from "path"
 
 let session: { user: { id: string; role: string } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { auditInTx, UnattributedAuditError } from "@/lib/audit-log"
@@ -134,6 +134,54 @@ it("an admin's act on B's data is in B's log, as Blend'n, and not in A's", async
   const all = await getAuditLog({ action: `${tag}.admin-on-B` })
   expect(all.total).toBe(1)
   expect(all.entries[0].actor?.id).toBe(admin)
+})
+
+/*
+ * A person's own preference about a place is nobody's but the platform's
+ * (the step 12 review): the venue does not learn who muted its offers or
+ * stopped being a regular, and the person's employer does not learn where
+ * they go. Nor is a row an organisation's when its actor was not acting for
+ * it — an attendee, a member of another organisation.
+ */
+describe("a person acting as themselves", () => {
+  async function personal(userId: string, action: string) {
+    await db.$transaction((tx) => auditInTx(tx, { userId, action, resource: "venue", resourceId: venueA, details: { tag } }))
+    return db.audit_logs.findFirstOrThrow({ where: { action, user_id: userId, details: { path: ["tag"], equals: tag } }, orderBy: { created_at: "desc" } })
+  }
+  const sees = async (viewer: string, id: string) => {
+    as(viewer)
+    return (await getAuditLog({ action: (await db.audit_logs.findUniqueOrThrow({ where: { id } })).action })).entries.some((e) => e.id === id)
+  }
+
+  afterAll(() => db.audit_logs.deleteMany({ where: { details: { path: ["tag"], equals: tag } } }))
+
+  it.each(["venue_offer.mute", "venue_regular.optin", "venue_offer.unmute", "venue_regular.optout"])(
+    "%s at a venue is seen by neither the venue's organisation nor the person's employer",
+    async (action) => {
+      // ownerB works for B; the venue is A's.
+      const row = await personal(ownerB, action)
+      expect(row.org_id).toBeNull()
+      expect(await sees(ownerA, row.id)).toBe(false)
+      expect(await sees(ownerB, row.id)).toBe(false)
+    }
+  )
+
+  it("even at the venue of the organisation the person works for", async () => {
+    // `shared` is staff at A, the venue's own organisation.
+    const row = await personal(shared, "venue_offer.mute")
+    expect(row.org_id).toBeNull()
+    expect(await sees(ownerA, row.id)).toBe(false)
+  })
+
+  it("a row about A's venue by someone who does not act for A is not A's", async () => {
+    const attendee = await makeUser("aos_attendee", "attendee")
+    users.push(attendee)
+    expect((await act(attendee, venueA, "attendee-on-A")).org_id).toBeNull()
+    expect((await act(ownerB, venueA, "other-org-on-A")).org_id).toBeNull()
+    const a = await seenBy(ownerA)
+    expect(a.has("attendee-on-A")).toBe(false)
+    expect(a.has("other-org-on-A")).toBe(false)
+  })
 })
 
 describe("a row about an organisation's data that cannot say which organisation", () => {

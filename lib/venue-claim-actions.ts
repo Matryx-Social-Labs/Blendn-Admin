@@ -557,7 +557,9 @@ export async function decideVenueClaim(
           id: claim.venue.id,
           ...(claim.is_dispute ? {} : { OR: [{ owner_org_id: null }, { owner_org_id: orgId }] }),
         },
-        data: { owner_org_id: orgId, claimed_at: new Date() },
+        // A new owner starts open on Blendn (M5): an incumbent who lost a
+        // dispute could otherwise close the venue on the way out.
+        data: { owner_org_id: orgId, claimed_at: new Date(), open_on_blendn: true },
       })
       if (handed.count !== 1) throw new Refusal(OWNER_SINCE_FILING)
       // Whoever paid for Pro here before does not hand it over with the venue:

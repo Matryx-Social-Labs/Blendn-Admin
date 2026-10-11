@@ -7,14 +7,14 @@ const mockDb = {
   sponsor_claims: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   sponsors: { findFirst: jest.fn(), update: jest.fn() },
   // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
-  user: { findMany: jest.fn(), findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
+  user: { findMany: jest.fn(), findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null }) },
   $transaction: jest.fn(),
 }
 mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise<void>) => fn(mockDb))
 const auditLog = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry: unknown) => auditLog(entry) }))
-jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))
+jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: 0 } }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
 const sent: { to: string; subject: string; text: string }[] = []

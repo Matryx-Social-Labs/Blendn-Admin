@@ -32,3 +32,12 @@ export function createRemoteJWKSet(): () => never {
     throw new Error("jose key set is stubbed in integration tests — do not verify identity here")
   }
 }
+
+/*
+ * NextAuth's own copy, real: the dashboard session cookie is encrypted with it
+ * (jose 4, CommonJS, nested under next-auth), and the mapper above sends
+ * next-auth's `require("jose")` here too. A suite that reads a dashboard
+ * session through NextAuth needs it to work (session-revocation.itest.ts).
+ * Encryption only — nothing here verifies an identity.
+ */
+export { EncryptJWT, jwtDecrypt } from "../../node_modules/next-auth/node_modules/jose"

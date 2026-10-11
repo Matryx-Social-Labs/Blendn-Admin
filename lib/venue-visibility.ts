@@ -38,6 +38,17 @@ export const undisputedLinkWhere = {
   OR: [{ venue_link_status: null }, { venue_link_status: { not: "disputed" as const } }],
 } satisfies Prisma.eventsWhereInput
 
+/**
+ * A venue the app may list in Places and on the home map (D-13): open on
+ * Blendn, or unclaimed. The switch is a claimed venue's owner opting out; an
+ * unclaimed venue has nobody to have asked, so a stale `false` left by a
+ * revoked or transferred claim never hides it. Only the list: its events, its
+ * page and Go Live are untouched. An `OR`: put it under `AND`.
+ */
+export const openOnBlendnWhere = {
+  OR: [{ open_on_blendn: true }, { owner_org_id: null }],
+} satisfies Prisma.venuesWhereInput
+
 /** An event this viewer may attend by its own age rule (D-3). An `OR`: put it under `AND`. */
 export const mayAttendWhere = (viewerAge: number) =>
   ({ OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }) satisfies Prisma.eventsWhereInput
