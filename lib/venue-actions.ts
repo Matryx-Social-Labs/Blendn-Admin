@@ -455,6 +455,15 @@ export async function setVenueOpenOnBlendn(id: string, open: boolean): Promise<v
   if (!venue.owner_org_id) {
     throw new Refusal("Only a claimed venue can leave the app's Places. An unclaimed one is always listed.")
   }
+  // Taking a venue out of the app is its organisation's owners' and admins'
+  // call, not every member's (step 18 security review, L2): staff run nights.
+  if (user.role !== "app_admin") {
+    const manager = await db.organisation_members.findFirst({
+      where: { user_id: user.id, org_id: venue.owner_org_id, role: { in: ["owner", "admin"] }, ...activeMembership },
+      select: { id: true },
+    })
+    if (!manager) throw new Refusal("Only the venue organisation's owners and admins can change this.")
+  }
 
   const changed = await db.$transaction(async (tx) => {
     // Conditional, so two clicks racing write one row and one audit entry.
@@ -608,7 +617,9 @@ export async function assignVenueOwner(venueId: string, orgId: string): Promise<
 
   await db.venues.update({
     where: { id: venueId },
-    data: { owner_org_id: orgId, claimed_at: new Date() },
+    // A new owner starts open on Blendn (step 18 security review, M5): the
+    // switch was the last owner's choice, and they could close it on the way out.
+    data: { owner_org_id: orgId, claimed_at: new Date(), open_on_blendn: true },
   })
 
   auditLog({

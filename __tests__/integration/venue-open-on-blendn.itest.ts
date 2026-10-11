@@ -5,10 +5,12 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 const mockGetAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+// As getAuth() returns it: the jwt callback always writes signedInAt (lib/session-revocation.ts).
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
-import { setVenueOpenOnBlendn } from "@/lib/venue-actions"
+import { assignVenueOwner, setVenueOpenOnBlendn } from "@/lib/venue-actions"
+import { decideVenueClaim } from "@/lib/venue-claim-actions"
 
 import { closeDb, db, makeUser, testId } from "./helpers"
 import { cleanupWorld, person, realEvent, req, venue, world } from "./go-live-world"
@@ -77,6 +79,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  await db.venue_claims.deleteMany({ where: { venue_id: { in: world.venues } } })
   await db.audit_logs.deleteMany({ where: { resource: "venue", resource_id: { in: world.venues } } })
   await db.event_rsvps.deleteMany({ where: { event: { venue_id: { in: world.venues } } } })
   await cleanupWorld()
@@ -196,5 +199,55 @@ describe("who may switch it", () => {
     }
     expect(await openOf(id)).toBe(true)
     expect(await auditFor(id)).toHaveLength(0)
+  })
+})
+
+describe("a new owner starts open (security review M5)", () => {
+  it("a dispute won reopens a venue the losing owner closed", async () => {
+    const id = await named("disputed", { ownerOrg })
+    as(ownerUser, "venue_owner")
+    await setVenueOpenOnBlendn(id, false)
+
+    // The other organisation's dispute, approved by an admin.
+    const otherOrg = (await db.organisation_members.findFirstOrThrow({ where: { user_id: otherUser }, select: { org_id: true } })).org_id
+    const claim = await db.venue_claims.create({ data: { venue_id: id, org_id: otherOrg, filed_by: otherUser, status: "pending", is_dispute: true } })
+    as(admin, "app_admin")
+    await decideVenueClaim(claim.id, "approve")
+
+    const after = await db.venues.findUniqueOrThrow({ where: { id }, select: { owner_org_id: true, open_on_blendn: true } })
+    expect(after).toEqual({ owner_org_id: otherOrg, open_on_blendn: true })
+    expect(await listedIds()).toContain(id)
+  })
+
+  it("an owner an admin assigns starts open, whatever the column said", async () => {
+    const id = await named("assigned")
+    // A stale false on an unclaimed venue (a claim taken back after it was closed).
+    await db.venues.update({ where: { id }, data: { open_on_blendn: false } })
+    as(admin, "app_admin")
+    await assignVenueOwner(id, ownerOrg)
+    expect((await db.venues.findUniqueOrThrow({ where: { id }, select: { open_on_blendn: true } })).open_on_blendn).toBe(true)
+  })
+})
+
+describe("only the organisation's owners and admins switch it (security review L2)", () => {
+  it("refuses staff, and lets an admin of the organisation", async () => {
+    const id = await named("staffed", { ownerOrg })
+    const staff = await makeUser(testId("ob_staff"), "organizer")
+    const orgAdmin = await makeUser(testId("ob_orgadmin"), "organizer")
+    world.users.push(staff, orgAdmin)
+    await db.organisation_members.createMany({
+      data: [
+        { org_id: ownerOrg, user_id: staff, role: "staff" },
+        { org_id: ownerOrg, user_id: orgAdmin, role: "admin" },
+      ],
+    })
+
+    as(staff, "venue_owner")
+    await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Only the venue organisation's owners and admins can change this.")
+    expect(await openOf(id)).toBe(true)
+
+    as(orgAdmin, "venue_owner")
+    await setVenueOpenOnBlendn(id, false)
+    expect(await openOf(id)).toBe(false)
   })
 })
