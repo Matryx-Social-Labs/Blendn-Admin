@@ -204,8 +204,15 @@ describe("POST /venues/:id/live", () => {
     // Before anybody is live: refused, nothing written.
     const first = await goLive(stranger.token, v, { minutes: 20 }, OUTSIDE)
     expect(first.status).toBe(400)
-    expect(first.json.error).toMatch(/^You're not at .+ yet\.$/)
-    expect(first.json.error).not.toMatch(/\d+\s?m\b|metre/)
+    /*
+     * The whole sentence, with the venue's own name and nothing after it. This
+     * was a pattern for "no distance in it" (`\d+\s?m\b`), and the fixture's
+     * venue is named `itest_Venue_<8 random characters>`: one name in about 130
+     * ends in a digit and an "m", reads as "45m", and failed the run.
+     * An exact sentence cannot carry a distance, and has no such name.
+     */
+    const { name } = await db.venues.findUniqueOrThrow({ where: { id: v }, select: { name: true } })
+    expect(first.json.error).toBe(`You're not at ${name} yet.`)
     expect(await db.events.count({ where: { venue_id: v, kind: "venue_day" } })).toBe(0)
 
     // Once the day exists, the refusal is recorded against it, and nowhere else.

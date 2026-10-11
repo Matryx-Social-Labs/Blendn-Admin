@@ -297,12 +297,45 @@ async function until(check: () => boolean | Promise<boolean>, ms = 3000) {
   return false
 }
 
-/** `join:chat` through the server's own handler: in the room, or refused with FORBIDDEN. */
+/** This socket in the room — not "somebody of this person's", which another of their sockets answers. */
+const socketInRoom = async (chatGroupId: string, socketId: string | undefined) =>
+  (await io.in(`chat:${chatGroupId}`).fetchSockets()).some((s) => s.id === socketId)
+
+/**
+ * `join:chat` through the server's own handler: in the room, or refused with FORBIDDEN.
+ *
+ * Asked of the socket that emitted, by its id. It asked of the person
+ * (`inRoom`), so a person with a second socket already in the room — the
+ * matrix test's, still open — answered "joined" at once, before the server had
+ * processed this one, and a leave sent next was announced to a room this
+ * socket was not yet in. Under load the join lost that race one run in four.
+ */
 async function joins(c: Online, chatGroupId: string): Promise<boolean> {
   const before = c.heard.refused.length
   c.socket.emit("join:chat", chatGroupId)
-  await until(async () => c.heard.refused.length > before || (await inRoom(chatGroupId, c.id)))
-  return inRoom(chatGroupId, c.id)
+  await until(async () => c.heard.refused.length > before || (await socketInRoom(chatGroupId, c.socket.id)))
+  return socketInRoom(chatGroupId, c.socket.id)
+}
+
+/** What the handshake says to an account that may not use the attendee socket (lib/socket-server.ts). */
+const HANDSHAKE_REFUSED = "Authentication required"
+
+/**
+ * Connect, or learn that the handshake refused this person.
+ *
+ * Only that refusal, by its message, is a result. Anything else — a timeout, a
+ * reset, a server that is not there — rethrows and fails the test: this was
+ * `.catch(() => null)`, which turned every such error into "handshake refused",
+ * the very answer staff are expected to get, so a dead server passed for them
+ * and failed for the members.
+ */
+async function handshake(p: Person): Promise<Online | typeof HANDSHAKE_REFUSED> {
+  try {
+    return await online(p)
+  } catch (error) {
+    if (error instanceof Error && error.message === HANDSHAKE_REFUSED) return HANDSHAKE_REFUSED
+    throw error
+  }
 }
 
 beforeAll(async () => {
@@ -400,7 +433,7 @@ describe("every caller × every operation on a board post's room (SEC-01)", () =
     const callers = { ...P }
     const matrix: Record<string, Record<string, number | boolean | string>> = {}
     for (const [name, who] of Object.entries(callers)) {
-      const c = await online(who).catch(() => null)
+      const c = await handshake(who)
       matrix[name] = {
         read: (await o.read(who)).status,
         roster: (await o.roster(who)).status,
@@ -409,7 +442,7 @@ describe("every caller × every operation on a board post's room (SEC-01)", () =
         reportMessage: (await o.reportMessage(who)).status,
         mute: (await o.mute(who)).status,
         unmute: (await o.unmute(who)).status,
-        join: c ? await joins(c, w.groupId) : "handshake refused",
+        join: c === HANDSHAKE_REFUSED ? "handshake refused" : await joins(c, w.groupId),
         // The guard itself, as a dashboard socket's join:chat asks it.
         door: await canJoinChat(who.id, w.groupId),
       }
