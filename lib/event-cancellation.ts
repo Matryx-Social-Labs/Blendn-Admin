@@ -16,11 +16,12 @@ import { db } from "@/lib/db"
  * occupancy and toward attendance. That was Fix #35, applied to the dashboard
  * route.
  *
- * The sessions are closed here too, because nothing else will: every checkout
- * path acts on `checked_in` rows only, and occupancy reads "inside" as an open
- * session. Cancelling the check-ins alone left the room counting its last
- * headcount for good (SCRUM-490). `ended` because the room closed at a known
- * instant, by a person's decision, rather than by inference.
+ * The sessions are closed here too, because nothing else will in time: every
+ * checkout path acts on `checked_in` rows only, and occupancy reads "inside" as
+ * an open session. Cancelling the check-ins alone left the room counting its
+ * last headcount (SCRUM-490), until `closeStrandedSessions` got to it once the
+ * occurrence was over, as inference. `ended` here because the room closed at a
+ * known instant, by a person's decision.
  *
  * It lives here rather than inline because the mobile route cancels events too
  * and did not cascade, so the exact state Fix #35 was written to prevent was
