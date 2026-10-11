@@ -4,6 +4,7 @@ import { IconAlertTriangle, IconEdit, IconMessage2, IconUsers } from "@tabler/ic
 import { AttendancePanel } from "@/components/dashboard/attendance-panel"
 import { ConnectionsPanel } from "@/components/dashboard/connections-panel"
 import { TurnedAwayPanel } from "@/components/dashboard/turned-away-panel"
+import { IssueLog } from "@/components/dashboard/issue-log"
 import { Panel } from "@/components/dashboard/kit"
 import { HeroMetric } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
@@ -11,6 +12,7 @@ import type { EventAttendance } from "@/lib/attendance"
 import type { EventRefusals } from "@/lib/check-in-refusals"
 import type { ConnectionMetrics } from "@/lib/connection-metrics"
 import type { EventOverview } from "@/lib/event-overview"
+import type { IssueRow } from "@/lib/event-issues"
 import { cn } from "@/lib/utils"
 
 /**
@@ -34,6 +36,8 @@ export function Overview({
   attendance,
   connections,
   turnedAway,
+  alertHistory,
+  timezone,
 }: {
   overview: EventOverview
   eventId: string
@@ -44,6 +48,15 @@ export function Overview({
   connections: ConnectionMetrics | null
   /** Null only for a draft: an upcoming event can already have turned people away (SCRUM-494). */
   turnedAway: EventRefusals | null
+  /**
+   * What the room's watch recorded while the event ran, for an event that is
+   * over and a viewer who may operate it; a venue's are the figure-free
+   * sentences. Null otherwise. The Live tab is the only other reader and it
+   * exists only while the event runs (F6).
+   */
+  alertHistory: IssueRow[] | null
+  /** The event's own zone: its times are told in it (SCRUM-421). */
+  timezone: string
 }) {
   const { state, hero, tiles, blockers, publishable } = overview
   const blocking = blockers.filter((b) => b.blocking)
@@ -131,6 +144,15 @@ export function Overview({
       {connections ? (
         <Panel>
           <ConnectionsPanel metrics={connections} />
+        </Panel>
+      ) : null}
+
+      {/* After who met, because "did anything go wrong" comes once "was it good"
+          is answered. Drawn only when something was recorded: "no alerts" is a
+          panel asserting the absence of a problem nobody asked about. */}
+      {alertHistory && alertHistory.length > 0 ? (
+        <Panel title="Alert history">
+          <IssueLog issues={alertHistory} timezone={timezone} over />
         </Panel>
       ) : null}
 

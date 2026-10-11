@@ -36,6 +36,8 @@ const render = (canEdit: boolean) =>
       attendance: null,
       connections: null,
       turnedAway: null,
+      alertHistory: null,
+      timezone: "Asia/Kolkata",
     })
   )
 
