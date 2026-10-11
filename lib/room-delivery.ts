@@ -1,6 +1,6 @@
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
-import { blockCounterparties } from "@/lib/conversations"
+import { keptApartIn } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
 import { roomHandle, type RoomScope } from "@/lib/room-handle"
@@ -60,7 +60,8 @@ export async function deliverToRoom(input: {
 
   let senderBlocked: string[] = []
   try {
-    senderBlocked = await blockCounterparties(senderId)
+    // A board post's room keeps closed pairs apart too (`keptApartIn`).
+    senderBlocked = await keptApartIn(senderId, typeof input.scope === "string" ? "event" : input.scope.kind)
   } catch (error) {
     /*
      * Fail **closed on delivery**, not open.

@@ -31,7 +31,8 @@ describe("every group-chat surface consults blocked_users", () => {
 
   it.each(surfaces)("%s filters history on the block list", (rel) => {
     const src = read(rel)
-    expect(src).toContain("blockCounterparties")
+    // `keptApartIn` is the block list, plus closed conversations in a board post's room (step 10 review H2).
+    expect(src).toMatch(/blockCounterparties|keptApartIn/)
     expect(src).toMatch(/notIn: blockedIds/)
   })
 

@@ -41,7 +41,11 @@ registry.registerPath({
     "interested in are for 18+ only.\" A new `age` or `dateOfBirth` under 18 is 400 (Blend'n is 18+, " +
     "SCRUM-330); clearing the age to unknown clears the stored dating intent, the \"dating\" in `looking_for`, " +
     "and the orientation fields. `onboarded: true` on a profile not yet onboarded is 403 \"Blend'n is for " +
-    "people 18 and over. Add your date of birth to finish.\" unless the age after the request is 18+.",
+    "people 18 and over. Add your date of birth to finish.\" unless the age after the request is 18+. " +
+    "Changing `languages`, `home_state`, `sun_sign`/`sign_system` or `work_field` (a real change, once onboarded) " +
+    "is limited to three a day — the fourth is 429 RATE_LIMITED \"You can change your languages, home state, sign " +
+    "or field of work three times a day. Try again tomorrow.\" — and stamps `tier_b_changed_at`: in a room you " +
+    "checked into before the change, your new values print no shared line.",
   security: bearerAuth,
   request: {
     params: z.object({ userId: z.string().uuid() }),

@@ -101,7 +101,7 @@ describe("the keyed handle (SCRUM-517)", () => {
     const src = codeOnly(read("lib", "anonymous-names.ts"))
     expect(src).toMatch(/event && event\.created_at < KEYED_PSEUDONYMS_FROM \? "legacy" : "keyed"/)
     const board = codeOnly(read("lib", "board-access.ts"))
-    expect(board).toContain("const scheme = await pseudonymSchemeFor(eventId)")
+    expect(board).toContain("const scheme = await pseudonymSchemeFor(eventId, client)")
   })
 })
 
@@ -273,7 +273,7 @@ describe("accepting opens a conversation that can be told apart from a match", (
     expect(src).toMatch(/action === "accept" && !isLiveRequest\(/)
     // ...and it must read the row, not a value it invented.
     expect(src).toContain("event: { select: { end_time: true } }")
-    expect(src).toContain("post: { select: { deleted_at: true, spaces_left: true } }")
+    expect(src).toContain("post: { select: { deleted_at: true, spaces_left: true, body: true } }")
   })
 })
 

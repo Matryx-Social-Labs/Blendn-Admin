@@ -45,6 +45,9 @@ const ROUTES = [
   "/api/mobile/categories",
   "/api/mobile/amenities",
   "/api/mobile/work-fields",
+  // Matching v2's vocabulary and your this-or-that answers (step 10).
+  "/api/mobile/profile-options",
+  "/api/mobile/me/this-or-that",
   "/api/mobile/venues",
   "/api/mobile/conversations",
   "/api/mobile/notifications",
