@@ -5,7 +5,8 @@ import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { currentUser } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
+import { dashboardSessionsEnded, endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { userLimit, rateLimit } from "@/lib/rate-limit"
 import { passwordStrength } from "@/lib/password-strength"
 
@@ -107,18 +108,19 @@ export async function changePassword(
    * it kept every phone alive — five before, five after, read back on staging.
    * One transaction, so a hash cannot land without the revoke or vice versa.
    */
+  const hash = await bcrypt.hash(newPassword, 12)
+  const at = new Date()
   const revoked = await db.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: user.id },
       // Every dashboard session signed in before now ends, this one included (M6).
-      data: { password: await bcrypt.hash(newPassword, 12), password_changed_at: new Date() },
+      data: { password: hash, password_changed_at: at },
     })
-    const { count } = await tx.mobile_refresh_tokens.updateMany({
-      where: { user_id: user.id, revoked_at: null },
-      data: { revoked_at: new Date() },
-    })
-    return count
+    return endPhoneSessions(tx, user.id, at)
   })
+  // And what was live when it changed closes now (SCRUM-603).
+  dashboardSessionsEnded(user.id)
+  phoneSessionsEnded(user.id, at)
 
   auditLog({
     userId: user.id,
@@ -144,41 +146,39 @@ export async function changePassword(
  */
 export async function endDashboardSessions(): Promise<void> {
   const user = await requireUser()
-  await db.user.update({ where: { id: user.id }, data: { sessions_revoked_at: new Date() } })
-
-  auditLog({ userId: user.id, action: "account.sessions_revoked", resource: "user", resourceId: user.id })
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: user.id }, data: { sessions_revoked_at: new Date() } })
+    await auditInTx(tx, { userId: user.id, action: "account.sessions_revoked", resource: "user", resourceId: user.id })
+  })
+  // A socket already open keeps the live room coming until it is closed.
+  dashboardSessionsEnded(user.id)
   revalidatePath("/dashboard/settings")
 }
 
 /**
- * Revoke every mobile refresh token for this account, and its push tokens.
+ * Sign every phone out of this account: `endPhoneSessions` (lib/session-end.ts)
+ * — refresh tokens, push tokens, and every access token issued until now —
+ * and their live sockets closed.
  *
  * Separate from dashboard sessions because they are separate auth systems — the
  * mobile app holds 30-day refresh tokens that a dashboard sign-out does not
  * touch, and someone who has lost a phone needs exactly this.
- *
- * The push tokens go with them, as they do on the app's own sign-out from
- * everywhere (app/api/mobile/auth/signout): a phone signed out from here can no
- * longer delete its own token, and kept receiving the account's notifications,
- * DM text included. Its access token still lives out its 15 minutes.
  */
 export async function revokeMobileSessions(): Promise<number> {
   const user = await requireUser()
-  const [{ count }] = await db.$transaction([
-    db.mobile_refresh_tokens.updateMany({
-      where: { user_id: user.id, revoked_at: null },
-      data: { revoked_at: new Date() },
-    }),
-    db.push_tokens.deleteMany({ where: { user_id: user.id } }),
-  ])
-
-  auditLog({
-    userId: user.id,
-    action: "account.mobile_tokens_revoked",
-    resource: "user",
-    resourceId: user.id,
-    details: { count },
+  const at = new Date()
+  const count = await db.$transaction(async (tx) => {
+    const live = await endPhoneSessions(tx, user.id, at)
+    await auditInTx(tx, {
+      userId: user.id,
+      action: "account.mobile_tokens_revoked",
+      resource: "user",
+      resourceId: user.id,
+      details: { count: live },
+    })
+    return live
   })
+  phoneSessionsEnded(user.id, at)
   revalidatePath("/dashboard/settings")
   return count
 }

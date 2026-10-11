@@ -43,8 +43,11 @@ jest.mock("next/navigation", () => ({
 }))
 
 import bcrypt from "bcryptjs"
+import { createServer } from "http"
+import type { AddressInfo } from "net"
 import { NextRequest } from "next/server"
 import { encode, type JWT } from "next-auth/jwt"
+import { io as connect, type Socket as ClientSocket } from "socket.io-client"
 
 import { GET as nextAuthRoute } from "@/app/api/auth/[...nextauth]/route"
 import { POST as resetPassword } from "@/app/api/auth/reset-password/route"
@@ -54,10 +57,12 @@ import { changePassword, endDashboardSessions, revokeMobileSessions, updateProfi
 import { authOptions, getAuth } from "@/lib/auth"
 import { currentUser } from "@/lib/current-user"
 import { db as appDb } from "@/lib/db"
-import { signRefreshToken, storeRefreshToken } from "@/lib/mobile-auth"
+import { getAuthenticatedUser, signAccessToken, signRefreshToken, storeRefreshToken } from "@/lib/mobile-auth"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { authenticateDashboardSocket } from "@/lib/socket-ops-auth"
+import { initSocketServer } from "@/lib/socket-server"
+import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import { middleware } from "@/middleware"
 
 import { closeDb, db, makeUser } from "./helpers"
@@ -75,7 +80,20 @@ const users: string[] = []
 type JwtCallback = (a: { token: JWT; user?: unknown; account?: unknown; trigger?: string; session?: unknown }) => Promise<JWT>
 const jwt = authOptions.callbacks!.jwt! as unknown as JwtCallback
 
+// The real socket server (its handshake and its rooms), installed as the app's io.
+const httpServer = createServer()
+const io = initSocketServer(httpServer)
+const clients: ClientSocket[] = []
+
+beforeAll(async () => {
+  await new Promise<void>((resolve) => httpServer.listen(0, resolve))
+})
+
 afterAll(async () => {
+  for (const c of clients) c.close()
+  stopSponsoredScheduler()
+  globalThis.__blendnSocketIo = null
+  await new Promise<void>((resolve) => io.close(() => resolve()))
   await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.mobile_refresh_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.password_reset_tokens.deleteMany({ where: { user_id: { in: users } } })
@@ -179,61 +197,165 @@ describe("a reset ends the sessions signed in before it", () => {
   })
 })
 
+/** A socket opened the way the dashboard (its cookie) or the app (its access token) opens one. */
+function socketOptions(auth: { cookie: string } | { token: string }) {
+  return "cookie" in auth
+    ? { extraHeaders: { cookie: `${COOKIE}=${auth.cookie}` }, transports: ["websocket"], reconnection: false }
+    : { auth: { token: auth.token }, transports: ["websocket"], reconnection: false }
+}
+
+async function live(auth: { cookie: string } | { token: string }) {
+  const { port } = httpServer.address() as AddressInfo
+  const socket = connect(`http://localhost:${port}`, socketOptions(auth))
+  clients.push(socket)
+  const closed: string[] = []
+  socket.on("disconnect", (reason) => closed.push(reason))
+  await new Promise<void>((resolve, reject) => {
+    socket.on("connect", () => resolve())
+    socket.on("connect_error", reject)
+  })
+  return { socket, closed }
+}
+
+/** Whether a new connection with these credentials is refused at the handshake. */
+async function refused(auth: { cookie: string } | { token: string }): Promise<boolean> {
+  const { port } = httpServer.address() as AddressInfo
+  const socket = connect(`http://localhost:${port}`, socketOptions(auth))
+  clients.push(socket)
+  return new Promise<boolean>((resolve) => {
+    socket.on("connect", () => resolve(false))
+    socket.on("connect_error", () => resolve(true))
+  })
+}
+
+async function closedSoon(s: { closed: string[] }) {
+  for (let waited = 0; s.closed.length === 0 && waited < 3000; waited += 25) await new Promise((r) => setTimeout(r, 25))
+  return s.closed
+}
+
+/** A person on the app: a refresh token stored, an access token, a push token, a live socket. */
+async function phone(id: string) {
+  const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
+  const refresh = signRefreshToken(id, email)
+  await storeRefreshToken(id, refresh)
+  const access = signAccessToken(id, email)
+  await db.push_tokens.create({ data: { user_id: id, token: `ExponentPushToken[m6-${id}-${Date.now()}]`, platform: "ios" } })
+  return { email, refresh, access, socket: await live({ token: access }) }
+}
+
+const refreshWith = (refreshToken: string) =>
+  refreshRoute.POST(
+    new NextRequest("http://localhost/api/mobile/auth/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-real-ip": "203.0.113.67" },
+      body: JSON.stringify({ refreshToken }),
+    })
+  )
+const apiAs = (access: string) =>
+  getAuthenticatedUser(new Request("http://localhost/api/mobile/me", { headers: { authorization: `Bearer ${access}` } }))
+
+/** Every way the phone could carry on, refused; its push token gone. */
+async function expectPhoneEnded(id: string, p: Awaited<ReturnType<typeof phone>>) {
+  expect(await closedSoon(p.socket)).toEqual(["io server disconnect"])
+  expect(await refused({ token: p.access })).toBe(true)
+  expect(await apiAs(p.access)).toBeNull()
+  expect((await refreshWith(p.refresh)).status).toBe(401)
+  expect(await db.mobile_refresh_tokens.count({ where: { user_id: id, revoked_at: null } })).toBe(0)
+  expect(await db.push_tokens.count({ where: { user_id: id } })).toBe(0)
+}
+
 describe("Settings → Sessions ends what it says (SCRUM-603)", () => {
-  it("Dashboard: ending from one browser ends every browser, this one included, wherever a cookie is read", async () => {
+  it("Dashboard: ending from one browser ends every browser, this one included, its live socket too", async () => {
     const id = await host()
     const here = await signedInCookie(id)
     const elsewhere = await signedInCookie(id)
+    const open = await live({ cookie: elsewhere })
     holding(here)
     expect(await currentUser()).toEqual({ id, role: "organizer" })
 
     await endDashboardSessions()
 
-    // Read back: the stamp the rule judges by.
+    // Read back: the stamp the rule judges by, and its audit row with it.
     const { sessions_revoked_at } = await db.user.findUniqueOrThrow({ where: { id }, select: { sessions_revoked_at: true } })
     expect(sessions_revoked_at).toBeInstanceOf(Date)
+    expect(await db.audit_logs.count({ where: { action: "account.sessions_revoked", user_id: id } })).toBe(1)
+    // The socket that was already open is closed, and cannot come back.
+    expect(await closedSoon(open)).toEqual(["io server disconnect"])
     for (const cookie of [here, elsewhere]) {
       holding(cookie)
       expect(await getAuth()).toBeNull()
       expect(await currentUser()).toBeNull()
-      expect(await authenticateDashboardSocket(`${COOKIE}=${cookie}`)).toBeNull()
+      expect(await refused({ cookie })).toBe(true)
       const res = await sessionRoute()
       expect(await res.json()).toEqual({})
       expect(res.headers.get("set-cookie")).toMatch(new RegExp(`${COOKIE.replace(/\./g, "\\.")}=;`))
     }
 
     // Signing in again is a session; the password did not change.
-    holding(await signedInCookie(id))
+    const again = await signedInCookie(id)
+    holding(again)
     expect(await currentUser()).toEqual({ id, role: "organizer" })
+    expect((await live({ cookie: again })).socket.connected).toBe(true)
   })
 
-  it("Mobile app: every phone's refresh is refused and its push token is gone; nobody else's", async () => {
+  it("Mobile app: every phone is out — socket, API, refresh, push — and nobody else's; a new sign-in is in", async () => {
     const id = await makeUser("m6_phone")
     const other = await makeUser("m6_other")
     users.push(id, other)
-    const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
-    const phone = signRefreshToken(id, email)
-    await storeRefreshToken(id, phone)
-    await db.push_tokens.createMany({
-      data: [
-        { user_id: id, token: `ExponentPushToken[m6-${id}]`, platform: "ios" },
-        { user_id: other, token: `ExponentPushToken[m6-${other}]`, platform: "ios" },
-      ],
-    })
+    const mine = await phone(id)
+    const theirs = await phone(other)
     mockSession = { user: { id, role: "attendee", signedInAt: Date.now() } }
 
     expect(await revokeMobileSessions()).toBe(1)
 
-    const res = await refreshRoute.POST(
-      new NextRequest("http://localhost/api/mobile/auth/refresh", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-real-ip": "203.0.113.67" },
-        body: JSON.stringify({ refreshToken: phone }),
-      })
-    )
-    expect(res.status).toBe(401)
-    expect(await db.push_tokens.count({ where: { user_id: id } })).toBe(0)
+    await expectPhoneEnded(id, mine)
+    expect(await db.audit_logs.count({ where: { action: "account.mobile_tokens_revoked", user_id: id } })).toBe(1)
+    // Somebody else's phone carries on.
+    expect(theirs.socket.socket.connected).toBe(true)
+    expect(await apiAs(theirs.access)).toMatchObject({ userId: other })
     expect(await db.push_tokens.count({ where: { user_id: other } })).toBe(1)
+    // A token issued after the sign-out (the next second: iat is in seconds) is a session.
+    const ended = (await db.user.findUniqueOrThrow({ where: { id }, select: { mobile_sessions_revoked_at: true } })).mobile_sessions_revoked_at!
+    while (Math.floor(Date.now() / 1000) * 1000 <= ended.getTime()) await new Promise((r) => setTimeout(r, 50))
+    const fresh = signAccessToken(id, mine.email)
+    expect(await apiAs(fresh)).toMatchObject({ userId: id })
+    expect((await live({ token: fresh })).socket.connected).toBe(true)
+  })
+
+  it("a password change ends the same: the cookie, the dashboard's socket, and every phone", async () => {
+    // An attendee: the app refuses a staff token at the handshake, so only an
+    // attendee can hold a phone socket for this to close.
+    const id = await makeUser("m6_pw")
+    users.push(id)
+    await db.user.update({ where: { id }, data: { password: await bcrypt.hash(OLD, 4) } })
+    const cookie = await signedInCookie(id)
+    const browser = await live({ cookie })
+    const mine = await phone(id)
+    holding(cookie)
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(await changePassword(OLD, "Turquoise-Lantern-Harbour-91")).toMatchObject({ ok: true, revokedSessions: 1 })
+
+    holding(cookie)
+    expect(await getAuth()).toBeNull()
+    expect(await closedSoon(browser)).toEqual(["io server disconnect"])
+    expect(await refused({ cookie })).toBe(true)
+    await expectPhoneEnded(id, mine)
+  })
+
+  it("and so does a reset link", async () => {
+    const id = await makeUser("m6_reset")
+    users.push(id)
+    const cookie = await signedInCookie(id)
+    const browser = await live({ cookie })
+    const mine = await phone(id)
+    await new Promise((r) => setTimeout(r, 5))
+
+    await resetPasswordOf(id)
+
+    expect(await closedSoon(browser)).toEqual(["io server disconnect"])
+    expect(await refused({ cookie })).toBe(true)
+    await expectPhoneEnded(id, mine)
   })
 })
 

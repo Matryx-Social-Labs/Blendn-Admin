@@ -64,6 +64,10 @@ model User {
   /// When the account last ended every dashboard session (Settings, SCRUM-603):
   /// a session that signed in at or before it is refused, as for the password.
   sessions_revoked_at DateTime? @db.Timestamptz(6)
+  /// When the account last ended its phone sessions (Settings, a password
+  /// change or reset): an access token issued at or before it is refused
+  /// (lib/account-blocklist.ts, the socket handshake; SCRUM-603).
+  mobile_sessions_revoked_at DateTime? @db.Timestamptz(6)
   suspended_by      String?
   suspension_reason String?
 

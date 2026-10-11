@@ -811,9 +811,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
          */
         const account = await db.user.findUnique({
           where: { id: decoded.userId },
-          select: { deletedAt: true, suspended_at: true, role: true },
+          select: { deletedAt: true, suspended_at: true, role: true, mobile_sessions_revoked_at: true },
         })
         if (accountBlockReason(account)) {
+          return next(new Error("Authentication required"))
+        }
+        // A token from before the phones were signed out (SCRUM-603): the
+        // eviction closed its socket, and this keeps it from reconnecting.
+        const phonesEnded = account?.mobile_sessions_revoked_at
+        if (phonesEnded && decoded.iat * 1000 <= phonesEnded.getTime()) {
           return next(new Error("Authentication required"))
         }
 
@@ -850,8 +856,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
     // Send connection confirmation
     authSocket.emit("connected", { userId: authSocket.data.userId })
 
-    // Join user's personal room for direct notifications
-    authSocket.join(`user:${authSocket.data.userId}`)
+    // Join user's personal room for direct notifications, and the one for
+    // this kind of session, so ending one kind closes only those (SCRUM-603).
+    authSocket.join([`user:${authSocket.data.userId}`, `user:${authSocket.data.userId}:${authSocket.data.principal}`])
 
     // Event room handlers
     authSocket.on("join:event", async (eventId) => {
@@ -1441,10 +1448,13 @@ export function closeConversationRoom(conversationId: string): void {
  * the underlying connections across the Redis adapter; the client's reconnect
  * then meets the handshake gate and stays out.
  */
-export function evictUserSockets(userId: string): void {
+export function evictUserSockets(userId: string, only?: "mobile" | "dashboard"): void {
   const io = currentIo()
   if (!io) return
-  io.in(`user:${userId}`).disconnectSockets(true)
+  // Only the dashboard's sockets, or only the phones', when one kind of
+  // session ends (Settings, a password change; SCRUM-603).
+  if (only) io.in(`user:${userId}:${only}`).disconnectSockets(true)
+  else io.in(`user:${userId}`).disconnectSockets(true)
 }
 
 /**
