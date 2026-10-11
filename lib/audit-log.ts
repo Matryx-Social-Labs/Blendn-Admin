@@ -211,7 +211,8 @@ const PERSONAL_ACTIONS = new Set(["venue_regular.optin", "venue_regular.optout",
 /**
  * Whether the actor was acting for `org` (step 18, M3, after the step 12
  * review): the platform itself (no actor — a webhook, a sweep), a Blend'n
- * admin, or a member of that organisation when the row is written. Anyone
+ * admin, or a member of that organisation, live (`activeMembership`), when
+ * the row is written. Anyone
  * else — an attendee, a member of another organisation, someone asking to
  * join — acted as themselves, and their row is the platform's alone: an
  * organisation reads what its people did for it, never what a person did
@@ -219,7 +220,7 @@ const PERSONAL_ACTIONS = new Set(["venue_regular.optin", "venue_regular.optout",
  */
 async function actsFor(client: Client, userId: string | null | undefined, org: string): Promise<boolean> {
   if (!userId) return true
-  const member = await client.organisation_members.findFirst({ where: { user_id: userId, org_id: org }, select: { id: true } })
+  const member = await client.organisation_members.findFirst({ where: { user_id: userId, org_id: org, ...activeMembership }, select: { id: true } })
   if (member) return true
   const actor = await client.user.findUnique({ where: { id: userId }, select: { role: true } })
   return actor?.role === "app_admin"
