@@ -1838,6 +1838,12 @@
       "observed": "2026-10-11, 21 tests. M1425: 1 failing (Dashboard) here, 2 in session-revocation.test.ts. M1426: 3 (Mobile, password change, reset). M1429: 1 (Dashboard). M1430: 3 (Mobile, password change, reset: the old token reconnects). M1431: 3 (the old token answers at the API). M1432: 1 (password change). M1433: 4 (no socket closes). M1434: 3. M1435: 1 (reset). Restored, 21 of 21.",
       "date": "2026-10-11"
     },
+    "account-blocklist-shared.test.ts": {
+      "guards": "SCRUM-603 follow-up: the blocklist's state is on globalThis, so a phone sign-out or a block told to one copy of lib/account-blocklist.ts (a dashboard action's) is refused by another (the mobile routes'), and only for tokens issued before it; and a refresh that read the database before the action committed does not drop what the action said. Two copies made with jest.isolateModules, the database answering nothing.",
+      "mutation": "M1445 the module as it was (state in module scope, replaced on refresh). M1446 recentlyBlocked ignores what an action said in this process (blockedNow / phonesEndedNow).",
+      "observed": "2026-10-11. M1445: 2 of 2 failing. M1446: 2 of 2 failing. Restored, 2 of 2. Staging before the fix: a signed-out phone's access token answered 200 at +4 s and 401 at +29 s.",
+      "date": "2026-10-11"
+    },
     "plus-erasure.itest.ts": {
       "guards": "Step 11 review M2/L8 through the real routes: a purchase being granted while the account is erased (the webhook's insert slowed by a trigger, the erasure started inside it) leaves no Blendn+ row, and a later renewal is unknown_user; with REVENUECAT_SECRET_KEY the erasure DELETEs the customer at RevenueCat, and a RevenueCat refusal does not undo the erasure.",
       "mutation": "M1048 the erasure's revenuecat: lock removed AND the webhook's FOR SHARE removed (either alone holds). M1068 the RevenueCat delete skipped.",
