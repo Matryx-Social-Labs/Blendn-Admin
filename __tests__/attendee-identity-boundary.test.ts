@@ -117,6 +117,11 @@ const ALLOWED = new Map([
   // The caller's own account, by the email they typed.
   ["app/api/auth/forgot-password/route.ts", "the caller's own account"],
   ["app/api/auth/reset-password/route.ts", "the caller's own account"],
+  // The address an applicant typed, to mail that address; nothing read is
+  // returned to them (step 18, M4).
+  ["app/api/onboarding/apply/route.ts", "the applicant's own address"],
+  // The caller's own address, read to bind an invitation to it (step 18, L4).
+  ["app/api/organisation/accept-invite/route.ts", "the caller's own account"],
   // `sender` of an announcement is the host (or staff) who sent it -- the
   // organisation's own voice, never an attendee.
   ["app/api/events/[id]/announcements/route.ts", "the sender is a host, not an attendee"],

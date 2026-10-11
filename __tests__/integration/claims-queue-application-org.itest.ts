@@ -12,7 +12,7 @@
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 // A real admin row (made below): requireAdmin reads the caller's role from the database (step 18).
 let mockAdminId = ""
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve({ user: { id: mockAdminId, role: "app_admin" } }) }))
+jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve({ user: { signedInAt: 0, id: mockAdminId, role: "app_admin" } }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { getEventClaimQueue } from "@/lib/event-claim-actions"

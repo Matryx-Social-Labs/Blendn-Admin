@@ -20,7 +20,7 @@ const tx = {
 
 const mockDb = {
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
   user_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   message_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   event_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
@@ -34,7 +34,7 @@ const mockDb = {
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 const mockAuditLog = jest.fn()

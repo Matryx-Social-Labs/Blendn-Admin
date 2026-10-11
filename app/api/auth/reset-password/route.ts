@@ -103,7 +103,10 @@ export async function POST(req: NextRequest) {
       })
       if (claimed.count === 0) throw new Error("ALREADY_USED")
 
-      await tx.user.update({ where: { id: row.user.id }, data: { password: hashed } })
+      // And every dashboard session signed in before now (step 18 M6): the
+      // JWT has no row to delete, so `isRevoked` (lib/session-revocation.ts)
+      // ends it by this time, wherever it is read.
+      await tx.user.update({ where: { id: row.user.id }, data: { password: hashed, password_changed_at: new Date() } })
 
       // The point of resetting after a compromise.
       await tx.mobile_refresh_tokens.updateMany({

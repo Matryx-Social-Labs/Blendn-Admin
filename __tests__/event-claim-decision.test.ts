@@ -12,7 +12,7 @@
  */
 const mockDb = {
   // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
-  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
+  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null }) },
   event_claims: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   organiser_onboarding_requests: { findUnique: jest.fn() },
   events: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -22,7 +22,7 @@ mockDb.$transaction.mockImplementation(async (fn: (tx: typeof mockDb) => Promise
 const auditLog = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog, auditInTx: (_tx: unknown, entry: unknown) => auditLog(entry) }))
-jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))
+jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: 0 } }) }))
 jest.mock("next/headers", () => ({ headers: jest.fn().mockResolvedValue({ get: () => "203.0.113.9" }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/rate-limit-store", () => ({ hit: jest.fn().mockResolvedValue({ count: 1 }) }))

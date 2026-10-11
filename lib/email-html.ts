@@ -425,6 +425,33 @@ export function domainVerifyHtml(domain: string, link: string): string {
  * for one hour (RESET_TTL_MS in app/api/auth/forgot-password), and the mail
  * says what the code does.
  */
+/**
+ * Somebody applied with an address that already has an account or an
+ * application (step 18 security review, M4): the page said "check your email"
+ * as it does for anyone, and this is what the email says.
+ */
+export function applyAgainHtml(kind: "account" | "pending", signInLink: string): string {
+  return designEmail({
+    title: kind === "account" ? "You already have a Blend'n host account" : "We already have your application",
+    preheader: kind === "account" ? "Sign in instead of applying again." : "It's with our team. No need to apply again.",
+    eyebrow: "Your application",
+    heading: kind === "account" ? "You already have an account" : "We already have your application",
+    paragraphs:
+      kind === "account"
+        ? [
+            "Somebody applied to host on Blend'n with this address, and it already has a host account.",
+            "Sign in instead. Forgotten the password? There is a link on the sign-in page.",
+          ]
+        : [
+            "Somebody applied to host on Blend'n with this address, and we already have an application from it.",
+            "A person is reviewing it, usually within two working days. You don't need to apply again.",
+          ],
+    button: kind === "account" ? { href: signInLink, label: "Sign in" } : { href: "https://www.blendn.app", label: "Visit Blend'n" },
+    note: "Didn't apply? Ignore this email. Nothing has changed on your account.",
+    about: "account",
+  })
+}
+
 export function passwordResetHtml(name: string, link: string): string {
   return designEmail({
     title: "Reset your Blend'n password",

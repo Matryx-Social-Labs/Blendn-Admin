@@ -1,5 +1,6 @@
 let session: { user: { id: string; role: "app_admin" } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+// As getAuth() returns it: the jwt callback always writes signedInAt (lib/session-revocation.ts).
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { advanceCharge, getChargeLedger, pricePlacement } from "@/lib/charge-actions"

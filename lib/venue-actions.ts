@@ -5,7 +5,7 @@ import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { currentUser, requireAdmin } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
 import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
@@ -435,6 +435,61 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
 }
 
 /**
+ * "Open on Blendn" (D-13): whether the app lists a claimed venue in Places and
+ * on its home map. Off, the venue leaves both; its events still show, and its
+ * page and Go Live are untouched (owner's definition, step 18).
+ *
+ * A claimed venue only — the opt-out is its owner's, and an unclaimed venue
+ * is always listed whatever the column says (`openOnBlendnWhere`). The owner's
+ * organisation or an admin, by the role the database holds now
+ * (`currentUser`), not the cookie's claim. The column and its audit row are
+ * one transaction: a switch nobody can account for is the failure PL-E04
+ * exists to catch. Setting what is already set writes nothing.
+ */
+export async function setVenueOpenOnBlendn(id: string, open: boolean): Promise<void> {
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
+  // A server action's argument is whatever the client sent.
+  if (typeof open !== "boolean") throw new Refusal("Open on Blendn is on or off.")
+  const venue = await venueForWrite(id, user)
+  if (!venue.owner_org_id) {
+    throw new Refusal("Only a claimed venue can leave the app's Places. An unclaimed one is always listed.")
+  }
+  // Taking a venue out of the app is its organisation's owners' and admins'
+  // call, not every member's (step 18 security review, L2): staff run nights.
+  if (user.role !== "app_admin") {
+    const manager = await db.organisation_members.findFirst({
+      where: { user_id: user.id, org_id: venue.owner_org_id, role: { in: ["owner", "admin"] }, ...activeMembership },
+      select: { id: true },
+    })
+    if (!manager) throw new Refusal("Only the venue organisation's owners and admins can change this.")
+  }
+
+  const changed = await db.$transaction(async (tx) => {
+    // Conditional, so two clicks racing write one row and one audit entry.
+    const { count } = await tx.venues.updateMany({
+      where: { id, deleted_at: null, open_on_blendn: !open },
+      data: { open_on_blendn: open },
+    })
+    if (count === 0) return false
+    await auditInTx(tx, {
+      userId: user.id,
+      action: open ? "venue.opened_on_blendn" : "venue.closed_on_blendn",
+      resource: "venue",
+      resourceId: id,
+      details: { open_on_blendn: open },
+      orgId: venue.owner_org_id,
+    })
+    return true
+  })
+
+  if (changed) {
+    revalidatePath("/dashboard/venues")
+    revalidatePath(`/dashboard/venues/${id}`)
+  }
+}
+
+/**
  * Retire a venue. Owners retire their own; admins retire any.
  *
  * ## The column that had no writer
@@ -559,7 +614,9 @@ export async function assignVenueOwner(venueId: string, orgId: string): Promise<
 
   await db.venues.update({
     where: { id: venueId },
-    data: { owner_org_id: orgId, claimed_at: new Date() },
+    // A new owner starts open on Blendn (step 18 security review, M5): the
+    // switch was the last owner's choice, and they could close it on the way out.
+    data: { owner_org_id: orgId, claimed_at: new Date(), open_on_blendn: true },
   })
 
   auditLog({

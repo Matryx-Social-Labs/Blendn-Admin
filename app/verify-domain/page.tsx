@@ -3,10 +3,9 @@
 import Link from "next/link"
 import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react"
-
+import { Callout } from "@/components/dashboard/kit"
+import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 
 /**
  * Landing page for the link sent to a domain's role address.
@@ -56,40 +55,36 @@ function Verify() {
     }
   }, [token])
 
-  if (state === "working") {
-    return <p className="text-sm text-muted-foreground">Confirming the domain...</p>
-  }
+  if (state === "working") return <Working />
 
   return (
-    <Card className="w-full max-w-lg rounded-xl shadow-none">
-      <CardContent className="space-y-5 px-8 py-10 text-center">
-        {state === "ok" ? (
-          <IconCircleCheck className="mx-auto size-12 text-primary" />
-        ) : (
-          <IconAlertTriangle className="mx-auto size-12 text-amber-500" />
-        )}
-        <h1 className="text-2xl font-semibold text-foreground">
-          {state === "ok" ? "Domain verified" : "That link didn't work"}
-        </h1>
-        <p className="text-sm leading-6 text-muted-foreground">{message}</p>
-        <Button asChild variant={state === "ok" ? "default" : "outline"} className="rounded-xl">
-          <Link href={state === "ok" ? "/dashboard/organisation" : "/"}>
-            {state === "ok" ? "Go to the organisation" : "Back to Blend'n"}
-          </Link>
-        </Button>
-      </CardContent>
-    </Card>
+    <AuthFrame title={state === "ok" ? "Domain verified" : "That link didn't work"}>
+      <Callout tone={state === "ok" ? "success" : "warning"} role="status">
+        {message}
+      </Callout>
+      <Button asChild size="lg" variant={state === "ok" ? "default" : "outline"}>
+        <Link href={state === "ok" ? "/dashboard/organisation" : "/"}>
+          {state === "ok" ? "Go to the organisation" : "Back to Blend'n"}
+        </Link>
+      </Button>
+    </AuthFrame>
+  )
+}
+
+function Working() {
+  return (
+    <AuthFrame title="Confirming the domain…">
+      <p className="text-[0.8125rem] text-muted-foreground">One moment.</p>
+    </AuthFrame>
   )
 }
 
 export default function VerifyDomainPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-10">
-      {/* useSearchParams needs a Suspense boundary or the whole route opts out
-          of static rendering and the build warns. */}
-      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
-        <Verify />
-      </Suspense>
-    </main>
+    // useSearchParams needs a Suspense boundary or the whole route opts out of
+    // static rendering and the build warns.
+    <Suspense fallback={<Working />}>
+      <Verify />
+    </Suspense>
   )
 }

@@ -117,6 +117,8 @@ describe("admin-only server actions read the role from the database", () => {
     expect(fn).not.toMatch(/getAuth\(/)
     const current = src.slice(src.indexOf("export async function currentUser("), src.indexOf("export async function requireAdmin("))
     expect(current).toMatch(/db\.user\.findUnique\(/)
-    expect(current).toMatch(/return \{ id, role: row\.role \}/)
+    expect(current).toMatch(/return \{ id, role: account\.role \}/)
+    // And the one revocation rule on that row (step 18, M6).
+    expect(current).toMatch(/isRevoked\(\{ sub: id, signedInAt: session\.user\.signedInAt \}, account\)/)
   })
 })

@@ -4,10 +4,12 @@ import Link from "next/link"
 import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react"
+import type { org_role } from "@prisma/client"
 
+import { Callout, Facts } from "@/components/dashboard/kit"
+import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { ROLE_BLURB, ROLE_LABEL } from "@/lib/org-roles"
 
 /**
  * Landing page for an invite link.
@@ -23,6 +25,8 @@ function Accept() {
   const [state, setState] = useState<"working" | "ok" | "bad" | "signin">("working")
   const [message, setMessage] = useState("")
   const [roleChanged, setRoleChanged] = useState(false)
+  /** What they joined as, once the server says: the role in words (the kit's Invite). */
+  const [joined, setJoined] = useState<{ org: string; role: org_role | null } | null>(null)
 
   useEffect(() => {
     if (status === "loading") return
@@ -49,6 +53,7 @@ function Accept() {
         if (res.ok && body.success) {
           setState("ok")
           setRoleChanged(!!body.roleChanged)
+          setJoined({ org: body.orgName, role: body.role in ROLE_LABEL ? (body.role as org_role) : null })
           setMessage(
             body.alreadyMember
               ? `You're already part of ${body.orgName}.`
@@ -71,60 +76,82 @@ function Accept() {
   }, [token, status])
 
   if (state === "working") {
-    return <p className="text-sm text-muted-foreground">Checking your invite...</p>
+    return (
+      <AuthFrame title="Checking your invite…">
+        <p className="text-[0.8125rem] text-muted-foreground">One moment.</p>
+      </AuthFrame>
+    )
   }
 
   if (state === "signin") {
     const callback = `/invite?token=${encodeURIComponent(token ?? "")}`
     return (
-      <Card className="w-full max-w-lg rounded-xl shadow-none">
-        <CardContent className="space-y-5 px-8 py-10 text-center">
-          <h1 className="text-2xl font-semibold text-foreground">Sign in to accept</h1>
-          <p className="text-sm leading-6 text-muted-foreground">
-            {message ||
-              "Invites are tied to the email address they were sent to. Sign in with that address and you'll come straight back here."}
-          </p>
-          <Button asChild className="rounded-xl">
-            <Link href={`/login?callbackUrl=${encodeURIComponent(callback)}`}>Sign in</Link>
-          </Button>
-        </CardContent>
-      </Card>
+      <AuthFrame
+        title="Sign in to accept"
+        sub="An invite is permission to join an organisation, not a new account."
+        after={<InviteNote />}
+      >
+        <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+          {message ||
+            "Invites are tied to the email address they were sent to. Sign in with that address and you'll come straight back here."}
+        </p>
+        <Button asChild size="lg">
+          <Link href={`/login?callbackUrl=${encodeURIComponent(callback)}`}>Sign in</Link>
+        </Button>
+      </AuthFrame>
+    )
+  }
+
+  if (state === "ok") {
+    return (
+      <AuthFrame title="You're in" sub={message}>
+        {joined ? (
+          <Facts
+            cols={1}
+            items={[
+              { label: "Organisation", value: joined.org },
+              joined.role ? { label: "Your role", value: `${ROLE_LABEL[joined.role]} — ${ROLE_BLURB[joined.role]}` } : null,
+            ]}
+          />
+        ) : null}
+        {roleChanged ? (
+          <Callout tone="warning">Sign out and back in to pick up your new access.</Callout>
+        ) : null}
+        <Button asChild size="lg">
+          <Link href="/dashboard">Go to dashboard</Link>
+        </Button>
+      </AuthFrame>
     )
   }
 
   return (
-    <Card className="w-full max-w-lg rounded-xl shadow-none">
-      <CardContent className="space-y-5 px-8 py-10 text-center">
-        {state === "ok" ? (
-          <IconCircleCheck className="mx-auto size-12 text-primary" />
-        ) : (
-          <IconAlertTriangle className="mx-auto size-12 text-amber-500" />
-        )}
-        <h1 className="text-2xl font-semibold text-foreground">
-          {state === "ok" ? "You're in" : "That invite didn't work"}
-        </h1>
-        <p className="text-sm leading-6 text-muted-foreground">{message}</p>
-        {state === "ok" && roleChanged ? (
-          <p className="text-sm leading-6 text-muted-foreground">
-            Sign out and back in to pick up your new access.
-          </p>
-        ) : null}
-        <Button asChild variant={state === "ok" ? "default" : "outline"} className="rounded-xl">
-          <Link href={state === "ok" ? "/dashboard" : "/"}>
-            {state === "ok" ? "Go to dashboard" : "Back to Blend'n"}
-          </Link>
-        </Button>
-      </CardContent>
-    </Card>
+    <AuthFrame title="That invite didn't work" after={<InviteNote />}>
+      <Callout tone="warning">{message}</Callout>
+      <Button asChild variant="outline" size="lg">
+        <Link href="/">Back to Blend&apos;n</Link>
+      </Button>
+    </AuthFrame>
+  )
+}
+
+function InviteNote() {
+  return (
+    <p className="text-center text-[0.78125rem] text-faint-foreground">
+      Signed in with a different account? Sign out first — invites are tied to the address they were sent to.
+    </p>
   )
 }
 
 export default function InvitePage() {
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-10">
-      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
-        <Accept />
-      </Suspense>
-    </main>
+    <Suspense
+      fallback={
+        <AuthFrame title="Checking your invite…">
+          <p className="text-[0.8125rem] text-muted-foreground">One moment.</p>
+        </AuthFrame>
+      }
+    >
+      <Accept />
+    </Suspense>
   )
 }

@@ -5,7 +5,7 @@ process.env.MOBILE_JWT_SECRET =
 
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 let session: { user: { id: string; role: "app_admin" } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 
 import { getCurationQueue } from "@/app/dashboard/events/curate/queue-actions"
 

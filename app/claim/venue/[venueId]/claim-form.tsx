@@ -5,10 +5,9 @@ import { useState, useTransition } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { IconCheck } from "@tabler/icons-react"
 
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Callout } from "@/components/dashboard/kit"
 import {
   Form,
   FormControl,
@@ -143,23 +142,17 @@ export function VenueClaimForm({ venueId, venueName }: { venueId: string; venueN
 
   if (filed) {
     return (
-      <Card className="flex flex-col gap-2 rounded-xl p-5" role="status">
-        <p className="inline-flex items-center gap-2 text-[0.875rem] font-medium">
-          <IconCheck className="size-4" />
-          Filed. We will read it.
-        </p>
-        <p className="text-[0.8125rem] leading-6 text-muted-foreground">
+      <Callout tone="success" role="status" title="Filed. We will read it.">
           A person reads every claim. Nothing about {venueName} changes until they do. We will reply
           to the address you gave — confirm it first if we have sent you a link.
-        </p>
-      </Card>
+      </Callout>
     )
   }
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(submit)}>
-        <Card className="flex flex-col gap-4 rounded-xl p-5">
+        <div className="flex flex-col gap-4 rounded-2xl border border-border p-5">
           <FormField
             control={form.control}
             name="organisationName"
@@ -283,7 +276,7 @@ export function VenueClaimForm({ venueId, venueName }: { venueId: string; venueN
             </Link>
             .
           </p>
-        </Card>
+        </div>
       </form>
     </Form>
   )

@@ -4,7 +4,7 @@ import { Refusal } from "./refusal"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { currentUser } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { userLimit, rateLimit } from "@/lib/rate-limit"
 import { passwordStrength } from "@/lib/password-strength"
@@ -19,9 +19,10 @@ import { passwordStrength } from "@/lib/password-strength"
  */
 
 async function requireUser() {
-  const session = await getAuth()
-  if (!session?.user?.id) throw new Refusal("Unauthorized")
-  return session.user
+  // Through the one revocation rule, with the row's role (step 18, M6).
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
+  return user
 }
 
 export async function updateProfile(name: string): Promise<void> {
@@ -50,10 +51,12 @@ export interface PasswordResult {
  * identity: it is what stops a walked-away laptop becoming a permanent account
  * takeover, and it is the reason every product asks.
  *
- * Other sessions are deliberately **left signed in**. Ending them is a separate,
- * explicit action — someone rotating a password as hygiene should not silently
- * lose their phone, and someone who suspects a compromise wants to end sessions
- * whether or not they are changing the password.
+ * Every session on the account ends with it: the phones (SCRUM-169, below)
+ * and every dashboard session, this one included — `password_changed_at` is
+ * what `isRevoked` (lib/session-revocation.ts) judges a session by (step 18
+ * security review, M6). Someone changing a password because of a compromise
+ * must not leave the other person signed in, and a JWT session cannot be
+ * ended any other way.
  */
 export async function changePassword(
   currentPassword: string,
@@ -107,7 +110,8 @@ export async function changePassword(
   const revoked = await db.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: user.id },
-      data: { password: await bcrypt.hash(newPassword, 12) },
+      // Every dashboard session signed in before now ends, this one included (M6).
+      data: { password: await bcrypt.hash(newPassword, 12), password_changed_at: new Date() },
     })
     const { count } = await tx.mobile_refresh_tokens.updateMany({
       where: { user_id: user.id, revoked_at: null },

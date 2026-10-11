@@ -314,8 +314,14 @@ is closed:
 bucket (D-19), the caller's own window and tonight's event — never the area,
 never who is live.
 
-D-13 ("Open on Blendn" as an opt-out for claimed venues) is not built: every
-active venue is live. It belongs with the venue owner's screens (step 17).
+D-13, "Open on Blendn" (step 18): an opt-out for **claimed** venues only. The
+owner's organisation (or an admin) switches it on the venue's page; off, the
+venue leaves the app's Places and home map (both read `GET /venues`), while its
+events still show and still name it. `venues.open_on_blendn`, written with an
+`audit_logs` row in one transaction (`setVenueOpenOnBlendn`). The reader's rule
+is `openOnBlendnWhere`: open, or unclaimed — so a claim that is revoked or
+transferred never leaves a place hidden that nobody owns. The venue page and Go
+Live are not affected; whether they should close too is the owner's call.
 
 Already closed here: the system user can sign in on no surface
 (`accountBlockReason`) and has no public profile. Two people live at the same
@@ -330,7 +336,7 @@ venue day count as having shared an event for message requests
 |---|---|
 | `lib/venue-day.ts` | `venueDayFor`, `venueDayBounds`, `SYSTEM_USER_ID` — the venue day |
 | `lib/event-kind.ts` | `realEventsWhere` / `venueDaysWhere`, the fragments every events reader uses; `inRoomWhere`, "in this room" for a check-in lookup |
-| `lib/venue-visibility.ts` | `venueTakeoverWhere`: when a real event takes its venue over (Go Live refused, sessions closed at its start, the venue left out of Places by `venuesTakenOver`); `eventVenue`: the venue an event card names |
+| `lib/venue-visibility.ts` | `venueTakeoverWhere`: when a real event takes its venue over (Go Live refused, sessions closed at its start, the venue left out of Places by `venuesTakenOver`); `eventVenue`: the venue an event card names; `openOnBlendnWhere`: which venues Places may list (D-13) |
 | `lib/venue-types.ts` | The 35-type vocabulary, labels, default extents, OSM mapping |
 | `lib/venue-actions.ts` | `venuesNear`, `createVenue`, `updateVenue`, `assignVenueOwner`, `searchVenues`, `venueById` — all `"use server"` |
 | `lib/venue-claim-actions.ts` | `fileVenueClaim`, `getVenueClaimQueue`, `decideVenueClaim` |
