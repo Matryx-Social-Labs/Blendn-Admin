@@ -21,14 +21,16 @@ const tx = {
 
 const mockDb = {
   categories: { findUniqueOrThrow: jest.fn(), findMany: jest.fn() },
+  // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null })) },
   $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
-// `requireAdmin` is local to category-actions and reads the session, so the
-// session is what gets mocked.
+// `requireAdmin` reads the caller's row through `db.user`, which answers with
+// the session's role, so the session is what gets mocked.
 const mockAuth = jest.fn()
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 

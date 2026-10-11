@@ -5,7 +5,7 @@ import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { ageFrom } from "@/lib/age"
 import type { user_role } from "@prisma/client"
@@ -73,10 +73,7 @@ export async function getUsers(
   offset: number = 0
 ): Promise<{ users: UserWithProfile[]; total: number }> {
   try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Refusal("Forbidden")
-    }
+    await requireAdmin()
 
     /*
      * ANDed clauses, because two of them are ORs. `search` and `not-onboarded`
@@ -206,10 +203,7 @@ export async function updateUser(
   }
 ) {
   try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Refusal("Forbidden")
-    }
+    const admin = await requireAdmin()
 
     // Only when sent: `normalizeLocationToCity(undefined)` is null, and a null
     // here would clear the column on a partial edit.
@@ -313,7 +307,7 @@ export async function updateUser(
     note("location", before.profile?.location, normalizedLocation)
     note("onboarded", before.profile?.onboarded, data.profile?.onboarded)
     auditLog({
-      userId: session.user.id,
+      userId: admin.id,
       action: "user.updated",
       resource: "user",
       resourceId: id,
@@ -330,17 +324,14 @@ export async function updateUser(
 }
 
 export async function updateUserRole(id: string, role: user_role) {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") {
-    throw new Refusal("Forbidden")
-  }
+  const admin = await requireAdmin()
   const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } })
   if (!before) throw new Refusal("User not found")
   await db.user.update({ where: { id, deletedAt: null }, data: { role } })
   // A role change is the canonical audited admin action (CLAUDE.md), and it
   // had no row: an attendee made an admin left nothing behind (SCRUM-131).
   auditLog({
-    userId: session.user.id,
+    userId: admin.id,
     action: "user.role_changed",
     resource: "user",
     resourceId: id,
@@ -401,10 +392,7 @@ export async function updateUserRole(id: string, role: user_role) {
  */
 export async function getUserStats() {
   try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Refusal("Forbidden")
-    }
+    await requireAdmin()
 
     // "Accounts" means people on the platform; an erased row is not one.
     const live = { deletedAt: null, id: { not: SYSTEM_USER_ID } }

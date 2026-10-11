@@ -140,7 +140,11 @@ describe("the queue renders the ranking", () => {
      * list, where `published` was a filled pill on fifteen of seventeen.
      */
     const src = read("app/dashboard/onboarding/queue.tsx")
-    expect(src).toMatch(/variant="outline" onClick=\{approve\}/)
-    expect(src).toMatch(/Approve &amp; create the account/)
+    const box = src.slice(src.indexOf("<DecideBox"), src.indexOf("/>", src.indexOf("<DecideBox")))
+    expect(box).toMatch(/\boutlineApprove\b/)
+    expect(box).toMatch(/approveLabel="Approve & create the account"/)
+    expect(box).toMatch(/onApprove=\{approve\}/)
+    // And the shared control honours it: outline, not the filled default.
+    expect(read("components/dashboard/decide-box.tsx")).toMatch(/variant=\{outlineApprove \? "outline" : "default"\}/)
   })
 })

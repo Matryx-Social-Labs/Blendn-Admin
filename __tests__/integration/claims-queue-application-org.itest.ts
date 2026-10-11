@@ -10,7 +10,9 @@
  * (SCRUM-238), claim 375c3e7a, after its application was approved.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
-jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))
+// A real admin row (made below): requireAdmin reads the caller's role from the database (step 18).
+let mockAdminId = ""
+jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve({ user: { id: mockAdminId, role: "app_admin" } }) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { getEventClaimQueue } from "@/lib/event-claim-actions"
@@ -20,6 +22,11 @@ const users: string[] = []
 const events: string[] = []
 const orgs: string[] = []
 const requests: string[] = []
+
+beforeAll(async () => {
+  mockAdminId = await makeUser(testId("cq_admin"), "app_admin")
+  users.push(mockAdminId)
+})
 
 afterAll(async () => {
   await db.event_claims.deleteMany({ where: { event_id: { in: events } } })
