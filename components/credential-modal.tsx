@@ -91,7 +91,7 @@ export function CredentialModal({ open, onOpenChange, role, roleLabel }: Credent
                 generated and shown once — share it directly with them.
               </SheetDescription>
             </SheetHeader>
-            <form onSubmit={handleSubmit} className="space-y-4 py-4">
+            <form onSubmit={handleSubmit} className="space-y-4 px-4 py-4">
               <div className="space-y-2">
                 <Label htmlFor="cred-name">Name</Label>
                 <Input
@@ -113,7 +113,7 @@ export function CredentialModal({ open, onOpenChange, role, roleLabel }: Credent
                   required
                 />
               </div>
-              <SheetFooter>
+              <SheetFooter className="px-0">
                 <Button type="button" variant="outline" onClick={() => handleClose(false)}>
                   Cancel
                 </Button>
@@ -132,7 +132,7 @@ export function CredentialModal({ open, onOpenChange, role, roleLabel }: Credent
                 password will <strong>not</strong> be shown again.
               </SheetDescription>
             </SheetHeader>
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 px-4 py-4">
               {[
                 { label: "Name", value: credentials?.name },
                 { label: "Email", value: credentials?.email },

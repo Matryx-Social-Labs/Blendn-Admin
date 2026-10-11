@@ -187,6 +187,12 @@ function PlusSheet({ user, onOpenChange }: { user: UserWithProfile; onOpenChange
 
   const held = state?.held
   const until = held?.expiresAt ? ` until ${PLUS_DAY.format(new Date(held.expiresAt))}` : ""
+  /*
+   * A grant is told once, by the control that can end it ("Blendn+, granted
+   * until …"). This line said the same thing above it. It stays for everything
+   * the control does not describe: a store's purchase, and nothing held at all.
+   */
+  const grantTellsItself = held?.source === "grant" && state?.grant != null
   return (
     <Sheet open onOpenChange={onOpenChange}>
       <SheetContent className="sm:max-w-[500px]">
@@ -194,20 +200,22 @@ function PlusSheet({ user, onOpenChange }: { user: UserWithProfile; onOpenChange
           <SheetTitle>Blendn+</SheetTitle>
           <SheetDescription>{name}</SheetDescription>
         </SheetHeader>
-        <div className="flex flex-col gap-4 py-4 text-[0.8125rem]">
+        <div className="flex flex-col gap-4 px-4 py-4 text-[0.8125rem]">
           {error ? (
             <p role="alert" className="text-destructive">{error}</p>
           ) : !state ? (
             <p className="text-muted-foreground">Loading…</p>
           ) : (
             <>
-              <p data-plus-source={held?.source ?? "none"}>
-                {held
-                  ? `${held.product === "night_pass" ? "A Night Pass" : "Blendn+"} from ${PLUS_FROM[held.source] ?? held.source}${until}${
-                      held.source === "apple" || held.source === "google" ? " — managed in the store" : ""
-                    }`
-                  : "No Blendn+ right now."}
-              </p>
+              {grantTellsItself ? null : (
+                <p data-plus-source={held?.source ?? "none"}>
+                  {held
+                    ? `${held.product === "night_pass" ? "A Night Pass" : "Blendn+"} from ${PLUS_FROM[held.source] ?? held.source}${until}${
+                        held.source === "apple" || held.source === "google" ? " — managed in the store" : ""
+                      }`
+                    : "No Blendn+ right now."}
+                </p>
+              )}
               <OrgAnalyticsGrantControl
                 subject="user"
                 subjectId={user.id}
@@ -524,7 +532,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
             Update user information and profile details.
           </SheetDescription>
         </SheetHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 py-4">
+        <form onSubmit={handleSubmit} className="space-y-4 px-4 py-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
@@ -607,7 +615,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
               </Select>
             </div>
           )}
-          <SheetFooter>
+          <SheetFooter className="px-0">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
