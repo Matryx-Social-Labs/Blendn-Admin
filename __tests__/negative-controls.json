@@ -1861,6 +1861,12 @@
       "mutation": "M1407 the refusal reads `You're not at <venue> yet (12 m away).`",
       "observed": "2026-10-11: M1407: 1 failing (refuses outside the fence without the distance). Restored; 52 green.",
       "date": "2026-10-11"
+    },
+    "dashboard-sheets.spec.ts": {
+      "guards": "SCRUM-593: in a real browser, at 375 and 1440, every control, label and line under a sheet's header starts and ends no nearer its edge than the title does (Users > Edit, Users > Blendn+ empty and granted, the credential modal's form and its one-time result); a footer button inside a form is at that inset and not inset twice; a grant is told once; one h1, no sideways scroll, nothing axe calls serious inside the sheet. The spec removes its own grant and the accounts it minted.",
+      "mutation": "M1408 the credential form's px-4 removed. M1409 the credential result's px-4 removed. M1410 the Edit form's px-4 removed. M1411 the Blendn+ body's px-4 removed. M1412 `grantTellsItself = false` (the status line back above the grant control). M1413 the Edit footer's `px-0` removed (inset twice).",
+      "observed": "2026-10-11, run against a local dev server on a seeded database. M1408: failing (Credentials, form @375: starts nearer the left edge than the title). M1409: failing (Credentials, result @375). M1410: failing (Users > Edit @375). M1411: failing (Users > Blendn+ (none) @375). M1412: failing (the grant is told once). M1413: failing (a footer button is inset twice). Restored; passing.",
+      "date": "2026-10-11"
     }
   },
   "grandfathered": [
