@@ -5,7 +5,8 @@ import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { currentUser } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
+import { dashboardSessionsEnded, endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { userLimit, rateLimit } from "@/lib/rate-limit"
 import { passwordStrength } from "@/lib/password-strength"
 
@@ -107,18 +108,19 @@ export async function changePassword(
    * it kept every phone alive — five before, five after, read back on staging.
    * One transaction, so a hash cannot land without the revoke or vice versa.
    */
+  const hash = await bcrypt.hash(newPassword, 12)
+  const at = new Date()
   const revoked = await db.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: user.id },
       // Every dashboard session signed in before now ends, this one included (M6).
-      data: { password: await bcrypt.hash(newPassword, 12), password_changed_at: new Date() },
+      data: { password: hash, password_changed_at: at },
     })
-    const { count } = await tx.mobile_refresh_tokens.updateMany({
-      where: { user_id: user.id, revoked_at: null },
-      data: { revoked_at: new Date() },
-    })
-    return count
+    return endPhoneSessions(tx, user.id, at)
   })
+  // And what was live when it changed closes now (SCRUM-603).
+  dashboardSessionsEnded(user.id)
+  phoneSessionsEnded(user.id, at)
 
   auditLog({
     userId: user.id,
@@ -131,48 +133,32 @@ export async function changePassword(
   return { ok: true, revokedSessions: revoked }
 }
 
-export interface SessionRow {
-  id: string
-  expires: Date
-  current: boolean
-}
-
 /**
- * Active dashboard sessions.
+ * End every dashboard session on this account, this one included (SCRUM-603).
  *
- * NextAuth's `Session` table is all there is — no device or location is
- * recorded, so the screen shows what exists (when it expires) rather than
- * inventing a "Chrome · macOS · Bengaluru" line from nothing.
+ * A dashboard session is a JWT with nothing stored behind it, so this used to
+ * delete NextAuth `Session` rows that the JWT strategy never writes: it ended
+ * nothing and said "No other sessions to end". The stamp is what `isRevoked`
+ * (lib/session-revocation.ts) judges every session by, as it does a password
+ * change. This browser's session signed in before it too, so it ends as well
+ * and the screen signs out; keeping it would mean re-minting a cookie that
+ * never proved the password again.
  */
-export async function listSessions(): Promise<SessionRow[]> {
+export async function endDashboardSessions(): Promise<void> {
   const user = await requireUser()
-  const rows = await db.session.findMany({
-    where: { userId: user.id, expires: { gt: new Date() } },
-    orderBy: { expires: "desc" },
-    select: { id: true, expires: true },
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: user.id }, data: { sessions_revoked_at: new Date() } })
+    await auditInTx(tx, { userId: user.id, action: "account.sessions_revoked", resource: "user", resourceId: user.id })
   })
-  // The JWT strategy means the current session may not be a row at all, so
-  // nothing is marked "this device" rather than marking the wrong one.
-  return rows.map((r) => ({ ...r, current: false }))
-}
-
-export async function signOutEverywhereElse(): Promise<number> {
-  const user = await requireUser()
-  const { count } = await db.session.deleteMany({ where: { userId: user.id } })
-
-  auditLog({
-    userId: user.id,
-    action: "account.sessions_revoked",
-    resource: "user",
-    resourceId: user.id,
-    details: { count },
-  })
+  // A socket already open keeps the live room coming until it is closed.
+  dashboardSessionsEnded(user.id)
   revalidatePath("/dashboard/settings")
-  return count
 }
 
 /**
- * Revoke every mobile refresh token for this account.
+ * Sign every phone out of this account: `endPhoneSessions` (lib/session-end.ts)
+ * — refresh tokens, push tokens, and every access token issued until now —
+ * and their live sockets closed.
  *
  * Separate from dashboard sessions because they are separate auth systems — the
  * mobile app holds 30-day refresh tokens that a dashboard sign-out does not
@@ -180,18 +166,19 @@ export async function signOutEverywhereElse(): Promise<number> {
  */
 export async function revokeMobileSessions(): Promise<number> {
   const user = await requireUser()
-  const { count } = await db.mobile_refresh_tokens.updateMany({
-    where: { user_id: user.id, revoked_at: null },
-    data: { revoked_at: new Date() },
+  const at = new Date()
+  const count = await db.$transaction(async (tx) => {
+    const live = await endPhoneSessions(tx, user.id, at)
+    await auditInTx(tx, {
+      userId: user.id,
+      action: "account.mobile_tokens_revoked",
+      resource: "user",
+      resourceId: user.id,
+      details: { count: live },
+    })
+    return live
   })
-
-  auditLog({
-    userId: user.id,
-    action: "account.mobile_tokens_revoked",
-    resource: "user",
-    resourceId: user.id,
-    details: { count },
-  })
+  phoneSessionsEnded(user.id, at)
   revalidatePath("/dashboard/settings")
   return count
 }

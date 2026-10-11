@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 
 import { getAuth } from "@/lib/auth"
-import { getAccount, listSessions } from "@/lib/account-actions"
+import { getAccount } from "@/lib/account-actions"
 
 import { SettingsForm } from "./settings-form"
 
@@ -30,7 +30,5 @@ export default async function SettingsPage() {
   const session = await getAuth()
   if (!session?.user) redirect("/login")
 
-  const [account, sessions] = await Promise.all([getAccount(), listSessions()])
-
-  return <SettingsForm account={account} sessionCount={sessions.length} />
+  return <SettingsForm account={await getAccount()} />
 }

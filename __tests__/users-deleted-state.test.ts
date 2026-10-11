@@ -46,7 +46,7 @@ beforeEach(() => {
   mockDb.user.findUnique.mockImplementation(async (args: { select?: { suspended_at?: true } }) =>
     // requireAdmin's read of the caller's own row (lib/current-user.ts).
     args.select?.suspended_at
-      ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null }
+      ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }
       : { name: "Old", email: "old@x", role: "attendee", profile: null }
   )
   mockDb.audit_logs.create.mockReturnValue({ catch: () => undefined, then: () => undefined })

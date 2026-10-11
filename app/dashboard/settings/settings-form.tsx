@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { IconDeviceMobile, IconDeviceDesktop, IconLogout } from "@tabler/icons-react"
+import { signOut } from "next-auth/react"
 import { toast } from "sonner"
 
 import { Callout } from "@/components/dashboard/kit"
@@ -13,8 +14,8 @@ import { cn } from "@/lib/utils"
 import { passwordStrength, MIN_LENGTH } from "@/lib/password-strength"
 import {
   changePassword,
+  endDashboardSessions,
   revokeMobileSessions,
-  signOutEverywhereElse,
   updateProfile,
 } from "@/lib/account-actions"
 import { refusalMessage } from "@/lib/refusal"
@@ -56,13 +57,7 @@ function Section({
   )
 }
 
-export function SettingsForm({
-  account,
-  sessionCount,
-}: {
-  account: Account
-  sessionCount: number
-}) {
+export function SettingsForm({ account }: { account: Account }) {
   return (
     <div className="flex max-w-4xl flex-col">
       <ProfileSection account={account} />
@@ -79,7 +74,7 @@ export function SettingsForm({
           </p>
         </Section>
       )}
-      <SessionsSection dashboardSessions={sessionCount} mobileSessions={account.mobileSessions} />
+      <SessionsSection mobileSessions={account.mobileSessions} />
     </div>
   )
 }
@@ -279,13 +274,7 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
   )
 }
 
-function SessionsSection({
-  dashboardSessions,
-  mobileSessions,
-}: {
-  dashboardSessions: number
-  mobileSessions: number
-}) {
+function SessionsSection({ mobileSessions }: { mobileSessions: number }) {
   const [confirming, setConfirming] = useState<"dashboard" | "mobile" | null>(null)
   const [pending, start] = useTransition()
 
@@ -295,33 +284,38 @@ function SessionsSection({
       description="Everywhere this account is signed in. Ending a session requires the password to sign back in."
     >
       {/*
-        NextAuth records no device or location, so this shows counts rather than
-        inventing a "Chrome · macOS · Bengaluru" line the database cannot
-        support. Two separate systems, because they are two separate systems: a
-        dashboard sign-out does not touch the mobile app's 30-day refresh
-        tokens, and someone who has lost a phone needs exactly that.
+        Nothing records a device or location, so this does not invent a
+        "Chrome · macOS · Bengaluru" line the database cannot support. Two
+        separate systems, because they are two separate systems: a dashboard
+        sign-out does not touch the mobile app's 30-day refresh tokens, and
+        someone who has lost a phone needs exactly that. A dashboard session is
+        a JWT with nothing stored behind it, so it has no count either
+        (SCRUM-603): the row says what End reaches instead.
       */}
       <div className="divide-y divide-border overflow-hidden rounded-[10px] border border-border">
         <SessionRow
           icon={<IconDeviceDesktop className="size-[17px]" />}
           label="Dashboard"
-          count={dashboardSessions}
+          detail="every browser signed in"
+          warning="Signs out every browser, this one too."
           confirming={confirming === "dashboard"}
           pending={pending}
           onAsk={() => setConfirming("dashboard")}
           onCancel={() => setConfirming(null)}
           onConfirm={() =>
             start(async () => {
-              const n = await signOutEverywhereElse()
-              toast.success(n === 0 ? "No other sessions to end" : `${n} session${n === 1 ? "" : "s"} ended`)
-              setConfirming(null)
+              await endDashboardSessions()
+              // This session ended with the rest: leave through the sign-in page.
+              await signOut({ callbackUrl: "/login" })
             })
           }
         />
         <SessionRow
           icon={<IconDeviceMobile className="size-[17px]" />}
           label="Mobile app"
-          count={mobileSessions}
+          detail={`${mobileSessions} active session${mobileSessions === 1 ? "" : "s"}`}
+          warning={`Ends ${mobileSessions} session${mobileSessions === 1 ? "" : "s"} immediately.`}
+          disabled={mobileSessions === 0}
           confirming={confirming === "mobile"}
           pending={pending}
           onAsk={() => setConfirming("mobile")}
@@ -342,7 +336,9 @@ function SessionsSection({
 function SessionRow({
   icon,
   label,
-  count,
+  detail,
+  warning,
+  disabled = false,
   confirming,
   pending,
   onAsk,
@@ -351,7 +347,9 @@ function SessionRow({
 }: {
   icon: React.ReactNode
   label: string
-  count: number
+  detail: string
+  warning: string
+  disabled?: boolean
   confirming: boolean
   pending: boolean
   onAsk: () => void
@@ -363,16 +361,11 @@ function SessionRow({
       <span className="text-muted-foreground">{icon}</span>
       <span className="flex-1">
         {label}
-        <span className="text-faint-foreground">
-          {" "}
-          · {count} active session{count === 1 ? "" : "s"}
-        </span>
+        <span className="text-faint-foreground"> · {detail}</span>
       </span>
       {confirming ? (
         <span className="flex items-center gap-2">
-          <span className="text-[0.75rem] text-destructive">
-            Ends {count} session{count === 1 ? "" : "s"} immediately.
-          </span>
+          <span className="text-[0.75rem] text-destructive">{warning}</span>
           <Button size="sm" variant="destructive" disabled={pending} onClick={onConfirm}>
             End
           </Button>
@@ -381,7 +374,7 @@ function SessionRow({
           </Button>
         </span>
       ) : (
-        <Button size="sm" variant="outline" disabled={count === 0 || pending} onClick={onAsk}>
+        <Button size="sm" variant="outline" disabled={disabled || pending} onClick={onAsk}>
           <IconLogout className="size-4" /> Sign out
         </Button>
       )}

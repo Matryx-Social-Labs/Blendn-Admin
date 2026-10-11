@@ -23,6 +23,7 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import { auditInTx } from "@/lib/audit-log"
 import { getAuditLog } from "@/lib/audit-actions"
 import { endPreviousOwnersPro } from "@/lib/subscription-cancel"
+import { decideVenueClaim } from "@/lib/venue-claim-actions"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -117,6 +118,7 @@ afterAll(async () => {
   await db.placement_charges.deleteMany({ where: { placement: { event_id: { in: events } } } })
   await db.event_sponsors.deleteMany({ where: { event_id: { in: events } } })
   await db.sponsors.deleteMany({ where: { name: { startsWith: tag } } })
+  await db.venue_claims.deleteMany({ where: { venue_id: { in: venues } } })
   await db.venues.deleteMany({ where: { id: { in: venues } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
   await cleanup(users, events)
@@ -167,6 +169,37 @@ it("A pays for Venue Pro, the venue passes to B: B reads that it ended, never A'
   const a = await logOf(ownerA)
   expect(a.rows.map((r) => r.action)).toEqual(expect.arrayContaining(["entitlement.ended_on_transfer"]))
   expect(a.text).toContain(ref)
+})
+
+it("a venue taken by a dispute: the previous owner reads that it went, and nothing of who took it or why (SCRUM-604)", async () => {
+  const venue = await db.venues.create({
+    data: { name: `${tag} disputed`, city: "Bengaluru", latitude: 12.97, longitude: 77.6, owner_org_id: orgA, claimed_at: new Date(Date.now() - 86_400_000) },
+  })
+  venues.push(venue.id)
+  const gstin = "29ABCDE1234F1Z5"
+  const evidence = { trade: `https://evidence.example/${tag}-trade.pdf` }
+  const claim = await db.venue_claims.create({
+    data: { venue_id: venue.id, org_id: orgB, filed_by: ownerB, status: "pending", is_dispute: true, gstin, evidence },
+  })
+
+  as(admin, "app_admin")
+  await decideVenueClaim(claim.id, "approve", "Lease and trade licence are B's")
+  expect((await db.venues.findUniqueOrThrow({ where: { id: venue.id } })).owner_org_id).toBe(orgB)
+
+  // Read back: the row, as written.
+  expect(await db.audit_logs.findMany({ where: { action: "venue.ownership_ended", resource_id: venue.id }, select: { org_id: true, user_id: true } })).toEqual([
+    { org_id: orgA, user_id: admin },
+  ])
+
+  const a = await logOf(ownerA)
+  const aboutIt = a.rows.filter((r) => r.resourceId === venue.id)
+  expect(aboutIt.map((r) => r.action)).toEqual(["venue.ownership_ended"])
+  expect(aboutIt[0].details).toEqual({ venue: `${tag} disputed`, note: "Transferred to another organisation after a claim was upheld" })
+  expect(aboutIt[0].actor).toEqual({ id: "blendn", name: "Blend'n", email: "" })
+  for (const secret of [orgB, ownerB, claim.id, gstin, evidence.trade, "Lease and trade licence"]) expect(a.text).not.toContain(secret)
+
+  // And it is the previous owner's alone.
+  expect((await logOf(ownerB)).rows.some((r) => r.action === "venue.ownership_ended")).toBe(false)
 })
 
 it("a sponsor's charge is in the brand's log and the platform's, never the host's", async () => {

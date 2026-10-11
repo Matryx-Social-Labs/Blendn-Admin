@@ -23,7 +23,7 @@ const mockDb = {
   // A transaction runs its callback against the same client.
   $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>): Promise<unknown> => cb(mockDb)),
   // The role is read from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
   audit_logs: { create: jest.fn() },
   billing_checkouts: { update: jest.fn() },
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },

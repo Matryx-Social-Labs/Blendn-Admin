@@ -9,7 +9,7 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { requireAdmin } from "@/lib/current-user"
 import { ALREADY_DECIDED, decisionFrom, reasonFrom } from "@/lib/decision"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { reviewableUrl } from "@/lib/tigris"
@@ -552,6 +552,9 @@ export async function decideVenueClaim(
 
       if (decision !== "approve" || !orgId) return
 
+      // The owner it is taken from, locked so the row below names exactly them.
+      const [before] = await tx.$queryRaw<{ owner_org_id: string | null }[]>`
+        SELECT owner_org_id::text AS owner_org_id FROM venues WHERE id = ${claim.venue.id}::uuid FOR UPDATE`
       const handed = await tx.venues.updateMany({
         where: {
           id: claim.venue.id,
@@ -562,6 +565,24 @@ export async function decideVenueClaim(
         data: { owner_org_id: orgId, claimed_at: new Date(), open_on_blendn: true },
       })
       if (handed.count !== 1) throw new Refusal(OWNER_SINCE_FILING)
+      /*
+       * The organisation that lost it reads that it did (SCRUM-604). The claim's
+       * rows are the claimant's, so its evidence stays theirs; without this one
+       * the previous owner's log stopped at its own last change. Nothing of the
+       * claimant's in it — not who, not why — as `endPreviousOwnersPro` does for
+       * the new owner's side of the money.
+       */
+      const previousOwner = before?.owner_org_id ?? null
+      if (previousOwner && previousOwner !== orgId) {
+        await auditInTx(tx, {
+          userId: admin.id,
+          action: "venue.ownership_ended",
+          resource: "venue",
+          resourceId: claim.venue.id,
+          details: { venue: claim.venue.name, note: "Transferred to another organisation after a claim was upheld" },
+          orgId: previousOwner,
+        })
+      }
       // Whoever paid for Pro here before does not hand it over with the venue:
       // it ends in this transaction, with the transfer or not at all (review M7).
       await endPreviousOwnersPro(tx, claim.venue.id, orgId, admin.id)

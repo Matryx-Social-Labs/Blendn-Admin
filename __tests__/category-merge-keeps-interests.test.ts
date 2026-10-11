@@ -22,7 +22,7 @@ const tx = {
 const mockDb = {
   categories: { findUniqueOrThrow: jest.fn(), findMany: jest.fn() },
   // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
   $transaction: jest.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
 }
 

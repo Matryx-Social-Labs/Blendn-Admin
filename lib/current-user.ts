@@ -24,7 +24,7 @@ export async function currentUser(): Promise<{ id: string; role: user_role } | n
   if (!id) return null
   const account = await db.user.findUnique({
     where: { id },
-    select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true },
+    select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
   })
   if (!account || isRevoked({ sub: id, signedInAt: session.user.signedInAt }, account)) return null
   return { id, role: account.role }

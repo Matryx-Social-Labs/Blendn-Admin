@@ -96,8 +96,9 @@ const BCRYPT_ROUNDS = 12
  *
  * This is checked where tokens are *issued* — sign-in, OAuth, refresh, session.
  * `getAuthenticatedUser` adds one more, cheap, check: `recentlyBlocked`, a
- * per-process set of accounts deleted or suspended in the last few minutes,
- * refreshed from one indexed query every 30 seconds. Because deletion and
+ * per-process set of accounts deleted or suspended in the last few minutes
+ * (and of phones signed out, whose older tokens it refuses — SCRUM-603),
+ * refreshed from one query every 30 seconds. Because deletion and
  * suspension revoke refresh tokens, the only access token that can outlive
  * either is at most one lifetime old — so the set only ever needs the last
  * twenty minutes, and it is small. Without it, a deleted account's still-valid
@@ -424,7 +425,7 @@ export async function getAuthenticatedUser(
     return null
   }
 
-  if (await recentlyBlocked(decoded.userId)) {
+  if (await recentlyBlocked(decoded.userId, decoded.iat)) {
     return null
   }
 

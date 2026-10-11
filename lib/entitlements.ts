@@ -567,6 +567,23 @@ export async function plusGrantsSince(client: Client, userId: string, refPrefix:
 }
 
 /**
+ * Has this person a Plus row that has not ended, whether or not it has
+ * started? Not a gate (gates call `hasEntitlement`): it is the "already
+ * given" read inside `grantOwed`'s lock. A Plus row starts at its writer's
+ * clock, and a twin request's clock can be a few ms ahead of this one's, so
+ * "live at now" missed the trial it had just granted and paid a referral month
+ * on top (SCRUM-602). A Night Pass is left out: it can start in the future by
+ * design (it stacks), so a pending one is not Plus held.
+ */
+export async function plusNotEnded(client: Client, userId: string, now: Date): Promise<boolean> {
+  const row = await client.entitlements.findFirst({
+    where: { subject_kind: "user", subject_id: userId, product: "plus", OR: [{ expires_at: null }, { expires_at: { gt: now } }] },
+    select: { id: true },
+  })
+  return row !== null
+}
+
+/**
  * Blendn+ from us, once per `ref` ever: the unique (source, external_ref)
  * makes a second run, or a race, a no-op. True when this call granted it.
  */

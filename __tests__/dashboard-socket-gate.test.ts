@@ -18,7 +18,7 @@ import { authenticateDashboardSocket } from "@/lib/socket-ops-auth"
 
 const COOKIE = "next-auth.session-token=signed-session"
 const SIGNED_IN = Date.parse("2026-10-01T10:00:00Z")
-const live = { id: "u1", email: "host@example.com", role: "organizer", suspended_at: null, deletedAt: null, password_changed_at: null }
+const live = { id: "u1", email: "host@example.com", role: "organizer", suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }
 
 beforeAll(() => {
   process.env.NEXTAUTH_SECRET = "test-secret-at-least-32-characters-long"
