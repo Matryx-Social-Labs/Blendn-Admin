@@ -234,6 +234,15 @@ describe("starting a subscription", () => {
     await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/already has an Analytics subscription/)
   })
 
+  it("refuses while a mandate on a retired plan key runs, and asks nothing of Razorpay", async () => {
+    await db.billing_checkouts.create({
+      data: { kind: "subscription", provider_ref: `sub_${randomUUID()}`, provider_plan_id: "plan_2025", org_id: orgId, plan_key: "analytics_monthly_2025", amount_minor: 199_900, status: "halted" },
+    })
+    as(owner, "organizer")
+    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/already has an Analytics subscription/)
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+  })
+
   it("the database holds one open subscription per organisation even past the lock", async () => {
     await db.billing_checkouts.create({
       data: { kind: "subscription", provider_ref: `sub_${randomUUID()}`, provider_plan_id: "plan_month", org_id: orgId, plan_key: "analytics_monthly", amount_minor: 235_900, status: "active" },

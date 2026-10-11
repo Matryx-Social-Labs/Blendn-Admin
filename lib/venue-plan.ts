@@ -91,7 +91,7 @@ export interface VenuePlanRow {
 }
 
 /** A venue's mandate as its row needs it; the plan key may be one the price table has retired. */
-export type VenueSubscription = Omit<SubscriptionState, "planKey">
+export type VenueSubscription = Omit<SubscriptionState, "planKey" | "label" | "period" | "amountMinor">
 
 export interface VenuePlanPage {
   paymentsOn: boolean

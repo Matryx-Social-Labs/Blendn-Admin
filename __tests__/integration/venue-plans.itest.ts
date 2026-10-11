@@ -597,6 +597,63 @@ describe("a venue changing hands (review M7)", () => {
     expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
     expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(true)
   })
+
+  describe("the previous owner's unpaid checkout is never the new owner's", () => {
+    /**
+     * The payer opens a Venue Pro checkout it never pays, then the venue is
+     * approved to the new owner while Razorpay refuses the transfer's cancel
+     * (`cancelPreviousOwnersMandates`), so the payer's row is still `created`.
+     */
+    async function unpaidThenTransferred(label: string) {
+      const v = await venue(label, { org: payerOrg })
+      await liveSince(v, 35)
+      as(payerOwner, "venue_owner")
+      const unpaid = (await actions.startVenueProCheckout(v, "monthly")).subscriptionId
+      const claim = await db.venue_claims.create({ data: { venue_id: v, org_id: newOrg, filed_by: newOwner, status: "pending", is_dispute: true } })
+      as(admin, "app_admin")
+      failCancel = true
+      await decideVenueClaim(claim.id, "approve")
+      failCancel = false
+      expect((await db.venues.findUniqueOrThrow({ where: { id: v } })).owner_org_id).toBe(newOrg)
+      expect(await rowOf(unpaid)).toMatchObject({ org_id: payerOrg, status: "created" })
+      calls.length = 0
+      as(newOwner, "venue_owner")
+      return { v, unpaid }
+    }
+    const rowOf = (ref: string) => db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })
+
+    it("org A starts Venue Pro, the venue moves to B, B starts: B gets a ref of its own, A's row is expired and cancelled at Razorpay first", async () => {
+      const { v, unpaid } = await unpaidThenTransferred("vp-resume")
+      const out = await actions.startVenueProCheckout(v, "monthly")
+
+      expect(out.subscriptionId).not.toBe(unpaid)
+      expect(await rowOf(unpaid)).toMatchObject({ org_id: payerOrg, venue_id: v, status: "expired" })
+      expect(await rowOf(out.subscriptionId)).toMatchObject({ org_id: newOrg, venue_id: v, status: "created", created_by: newOwner })
+      expect(await db.billing_checkouts.count({ where: { venue_id: v, status: "created" } })).toBe(1)
+      // The old checkout was cancelled at Razorpay, and before the new one was made.
+      const urls = calls.filter((c) => c.method === "POST").map((c) => c.url)
+      const cancelAt = urls.findIndex((u) => u.endsWith(`/subscriptions/${unpaid}/cancel`))
+      const createAt = urls.findIndex((u) => u.endsWith("/subscriptions"))
+      expect(cancelAt).toBeGreaterThanOrEqual(0)
+      expect(createAt).toBeGreaterThan(cancelAt)
+      // And B's own second start resumes B's own.
+      expect((await actions.startVenueProCheckout(v, "monthly")).subscriptionId).toBe(out.subscriptionId)
+    })
+
+    it("Razorpay refusing that cancel changes nothing for B: still a new ref, A's row still expired, and the failure is logged with the ref", async () => {
+      const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined)
+      try {
+        const { v, unpaid } = await unpaidThenTransferred("vp-resume-refused")
+        failCancel = true
+        const out = await actions.startVenueProCheckout(v, "monthly")
+        expect(out.subscriptionId).not.toBe(unpaid)
+        expect((await rowOf(unpaid)).status).toBe("expired")
+        expect(warn.mock.calls.some(([, meta]) => (meta as Record<string, unknown> | undefined)?.providerRef === unpaid)).toBe(true)
+      } finally {
+        warn.mockRestore()
+      }
+    })
+  })
 })
 
 describe("founding grants (admin)", () => {

@@ -184,10 +184,10 @@ function StatusPanel({ view, pending, pendingFor }: { view: PlanPageData; pendin
     detail = view.date ? `Given by Blend'n, on ${dated(view.date)}. Nothing is charged.` : "Given by Blend'n."
   } else if (view.analytics) {
     const sub = view.subscriptions[0]
-    headline = sub ? `Analytics · ${BILLING_PLANS[sub.planKey].period === "yearly" ? "yearly" : "monthly"}` : "Analytics"
+    headline = sub?.period ? `Analytics · ${sub.period}` : "Analytics"
     detail =
       view.date?.word === "renews" && sub
-        ? `Renews ${day(view.date.at)} for ${rupees(grossRupees(BILLING_PLANS[sub.planKey]))}.`
+        ? `Renews ${day(view.date.at)} for ${rupees(sub.amountMinor / 100)}.`
         : view.date
           ? `On until ${day(view.date.at)}, then Free.`
           : "On."
@@ -231,7 +231,7 @@ function Subscriptions({ view }: { view: PlanPageData }) {
       <ul className="flex flex-col">
         {view.subscriptions.map((s) => (
           <li key={s.providerRef} className="flex flex-wrap items-baseline gap-x-3 border-t border-border py-2 text-[0.8125rem] first:border-t-0">
-            <span className="font-medium">{BILLING_PLANS[s.planKey].label}</span>
+            <span className="font-medium">{s.label}</span>
             <span className="text-muted-foreground">
               {s.status === "created"
                 ? "waiting for payment"
