@@ -99,6 +99,22 @@ describe("every admin edit is accountable", () => {
     })
   })
 
+  it("writes no user.updated row for a save that changed nothing, as a role-only edit sends it (SCRUM-614)", async () => {
+    await admin()
+    const id = await makeUser(testId("aua-noop"), "attendee")
+    users.push(id)
+    const before = await db.user.findUniqueOrThrow({ where: { id } })
+
+    // The Edit dialog sends every field it shows, changed or not, and then the role.
+    await updateUser(id, { name: before.name ?? undefined, email: before.email })
+    await updateUserRole(id, "organizer")
+
+    // The role row landing proves the writes are done; the empty one never comes.
+    expect(await auditRow({ resource_id: id, action: "user.role_changed" })).not.toBeNull()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(await db.audit_logs.count({ where: { resource_id: id, action: "user.updated" } })).toBe(0)
+  })
+
   it("writes user.role_changed with from and to", async () => {
     const adminId = await admin()
     const id = await makeUser(testId("aua-role"), "attendee")
