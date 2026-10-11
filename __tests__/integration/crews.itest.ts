@@ -1103,7 +1103,11 @@ describe("reports and the moderator's levers (C12)", () => {
     expect(await sees()).toBe(false)
     // Its members keep their crew and its chat.
     expect((await api.detail(a, reported.crewId)).status).toBe(200)
-    expect(await db.audit_logs.count({ where: { action: "report.hide_crew", resource_id: reports[0].id } })).toBe(1)
+    // `auditLog` is fire-and-forget: the row lands after `resolveReport` returns, so wait for it
+    // rather than read it once (the nightly of 2026-10-11 read it first and found 0).
+    const hideAudit = () => db.audit_logs.count({ where: { action: "report.hide_crew", resource_id: reports[0].id } })
+    expect(await until(async () => (await hideAudit()) > 0)).toBe(true)
+    expect(await hideAudit()).toBe(1)
 
     // A second report, then a dissolve: the crew ends and its chat closes.
     const second = await person("mod-second")
