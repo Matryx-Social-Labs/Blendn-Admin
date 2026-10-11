@@ -49,16 +49,18 @@ import { venueReadiness } from "@/lib/venue-plan"
  *
  * Two admins, two tabs or a double click must not open two mandates. Starting
  * takes a transaction-scoped advisory lock on the organisation, resumes a
- * checkout opened in the last 30 minutes for the same thing, marks older
- * unpaid ones expired, and only then creates. The partial unique index
+ * checkout opened in the last 30 minutes for the same thing by the same
+ * organisation, marks older unpaid ones expired (cancelling at Razorpay any
+ * that another organisation opened on a venue before it changed hands), and
+ * only then creates. The partial unique index
  * `billing_checkouts_one_open_subscription_per_org` holds if two requests
  * race past the lock anyway.
  */
 
 const PAYMENTS_OFF = "Payments aren't switched on here yet."
 const STARTS = { max: 5, windowMs: 60_000 }
-/** The lock is held across one Razorpay call (≤15 s), so the transaction may run that long. */
-const TX = { maxWait: 10_000, timeout: 30_000 }
+/** The lock is held across up to two Razorpay calls (≤15 s each: a previous owner's checkout cancelled, then ours made), so the transaction may run that long and a little more. */
+const TX = { maxWait: 10_000, timeout: 40_000 }
 
 const periodSchema = z.enum(["monthly", "yearly"])
 const idSchema = z.uuid()
@@ -172,6 +174,24 @@ async function dropOrphan(subscriptionId: string | null): Promise<void> {
   }
 }
 
+/**
+ * Another organisation's unpaid checkout on a venue, closed at Razorpay so it
+ * cannot be paid after we stopped counting it. Best effort: the row here is
+ * already expired, and Razorpay's `expire_by` ends it anyway. A refusal is
+ * logged with the id; a payment that still arrives grants nothing to its payer
+ * (`billing.payer_not_owner`) and is cancelled by the webhook.
+ */
+async function cancelUnpaidOfAnother(subscriptionId: string): Promise<void> {
+  try {
+    await cancelSubscription(subscriptionId, false)
+  } catch (err) {
+    logger.warn("Cancelling the previous owner's unpaid checkout at Razorpay failed; it expires by itself", {
+      providerRef: subscriptionId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 export interface SubscriptionCheckout {
   kind: "subscription"
   keyId: string
@@ -211,16 +231,29 @@ async function startSubscription(
           status: { in: [...OPEN_SUBSCRIPTION_STATUSES] },
         },
         orderBy: { created_at: "desc" },
-        select: { id: true, provider_ref: true, plan_key: true, status: true, created_at: true },
+        select: { id: true, provider_ref: true, org_id: true, venue_id: true, plan_key: true, status: true, created_at: true },
       })
       if (open.some((s) => s.status !== "created")) throw new Refusal(scope.already)
-      const fresh = open.find((s) => s.plan_key === plan.key && now.getTime() - s.created_at.getTime() < CREATED_CHECKOUT_LIFETIME_MS)
+      // Resumed only if it is this buyer's own, for this scope and plan: a
+      // venue's `created` checkout may be the previous owner's, and its
+      // reference is never handed to the new one (the webhook would attribute
+      // the payment to the payer, not the owner).
+      const fresh = open.find(
+        (s) =>
+          s.org_id === scope.orgId &&
+          s.venue_id === scope.venueId &&
+          s.plan_key === plan.key &&
+          now.getTime() - s.created_at.getTime() < CREATED_CHECKOUT_LIFETIME_MS
+      )
       if (fresh) return fresh.provider_ref
-      // Unpaid and either stale or for the other period: Razorpay expires
-      // them (expire_by); here they stop counting as open.
+      // Unpaid and either stale, for the other period or another
+      // organisation's: here they stop counting as open.
       if (open.length) {
         await tx.billing_checkouts.updateMany({ where: { id: { in: open.map((s) => s.id) } }, data: { status: "expired" } })
       }
+      // Our own stale ones Razorpay expires (expire_by). Another organisation's
+      // may still be paid from its open Checkout, so it is cancelled now.
+      for (const s of open) if (s.org_id !== scope.orgId) await cancelUnpaidOfAnother(s.provider_ref)
 
       const planId = await planIdFor(plan)
       if (!planId) {

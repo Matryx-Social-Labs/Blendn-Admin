@@ -3,7 +3,7 @@ import "server-only"
 import type { org_role, user_role } from "@prisma/client"
 
 import { analyticsAccess, mayOpenEvent, type AccessReason } from "./analytics-access"
-import { BILLING_PLANS, isBillingPlanKey, type BillingPlanKey } from "./billing-plans"
+import { BILLING_PLANS, isBillingPlanKey, rupees } from "./billing-plans"
 import { db } from "./db"
 import { liveEntitlement, type LiveEntitlement } from "./entitlements"
 import { razorpayKeys } from "./env"
@@ -120,7 +120,13 @@ export async function planBadgeFor(orgId: string, now: Date = new Date()): Promi
 
 export interface SubscriptionState {
   providerRef: string
-  planKey: BillingPlanKey
+  /** A key of the price table, or one it has since retired: the mandate still runs, so it is still listed. */
+  planKey: string
+  /** The table's label, or, for a retired key, what was stored: its period, its price and "earlier plan". */
+  label: string
+  period: "monthly" | "yearly" | null
+  /** What each cycle charges, GST included, in paise: the figure stored when it started, not today's table. */
+  amountMinor: number
   status: string
   currentEnd: Date | null
   cancelAtCycleEnd: boolean
@@ -151,6 +157,40 @@ export interface PlanPageData {
   payments: PaymentLine[]
 }
 
+/**
+ * A mandate as the Plan page shows it. One on a plan key the price table has
+ * retired is kept, never dropped (the same fix as the venue loader's, review
+ * L7): a mandate nobody can see is one nobody can cancel, and Buy would be
+ * refused with "manage it below" and nothing below. It is described by what
+ * was stored, since the table no longer prices it. An organisation's own
+ * subscription is Analytics.
+ */
+function subscriptionState(s: {
+  provider_ref: string
+  plan_key: string
+  amount_minor: number
+  status: string
+  current_end: Date | null
+  cancel_at_cycle_end: boolean
+  created_at: Date
+}): SubscriptionState {
+  const word = /monthly|yearly/.exec(s.plan_key)?.[0]
+  const period = word === "monthly" || word === "yearly" ? word : null
+  return {
+    providerRef: s.provider_ref,
+    planKey: s.plan_key,
+    label: isBillingPlanKey(s.plan_key)
+      ? BILLING_PLANS[s.plan_key].label
+      : `Analytics${period ? `, ${period}` : ""}, ${rupees(s.amount_minor / 100)} (earlier plan)`,
+    period,
+    amountMinor: s.amount_minor,
+    status: s.status,
+    currentEnd: s.current_end,
+    cancelAtCycleEnd: s.cancel_at_cycle_end,
+    createdAt: s.created_at,
+  }
+}
+
 export async function planPageData(org: BillingOrg, now: Date = new Date()): Promise<PlanPageData> {
   const [access, analytics, subscriptionRows, events, paid] = await Promise.all([
     analyticsAccess(org.orgId, now),
@@ -158,7 +198,7 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
     db.billing_checkouts.findMany({
       where: { org_id: org.orgId, venue_id: null, kind: "subscription", status: { in: [...OPEN_SUBSCRIPTION_STATUSES] } },
       orderBy: { created_at: "desc" },
-      select: { provider_ref: true, plan_key: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
+      select: { provider_ref: true, plan_key: true, amount_minor: true, status: true, current_end: true, cancel_at_cycle_end: true, created_at: true },
     }),
     db.events.findMany({
       where: { organizer_org_id: org.orgId, deleted_at: null, ...realEventsWhere },
@@ -184,20 +224,7 @@ export async function planPageData(org: BillingOrg, now: Date = new Date()): Pro
     }),
   ])
   const firstFree = access.firstFreeEventId ? events.find((e) => e.id === access.firstFreeEventId) : undefined
-  const subscriptions = subscriptionRows.flatMap((s) =>
-    isBillingPlanKey(s.plan_key)
-      ? [
-          {
-            providerRef: s.provider_ref,
-            planKey: s.plan_key,
-            status: s.status,
-            currentEnd: s.current_end,
-            cancelAtCycleEnd: s.cancel_at_cycle_end,
-            createdAt: s.created_at,
-          },
-        ]
-      : []
-  )
+  const subscriptions = subscriptionRows.map(subscriptionState)
 
   return {
     org,
