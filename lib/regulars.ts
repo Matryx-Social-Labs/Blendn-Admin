@@ -42,6 +42,12 @@ import { venueDayBounds } from "./venue-day"
 
 export const REGULAR_NIGHTS = 3
 export const REGULAR_WINDOW_DAYS = 30
+/**
+ * An account younger than this is never in an audience (review M4): a venue
+ * that made five accounts, walked them in on three nights and sent an offer
+ * could otherwise read whether one real person joined them.
+ */
+export const MIN_ACCOUNT_AGE_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface RegularsVenue {
@@ -61,8 +67,14 @@ export function regularsWindow(v: RegularsVenue, now: Date = new Date()): { from
   return { from: from < to ? from : to, to }
 }
 
-/** Each guest's nights at the venue in [from, to): rows of (user_id, nights). */
-export function nightsSql(v: RegularsVenue, from: Date, to: Date): Prisma.Sql {
+/**
+ * Each guest's nights at the venue in [from, to): rows of (user_id, nights).
+ * `onlyUsers` narrows it to those people (the venue's own yeses, review L7).
+ * The events are bounded by their dates too, so the venue's years of nights
+ * are not walked to find a month (a day either side for a night that ran late
+ * or started early).
+ */
+export function nightsSql(v: RegularsVenue, from: Date, to: Date, onlyUsers?: Prisma.Sql): Prisma.Sql {
   // any-kind: a regular's nights are any nights out at the venue, a host's event or its own live room.
   return Prisma.sql`
     SELECT c.user_id,
@@ -71,9 +83,12 @@ export function nightsSql(v: RegularsVenue, from: Date, to: Date): Prisma.Sql {
       JOIN events e ON e.id = c.event_id
      WHERE e.venue_id = ${v.id}::uuid
        AND e.deleted_at IS NULL
+       AND e.start_time < ${to}::timestamptz + interval '1 day'
+       AND e.end_time > ${from}::timestamptz - interval '1 day'
        AND c.kind = 'attendee'
        AND c.status IN ('checked_in', 'checked_out')
        AND c.check_in_time >= ${from} AND c.check_in_time < ${to}
+       ${onlyUsers ? Prisma.sql`AND c.user_id IN (${onlyUsers})` : Prisma.empty}
      GROUP BY c.user_id`
 }
 
@@ -97,8 +112,9 @@ const adultSql = Prisma.sql`
  * The people an offer to "regulars" goes to now: rows of `user_id`.
  *
  * Regulars (above), less anyone who could not or should not get it: a
- * deleted or suspended account, anyone not known to be an adult, anyone who
- * muted this venue's offers, and the venue's own people (members of its
+ * deleted or suspended account, an account under 30 days old, anyone not
+ * known to be an adult, anyone who turned "Offers from places" off or muted
+ * this venue's offers, and the venue's own people (members of its
  * organisation are its staff, not its guests).
  */
 export function audienceSql(v: RegularsVenue, now: Date = new Date()): Prisma.Sql {
@@ -111,6 +127,8 @@ export function audienceSql(v: RegularsVenue, now: Date = new Date()): Prisma.Sq
      WHERE n.nights >= ${REGULAR_NIGHTS}
        AND u."deletedAt" IS NULL
        AND u.suspended_at IS NULL
+       AND u."createdAt" <= ${now}::timestamptz - make_interval(days => ${MIN_ACCOUNT_AGE_DAYS})
+       AND p.offers_from_places IS DISTINCT FROM false
        AND ${adultSql}
        AND NOT EXISTS (SELECT 1 FROM venue_offer_mutes m WHERE m.venue_id = ${v.id}::uuid AND m.user_id = n.user_id)
        AND NOT EXISTS (SELECT 1 FROM organisation_members om WHERE om.org_id = ${v.owner_org_id}::uuid AND om.user_id = n.user_id)`

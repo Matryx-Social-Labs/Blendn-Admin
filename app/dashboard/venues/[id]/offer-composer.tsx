@@ -34,8 +34,8 @@ export function OfferComposer({ venueId }: { venueId: string }) {
     if (empty || pending) return
     start(async () => {
       try {
-        const { sent } = await sendOffer({ venueId, text, days })
-        toast.success(`Sent to ${sent} regulars. You'll see how many open and redeem it — never who.`)
+        const { reached } = await sendOffer({ venueId, text, days })
+        toast.success(`Sent to ${reached} regulars. Opens and redemptions show as weekly totals — never who.`)
         setText("")
         router.refresh()
       } catch (err) {

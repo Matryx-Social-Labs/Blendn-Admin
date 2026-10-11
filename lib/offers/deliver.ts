@@ -26,20 +26,21 @@ import { sendBulkPushNotifications } from "../push-notifications"
  * app with no push. Add a `pushed_at` column and a sweep if that is ever seen.
  */
 
-export const OFFER_PUSH_TITLE = "An offer for you"
-export const OFFER_PUSH_BODY = "A place you keep going back to sent you something. Open Blendn to see it."
+export const OFFER_PUSH_TITLE = "You have a new offer"
+export const OFFER_PUSH_BODY = "Open Blendn to see it."
 
 export async function deliverOffer(offerId: string): Promise<void> {
   try {
-    const sends = await db.venue_offer_sends.findMany({ where: { offer_id: offerId }, select: { user_id: true } })
-    if (sends.length === 0) return
+    const sends = await db.venue_offer_sends.findMany({ where: { offer_id: offerId, user_id: { not: null } }, select: { user_id: true } })
+    const userIds = sends.flatMap((s) => (s.user_id ? [s.user_id] : []))
+    if (userIds.length === 0) return
     const { sent, failed } = await sendBulkPushNotifications({
-      userIds: sends.map((s) => s.user_id),
+      userIds,
       title: OFFER_PUSH_TITLE,
       body: OFFER_PUSH_BODY,
       data: { type: "venue_offer", offerId },
     })
-    logger.info("Offer delivered", { offerId, recipients: sends.length, sent, failed })
+    logger.info("Offer delivered", { offerId, recipients: userIds.length, sent, failed })
   } catch (error) {
     logger.error("Offer delivery failed", { offerId, error: error instanceof Error ? error.message : String(error) })
   }

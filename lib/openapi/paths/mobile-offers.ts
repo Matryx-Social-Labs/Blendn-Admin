@@ -39,8 +39,11 @@ const OpenedOfferSchema = OfferSchema.extend({
 
 const RegularPrefsSchema = z
   .object({
-    known: z.boolean().describe("\"Let this venue know I'm a regular\": the venue sees your first name and your nights there in the last 30."),
-    offersMuted: z.boolean().describe("No offers from this venue."),
+    known: z
+      .boolean()
+      .describe("\"Let this venue know I'm a regular\", to the organisation that runs it now: it sees your first name and your nights there in the last 30. A new owner sees none of an earlier owner's yeses."),
+    offersMuted: z.boolean().describe("No offers from this venue (kept across a change of owner)."),
+    ownerName: z.string().nullable().describe("Who would see it: the organisation that runs the venue on Blendn now; null while nobody does."),
   })
   .openapi("RegularPrefs")
 
@@ -109,6 +112,62 @@ registry.registerPath({
   },
   responses: {
     200: { description: "Your choices now", content: { "application/json": { schema: wrap(RegularPrefsSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/offers/{offerId}/report",
+  tags: ["Mobile Offers"],
+  summary: "Report an offer you were sent",
+  description:
+    "Into the reports queue as a venue offer, with its words as they read. 404 for an offer you were not sent; " +
+    "409 `CONFLICT` while your earlier report on it is pending.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ offerId: z.string().uuid() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({ reason: z.enum(["offensive", "misleading", "spam", "unsafe", "other"]), description: z.string().max(500).optional() })
+            .strict(),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Reported", content: { "application/json": { schema: wrap(z.object({ reported: z.literal(true) })) } } },
+    ...standardErrors,
+  },
+})
+
+const OffersSettingSchema = z
+  .object({ enabled: z.boolean().describe("\"Offers from places\": off, no venue's offer reaches you. On unless turned off.") })
+  .openapi("OffersSetting")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/offers",
+  tags: ["Mobile Offers"],
+  summary: "Offers from places: on or off",
+  security: bearerAuth,
+  responses: {
+    200: { description: "The setting", content: { "application/json": { schema: wrap(OffersSettingSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "put",
+  path: "/api/mobile/me/offers",
+  tags: ["Mobile Offers"],
+  summary: "Turn offers from places on or off",
+  security: bearerAuth,
+  request: { body: { content: { "application/json": { schema: z.object({ enabled: z.boolean() }).strict() } } } },
+  responses: {
+    200: { description: "The setting now", content: { "application/json": { schema: wrap(OffersSettingSchema) } } },
     ...standardErrors,
   },
 })

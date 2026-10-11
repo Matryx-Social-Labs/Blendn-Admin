@@ -1,6 +1,6 @@
 /**
- * Step 12 units: what a venue is shown of an offer, the weekly quota, and
- * the door pass's code (RG-U02, RG-U03; the database half is
+ * Step 12 units: what a venue is shown of its offers (bands, weekly totals),
+ * the weekly quota, and the door pass's code (RG-U02, RG-U03; the database half is
  * integration/regulars.itest.ts).
  *
  * Literals, never the constants under test: a floor of 3 or a quota of 5
@@ -12,35 +12,97 @@ jest.mock("@/lib/db", () => ({ db: {} }))
 jest.mock("@/lib/entitlements", () => ({ hasEntitlement: jest.fn() }))
 
 import { codeMatches, currentPass, normaliseCode, passCode, passStep, PASS_STEP_MS } from "@/lib/offers/pass-code"
-import { nextOfferAt, offerCounts } from "@/lib/offers/venue"
+import { audienceBand, nextOfferAt, publishedTotals, weekBoundaries, weekStart, type OfferHistory } from "@/lib/offers/venue"
 
-describe("an offer's counts, as the venue sees them", () => {
-  it("shows a part only when it and the rest of its group both reach 5", () => {
-    expect(offerCounts(20, 12, 6)).toEqual({ sent: 20, opened: 12, redeemed: 6 })
-    // 12 of 12 opened: "everyone" names everyone it was sent to.
-    expect(offerCounts(12, 12, 6).opened).toBeNull()
-    // 11 of 12: the one who did not open would be named.
-    expect(offerCounts(12, 11, 5).opened).toBeNull()
-    // 4 opened: under the floor.
-    expect(offerCounts(20, 4, 0).opened).toBeNull()
-    // Opened 10, redeemed 6: the 4 who opened and did not come would be named.
-    expect(offerCounts(20, 10, 6).redeemed).toBeNull()
-    expect(offerCounts(20, 10, 5)).toEqual({ sent: 20, opened: 10, redeemed: 5 })
-    // Nobody opened yet: zero is "everyone did not", held back too.
-    expect(offerCounts(9, 0, 0)).toEqual({ sent: 9, opened: null, redeemed: null })
+const D = (iso: string) => new Date(iso)
+/** One offer: created at, audience, and its cumulative opens / redemptions before each boundary. */
+const offer = (createdAt: string, sent: number, opened: number[], redeemed: number[]): OfferHistory => ({
+  createdAt: D(createdAt),
+  sent,
+  opened,
+  redeemed,
+})
+
+describe("how many an offer reached, as a venue is told it (M4)", () => {
+  it("is a band, never the number, and nothing under 5", () => {
+    expect([4, 5, 9, 10, 24, 25, 49, 50, 400].map(audienceBand)).toEqual([null, "5–9", "5–9", "10–24", "10–24", "25–49", "25–49", "50+", "50+"])
+  })
+})
+
+describe("the venue's week", () => {
+  it("starts at the venue-day start of Monday, on its own clock", () => {
+    // Sun 11 Oct 2026, 23:00 IST is still the week of Mon 5 Oct; 06:00 IST = 00:30 UTC.
+    expect(weekStart("Asia/Kolkata", 6, D("2026-10-11T17:30:00Z")).toISOString()).toBe("2026-10-05T00:30:00.000Z")
+    // Mon 12 Oct 05:00 IST is before the reset: still last week.
+    expect(weekStart("Asia/Kolkata", 6, D("2026-10-11T23:30:00Z")).toISOString()).toBe("2026-10-05T00:30:00.000Z")
+    expect(weekStart("Asia/Kolkata", 6, D("2026-10-12T01:00:00Z")).toISOString()).toBe("2026-10-12T00:30:00.000Z")
   })
 
-  it("never shows a redeemed count that subtracts from what is shown into fewer than 5", () => {
-    for (let sent = 5; sent <= 30; sent++) {
-      for (let opened = 0; opened <= sent; opened++) {
-        for (let redeemed = 0; redeemed <= opened; redeemed++) {
-          const c = offerCounts(sent, opened, redeemed)
-          if (c.opened !== null) expect(Math.min(c.opened, sent - c.opened)).toBeGreaterThanOrEqual(5)
-          if (c.redeemed !== null) expect(Math.min(c.redeemed, opened - c.redeemed)).toBeGreaterThanOrEqual(5)
-          if (c.opened !== null && c.redeemed !== null) expect(c.opened - c.redeemed).toBeGreaterThanOrEqual(5)
+  it("lists the week starts after the first offer up to this week's", () => {
+    const b = weekBoundaries("UTC", 6, D("2026-09-23T12:00:00Z"), D("2026-10-14T12:00:00Z"))
+    expect(b.map((x) => x.toISOString())).toEqual(["2026-09-28T06:00:00.000Z", "2026-10-05T06:00:00.000Z", "2026-10-12T06:00:00.000Z"])
+  })
+})
+
+describe("weekly totals that cannot be differenced (M1)", () => {
+  const weeks = [D("2026-09-28T06:00:00Z"), D("2026-10-05T06:00:00Z"), D("2026-10-12T06:00:00Z")]
+
+  it("the review's probe: two offers, one a week — the second week alone (15 sent, 11 opened) is never published", () => {
+    const A = offer("2026-09-23T12:00:00Z", 20, [10, 10, 10], [0, 0, 0])
+    const B = offer("2026-09-30T12:00:00Z", 15, [0, 11, 11], [0, 0, 0])
+    const t = publishedTotals(weeks, [A, B])
+    // Week 1 (A alone, 10 of 20) published; week 2 adds B's 11 of 15 — the 4 who did not open would be named — held.
+    expect(t).toEqual({ asOf: "2026-09-28T06:00:00.000Z", sent: "10–24", opened: 10, redeemed: null })
+  })
+
+  it("rolls a held week's change into the next one that is safe", () => {
+    const A = offer("2026-09-23T12:00:00Z", 20, [10, 10, 10], [0, 0, 0])
+    const B = offer("2026-09-30T12:00:00Z", 15, [0, 11, 11], [0, 0, 0])
+    const C = offer("2026-10-07T12:00:00Z", 30, [0, 0, 10], [0, 0, 0])
+    // Since week 1: 45 more sent, 21 more opened, 24 not — both at the floor; C alone, 10 of 30, too.
+    expect(publishedTotals(weeks, [A, B, C])).toEqual({ asOf: "2026-10-12T06:00:00.000Z", sent: "50+", opened: 31, redeemed: null })
+  })
+
+  it("holds a week whose only offer fails the rule on its own, even inside a large total", () => {
+    const A = offer("2026-09-23T12:00:00Z", 40, [20, 20, 20], [5, 5, 5])
+    const B = offer("2026-10-07T12:00:00Z", 7, [0, 0, 7], [0, 0, 0])
+    const C = offer("2026-10-08T12:00:00Z", 30, [0, 0, 10], [0, 0, 0])
+    // Week 2 changed nothing and stands. Week 3's change (37 sent, 17 opened, 20 not) would pass,
+    // but B in it is 7 of 7 — everyone opened — so the week is held.
+    expect(publishedTotals(weeks, [A, B, C])).toEqual({ asOf: "2026-10-05T06:00:00.000Z", sent: "25–49", opened: 20, redeemed: 5 })
+  })
+
+  it("never publishes two weeks whose difference names fewer than 5 (an exhaustive sweep)", () => {
+    // Every combination of opens for a 3-week history of two offers: whatever is published,
+    // the step between consecutive published weeks is zero or passes the complement rule.
+    const sizes = [5, 8, 12, 20]
+    for (const sa of sizes) for (const sb of sizes) {
+      for (let a1 = 0; a1 <= sa; a1 += 3) for (let b2 = 0; b2 <= sb; b2 += 3) {
+        const A = offer("2026-09-23T12:00:00Z", sa, [a1, Math.min(sa, a1 + 1), Math.min(sa, a1 + 2)], [0, 0, 0])
+        const B = offer("2026-09-30T12:00:00Z", sb, [0, b2, b2], [0, 0, 0])
+        const seen: { s: number; o: number }[] = [{ s: 0, o: 0 }]
+        for (let k = 1; k <= weeks.length; k++) {
+          const t = publishedTotals(weeks.slice(0, k), [A, B])
+          if (!t.asOf) continue
+          const i = weeks.findIndex((w) => w.toISOString() === t.asOf)
+          const s = [A, B].filter((o) => o.createdAt < weeks[i]).reduce((n, o) => n + o.sent, 0)
+          const o = [A, B].filter((x) => x.createdAt < weeks[i]).reduce((n, x) => n + x.opened[i], 0)
+          const last = seen[seen.length - 1]
+          if (s !== last.s || o !== last.o) {
+            const dS = s - last.s
+            const dO = o - last.o
+            if (!(dS === 0 && dO === 0)) {
+              expect(Math.min(dO, dS - dO)).toBeGreaterThanOrEqual(5)
+            }
+            seen.push({ s, o })
+          }
         }
       }
     }
+  })
+
+  it("shows nothing before a week is published", () => {
+    expect(publishedTotals([], [])).toEqual({ asOf: null, sent: null, opened: null, redeemed: null })
   })
 })
 

@@ -358,6 +358,7 @@ describe("no field on the profile survives deletion unnoticed", () => {
     // behave, not who the person was. Their defaults are already harmless and
     // nothing reads them for a deleted account.
     push_enabled: "a setting, not an attribute of the person",
+    offers_from_places: "a setting, not an attribute of the person (step 12)",
     show_online: "a setting, not an attribute of the person",
     read_receipts: "a setting, not an attribute of the person",
     share_location: "a setting, not an attribute of the person",

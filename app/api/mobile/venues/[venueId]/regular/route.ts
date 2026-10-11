@@ -12,7 +12,6 @@ import {
   validationErrorResponse,
 } from "@/lib/api-response"
 import { ADULTS_ONLY } from "@/lib/age"
-import { getRequestIp } from "@/lib/audit-log"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { regularPrefs, setRegularPrefs } from "@/lib/offers/person"
@@ -28,9 +27,11 @@ interface RouteParams {
  * Your two choices about a venue (step 12):
  *
  *   - `known` — "Let this venue know I'm a regular". Off until you say yes.
- *     On, the venue sees your first name and how many nights you came in the
- *     last 30, and can greet you; off, it sees nothing of you again, from the
- *     next request (no cache). Each change is audited.
+ *     The yes goes to the organisation that runs the venue now (`ownerName`):
+ *     it sees your first name and how many nights you came in the last 30,
+ *     and can greet you; off, it sees nothing of you again, from the next
+ *     request (no cache). A new owner sees none of an earlier owner's yeses.
+ *     Nothing about these choices is written to the audit log.
  *   - `offersMuted` — no offers from this venue.
  *
  * GET answers both. PUT changes what it is given: each must be a real
@@ -78,7 +79,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const parsed = putSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
-    const result = await setRegularPrefs(authUser.userId, venueId, parsed.data, getRequestIp(request))
+    const result = await setRegularPrefs(authUser.userId, venueId, parsed.data)
     if ("refusal" in result) {
       if (result.refusal === "not_found") return notFoundResponse("Venue not found")
       if (result.refusal === "unclaimed") {

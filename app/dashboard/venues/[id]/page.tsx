@@ -19,6 +19,7 @@ import { REGULAR_NIGHTS, REGULAR_WINDOW_DAYS } from "@/lib/regulars"
 import { MIN_CELL } from "@/lib/disclosure"
 import { maySendVenueOffers } from "@/lib/rbac"
 import { OfferComposer } from "./offer-composer"
+import { EndOfferButton } from "./end-offer-button"
 import { RatingBars } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
 import { VenueManage } from "./venue-manage"
@@ -439,7 +440,7 @@ function VenueInsights({
       ) : null}
 
       {offers ? (
-        <RegularsOffers offers={offers} venueId={venueId} venueName={venueName} mayCompose={mayCompose} atTheDoor={!isAdmin} />
+        <RegularsOffers offers={offers} venueId={venueId} venueName={venueName} mayCompose={mayCompose} isAdmin={isAdmin} />
       ) : (
         <Locked
           plan="Venue Pro"
@@ -469,13 +470,13 @@ function RegularsOffers({
   venueId,
   venueName,
   mayCompose,
-  atTheDoor,
+  isAdmin,
 }: {
   offers: VenueOffersView
   venueId: string
   venueName: string
   mayCompose: boolean
-  atTheDoor: boolean
+  isAdmin: boolean
 }) {
   return (
     <Panel
@@ -506,20 +507,22 @@ function RegularsOffers({
                 {(
                   [
                     ["Sent", offers.totals.sent],
-                    ["Opened", offers.totals.opened],
-                    ["Redeemed", offers.totals.redeemed],
+                    ["Opened", offers.totals.opened === null ? null : formatNumber(offers.totals.opened)],
+                    ["Redeemed", offers.totals.redeemed === null ? null : formatNumber(offers.totals.redeemed)],
                   ] as const
                 ).map(([label, value]) => (
                   <div key={label} className="flex flex-col gap-0.5">
                     <dt className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</dt>
                     <dd className={value === null ? "text-[0.8125rem] text-faint-foreground" : "text-[1.375rem] font-bold tabular-nums"}>
-                      {value === null ? "held back" : formatNumber(value)}
+                      {value === null ? "held back" : value}
                     </dd>
                   </div>
                 ))}
               </dl>
               <p className="text-[0.75rem] text-faint-foreground">
-                All your offers here, up to {OFFER_DAY.format(new Date(offers.totals.asOf))} this morning: totals only, never per offer or per person.
+                {offers.totals.asOf
+                  ? `All your offers here, as of the week starting ${OFFER_DAY.format(new Date(offers.totals.asOf))}: weekly totals, never per offer or per person.`
+                  : "Totals appear once a week has enough in it to show without pointing at anyone."}
               </p>
               <table className="w-full text-[0.8125rem]">
                 <caption className="sr-only">Offers sent</caption>
@@ -527,6 +530,7 @@ function RegularsOffers({
                   <tr className="text-[0.6875rem] uppercase tracking-[0.06em] text-muted-foreground">
                     <th scope="col" className="py-2 text-left font-medium">Offer</th>
                     <th scope="col" className="w-16 py-2 text-right font-medium">To</th>
+                    {isAdmin ? <th scope="col" className="w-20 py-2 text-right font-medium"><span className="sr-only">End</span></th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -538,7 +542,10 @@ function RegularsOffers({
                           {OFFER_DAY.format(new Date(o.createdAt))} · {o.live ? `live until ${OFFER_DAY.format(new Date(o.endsAt))}` : "ended"}
                         </span>
                       </td>
-                      <td className="py-3 text-right font-bold tabular-nums">{formatNumber(o.sent)}</td>
+                      <td className="py-3 text-right font-bold tabular-nums">{o.reached ?? "—"}</td>
+                      {isAdmin ? (
+                        <td className="py-3 text-right">{o.live ? <EndOfferButton offerId={o.id} /> : null}</td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>
@@ -564,7 +571,7 @@ function RegularsOffers({
               People who chose &ldquo;Let {venueName} know I&apos;m a regular&rdquo; in the app. They can take it back any time.
             </p>
           ) : null}
-          {atTheDoor ? (
+          {!isAdmin ? (
             <Link href={`/dashboard/venues/${venueId}/door`} className="text-[0.8125rem] underline underline-offset-4">
               Redeem a pass at the door →
             </Link>

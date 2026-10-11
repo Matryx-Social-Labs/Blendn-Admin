@@ -5,7 +5,8 @@
 -- many were sent, opened and redeemed — never who — unless a person opts in
 -- to being known as a regular there.
 --
--- Additive only: four new tables and one enum. Rolling back is a NEW forward
+-- Additive only: four new tables, one enum, a profiles column with a constant
+-- default, and a partial unique index on message_reports. Rolling back is a NEW forward
 -- migration that drops them (never SQL by hand against staging or
 -- production); older code reads none of them, so a rollback of the CODE alone
 -- is safe.
@@ -60,7 +61,9 @@ CREATE TABLE "venue_offer_sends" (
   "offer_id" UUID NOT NULL,
   -- The offer's venue, copied so one pass a night per venue can be a unique index.
   "venue_id" UUID NOT NULL,
-  "user_id" TEXT NOT NULL,
+  -- Null once the person's account is erased: the row stays as a count, its
+  -- times cut to the day (app/api/mobile/account/route.ts).
+  "user_id" TEXT,
   "sent_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
   -- The person opened the offer in the app.
   "opened_at" TIMESTAMPTZ(6),
@@ -93,17 +96,25 @@ CREATE INDEX "venue_offer_sends_door_idx" ON "venue_offer_sends"("venue_id", "pa
 
 -- "Let this venue know I'm a regular": a row is an explicit yes, and
 -- revoking deletes it. No row is no, so a missing answer can never read as yes.
+-- The yes is to the organisation that ran the venue when it was given
+-- (`org_id`): a venue that changes hands shows its new owner none of them.
+-- `created_at` is the record of consent; nothing is written to audit_logs.
 CREATE TABLE "venue_regular_optins" (
   "venue_id" UUID NOT NULL,
   "user_id" TEXT NOT NULL,
+  "org_id" UUID NOT NULL,
   "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
-  CONSTRAINT "venue_regular_optins_pkey" PRIMARY KEY ("venue_id", "user_id")
+  CONSTRAINT "venue_regular_optins_pkey" PRIMARY KEY ("venue_id", "user_id", "org_id")
 );
 ALTER TABLE "venue_regular_optins" ADD CONSTRAINT "venue_regular_optins_venue_id_fkey"
   FOREIGN KEY ("venue_id") REFERENCES "venues"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "venue_regular_optins" ADD CONSTRAINT "venue_regular_optins_user_id_fkey"
   FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "venue_regular_optins" ADD CONSTRAINT "venue_regular_optins_org_id_fkey"
+  FOREIGN KEY ("org_id") REFERENCES "organisations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 CREATE INDEX "venue_regular_optins_user_id_idx" ON "venue_regular_optins"("user_id");
+-- The venue's list (its current owner's yeses), and the organisation's key.
+CREATE INDEX "venue_regular_optins_org_id_venue_id_idx" ON "venue_regular_optins"("org_id", "venue_id");
 
 -- "No offers from this venue": a row mutes it.
 CREATE TABLE "venue_offer_mutes" (
@@ -117,5 +128,16 @@ ALTER TABLE "venue_offer_mutes" ADD CONSTRAINT "venue_offer_mutes_venue_id_fkey"
 ALTER TABLE "venue_offer_mutes" ADD CONSTRAINT "venue_offer_mutes_user_id_fkey"
   FOREIGN KEY ("user_id") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 CREATE INDEX "venue_offer_mutes_user_id_idx" ON "venue_offer_mutes"("user_id");
+
+-- "Offers from places", the person's one switch for all of them (Settings).
+-- On by default; off, no venue's offer reaches them. A constant default is a
+-- catalogue change on Postgres 11+, no table rewrite.
+ALTER TABLE "profiles" ADD COLUMN "offers_from_places" BOOLEAN NOT NULL DEFAULT true;
+
+-- "Report this offer" files into the existing reports queue as message_type
+-- 'venue_offer' (message_id = the offer). One pending report per person per
+-- offer: a second tap is the same report.
+CREATE UNIQUE INDEX "message_reports_one_pending_offer_report" ON "message_reports"("reporter_id", "message_id")
+  WHERE "status" = 'pending' AND "message_type" = 'venue_offer';
 
 COMMIT;

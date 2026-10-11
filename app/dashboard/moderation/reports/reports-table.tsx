@@ -125,6 +125,7 @@ function aboutLabel(row: ReportRow): string {
   if (row.messageType === "board_post") return `Board · ${row.boardKind ?? "post"}`
   if (row.messageType === "board_request") return "Board ask"
   if (row.messageType === "crew") return "Crew"
+  if (row.messageType === "venue_offer") return "Venue offer"
   return "Room message"
 }
 

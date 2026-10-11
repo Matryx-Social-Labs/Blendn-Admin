@@ -154,3 +154,25 @@ export async function forget(key: string): Promise<void> {
     })
   }
 }
+
+/**
+ * The count a key holds now, without adding to it: zero when it has none or
+ * its window has passed. For a lock that only failures set (the offer door,
+ * step 12 review L1): every attempt asks, only a failure counts.
+ */
+export async function peek(key: string): Promise<number> {
+  const now = Date.now()
+  const redis = await getRedis()
+  if (redis) {
+    try {
+      const value = await (redis as unknown as { get(k: string): Promise<string | null> }).get(key)
+      return value ? Number(value) || 0 : 0
+    } catch (error) {
+      logger.warn("Rate limit Redis peek failed, falling back to memory", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+  const existing = memory.get(key)
+  return existing && now <= existing.resetAt ? existing.count : 0
+}

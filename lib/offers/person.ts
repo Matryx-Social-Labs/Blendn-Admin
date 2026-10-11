@@ -2,6 +2,7 @@ import "server-only"
 
 import { ageFrom, isAdult } from "../age"
 import { db } from "../db"
+import { violatedConstraint } from "../prisma-errors"
 import { venueDayBounds } from "../venue-day"
 import { currentPass } from "./pass-code"
 
@@ -84,6 +85,8 @@ function shape(send: SendRow, state: OfferState): PersonOffer {
 }
 
 const MY_OFFERS_LIMIT = 50
+/** How often a pass on screen re-marks itself as on screen. The door looks back three minutes. */
+const PASS_SEEN_EVERY_MS = 60 * 1000
 
 /** The caller's offers, newest first. Reading the list opens nothing. */
 export async function myOffers(userId: string, now: Date = new Date()): Promise<PersonOffer[]> {
@@ -127,49 +130,66 @@ export async function openOffer(userId: string, offerId: string, now: Date = new
   }
   if (state !== "live") return { ...shape(send, state), pass: null }
 
-  // On screen now: the door matches a typed code only against passes being shown.
-  await db.venue_offer_sends.update({ where: { id: send.id }, data: { pass_seen_at: now } })
+  // On screen now: the door matches a typed code only against passes being
+  // shown. Written at most once a minute: the screen asks every few seconds (L5).
+  await db.venue_offer_sends.updateMany({
+    where: { id: send.id, OR: [{ pass_seen_at: null }, { pass_seen_at: { lt: new Date(now.getTime() - PASS_SEEN_EVERY_MS) } }] },
+    data: { pass_seen_at: now },
+  })
   return { ...shape(send, state), pass: currentPass(send.id, now) }
 }
 
 export interface RegularPrefs {
-  /** "Let this venue know I'm a regular": an explicit yes, revocable. */
+  /** "Let this venue know I'm a regular": an explicit yes to its current owner, revocable. */
   known: boolean
-  /** No offers from this venue. */
+  /** No offers from this venue (kept across a change of owner). */
   offersMuted: boolean
+  /** Who would see it: the organisation that runs the venue on Blendn now; null while nobody does. */
+  ownerName: string | null
+}
+
+async function venueAndOwner(venueId: string) {
+  return db.venues.findFirst({
+    where: { id: venueId, deleted_at: null },
+    select: { id: true, owner_org_id: true, owner_org: { select: { display_name: true } } },
+  })
 }
 
 /** The caller's two choices about a venue, or null for no such (live) venue. */
 export async function regularPrefs(userId: string, venueId: string): Promise<RegularPrefs | null> {
-  const venue = await db.venues.findFirst({ where: { id: venueId, deleted_at: null }, select: { id: true } })
+  const venue = await venueAndOwner(venueId)
   if (!venue) return null
   const [known, muted] = await Promise.all([
-    db.venue_regular_optins.findUnique({ where: { venue_id_user_id: { venue_id: venueId, user_id: userId } }, select: { user_id: true } }),
+    // A yes to an earlier owner is not a yes to this one.
+    venue.owner_org_id
+      ? db.venue_regular_optins.findUnique({
+          where: { venue_id_user_id_org_id: { venue_id: venueId, user_id: userId, org_id: venue.owner_org_id } },
+          select: { user_id: true },
+        })
+      : null,
     db.venue_offer_mutes.findUnique({ where: { venue_id_user_id: { venue_id: venueId, user_id: userId } }, select: { user_id: true } }),
   ])
-  return { known: known !== null, offersMuted: muted !== null }
+  return { known: known !== null, offersMuted: muted !== null, ownerName: venue.owner_org?.display_name ?? null }
 }
 
 export type PrefsRefusal = "not_found" | "unclaimed" | "not_adult"
 
 /**
- * Change the caller's choices about a venue. Each change that happens is
- * audited in the same transaction, so there is never a yes without its record
- * (or a record of a yes that did not happen).
+ * Change the caller's choices about a venue.
  *
- * Saying yes needs somebody to tell: a claimed venue. And an adult: the venue
- * learns a person's first name, and it may be a bar.
+ * Saying yes needs somebody to tell — a claimed venue — and an adult: the
+ * venue learns a person's first name, and it may be a bar. The yes is given to
+ * the organisation that runs the venue now. No yes, no, mute or unmute is
+ * written to audit_logs (review H1): those rows are read by organisations, and
+ * a person's own choice about a place is nobody's record but theirs — the
+ * opt-in row's `created_at` is the proof of consent, and a no deletes it.
  */
 export async function setRegularPrefs(
   userId: string,
   venueId: string,
-  change: Partial<RegularPrefs>,
-  ipAddress: string | null
+  change: Partial<Pick<RegularPrefs, "known" | "offersMuted">>
 ): Promise<{ prefs: RegularPrefs } | { refusal: PrefsRefusal }> {
-  const venue = await db.venues.findFirst({
-    where: { id: venueId, deleted_at: null },
-    select: { id: true, owner_org_id: true },
-  })
+  const venue = await venueAndOwner(venueId)
   if (!venue) return { refusal: "not_found" }
   if (change.known === true) {
     if (!venue.owner_org_id) return { refusal: "unclaimed" }
@@ -178,22 +198,51 @@ export async function setRegularPrefs(
   }
 
   const key = { venue_id: venueId, user_id: userId }
-  await db.$transaction(async (tx) => {
-    const audit = (action: string) =>
-      tx.audit_logs.create({ data: { user_id: userId, action: action, resource: "venue", resource_id: venueId, ip_address: ipAddress } })
-    if (change.known !== undefined) {
-      const { count } = change.known
-        ? await tx.venue_regular_optins.createMany({ data: [key], skipDuplicates: true })
-        : await tx.venue_regular_optins.deleteMany({ where: key })
-      if (count > 0) await audit(change.known ? "venue_regular.optin" : "venue_regular.optout")
-    }
-    if (change.offersMuted !== undefined) {
-      const { count } = change.offersMuted
-        ? await tx.venue_offer_mutes.createMany({ data: [key], skipDuplicates: true })
-        : await tx.venue_offer_mutes.deleteMany({ where: key })
-      if (count > 0) await audit(change.offersMuted ? "venue_offer.mute" : "venue_offer.unmute")
-    }
-  })
+  if (change.known === true && venue.owner_org_id) {
+    await db.venue_regular_optins.createMany({ data: [{ ...key, org_id: venue.owner_org_id }], skipDuplicates: true })
+  } else if (change.known === false) {
+    // Every yes this person gave here, to whichever owner.
+    await db.venue_regular_optins.deleteMany({ where: key })
+  }
+  if (change.offersMuted === true) await db.venue_offer_mutes.createMany({ data: [key], skipDuplicates: true })
+  else if (change.offersMuted === false) await db.venue_offer_mutes.deleteMany({ where: key })
+
   const prefs = await regularPrefs(userId, venueId)
-  return { prefs: prefs ?? { known: false, offersMuted: false } }
+  return { prefs: prefs ?? { known: false, offersMuted: false, ownerName: null } }
+}
+
+/** "Offers from places" — the person's one switch for every venue (review M6). On unless turned off. */
+export async function offersFromPlaces(userId: string): Promise<boolean> {
+  const profile = await db.profiles.findUnique({ where: { id: userId }, select: { offers_from_places: true } })
+  return profile?.offers_from_places ?? true
+}
+
+export async function setOffersFromPlaces(userId: string, enabled: boolean): Promise<boolean> {
+  await db.profiles.update({ where: { id: userId }, data: { offers_from_places: enabled } })
+  return enabled
+}
+
+export type ReportOutcome = "filed" | "already" | "not_found"
+
+/**
+ * "Report this offer" (review M5): into the reports queue every other report
+ * goes to, as `message_type 'venue_offer'`, with the words as they read. Only
+ * someone it was sent to can report it; one pending report per person per
+ * offer (a partial unique in the migration).
+ */
+export async function reportOffer(userId: string, offerId: string, reason: string, description: string | null): Promise<ReportOutcome> {
+  const send = await db.venue_offer_sends.findUnique({
+    where: { offer_id_user_id: { offer_id: offerId, user_id: userId } },
+    select: { offer: { select: { text: true } } },
+  })
+  if (!send) return "not_found"
+  try {
+    await db.message_reports.create({
+      data: { reporter_id: userId, message_id: offerId, message_type: "venue_offer", reason: reason, description: description, excerpt: send.offer.text },
+    })
+    return "filed"
+  } catch (error) {
+    if (violatedConstraint(error, "message_reports_one_pending_offer_report")) return "already"
+    throw error
+  }
 }

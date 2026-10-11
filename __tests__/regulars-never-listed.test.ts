@@ -242,27 +242,50 @@ describe("a venue never gets a list of its regulars (RG-G01)", () => {
       return [...body.slice(1, -1).matchAll(/^\s*(\w+)\??\s*:/gm)].map((m) => m[1])
     }
     // No results of its own per offer (the overlapping-sends rule): opened and redeemed only as totals.
-    expect(fields("OfferResult")).toEqual(["id", "text", "createdAt", "endsAt", "live", "sent"])
+    expect(fields("OfferResult")).toEqual(["id", "text", "createdAt", "endsAt", "live", "reached"])
     expect(fields("OfferTotals")).toEqual(["asOf", "sent", "opened", "redeemed"])
+    // How many is a band, in every field that says how many (M4).
+    expect(venue).toMatch(/reached: AudienceBand \| null/)
+    expect(venue).toMatch(/sent: AudienceBand \| null/)
     expect(fields("KnownRegular")).toEqual(["firstName", "nights"])
     expect(fields("VenueOffersView")).toEqual(["perWeek", "sentThisWeek", "nextAt", "offers", "totals", "known"])
     const actions = file("lib/offer-actions.ts")
-    expect(actions).toMatch(/export async function sendOffer\([\s\S]*?\): Promise<\{ offerId: string; sent: number \}>/)
+    expect(actions).toMatch(/export async function sendOffer\([\s\S]*?\): Promise<\{ offerId: string; reached: AudienceBand \}>/)
     expect(actions).toMatch(/export async function redeemPass\([\s\S]*?\): Promise<\{ text: string \}>/)
   })
 
-  it("the view is asked whose it is, and counts stop where the venue's day began (the differencing rule)", () => {
+  it("the view is asked whose it is, and its totals are the published weeks' (the differencing rule)", () => {
     const venue = file("lib/offers/venue.ts")
     expect(venue).toMatch(/export async function venueOffersView\(\s*venueId: string,\s*viewer:/)
     expect(venue).toMatch(/\(await actorFor\(viewer\)\)\.orgIds\.includes\(v\.owner_org_id\)/)
-    // The totals read only what happened before `to`, the start of the venue's today.
-    const totals = templates(venue).find((t) => /count\(s\.opened_at\)/.test(t))
-    expect(totals).toBeDefined()
-    expect(totals).toMatch(/FILTER \(WHERE s\.opened_at < \$\{\}\)/)
-    expect(totals).toMatch(/FILTER \(WHERE s\.redeemed_at < \$\{\}\)/)
-    expect(totals).toMatch(/o\.created_at < \$\{\}/)
-    // Offers are the sending organisation's: every read names the owner org.
-    for (const t of templates(venue).filter((x) => /venue_offers/.test(x))) expect(t).toMatch(/org_id = \$\{\}::uuid/)
+    // Counts before each week boundary only, and the totals only through publishedTotals.
+    const history = templates(venue).find((t) => /count\(s\.opened_at\)/.test(t))
+    expect(history).toMatch(/FILTER \(WHERE s\.opened_at < b\.t\)/)
+    expect(history).toMatch(/FILTER \(WHERE s\.redeemed_at < b\.t\)/)
+    expect(venue).toMatch(/totals: publishedTotals\(boundaries, await histories\(/)
+    // Offers are the sending organisation's, and yeses the organisation they were given to (M2).
+    for (const t of templates(venue).filter((x) => /venue_offers|venue_regular_optins/.test(x))) expect(t).toMatch(/org_id = \$\{\}::uuid/)
+    // The known list's nights are counted for the yeses only (L7).
+    expect(venue).toMatch(/nightsSql\(\s*venue,\s*from,\s*to,\s*Prisma\.sql`SELECT user_id FROM venue_regular_optins/)
+  })
+
+  it("a person's own choices about a venue are never written to the audit log (H1)", () => {
+    // The only place these action names may appear: the filter that keeps old rows from organisations.
+    const naming = files
+      .filter((f) => /["'`]venue_regular\.|["'`]venue_offer\.(?:mute|unmute)["'`]/.test(f.code))
+      .map((f) => f.rel)
+    expect(naming).toEqual(["lib/audit-actions.ts"])
+    // No module a person's own request reaches writes an audit row on a venue.
+    const personSide = files.filter((f) => f.rel.startsWith("app/api/mobile/") || f.rel === "lib/offers/person.ts")
+    const writes: string[] = []
+    for (const f of personSide) {
+      for (const m of f.code.matchAll(/\b(?:auditLog|auditInTx)\s*\(|\.\s*audit_logs\s*\.\s*create\w*\s*\(/g)) {
+        const call = matched(f.code, m.index + m[0].length - 1, "(", ")")
+        if (/resource:\s*["']venue["']/.test(call)) writes.push(f.rel)
+      }
+    }
+    expect(writes).toEqual([])
+    expect(/\baudit/i.test(file("lib/offers/person.ts").replace(/audit_logs \(review H1\)|audit log/gi, ""))).toBe(false)
   })
 
   it("no route hands a venue a recipient: each side imports only its own module (e)", () => {

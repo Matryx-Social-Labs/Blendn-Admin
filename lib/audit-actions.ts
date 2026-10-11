@@ -24,6 +24,17 @@ import { idForViewer } from "@/lib/room-handle"
  *     company's operations out of a shared table.
  */
 
+
+/**
+ * Audit actions that were a person's own choice about a venue — to be known
+ * there as a regular, or to hear no offers from it (step 12). Never shown
+ * outside the platform's admins (review H1); `regulars-never-listed.test.ts`
+ * holds that nothing writes them.
+ */
+const PERSONS_OWN_CHOICES: Prisma.audit_logsWhereInput[] = [
+  { action: { startsWith: "venue_regular." } },
+  { action: { in: ["venue_offer.mute", "venue_offer.unmute"] } },
+]
 export interface AuditEntry {
   id: string
   action: string
@@ -100,6 +111,10 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
      * anyone who left. A row with no organisation is the platform's alone.
      */
     and.push({ org_id: { in: manageable.map((m) => m.org_id) } })
+    // A person's own choices about a venue are never an organisation's to read
+    // (step 12 review H1). Nothing writes them any more; any row from before
+    // stays the platform's.
+    and.push({ NOT: { OR: PERSONS_OWN_CHOICES } })
   }
 
   // The dropdown lists every action in scope, not only the filtered one (SCRUM-462).

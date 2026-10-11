@@ -349,6 +349,9 @@ model profiles {
   /// Default true because that is what the UI has been claiming, so nobody's
   /// apparent settings change on the day these start being honoured.
   push_enabled   Boolean  @default(true)
+  /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
+  /// default (the coordinator's default, flagged to the owner).
+  offers_from_places Boolean @default(true)
   /// Honoured on the two surfaces where another attendee can see you are in
   /// a room: the roster (`GET /events/:id/checkins`) and the grid
   /// (`lib/matches.ts`). Off means counted and not listed — the numbers
@@ -1704,6 +1707,7 @@ model organisations {
   upload_grants  upload_grants[]
   billing_checkouts billing_checkouts[]
   venue_offers   venue_offers[]
+  regular_optins venue_regular_optins[]
 
   @@index([status])
 }
@@ -4236,7 +4240,8 @@ model venue_offer_sends {
   offer_id       String    @db.Uuid
   /// The offer's venue, copied so "one pass a night" can be a unique index.
   venue_id       String    @db.Uuid
-  user_id        String
+  /// Null once the person's account is erased: the row stays as a count.
+  user_id        String?
   sent_at        DateTime  @default(now()) @db.Timestamptz(6)
   opened_at      DateTime? @db.Timestamptz(6)
   /// The last time the pass was on their screen; the door matches only those.
@@ -4247,25 +4252,31 @@ model venue_offer_sends {
 
   offer venue_offers @relation(fields: [offer_id], references: [id], onDelete: Cascade)
   venue venues       @relation(fields: [venue_id], references: [id], onDelete: Cascade)
-  user  User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user  User?        @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([offer_id, user_id])
   @@index([user_id, sent_at])
 }
 
-/// "Let this venue know I'm a regular" (step 12): a row is an explicit yes;
-/// revoking deletes it. The venue then sees that person's first name and how
-/// many nights they came in the last 30 days, and nobody else's.
+/// "Let this venue know I'm a regular" (step 12): a row is an explicit yes,
+/// given to the organisation that ran the venue then (`org_id`); revoking
+/// deletes it. That organisation sees the person's first name and their
+/// nights in the last 30, and nobody else's; after a transfer the new owner
+/// sees none of the old yeses. `created_at` is the record of consent — a
+/// person's own choices are never written to audit_logs.
 model venue_regular_optins {
   venue_id   String   @db.Uuid
   user_id    String
+  org_id     String   @db.Uuid
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
-  venue venues @relation(fields: [venue_id], references: [id], onDelete: Cascade)
-  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  venue venues        @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  org   organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
 
-  @@id([venue_id, user_id])
+  @@id([venue_id, user_id, org_id])
   @@index([user_id])
+  @@index([org_id, venue_id])
 }
 
 /// "No offers from this venue": a row mutes it (step 12, RG-I07).

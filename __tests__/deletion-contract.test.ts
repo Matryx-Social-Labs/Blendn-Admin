@@ -144,12 +144,12 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     why: "Their choice to hear no offers from a venue; nobody else reads it.",
   },
   venue_offer_sends: {
-    how: "RETAINED",
-    why: "An offer's sent, opened and redeemed counts are the venue's, already shown to it; the row names an anonymised account and nothing else about them, and no venue-facing reader selects it.",
+    how: "SCRUBBED",
+    why: "The row stays so a venue's weekly opened and redeemed totals still add up, and nothing of the person stays on it: no account (user_id null), the sent, opened and redeemed times cut to the day, and pass_seen_at — when a pass was on their screen at a door — gone. Written in SQL (`UPDATE venue_offer_sends`) because Prisma cannot truncate a timestamp.",
   },
   audit_logs: {
     how: "RETAINED",
-    why: "What an admin did and from where. An accountability record that a subject can erase is not one — and these describe staff actions, not the deleted person's own activity.",
+    why: "What an admin did and from where. An accountability record that a subject can erase is not one — and these describe staff actions, not the deleted person's own activity: a person's own choices (being known as a regular somewhere, muting a venue's offers) are never written here (step 12 review H1, regulars-never-listed.test.ts).",
   },
 }
 
@@ -225,8 +225,9 @@ describe("the deletion contract", () => {
       }
       const verb = how === "SCRUBBED" ? "updateMany" : "deleteMany"
       // A DELETE written in SQL counts too: the crew rows are deleted with
-      // `DELETE … RETURNING`, so the erasure learns which crews to settle.
-      const sql = how === "DELETED" ? `|DELETE FROM ${model}\\b` : ""
+      // `DELETE … RETURNING`, so the erasure learns which crews to settle. An
+      // UPDATE in SQL counts for a scrub: the offer sends' times are cut to the day.
+      const sql = how === "DELETED" ? `|DELETE FROM ${model}\\b` : `|UPDATE ${model}\\b`
       if (!new RegExp(`db\\.${model}\\.${verb}\\(${sql}`).test(route)) {
         broken.push(`${model}: declared ${how} but no db.${model}.${verb} in the deletion path`)
       }
