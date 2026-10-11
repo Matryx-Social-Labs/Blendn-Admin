@@ -469,10 +469,15 @@ describe("coordinates are kept a few days", () => {
 })
 
 describe("the daily reset, in the venue's clock (PL-I15, D-4, D-5)", () => {
-  // Only the clock is moved; it runs on from wherever it is set. Tokens are
-  // signed after it moves, or they would read as expired (or not yet issued).
+  // Only the clock is moved, and it stays where it is set: each case injects
+  // its `now` and nothing ticks it over a boundary while a slow machine is
+  // still inside the case. It ran on instead (`advanceTimers`, a 20 ms step),
+  // and the first case sat exactly ROLLOVER_MINUTES before the reset, so one
+  // step under load turned "tonight's room, ending at 06:00" into "tomorrow's".
+  // Tokens are signed after the clock moves, or they would read as expired
+  // (or not yet issued).
   const onlyDate = ["nextTick", "setImmediate", "clearImmediate", "setInterval", "clearInterval", "setTimeout", "clearTimeout", "queueMicrotask", "hrtime", "performance"] as const
-  beforeEach(() => jest.useFakeTimers({ advanceTimers: true, doNotFake: [...onlyDate] }))
+  beforeEach(() => jest.useFakeTimers({ doNotFake: [...onlyDate] }))
   afterEach(() => jest.useRealTimers())
   const at = (iso: string) => jest.setSystemTime(new Date(iso))
   const tokenOf = (id: string) => signAccessToken(id, `${id}@itest.invalid`)
@@ -481,7 +486,10 @@ describe("the daily reset, in the venue's clock (PL-I15, D-4, D-5)", () => {
     const v = await venue({ timezone: "Asia/Kolkata", resetHour: 6 })
     const [a, b] = [await person(), await person()]
 
-    at("2026-10-05T00:25:00Z") // 05:55 IST
+    // 05:50 IST: ten minutes before the reset, clear of the five-minute
+    // rollover into tomorrow's room (ROLLOVER_MINUTES), so a 20-minute Go Live
+    // runs out of day at 06:00.
+    at("2026-10-05T00:20:00Z")
     const night = await goLive(tokenOf(a.id), v, { minutes: 20 })
     expect(night.status).toBe(200)
     expect(night.json.data.expiresAt).toBe("2026-10-05T00:30:00.000Z")
@@ -512,6 +520,21 @@ describe("the daily reset, in the venue's clock (PL-I15, D-4, D-5)", () => {
     )
     expect(post.status).toBe(403)
     expect(bMorning.status).toBe(200)
+  })
+
+  it.each([
+    // The rollover is "less than ROLLOVER_MINUTES to the reset", so exactly five
+    // minutes out is still tonight's room and a millisecond later is tomorrow's.
+    // With the clock frozen the edge is a case of its own, not a race.
+    ["exactly five minutes before the reset: tonight's room, out of day at 06:00", "2026-10-05T00:25:00.000Z", "2026-10-05T00:30:00.000Z"],
+    ["a millisecond inside the five minutes: tomorrow's room, the full 20 minutes", "2026-10-05T00:25:00.001Z", "2026-10-05T00:45:00.001Z"],
+  ])("at the rollover edge, %s", async (_label, when, expiresAt) => {
+    const v = await venue({ timezone: "Asia/Kolkata", resetHour: 6 })
+    const me = await person()
+    at(when)
+    const { status, json } = await goLive(tokenOf(me.id), v, { minutes: 20 })
+    expect(status).toBe(200)
+    expect(json.data.expiresAt).toBe(expiresAt)
   })
 
   it("opens tomorrow's room for a Go Live in the last minutes before the reset", async () => {
