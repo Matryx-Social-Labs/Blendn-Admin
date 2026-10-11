@@ -48,9 +48,10 @@ export function Panel({
     >
       {title || action ? (
         <div className="flex items-center justify-between gap-3 px-5 pt-4">
-          <div className="flex min-w-0 items-baseline gap-2.5">
+          {/* Wraps, so a long hint drops under the title instead of squeezing it to "Pay…" at 375. */}
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
             {title ? (
-              <h2 className="min-w-0 truncate whitespace-nowrap text-panel-title font-bold">{title}</h2>
+              <h2 className="max-w-full min-w-0 truncate whitespace-nowrap text-panel-title font-bold">{title}</h2>
             ) : null}
             {hint ? <span className="min-w-0 text-[0.75rem] text-faint-foreground">{hint}</span> : null}
           </div>

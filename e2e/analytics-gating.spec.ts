@@ -250,7 +250,7 @@ test("an Event Pass opens its event and nothing else", async ({ baseURL }) => {
 
 test("inside the free window, everything is open", async ({ baseURL }) => {
   const page = await fetchPage(baseURL!, ids.ownerB, "organizer", analytics(ids.fresh))
-  expect(page.body).toContain("Free until")
+  expect(page.body).toContain("Open until")
   expect(page.body).toContain("1h 47m")
   expect(page.body).not.toContain("Sample: Rooftop social")
 })
