@@ -1891,6 +1891,18 @@
       "mutation": "M1408 the credential form's px-4 removed. M1409 the credential result's px-4 removed. M1410 the Edit form's px-4 removed. M1411 the Blendn+ body's px-4 removed. M1412 `grantTellsItself = false` (the status line back above the grant control). M1413 the Edit footer's `px-0` removed (inset twice).",
       "observed": "2026-10-11, run against a local dev server on a seeded database. M1408: failing (Credentials, form @375: starts nearer the left edge than the title). M1409: failing (Credentials, result @375). M1410: failing (Users > Edit @375). M1411: failing (Users > Blendn+ (none) @375). M1412: failing (the grant is told once). M1413: failing (a footer button is inset twice). Restored; passing.",
       "date": "2026-10-11"
+    },
+    "event-alert-history.test.tsx": {
+      "guards": "F6: the Overview of an event that is over lists the alerts its watch recorded (Alert history), read once per page and only when the event is over and the viewer may operate it; a host reads the bodies as recorded, a venue on another host's night reads each as a sentence with no figure and not the two it is never sent; nothing is drawn when nothing was recorded; the record says how each ended (lasted N, or still on when it ended for at least N) and never says ongoing or tonight; rows are divided by a rule, not a box each inside the panel's box, with the severity said to a screen reader; the Live tab, if it was open when the event ended, points at the Overview.",
+      "mutation": "M1414 the page reads the issues for every state (`overview.state === \"over\" &&` dropped). M1415 a venue gets the host's bodies (`alertsForVenue` dropped). M1416 the panel never drawn. M1417 the panel drawn when empty (`.length > 0` dropped). M1418 IssueLog never in its over mode. M1419 the Live tab's pointer removed. M1420 the record drawn as a bordered box per row. M1421 the severity words removed.",
+      "observed": "2026-10-11, 13 tests. M1414: 1 failing (asks for the history only when it is over). M1415: 1 (the venue's sentences with no figure). M1416: 3 (lists what was recorded; the venue's; cancelled as over). M1417: 1 (not drawn for an event that recorded nothing). M1418: 2 (lists what was recorded, no ongoing; still on when it ended for at least 40 min). M1419: 1 (the Live tab says where the alerts went). M1420: 1 (rows divided by a rule). M1421: 1 (how bad each was to a screen reader). Restored; 13 green.",
+      "date": "2026-10-11"
+    },
+    "event-alert-history.spec.ts": {
+      "guards": "F6 in a real browser: on a seeded past event given two recorded issues, the admin reads the Alert history at 375, 768 and 1440 with one h1, no sideways scroll and nothing axe calls serious inside main; the Live tab is not offered and ?tab=live lands on the Overview, where the panel is; the organiser who ran it reads the same record. The spec removes its own rows, pass or fail.",
+      "mutation": "M1422 the panel never drawn on the Overview.",
+      "observed": "2026-10-11, against a local dev server on a seeded database. M1422: 3 failing, all three cases (the panel is not visible). Restored; 3 passing.",
+      "date": "2026-10-11"
     }
   },
   "grandfathered": [

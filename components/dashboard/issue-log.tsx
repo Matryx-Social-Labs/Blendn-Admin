@@ -29,12 +29,30 @@ function duration(from: string, to: string): string {
   return `${h}h ${mins % 60}m`
 }
 
-export function IssueLog({ issues, timezone }: { issues: IssueRow[]; timezone: string }) {
+export function IssueLog({
+  issues,
+  timezone,
+  over = false,
+}: {
+  issues: IssueRow[]
+  timezone: string
+  /**
+   * The event is over and this is its record (F6), not a feed.
+   *
+   * Nothing is "ongoing" and nothing is "tonight": an issue the sweep still
+   * had open was on when the event ended, and nothing resolves it afterwards
+   * because the sweep only visits events that are running. Said as that, with
+   * the time it was last seen as the floor of how long it lasted.
+   */
+  over?: boolean
+}) {
   const [pending, startTransition] = useTransition()
   const [acked, setAcked] = useState<Set<string>>(new Set())
 
   if (issues.length === 0) {
-    return (
+    return over ? (
+      <EmptyState compact description="No alerts were recorded while it ran." />
+    ) : (
       <EmptyState
         title="Nothing has gone wrong tonight"
         description="Entry backing up, capacity, people leaving early, safety reports and the room going quiet are all being watched — whether or not this tab is open."
@@ -43,7 +61,12 @@ export function IssueLog({ issues, timezone }: { issues: IssueRow[]; timezone: s
   }
 
   return (
-    <ul className="flex flex-col gap-2">
+    /*
+     * A record is rows divided by a rule, inside the panel that already has the
+     * border: a bordered box per row inside a bordered panel is a card inside a
+     * card. A feed on the Live tab sits on the page, where each row is its own.
+     */
+    <ul className={cn("flex flex-col", over ? "divide-y divide-border" : "gap-2")}>
       {issues.map((i) => {
         const open = i.resolvedAt === null
         const isAcked = i.acknowledgedAt !== null || acked.has(i.id)
@@ -51,21 +74,39 @@ export function IssueLog({ issues, timezone }: { issues: IssueRow[]; timezone: s
           <li
             key={i.id}
             className={cn(
-              "rounded-lg border px-4 py-3",
-              open && i.severity === "critical"
-                ? "border-[color-mix(in_oklch,var(--primary)_55%,transparent)]"
-                : "border-border",
-              !open && "opacity-70"
+              over
+                ? "py-3 first:pt-0 last:pb-0"
+                : cn(
+                    "rounded-lg border px-4 py-3",
+                    open && i.severity === "critical"
+                      ? "border-[color-mix(in_oklch,var(--primary)_55%,transparent)]"
+                      : "border-border"
+                  ),
+              !open && !over && "opacity-70"
             )}
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="font-semibold">{i.title}</span>
+              <span className="flex items-center gap-2 font-semibold">
+                {over ? (
+                  /* How bad, said twice: a dot for the eye, a word for a screen reader. */
+                  <>
+                    <span
+                      aria-hidden
+                      className={cn("size-2 shrink-0 rounded-full", i.severity === "critical" ? "bg-destructive" : "bg-warning")}
+                    />
+                    <span className="sr-only">{i.severity === "critical" ? "Critical: " : "Warning: "}</span>
+                  </>
+                ) : null}
+                {i.title}
+              </span>
               <span className="text-[0.8125rem] text-muted-foreground tabular-nums">
                 {/* Opened, and how long it lasted — a five-minute queue and a
                     two-hour one are different nights. */}
                 {issueOpenedLabel(i.openedAt, timezone)}
                 {open
-                  ? ` · ongoing ${duration(i.openedAt, i.lastSeenAt)}`
+                  ? over
+                    ? ` · still on when it ended, for at least ${duration(i.openedAt, i.lastSeenAt)}`
+                    : ` · ongoing ${duration(i.openedAt, i.lastSeenAt)}`
                   : ` · lasted ${duration(i.openedAt, i.resolvedAt!)}`}
               </span>
             </div>

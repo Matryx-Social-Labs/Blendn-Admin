@@ -227,6 +227,17 @@ export default async function EventDetailPage({
   ])
 
   /*
+   * The record of what the room's watch saw while it ran (F6). The Live tab
+   * lists it and exists only while the event does, so once it is over this is
+   * the one place a person can ask "did anything go wrong". Read for whoever
+   * may operate the event, and nobody else: a venue gets the sentences it is
+   * sent live, with no figure in them, as there. After the batch above, which
+   * a guard pins as the one place the page's counts are read together.
+   */
+  const history = overview.state === "over" && permissions.canOperate ? await issuesFor(event.id) : null
+  const alertHistory = history && (permissions.canEdit ? history : alertsForVenue(history))
+
+  /*
    * The per-event half of curation health.
    *
    * The queue screen answers "which of everything we added is dead"; this
@@ -267,6 +278,8 @@ export default async function EventDetailPage({
         attendance={attendance}
         connections={connections}
         turnedAway={turnedAway && venueMaySee(turnedAway.people) ? turnedAway : null}
+        alertHistory={alertHistory}
+        timezone={event.timezone}
       />
     </div>
   )
