@@ -18,11 +18,11 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 jest.mock("@auth/prisma-adapter", () => ({ PrismaAdapter: () => ({}) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const mockGetAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ ...jest.requireActual("@/lib/auth"), getAuth: () => mockGetAuth() }))
+jest.mock("@/lib/auth", () => ({ ...jest.requireActual("@/lib/auth"), getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 import { authOptions } from "@/lib/auth"
 import { createRoleUser } from "@/lib/admin-role-actions"
 import { findOrCreateAppleUser, findOrCreateGoogleUser } from "@/lib/mobile-auth"
-import { cleanup, closeDb, db, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
 /* eslint-disable @typescript-eslint/no-require-imports */
 const signupRoute = require("@/app/api/mobile/auth/signup/route") as typeof import("@/app/api/mobile/auth/signup/route")
 const signinRoute = require("@/app/api/mobile/auth/signin/route") as typeof import("@/app/api/mobile/auth/signin/route")
@@ -120,7 +120,10 @@ it("links Apple to the password account whatever case Apple reports", async () =
 })
 
 it("creates an operator account in lowercase, and refuses the same inbox in another case", async () => {
-  mockGetAuth.mockResolvedValue({ user: { id: "admin", role: "app_admin" } })
+  // A real admin row: requireAdmin reads the caller's role from the database (step 18).
+  const admin = await makeUser(testId("eio_admin"), "app_admin")
+  users.push(admin)
+  mockGetAuth.mockResolvedValue({ user: { id: admin, role: "app_admin" } })
   const typed = mixedCase("eio-role")
   const created = await createRoleUser("Role", typed, "organizer")
   users.push((await db.user.findUniqueOrThrow({ where: { email: typed.toLowerCase() }, select: { id: true } })).id)

@@ -1,11 +1,11 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { signIn, useSession } from "next-auth/react"
 
+import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -121,27 +121,20 @@ function SignInForm() {
    * in is moved along by the effect above. Neither case wants a spinner.
    */
   return (
-    <div className="relative flex w-full max-w-[400px] flex-col gap-7">
-      <div className="flex flex-col items-center gap-3.5">
-        <Image src="/brand/monogram-gradient.png" alt="Blend'n" width={64} height={64} priority />
-        <div className="text-center">
-          <h1 className="text-[length:var(--text-h1)] font-bold">Blend&apos;n dashboard</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            For the people who run the platform and the events on it.
-          </p>
-        </div>
-      </div>
-
-      <form
-        onSubmit={handleSubmit}
-        className="relative flex flex-col gap-4 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-6"
-      >
-        {/* The brand gradient, on the one screen it belongs to. */}
-        <div
-          aria-hidden
-          className="absolute inset-x-0 top-0 h-[3px] bg-[image:var(--gradient-brand)]"
-        />
-
+    <AuthFrame
+      title="Blend'n dashboard"
+      sub="For the people who run the platform and the events on it."
+      after={
+        <p className="mx-auto max-w-[40ch] text-center text-[0.78125rem] text-faint-foreground">
+          Operator access only — attendees use the Blend&apos;n app. Not a host yet?{" "}
+          <Link href="/apply" className="underline underline-offset-4 hover:text-foreground">
+            Apply
+          </Link>
+          .
+        </p>
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="email">Email</Label>
           <Input
@@ -190,12 +183,7 @@ function SignInForm() {
           Forgotten your password?
         </Link>
       </form>
-
-      <p className="mx-auto max-w-[40ch] text-center text-[0.78125rem] text-faint-foreground">
-        Operator access only — attendees use the Blend&apos;n app. Your role decides what you see
-        after signing in.
-      </p>
-    </div>
+    </AuthFrame>
   )
 }
 
@@ -214,19 +202,5 @@ const RATE_LIMITED =
   "Too many sign-in attempts from this network. Wait fifteen minutes and try again."
 
 export default function LoginPage() {
-  return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-6">
-      {/* Oversized, barely-there monogram. Decorative, so it is hidden from
-          assistive tech and cannot be clicked through to. */}
-      <Image
-        src="/brand/monogram-gradient.png"
-        alt=""
-        aria-hidden
-        width={560}
-        height={560}
-        className="pointer-events-none absolute -bottom-[18%] -right-[8%] w-[560px] max-w-none opacity-[0.04]"
-      />
-      <SignInForm />
-    </main>
-  )
+  return <SignInForm />
 }

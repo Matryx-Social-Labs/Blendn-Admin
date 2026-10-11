@@ -10,12 +10,20 @@ const mockDb = {
   },
   organisation_members: { findFirst: jest.fn() },
   events: { count: jest.fn() },
+  // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
 }
 
 const mockAuth = jest.fn()
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+// As getAuth() returns it: the jwt callback always writes `signedInAt` (lib/session-revocation.ts).
+jest.mock("@/lib/auth", () => ({
+  getAuth: async () => {
+    const session = await mockAuth()
+    return session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session
+  },
+}))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const mockOverLimit = jest.fn()

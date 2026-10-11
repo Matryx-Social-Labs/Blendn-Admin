@@ -39,18 +39,8 @@ import {
 import type { OrgPermissions } from "@/lib/org-permissions"
 import type { org_role } from "@prisma/client"
 import { refusalMessage } from "@/lib/refusal"
+import { ROLE_BLURB, ROLE_LABEL } from "@/lib/org-roles"
 
-const ROLE_LABEL: Record<org_role, string> = {
-  owner: "Owner",
-  admin: "Admin",
-  staff: "Staff",
-}
-
-const ROLE_BLURB: Record<org_role, string> = {
-  owner: "Everything, including domains and removing the organisation.",
-  admin: "Members and events. Cannot verify domains.",
-  staff: "Events and chat. Cannot change who is in the organisation.",
-}
 
 export function OrgPanel({
   org,

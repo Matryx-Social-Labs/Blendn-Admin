@@ -2,7 +2,8 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { getAuth } from "@/lib/auth"
 import { getRoleUsers } from "@/lib/admin-role-actions"
-import { neverPublished } from "@/lib/dashboard-format"
+import { venueOwnerFacts } from "@/lib/venue-owner-facts"
+import { StatLine } from "@/components/dashboard/kit"
 import { RoleUsersTable } from "@/components/role-users-table"
 import { Button } from "@/components/ui/button"
 
@@ -18,58 +19,51 @@ export default async function VenueOwnersPage() {
   }
 
   const users = await getRoleUsers("venue_owner")
+  // After the gate above: this read is plain, not a server action.
+  const facts = await venueOwnerFacts(users.map((u) => u.id))
 
-  const published = users.reduce((sum, u) => sum + u.published, 0)
-  const dormant = neverPublished(users)
+  const venues = Object.values(facts).reduce((sum, f) => sum + f.venues, 0)
+  const waiting = Object.values(facts).filter((f) => f.pendingClaims > 0).length
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground">
-          <span>
-            <b className="font-bold text-foreground tabular-nums">{users.length}</b> venue owner
-            {users.length === 1 ? "" : "s"}
-          </span>
-          {/*
-            Events they CREATED, which is not the same as events at their
-            venues — `eventScope` is `organizer_id` here and H2 records that a
-            venue owner operates every event in their building whoever made it.
-            Labelled precisely rather than counted wrongly; the building-level
-            figure needs a join through `venues.owner_org_id` and belongs on the
-            venue index, not on a list of people.
-          */}
-          <span>
-            <span className="tabular-nums">{published}</span> event
-            {published === 1 ? "" : "s"} of their own
-          </span>
-          {dormant > 0 ? (
-            <span className="font-medium text-warning">
-              <span className="tabular-nums">{dormant}</span> never published
-            </span>
-          ) : null}
-        </div>
-        {/*
-          Two buttons, out of the bordered card that held nothing else. A card
-          exists to group things; one containing a single row of controls is
-          100px of chrome around a toolbar.
-        */}
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" className="rounded-full">
-            <Link href="/dashboard/claims/venues">Review claims</Link>
-          </Button>
-          <Button asChild variant="outline" className="rounded-full">
-            {/* Admin-created venues land unclaimed, which is how the directory
-                gets seeded before any owner is on the platform. */}
-            <Link href="/dashboard/venues/new">Add a venue</Link>
-          </Button>
-        </div>
-      </div>
-
       <RoleUsersTable
         users={users}
         role="venue_owner"
-        roleLabel="Venue Owner"
+        roleLabel="Venue owner"
         detailBasePath="/dashboard/venue-owners"
+        facts={facts}
+        summary={
+          /*
+            The kit's line: accounts, the venues their organisations hold, and
+            the one count that wants a decision. "Venues held" is a sum over
+            people, as the table below is, so two owners at one company count
+            their shared buildings twice.
+          */
+          <StatLine
+            items={[
+              { value: users.length, label: users.length === 1 ? "venue owner" : "venue owners" },
+              { value: venues, label: venues === 1 ? "venue held" : "venues held" },
+              waiting > 0 && {
+                value: waiting,
+                label: waiting === 1 ? "claim pending" : "claims pending",
+                tone: "warning",
+              },
+            ]}
+          />
+        }
+        actions={
+          <>
+            <Button asChild variant="outline" size="sm" className="rounded-full">
+              <Link href="/dashboard/claims/venues">Review claims</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="rounded-full">
+              {/* Admin-created venues land unclaimed, which is how the directory
+                  gets seeded before any owner is on the platform. */}
+              <Link href="/dashboard/venues/new">Add a venue</Link>
+            </Button>
+          </>
+        }
       />
     </div>
   )

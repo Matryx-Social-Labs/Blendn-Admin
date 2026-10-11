@@ -2,7 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
-import { Card } from "@/components/ui/card"
+import { PublicChip, PublicFrame, PublicLockup } from "@/components/public-frame"
 import { isUuid } from "@/lib/api-input"
 import { claimVenueWhere } from "@/lib/curation"
 import { db } from "@/lib/db"
@@ -52,34 +52,29 @@ export default async function ClaimVenuePage({
   const where = [venue.address, venue.city].filter(Boolean).join(" · ")
 
   return (
-    <main className="flex min-h-screen items-start justify-center px-6 py-12">
-      <div className="flex w-full max-w-xl flex-col gap-5">
-        <div className="flex flex-col gap-1.5">
-          <h1 className="text-2xl font-bold tracking-tight">Is this your place?</h1>
-          <p className="text-[0.875rem] leading-6 text-muted-foreground">
-            Blend&rsquo;n lists places in {venue.city ?? "the city"} so people can find them and meet
-            there. If you run {venue.name}, take it over: once a person checks it is yours, you manage
-            the venue, its check-in area and the events held there.
-          </p>
-        </div>
-
-        <Card className="flex flex-col gap-2 rounded-xl p-5">
+    <PublicFrame width="medium">
+      <div className="flex flex-col gap-6 px-6 py-8 sm:px-9 sm:py-9">
+        <PublicLockup className="h-[30px]" priority />
+        <div className="flex flex-col gap-2.5">
+          <PublicChip>{venue.owner_org_id ? "On Blend\u2019n" : "Listed by Blend\u2019n"}</PublicChip>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-bold">{venue.name}</h2>
+            <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight">{venue.name}</h1>
             {venue.venue_type ? <Badge variant="secondary">{venueTypeLabel(venue.venue_type)}</Badge> : null}
           </div>
-          {where ? <p className="text-[0.8125rem] text-muted-foreground">{where}</p> : null}
-          <p className="text-[0.75rem] text-faint-foreground">
-            {venue.owner_org_id ? "Managed on Blend’n by its owner." : "Added by Blend’n. Nobody has claimed it yet."}
+          {where ? <p className="text-[0.875rem] text-muted-foreground">{where}</p> : null}
+          <p className="text-[0.875rem] leading-6 text-muted-foreground">
+            Blend&rsquo;n lists places in {venue.city ?? "the city"} so people can find them and meet there.
+            If you run {venue.name}, claim it: once a person checks it is yours, you manage the venue, its
+            check-in area and the events held there from then on — a claim never opens the nights before it.
           </p>
-        </Card>
+        </div>
 
         {venue.owner_org_id ? (
           /*
            * A fact about the place, not an error about the person. A dispute
            * needs an account and documents, so it is not offered here.
            */
-          <Card className="flex flex-col gap-2 rounded-xl p-5">
+          <div className="flex flex-col gap-2 rounded-2xl border border-border p-5">
             <p className="text-[0.875rem] font-medium">This place already has an owner on Blend&rsquo;n.</p>
             <p className="text-[0.8125rem] leading-6 text-muted-foreground">
               Somebody showed it was theirs and we handed it over. If that should have been you,
@@ -89,11 +84,11 @@ export default async function ClaimVenuePage({
               </Link>{" "}
               and dispute it from your dashboard.
             </p>
-          </Card>
+          </div>
         ) : (
           <VenueClaimForm venueId={venue.id} venueName={venue.name} />
         )}
       </div>
-    </main>
+    </PublicFrame>
   )
 }

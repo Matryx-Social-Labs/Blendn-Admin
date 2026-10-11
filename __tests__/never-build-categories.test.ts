@@ -13,12 +13,14 @@ const mockDb = {
     create: jest.fn().mockResolvedValue({ id: "c1" }),
     update: jest.fn(),
   },
+  // requireAdmin reads the caller's row (lib/current-user.ts): a live admin.
+  user: { findUnique: jest.fn(async () => ({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null })) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 
 import { createCategory, renameCategory } from "@/lib/category-actions"
 import { neverBuildHits } from "@/lib/never-build"

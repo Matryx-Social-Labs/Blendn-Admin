@@ -20,6 +20,8 @@
  */
 
 const mockDb = {
+  // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
   amenities: {
     findMany: jest.fn(),
     findFirst: jest.fn(),
@@ -37,7 +39,7 @@ jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 
 import { setAmenityActive, updateAmenity, createAmenity } from "@/lib/amenity-actions"
 

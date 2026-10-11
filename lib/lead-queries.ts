@@ -175,6 +175,35 @@ export async function getLeadMetrics(): Promise<LeadMetrics> {
   }
 }
 
+/**
+ * How many leads each status pill would show — the kit's counts beside the
+ * pills, so "Contacted" with nothing in it is not a click to find out.
+ *
+ * One `groupBy`, then the two views that are not a status: `open` is the
+ * statuses `getLeads` reads as open, and `all` is every lead.
+ */
+export async function getLeadStatusCounts(): Promise<Record<lead_status | "open" | "all", number>> {
+  const groups = await db.leads.groupBy({ by: ["status"], _count: { _all: true } })
+  return leadStatusCounts(groups.map((g) => ({ status: g.status, count: g._count._all })))
+}
+
+export function leadStatusCounts(
+  groups: { status: lead_status; count: number }[]
+): Record<lead_status | "open" | "all", number> {
+  const by = (status: string) => groups.find((g) => g.status === status)?.count ?? 0
+  const open: readonly string[] = OPEN_LEAD_STATUSES
+  return {
+    new: by("new"),
+    contacted: by("contacted"),
+    qualified: by("qualified"),
+    converted: by("converted"),
+    archived: by("archived"),
+    spam: by("spam"),
+    open: groups.filter((g) => open.includes(g.status)).reduce((n, g) => n + g.count, 0),
+    all: groups.reduce((n, g) => n + g.count, 0),
+  }
+}
+
 /** Admins available in the assign control. */
 export async function getLeadAssignees() {
   return db.user.findMany({

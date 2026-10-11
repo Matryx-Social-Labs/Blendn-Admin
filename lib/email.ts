@@ -6,6 +6,7 @@ import {
   declinedHtml,
   domainVerifyHtml,
   passwordResetHtml,
+  applyAgainHtml,
   inviteHtml,
   onboardingVerifyHtml,
 } from "./email-html"
@@ -121,6 +122,11 @@ function mayDeliverTo(to: string): boolean {
   return OWN_DOMAINS.has(domain) || listed.includes(address)
 }
 
+/** A header value on one line: CR, LF and the other line breaks become spaces. */
+export function headerSafe(value: string): string {
+  return value.replace(/[\r\n\u2028\u2029]+/g, " ")
+}
+
 export async function sendEmail(opts: {
   to: string
   subject: string
@@ -158,8 +164,10 @@ export async function sendEmail(opts: {
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from,
-        to: [opts.to],
-        subject: opts.subject,
+        // No CR/LF in anything a header is made of (step 18 security review,
+        // M4): a subject or an address carrying one is a second header.
+        to: [headerSafe(opts.to)],
+        subject: headerSafe(opts.subject),
         text: opts.text,
         ...(opts.html ? { html: opts.html } : {}),
       }),
@@ -304,6 +312,28 @@ export function claimDecisionEmail(
       approved
         ? "You can invite colleagues from Organisation → Members."
         : "If you think this is a mistake, reply to this email with more detail.",
+    ].join("\n"),
+  }
+}
+
+/**
+ * See `applyAgainHtml`: an application from an address that already has an
+ * account, or one under review. A fixed text with no name in it — anybody can
+ * type an address into /apply, so nothing they typed reaches this email (M4).
+ */
+export function applyAgainEmail(kind: "account" | "pending", signInLink: string) {
+  return {
+    html: applyAgainHtml(kind, signInLink),
+    subject: kind === "account" ? "You already have a Blend'n host account" : "We already have your Blend'n application",
+    text: [
+      "Hi,",
+      "",
+      kind === "account"
+        ? "Somebody applied to host on Blend'n with this address, and it already has a host account. Sign in instead:"
+        : "Somebody applied to host on Blend'n with this address, and we already have an application from it. A person is reviewing it, usually within two working days — you don't need to apply again.",
+      ...(kind === "account" ? [signInLink] : []),
+      "",
+      "Didn't apply? Ignore this email. Nothing has changed on your account.",
     ].join("\n"),
   }
 }

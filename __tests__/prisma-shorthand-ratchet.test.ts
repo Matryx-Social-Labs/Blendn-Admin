@@ -108,7 +108,6 @@ const BASELINE: Record<string, string[]> = {
   "lib/admin-role-actions.ts": ["name", "role", "status"],
   "lib/amenity-actions.ts": ["name"],
   "lib/category-actions.ts": ["slug"],
-  "lib/charge-actions.ts": ["currency"],
   "lib/event-claim-actions.ts": ["flags"],
   "lib/mobile-auth.ts": ["email", "provider"],
   "lib/onboarding-actions.ts": ["domain", "status"],

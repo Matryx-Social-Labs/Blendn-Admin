@@ -141,8 +141,10 @@ describe("lib/auth.ts holds two gates, and both are asserted separately", () => 
     expect(jwtBody).not.toBeNull()
     // Selected...
     expect(jwtBody![0]).toMatch(/select:[^}]*suspended_at/)
-    // ...and actually consulted, not just fetched.
-    expect(jwtBody![0]).toMatch(/suspended_at\s*!==\s*null|suspended_at\s*\?|suspended_at\s*\)/)
+    // ...and actually consulted, not just fetched: through the one rule
+    // (step 18, M6), which must itself consult it.
+    expect(jwtBody![0]).toMatch(/isRevoked\(token,\s*account\)/)
+    expect(stripComments(read("lib/session-revocation.ts"))).toMatch(/suspended_at\s*!==\s*null/)
   })
 })
 

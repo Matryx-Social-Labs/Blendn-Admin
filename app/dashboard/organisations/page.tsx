@@ -42,10 +42,15 @@ export default async function OrganisationsPage() {
     )
   }
 
+  /*
+   * The kit's Organisations: one bordered list, divided, controls to the right.
+   * One box around every row rather than a card each — a Panel groups, and a
+   * card per organisation would be thirty boxes competing for the eye.
+   */
   return (
-    <ul className="flex flex-col divide-y divide-border">
+    <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-panel border border-border bg-card">
       {orgs.map((org) => (
-        <li key={org.id} className="flex flex-col gap-2 py-4 @3xl/main:flex-row @3xl/main:items-start @3xl/main:justify-between @3xl/main:gap-6">
+        <li key={org.id} className="flex flex-col gap-2 px-5 py-4 @3xl/main:flex-row @3xl/main:items-start @3xl/main:justify-between @3xl/main:gap-6">
           <div className="flex min-w-0 flex-col gap-1">
             <div className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem] text-muted-foreground">
               <h2 className="text-[0.9375rem] font-bold text-foreground">{org.display_name}</h2>
@@ -65,14 +70,14 @@ export default async function OrganisationsPage() {
                 : " · no primary contact"}
               {org.gstin ? ` · ${org.gstin}` : ""}
             </p>
-            <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.78125rem] text-faint-foreground">
               <span>{org.memberCount} member{org.memberCount === 1 ? "" : "s"}</span>
               <span>{org.eventCount} event{org.eventCount === 1 ? "" : "s"}</span>
               <span>{org.venueCount} venue{org.venueCount === 1 ? "" : "s"}</span>
               <span>since {formatDay(org.created_at.toISOString())}</span>
               {org.domains.map((d) => (
-                <span key={d.domain} className="inline-flex items-center gap-1">
-                  {d.verified ? <IconCircleCheck className="size-3.5 text-success" /> : null}
+                <span key={d.domain} className={d.verified ? "inline-flex items-center gap-1 text-success" : "inline-flex items-center gap-1"}>
+                  {d.verified ? <IconCircleCheck aria-hidden className="size-3.5" /> : null}
                   {d.domain}
                   {d.verified ? "" : " (unverified)"}
                 </span>

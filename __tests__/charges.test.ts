@@ -23,7 +23,7 @@ const mockDb = {
   // A transaction runs its callback against the same client.
   $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>): Promise<unknown> => cb(mockDb)),
   // The role is read from the database (lib/current-user.ts): here, the session's own.
-  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null })) },
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null })) },
   audit_logs: { create: jest.fn() },
   billing_checkouts: { update: jest.fn() },
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },
@@ -31,8 +31,18 @@ const mockDb = {
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
-jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
+// As getAuth() returns it: the jwt callback always writes `signedInAt` (lib/session-revocation.ts).
+jest.mock("@/lib/auth", () => ({
+  getAuth: async () => {
+    const session = await mockAuth()
+    return session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session
+  },
+}))
+// The in-transaction writer, as lib/audit-log.ts writes it: through the transaction's audit_logs.
+jest.mock("@/lib/audit-log", () => ({
+  auditLog: jest.fn(),
+  auditInTx: (tx: { audit_logs: { create: (a: unknown) => unknown } }, entry: unknown) => tx.audit_logs.create({ data: entry }),
+}))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { advanceCharge, getChargeLedger, pricePlacement } from "@/lib/charge-actions"

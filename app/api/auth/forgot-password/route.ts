@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
@@ -25,7 +27,32 @@ import { readJson } from "@/lib/api-input"
 /** One hour. Short, because this token changes a credential. */
 const RESET_TTL_MS = 60 * 60 * 1000
 
+/**
+ * The one form of an address this route uses, for the lookup and the limit
+ * alike: trimmed and lower-cased, which is how every account's address is
+ * stored (SCRUM-328) and how sign-in looks it up. No Unicode folding and no
+ * `+tag` stripping: either would make two stored accounts one string, and the
+ * lookup is an exact match on the stored form. Anything not a string is "".
+ */
+function canonicalEmail(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toLowerCase() : ""
+}
+
+/**
+ * Every answer takes at least this long, and the email goes after it (step 18
+ * security review, L3): an address with an account did a database write and a
+ * mail send that one without did not, and the difference was a clock.
+ */
+const MIN_RESPONSE_MS = 600
+
+async function padded<T>(started: number, response: T): Promise<T> {
+  const wait = MIN_RESPONSE_MS - (Date.now() - started)
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+  return response
+}
+
 export async function POST(req: NextRequest) {
+  const started = Date.now()
   // Two limits. Per-IP stops someone walking a list of addresses; the
   // per-address limit below stops one victim being mailbombed from many IPs.
   const limited = await rateLimit(req, {
@@ -44,15 +71,31 @@ export async function POST(req: NextRequest) {
 
   try {
     const { email } = ((await readJson(req)) ?? {}) as { email?: unknown }
-    const address = typeof email === "string" ? email.trim().toLowerCase() : ""
-    if (!address || !emailDomain(address)) return ok
+    const address = canonicalEmail(email)
+    if (!address || !emailDomain(address)) return padded(started, ok)
 
-    const perAddress = await rateLimit(req, {
+    /*
+     * Three mails an hour per address, and over that the same "ok" with
+     * nothing issued and nothing sent (L3 and the scan after it).
+     *
+     * This answered a 429, which let a stranger refuse the owner's own request
+     * for the hour. Now the cap only stops mail. Nothing over it issues a
+     * token either — issuing spends the outstanding one — so the newest link
+     * that was mailed stays good for its full hour: three requests from a
+     * stranger put three links in the owner's inbox and take nothing away.
+     * The window is fixed, not sliding (lib/rate-limit-store.ts `hit`), so a
+     * steady trickle cannot hold it shut; the per-network limit above stays.
+     *
+     * The key is the hash of the very string the account is looked up by, so
+     * one bucket is one account: no variant of an address reaches the same
+     * account through a different bucket, and no two accounts share one.
+     */
+    const capped = await rateLimit(req, {
       windowMs: 60 * 60 * 1000,
       maxRequests: 3,
-      keyGenerator: () => `auth:forgot:addr:${address}`,
+      keyGenerator: () => `auth:forgot:addr:${createHash("sha256").update(address).digest("hex")}`,
     })
-    if (perAddress) return perAddress
+    if (capped) return padded(started, ok)
 
     const user = await db.user.findUnique({
       where: { email: address },
@@ -76,7 +119,7 @@ export async function POST(req: NextRequest) {
      * Nothing downstream needed changing: `/api/auth/reset-password` already
      * revokes `mobile_refresh_tokens` when the password changes.
      */
-    if (!user || user.deletedAt) return ok
+    if (!user || user.deletedAt) return padded(started, ok)
 
     // Outstanding tokens for this user are spent. Otherwise requesting a second
     // link leaves the first one live, and the older mail is the one more likely
@@ -84,13 +127,12 @@ export async function POST(req: NextRequest) {
     const link = await issuePasswordResetLink(user.id, RESET_TTL_MS)
 
     if (emailConfigured()) {
-      const result = await sendEmail({
-        to: address,
-        ...passwordResetEmail(user.name ?? "there", link),
-      })
-      if (!result.sent) {
-        logger.error("Password reset email failed", { userId: user.id, reason: result.reason })
-      }
+      // After the response, never awaited by it (L3).
+      void sendEmail({ to: address, ...passwordResetEmail(user.name ?? "there", link) })
+        .then((result) => {
+          if (!result.sent) logger.error("Password reset email failed", { userId: user.id, reason: result.reason })
+        })
+        .catch((error: unknown) => logger.error("Password reset email failed", { userId: user.id, error: String(error) }))
     }
 
     auditLog({
@@ -101,13 +143,13 @@ export async function POST(req: NextRequest) {
       ipAddress: getRequestIp(req),
     })
 
-    return ok
+    return padded(started, ok)
   } catch (err) {
     logger.error("Forgot-password failed", {
       error: err instanceof Error ? err.message : String(err),
     })
     // Even a crash returns the same body — an error here would otherwise
     // distinguish "real address, something broke" from "no such address".
-    return ok
+    return padded(started, ok)
   }
 }

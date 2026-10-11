@@ -7,7 +7,7 @@
  * dead end visible to every host.
  */
 jest.mock("@/lib/auth", () => ({
-  getAuth: () => Promise.resolve({ user: { id: "u1", role: "venue_owner" } }),
+  getAuth: () => Promise.resolve({ user: { id: "u1", role: "venue_owner", signedInAt: 0 } }),
 }))
 jest.mock("@/lib/rate-limit", () => ({ rateLimit: () => Promise.resolve(null), userLimit: () => ({}) }))
 jest.mock("@/lib/event-visibility", () => ({ visibleEventsWhere: () => Promise.resolve({}) }))
@@ -15,7 +15,8 @@ jest.mock("@/lib/db", () => ({
   db: {
     organisation_members: { findMany: () => Promise.resolve([{ org_id: "o1" }]) },
     events: { findMany: () => Promise.resolve([]) },
-    user: { findMany: () => Promise.resolve([]) },
+    // currentUser reads the caller's row (step 18, L5).
+    user: { findMany: () => Promise.resolve([]), findUnique: () => Promise.resolve({ role: "venue_owner", suspended_at: null, deletedAt: null, password_changed_at: null }) },
     organisations: { findMany: () => Promise.resolve([]) },
     venues: {
       findMany: () => Promise.resolve([{ id: "v-123", name: "The Humming Tree", city: "Bengaluru" }]),

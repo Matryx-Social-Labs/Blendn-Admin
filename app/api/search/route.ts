@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { errorResponse } from "@/lib/api-response"
 import { getAuth } from "@/lib/auth"
+import { currentUser } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -44,7 +45,11 @@ export async function GET(req: NextRequest) {
     // Two characters is where the results stop being "everything".
     if (q.length < 2) return NextResponse.json({ hits: [] })
 
-    const role = session.user.role
+    // The admin's reach (users, leads, every organisation) on the role the
+    // database holds now, not the cookie's (step 18, L5).
+    const caller = await currentUser()
+    if (!caller) return errorResponse("Unauthorized", 401)
+    const role = caller.role
     const isAdmin = role === "app_admin"
     const contains = { contains: q, mode: "insensitive" as const }
 

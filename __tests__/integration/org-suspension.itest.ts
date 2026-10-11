@@ -16,7 +16,7 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("@/lib/rate-limit", () => ({ rateLimit: jest.fn().mockResolvedValue(null), userLimit: jest.fn() }))
 // The push transport is mocked; the `notifications` rows are real.
 jest.mock("@/lib/push-notifications", () => {
