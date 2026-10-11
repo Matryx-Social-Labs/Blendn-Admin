@@ -446,7 +446,9 @@ describe("a venue changing hands (review M7)", () => {
     expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
     expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(true)
     expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
-    expect(await db.audit_logs.count({ where: { action: "entitlement.ended_on_transfer", resource_id: v } })).toBe(1)
+    // Both of the previous owner's rows are its own: its Pro ended, and the venue went (SCRUM-604).
+    expect(await db.audit_logs.count({ where: { action: "entitlement.ended_on_transfer", resource_id: v, org_id: payerOrg } })).toBe(1)
+    expect(await db.audit_logs.count({ where: { action: "venue.ownership_ended", resource_id: v, org_id: payerOrg } })).toBe(1)
 
     // The new owner sees the venue, and none of the previous owner's mandate:
     // no subscription, no payment row, no reference, invoice or amount anywhere.
