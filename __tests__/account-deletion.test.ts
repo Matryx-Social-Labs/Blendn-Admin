@@ -40,6 +40,8 @@ const mockDb = {
   crew_invites: { deleteMany: jest.fn() },
   blend_reveals: { deleteMany: jest.fn() },
   product_events: { deleteMany: jest.fn() },
+  venue_regular_optins: { deleteMany: jest.fn() },
+  venue_offer_mutes: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },

@@ -46,8 +46,10 @@ function serverActionFiles(): string[] {
 }
 
 /** Any of the ways this codebase establishes who is calling. */
+// `currentUser()` (lib/current-user.ts) is `getAuth()` plus the account's
+// role, suspension and deletion read from the database (step 12's actions).
 const READS_SESSION =
-  /getAuth\(|await auth\(\)|requireUser\(|requireAdmin\(|requireOrgRole\(|actorFor\(/
+  /getAuth\(|await auth\(\)|requireUser\(|requireAdmin\(|requireOrgRole\(|actorFor\(|currentUser\(/
 
 describe("server actions authorise themselves", () => {
   const files = serverActionFiles()

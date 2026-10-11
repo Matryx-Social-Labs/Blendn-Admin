@@ -1,0 +1,460 @@
+/*
+ * Regulars, blind offers and the door pass against real Postgres (step 12;
+ * TQ-A09: RG-U01, RG-U03, RG-I01..I08, SEC-09).
+ *
+ *   - Who is a regular: 3+ nights in 30 at the venue, after its claim only;
+ *     two check-ins on one night are one night; staff, a minor, an unknown
+ *     age, a muted person, a deleted account and the venue's own people never
+ *     are (RG-U01, D-7).
+ *   - The send: Venue Pro asked on the server (RG-I08), owners and admins
+ *     only, the words moderated (RG-I06), two a week under a lock (RG-I07),
+ *     and an audience under 5 refused with no count and nothing written (D-8).
+ *     The venue's answer is `{ offerId, sent }` and nothing else (RG-I01).
+ *   - The counts: held back by the complement rule.
+ *   - The pass: redeemed once under a race, replay refused, a stale code and
+ *     another venue's staff refused alike, one a night (RG-I04, RG-U03).
+ *   - The opt-in: only an explicit boolean; revoking takes the person off the
+ *     venue's list on the next read; audited (RG-I02, RG-I03).
+ *   - A canary name is absent from every venue-facing answer until that
+ *     person opts in, page tree included (SEC-09).
+ */
+process.env.MOBILE_JWT_SECRET = process.env.MOBILE_JWT_SECRET ?? "itest-mobile-secret-0123456789abcdefghij"
+process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "itest-nextauth-secret-0123456789abcdefghij"
+
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+const mockGetAuth = jest.fn()
+jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+// The venue's map form imports Leaflet's CSS, which node cannot load.
+jest.mock("@/app/dashboard/venues/[id]/venue-manage", () => ({ VenueManage: () => null }))
+
+import { NextRequest } from "next/server"
+import { isValidElement, type ReactElement } from "react"
+
+import { signAccessToken } from "@/lib/mobile-auth"
+import { OFFER_PUSH_BODY, OFFER_PUSH_TITLE } from "@/lib/offers/deliver"
+import { passCode, passStep } from "@/lib/offers/pass-code"
+import { venueOffersView } from "@/lib/offers/venue"
+import { resetMemoryStore } from "@/lib/rate-limit-store"
+import { venueDayBounds } from "@/lib/venue-day"
+
+import { closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
+
+/* eslint-disable @typescript-eslint/no-require-imports */
+const actions = require("@/lib/offer-actions") as typeof import("@/lib/offer-actions")
+const offersRoute = require("@/app/api/mobile/offers/route") as typeof import("@/app/api/mobile/offers/route")
+const offerRoute = require("@/app/api/mobile/offers/[offerId]/route") as typeof import("@/app/api/mobile/offers/[offerId]/route")
+const regularRoute = require("@/app/api/mobile/venues/[venueId]/regular/route") as typeof import("@/app/api/mobile/venues/[venueId]/regular/route")
+const venuePage = require("@/app/dashboard/venues/[id]/page") as typeof import("@/app/dashboard/venues/[id]/page")
+/* eslint-enable @typescript-eslint/no-require-imports */
+
+const DAY = 86_400_000
+const users: string[] = []
+const orgs: string[] = []
+const venues: string[] = []
+const events: string[] = []
+
+const as = (id: string, role: "venue_owner" | "app_admin" = "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role } })
+const yearsAgo = (years: number) => new Date(Date.now() - (years * 365.25 + 30) * DAY)
+
+async function person(label: string, o: { age?: number | null; first?: string } = {}) {
+  const id = await makeUser(testId(label))
+  users.push(id)
+  await onboard(id)
+  const age = o.age === undefined ? 30 : o.age
+  await db.profiles.update({
+    where: { id },
+    data: { name: `${o.first ?? "Test"} ${label}`, date_of_birth: age === null ? null : yearsAgo(age), age: null },
+  })
+  return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
+}
+
+async function dashboardUser(label: string, role: "venue_owner" | "app_admin" = "venue_owner") {
+  const id = await makeUser(testId(label))
+  users.push(id)
+  await db.user.update({ where: { id }, data: { role } })
+  return id
+}
+
+async function org(owner: string, staff: string[] = []) {
+  const o = await db.organisations.create({ data: { display_name: testId("venue_org"), kind: "company", status: "verified" } })
+  orgs.push(o.id)
+  await db.organisation_members.create({ data: { org_id: o.id, user_id: owner, role: "owner" } })
+  for (const s of staff) await db.organisation_members.create({ data: { org_id: o.id, user_id: s, role: "staff" } })
+  return o.id
+}
+
+/** A claimed venue on UTC with its day turning at 06:00. */
+async function venue(orgId: string | null, claimedDaysAgo = 60) {
+  const v = await db.venues.create({
+    data: {
+      name: testId("Regulars Venue"),
+      city: "Bengaluru",
+      latitude: 12.97,
+      longitude: 77.64,
+      timezone: "UTC",
+      day_reset_hour: 6,
+      owner_org_id: orgId,
+      claimed_at: orgId ? new Date(Date.now() - claimedDaysAgo * DAY) : null,
+    },
+  })
+  venues.push(v.id)
+  return v.id
+}
+
+async function pro(venueId: string) {
+  await db.entitlements.create({
+    data: { subject_kind: "venue", subject_id: venueId, product: "venue_pro", source: "grant", starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 90 * DAY) },
+  })
+}
+
+/** Where today's venue day began: the regulars' window ends here. */
+const today = () => venueDayBounds("UTC", 6, new Date()).start
+
+let host = ""
+/** A night out at the venue `k` days before today began, at 20:00 + `hoursLater`. */
+async function night(venueId: string, userId: string, k: number, o: { kind?: "attendee" | "staff"; hoursLater?: number } = {}) {
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+  await db.events.update({ where: { id: eventId }, data: { venue_id: venueId } })
+  const at = new Date(today().getTime() - k * DAY + (14 + (o.hoursLater ?? 0)) * 60 * 60 * 1000)
+  await db.event_check_ins.create({
+    data: { event_id: eventId, occurrence_id: await occurrenceOf(eventId), user_id: userId, kind: o.kind ?? "attendee", status: "checked_out", check_in_time: at },
+  })
+}
+
+async function regular(venueId: string, userId: string, nights = [1, 2, 3]) {
+  for (const k of nights) await night(venueId, userId, k)
+}
+
+const req = (url: string, token: string, method = "GET", body?: unknown) =>
+  new NextRequest(`http://localhost${url}`, {
+    method,
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    ...(body !== undefined && { body: typeof body === "string" ? body : JSON.stringify(body) }),
+  })
+
+async function openOffer(token: string, offerId: string) {
+  const res = await offerRoute.GET(req(`/api/mobile/offers/${offerId}`, token), { params: Promise.resolve({ offerId }) })
+  return { status: res.status, json: await res.json() }
+}
+
+async function prefs(token: string, venueId: string, body: unknown) {
+  const res = await regularRoute.PUT(req(`/api/mobile/venues/${venueId}/regular`, token, "PUT", body), { params: Promise.resolve({ venueId }) })
+  return { status: res.status, json: await res.json() }
+}
+
+async function until<T>(read: () => Promise<T>, check: (v: T) => boolean, timeoutMs = 5_000): Promise<T> {
+  const started = Date.now()
+  for (;;) {
+    const value = await read()
+    if (check(value) || Date.now() - started > timeoutMs) return value
+    await new Promise((r) => setTimeout(r, 25))
+  }
+}
+
+const refusal = (p: Promise<unknown>) => p.then(() => null, (e: Error) => e.message)
+const sends = (offerId: string) => db.venue_offer_sends.findMany({ where: { offer_id: offerId }, select: { user_id: true, opened_at: true, redeemed_at: true } })
+
+// The world: venue A with exactly five regulars and every kind of near miss.
+let owner = ""
+let staff = ""
+let admin = ""
+let otherOwner = ""
+let orgA = ""
+let A = ""
+const R: { id: string; token: string }[] = []
+const misses: Record<string, string> = {}
+
+beforeAll(async () => {
+  host = await makeUser(testId("rg_host"), "organizer")
+  users.push(host)
+  owner = await dashboardUser("rg_owner")
+  staff = await dashboardUser("rg_staff")
+  admin = await dashboardUser("rg_admin", "app_admin")
+  otherOwner = await dashboardUser("rg_other_owner")
+  orgA = await org(owner, [staff])
+  A = await venue(orgA)
+  // Another venue, with its own owner: the staff of somewhere else.
+  await venue(await org(otherOwner))
+
+  for (let i = 0; i < 5; i++) {
+    const p = await person(`rg_r${i}`, { first: `Zqcanary${i}` })
+    R.push(p)
+    await regular(A, p.id)
+  }
+  // Two check-ins on one night (20:00 and 02:00, before the 06:00 turn) are one night.
+  const twice = await person("rg_twice", { first: "Zqcanarytwice" })
+  await night(A, twice.id, 1)
+  await night(A, twice.id, 1, { hoursLater: 6 })
+  await night(A, twice.id, 2)
+  misses.twice = twice.id
+  const staffer = await person("rg_staffer", { first: "Zqcanarystaff" })
+  for (const k of [1, 2, 3]) await night(A, staffer.id, k, { kind: "staff" })
+  misses.staffer = staffer.id
+  misses.minor = (await person("rg_minor", { age: 16 })).id
+  await regular(A, misses.minor)
+  misses.noAge = (await person("rg_noage", { age: null })).id
+  await regular(A, misses.noAge)
+  misses.deleted = (await person("rg_deleted")).id
+  await regular(A, misses.deleted)
+  await db.user.update({ where: { id: misses.deleted }, data: { deletedAt: new Date() } })
+  // One of the venue's own people, checked in as a guest.
+  misses.member = (await person("rg_member")).id
+  await regular(A, misses.member)
+  await db.organisation_members.create({ data: { org_id: orgA, user_id: misses.member, role: "staff" } })
+  // Two of three nights before the 30-night window.
+  misses.old = (await person("rg_old")).id
+  await regular(A, misses.old, [1, 31, 32])
+}, 120_000)
+
+beforeEach(() => resetMemoryStore())
+
+afterAll(async () => {
+  await db.notifications.deleteMany({ where: { user_id: { in: users } } })
+  await db.audit_logs.deleteMany({ where: { resource: "venue", resource_id: { in: venues } } })
+  await db.entitlements.deleteMany({ where: { subject_kind: "venue", subject_id: { in: venues } } })
+  await db.venue_offers.deleteMany({ where: { venue_id: { in: venues } } })
+  await db.venue_regular_optins.deleteMany({ where: { venue_id: { in: venues } } })
+  await db.venue_offer_mutes.deleteMany({ where: { venue_id: { in: venues } } })
+  await db.event_check_ins.deleteMany({ where: { event_id: { in: events } } })
+  await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
+  await db.events.deleteMany({ where: { id: { in: events } } })
+  await db.venues.deleteMany({ where: { id: { in: venues } } })
+  await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
+  await db.organisations.deleteMany({ where: { id: { in: orgs } } })
+  await db.profiles.deleteMany({ where: { id: { in: users } } })
+  await db.user.deleteMany({ where: { id: { in: users } } })
+  await closeDb()
+}, 120_000)
+
+describe("the send", () => {
+  it("without Venue Pro, refuses on the server, naming the plan, and writes nothing (RG-I08)", async () => {
+    as(owner)
+    expect(await refusal(actions.sendOffer({ venueId: A, text: "First drink on the house", days: 7 }))).toMatch(/Venue Pro/)
+    expect(await db.venue_offers.count({ where: { venue_id: A } })).toBe(0)
+  })
+
+  it("refuses staff, another venue's owner and an admin", async () => {
+    await pro(A)
+    as(staff)
+    expect(await refusal(actions.sendOffer({ venueId: A, text: "x", days: 7 }))).toMatch(/owner or admin/)
+    as(otherOwner)
+    expect(await refusal(actions.sendOffer({ venueId: A, text: "x", days: 7 }))).toBe("This venue isn't yours to send offers from.")
+    as(admin, "app_admin")
+    expect(await refusal(actions.sendOffer({ venueId: A, text: "x", days: 7 }))).toBe("This venue isn't yours to send offers from.")
+    expect(await db.venue_offers.count({ where: { venue_id: A } })).toBe(0)
+  })
+
+  it("refuses a phone number and a banned word, saying why (RG-I06)", async () => {
+    as(owner)
+    expect(await refusal(actions.sendOffer({ venueId: A, text: "Free drink, call 98450 12345", days: 7 }))).toMatch(/contact details/)
+    expect(await refusal(actions.sendOffer({ venueId: A, text: "Free drink for every retard here", days: 7 }))).toBe("This can't be sent as an offer.")
+    expect(await db.venue_offers.count({ where: { venue_id: A } })).toBe(0)
+  })
+
+  it("reaches exactly the regulars, answers with how many and nothing else, and delivers a push naming no venue (RG-U01, RG-I01)", async () => {
+    as(owner)
+    const result = await actions.sendOffer({ venueId: A, text: "First drink on the house, Thu–Sun before 10", days: 7 })
+    expect(Object.keys(result).sort()).toEqual(["offerId", "sent"])
+    expect(result.sent).toBe(5)
+    const rows = await sends(result.offerId)
+    expect(rows.map((r) => r.user_id).sort()).toEqual(R.map((r) => r.id).sort())
+    for (const id of Object.values(misses)) expect(rows.map((r) => r.user_id)).not.toContain(id)
+
+    const offer = await db.venue_offers.findUniqueOrThrow({ where: { id: result.offerId } })
+    expect(offer).toMatchObject({ audience_size: 5, org_id: orgA, created_by: owner })
+    const audits = await db.audit_logs.findMany({ where: { resource: "venue", resource_id: A, action: "venue_offer.send" } })
+    expect(audits).toHaveLength(1)
+    expect(audits[0].details).toEqual({ offerId: result.offerId, audience: 5, days: 7 })
+
+    const bell = await until(
+      () => db.notifications.findMany({ where: { user_id: { in: R.map((r) => r.id) }, kind: "venue_offer" } }),
+      (n) => n.length === 5
+    )
+    expect(bell).toHaveLength(5)
+    for (const n of bell) {
+      expect({ title: n.title, body: n.body }).toEqual({ title: OFFER_PUSH_TITLE, body: OFFER_PUSH_BODY })
+      expect(n.title + n.body).not.toContain("Regulars Venue")
+      expect(n.data).toMatchObject({ type: "venue_offer", offerId: result.offerId })
+    }
+  })
+
+  it("two a week: the third is refused, and three at once send two (RG-I07)", async () => {
+    as(owner)
+    await actions.sendOffer({ venueId: A, text: "Second offer", days: 3 })
+    expect(await refusal(actions.sendOffer({ venueId: A, text: "Third offer", days: 3 }))).toMatch(/sent its 2 offers this week/)
+    expect(await db.venue_offers.count({ where: { venue_id: A } })).toBe(2)
+
+    const C = await venue(orgA)
+    await pro(C)
+    for (let i = 0; i < 5; i++) await regular(C, R[i].id)
+    const results = await Promise.allSettled([1, 2, 3].map((n) => actions.sendOffer({ venueId: C, text: `Race ${n}`, days: 3 })))
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2)
+    expect(await db.venue_offers.count({ where: { venue_id: C } })).toBe(2)
+  })
+
+  it("an audience under 5 is refused with no count and nothing written, and visits before the claim never count (D-7, D-8)", async () => {
+    const D = await venue(orgA, 10)
+    await pro(D)
+    // Three regulars after the claim; six people with two nights before it and one after.
+    for (let i = 0; i < 3; i++) await regular(D, R[i].id)
+    for (let i = 0; i < 6; i++) {
+      const p = await person(`rg_preclaim${i}`)
+      await regular(D, p.id, [2, 15, 20])
+    }
+    as(owner)
+    const message = await refusal(actions.sendOffer({ venueId: D, text: "An offer", days: 7 }))
+    expect(message).toBe("Fewer than 5 regulars right now, so nothing was sent. A regular has come on 3 or more nights in the last 30.")
+    expect(await db.venue_offers.count({ where: { venue_id: D } })).toBe(0)
+    expect(await db.venue_offer_sends.count({ where: { venue_id: D } })).toBe(0)
+    expect(await db.audit_logs.count({ where: { resource: "venue", resource_id: D } })).toBe(0)
+  })
+
+  it("a person who muted the venue receives nothing (RG-I07)", async () => {
+    const E = await venue(orgA)
+    await pro(E)
+    for (let i = 0; i < 5; i++) await regular(E, R[i].id)
+    expect((await prefs(R[4].token, E, { offersMuted: true })).status).toBe(200)
+    as(owner)
+    // Four left: under the floor.
+    expect(await refusal(actions.sendOffer({ venueId: E, text: "An offer", days: 7 }))).toMatch(/^Fewer than 5 regulars/)
+    expect((await prefs(R[4].token, E, { offersMuted: false })).json.data).toEqual({ known: false, offersMuted: false })
+    expect((await actions.sendOffer({ venueId: E, text: "An offer", days: 7 })).sent).toBe(5)
+    const actionsLogged = await db.audit_logs.findMany({ where: { resource: "venue", resource_id: E, user_id: R[4].id }, orderBy: { created_at: "asc" } })
+    expect(actionsLogged.map((a) => a.action)).toEqual(["venue_offer.mute", "venue_offer.unmute"])
+  })
+})
+
+describe("the person's side and the pass", () => {
+  let offerId = ""
+  beforeAll(async () => {
+    offerId = (await db.venue_offers.findFirstOrThrow({ where: { venue_id: A }, orderBy: { created_at: "asc" } })).id
+  })
+
+  it("lists the offer for a recipient without opening it, and 404s it for anyone else", async () => {
+    const list = await offersRoute.GET(req("/api/mobile/offers", R[0].token))
+    const body = await list.json()
+    expect(body.data.offers.map((o: { id: string }) => o.id)).toContain(offerId)
+    expect((await sends(offerId)).every((s) => s.opened_at === null)).toBe(true)
+    const stranger = await person("rg_stranger")
+    expect((await openOffer(stranger.token, offerId)).status).toBe(404)
+  })
+
+  it("opening counts once, and the pass carries a code that turns", async () => {
+    const first = await openOffer(R[0].token, offerId)
+    expect(first.status).toBe(200)
+    expect(first.json.data.offer).toMatchObject({ id: offerId, state: "live", text: "First drink on the house, Thu–Sun before 10" })
+    expect(first.json.data.offer.pass.code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/)
+    const openedAt = (await db.venue_offer_sends.findFirstOrThrow({ where: { offer_id: offerId, user_id: R[0].id } })).opened_at
+    await openOffer(R[0].token, offerId)
+    expect((await db.venue_offer_sends.findFirstOrThrow({ where: { offer_id: offerId, user_id: R[0].id } })).opened_at).toEqual(openedAt)
+  })
+
+  it("redeems once under a race; a replay, a stale code and another venue's staff are refused (RG-I04, RG-U03)", async () => {
+    const { json } = await openOffer(R[0].token, offerId)
+    const code = json.data.offer.pass.code as string
+    const send = await db.venue_offer_sends.findFirstOrThrow({ where: { offer_id: offerId, user_id: R[0].id } })
+
+    as(otherOwner)
+    expect(await refusal(actions.redeemPass({ venueId: A, code }))).toBe("That code isn't a live pass here. Ask them to open the pass again.")
+    // A code from a minute ago: a screenshot.
+    as(staff)
+    expect(await refusal(actions.redeemPass({ venueId: A, code: passCode(send.id, passStep(new Date()) - 2) }))).toBe(
+      "That code isn't a live pass here. Ask them to open the pass again."
+    )
+
+    const [a, b] = await Promise.allSettled([actions.redeemPass({ venueId: A, code }), actions.redeemPass({ venueId: A, code })])
+    const ok = [a, b].filter((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ text: string }>[]
+    expect(ok).toHaveLength(1)
+    expect(Object.keys(ok[0].value)).toEqual(["text"])
+    expect([a, b].find((r) => r.status === "rejected")).toMatchObject({ reason: { message: "This pass was already redeemed." } })
+    expect(await refusal(actions.redeemPass({ venueId: A, code }))).toBe("This pass was already redeemed.")
+    expect(await db.audit_logs.count({ where: { resource: "venue", resource_id: A, action: "venue_offer.redeem" } })).toBe(1)
+
+    const after = await openOffer(R[0].token, offerId)
+    expect(after.json.data.offer).toMatchObject({ state: "redeemed", pass: null })
+  })
+
+  it("one pass a night per person per venue, whichever offer", async () => {
+    const second = await db.venue_offers.findFirstOrThrow({ where: { venue_id: A, text: "Second offer" } })
+    const opened = await openOffer(R[0].token, second.id)
+    expect(opened.json.data.offer).toMatchObject({ state: "used_tonight", pass: null })
+    // Even a pass that was on screen before the first was redeemed: the index holds.
+    const send = await db.venue_offer_sends.findFirstOrThrow({ where: { offer_id: second.id, user_id: R[0].id } })
+    await db.venue_offer_sends.update({ where: { id: send.id }, data: { pass_seen_at: new Date() } })
+    as(staff)
+    expect(await refusal(actions.redeemPass({ venueId: A, code: passCode(send.id, passStep(new Date())) }))).toBe(
+      "They've already used a pass here tonight. One a night."
+    )
+  })
+
+  it("the venue sees counts held back by the complement rule, never who", async () => {
+    for (const r of R.slice(1)) await openOffer(r.token, offerId)
+    as(owner)
+    const view = await venueOffersView(A)
+    const first = view?.offers.find((o) => o.id === offerId)
+    // 5 sent, 5 opened: "everyone opened" names everyone; 1 redeemed: under 5.
+    expect(first).toMatchObject({ sent: 5, opened: null, redeemed: null })
+  })
+})
+
+describe("being known as a regular (RG-I02, RG-I03, SEC-09)", () => {
+  const venueFacing = async () => {
+    as(owner)
+    const view = JSON.stringify(await venueOffersView(A))
+    // The page tree as the server renders it, props and all: what the RSC payload would carry.
+    const expand = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(expand)
+      if (!isValidElement(node)) return node
+      const el = node as ReactElement<Record<string, unknown>>
+      if (typeof el.type === "function" && ["VenueInsights", "RegularsOffers"].includes(el.type.name)) return expand((el.type as (p: unknown) => unknown)(el.props))
+      return { ...el, props: { ...el.props, children: expand(el.props.children) } }
+    }
+    const el = await venuePage.default({ params: Promise.resolve({ id: A }), searchParams: Promise.resolve({}) })
+    const page = JSON.stringify(expand(el), (k, value) => (k === "type" || k === "_owner" || typeof value === "function" ? undefined : value))
+    return view + page
+  }
+
+  it("the venue sees no regular's name, id or email until they say yes", async () => {
+    const seen = await venueFacing()
+    expect(seen).toContain("Regulars &") // the panel is there
+    for (const r of R) {
+      expect(seen).not.toContain(r.id)
+      expect(seen).not.toContain(`${r.id}@itest.invalid`)
+    }
+    expect(seen).not.toMatch(/Zqcanary/)
+  })
+
+  it("only an explicit boolean changes anything", async () => {
+    for (const body of [{}, { known: "true" }, { known: 1 }, { known: true, extra: 1 }, "not json"]) {
+      expect((await prefs(R[1].token, A, body)).status).toBe(400)
+    }
+    expect(await db.venue_regular_optins.count({ where: { venue_id: A } })).toBe(0)
+  })
+
+  it("yes puts them on the venue's list by first name, audited; taking it back takes them off on the next read", async () => {
+    const yes = await prefs(R[1].token, A, { known: true })
+    expect(yes).toMatchObject({ status: 200, json: { data: { known: true, offersMuted: false } } })
+    as(owner)
+    expect((await venueOffersView(A))?.known).toEqual([{ firstName: "Zqcanary1", nights: 3 }])
+    const seen = await venueFacing()
+    expect(seen).toContain("Zqcanary1")
+    expect(seen).not.toMatch(/Zqcanary[02-4]/)
+    expect(seen).not.toContain(R[1].id)
+
+    expect((await prefs(R[1].token, A, { known: false })).json.data.known).toBe(false)
+    expect((await venueOffersView(A))?.known).toEqual([])
+    expect(await venueFacing()).not.toMatch(/Zqcanary/)
+    const logged = await db.audit_logs.findMany({ where: { resource: "venue", resource_id: A, user_id: R[1].id }, orderBy: { created_at: "asc" } })
+    expect(logged.map((a) => a.action)).toEqual(["venue_regular.optin", "venue_regular.optout"])
+  })
+
+  it("refuses yes at a venue nobody runs, and from someone not known to be an adult", async () => {
+    const unclaimed = await venue(null)
+    expect(await prefs(R[1].token, unclaimed, { known: true })).toMatchObject({ status: 409, json: { errorCode: "VENUE_UNCLAIMED" } })
+    const minor = await person("rg_minor_optin", { age: 16 })
+    expect(await prefs(minor.token, A, { known: true })).toMatchObject({ status: 403, json: { errorCode: "AGE_RESTRICTED" } })
+    expect(await db.venue_regular_optins.count({ where: { venue_id: { in: [A, unclaimed] } } })).toBe(0)
+  })
+})

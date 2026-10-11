@@ -6,7 +6,7 @@ import { analyticsAccess, mayOpenEvent, type AnalyticsAccess } from "./analytics
 import { planBadgeFor, type PlanDate } from "./billing"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
-import { discloseBreakdown, discloseRating, MIN_CELL } from "./disclosure"
+import { discloseRating, heldPart, MIN_CELL } from "./disclosure"
 import type { PacingPoint } from "./dashboard-types"
 import { realEventsWhere } from "./event-kind"
 import { buildPacing, pacingWindowDays } from "./pacing"
@@ -73,13 +73,8 @@ function istMonth(at: Date): string {
 /** A plain count of people, at the minimum cell. */
 export const held = (n: number): number | null => (n >= MIN_CELL ? n : null)
 
-/**
- * A part of a known group, shown only when the part and the rest both reach
- * the floor. The rest is never shown beside it, so neither can be subtracted
- * from a total to recover the other.
- */
-export const heldPart = (part: number, whole: number): number | null =>
-  whole < MIN_CELL ? null : discloseBreakdown([part, whole - part]).cells[0]
+/** The complement rule, kept in lib/disclosure.ts with the other floors. */
+export { heldPart }
 
 const pct = (part: number | null, whole: number): number | null =>
   part === null || whole === 0 ? null : Math.round((part / whole) * 100)

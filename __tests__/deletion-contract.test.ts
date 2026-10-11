@@ -135,6 +135,18 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "RETAINED",
     why: "Written BY the deletion: what they registered with, which the IT Rules 2021 r.3(1)(h) require for 180 days after the account goes. No route reads it, and the retention sweeper purges each row on its date.",
   },
+  venue_regular_optins: {
+    how: "DELETED",
+    why: "\"Let this venue know I'm a regular\" is the person's own disclosure to a venue: it goes with them, so an erased account is never on a venue's list.",
+  },
+  venue_offer_mutes: {
+    how: "DELETED",
+    why: "Their choice to hear no offers from a venue; nobody else reads it.",
+  },
+  venue_offer_sends: {
+    how: "RETAINED",
+    why: "An offer's sent, opened and redeemed counts are the venue's, already shown to it; the row names an anonymised account and nothing else about them, and no venue-facing reader selects it.",
+  },
   audit_logs: {
     how: "RETAINED",
     why: "What an admin did and from where. An accountability record that a subject can erase is not one — and these describe staff actions, not the deleted person's own activity.",

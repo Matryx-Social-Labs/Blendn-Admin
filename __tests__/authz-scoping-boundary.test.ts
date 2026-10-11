@@ -194,6 +194,9 @@ const VENUE_ID_READS_ALLOWED = new Map([
   ["lib/billing.ts", "an organisation's own purchases (`billing_checkouts.venue_id: null`), not events"],
   ["lib/venue-plan.ts", "a venue's purchases (`billing_checkouts.venue_id`), not events"],
   ["lib/subscription-cancel.ts", "a venue's purchases ended when it changes hands (`billing_checkouts.venue_id`), not events"],
+  ["lib/offer-actions.ts", "a venue's offers this week and the passes on screen at its door (`venue_offers`, `venue_offer_sends`), not events; regulars' nights come through lib/regulars.ts, clamped to the claim"],
+  ["lib/offers/person.ts", "the caller's own pass tonight at a venue (`venue_offer_sends`), not events"],
+  ["lib/offers/venue.ts", "a venue's offers this week (`venue_offers`), not events; regulars' nights come through lib/regulars.ts, clamped to the claim"],
 ])
 
 describe("a venue owner's view starts at the claim", () => {

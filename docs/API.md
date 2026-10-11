@@ -2942,3 +2942,63 @@ checked on the server.
 trigger). The cooldowns are the app's: at most one automatic paywall a session,
 never during onboarding, check-in or chat. 400 for anything off these lists.
 
+
+## Regulars, offers and the door pass (step 12)
+
+A venue on Venue Pro can send an offer — "First drink on the house, Thu–Sun
+before 10" — to its **regulars**: people who came on 3 or more nights in the
+last 30, counted from the venue's claim on (a host's event there or its own
+live room; staff never count). The venue picks the words; we pick who, and the
+venue never learns who. It sees how many an offer reached, opened and redeemed,
+each held back under 5. An audience under 5 is refused with nothing sent.
+
+The push names no venue and quotes no offer — a lock screen is read by whoever
+holds the phone: **"An offer for you" / "A place you keep going back to sent you
+something. Open Blendn to see it."** Its `data` is `{ type: "venue_offer",
+offerId }`; the bell stores the same two lines. Open the offer with
+`GET /offers/:offerId`.
+
+### GET /offers
+
+```json
+{ "success": true, "data": { "offers": [ {
+  "id": "…", "venue": { "id": "…", "name": "Toit" },
+  "text": "First drink on the house, Thu–Sun before 10",
+  "sentAt": "2026-10-11T12:00:00.000Z", "endsAt": "2026-10-18T12:00:00.000Z",
+  "state": "live"
+} ] } }
+```
+
+Newest first, at most 50. `state`: `live` (the pass can be shown), `redeemed`,
+`ended` (past its end, or the venue was retired or changed hands — a new owner
+does not honour the last one's offers). Reading the list opens nothing.
+
+### GET /offers/:offerId — the offer and its door pass
+
+The first call is what the venue's "opened" counts. While `live`, `pass` is
+`{ code, rotatesAt }`: six characters that change every 30 seconds. Draw the
+pass live around it (a running clock, motion) and ask again before `rotatesAt`
+while it is on screen. Staff type the code on the dashboard's door screen and
+tap "Redeemed"; the next answer says `redeemed`. A screenshot carries a code
+that stops working within a minute, and a pass redeems once.
+
+One pass a night per person per venue: `used_tonight` means another of this
+venue's passes was redeemed tonight (the venue's night, which turns at its
+reset hour). 404 for an offer you were not sent, the same as for none.
+`no-store`; 60 a minute.
+
+### GET / PUT /venues/:venueId/regular — your choices about a venue
+
+```json
+{ "known": true }
+{ "offersMuted": true }
+```
+
+`known` is "Let this venue know I'm a regular": on, the venue sees your first
+name and your nights there in the last 30, and can greet you; off, it sees
+nothing of you again, from the next request. `offersMuted`: no offers from this
+venue. Each field must be a real boolean, at least one per PUT; a missing one is
+left as it is, so "Maybe later" sends nothing. Each change is audited.
+`known: true` — 409 `VENUE_UNCLAIMED` while nobody runs the venue on Blendn
+(there is nobody to tell), 403 `AGE_RESTRICTED` without an adult age on file.
+404 for no such venue. GET answers `{ known, offersMuted }`.

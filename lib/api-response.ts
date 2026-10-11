@@ -73,6 +73,11 @@ export const ErrorCode = {
    * The remedy is a better fix where you stand, not walking anywhere.
    */
   GPS_TOO_VAGUE: "GPS_TOO_VAGUE",
+  /**
+   * "Let this venue know I'm a regular" at a venue nobody runs on Blendn yet:
+   * there is nobody to tell (step 12). Not `NOT_FOUND`: the venue is there.
+   */
+  VENUE_UNCLAIMED: "VENUE_UNCLAIMED",
 } as const
 
 /**
