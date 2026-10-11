@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { eventClock } from "@/lib/event-phase"
+import { eventHost } from "@/lib/event-host"
 import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { getOccupancies } from "@/lib/occupancy"
@@ -71,6 +72,10 @@ export default async function ChatroomsPage() {
       // "ends 18:30" on the event's clock, not the server's (SCRUM-496).
       timezone: true,
       organizer: { select: { name: true } },
+      // For `eventHost`: the owning organisation is the host once a claim is approved, not the founder in `organizer`.
+      organizer_org: { select: { display_name: true } },
+      kind: true,
+      curated_at: true,
       organizer_id: true,
       organizer_org_id: true,
       chat_group: { select: { id: true, _count: { select: { messages: true } } } },
@@ -172,7 +177,7 @@ export default async function ChatroomsPage() {
               >
                 <p className="-mt-2 truncate text-[0.8125rem] text-muted-foreground">
                   {[room.venue_name, room.city].filter(Boolean).join(" · ") || "Location pending"}
-                  {isPlatformAdmin && room.organizer.name ? ` · ${room.organizer.name}` : ""}
+                  {isPlatformAdmin ? ` · ${eventHost(room).name}` : ""}
                 </p>
                 <dl className="flex gap-6">
                   {(

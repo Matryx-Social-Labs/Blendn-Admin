@@ -117,6 +117,20 @@ async function org(label: string, owner: string, staff?: string) {
   return id
 }
 
+/**
+ * `n` days ago at 14:00 IST, whatever time the suite starts (SCRUM-615).
+ *
+ * These events used `now - n * DAY`, so their arrivals had the time of day of
+ * the run, and every page prints its first and last arrival slot. Started
+ * between 22:40 and 23:00 UTC, a slot label read "4:20 am", the canary's slot,
+ * on pages that must not carry it: 20 red minutes a day. The canary keeps its
+ * own fixed 22:50 UTC; nothing else may land near it.
+ */
+function daysAgoAt(now: number, n: number): Date {
+  const d = new Date(now - n * DAY)
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8, 30))
+}
+
 test.beforeAll(async () => {
   const now = Date.now()
   ids.owner = await person("owner", "organizer")
@@ -128,7 +142,7 @@ test.beforeAll(async () => {
   ids.orgB = await org("org B", ids.ownerB)
 
   const firstPeople = await people("first", 6)
-  ids.first = await event(ids.orgA, ids.owner, "first", new Date(now - 60 * DAY), firstPeople.map((user_id) => ({ user_id, minutes: 95 })))
+  ids.first = await event(ids.orgA, ids.owner, "first", daysAgoAt(now, 60), firstPeople.map((user_id) => ({ user_id, minutes: 95 })))
 
   // 04:20 IST, ten days ago: a slot the sample's evening arrivals never use.
   const tenDaysAgo = new Date(now - 10 * DAY)
@@ -150,7 +164,7 @@ test.beforeAll(async () => {
     })
   }
 
-  ids.pass = await event(ids.orgA, ids.owner, "pass", new Date(now - 20 * DAY), canaryPeople.slice(0, 7).map((user_id) => ({ user_id, minutes: 131 })))
+  ids.pass = await event(ids.orgA, ids.owner, "pass", daysAgoAt(now, 20), canaryPeople.slice(0, 7).map((user_id) => ({ user_id, minutes: 131 })))
   await db.entitlements.create({
     data: {
       subject_kind: "org",
@@ -164,7 +178,7 @@ test.beforeAll(async () => {
   })
 
   const freshPeople = await people("fresh", 5)
-  ids.fresh = await event(ids.orgB, ids.ownerB, "fresh", new Date(now - 5 * DAY), freshPeople.map((user_id) => ({ user_id, minutes: 107 })))
+  ids.fresh = await event(ids.orgB, ids.ownerB, "fresh", daysAgoAt(now, 5), freshPeople.map((user_id) => ({ user_id, minutes: 107 })))
 })
 
 test.afterAll(async () => {
@@ -250,7 +264,7 @@ test("an Event Pass opens its event and nothing else", async ({ baseURL }) => {
 
 test("inside the free window, everything is open", async ({ baseURL }) => {
   const page = await fetchPage(baseURL!, ids.ownerB, "organizer", analytics(ids.fresh))
-  expect(page.body).toContain("Free until")
+  expect(page.body).toContain("Open until")
   expect(page.body).toContain("1h 47m")
   expect(page.body).not.toContain("Sample: Rooftop social")
 })

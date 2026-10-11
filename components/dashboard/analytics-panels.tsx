@@ -172,29 +172,40 @@ export function ArrivalBars({ arrivals }: { arrivals: EventAnalytics["arrivals"]
   const peak = Math.max(...arrivals.map((b) => b.people / slots(b)), 1)
   const total = arrivals.reduce((n, b) => n + b.people, 0)
   const busiest = arrivals.reduce((a, b) => (b.people / slots(b) > a.people / slots(a) ? b : a))
-  const summary = `${total} first arrivals from ${TIME.format(new Date(arrivals[0].from))} to ${TIME.format(
-    new Date(arrivals[arrivals.length - 1].to)
-  )}; busiest ${TIME.format(new Date(busiest.from))}–${TIME.format(new Date(busiest.to))} with ${busiest.people}.`
+  const first = TIME.format(new Date(arrivals[0].from))
+  const last = TIME.format(new Date(arrivals[arrivals.length - 1].to))
+  const peakTime = `${TIME.format(new Date(busiest.from))}–${TIME.format(new Date(busiest.to))}`
+  const summary = `${total} first arrivals from ${first} to ${last}; busiest ${peakTime} with ${busiest.people}.`
   return (
     <figure className="flex flex-col gap-1.5">
-      <figcaption className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
-        Arrivals, every 10 minutes
-      </figcaption>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <figcaption className="text-[0.75rem] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+          Arrivals, every 10 minutes
+        </figcaption>
+        {/* The chart's own words, for the eye: the tooltip on a bar is not there on a phone. */}
+        <span aria-hidden="true" className="text-[0.75rem] tabular-nums text-muted-foreground">
+          {total} first arrivals · busiest {peakTime}, {busiest.people}
+        </span>
+      </div>
       <div role="img" aria-label={summary} className="flex h-[120px] items-end gap-1 border-b border-chart-grid">
         {arrivals.map((b) => (
           <div
             key={b.from}
             title={`${TIME.format(new Date(b.from))}–${TIME.format(new Date(b.to))}: ${b.people}`}
-            className="rounded-t bg-chart-1"
+            className="flex justify-center rounded-t bg-chart-1 pt-0.5 text-[0.6875rem] font-bold tabular-nums text-background"
             style={{ flexGrow: slots(b), flexBasis: 0, height: `${Math.max(4, (b.people / slots(b) / peak) * 100)}%` }}
-          />
+          >
+            {b === busiest ? b.people : null}
+          </div>
         ))}
       </div>
-      <div className="flex justify-between text-[0.6875rem] text-faint-foreground">
-        <span>{TIME.format(new Date(arrivals[0].from))}</span>
-        <span>a quiet stretch is merged into the bar beside it until it holds 5</span>
-        <span>{TIME.format(new Date(arrivals[arrivals.length - 1].to))}</span>
+      <div className="flex justify-between whitespace-nowrap text-[0.6875rem] tabular-nums text-faint-foreground">
+        <span>{first}</span>
+        <span>{last}</span>
       </div>
+      <p className="text-[0.6875rem] text-faint-foreground">
+        A quiet stretch is merged into the bar beside it until it holds 5, so a wide bar is drawn at its rate per 10 minutes.
+      </p>
     </figure>
   )
 }

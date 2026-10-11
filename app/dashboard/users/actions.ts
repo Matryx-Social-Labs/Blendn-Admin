@@ -306,13 +306,18 @@ export async function updateUser(
     note("age", before.profile?.age, data.profile?.age)
     note("location", before.profile?.location, normalizedLocation)
     note("onboarded", before.profile?.onboarded, data.profile?.onboarded)
-    auditLog({
-      userId: admin.id,
-      action: "user.updated",
-      resource: "user",
-      resourceId: id,
-      details: { changed } as never,
-    })
+    // Nothing changed, no row: the dialog sends every field it shows and then the
+    // role, so a role-only save used to leave "user.updated {}" beside the real
+    // `user.role_changed` (SCRUM-614).
+    if (Object.keys(changed).length > 0) {
+      auditLog({
+        userId: admin.id,
+        action: "user.updated",
+        resource: "user",
+        resourceId: id,
+        details: { changed } as never,
+      })
+    }
 
     revalidatePath("/dashboard/users")
     return { success: true, user }
