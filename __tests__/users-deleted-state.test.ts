@@ -43,7 +43,12 @@ beforeEach(() => {
   mockDb.user.update.mockResolvedValue({ id: "u1" })
   // The pre-write read the audit row is built from; `deletedAt: null` in
   // its where is what makes an erased row "not found" before any write.
-  mockDb.user.findUnique.mockResolvedValue({ name: "Old", email: "old@x", role: "attendee", profile: null })
+  mockDb.user.findUnique.mockImplementation(async (args: { select?: { suspended_at?: true } }) =>
+    // requireAdmin's read of the caller's own row (lib/current-user.ts).
+    args.select?.suspended_at
+      ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null }
+      : { name: "Old", email: "old@x", role: "attendee", profile: null }
+  )
   mockDb.audit_logs.create.mockReturnValue({ catch: () => undefined, then: () => undefined })
 })
 
@@ -89,7 +94,7 @@ describe("an erased account cannot be edited back into existence", () => {
     await updateUser("u1", { name: "Resurrected" })
     expect(mockDb.user.update.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
     // And the read before it, so an erased row is refused before any write.
-    expect(mockDb.user.findUnique.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
+    expect(mockDb.user.findUnique.mock.calls.at(-1)![0].where).toEqual({ id: "u1", deletedAt: null })
   })
 
   it("updateUserRole does too", async () => {

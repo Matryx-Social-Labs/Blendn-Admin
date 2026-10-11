@@ -1,6 +1,7 @@
 import { cache } from "react"
 
 import { getAuth } from "./auth"
+import { currentUser } from "./current-user"
 import { db } from "./db"
 import { eventDisplayTitle } from "./event-kind"
 import { activeMembership, actorFor } from "./org-membership"
@@ -39,18 +40,18 @@ export const eventTitleFor = cache(async (id: string): Promise<string | null> =>
  * nobody has claimed it — a member of the organisation that added it.
  */
 export const venueTitleFor = cache(async (id: string): Promise<string | null> => {
-  const session = await getAuth()
-  if (!session?.user) return null
+  const caller = await currentUser()
+  if (!caller) return null
   const venue = await db.venues.findUnique({
     where: { id },
     select: { name: true, owner_org_id: true, created_by_org_id: true, deleted_at: true },
   })
   if (!venue) return null
-  if (session.user.role === "app_admin") return venue.name
+  if (caller.role === "app_admin") return venue.name
   const orgId = venue.owner_org_id ?? (venue.deleted_at ? null : venue.created_by_org_id)
   if (!orgId) return null
   const member = await db.organisation_members.findFirst({
-    where: { user_id: session.user.id, org_id: orgId, ...activeMembership },
+    where: { user_id: caller.id, org_id: orgId, ...activeMembership },
     select: { id: true },
   })
   return member ? venue.name : null
@@ -58,8 +59,9 @@ export const venueTitleFor = cache(async (id: string): Promise<string | null> =>
 
 /** The organiser and venue-owner account pages: admins only, as the pages are. */
 export const accountTitleFor = cache(async (id: string): Promise<string | null> => {
-  const session = await getAuth()
-  if (session?.user?.role !== "app_admin") return null
+  // The role the database holds now (step 18, L5).
+  const caller = await currentUser()
+  if (caller?.role !== "app_admin") return null
   const user = await db.user.findUnique({ where: { id }, select: { name: true, email: true } })
   return user ? (user.name ?? user.email) : null
 })

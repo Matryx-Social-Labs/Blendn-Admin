@@ -198,8 +198,9 @@ describe("curation health separates a wrong pin from a dead listing", () => {
      * and the action returning the sensitive data did not. This returns contact
      * emails and free-text notes for every pending claim on the platform.
      */
-    expect(code("lib/event-claim-actions.ts")).toMatch(/role !== "app_admin"\) throw new Refusal\("Not authorised"\)/)
-    expect(code("app/dashboard/events/curate/queue-actions.ts")).toMatch(/throw new Refusal\("Not authorised"\)/)
+    const queue = (src: string, fn: string) => src.slice(src.indexOf(`export async function ${fn}(`)).slice(0, 1200)
+    expect(queue(code("lib/event-claim-actions.ts"), "getEventClaimQueue")).toMatch(/await requireAdmin\(\)/)
+    expect(queue(code("app/dashboard/events/curate/queue-actions.ts"), "getCurationQueue")).toMatch(/await requireAdmin\(\)/)
   })
 })
 

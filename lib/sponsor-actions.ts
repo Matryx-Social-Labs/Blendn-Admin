@@ -6,6 +6,7 @@ import { z } from "zod"
 
 import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
@@ -316,8 +317,7 @@ export async function attachSponsorToEvent(eventId: string, sponsorId: string) {
  * relations declared on the model, so a future foreign key cannot be forgotten.
  */
 export async function mergeSponsors(loserId: string, winnerId: string, note: string) {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  const admin = await requireAdmin()
   if (loserId === winnerId) throw new Refusal("A brand cannot be merged into itself")
 
   const [loser, winner] = await Promise.all([
@@ -381,7 +381,7 @@ export async function mergeSponsors(loserId: string, winnerId: string, note: str
   })
 
   auditLog({
-    userId: session.user.id,
+    userId: admin.id,
     action: "sponsor.merge",
     resource: "sponsors",
     resourceId: winnerId,
@@ -405,8 +405,7 @@ export async function mergeSponsors(loserId: string, winnerId: string, note: str
  * `normaliseSponsorName` warns against, so the UI shows what actually moves.
  */
 export async function mergePreview(loserId: string) {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const [placements, campaigns, claims] = await Promise.all([
     db.event_sponsors.count({ where: { sponsor_id: loserId } }),
@@ -999,8 +998,7 @@ export interface SponsorRegister {
  * person, rather than merging anything on its own.
  */
 export async function getSponsorRegister(): Promise<SponsorRegister> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const rows = await db.sponsors.findMany({
     where: { deleted_at: null, merged_into: null },

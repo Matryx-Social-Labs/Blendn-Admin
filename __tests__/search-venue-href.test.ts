@@ -15,7 +15,8 @@ jest.mock("@/lib/db", () => ({
   db: {
     organisation_members: { findMany: () => Promise.resolve([{ org_id: "o1" }]) },
     events: { findMany: () => Promise.resolve([]) },
-    user: { findMany: () => Promise.resolve([]) },
+    // currentUser reads the caller's row (step 18, L5).
+    user: { findMany: () => Promise.resolve([]), findUnique: () => Promise.resolve({ role: "venue_owner", suspended_at: null, deletedAt: null }) },
     organisations: { findMany: () => Promise.resolve([]) },
     venues: {
       findMany: () => Promise.resolve([{ id: "v-123", name: "The Humming Tree", city: "Bengaluru" }]),

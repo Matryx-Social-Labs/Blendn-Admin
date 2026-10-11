@@ -1,9 +1,9 @@
-import Link from "next/link"
 import { redirect } from "next/navigation"
 import type { report_status } from "@prisma/client"
 
+import { PillTabs } from "@/components/dashboard/kit"
 import { getAuth } from "@/lib/auth"
-import { cn } from "@/lib/utils"
+import { db } from "@/lib/db"
 
 import { QueueSwitch } from "../queue-switch"
 import { getReportQueue } from "./actions"
@@ -16,10 +16,11 @@ export const metadata = routeMetadata("/dashboard/moderation/reports")
 
 export const dynamic = "force-dynamic"
 
-const TABS: Array<{ value: report_status; label: string; hint: string }> = [
-  { value: "pending", label: "Pending", hint: "Waiting for a human" },
-  { value: "reviewed", label: "Reviewed", hint: "Looked at, no action taken" },
-  { value: "resolved", label: "Resolved", hint: "Acted on" },
+/** Reviewed: looked at, no action taken. Resolved: acted on. The empty state says so. */
+const TABS: Array<{ value: report_status; label: string }> = [
+  { value: "pending", label: "Pending" },
+  { value: "reviewed", label: "Reviewed" },
+  { value: "resolved", label: "Resolved" },
 ]
 
 export default async function ReportsPage({
@@ -34,36 +35,30 @@ export default async function ReportsPage({
   const { status } = await searchParams
   const active = (TABS.find((tab) => tab.value === status)?.value ?? "pending") as report_status
 
-  const { rows, counts, truncated } = await getReportQueue(active)
+  const [{ rows, counts, truncated }, pendingFlags] = await Promise.all([
+    getReportQueue(active),
+    // The other queue's number, for its tab.
+    db.moderation_flags.count({ where: { status: "pending" } }),
+  ])
 
   return (
     <div className="flex flex-col gap-5">
-      <QueueSwitch active="reports" reportCount={counts.pending ?? 0} />
+      <QueueSwitch active="reports" flagCount={pendingFlags} reportCount={counts.pending ?? 0} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav className="flex gap-1.5" aria-label="Report status">
-          {TABS.map((tab) => (
-            <Link
-              key={tab.value}
-              href={`/dashboard/moderation/reports?status=${tab.value}`}
-              aria-current={tab.value === active ? "page" : undefined}
-              title={tab.hint}
-              className={cn(
-                "rounded-full border border-border px-3 py-1.5 text-[0.8125rem] transition-colors",
-                tab.value === active
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )}
-            >
-              {tab.label}
-              {counts[tab.value] ? ` ${counts[tab.value]}` : ""}
-            </Link>
-          ))}
-        </nav>
+        <PillTabs
+          label="Report status"
+          active={active}
+          tabs={TABS.map((tab) => ({
+            key: tab.value,
+            href: `/dashboard/moderation/reports?status=${tab.value}`,
+            label: counts[tab.value] ? `${tab.label} · ${counts[tab.value]}` : tab.label,
+          }))}
+        />
         {truncated ? (
           // Said out loud rather than silently truncated: a capped queue that
           // looks complete is how a backlog gets missed.
-          <span className="text-[0.75rem] text-muted-foreground">
+          <span className="text-[0.8125rem] text-muted-foreground">
             Showing the oldest 100 of each kind
           </span>
         ) : null}

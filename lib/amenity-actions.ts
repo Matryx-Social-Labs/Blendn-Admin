@@ -5,7 +5,7 @@ import { likeLiteral } from "./like-literal"
 import { revalidatePath } from "next/cache"
 
 import { auditLog } from "@/lib/audit-log"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 
 /**
@@ -27,12 +27,6 @@ import { db } from "@/lib/db"
  * only removal here is `is_active = false` — it stops being offered for new
  * events and still resolves on the ones that already reference it.
  */
-
-async function requireAdmin() {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  return session.user
-}
 
 export interface AmenityRow {
   id: string

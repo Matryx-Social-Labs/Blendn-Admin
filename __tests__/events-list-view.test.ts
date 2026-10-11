@@ -61,32 +61,39 @@ describe("whenLabel", () => {
 })
 
 describe("stageFill", () => {
-  it("walks chart-1 to chart-3 across the funnel", () => {
+  // signed up, onboarded, RSVP'd, checked in | came back, matched, conversed
+  const CHECKED_IN = 3
+
+  it("draws the stages after checked in in their own colour", () => {
     /*
-     * The palette rule, and the guard against the thing this function already
-     * got wrong once: an earlier version handed stage 0 `--gradient-brand`,
-     * giving the screen two gradient elements where `DESIGN_SYSTEM.md` allows
-     * exactly one — and carried a comment claiming it did not.
+     * The admin overview's memorable detail (step 18): the stages that need
+     * verified attendance are the product's thesis, and they read as their
+     * own group, not as the tail of a ramp.
      */
-    expect(stageFill(0, 7)).toBe("var(--chart-1)")
-    expect(stageFill(3, 7)).toBe("var(--chart-2)")
-    expect(stageFill(6, 7)).toBe("var(--chart-3)")
+    expect([0, 1, 2, 3, 4, 5, 6].map((i) => stageFill(i, CHECKED_IN))).toEqual([
+      "var(--chart-1)",
+      "var(--chart-1)",
+      "var(--chart-1)",
+      "var(--chart-1)",
+      "var(--chart-3)",
+      "var(--chart-3)",
+      "var(--chart-3)",
+    ])
   })
 
   it("never emits the brand gradient", () => {
-    for (let i = 0; i < 7; i++) expect(stageFill(i, 7)).not.toContain("gradient")
+    /*
+     * The guard against the thing this function already got wrong once: an
+     * earlier version handed stage 0 `--gradient-brand`, giving the screen two
+     * gradient elements where `DESIGN_SYSTEM.md` allows exactly one — and
+     * carried a comment claiming it did not.
+     */
+    for (let i = 0; i < 7; i++) expect(stageFill(i, CHECKED_IN)).not.toContain("gradient")
   })
 
-  it("survives a one-stage funnel", () => {
-    // `count - 1` is the divisor, so a single stage would divide by zero.
-    expect(stageFill(0, 1)).toBe("var(--chart-1)")
-  })
-
-  it("uses the whole ramp whatever the stage count", () => {
-    for (const count of [3, 5, 7, 9]) {
-      const used = new Set(Array.from({ length: count }, (_, i) => stageFill(i, count)))
-      expect(used).toEqual(new Set(["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"]))
-    }
+  it("sets nothing apart when the funnel has no checked-in stage", () => {
+    // `findIndex` answers -1; every stage after -1 is every stage.
+    for (let i = 0; i < 7; i++) expect(stageFill(i, -1)).toBe("var(--chart-1)")
   })
 })
 
