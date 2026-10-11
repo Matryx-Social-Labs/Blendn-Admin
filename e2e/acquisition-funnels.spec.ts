@@ -1,4 +1,6 @@
 import { test, expect, request as playwrightRequest } from "@playwright/test"
+import { PrismaClient } from "@prisma/client"
+import { PrismaPg } from "@prisma/adapter-pg"
 
 import { statePathFor } from "./global-setup"
 
@@ -134,7 +136,7 @@ test.describe("landing page application", () => {
     expect((await res.json()).error).toMatch(/legal name/i)
   })
 
-  test("a second application from the same address is refused, not queued twice", async ({
+  test("a second application from the same address is not queued twice, and is not told apart", async ({
     request,
   }) => {
     /*
@@ -159,9 +161,15 @@ test.describe("landing page application", () => {
         .success
     ).toBe(true)
 
+    // The same answer as any application (step 18, M4): a 409 told anyone who
+    // typed an address that it had applied. The email says "we already have it".
     const second = await request.post("/api/onboarding/apply", { headers: ip, data: payload })
-    expect(second.status()).toBe(409)
-    expect((await second.json()).error).toMatch(/already/i)
+    expect(second.status()).toBe(200)
+    expect(Object.keys(await second.json()).sort()).toEqual(["emailSent", "message", "requestId", "success"])
+
+    const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL, max: 1 }) })
+    expect(await db.organiser_onboarding_requests.count({ where: { contact_email: email } }), "queued once, not twice").toBe(1)
+    await db.$disconnect()
   })
 
   test("the admin queue shows what was filed", async ({ baseURL }) => {
