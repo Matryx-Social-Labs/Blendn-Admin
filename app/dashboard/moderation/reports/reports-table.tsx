@@ -206,7 +206,8 @@ function Excerpt({ row }: { row: ReportRow }) {
     return (
       <blockquote className="whitespace-pre-wrap break-words rounded-lg bg-surface-raised px-3 py-2.5 text-[0.84375rem]">
         &ldquo;{row.excerpt}&rdquo;
-        {row.messageDeleted ? <span className="ml-1 text-faint-foreground">(removed)</span> : null}
+        {/* Muted, not faint: faint measured 4.1:1 on this card (SCRUM-613); the floor is 4.5:1. */}
+        {row.messageDeleted ? <span className="ml-1 text-muted-foreground">(removed)</span> : null}
       </blockquote>
     )
   }
