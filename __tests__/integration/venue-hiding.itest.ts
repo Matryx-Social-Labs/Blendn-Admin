@@ -153,11 +153,17 @@ describe("GET /venues hides a venue a real event has taken over (HM-I01)", () =>
           longitude: LNG,
         },
       })
-      for (const d of days) {
+      for (const [i, d] of days.entries()) {
+        // A run's days are consecutive dates. Taking each from its start put
+        // both on one UTC date from 20:00 to 23:30 UTC (now - 20 h and now +
+        // 30 min), and (event_id, occurs_on) is unique: the fixture failed
+        // every evening. Hiding reads the times, never this date.
+        const occursOn = new Date(new Date(days[0].start).toISOString().slice(0, 10))
+        occursOn.setUTCDate(occursOn.getUTCDate() + i)
         await db.event_occurrences.create({
           data: {
             event_id: event.id,
-            occurs_on: new Date(new Date(d.start).toISOString().slice(0, 10)),
+            occurs_on: occursOn,
             start_time: new Date(d.start),
             end_time: new Date(d.end),
           },

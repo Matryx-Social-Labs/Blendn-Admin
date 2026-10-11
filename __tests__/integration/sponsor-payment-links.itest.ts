@@ -29,7 +29,9 @@ jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetA
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { createHmac, randomUUID } from "crypto"
+import { readFileSync } from "fs"
 import { NextRequest } from "next/server"
+import { join } from "path"
 
 import { planPageData } from "@/lib/billing"
 import { advanceCharge, getChargeLedger, pricePlacement, sendPaymentLink } from "@/lib/charge-actions"
@@ -395,6 +397,41 @@ describe("payment_link.paid settles the charge (MN-I01..I04)", () => {
     expect((await chargeRow(chargeId)).settled_at?.getTime()).toBe(T0 * 1000)
     const payment = await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: paymentId } })
     expect(payment.captured_at.getTime()).toBe(T0 * 1000)
+  })
+
+  it("L6: the backfill puts a link payment recorded before #673 back to the payment's time, once, and leaves a right one alone", async () => {
+    const { Client } = await import("pg")
+    const sql = readFileSync(join(process.cwd(), "prisma/migrations/20261011200000_link_payment_time_backfill/migration.sql"), "utf8")
+    const runBackfill = async () => {
+      const client = new Client({ connectionString: process.env.DATABASE_URL })
+      await client.connect()
+      try {
+        await client.query(sql)
+      } finally {
+        await client.end()
+      }
+    }
+    const sentAt = T0 - 13 * 24 * 60 * 60
+    const old = await sentLink()
+    const oldPayment = `pay_${randomUUID().slice(0, 10)}`
+    await post(linkPaid(old.linkId, { paymentId: oldPayment, at: sentAt, paidAt: T0 }))
+    // What the webhook wrote before #673: the link's creation, on both rows.
+    await db.billing_payments.updateMany({ where: { provider_payment_id: oldPayment }, data: { captured_at: new Date(sentAt * 1000) } })
+    await db.placement_charges.update({ where: { id: old.chargeId }, data: { settled_at: new Date(sentAt * 1000) } })
+    const right = await sentLink()
+    const rightPayment = `pay_${randomUUID().slice(0, 10)}`
+    await post(linkPaid(right.linkId, { paymentId: rightPayment, at: sentAt, paidAt: T0 }))
+    // Rows put right by hand (any value but the delivery's stamp) stay as they are.
+    await db.billing_payments.updateMany({ where: { provider_payment_id: rightPayment }, data: { captured_at: new Date((T0 + 999) * 1000) } })
+    await db.placement_charges.update({ where: { id: right.chargeId }, data: { settled_at: new Date((T0 + 999) * 1000) } })
+
+    for (let run = 0; run < 2; run++) {
+      await runBackfill()
+      expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: oldPayment } })).captured_at.getTime()).toBe(T0 * 1000)
+      expect((await chargeRow(old.chargeId)).settled_at?.getTime()).toBe(T0 * 1000)
+      expect((await db.billing_payments.findFirstOrThrow({ where: { provider_payment_id: rightPayment } })).captured_at.getTime()).toBe((T0 + 999) * 1000)
+      expect((await chargeRow(right.chargeId)).settled_at?.getTime()).toBe((T0 + 999) * 1000)
+    }
   })
 
   it.each([

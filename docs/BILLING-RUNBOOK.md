@@ -55,7 +55,9 @@ per admin.
 currency and "paid" status must match it and the charge. `notes` are never
 read. The charge's `settled_at` and the payment's `captured_at` are the
 payment's own time: the delivery is stamped with the link's creation, up to
-14 days earlier (SCRUM-606). Then, by case:
+14 days earlier (SCRUM-606). Link payments recorded before that fix were put
+right by the migration `20261011200000_link_payment_time_backfill`, from each
+stored delivery. Then, by case:
 
 - **Already settled by this link:** a replay changes nothing.
 - **Settled some other way** (by hand, a bank transfer): the sponsor paid
@@ -151,7 +153,16 @@ Analytics keeps its own index.
   (`refund.processed`, each refund id counted once) reaches the payment, what
   it bought ends at Razorpay's time for the last refund, and a refunded
   subscription is also cancelled at Razorpay. Until then a partial refund
-  changes nothing.
+  changes nothing. A refund with no id is refused (`malformed`).
+- **A refund of an earlier period changes nothing but the payment.** When a
+  subscription has renewed since the refunded payment (a newer payment is
+  captured on the same purchase), the running period was paid for: access and
+  the mandate stay, the payment reads refunded, and `audit_logs` has
+  `entitlement.refund_old_period` naming both payments. To end the plan as
+  well, cancel the subscription at Razorpay, or Revoke on the organisation.
+- A refund Razorpay delivered before its payment (`payment_events.error`
+  `unknown_ref`) is applied when the payment lands: a subscription charge,
+  an Event Pass or a link. The earlier delivery is then marked processed.
 - A dispute opened or lost ends it; a dispute won restores it.
 - `entitlement.duplicate_pass` in `audit_logs` (and a logger error) means an
   organisation paid twice for one event's pass. Refund the second order from
