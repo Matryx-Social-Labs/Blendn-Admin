@@ -25,10 +25,11 @@ import { normalizeLocationToCity } from "@/lib/location"
  * it is one name long.
  */
 export function profileForSelfResponse<
-  T extends { date_of_birth?: Date | null; age?: number | null },
+  T extends { date_of_birth?: Date | null; age?: number | null; tier_b_changes?: Date[] },
 >(profile: T | null | undefined) {
   if (!profile) return null
-  const { date_of_birth: _dob, ...rest } = profile
+  // `tier_b_changes` is the cooldown's own ledger (lib/tier-b.ts), not the person's data to read back.
+  const { date_of_birth: _dob, tier_b_changes: _ledger, ...rest } = profile
   // Derived, so the number is true today rather than on the day they signed up.
   // A stale `age` here would disagree with every other route in the API.
   // The sign is the editor's prefill — derived for the owner only, stored only

@@ -299,6 +299,8 @@ describe("the about-you fields on the profile (MV-I05)", () => {
     const self = await call(profileRoute.GET, `/api/mobile/profiles/${me.id}`, me, { params: { userId: me.id } })
     expect(self.body.data.profile).toMatchObject({ sun_sign: "leo", sign_system: "rashi", suggested_sun_sign: "leo" })
     expect(self.body.data.profile.date_of_birth).toBeUndefined()
+    // The cooldown's ledger is not the person's to read back.
+    expect(self.body.data.profile).not.toHaveProperty("tier_b_changes")
 
     // A stranger who cannot see who this is gets none of it, on either route.
     const stranger = await who("mv-p-stranger")

@@ -219,7 +219,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * without a code change — the withholding is the deliberate part, and it
      * is one name long.
      */
-    const { date_of_birth: _dob, ...selfProfileFields } = {
+    // `tier_b_changes` is the cooldown's ledger (lib/tier-b.ts), withheld with the birth date.
+    const { date_of_birth: _dob, tier_b_changes: _ledger, ...selfProfileFields } = {
       ...p,
       age: profileAge,
       // The editor's prefill, never stored until they pick it (lib/about-you.ts).
