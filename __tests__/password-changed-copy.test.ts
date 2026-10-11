@@ -10,8 +10,17 @@ const src = readFileSync(join(__dirname, "..", "app", "dashboard", "settings", "
 
 it("does not claim the phones stayed signed in", () => {
   expect(src).not.toMatch(/Your other sessions stay signed in/)
-  expect(src).toMatch(/signed out and will need the new password/)
+  expect(src).toMatch(/phones were`\} signed out/)
   expect(src).toMatch(/setDone\(\{ revokedSessions: result\.revokedSessions \?\? 0 \}\)/)
-  // What the change does not touch is still stated: other dashboard sessions.
-  expect(src).toMatch(/Other dashboard sessions stay signed in/)
+})
+
+/*
+ * And about the dashboard (step 18 security review, M6): the change ends
+ * every dashboard session now, this one included. The sentence used to say
+ * the others stayed signed in, which was true, and an invitation to stop
+ * there; it would now be false.
+ */
+it("says every dashboard session ended, this one included", () => {
+  expect(src).not.toMatch(/Other dashboard sessions stay signed in/)
+  expect(src).toMatch(/Every dashboard session has ended, this one included/)
 })

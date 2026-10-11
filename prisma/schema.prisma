@@ -58,6 +58,9 @@ model User {
   // punish one person. Reversible; `suspended_by` mirrors the plain-String
   // pattern used by chat_group_members.banned_by, with audit_logs as the trail.
   suspended_at      DateTime? @db.Timestamptz(6)
+  /// When the password last changed (reset link or Settings): a dashboard
+  /// session that signed in before it is refused (lib/auth.ts, step 18 M6).
+  password_changed_at DateTime? @db.Timestamptz(6)
   suspended_by      String?
   suspension_reason String?
 

@@ -162,13 +162,14 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
         <div className="flex items-center gap-2.5 rounded-lg border border-success px-3.5 py-3 text-sm">
           <IconCircleCheck className="size-5 shrink-0 text-success" />
           <span>
-            {/* The phones were ended with the change (SCRUM-169); the other
-                dashboard sessions were not, and that is still the person's call. */}
-            Password changed.{" "}
+            {/* The change ends every session on the account: the phones
+                (SCRUM-169) and every dashboard session, this browser's
+                included (step 18, M6) — the next page is the sign-in form. */}
+            Password changed. Every dashboard session has ended, this one included
             {done.revokedSessions > 0
-              ? `${done.revokedSessions === 1 ? "Your phone was" : `Your ${done.revokedSessions} phones were`} signed out and will need the new password. `
+              ? `, and ${done.revokedSessions === 1 ? "your phone was" : `your ${done.revokedSessions} phones were`} signed out`
               : ""}
-            Other dashboard sessions stay signed in — end them below if that wasn&apos;t you.
+            . Sign in again with the new password.
           </span>
         </div>
       </Section>
@@ -263,11 +264,7 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
                 setCurrent("")
                 setNext("")
                 setConfirm("")
-                toast.success(
-                  result.revokedSessions
-                    ? `Password changed. ${result.revokedSessions === 1 ? "Your phone" : "Your phones"} will need to sign in again.`
-                    : "Password changed"
-                )
+                toast.success("Password changed. Sign in again with the new password.")
               } else {
                 toast.error(result.error ?? "Could not change password")
               }

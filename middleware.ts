@@ -170,9 +170,15 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (pathname === "/login" && signedIn) {
-    return NextResponse.redirect(new URL("/dashboard", req.url))
-  }
+  /*
+   * `/login` is not bounced to the dashboard here any more (step 18 security
+   * review, M6). This reads the cookie's claims and cannot ask the database;
+   * the dashboard's pages can, and send a session the database has ended to
+   * /login — which this sent straight back, a redirect loop for every ended
+   * session. The sign-in page moves a live session along itself, once
+   * `/api/auth/session` has vouched for it, and that same call clears an
+   * ended one's cookie.
+   */
 
   /*
    * The API documentation is internal, and was public.
