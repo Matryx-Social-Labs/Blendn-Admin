@@ -46,8 +46,19 @@ const directives = (policy: string) =>
 
 it("lets Razorpay Checkout load its script and open its frames, and loosens nothing else", () => {
   const d = directives(contentSecurityPolicy(null))
-  expect(d["script-src"]).toEqual(["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://checkout.razorpay.com", "https://api.razorpay.com"])
+  // cdn.razorpay.com: checkout.js adds its risk-detection script to our page
+  // from there (SCRUM-608, the one violation on staging). A script, never a frame.
+  expect(d["script-src"]).toEqual([
+    "'self'",
+    "'unsafe-inline'",
+    "'unsafe-eval'",
+    "https://checkout.razorpay.com",
+    "https://api.razorpay.com",
+    "https://cdn.razorpay.com",
+  ])
   expect(d["frame-src"]).toEqual(["'self'", "https://checkout.razorpay.com", "https://api.razorpay.com"])
+  // Its images (cdn.razorpay.com) and beacons (lumberjack.razorpay.com) are already https.
+  expect(d["img-src"]).toEqual(["'self'", "data:", "blob:", "https:"])
   expect(d["connect-src"]).toEqual(["'self'", "https:", "wss:"])
   expect(d["frame-ancestors"]).toEqual(["'none'"])
   expect(d["default-src"]).toEqual(["'self'"])

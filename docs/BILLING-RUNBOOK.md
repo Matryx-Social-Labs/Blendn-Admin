@@ -53,7 +53,9 @@ per admin.
 
 `payment_link.paid` settles the charge, once, against that row: the amount,
 currency and "paid" status must match it and the charge. `notes` are never
-read. Then, by case:
+read. The charge's `settled_at` and the payment's `captured_at` are the
+payment's own time: the delivery is stamped with the link's creation, up to
+14 days earlier (SCRUM-606). Then, by case:
 
 - **Already settled by this link:** a replay changes nothing.
 - **Settled some other way** (by hand, a bank transfer): the sponsor paid
@@ -62,9 +64,10 @@ read. Then, by case:
 - **Voided:** a charge voided before the payment landed stays void. The
   webhook writes `charge.paid_after_void` and logs an error. **Refund it from
   the Razorpay dashboard.**
-- **Refunded:** a full refund (`refund.processed`) voids the charge this link
-  settled, with the refund id as the reason — also when Razorpay delivered the
-  refund before the payment.
+- **Refunded:** refunds that reach the whole payment (`refund.processed`, one
+  or several partial ones added up) void the charge this link settled, with
+  the last refund's id as the reason — also when Razorpay delivered the
+  refunds before the payment.
 - **Disputed:** `charge.disputed` and an error log; answer it at Razorpay. A
   dispute lost voids the charge this link settled.
 - **Any other state** (a link is only sent for an agreed charge):
@@ -124,6 +127,11 @@ Analytics keeps its own index.
   refusal would change nothing.
 - It answers 5xx only when the database failed. The whole delivery is one
   transaction, so nothing was half-applied, and Razorpay's retry applies it.
+- **429 after 30 failed signatures a minute from one network**, with
+  `Retry-After`, before any database work. Only failed signatures count: a
+  valid delivery is never limited. A burst of 429s is someone probing, or
+  Razorpay signing with a secret we do not have: check
+  `RAZORPAY_WEBHOOK_SECRET` against the dashboard's.
 - **Razorpay retries a failing webhook for about 24 hours and then disables
   it.** A disabled webhook means every later payment is taken and never
   granted. Alert on any 5xx from `/api/webhooks/razorpay` (Sentry, or the
@@ -139,9 +147,11 @@ Analytics keeps its own index.
 
 ## Refunds, disputes, a second pass
 
-- A full refund (`refund.processed`) ends what the payment bought at
-  Razorpay's time for the refund; a refunded subscription is also cancelled at
-  Razorpay. A partial refund changes nothing.
+- Refunds of one payment add up (SCRUM-610). Once what was refunded
+  (`refund.processed`, each refund id counted once) reaches the payment, what
+  it bought ends at Razorpay's time for the last refund, and a refunded
+  subscription is also cancelled at Razorpay. Until then a partial refund
+  changes nothing.
 - A dispute opened or lost ends it; a dispute won restores it.
 - `entitlement.duplicate_pass` in `audit_logs` (and a logger error) means an
   organisation paid twice for one event's pass. Refund the second order from

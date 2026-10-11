@@ -34,10 +34,18 @@ const PRO = [
   "Perks for Blendn+ members (coming)",
 ]
 
+/**
+ * Venue Pro can be bought for this venue now (SCRUM-609): it is not on Pro,
+ * paid or a founding grant, and no mandate past `created` holds its one open
+ * subscription. The checkout refuses both (`lib/billing-actions.ts`); an
+ * abandoned `created` one is replaced by a new purchase.
+ */
+const proBuyable = (v: VenuePlanRow) => !v.pro && v.subscriptions.every((s) => s.status === "created")
+
 export function VenuePlan({ view, pending }: { view: VenuePlanPage; pending: boolean }) {
   const monthly = BILLING_PLANS.venue_pro_monthly
   const yearly = BILLING_PLANS.venue_pro_yearly
-  const anyBuyable = view.paymentsOn && view.venues.some((v) => v.mayBuy && v.readiness.chargeable && !v.pro)
+  const anyBuyable = view.paymentsOn && view.venues.some((v) => v.mayBuy && v.readiness.chargeable && proBuyable(v))
 
   const cards = (
     <div className="grid grid-cols-1 gap-5 @3xl/main:grid-cols-2">
@@ -151,7 +159,7 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col gap-2 @3xl/main:w-[300px]">
-        {pro || !venue.owned ? (
+        {!proBuyable(venue) || !venue.owned ? (
           cancellable.length > 0 && venue.mayCancel && paymentsOn ? (
             <CancelAnalytics running={cancellable.some((s) => s.status === "active")} venueId={venue.venueId} />
           ) : null
@@ -170,7 +178,11 @@ function VenueRow({ venue, paymentsOn, pending }: { venue: VenuePlanRow; payment
 function DataMeter({ venue }: { venue: VenuePlanRow }) {
   const { readiness } = venue
   if (readiness.chargeable) {
-    return <p className="text-[0.75rem] text-faint-foreground">{VENUE_DATA_DAYS} of {VENUE_DATA_DAYS} days of data · Venue Pro can be bought</p>
+    return (
+      <p className="text-[0.75rem] text-faint-foreground">
+        {VENUE_DATA_DAYS} of {VENUE_DATA_DAYS} days of data{proBuyable(venue) ? " · Venue Pro can be bought" : ""}
+      </p>
+    )
   }
   const pct = Math.round((readiness.dataDays / VENUE_DATA_DAYS) * 100)
   return (

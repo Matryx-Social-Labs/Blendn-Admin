@@ -30,10 +30,17 @@ export function sentryCspReportUri(dsn: string | undefined, environment?: string
 
 /**
  * Razorpay Checkout's origins (plan v2 §9.2, test plan F12 / MN-E04): its
- * script, and the frames it opens its payment sheet in. `connect-src` already
- * allows any https origin, which covers its telemetry.
+ * script, and the frames it opens its payment sheet in. `connect-src` and
+ * `img-src` already allow any https origin, which covers its telemetry
+ * (lumberjack.razorpay.com) and its app icons.
  */
 export const RAZORPAY_CHECKOUT_ORIGINS = ["https://checkout.razorpay.com", "https://api.razorpay.com"] as const
+/**
+ * Where checkout.js loads its risk-detection script into our page from
+ * (`/static/cx/razorpay-risk-detection/bundle.js`, SCRUM-608). A script
+ * only: nothing there is framed.
+ */
+export const RAZORPAY_SCRIPT_CDN = "https://cdn.razorpay.com"
 
 /**
  * The policy itself, as a header value. Here rather than inline in
@@ -43,7 +50,7 @@ export function contentSecurityPolicy(reportUri: string | null): string {
   const razorpay = RAZORPAY_CHECKOUT_ORIGINS.join(" ")
   return [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${razorpay}`,
+    `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${razorpay} ${RAZORPAY_SCRIPT_CDN}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
