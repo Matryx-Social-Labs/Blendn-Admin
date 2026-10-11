@@ -38,7 +38,10 @@ export const routeContent: Record<string, RouteContent> = {
    */
   "/dashboard/events/curate": {
     title: "Curation",
-    description: "Events we added from public listings — and which of them nobody could get into.",
+    // The kit's line: the screen's one reading rule, which used to sit under a
+    // second, in-page "Curation health" heading.
+    description:
+      "Events we added from public listings. Whether anybody tried is the difference between a wrong pin and a dead listing.",
   },
   "/dashboard/claims": {
     title: "Claims",

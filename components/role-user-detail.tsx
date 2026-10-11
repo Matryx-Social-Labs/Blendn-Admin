@@ -1,12 +1,13 @@
 import { UserEventsTable } from "@/components/user-events-table"
-import { SectionTitle } from "@/components/dashboard/primitives"
+import { Panel } from "@/components/dashboard/kit"
 
 /**
  * One host account's events, for an admin.
  *
  * Shared by the organiser and venue-owner detail pages, which were the same
  * sixty lines twice. The account's name is each page's own `PageHeader`
- * (an owned header, `OWNED_HEADERS`), so this is the body only.
+ * (an owned header, `OWNED_HEADERS`), so this is the body only: one Panel,
+ * the table edge to edge inside it.
  */
 export function RoleUserDetail({
   user,
@@ -16,9 +17,8 @@ export function RoleUserDetail({
   const n = user.organized_events.length
 
   return (
-    <section className="flex flex-col gap-3 border-t border-border pt-5">
-      <SectionTitle hint={`${n} created`}>Events</SectionTitle>
+    <Panel title="Events" hint={`${n} created`} bodyClassName="px-0 pb-1 pt-3">
       <UserEventsTable events={user.organized_events} isAdmin />
-    </section>
+    </Panel>
   )
 }

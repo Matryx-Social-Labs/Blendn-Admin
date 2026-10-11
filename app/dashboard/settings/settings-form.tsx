@@ -1,9 +1,10 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { IconCircleCheck, IconDeviceMobile, IconDeviceDesktop, IconLogout } from "@tabler/icons-react"
+import { IconDeviceMobile, IconDeviceDesktop, IconLogout } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { Callout } from "@/components/dashboard/kit"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,6 +32,9 @@ interface Account {
  * Two columns on desktop: what the section is on the left, the controls on the
  * right. Sections are independent — each saves on its own, so nothing is a
  * page-wide form with one Save button that makes you wonder what it touched.
+ *
+ * The kit's `SettingsSection` (shared.jsx): a hairline above each section, a
+ * panel-sized title, and a 240px label column beside a 480px control column.
  */
 function Section({
   title,
@@ -42,10 +46,10 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <section className="grid gap-6 border-b border-border py-6 @3xl/main:grid-cols-[minmax(180px,240px)_minmax(0,480px)]">
+    <section className="grid gap-x-8 gap-y-4 border-t border-border py-6 @3xl/main:grid-cols-[minmax(180px,240px)_minmax(0,480px)]">
       <div className="flex flex-col gap-1">
-        <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
-        <p className="text-[0.78125rem] text-muted-foreground">{description}</p>
+        <h2 className="text-panel-title font-bold">{title}</h2>
+        <p className="text-[0.78125rem] leading-[19px] text-muted-foreground">{description}</p>
       </div>
       <div className="flex flex-col gap-3.5">{children}</div>
     </section>
@@ -159,18 +163,14 @@ function PasswordSection({ email, name }: { email: string; name: string }) {
   if (done) {
     return (
       <Section title="Password" description="Your sign-in credential.">
-        <div className="flex items-center gap-2.5 rounded-lg border border-success px-3.5 py-3 text-sm">
-          <IconCircleCheck className="size-5 shrink-0 text-success" />
-          <span>
-            {/* The phones were ended with the change (SCRUM-169); the other
-                dashboard sessions were not, and that is still the person's call. */}
-            Password changed.{" "}
-            {done.revokedSessions > 0
-              ? `${done.revokedSessions === 1 ? "Your phone was" : `Your ${done.revokedSessions} phones were`} signed out and will need the new password. `
-              : ""}
-            Other dashboard sessions stay signed in — end them below if that wasn&apos;t you.
-          </span>
-        </div>
+        <Callout tone="success" title="Password changed." role="status">
+          {/* The phones were ended with the change (SCRUM-169); the other
+              dashboard sessions were not, and that is still the person's call. */}
+          {done.revokedSessions > 0
+            ? `${done.revokedSessions === 1 ? "Your phone was" : `Your ${done.revokedSessions} phones were`} signed out and will need the new password. `
+            : ""}
+          Other dashboard sessions stay signed in — end them below if that wasn&apos;t you.
+        </Callout>
       </Section>
     )
   }
@@ -303,7 +303,7 @@ function SessionsSection({
         dashboard sign-out does not touch the mobile app's 30-day refresh
         tokens, and someone who has lost a phone needs exactly that.
       */}
-      <div className="divide-y divide-border border-y border-border">
+      <div className="divide-y divide-border overflow-hidden rounded-[10px] border border-border">
         <SessionRow
           icon={<IconDeviceDesktop className="size-[17px]" />}
           label="Dashboard"
