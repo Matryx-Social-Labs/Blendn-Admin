@@ -35,6 +35,12 @@ jest.mock("@/lib/location", () => ({
 }))
 
 jest.mock("@/lib/conversations", () => ({ blockedEitherWay: jest.fn().mockResolvedValue(false) }))
+// Tier B is written by `writeTierB`, in its own locked transaction (step 10 review): a seam here.
+const mockWriteTierB = jest.fn().mockResolvedValue("written")
+jest.mock("@/lib/tier-b", () => ({
+  ...jest.requireActual("@/lib/tier-b"),
+  writeTierB: (...a: unknown[]) => mockWriteTierB(...a),
+}))
 const maySeeIdentity = jest.fn().mockResolvedValue(false)
 // Every ref here is a raw id, so `identityForRef` is the unscoped gate — which
 // is what this file varies. Room handles are covered in room-handles.itest.ts.
@@ -805,10 +811,12 @@ describe("PUT /profiles/:userId — accepted means written", () => {
     await putProfile(profileReq(SAMPLE), { params: Promise.resolve({ userId: USER }) })
 
     const update = mockDb.profiles.upsert.mock.calls[0][0].update
+    // Tier B (work_field here) goes through `writeTierB`, under the row's lock — written, not dropped.
+    const tierB = (mockWriteTierB.mock.calls[0]?.[1] ?? {}) as Record<string, unknown>
     const dropped = Object.keys(SAMPLE)
       .filter((k) => !NOT_A_PROFILE_COLUMN.has(k))
       .map((k) => RENAMED[k] ?? k)
-      .filter((column) => !(column in update))
+      .filter((column) => !(column in update) && tierB[column] === undefined)
 
     // Named rather than counted, so the failure says which field is inert.
     expect(dropped).toEqual([])

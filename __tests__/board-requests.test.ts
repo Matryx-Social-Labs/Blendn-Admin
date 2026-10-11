@@ -101,7 +101,7 @@ describe("the keyed handle (SCRUM-517)", () => {
     const src = codeOnly(read("lib", "anonymous-names.ts"))
     expect(src).toMatch(/event && event\.created_at < KEYED_PSEUDONYMS_FROM \? "legacy" : "keyed"/)
     const board = codeOnly(read("lib", "board-access.ts"))
-    expect(board).toContain("const scheme = await pseudonymSchemeFor(eventId)")
+    expect(board).toContain("const scheme = await pseudonymSchemeFor(eventId, client)")
   })
 })
 

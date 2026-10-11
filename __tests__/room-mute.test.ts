@@ -31,7 +31,11 @@ jest.mock("@/lib/db", () => ({
     },
   },
 }))
-jest.mock("@/lib/conversations", () => ({ blockCounterparties: (...a: unknown[]) => blocks(...a) }))
+// keptApartIn: the room's kept-apart set (board rooms add closed pairs); blocks here.
+jest.mock("@/lib/conversations", () => ({
+  blockCounterparties: (...a: unknown[]) => blocks(...a),
+  keptApartIn: (...a: unknown[]) => blocks(...a),
+}))
 jest.mock("@/lib/socket-server", () => ({ emitChatMessage: jest.fn() }))
 jest.mock("@/lib/room-handle", () => ({ roomHandle: (_e: string, u: string) => `handle-of-${u}` }))
 jest.mock("expo-server-sdk", () => ({
