@@ -6,7 +6,10 @@ const as = (role: DashboardRole, id: string) => {
   session = { user: { id, role } }
 }
 
+import { renderToStaticMarkup } from "react-dom/server"
+
 import { getDashboardOverview } from "@/app/dashboard/actions"
+import ChatroomsPage from "@/app/dashboard/chatrooms/page"
 import EventsPage from "@/app/dashboard/events/page"
 import { visibleEventsWhere } from "@/lib/event-visibility"
 import { setupFactsFor } from "@/lib/organiser-overview"
@@ -142,6 +145,7 @@ describe("the Events list's rows", () => {
   let ahead: string
   let listing: string
   let claimedListing: string
+  let liveNight: string
   let admin: string
 
   beforeAll(async () => {
@@ -155,6 +159,8 @@ describe("the Events list's rows", () => {
     // The same kind of listing after a claim was approved: the organisation owns it, `organizer_id` is still the founder (SCRUM-612).
     claimedListing = await event(admin, hostOrg, { start: new Date(Date.now() + 5 * DAY), curated: true })
     await db.events.update({ where: { id: claimedListing }, data: { claimed_at: new Date() } })
+    // Running now, so it has a room on the Chatrooms screen.
+    liveNight = await event(creator, hostOrg, { start: new Date(Date.now() - HOUR), hours: 4 })
     const people = await Promise.all(["g1", "g2", "m1", "n1"].map((l) => makeUser(`rows_${l}`)))
     users.push(...people)
     await db.event_rsvps.createMany({
@@ -198,6 +204,18 @@ describe("the Events list's rows", () => {
     expect(all.find((r) => r.id === listing)?.host).toBeNull()
     expect(all.find((r) => r.id === claimedListing)?.host).toBe(hostName)
     expect(all.map((r) => r.host)).not.toContain(founderName)
+  })
+
+  it("names the organisation, not the member who made the event, beside a room on an admin's Chatrooms", async () => {
+    as("app_admin", admin)
+    const hostName = (await db.organisations.findUniqueOrThrow({ where: { id: hostOrg } })).display_name
+    const memberName = (await db.user.findUniqueOrThrow({ where: { id: creator } })).name
+    const html = renderToStaticMarkup(await ChatroomsPage())
+    const night = (await db.events.findUniqueOrThrow({ where: { id: liveNight } })).title
+    // The room's card carries its title and, for an admin, " · <host>".
+    const card = html.slice(html.indexOf(night))
+    expect(card.slice(0, 1500)).toContain(hostName)
+    expect(html).not.toContain(memberName as string)
   })
 })
 
