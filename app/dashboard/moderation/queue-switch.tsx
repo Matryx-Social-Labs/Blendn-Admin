@@ -1,6 +1,4 @@
-import Link from "next/link"
-
-import { cn } from "@/lib/utils"
+import { PillTabs } from "@/components/dashboard/kit"
 
 /**
  * Flags and reports are two queues, and this is what says so.
@@ -10,41 +8,27 @@ import { cn } from "@/lib/utils"
  * for help — but they are one job, done by one person, in one sitting. Without
  * a switch between them the reports queue is a URL nobody would find; the nav
  * has one "Moderation" entry and it has always pointed at flags.
+ *
+ * The kit's "Flags · N | Reports · N": both pending counts on both tabs, so the
+ * queue you are not on still says how much is in it.
  */
 export function QueueSwitch({
   active,
+  flagCount,
   reportCount,
 }: {
   active: "flags" | "reports"
+  flagCount: number
   reportCount: number
 }) {
-  const tabs = [
-    { key: "flags" as const, href: "/dashboard/moderation", label: "Flags" },
-    { key: "reports" as const, href: "/dashboard/moderation/reports", label: "Reports" },
-  ]
-
   return (
-    <nav className="flex gap-4 border-b border-border" aria-label="Moderation queue">
-      {tabs.map((tab) => (
-        <Link
-          key={tab.key}
-          href={tab.href}
-          aria-current={tab.key === active ? "page" : undefined}
-          className={cn(
-            "-mb-px border-b-2 px-0.5 pb-2 text-sm transition-colors",
-            tab.key === active
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {tab.label}
-          {tab.key === "reports" && reportCount > 0 ? (
-            <span className="ml-1.5 rounded-full bg-destructive/15 px-1.5 py-0.5 text-[0.6875rem] text-destructive tabular-nums">
-              {reportCount}
-            </span>
-          ) : null}
-        </Link>
-      ))}
-    </nav>
+    <PillTabs
+      label="Moderation queue"
+      active={active}
+      tabs={[
+        { key: "flags", href: "/dashboard/moderation", label: `Flags · ${flagCount}` },
+        { key: "reports", href: "/dashboard/moderation/reports", label: `Reports · ${reportCount}` },
+      ]}
+    />
   )
 }

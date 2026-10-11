@@ -43,7 +43,8 @@ function ChartFrame({
   emptyText,
   action,
 }: {
-  title: string
+  /** None when the chart sits in a kit `Panel`, which carries the title itself. */
+  title?: string
   hint?: string
   children: ReactNode
   empty?: boolean
@@ -53,27 +54,29 @@ function ChartFrame({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between gap-2">
-        {/*
-          `h2`, not `h3`.
+      {title ? (
+        <div className="flex items-baseline justify-between gap-2">
+          {/*
+            `h2`, not `h3`.
 
-          The layout's `PageHeader` owns the page's only `h1` and bodies start at `h2`, per
-          the design system. Every chart panel rendered an `h3` — and on the
-          admin overview those panels sit in the row *above* the `h2` tables, so
-          the document outline read h1 → h3 → h3 → h2 → h2. A reader navigating
-          by heading meets two subsections before their parent exists.
+            The layout's `PageHeader` owns the page's only `h1` and bodies start at `h2`, per
+            the design system. Every chart panel rendered an `h3` — and on the
+            admin overview those panels sit in the row *above* the `h2` tables, so
+            the document outline read h1 → h3 → h3 → h2 → h2. A reader navigating
+            by heading meets two subsections before their parent exists.
 
-          They are siblings on screen; they are siblings in the outline now.
-        */}
-        {/* Same size as SectionTitle. A chart panel and a table section are
-            siblings on the overview; they read as siblings only if their
-            headings are the same size. */}
-        <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
-        <span className="flex items-baseline gap-3">
-          {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
-          {action}
-        </span>
-      </div>
+            They are siblings on screen; they are siblings in the outline now.
+          */}
+          {/* Same size as SectionTitle. A chart panel and a table section are
+              siblings on the overview; they read as siblings only if their
+              headings are the same size. */}
+          <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
+          <span className="flex items-baseline gap-3">
+            {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
+            {action}
+          </span>
+        </div>
+      ) : null}
       <div className="relative">
         <div className={cn(empty && "opacity-30")}>{children}</div>
         {empty ? (
@@ -255,24 +258,20 @@ export type FunnelStage = {
  */
 export function Funnel({
   stages,
-  title = "The loop",
-  hint = "all time",
   empty,
+  verifiedAfter = "checked in",
 }: {
   stages: FunnelStage[]
-  title?: string
-  hint?: string
   empty?: boolean
+  /** The last stage any events app can count; the ones after it take their own colour. */
+  verifiedAfter?: string
 }) {
   const max = Math.max(...stages.map((s) => s.value), 1)
+  const lastMeasurable = stages.findIndex((s) => s.label === verifiedAfter)
 
+  // Titled by the `Panel` it sits in (the kit's AdminOverview), not by a frame of its own.
   return (
-    <ChartFrame
-      title={title}
-      hint={hint}
-      empty={empty}
-      emptyText="Fills as people sign up, turn up, match, talk, and come back."
-    >
+    <ChartFrame empty={empty} emptyText="Fills as people sign up, turn up, match, talk, and come back.">
       <div className="flex flex-col gap-2">
         {stages.map((stage, index) => {
           const previous =
@@ -315,7 +314,7 @@ export function Funnel({
                     className="h-full rounded"
                     style={{
                       width: `${barWidth(stage.value, max)}%`,
-                      background: stageFill(index, stages.length),
+                      background: stageFill(index, lastMeasurable),
                     }}
                   />
                 </div>
@@ -335,12 +334,12 @@ export function Funnel({
 }
 
 /**
- * Stages walk `--chart-1` to `--chart-3`, which `app/globals.css` documents as
- * the brand's orange-to-purple ramp sampled at three points.
- *
- * The screen was almost entirely `--chart-1` while 2 and 3 went unused, which
- * the design direction calls a one-note palette. Walking the ramp also carries
- * meaning for free: a stage's colour says how deep into the loop it is.
+ * A stage's colour says which side of the door it is on (step 18, the kit's
+ * AdminOverview): up to and including the last stage any events app can count
+ * — "checked in" — `--chart-1`; after it, the stages that need verified
+ * attendance, `--chart-3`. Those are the product's thesis, and they read as
+ * their own group rather than as the tail of a ramp. `lastMeasurable` is -1
+ * when the funnel has no such stage, and then nothing is set apart.
  *
  * **An earlier version of this gave stage 0 `--gradient-brand` itself, and the
  * comment above it claimed that did not collide with `HeroMetric`.** It did.
@@ -350,10 +349,8 @@ export function Funnel({
  * screen competing with the hero beside it. The comment defended the bug, which
  * is worse than not having one.
  */
-export function stageFill(index: number, count: number): string {
-  if (count < 2) return "var(--chart-1)"
-  const step = Math.round((index / (count - 1)) * 2)
-  return `var(--chart-${step + 1})`
+export function stageFill(index: number, lastMeasurable: number): string {
+  return lastMeasurable >= 0 && index > lastMeasurable ? "var(--chart-3)" : "var(--chart-1)"
 }
 
 /* -------------------------------------------------------------------------- */

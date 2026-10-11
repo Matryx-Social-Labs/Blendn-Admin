@@ -477,9 +477,22 @@ describe("venue owner overview", () => {
   })
 })
 
+/**
+ * A real admin row: the overview reads the caller's role from the database
+ * (step 18), so a session naming nobody is refused, not shown the platform.
+ */
+let adminId: string | null = null
+async function platformAdmin() {
+  if (!adminId) {
+    adminId = await makeUser("ovw_admin", "app_admin")
+    users.push(adminId)
+  }
+  return adminId
+}
+
 describe("admin overview", () => {
   it("executes every query and reports the moderation queue", async () => {
-    const overview = (as("app_admin"), await getDashboardOverview())
+    const overview = (as("app_admin", await platformAdmin()), await getDashboardOverview())
     if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
     /*
@@ -543,7 +556,7 @@ describe("admin overview", () => {
   })
 
   it("keeps the funnel monotonically non-increasing", async () => {
-    const overview = (as("app_admin"), await getDashboardOverview())
+    const overview = (as("app_admin", await platformAdmin()), await getDashboardOverview())
     if (overview.role !== "app_admin") throw new Error("wrong overview role")
 
     // Each stage is a subset of the one it is a share of — the stage above,

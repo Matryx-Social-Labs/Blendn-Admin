@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, OverlapSchema, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
 
 /*
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
@@ -80,8 +80,16 @@ const CrewCardSchema = z
     tags: z.array(Tag),
     intent: z.array(Intent),
     youLiked: z.boolean().describe("Whether your side liked this crew tonight. Never whether they liked you"),
+    overlaps: z
+      .array(OverlapSchema)
+      .describe(
+        "Matching v2: up to two lines of what this crew HOLDS (two members and a third of the crew) in common with your crew here, or with you alone — \"Both crews are into Techno\", \"Two RCB crews\", \"This crew picks chai over filter coffee, like you\". Never a member, never a count. Languages and home states only between crews of four or more here in a room of eight or more, one line at most."
+      ),
+    badges: z.array(BadgeSchema).describe("\"N nights out together\": occurrences two or more members checked in at, from 2"),
   })
-  .describe("Counts only: never a person's name, photo or pseudonym")
+  .describe(
+    "Counts only: never a person's name, photo or pseudonym. Ranked from your side: crew-held interests and shared intent, damped when one crew is more than twice the other's size here; then most here, then id."
+  )
   .openapi("CrewCard")
 
 const CrewFields = {

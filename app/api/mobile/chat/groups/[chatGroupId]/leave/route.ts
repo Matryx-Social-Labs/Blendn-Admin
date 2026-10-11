@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { blockCounterparties } from "@/lib/conversations"
+import { keptApartIn } from "@/lib/conversations"
 import { bannedRefusal, chatClosedMessage, leftByChoice } from "@/lib/chat-window"
 import { roomForMember } from "@/lib/room-membership"
 import { roomScope } from "@/lib/room-kind"
@@ -77,7 +77,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (count === 1) {
       // Null when blocks cannot be read: then only the eviction runs (see the emitter).
-      const blocked = await blockCounterparties(authUser.userId).catch((err: unknown) => {
+      // In a board post's room, a closed conversation's pair too (`keptApartIn`, step 10 review H2).
+      const blocked = await keptApartIn(authUser.userId, room.group.kind).catch((err: unknown) => {
         logger.error("Leave room: blocks could not be read, so nobody is told", {
           chatGroupId: room.group.id,
           error: err instanceof Error ? err.message : String(err),

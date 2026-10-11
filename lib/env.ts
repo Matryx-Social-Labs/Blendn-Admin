@@ -80,11 +80,37 @@ const envSchema = z.object({
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
   /**
-   * Whether Go Live's "stay" needs Blendn+ (`plusGating`). Off until step 11
-   * ships entitlements: "stay" is built as available to everyone until that
-   * changes (docs/HOTSPOTS.md).
+   * Where Blendn+ is gated, and since when (`plusGateFor`). Unset or `false`:
+   * launch season everywhere, everything unlocked. Otherwise comma-separated
+   * entries `<city>:<YYYY-MM-DD>` — the day that city's gating went on, which
+   * is what the 14-day trial for its existing people is measured from — or
+   * `*:<date>` for everywhere. An entry without a date gates with no trial;
+   * `true` is `*` with no date. Cities match through `canonicalCity`
+   * (`Bangalore` is Bengaluru).
    */
-  PLUS_GATING: z.enum(["true", "false"]).optional(),
+  PLUS_GATING: z
+    .string()
+    .regex(
+      /^\s*(true|false|((\*|[^:,]+)(:\d{4}-\d{2}-\d{2})?\s*)(,\s*(\*|[^:,]+)(:\d{4}-\d{2}-\d{2})?\s*)*)\s*$/i,
+      "PLUS_GATING is `false`, `true`, or entries like `Bengaluru:2026-11-01,*:2027-01-01`"
+    )
+    .optional(),
+
+  /**
+   * RevenueCat (plan v2 §5). The value the RevenueCat dashboard sends as the
+   * webhook's `Authorization` header is `Bearer <this>`. We choose it, so 32
+   * or more. Unset: the webhook refuses everything and nothing grants Blendn+
+   * from a store — the feature is off.
+   */
+  REVENUECAT_WEBHOOK_SECRET: z.string().min(32, "REVENUECAT_WEBHOOK_SECRET must be at least 32 characters").optional(),
+  /**
+   * RevenueCat's SECRET API key (`sk_…`, Project settings → API keys), for
+   * the server's own reads and deletes: a TRANSFER is applied only as far as
+   * RevenueCat's record of the receiving account confirms it, and an erased
+   * account is deleted there too. Unset: transfers are recorded and applied
+   * to nothing (fail closed). Never in the app.
+   */
+  REVENUECAT_SECRET_KEY: z.string().regex(/^sk_[A-Za-z0-9]+$/, "REVENUECAT_SECRET_KEY must look like sk_…").optional(),
 
   /**
    * Razorpay (plan v2 §9.2). All optional: unset, the Plan page says payments
@@ -238,13 +264,104 @@ export function googleSignInConfigWarning(
 }
 
 /**
- * Go Live "stay" is Blendn+ only when this is on (`PLUS_GATING=true`).
- *
- * Off by default, and nothing grants Plus yet (step 11), so turning it on
- * today refuses "stay" to everyone with `PLUS_REQUIRED`.
+ * One name per city, whatever spelling a venue or event was saved with. The
+ * one alias map; add a city's old or local names here.
  */
-export function plusGating(): boolean {
-  return process.env.PLUS_GATING === "true"
+const CITY_ALIASES: Record<string, string> = {
+  bangalore: "bengaluru",
+  "bengaluru urban": "bengaluru",
+  bombay: "mumbai",
+  "new delhi": "delhi",
+  gurgaon: "gurugram",
+  calcutta: "kolkata",
+  madras: "chennai",
+  poona: "pune",
+  mysore: "mysuru",
+}
+
+export function canonicalCity(city: string | null | undefined): string | null {
+  const key = city?.trim().toLowerCase().replace(/\s+/g, " ")
+  return key ? (CITY_ALIASES[key] ?? key) : null
+}
+
+export interface PlusGate {
+  gated: boolean
+  /** The day gating went on here: the trial is for people who were already out before it. Null: no trial. */
+  flippedAt: Date | null
+}
+
+/** `PLUS_GATING` read as city → flip date (or null). `*` is everywhere. */
+function gatingEntries(): Map<string, Date | null> {
+  const raw = process.env.PLUS_GATING?.trim()
+  const out = new Map<string, Date | null>()
+  if (!raw || raw.toLowerCase() === "false") return out
+  if (raw.toLowerCase() === "true") return out.set("*", null)
+  for (const entry of raw.split(",")) {
+    const [name, day] = entry.split(":").map((p) => p.trim())
+    const at = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? new Date(`${day}T00:00:00+05:30`) : null
+    const key = name === "*" ? "*" : canonicalCity(name)
+    if (key) out.set(key, at && !Number.isNaN(at.getTime()) ? at : null)
+  }
+  return out
+}
+
+const reportedUngated = new Set<string>()
+
+/**
+ * Is Blendn+ gated where this is (`PLUS_GATING`), and since when? A city not
+ * named is in its launch season: every Plus feature is everyone's (plan v2
+ * §9.3). A place with no city, while anything is gated, is gated — a missing
+ * city must not be a way round the gate — and takes `*`'s date, else the
+ * earliest named. A city that matches nothing is logged once, so a spelling
+ * the alias map lacks is seen rather than silently free.
+ */
+export function plusGateFor(city: string | null | undefined): PlusGate {
+  const entries = gatingEntries()
+  if (entries.size === 0) return { gated: false, flippedAt: null }
+  const key = canonicalCity(city)
+  if (entries.has("*")) return { gated: true, flippedAt: (key && entries.get(key)) || entries.get("*") || null }
+  if (key === null) {
+    const days = [...entries.values()].filter((d): d is Date => d !== null)
+    return { gated: true, flippedAt: days.length ? new Date(Math.min(...days.map((d) => d.getTime()))) : null }
+  }
+  if (entries.has(key)) return { gated: true, flippedAt: entries.get(key) ?? null }
+  if (!reportedUngated.has(key)) {
+    reportedUngated.add(key)
+    logger.info("Blendn+ is not gated in this city (launch season)", { city: key })
+  }
+  return { gated: false, flippedAt: null }
+}
+
+/** Is Blendn+ gated everywhere (`*`, or `true`)? */
+export function plusGatedEverywhere(): boolean {
+  return gatingEntries().has("*")
+}
+
+/** Is Blendn+ gated anywhere at all? False in a launch season everywhere, so a gate can skip its queries. */
+export function plusGatedAnywhere(): boolean {
+  return gatingEntries().size > 0
+}
+
+/** RevenueCat's secret API key, or null when the server's own RevenueCat calls are off. */
+export function revenuecatSecretKey(): string | null {
+  const key = process.env.REVENUECAT_SECRET_KEY?.trim()
+  return key && /^sk_[A-Za-z0-9]+$/.test(key) ? key : null
+}
+
+/** The RevenueCat webhook's shared secret, or null when the webhook is off (unset or too short to be ours). */
+export function revenuecatWebhookSecret(): string | null {
+  const secret = process.env.REVENUECAT_WEBHOOK_SECRET?.trim()
+  return secret && secret.length >= 32 ? secret : null
+}
+
+/**
+ * The store environment whose purchases grant Blendn+ here: real money in
+ * production, sandbox everywhere else. The other one is recorded and never
+ * granted, so a sandbox purchase cannot hand out Plus in production and a real
+ * one cannot on staging (test plan MN-U05). Same rule as the Razorpay key mode.
+ */
+export function storeEnvironment(): "PRODUCTION" | "SANDBOX" {
+  return process.env.RAILWAY_ENVIRONMENT_NAME === "production" ? "PRODUCTION" : "SANDBOX"
 }
 
 /**
