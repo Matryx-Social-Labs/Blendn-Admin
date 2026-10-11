@@ -71,6 +71,10 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "SCRUBBED",
     why: "A two-party row, so it stays or the recipient's inbox develops holes. Only the message they SENT is theirs to erase.",
   },
+  this_or_that_answers: {
+    how: "DELETED",
+    why: "Their own answers to the this-or-that questions (matching v2). Nobody else's record, and nothing counts them after the person is gone.",
+  },
   product_events: {
     how: "DELETED",
     why: "Behavioural signals about one person — when they opened the app, what they looked at. A scrubbed row cannot be counted as a distinct person, so nulling `user_id` would keep a record of when somebody was awake and looking while no longer answering anything. Historical 'active this week' therefore drops by the days they contributed, and that is correct: keeping behaviour after somebody asked to be erased, to make a chart smoother, is not a trade this product should make.",

@@ -6,6 +6,15 @@ import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
+import { neverBuildHits } from "@/lib/never-build"
+
+/**
+ * A category is an interest people hold and a filter events carry, so it is
+ * the one place an admin could add a caste, faith or diet proxy without a
+ * deploy (plan v2 §8.4, `lib/never-build.ts`). One sentence for every hit.
+ */
+const NEVER_A_CATEGORY =
+  "That can't be a category: Blendn never groups people by diet, faith, caste, community, income, height, college or neighbourhood."
 
 /**
  * Managing the category taxonomy.
@@ -85,6 +94,7 @@ export async function renameCategory(id: string, name: string): Promise<void> {
   const admin = await requireAdmin()
   const trimmed = name.trim()
   if (trimmed.length < 2) throw new Refusal("Name is too short.")
+  if (neverBuildHits(trimmed).length) throw new Refusal(NEVER_A_CATEGORY)
 
   const before = await db.categories.findUniqueOrThrow({
     where: { id },
@@ -237,6 +247,7 @@ export async function createCategory(name: string, parentId: string | null): Pro
   const admin = await requireAdmin()
   const trimmed = name.trim()
   if (trimmed.length < 2) throw new Refusal("Name is too short.")
+  if (neverBuildHits(trimmed).length) throw new Refusal(NEVER_A_CATEGORY)
 
   if (parentId) {
     const parent = await db.categories.findUniqueOrThrow({

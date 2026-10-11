@@ -22,6 +22,7 @@ import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { changesTierB, normaliseLanguages, TIER_B_REFUSAL, writeTierB } from "@/lib/tier-b"
 import {
   successResponse,
   validationErrorResponse,
@@ -30,8 +31,10 @@ import {
   errorResponse,
   notFoundResponse,
   serverErrorResponse,
+  ErrorCode,
 } from "@/lib/api-response"
-import { updateProfileSchema } from "@/lib/validations/profile"
+import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
+import { homeStateLabel, languageLabels, signLabel, westernSignFor } from "@/lib/about-you"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 
@@ -193,6 +196,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * tag on a card, never as the values behind it.
        */
       ...(identified && p.show_orientation ? { orientations: p.orientations } : {}),
+      /*
+       * Languages, home state and sign — labels, and only to somebody who can
+       * see who this is. Before that they are Tier B (plan v2 §8.5): a card
+       * shows one of them as a shared line in a room big enough to hide in,
+       * never the set beside an age and a city.
+       */
+      ...(identified
+        ? {
+            languages: languageLabels(p.languages),
+            home_state: homeStateLabel(p.home_state),
+            sign: signLabel(p.sun_sign, p.sign_system),
+          }
+        : {}),
     }
 
     /*
@@ -203,7 +219,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * without a code change — the withholding is the deliberate part, and it
      * is one name long.
      */
-    const { date_of_birth: _dob, ...selfProfileFields } = { ...p, age: profileAge }
+    // `tier_b_changes` is the cooldown's ledger (lib/tier-b.ts), withheld with the birth date.
+    const { date_of_birth: _dob, tier_b_changes: _ledger, ...selfProfileFields } = {
+      ...p,
+      age: profileAge,
+      // The editor's prefill, never stored until they pick it (lib/about-you.ts).
+      suggested_sun_sign: westernSignFor(p?.date_of_birth),
+    }
 
     return successResponse({
       id: isSelf ? user.id : ref,
@@ -273,7 +295,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
       push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
+      languages, home_state, sun_sign, sign_system, shows_up_badge, show_badges,
     } = parsed.data
+    const signRefusal = signPairRefusal(parsed.data)
+    if (signRefusal) return errorResponse(signRefusal, 400, "VALIDATION_ERROR")
 
     /*
      * A photo moderation pulled stays pulled (SCRUM-479). The app sends back
@@ -343,6 +368,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
      * own -- that is the whole case `pruneExpertise` exists for.
      */
     const touchesExpertise = work_field !== undefined || expertise !== undefined
+    // Tier B facts: a change is stamped and rate-limited (step 10 review H1).
+    const touchesTierB =
+      languages !== undefined || home_state !== undefined || sun_sign !== undefined || work_field !== undefined
     // Finishing onboarding is gated on age (SCRUM-330), and needs to know whether it already happened.
     const finishesOnboarding = onboarded === true
     const existing =
@@ -350,6 +378,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       touchesDating ||
       touchesOrientationGate ||
       touchesExpertise ||
+      touchesTierB ||
       finishesOnboarding ||
       photos !== undefined ||
       blur_photo !== undefined
@@ -368,9 +397,25 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
               blur_photo: true,
               work_field: true,
               expertise: true,
+              languages: true,
+              home_state: true,
+              sun_sign: true,
+              sign_system: true,
             },
           })
         : null
+
+    /*
+     * Tier B (step 10 review H1; lib/tier-b.ts). Written by `writeTierB` below,
+     * which compares, counts, stamps and writes under the row's lock — never
+     * from this read, which another request may have overtaken. This read only
+     * decides the create path: a profile that does not exist yet has nothing to
+     * lock, nobody to protect, and gets its first answers stamped.
+     */
+    const firstTierB =
+      !existing &&
+      touchesTierB &&
+      changesTierB({ languages, home_state, sun_sign, sign_system, work_field }, null)
 
     /*
      * Specialisms, against the field they will sit under.
@@ -573,6 +618,12 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const storedPhotos = photos?.map((u: string) => sealedFor.get(u) ?? u)
 
 
+    // Tier B first, under its row lock: refused means nothing below is written either.
+    if (touchesTierB && existing) {
+      const tierB = await writeTierB(userId, { languages, home_state, sun_sign, sign_system, work_field })
+      if (tierB === "refused") return errorResponse(TIER_B_REFUSAL, 429, ErrorCode.RATE_LIMITED)
+    }
+
     // Update user record (name and/or primary photo)
     const userUpdate: Record<string, unknown> = {}
     if (name !== undefined) userUpdate.name = name
@@ -595,6 +646,23 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         where: { id: userId },
         data: userUpdate,
       })
+    }
+
+    // Matching v2's switches (lib/about-you.ts). Absent means unchanged.
+    const aboutYou = {
+      ...(shows_up_badge !== undefined && { shows_up_badge }),
+      ...(show_badges !== undefined && { show_badges }),
+    }
+    /*
+     * A new profile's first Tier B answers, on the create path only: an
+     * existing row's are written by `writeTierB` above and never here.
+     */
+    const firstAnswers = {
+      ...(languages !== undefined && { languages: normaliseLanguages(languages) }),
+      ...(home_state !== undefined && { home_state }),
+      ...(sun_sign !== undefined && { sun_sign, sign_system }),
+      ...(work_field !== undefined && { work_field }),
+      ...(firstTierB && { tier_b_changed_at: new Date() }),
     }
 
     // Update or create profile
@@ -657,7 +725,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
          * `show_orientation: true` to staging and reading `false` back.
          */
         ...(show_orientation !== undefined && { show_orientation }),
-        ...(work_field !== undefined && { work_field }),
+        // Tier B, first answers (`firstAnswers`).
         ...(prunedExpertise !== undefined && { expertise: prunedExpertise }),
         // Omitted rather than defaulted: the column defaults to true, which is
         // what the settings screen has always claimed, so nobody's apparent
@@ -667,6 +735,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),
         ...(friends_see_me_in_rooms !== undefined && { friends_see_me_in_rooms }),
+        ...aboutYou,
+        ...firstAnswers,
       },
       update: {
         ...(name !== undefined && { name }),
@@ -715,7 +785,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
          * `show_orientation: true` to staging and reading `false` back.
          */
         ...(show_orientation !== undefined && { show_orientation }),
-        ...(work_field !== undefined && { work_field }),
+        // No Tier B here: `writeTierB` wrote it under the row's lock.
         // Also when only the FIELD moved -- see `prunedExpertise` above.
         ...(prunedExpertise !== undefined && { expertise: prunedExpertise }),
         ...(push_enabled !== undefined && { push_enabled }),
@@ -723,6 +793,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),
         ...(friends_see_me_in_rooms !== undefined && { friends_see_me_in_rooms }),
+        ...aboutYou,
         updated_at: new Date(),
       },
     })

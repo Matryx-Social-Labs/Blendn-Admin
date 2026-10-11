@@ -193,6 +193,19 @@ jobs:
             fi
             echo "--- npm audit output (exit $code) ---"
             echo "$out"
+            # A finding with no patched release anywhere can be excused one
+            # advisory at a time, dev-only and until a date, by the list in
+            # scripts/audit-gate.ts. Nothing else is: the level above stays
+            # `high` and dev dependencies stay in. The first entry is braces
+            # (GHSA-vfj7-8cjw-p6xm), reachable only through eslint-config-next;
+            # the nightlies of 2026-10-10 and 2026-10-11 failed on it with
+            # nothing left to upgrade to.
+            if gate=$(npm audit --json 2>/dev/null | npx --no-install tsx scripts/audit-gate.ts 2>&1); then
+              echo "$gate"
+              echo "::warning::High-severity advisory excused by scripts/audit-gate.ts (dev-only, no patched release, ends on the date in that file) — see the log above."
+              exit 0
+            fi
+            echo "$gate"
             if [ "$blocking" -eq 0 ]; then
               echo "::warning::High-severity advisory present, but this PR touches no package.json or package-lock.json, so it did not introduce it and cannot be the place it is fixed. The nightly run and the push to dev still fail on this."
               exit 0

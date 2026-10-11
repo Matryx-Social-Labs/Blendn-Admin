@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { blockCounterparties } from "@/lib/conversations"
+import { keptApartIn } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
@@ -96,7 +96,8 @@ export async function GET(
      * their messages still arrived in the history, over the socket and as a
      * push notification.
      */
-    const blockedIds = await blockCounterparties(user.userId)
+    // …and in a board post's room, a closed conversation's too (`keptApartIn`).
+    const blockedIds = await keptApartIn(user.userId, chatGroup.kind)
 
     const whereClause: Record<string, unknown> = {
       chat_group_id: chatGroupId,
