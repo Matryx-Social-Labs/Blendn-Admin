@@ -236,6 +236,16 @@
       "blends"
     ]
   },
+  "/api/mobile/offers": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "offers"
+    ]
+  },
   "/api/mobile/me/plus": {
     "status": 200,
     "envelope": [
@@ -438,6 +448,7 @@
         "looking_for",
         "name",
         "occupation",
+        "offers_from_places",
         "onboarded",
         "orientations",
         "phone",

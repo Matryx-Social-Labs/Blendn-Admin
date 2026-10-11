@@ -299,6 +299,26 @@ export async function DELETE(request: NextRequest) {
        * make a chart smoother, is not a trade this product should make.
        */
       db.product_events.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * Their choices about venues (step 12): being known somewhere as a
+       * regular is theirs, and an erased account must not stay on a venue's
+       * list; a mute protects nobody once there is nobody to send to.
+       */
+      db.venue_regular_optins.deleteMany({ where: { user_id: authUser.userId } }),
+      db.venue_offer_mutes.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * The offers they were sent stay as counts, and nothing more (review
+       * M3): no account on them, the times cut to the day, and no trace of
+       * when a pass was last on their screen — a venue's opens and
+       * redemptions still add up, and nobody's nights at a door can be read.
+       */
+      db.$executeRaw`UPDATE venue_offer_sends
+                        SET user_id = NULL,
+                            sent_at = date_trunc('day', sent_at),
+                            opened_at = date_trunc('day', opened_at),
+                            redeemed_at = date_trunc('day', redeemed_at),
+                            pass_seen_at = NULL
+                      WHERE user_id = ${authUser.userId}`,
       db.user_oauth_accounts.deleteMany({ where: { user_id: authUser.userId } }),
       db.account.deleteMany({ where: { userId: authUser.userId } }),
       db.session.deleteMany({ where: { userId: authUser.userId } }),

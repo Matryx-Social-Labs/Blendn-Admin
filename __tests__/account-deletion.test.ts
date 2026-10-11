@@ -40,6 +40,8 @@ const mockDb = {
   crew_invites: { deleteMany: jest.fn() },
   blend_reveals: { deleteMany: jest.fn() },
   product_events: { deleteMany: jest.fn() },
+  venue_regular_optins: { deleteMany: jest.fn() },
+  venue_offer_mutes: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },
@@ -356,6 +358,7 @@ describe("no field on the profile survives deletion unnoticed", () => {
     // behave, not who the person was. Their defaults are already harmless and
     // nothing reads them for a deleted account.
     push_enabled: "a setting, not an attribute of the person",
+    offers_from_places: "a setting, not an attribute of the person (step 12)",
     show_online: "a setting, not an attribute of the person",
     read_receipts: "a setting, not an attribute of the person",
     share_location: "a setting, not an attribute of the person",

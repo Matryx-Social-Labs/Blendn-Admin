@@ -241,6 +241,9 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
   if (pathname.startsWith("/dashboard/venue-owners/")) {
     return { title: "Venue owner", description: "One owner account and the events it created." }
   }
+  if (pathname.startsWith("/dashboard/venues/") && pathname.endsWith("/door")) {
+    return { title: "Redeem a pass", description: "Type the code on their pass, then tap Redeemed." }
+  }
   if (pathname.startsWith("/dashboard/venues/") && pathname.endsWith("/claim")) {
     return {
       title: "Claim a venue",

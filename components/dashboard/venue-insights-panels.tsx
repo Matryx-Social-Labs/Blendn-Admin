@@ -58,12 +58,13 @@ export function PeopleHeatmap({ people }: { people: PeopleGrid }) {
   )
 }
 
-/** Guests, regulars and the returning share, each held back on its own terms. */
+/** Guests, returning guests and their share, each held back on its own terms. */
 export function RegularsFigures({ regulars }: { regulars: VenueInsight["regulars"] }) {
   const items = [
     // Counted in the slots the grid shows, so the total never gives a held one back.
     { label: "Guests", value: regulars.visitors, hint: "in the slots shown" },
-    { label: "Regulars", value: regulars.regulars, hint: "came on 2+ nights" },
+    // "Returning", not "Regulars": a regular is who an offer reaches, 3+ nights in 30 (lib/regulars.ts).
+    { label: "Returning", value: regulars.regulars, hint: "came on 2+ nights" },
     { label: "Returning share", value: regulars.sharePct === null ? null : `${regulars.sharePct}%`, hint: "of guests" },
   ]
   return (
@@ -115,7 +116,7 @@ export function PreClaimFigures({ history }: { history: PreClaimHistory }) {
   )
 }
 
-/** The regulars & offers composer's report, for its placeholder (step 12 wires the real one). */
+/** What an offer to regulars reports, drawn from the static sample inside the Listed venue's `Locked` preview. */
 export function OfferPreview({
   offer,
 }: {

@@ -359,3 +359,19 @@ export function mayManageBilling(userRole: user_role, memberRole: org_role): boo
 export function mayManageVenueBilling(userRole: user_role, memberRole: org_role): boolean {
   return userRole === "venue_owner" && (memberRole === "owner" || memberRole === "admin")
 }
+
+/**
+ * May this member of a venue's owning organisation send its regulars an
+ * offer (step 12)? Venue owners only, and the organisation's owners and
+ * admins: an offer goes out in the venue's name to people's phones. Staff
+ * redeem passes at the door (`mayRedeemAtVenue`). A platform admin sends
+ * nothing for a venue.
+ */
+export function maySendVenueOffers(userRole: user_role, memberRole: org_role): boolean {
+  return userRole === "venue_owner" && (memberRole === "owner" || memberRole === "admin")
+}
+
+/** May this member redeem a door pass at the venue (step 12)? Anyone on its staff. */
+export function mayRedeemAtVenue(userRole: user_role): boolean {
+  return userRole === "venue_owner"
+}

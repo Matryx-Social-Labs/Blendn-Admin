@@ -48,7 +48,7 @@ export interface ReportRow {
   subjectSuspended: boolean
   /** Message reports only — a board post's body and a board ask's message included. */
   excerpt: string | null
-  messageType: "group" | "private" | "board_post" | "board_request" | "crew" | null
+  messageType: "group" | "private" | "board_post" | "board_request" | "crew" | "venue_offer" | null
   /**
    * Crew reports only (C12): the crew's state now. The subject is the crew's
    * card, not a person — `subjectId` stays null, so no Suspend is offered; the
@@ -187,16 +187,17 @@ export async function getReportQueue(status: report_status = "pending") {
    */
   const idsOf = (type: string) =>
     messageReports.filter((r) => r.message_type === type).map((r) => r.message_id)
-  const [groupIds, privateIds, boardPostIds, boardRequestIds, crewIds] = [
+  const [groupIds, privateIds, boardPostIds, boardRequestIds, crewIds, offerIds] = [
     idsOf("group"),
     idsOf("private"),
     idsOf("board_post"),
     idsOf("board_request"),
     idsOf("crew"),
+    idsOf("venue_offer"),
   ]
 
   const person = { select: { id: true, name: true, email: true, suspended_at: true } } as const
-  const [groupMessages, privateMessages, boardPosts, boardRequests, crews] = await Promise.all([
+  const [groupMessages, privateMessages, boardPosts, boardRequests, crews, offers] = await Promise.all([
     groupIds.length
       ? db.chat_messages.findMany({
           where: { id: { in: groupIds } },
@@ -255,6 +256,13 @@ export async function getReportQueue(status: report_status = "pending") {
           select: { id: true, name: true, hidden_at: true, dissolved_at: true },
         })
       : [],
+    // A venue's offer (step 12): the venue it came from, and whether it still runs. An admin ends it on the venue's page.
+    offerIds.length
+      ? db.venue_offers.findMany({
+          where: { id: { in: offerIds } },
+          select: { id: true, ends_at: true, venue: { select: { name: true } } },
+        })
+      : [],
   ])
 
   const groupById = new Map(groupMessages.map((m) => [m.id, m]))
@@ -262,6 +270,7 @@ export async function getReportQueue(status: report_status = "pending") {
   const boardPostById = new Map(boardPosts.map((p) => [p.id, p]))
   const boardRequestById = new Map(boardRequests.map((r) => [r.id, r]))
   const crewById = new Map(crews.map((c) => [c.id, c]))
+  const offerById = new Map(offers.map((o) => [o.id, o]))
 
   /*
    * How many reports in this tab name the same thing. Grouped by subject so a
@@ -345,6 +354,24 @@ export async function getReportQueue(status: report_status = "pending") {
           eventTitle: null,
           eventId: null,
           crew: crew ? { hidden: crew.hidden_at !== null, dissolved: crew.dissolved_at !== null } : null,
+        }
+      }
+      if (r.message_type === "venue_offer") {
+        const offer = offerById.get(r.message_id)
+        return {
+          ...base,
+          // The subject is a venue's offer, not a person: no Suspend.
+          subjectId: null,
+          subjectName: `Offer · ${offer?.venue.name ?? "gone"}${offer && offer.ends_at.getTime() <= now ? " (ended)" : ""}`,
+          subjectSuspended: false,
+          excerpt: (r.excerpt ?? "").slice(0, 200) || null,
+          messageType: "venue_offer",
+          boardKind: null,
+          messageDeleted: false,
+          gone: !offer,
+          removable: false,
+          eventTitle: null,
+          eventId: null,
         }
       }
       if (r.message_type === "board_post") {

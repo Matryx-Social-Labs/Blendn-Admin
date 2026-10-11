@@ -400,6 +400,14 @@ export function discloseBreakdown(
 }
 
 /**
+ * A part of a known group, shown only when the part and the rest both reach
+ * the floor. The rest is never shown beside it, so neither can be subtracted
+ * from a total to recover the other.
+ */
+export const heldPart = (part: number, whole: number): number | null =>
+  whole < MIN_CELL ? null : discloseBreakdown([part, whole - part]).cells[0]
+
+/**
  * What to render in place of a withheld number.
  *
  * Centralised so two surfaces cannot describe the same suppression differently,

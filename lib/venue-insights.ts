@@ -31,6 +31,10 @@ import { venueDayBounds } from "./venue-day"
  * through `discloseBreakdown`: neither part is shown when either is under
  * the floor, or the whole minus the shown part would give the hidden one back.
  *
+ * "Regulars" in `VenueRegulars` is **returning guests: 2+ nights in the
+ * window**, and the page labels it "Returning". The regulars an offer reaches
+ * are a different, stricter rule — 3+ nights in 30 days — in lib/regulars.ts.
+ *
  * ## Whole nights, so a figure does not move while you watch
  *
  * The window ends at the start of the venue's current day (its 06:00 reset),
