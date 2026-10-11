@@ -18,7 +18,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 jest.mock("@auth/prisma-adapter", () => ({ PrismaAdapter: () => ({}) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const mockGetAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ ...jest.requireActual("@/lib/auth"), getAuth: () => mockGetAuth() }))
+jest.mock("@/lib/auth", () => ({ ...jest.requireActual("@/lib/auth"), getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 import { authOptions } from "@/lib/auth"
 import { createRoleUser } from "@/lib/admin-role-actions"
 import { findOrCreateAppleUser, findOrCreateGoogleUser } from "@/lib/mobile-auth"

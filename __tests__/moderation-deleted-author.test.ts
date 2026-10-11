@@ -15,10 +15,10 @@ const mockDb = {
   chat_messages: { count: jest.fn().mockResolvedValue(0) },
   photo_checks: { count: jest.fn().mockResolvedValue(0) },
   // requireAdmin reads the role from the database (lib/current-user.ts): an admin's row.
-  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null }) },
+  user: { findUnique: jest.fn().mockResolvedValue({ role: "app_admin", suspended_at: null, deletedAt: null, password_changed_at: null }) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin" } }) }))
+jest.mock("@/lib/auth", () => ({ getAuth: jest.fn().mockResolvedValue({ user: { id: "admin", role: "app_admin", signedInAt: 0 } }) }))
 jest.mock("@/lib/trust", () => ({ trustSignalsFor: jest.fn().mockResolvedValue(new Map()) }))
 // The action module now tells the room about a removal; socket-server pulls in
 // ESM-only deps a unit test cannot load, and this test never resolves a flag.

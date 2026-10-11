@@ -27,7 +27,7 @@ beforeAll(async () => {
   const admin = await makeUser(testId("supply_admin"), "app_admin")
   users.push(admin)
   mockAuth.mockResolvedValue({
-    user: { id: admin, role: "app_admin", email: "a@b.c" },
+    user: { signedInAt: 0, id: admin, role: "app_admin", email: "a@b.c" },
   } as unknown as Awaited<ReturnType<typeof getAuth>>)
 })
 

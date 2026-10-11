@@ -12,7 +12,7 @@ import type { DashboardRole } from "@/lib/dashboard-types"
  * canonically audited. Real actions against real Postgres, rows read back.
  */
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { getUsers, updateUser, updateUserRole } from "@/app/dashboard/users/actions"
