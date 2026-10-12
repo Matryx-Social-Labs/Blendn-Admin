@@ -49,8 +49,10 @@ const codes = (markup: string) =>
     .filter((s) => /^<svg[^>]*role="img"[^>]*aria-label="QR code for Sunset Sessions/.test(s))
 
 describe("EventShare", () => {
-  const html = (linksLive = false) =>
-    renderToStaticMarkup(createElement(EventShare, { url: eventShareUrl(ID), title: TITLE, when: WHEN, linksLive }))
+  const html = (linksLive = false, androidOpensApp = false) =>
+    renderToStaticMarkup(
+      createElement(EventShare, { url: eventShareUrl(ID), title: TITLE, when: WHEN, linksLive, androidOpensApp })
+    )
 
   it("draws the code on the tab, and it scans to the event's address", () => {
     const svgs = codes(html())
@@ -73,6 +75,20 @@ describe("EventShare", () => {
   it("says the link does not open the app while it does not, and stops saying so once it does", () => {
     expect(html(false)).toContain("does not open the app yet")
     expect(html(true)).not.toContain("does not open the app yet")
+  })
+
+  // SCRUM-537: live on the site and on iOS first; Android opens the app directly only from its next store build.
+  it("once live, says what a scan does on each phone until Android opens the app directly, then says nothing", () => {
+    const meanwhile = html(true, false)
+    expect(meanwhile).toContain("On an iPhone with Blend&#x27;n, scanning opens this event in the app.")
+    expect(meanwhile).toContain("On Android it opens a blendn.app page first, with an")
+    expect(meanwhile).toContain("until the app&#x27;s next Android release")
+    expect(meanwhile).toContain("Phones without the app get that page too.")
+    expect(meanwhile).not.toContain("not found")
+    const after = html(true, true)
+    for (const gone of ["On an iPhone", "On Android", "Phones without the app", "does not open the app yet"]) {
+      expect(after).not.toContain(gone)
+    }
   })
 })
 

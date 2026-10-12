@@ -117,16 +117,23 @@ test("the organiser walks every tab under one header, and the QR & link tab hand
     }, bytes)
     expect(read).toEqual({ width: 1024, height: 1024, data: `https://www.blendn.app/event/${id}` })
 
-    // Printing prints the door slide and nothing else, and while the link
-    // opens nothing (SCRUM-537) the slide carries no code and no address.
+    // The link is live (SCRUM-537): the tab says what a scan does on each
+    // phone, Android opening a web page first until its next store build.
+    await expect(main(page)).toContainText("On an iPhone with Blend'n, scanning opens this event in the app.")
+    await expect(main(page)).toContainText("On Android it opens a blendn.app page first")
+    await expect(main(page)).not.toContainText("does not open the app yet")
+
+    // Printing prints the door slide and nothing else, and the slide carries
+    // the code and the address.
     await page.emulateMedia({ media: "print" })
     const slide = page.locator("[data-door-slide]")
     await expect(slide).toBeVisible()
     await expect(page.locator('[data-slot="sidebar-container"]')).toBeHidden()
     await expect(main(page)).toBeHidden()
-    await expect(slide).toContainText("find this event by its name")
-    await expect(slide.getByRole("img")).toHaveCount(0)
-    await expect(slide).not.toContainText("www.blendn.app")
+    await expect(slide.getByRole("img", { name: "QR code for Sunset Sessions at The Humming Tree" })).toHaveCount(1)
+    await expect(slide).toContainText("Scan to check in with Blend'n")
+    await expect(slide).toContainText(`https://www.blendn.app/event/${id}`)
+    await expect(slide).not.toContainText("find this event by its name")
     await page.emulateMedia({ media: "screen" })
     await expect(slide).toBeHidden()
     found.push(...(await axeMain(page)).map((v) => `share@${width}: ${v}`))

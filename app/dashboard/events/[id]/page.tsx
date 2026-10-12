@@ -17,7 +17,7 @@ import { getEventOverview } from "@/lib/event-overview"
 import { discloseHeadcount } from "@/lib/disclosure"
 import { eventAttendees } from "@/lib/attendee-roster"
 import { loadEventPage } from "@/lib/event-page"
-import { EVENT_LINKS_LIVE, eventShareUrl } from "@/lib/event-share"
+import { EVENT_LINKS_LIVE, EVENT_LINKS_OPEN_ANDROID_APP, eventShareUrl } from "@/lib/event-share"
 
 import { EventAttendeesCount, EventAttendeesTable } from "./attendees-table"
 import { eventTabsFor, sharesLink } from "./event-tabs"
@@ -134,6 +134,7 @@ export default async function EventDetailPage({
           title={event.title}
           when={`${clock.dateTime(event.start_time)}${venueName ? ` · ${venueName}` : ""}`}
           linksLive={EVENT_LINKS_LIVE}
+          androidOpensApp={EVENT_LINKS_OPEN_ANDROID_APP}
         />
       </div>
     )
