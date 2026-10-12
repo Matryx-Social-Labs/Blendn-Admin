@@ -18,13 +18,22 @@ export function eventShareUrl(eventId: string): string {
 }
 
 /**
- * Whether the address opens anything yet.
+ * Whether the address opens anything.
  *
- * It does not, on 2026-10-02: www.blendn.app's association file lists only
- * `/f/*` and the app's https intent filter only `/f/`, so a phone with the app
- * opens the browser, and the site has no `/event/` page, so that browser shows
- * "not found". The tab says so while this is false, and still hands over the
- * code: the address is permanent, so a code printed today starts working the
- * day the landing page and the app learn it (SCRUM-537). Flip this then.
+ * It does since 2026-10-12 (SCRUM-537). www.blendn.app serves an `/event/<id>`
+ * page, so a phone without the app gets that page and its store link, and the
+ * site's association file lists `/event/*`, so an iPhone with the app opens
+ * the event in it. While this was false (from 2026-10-02) the tab said
+ * "not found" and the door slide carried no code.
  */
-export const EVENT_LINKS_LIVE = false
+export const EVENT_LINKS_LIVE = true
+
+/**
+ * Whether Android opens the app straight from the address.
+ *
+ * Not yet. The Android app opens only the https paths its intent filter lists,
+ * and `/event/` is in that filter only from the next store build (client PR
+ * #376). Until then Android shows the web page, whose "Open in Blend'n" button
+ * opens the event, and the tab says so. Flip this once that build is on Play.
+ */
+export const EVENT_LINKS_OPEN_ANDROID_APP = false

@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconCopy,
   IconDownload,
+  IconInfoCircle,
   IconPresentation,
   IconPrinter,
 } from "@tabler/icons-react"
@@ -38,6 +39,7 @@ export function EventShare({
   title,
   when,
   linksLive,
+  androidOpensApp,
 }: {
   /** `eventShareUrl(id)`, built on the server. Nothing else is ever encoded. */
   url: string
@@ -46,6 +48,8 @@ export function EventShare({
   when: string
   /** `EVENT_LINKS_LIVE`: whether the address opens anything yet. */
   linksLive: boolean
+  /** `EVENT_LINKS_OPEN_ANDROID_APP`: whether Android opens the app from it, not the web page. */
+  androidOpensApp: boolean
 }) {
   const slide = useRef<HTMLDivElement>(null)
   const presentButton = useRef<HTMLButtonElement>(null)
@@ -142,11 +146,17 @@ export function EventShare({
               Attendees scan it to find this event, check in with GPS inside your check-in area, and join the
               room under a made-up name.
             </p>
-            {linksLive ? null : (
-              <Note>
+            {!linksLive ? (
+              <Note warning>
                 The link does not open the app yet: phones show a &ldquo;not found&rdquo; page until blendn.app and
                 the app learn event links. The address is permanent, so a code printed later will work; until then
                 the slide and the print tell people to find the event by its name.
+              </Note>
+            ) : androidOpensApp ? null : (
+              <Note>
+                On an iPhone with Blend&apos;n, scanning opens this event in the app. On Android it opens a blendn.app
+                page first, with an &ldquo;Open in Blend&apos;n&rdquo; button, until the app&apos;s next Android
+                release. Phones without the app get that page too.
               </Note>
             )}
             <div className="flex flex-wrap items-center gap-2">
@@ -263,10 +273,12 @@ export function DoorSlide({
 
 const noSubscribe = () => () => {}
 
-function Note({ children }: { children: React.ReactNode }) {
+/** A line under the panel's prose: a warning when something is broken, otherwise a quiet heads-up. */
+function Note({ children, warning = false }: { children: React.ReactNode; warning?: boolean }) {
+  const Icon = warning ? IconAlertTriangle : IconInfoCircle
   return (
     <p className="flex max-w-[60ch] items-start gap-2 text-[0.8125rem] leading-5 text-muted-foreground">
-      <IconAlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+      <Icon aria-hidden className={warning ? "mt-0.5 size-4 shrink-0 text-warning" : "mt-0.5 size-4 shrink-0"} />
       <span>{children}</span>
     </p>
   )
