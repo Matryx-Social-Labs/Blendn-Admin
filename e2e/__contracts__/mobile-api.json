@@ -448,6 +448,7 @@
         "looking_for",
         "name",
         "occupation",
+        "offer_push_consent_at",
         "offers_from_places",
         "onboarded",
         "orientations",

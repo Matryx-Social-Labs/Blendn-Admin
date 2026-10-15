@@ -32,7 +32,7 @@ jest.mock("expo-server-sdk", () => {
   return { Expo }
 })
 
-import { sendPushNotification } from "@/lib/push-notifications"
+import { sendBulkPushNotifications, sendPushNotification } from "@/lib/push-notifications"
 import { closeDb, db, makeUser, testId } from "./helpers"
 
 const users: string[] = []
@@ -47,7 +47,7 @@ afterAll(async () => {
 
 beforeEach(() => sent.mockClear())
 
-async function person(label: string, profile: { push_enabled: boolean } | null) {
+async function person(label: string, profile: { push_enabled?: boolean; offer_push_consent_at?: Date } | null) {
   const id = await makeUser(testId(label))
   users.push(id)
   if (profile) await db.profiles.create({ data: { id, ...profile } })
@@ -92,5 +92,65 @@ describe("the switch is honoured on the send path", () => {
     await push(id)
     await expect(db.push_tokens.count({ where: { user_id: id } })).resolves.toBe(0)
     await expect(db.push_tokens.count({ where: { user_id: bystander } })).resolves.toBe(1)
+  })
+})
+
+/*
+ * SCRUM-628. A venue's offer is a promotion, and App Store guideline 4.5.4
+ * allows a promotional push only to someone who said yes to it in the app.
+ * The yes is `profiles.offer_push_consent_at`, and nobody has one until they
+ * give it. The offer itself still arrives — its bell line and Passes & offers
+ * — so only the push waits for the yes.
+ */
+describe("an offer's push needs an explicit yes (SCRUM-628)", () => {
+  const offer = (userIds: string[]) =>
+    sendBulkPushNotifications({ userIds, title: "t", body: "b", data: { type: "venue_offer", offerId: "o-628" } })
+  const tokenOf = (id: string) => `ExponentPushToken[itest-${id}]`
+
+  it("no yes: no push, and the offer's line is still in the bell", async () => {
+    const id = await person("po-offer-no", { push_enabled: true })
+    await offer([id])
+    expect(sent).not.toHaveBeenCalled()
+    await expect(db.notifications.count({ where: { user_id: id, kind: "venue_offer" } })).resolves.toBe(1)
+  })
+
+  it("a yes: the push goes, on the offers channel", async () => {
+    const id = await person("po-offer-yes", { offer_push_consent_at: new Date() })
+    await offer([id])
+    expect(sent).toHaveBeenCalledTimes(1)
+    expect(sent.mock.calls[0][0]).toEqual([expect.objectContaining({ to: tokenOf(id), channelId: "offers" })])
+  })
+
+  it("one send to both: only the person who said yes is pushed, and both get the line", async () => {
+    const yes = await person("po-offer-mixed-yes", { offer_push_consent_at: new Date() })
+    const no = await person("po-offer-mixed-no", {})
+    await offer([yes, no])
+    expect(sent.mock.calls.flatMap((c) => c[0].map((m) => m.to))).toEqual([tokenOf(yes)])
+    await expect(db.notifications.count({ where: { user_id: { in: [yes, no] }, kind: "venue_offer" } })).resolves.toBe(2)
+  })
+
+  it("no profile row at all: no yes, so no offer push — the opposite default to push_enabled", async () => {
+    const id = await person("po-offer-none", null)
+    await offer([id])
+    expect(sent).not.toHaveBeenCalled()
+  })
+
+  it("a yes with notifications off: still nothing", async () => {
+    const id = await person("po-offer-yes-off", { push_enabled: false, offer_push_consent_at: new Date() })
+    await offer([id])
+    expect(sent).not.toHaveBeenCalled()
+  })
+
+  it("the single sender asks the same, and an event's push to someone with no yes still goes", async () => {
+    const single = (userId: string) =>
+      sendPushNotification({ userId, title: "t", body: "b", data: { type: "venue_offer", offerId: "o-628" } })
+    const id = await person("po-offer-single", {})
+    await expect(single(id)).resolves.toBe(false)
+    expect(sent).not.toHaveBeenCalled()
+    await expect(push(id)).resolves.toBe(true)
+    expect(sent).toHaveBeenCalledTimes(1)
+    const yes = await person("po-offer-single-yes", { offer_push_consent_at: new Date() })
+    await expect(single(yes)).resolves.toBe(true)
+    expect(sent).toHaveBeenCalledTimes(2)
   })
 })

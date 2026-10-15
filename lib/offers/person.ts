@@ -211,15 +211,37 @@ export async function setRegularPrefs(
   return { prefs: prefs ?? { known: false, offersMuted: false, ownerName: null } }
 }
 
-/** "Offers from places" — the person's one switch for every venue (review M6). On unless turned off. */
-export async function offersFromPlaces(userId: string): Promise<boolean> {
-  const profile = await db.profiles.findUnique({ where: { id: userId }, select: { offers_from_places: true } })
-  return profile?.offers_from_places ?? true
+export interface OfferSettings {
+  /** "Offers from places": the one switch for every venue (review M6). On unless turned off; off, no offer reaches them. */
+  enabled: boolean
+  /** Offer pushes (SCRUM-628): off until they say yes in the app. Off, offers still arrive, with no push. */
+  pushes: boolean
 }
 
-export async function setOffersFromPlaces(userId: string, enabled: boolean): Promise<boolean> {
-  await db.profiles.update({ where: { id: userId }, data: { offers_from_places: enabled } })
-  return enabled
+const settingsSelect = { offers_from_places: true, offer_push_consent_at: true } as const
+
+export async function offerSettings(userId: string): Promise<OfferSettings> {
+  const profile = await db.profiles.findUnique({ where: { id: userId }, select: settingsSelect })
+  return { enabled: profile?.offers_from_places ?? true, pushes: Boolean(profile?.offer_push_consent_at) }
+}
+
+/**
+ * Changes what it is given. A yes to pushes is kept with when it was first
+ * given — a second yes (a retry, a double tap) is the same yes; a no clears it.
+ */
+export async function setOfferSettings(userId: string, change: Partial<OfferSettings>, now: Date = new Date()): Promise<OfferSettings> {
+  const firstYes = change.pushes
+    ? (await db.profiles.findUnique({ where: { id: userId }, select: { offer_push_consent_at: true } }))?.offer_push_consent_at
+    : null
+  const profile = await db.profiles.update({
+    where: { id: userId },
+    data: {
+      ...(change.enabled !== undefined && { offers_from_places: change.enabled }),
+      ...(change.pushes !== undefined && { offer_push_consent_at: change.pushes ? (firstYes ?? now) : null }),
+    },
+    select: settingsSelect,
+  })
+  return { enabled: profile.offers_from_places, pushes: profile.offer_push_consent_at !== null }
 }
 
 export type ReportOutcome = "filed" | "already" | "not_found"

@@ -359,6 +359,7 @@ describe("no field on the profile survives deletion unnoticed", () => {
     // nothing reads them for a deleted account.
     push_enabled: "a setting, not an attribute of the person",
     offers_from_places: "a setting, not an attribute of the person (step 12)",
+    offer_push_consent_at: "a setting and when it was given, not an attribute of the person (SCRUM-628)",
     show_online: "a setting, not an attribute of the person",
     read_receipts: "a setting, not an attribute of the person",
     share_location: "a setting, not an attribute of the person",

@@ -5,8 +5,9 @@ import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 
 /**
- * Deliver an offer to the people it was sent to (step 12): one push each,
- * and a line in their bell.
+ * Deliver an offer to the people it was sent to (step 12): a line in each
+ * one's bell, and a push to those who said yes to offer pushes — the sender
+ * asks (SCRUM-628, `lib/push-notifications.ts`).
  *
  * **The only module that reads an offer audience's ids**
  * (`__tests__/regulars-never-listed.test.ts`). The send wrote them with one

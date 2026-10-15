@@ -362,6 +362,12 @@ model profiles {
   /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
   /// default (the coordinator's default, flagged to the owner).
   offers_from_places Boolean @default(true)
+  /// When they said yes to offer pushes; null is no (SCRUM-628). A venue's
+  /// offer is a promotion, and App Store guideline 4.5.4 allows a promotional
+  /// push only to someone who opted in through the app — so nobody has one
+  /// until they give it. Without it the offer still arrives, in the bell and
+  /// Passes & offers; only the push waits (`lib/push-notifications.ts`).
+  offer_push_consent_at DateTime? @db.Timestamptz(6)
   /// Honoured on the two surfaces where another attendee can see you are in
   /// a room: the roster (`GET /events/:id/checkins`) and the grid
   /// (`lib/matches.ts`). Off means counted and not listed — the numbers
