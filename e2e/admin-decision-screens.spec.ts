@@ -1,6 +1,7 @@
 import { test, expect, chromium, type Browser, type Page } from "@playwright/test"
 
 import { statePathFor } from "./global-setup"
+import { axeMain } from "./fixtures/a11y"
 
 /**
  * The admin's decision screens on the kit (step 18, part A): the overview,
@@ -20,17 +21,6 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await browser.close()
 })
-
-async function axeMain(page: Page): Promise<string[]> {
-  await page.addScriptTag({ path: require.resolve("axe-core/axe.min.js") })
-  return page.evaluate(async () => {
-    type Axe = { run: (...a: unknown[]) => Promise<{ violations: { id: string; impact: string; nodes: { target: string[] }[] }[] }> }
-    const res = await (window as unknown as { axe: Axe }).axe.run({ include: [["main"]] }, { resultTypes: ["violations"] })
-    return res.violations
-      .filter((v) => v.impact === "serious" || v.impact === "critical")
-      .map((v) => `${v.id} (${v.impact}) ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)
-  })
-}
 
 /** How far the page is wider than its viewport, in px; 0 is the only right answer. */
 const overflowPx = (page: Page) =>

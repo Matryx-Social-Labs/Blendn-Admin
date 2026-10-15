@@ -2,6 +2,7 @@ import { test, expect, chromium, type Browser, type Page } from "@playwright/tes
 
 import type { RoleKey } from "./fixtures/auth"
 import { statePathFor } from "./global-setup"
+import { axeMain } from "./fixtures/a11y"
 
 /**
  * The organiser's screens on the design kit (step 15), driven in a real
@@ -28,17 +29,6 @@ async function open(account: RoleKey, width: number, baseURL: string | undefined
 }
 
 /** Serious and critical axe findings inside `main`: the screen's, not the shell's. */
-async function axeMain(page: Page): Promise<string[]> {
-  await page.addScriptTag({ path: require.resolve("axe-core/axe.min.js") })
-  return page.evaluate(async () => {
-    type Axe = { run: (...a: unknown[]) => Promise<{ violations: { id: string; impact: string; nodes: { target: string[] }[] }[] }> }
-    const res = await (window as unknown as { axe: Axe }).axe.run({ include: [["main"]] }, { resultTypes: ["violations"] })
-    return res.violations
-      .filter((v) => v.impact === "serious" || v.impact === "critical")
-      .map((v) => `${v.id} (${v.impact}) ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)
-  })
-}
-
 const main = (page: Page) => page.getByRole("main")
 
 test("the organiser overview: setup, the last 30 days, and a row per upcoming event, clean under axe", async ({ baseURL }) => {

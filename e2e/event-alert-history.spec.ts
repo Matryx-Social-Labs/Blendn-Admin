@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 
 import type { RoleKey } from "./fixtures/auth"
 import { statePathFor } from "./global-setup"
+import { axeMain } from "./fixtures/a11y"
 
 /**
  * The alert log, once the event is over (F6), in a real browser.
@@ -68,17 +69,6 @@ test.afterAll(async () => {
     await db.$disconnect()
   }
 })
-
-async function axeMain(page: Page): Promise<string[]> {
-  await page.addScriptTag({ path: require.resolve("axe-core/axe.min.js") })
-  return page.evaluate(async () => {
-    type Axe = { run: (...a: unknown[]) => Promise<{ violations: { id: string; impact: string; nodes: { target: string[] }[] }[] }> }
-    const res = await (window as unknown as { axe: Axe }).axe.run({ include: [["main"]] }, { resultTypes: ["violations"] })
-    return res.violations
-      .filter((v) => v.impact === "serious" || v.impact === "critical")
-      .map((v) => `${v.id} (${v.impact}) ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)
-  })
-}
 
 async function open(account: RoleKey, width: number, baseURL: string | undefined) {
   const ctx = await browser.newContext({ storageState: statePathFor(account), viewport: { width, height: 900 }, baseURL })
