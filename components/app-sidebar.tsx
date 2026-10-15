@@ -9,23 +9,13 @@ import { NavMain } from "@/components/nav-main"
 import { ProTag } from "@/components/dashboard/kit"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, useSidebar } from "@/components/ui/sidebar"
 import { groupedNavFor } from "@/lib/dashboard-nav"
+import { initialsOf } from "@/lib/utils"
 
 const ROLE_LABELS: Record<string, string> = {
   app_admin: "Platform",
   organizer: "Organiser",
   venue_owner: "Venue owner",
   sponsor: "Sponsor",
-}
-
-function initialsOf(name: string): string {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase())
-      .join("") || "B"
-  )
 }
 
 /**
@@ -92,7 +82,7 @@ export function AppSidebar({
       <nav aria-label="Dashboard" className="flex min-h-0 flex-1 flex-col">
         <SidebarHeader className="gap-[18px] px-3 pb-0 pt-4">
           <div className="px-1.5">
-            <BrandLogo size="sidebar" />
+            <BrandLogo />
           </div>
           <div data-slot="org-card" className="flex items-center gap-2.5 rounded-[10px] border border-border bg-card p-2.5">
             <span

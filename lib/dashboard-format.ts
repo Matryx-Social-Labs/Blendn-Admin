@@ -131,33 +131,6 @@ export function whenLabel(
   return `${day(start, showStartYear)}, ${from}`
 }
 
-/**
- * Every event this person may see.
- *
- * ## Why this is a server component now
- *
- * It was the last screen in the dashboard that fetched its own data from a
- * client `useEffect`, and that one decision produced most of what was wrong
- * with it: a **"Loading events…" spinner inside a bordered card**, on a
- * codebase whose design system says skeletons rather than spinners and which
- * already had `app/dashboard/events/loading.tsx` sitting unused — the boundary
- * can never fire for a component that does not suspend.
- *
- * It also meant a second copy of the row shape, and a second answer to "which
- * events may I see": the route it called had careful organisation-membership
- * scoping with a comment explaining the colleague-sees-an-empty-list bug, and
- * nothing held the dashboard to it. `lib/event-visibility.ts` is now the only
- * answer, used by both.
- *
- * ## What the columns are for
- *
- * An admin opens this to find one event, or to see what is broken. So: when,
- * where, whose, and whether it can actually be checked into. **Capacity is
- * gone** — it rendered `current_capacity`, which has no application writer and
- * was `0` on every row for every event ever created (K4.12). A column of zeroes
- * is not a neutral omission; it is a metric asserting that nobody came.
- */
-
 /* -------------------------------------------------------------------------- */
 
 /**

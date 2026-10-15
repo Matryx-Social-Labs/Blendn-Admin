@@ -18,7 +18,7 @@ export function RoleUserDetail({
 
   return (
     <Panel title="Events" hint={`${n} created`} bodyClassName="px-0 pb-1 pt-3">
-      <UserEventsTable events={user.organized_events} isAdmin />
+      <UserEventsTable events={user.organized_events} />
     </Panel>
   )
 }

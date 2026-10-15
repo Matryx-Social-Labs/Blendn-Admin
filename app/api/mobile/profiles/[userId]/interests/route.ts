@@ -80,6 +80,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 }
 
+/** What POST and DELETE answer with: the person's interests after the write. */
+async function interestsOf(userId: string) {
+  const interests = await db.user_interests.findMany({
+    where: { user_id: userId },
+    include: {
+      category: true,
+    },
+  })
+  return interests.map((ui) => ({
+    id: ui.category.id,
+    name: ui.category.name,
+    slug: ui.category.slug,
+    icon: ui.category.icon,
+    addedAt: ui.created_at,
+  }))
+}
+
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { userId } = await params
@@ -177,23 +194,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       skipDuplicates: true,
     })
 
-    // Fetch updated interests
-    const interests = await db.user_interests.findMany({
-      where: { user_id: userId },
-      include: {
-        category: true,
-      },
-    })
-
-    return successResponse({
-      interests: interests.map((ui) => ({
-        id: ui.category.id,
-        name: ui.category.name,
-        slug: ui.category.slug,
-        icon: ui.category.icon,
-        addedAt: ui.created_at,
-      })),
-    })
+    return successResponse({ interests: await interestsOf(userId) })
   } catch (error) {
     logger.error("Add interests error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to add interests")
@@ -236,23 +237,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    // Fetch remaining interests
-    const interests = await db.user_interests.findMany({
-      where: { user_id: userId },
-      include: {
-        category: true,
-      },
-    })
-
-    return successResponse({
-      interests: interests.map((ui) => ({
-        id: ui.category.id,
-        name: ui.category.name,
-        slug: ui.category.slug,
-        icon: ui.category.icon,
-        addedAt: ui.created_at,
-      })),
-    })
+    return successResponse({ interests: await interestsOf(userId) })
   } catch (error) {
     logger.error("Remove interests error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to remove interests")

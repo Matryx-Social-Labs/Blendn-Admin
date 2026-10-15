@@ -93,14 +93,6 @@ export const STATE_LABEL: Record<EventState, string> = {
   over: "Over",
 }
 
-/** What the screen is asking, per state. Used as the Overview's own subtitle. */
-export const STATE_QUESTION: Record<EventState, string> = {
-  draft: "What is stopping this from being published?",
-  upcoming: "Will it fill?",
-  live: "Is it going okay right now?",
-  over: "Was it good, and what would you do differently?",
-}
-
 export interface PublishBlocker {
   key: string
   label: string

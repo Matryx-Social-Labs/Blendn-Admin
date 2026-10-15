@@ -15,7 +15,7 @@ import {
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { boundedInt } from "@/lib/pagination"
+import { boundedInt, paginationMeta } from "@/lib/pagination"
 
 export async function GET(request: NextRequest) {
   try {
@@ -475,13 +475,7 @@ export async function GET(request: NextRequest) {
       groups: groupsWithUnread,
       /** Crew and Blend rooms, newest message first, not paged (see above). */
       rooms,
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     logger.error("Get chat groups error", { error: error instanceof Error ? error.message : String(error) })

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors } from "@/lib/openapi/schemas/common"
+import { standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 
 /*
  * Regulars, blind offers and the door pass (step 12). A venue on Venue Pro
@@ -8,9 +8,6 @@ import { standardErrors } from "@/lib/openapi/schemas/common"
  * person sees it here. Nothing on this side names anybody else, and the venue
  * learns counts only — the dashboard's side is server actions, not this API.
  */
-
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
 const OfferSchema = z
   .object({

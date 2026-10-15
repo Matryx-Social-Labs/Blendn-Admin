@@ -376,13 +376,11 @@ export function PillTabs({
  */
 export function StatLine({
   items,
-  className,
 }: {
   items: Array<{ value: ReactNode; label: string; tone?: "destructive" | "warning" | "faint" } | null | false>
-  className?: string
 }) {
   return (
-    <p className={cn("flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground", className)}>
+    <p className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-[0.8125rem] text-muted-foreground">
       {items.filter(Boolean).map((item) => {
         const { value, label, tone } = item as Exclude<typeof item, null | false>
         return (
@@ -423,17 +421,15 @@ export function Callout({
   title,
   children,
   role,
-  className,
 }: {
   tone?: keyof typeof CALLOUT_TONE
   title?: ReactNode
   children?: ReactNode
   role?: "status" | "alert"
-  className?: string
 }) {
   const Icon = tone === "success" ? IconCircleCheck : IconAlertTriangle
   return (
-    <div role={role} className={cn("flex gap-2.5 rounded-[10px] border px-3.5 py-3", CALLOUT_TONE[tone].box, className)}>
+    <div role={role} className={cn("flex gap-2.5 rounded-[10px] border px-3.5 py-3", CALLOUT_TONE[tone].box)}>
       <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", CALLOUT_TONE[tone].icon)} />
       <div className="flex min-w-0 flex-col gap-0.5 text-[0.8125rem]">
         {title ? <p className="font-bold">{title}</p> : null}

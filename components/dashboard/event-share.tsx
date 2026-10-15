@@ -3,7 +3,6 @@
 import { useEffect, useRef, useSyncExternalStore, type Ref } from "react"
 import { createPortal } from "react-dom"
 import {
-  IconAlertTriangle,
   IconCopy,
   IconDownload,
   IconInfoCircle,
@@ -38,7 +37,6 @@ export function EventShare({
   url,
   title,
   when,
-  linksLive,
   androidOpensApp,
 }: {
   /** `eventShareUrl(id)`, built on the server. Nothing else is ever encoded. */
@@ -46,8 +44,6 @@ export function EventShare({
   title: string
   /** "4 Oct 2026, 15:31 · The Humming Tree", on the event's clock. */
   when: string
-  /** `EVENT_LINKS_LIVE`: whether the address opens anything yet. */
-  linksLive: boolean
   /** `EVENT_LINKS_OPEN_ANDROID_APP`: whether Android opens the app from it, not the web page. */
   androidOpensApp: boolean
 }) {
@@ -146,13 +142,7 @@ export function EventShare({
               Attendees scan it to find this event, check in with GPS inside your check-in area, and join the
               room under a made-up name.
             </p>
-            {!linksLive ? (
-              <Note warning>
-                The link does not open the app yet: phones show a &ldquo;not found&rdquo; page until blendn.app and
-                the app learn event links. The address is permanent, so a code printed later will work; until then
-                the slide and the print tell people to find the event by its name.
-              </Note>
-            ) : androidOpensApp ? null : (
+            {androidOpensApp ? null : (
               <Note>
                 On an iPhone with Blend&apos;n, scanning opens this event in the app. On Android it opens a blendn.app
                 page first, with an &ldquo;Open in Blend&apos;n&rdquo; button, until the app&apos;s next Android
@@ -205,7 +195,7 @@ export function EventShare({
       */}
       {mounted
         ? createPortal(
-            <DoorSlide ref={slide} url={url} title={title} when={when} linksLive={linksLive} />,
+            <DoorSlide ref={slide} url={url} title={title} when={when} />,
             document.body
           )
         : null}
@@ -218,21 +208,17 @@ export function EventShare({
  * whatever the theme, because a projector and a printer both want it.
  *
  * A dialog while it fills the screen: named, focused when it opens, with a
- * Close for whoever cannot reach Esc. While the link opens nothing
- * (`EVENT_LINKS_LIVE`), it shows no code and no address — a door sign must not
- * send people to a dead page — and says to find the event by its name.
+ * Close for whoever cannot reach Esc.
  */
 export function DoorSlide({
   url,
   title,
   when,
-  linksLive,
   ref,
 }: {
   url: string
   title: string
   when: string
-  linksLive: boolean
   ref?: Ref<HTMLDivElement>
 }) {
   return (
@@ -247,19 +233,11 @@ export function DoorSlide({
     >
       <p className="text-[5vmin] font-bold leading-tight">{title}</p>
       <p className="text-[2.6vmin]">{when}</p>
-      {linksLive ? (
-        <>
-          <div className="aspect-square h-[60vmin]">
-            <QR value={url} label={`QR code for ${title}`} fill />
-          </div>
-          <p className="text-[2.6vmin] font-bold">Scan to check in with Blend&apos;n</p>
-          <p className="font-mono text-[1.8vmin]">{url}</p>
-        </>
-      ) : (
-        <p className="max-w-[40ch] text-[3.4vmin] font-bold leading-snug">
-          Open Blend&apos;n and find this event by its name to check in.
-        </p>
-      )}
+      <div className="aspect-square h-[60vmin]">
+        <QR value={url} label={`QR code for ${title}`} fill />
+      </div>
+      <p className="text-[2.6vmin] font-bold">Scan to check in with Blend&apos;n</p>
+      <p className="font-mono text-[1.8vmin]">{url}</p>
       <button
         type="button"
         onClick={() => void document.exitFullscreen()}
@@ -273,12 +251,11 @@ export function DoorSlide({
 
 const noSubscribe = () => () => {}
 
-/** A line under the panel's prose: a warning when something is broken, otherwise a quiet heads-up. */
-function Note({ children, warning = false }: { children: React.ReactNode; warning?: boolean }) {
-  const Icon = warning ? IconAlertTriangle : IconInfoCircle
+/** A quiet heads-up under the panel's prose. */
+function Note({ children }: { children: React.ReactNode }) {
   return (
     <p className="flex max-w-[60ch] items-start gap-2 text-[0.8125rem] leading-5 text-muted-foreground">
-      <Icon aria-hidden className={warning ? "mt-0.5 size-4 shrink-0 text-warning" : "mt-0.5 size-4 shrink-0"} />
+      <IconInfoCircle aria-hidden className="mt-0.5 size-4 shrink-0" />
       <span>{children}</span>
     </p>
   )

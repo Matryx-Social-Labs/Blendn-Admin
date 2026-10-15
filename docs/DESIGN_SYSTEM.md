@@ -84,7 +84,7 @@ tokens are decided here:
 | `--gradient-ember` | see *Gradients* | The interface gradient (ProTag, the organiser's chat bubble). |
 | `--radius-panel` → `rounded-panel` | 12px | The Panel (R3). `--radius` stays 10px for tiles, tables and the hero. |
 | `--text-page-title` → `text-page-title` | 26px | The in-content PageHeader title (R5). |
-| `--text-panel-title` → `text-panel-title` | 15px | A Panel's title (`components/dashboard/kit.tsx`). `SectionTitle` is still 17px until the screens move to Panels (step 15). |
+| `--text-panel-title` → `text-panel-title` | 15px | A Panel's title (`components/dashboard/kit.tsx`). |
 
 ### Charts
 

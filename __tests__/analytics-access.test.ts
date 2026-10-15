@@ -1,5 +1,6 @@
 import { decideAccess, FREE_WINDOW_DAYS, mayOpenEvent, type AnalyticsAccess } from "@/lib/analytics-access"
-import { held, heldPart, mergeArrivals } from "@/lib/org-analytics"
+import { heldPart } from "@/lib/disclosure"
+import { held, mergeArrivals } from "@/lib/org-analytics"
 
 jest.mock("@/lib/db", () => ({ db: {} }))
 

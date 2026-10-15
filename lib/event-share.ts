@@ -18,17 +18,6 @@ export function eventShareUrl(eventId: string): string {
 }
 
 /**
- * Whether the address opens anything.
- *
- * It does since 2026-10-12 (SCRUM-537). www.blendn.app serves an `/event/<id>`
- * page, so a phone without the app gets that page and its store link, and the
- * site's association file lists `/event/*`, so an iPhone with the app opens
- * the event in it. While this was false (from 2026-10-02) the tab said
- * "not found" and the door slide carried no code.
- */
-export const EVENT_LINKS_LIVE = true
-
-/**
  * Whether Android opens the app straight from the address.
  *
  * Not yet. The Android app opens only the https paths its intent filter lists,

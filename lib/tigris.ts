@@ -646,10 +646,6 @@ export function isConfigured(): boolean {
 }
 
 /**
- * Set bucket policy to allow public read access.
- * This lets profile/event/chat images be served without presigned URLs.
- */
-/**
  * Applying the public-read policy is best-effort and must never decide whether
  * storage is usable.
  *
@@ -774,20 +770,7 @@ export async function ensureBucketExists(): Promise<boolean> {
 
         // Set up CORS for the bucket
         await client.send(
-          new PutBucketCorsCommand({
-            Bucket: TIGRIS_BUCKET,
-            CORSConfiguration: {
-              CORSRules: [
-                {
-                  AllowedHeaders: ["*"],
-                  AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
-                  AllowedOrigins: ["*"],
-                  ExposeHeaders: ["ETag"],
-                  MaxAgeSeconds: 3600,
-                },
-              ],
-            },
-          })
+          new PutBucketCorsCommand({ Bucket: TIGRIS_BUCKET, CORSConfiguration: BROWSER_UPLOAD_CORS })
         )
         logger.info("CORS configured for bucket", { bucket: TIGRIS_BUCKET })
         await trySetBucketPublicRead()
@@ -800,26 +783,6 @@ export async function ensureBucketExists(): Promise<boolean> {
     }
     logger.error("Error checking bucket", { bucket: TIGRIS_BUCKET, error: error instanceof Error ? error.message : String(error) })
     return false
-  }
-}
-
-/**
- * Test the Tigris connection
- */
-export async function testConnection(): Promise<{ success: boolean; message: string }> {
-  if (!validateConfig()) {
-    return { success: false, message: "Tigris not configured" }
-  }
-
-  try {
-    const bucketExists = await ensureBucketExists()
-    if (bucketExists) {
-      return { success: true, message: `Connected to Tigris. Bucket: ${TIGRIS_BUCKET}` }
-    }
-    return { success: false, message: "Failed to verify/create bucket" }
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Connection failed"
-    return { success: false, message }
   }
 }
 

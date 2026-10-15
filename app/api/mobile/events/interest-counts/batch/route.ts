@@ -1,6 +1,5 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, createBatchRateLimit } from "@/lib/rate-limit"
@@ -11,10 +10,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
-
-const batchInterestCountsSchema = z.object({
-  eventIds: z.array(z.string().uuid()).min(1).max(50),
-})
+import { eventIdsBatchSchema } from "@/lib/validations/event"
 
 export async function POST(request: NextRequest) {
   const rateLimitResult = await rateLimit(request, createBatchRateLimit())
@@ -27,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await readJson(request)
-    const parsed = batchInterestCountsSchema.safeParse(body)
+    const parsed = eventIdsBatchSchema.safeParse(body)
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
     }
@@ -45,18 +41,8 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Build counts map
-    const counts: Record<string, number> = {}
-
-    // Initialize all eventIds with 0
-    for (const eventId of eventIds) {
-      counts[eventId] = 0
-    }
-
-    // Populate with actual counts
-    for (const item of favoriteCounts) {
-      counts[item.event_id] = item._count.event_id
-    }
+    const counted = new Map(favoriteCounts.map((item) => [item.event_id, item._count.event_id]))
+    const counts: Record<string, number> = Object.fromEntries(eventIds.map((id) => [id, counted.get(id) ?? 0]))
 
     return successResponse({ counts })
   } catch (error) {

@@ -9,7 +9,7 @@ import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { isRoomMuted } from "../room-mute"
 import { blocksBetween, blocksExclude } from "./blocks"
-import { CREW_TAGS, NO_CREW, type CrewRefusal, type CrewTag } from "./crews"
+import { CREW_TAGS, CREWS_OFF, NO_CREW, NO_EVENT, type CrewRefusal, type CrewTag } from "./crews"
 import { crewBadges, nightsTogether, rankCrewsFor, type RankedCrew } from "./signals"
 import type { Badge, Overlap } from "../overlaps"
 
@@ -304,9 +304,7 @@ export async function crewsAtEvent(
 /* "We're here"                                                               */
 /* -------------------------------------------------------------------------- */
 
-const CREWS_OFF: CrewRefusal = { refusal: "The host has turned crews off for this event.", status: 403 }
 const NOT_IN: CrewRefusal = { refusal: "Check in first — \"We're here\" is for when you're in.", status: 403 }
-const NO_EVENT: CrewRefusal = { refusal: "Event not found", status: 404 }
 
 /**
  * "We're here" (§6): a line in the crew chat, and a push to every other

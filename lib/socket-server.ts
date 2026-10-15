@@ -258,9 +258,6 @@ export interface ClientToServerEvents {
   "private:markRead": (conversationId: string, messageIds: string[]) => void
   /** The app received these messages (a socket delivery or a push it handled). */
   "private:delivered": (conversationId: string, messageIds: string[]) => void
-
-  // Ping for connection health
-  ping: () => void
 }
 
 interface SocketData {
@@ -1021,11 +1018,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
     authSocket.on("private:markRead", (conversationId, messageIds) =>
       void emitPrivateRead(authSocket, conversationId, messageIds)
     )
-
-    // Ping handler for connection health
-    authSocket.on("ping", () => {
-      // Socket.io handles pong automatically
-    })
 
     // Disconnect handler
     authSocket.on("disconnect", (reason) => {

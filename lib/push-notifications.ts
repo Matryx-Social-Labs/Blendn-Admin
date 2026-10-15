@@ -32,14 +32,7 @@ interface SendNotificationOptions {
   sound?: "default" | null
 }
 
-interface SendBulkNotificationOptions {
-  userIds: string[]
-  title: string
-  body: string
-  data?: NotificationData
-  badge?: number
-  sound?: "default" | null
-}
+type SendBulkNotificationOptions = Omit<SendNotificationOptions, "userId"> & { userIds: string[] }
 
 /**
  * Where a notification lands on the phone, decided by what it is rather than
@@ -753,9 +746,7 @@ export async function notifyAnnouncement(
 
   if (userIds.length === 0) return { sent: 0, failed: 0 }
 
-  const preview = announcementText.length > 100
-    ? announcementText.substring(0, 97) + "..."
-    : announcementText
+  const preview = clip(announcementText, 100)
 
   return sendBulkPushNotifications({
     userIds,

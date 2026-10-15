@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { errorResponse } from "@/lib/api-response"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
-import { eventWriteSchema } from "@/lib/validations/event"
+import { eventWriteSchema, parseJsonField } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { resolveEventCity } from "@/lib/location"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
@@ -18,16 +18,6 @@ import { syncOccurrences } from "@/lib/occurrences"
 import { auditLog } from "@/lib/audit-log"
 import { getOccupancies } from "@/lib/occupancy"
 import { readJson } from "@/lib/api-input"
-
-const parseJsonField = (value: unknown) => {
-  if (typeof value !== "string") return value
-  if (value.trim() === "") return undefined
-  try {
-    return JSON.parse(value)
-  } catch {
-    return undefined
-  }
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -201,10 +191,8 @@ export async function POST(req: Request) {
       }
     }
 
+    // `description` is required above, so this is never empty.
     const resolvedFullDescription = full_description || description
-    if (!resolvedFullDescription) {
-      return errorResponse("Missing full description", 400)
-    }
 
     // Derived, never taken from the body — see lib/venue-link.ts.
     const venueLink = await resolveVenueLink(venue_id)

@@ -26,7 +26,7 @@ export function intentsAreCoherent(intents: readonly string[]): boolean {
   return !(intents.includes("just_here") && intents.length > 1)
 }
 
-const intentArray = z
+export const intentArray = z
   .array(z.enum(CONNECTION_INTENTS))
   .max(4)
   .refine(intentsAreCoherent, {
@@ -293,9 +293,7 @@ export const addInterestsSchema = z.object({
   categoryIds: z.array(z.string().uuid("Invalid category ID")).min(1, "At least one category is required"),
 })
 
-export const removeInterestsSchema = z.object({
-  categoryIds: z.array(z.string().uuid("Invalid category ID")).min(1, "At least one category is required"),
-})
+export const removeInterestsSchema = addInterestsSchema
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>
 export type AddInterestsInput = z.infer<typeof addInterestsSchema>

@@ -9,6 +9,13 @@ export const SuccessResponseSchema = z
   })
   .openapi("SuccessResponse")
 
+/** The success envelope around one route's `data`. */
+export const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
+
+/** Security requirements, naming the schemes `registry.ts` registers. */
+export const bearerAuth = [{ BearerAuth: [] }]
+export const sessionAuth = [{ SessionAuth: [] }]
+
 // Standard error response
 export const ErrorResponseSchema = z
   .object({
@@ -108,43 +115,18 @@ export const PARTICIPATION_GATE =
   "403 `FORBIDDEN` \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
   "profile has neither finished onboarding nor an adult age on file (SCRUM-331). "
 
+const errorBody = (description: string, schema: z.ZodTypeAny = ErrorResponseSchema) => ({
+  description,
+  content: { "application/json": { schema } },
+})
+
 export const standardErrors = {
-  400: {
-    description: "Validation error",
-    content: {
-      "application/json": { schema: ValidationErrorSchema },
-    },
-  },
-  401: {
-    description: "Unauthorized",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
-  403: {
-    description: "Forbidden",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
-  404: {
-    description: "Not found",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
-  429: {
-    description: "Rate limited",
-    content: {
-      "application/json": { schema: RateLimitErrorSchema },
-    },
-  },
-  500: {
-    description: "Internal server error",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
+  400: errorBody("Validation error", ValidationErrorSchema),
+  401: errorBody("Unauthorized"),
+  403: errorBody("Forbidden"),
+  404: errorBody("Not found"),
+  429: errorBody("Rate limited", RateLimitErrorSchema),
+  500: errorBody("Internal server error"),
 } as const
 
 /**

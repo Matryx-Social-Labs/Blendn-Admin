@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors } from "@/lib/openapi/schemas/common"
+import { standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   SendMessageRequestSchema,
   ChatMessageSchema,
@@ -8,9 +8,6 @@ import {
   GroupMessagesResponseSchema,
   ParticipantsResponseSchema,
 } from "@/lib/openapi/schemas/chat"
-
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
 // GET /api/mobile/chat/groups
 registry.registerPath({

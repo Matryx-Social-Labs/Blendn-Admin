@@ -1,10 +1,7 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors } from "@/lib/openapi/schemas/common"
+import { standardErrors, wrap, sessionAuth } from "@/lib/openapi/schemas/common"
 import { PresignedUrlRequestSchema, PresignedUrlResponseSchema } from "@/lib/openapi/schemas/profile"
-
-const sessionAuth = [{ SessionAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
 // GET /api/events
 registry.registerPath({

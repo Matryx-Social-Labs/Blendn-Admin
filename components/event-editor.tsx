@@ -7,8 +7,7 @@ import { refusalText } from "@/lib/refusal"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
-import { format } from "date-fns"
-import { toZonedTime } from "date-fns-tz"
+import { formatInTimeZone } from "date-fns-tz"
 import { wallClockToUtc } from "@/lib/event-wall-clock"
 import type { AmenityOption } from "@/components/event-form/amenities-section"
 import { EventForm, type EventFormValues } from "@/components/event-form"
@@ -72,7 +71,7 @@ interface EventEditorProps {
 const formatDateTimeInput = (value?: string, timezone = "Asia/Kolkata") => {
   if (!value) return ""
   // Convert the UTC timestamp from the DB into the event's timezone for display
-  return format(toZonedTime(new Date(value), timezone), "yyyy-MM-dd'T'HH:mm")
+  return formatInTimeZone(new Date(value), timezone, "yyyy-MM-dd'T'HH:mm")
 }
 
 const parseToKvArray = (value: unknown): Array<{ key: string; value: string }> => {

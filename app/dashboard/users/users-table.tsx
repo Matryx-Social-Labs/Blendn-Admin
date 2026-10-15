@@ -81,7 +81,6 @@ interface UsersTableProps {
   data: UserWithProfile[]
   total: number
   currentUserRole: string
-  onRefresh?: () => void
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -110,7 +109,7 @@ function ActionsCell({
   row: { original: UserWithProfile }
   table: {
     options: {
-      meta?: { onRefresh?: () => void; currentUserRole?: string }
+      meta?: { currentUserRole?: string }
     }
   }
 }) {
@@ -153,7 +152,6 @@ function ActionsCell({
         user={user}
         open={isEditOpen}
         onOpenChange={setIsEditOpen}
-        onSuccess={() => table.options.meta?.onRefresh?.()}
         currentUserRole={currentUserRole}
       />
       {isPlusOpen ? <PlusSheet user={user} onOpenChange={setIsPlusOpen} /> : null}
@@ -478,11 +476,10 @@ interface EditUserDialogProps {
   user: UserWithProfile
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: () => void
   currentUserRole?: string
 }
 
-function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }: EditUserDialogProps) {
+function EditUserDialog({ user, open, onOpenChange, currentUserRole }: EditUserDialogProps) {
   const [isLoading, setIsLoading] = React.useState(false)
   const [formData, setFormData] = React.useState({
     name: user.name || "",
@@ -515,7 +512,6 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
       }
       toast.success("User updated successfully")
       onOpenChange(false)
-      onSuccess()
     } catch {
       toast.error("Failed to update user")
     } finally {
@@ -629,7 +625,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
   )
 }
 
-export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTableProps) {
+export function UsersTable({ data, total, currentUserRole }: UsersTableProps) {
   const router = useRouter()
   const params = useSearchParams()
 
@@ -718,7 +714,6 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
     meta: {
-      onRefresh,
       currentUserRole,
     },
   })

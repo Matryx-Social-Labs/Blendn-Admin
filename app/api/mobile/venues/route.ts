@@ -20,6 +20,7 @@ import { realEventsWhere } from "@/lib/event-kind"
 import { liveGuestIds, venueLiveBucket } from "@/lib/live-count"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere, venuesTakenOver } from "@/lib/venue-visibility"
+import { paginationMeta } from "@/lib/pagination"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -326,13 +327,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       venues: items,
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     logger.error("List venues error", { error: String(error) })

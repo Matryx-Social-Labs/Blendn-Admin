@@ -35,7 +35,7 @@ function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }
 }
 import { VENUE_TYPES, venueTypeLabel } from "@/lib/venue-types"
 import { defaultVenueFence, nearbyVenues, type NearbyVenue } from "@/lib/venue-rules"
-import { type venue_type } from "@prisma/client"
+import { type Prisma, type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
 import { overUserLimit } from "@/lib/rate-limit"
@@ -649,6 +649,37 @@ const SEARCH_STOPWORDS = new Set(["the", "and", "of", "at", "in", "on", "by", "a
 const SEARCH_CANDIDATES = 50
 const SEARCH_RESULTS = 8
 
+/** What the venue picker reads (searchVenues, venueById), and how it reads it. */
+const venueOptionSelect = {
+  id: true,
+  name: true,
+  venue_type: true,
+  address: true,
+  city: true,
+  latitude: true,
+  longitude: true,
+  capacity: true,
+  geofence: true,
+  owner_org_id: true,
+} as const
+
+function toVenueOption(v: Prisma.venuesGetPayload<{ select: typeof venueOptionSelect }>): VenueOption {
+  return {
+    id: v.id,
+    name: v.name,
+    venueTypeLabel: venueTypeLabel(v.venue_type),
+    address: v.address,
+    city: v.city,
+    lat: v.latitude,
+    lng: v.longitude,
+    capacity: v.capacity,
+    geofence: v.geofence,
+    // Shown so an organiser knows the owner will see this event's operational
+    // side. Who that owner *is* stays hidden — that would be a customer list.
+    claimed: v.owner_org_id !== null,
+  }
+}
+
 /**
  * Venues an organiser can pick from when creating an event.
  *
@@ -685,18 +716,7 @@ export async function searchVenues(query: string): Promise<VenueOption[]> {
         ...terms.map((w) => ({ name: { contains: w, mode: "insensitive" as const } })),
       ],
     },
-    select: {
-      id: true,
-      name: true,
-      venue_type: true,
-      address: true,
-      city: true,
-      latitude: true,
-      longitude: true,
-      capacity: true,
-      geofence: true,
-      owner_org_id: true,
-    },
+    select: venueOptionSelect,
     orderBy: { name: "asc" },
     take: SEARCH_CANDIDATES,
   })
@@ -713,20 +733,7 @@ export async function searchVenues(query: string): Promise<VenueOption[]> {
     .slice(0, SEARCH_RESULTS)
     .map(({ v }) => v)
 
-  return venues.map((v) => ({
-    id: v.id,
-    name: v.name,
-    venueTypeLabel: venueTypeLabel(v.venue_type),
-    address: v.address,
-    city: v.city,
-    lat: v.latitude,
-    lng: v.longitude,
-    capacity: v.capacity,
-    geofence: v.geofence,
-    // Shown so an organiser knows the owner will see this event's operational
-    // side. Who that owner *is* stays hidden — that would be a customer list.
-    claimed: v.owner_org_id !== null,
-  }))
+  return venues.map(toVenueOption)
 }
 
 /** Re-hydrate the picker when an existing event is opened for editing. */
@@ -734,30 +741,7 @@ export async function venueById(id: string): Promise<VenueOption | null> {
   await requireUser()
   const v = await db.venues.findUnique({
     where: { id, deleted_at: null },
-    select: {
-      id: true,
-      name: true,
-      venue_type: true,
-      address: true,
-      city: true,
-      latitude: true,
-      longitude: true,
-      capacity: true,
-      geofence: true,
-      owner_org_id: true,
-    },
+    select: venueOptionSelect,
   })
-  if (!v) return null
-  return {
-    id: v.id,
-    name: v.name,
-    venueTypeLabel: venueTypeLabel(v.venue_type),
-    address: v.address,
-    city: v.city,
-    lat: v.latitude,
-    lng: v.longitude,
-    capacity: v.capacity,
-    geofence: v.geofence,
-    claimed: v.owner_org_id !== null,
-  }
+  return v ? toVenueOption(v) : null
 }

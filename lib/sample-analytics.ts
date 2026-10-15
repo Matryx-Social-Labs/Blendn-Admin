@@ -12,8 +12,6 @@ import type { PreClaimHistory, VenueInsight } from "./venue-insights"
  * `SAMPLE_`, so a test can tell a sample payload from a real one.
  */
 
-export const SAMPLE_MARKER = "SAMPLE_"
-
 export const SAMPLE_ORG_ANALYTICS: OrgAnalytics = {
   range: "90d",
   backWithin90: { pct: 38, cohort: 120, cohorts: 3 },

@@ -12,7 +12,7 @@ import {
 import { ageFrom, datingAgeRefusal } from "@/lib/age"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
-import { intentsAreCoherent } from "@/lib/validations/profile"
+import { intentArray } from "@/lib/validations/profile"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -26,13 +26,7 @@ interface RouteParams {
 const preferencesSchema = z.object({
   // Same rule as `intent_default`, from the same place. The per-event screen
   // already enforced exclusivity client-side; this is what makes it true.
-  intent: z
-    .array(z.enum(["dating", "networking", "friendship", "just_here"]))
-    .max(4)
-    .refine(intentsAreCoherent, {
-      message: '"Just here for the event" cannot be combined with anything else',
-    })
-    .optional(),
+  intent: intentArray.optional(),
   revealed: z.boolean().optional(),
   /**
    * "Open to joining a crew tonight" (plan v2 §8.3): without it a person here
