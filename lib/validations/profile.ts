@@ -26,7 +26,7 @@ export function intentsAreCoherent(intents: readonly string[]): boolean {
   return !(intents.includes("just_here") && intents.length > 1)
 }
 
-const intentArray = z
+export const intentArray = z
   .array(z.enum(CONNECTION_INTENTS))
   .max(4)
   .refine(intentsAreCoherent, {

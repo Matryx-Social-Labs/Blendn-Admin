@@ -216,10 +216,8 @@ export async function POST(
         where: { id: event.chat_group.id },
         data: { last_message_at: chatMsg.created_at },
       })
-    }
 
-    // Emit announcement to event chat group via socket if one exists
-    if (event.chat_group?.id && chatMsg) {
+      // Emit announcement to event chat group via socket
       emitChatMessage(event.chat_group.id, {
         id: chatMsg.id,
         content: chatContent,

@@ -60,13 +60,6 @@ export async function POST(
       return errorResponse("You are not checked in to this event", 400)
     }
 
-    if (checkIn.status !== "checked_in") {
-      return errorResponse(
-        `Cannot checkout: current status is "${checkIn.status}"`,
-        400
-      )
-    }
-
     // Through the shared path, so this and the sweeper cannot drift.
     const now = new Date()
     await performCheckout(checkIn.id, "manual", now)

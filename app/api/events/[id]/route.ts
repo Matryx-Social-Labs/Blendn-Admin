@@ -9,7 +9,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { cancelEventCheckIns, eventWriteAction, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
@@ -205,7 +205,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     }
 
     // Fix #35: When cancelling an event, cascade to active check-ins
-    const isCancelling = status === "cancelled" && event.status !== "cancelled"
+    const isCancelling = isCancellingEvent(status ?? undefined, event.status)
 
     // And cancelled is terminal -- see lib/event-cancellation.ts.
     if (isUncancellingEvent(status, event.status)) {

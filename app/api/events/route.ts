@@ -191,10 +191,8 @@ export async function POST(req: Request) {
       }
     }
 
+    // `description` is required above, so this is never empty.
     const resolvedFullDescription = full_description || description
-    if (!resolvedFullDescription) {
-      return errorResponse("Missing full description", 400)
-    }
 
     // Derived, never taken from the body — see lib/venue-link.ts.
     const venueLink = await resolveVenueLink(venue_id)
