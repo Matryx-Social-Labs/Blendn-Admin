@@ -491,13 +491,13 @@ against a weight that does not exist.
 Next.js 16 App Router, React 19, Tailwind v4 (CSS-first `@theme`, no
 `tailwind.config.js`), shadcn/ui, recharts 2, `@tanstack/react-table` 8.
 
-Available shadcn primitives: avatar, badge, breadcrumb, button, calendar, card,
-chart, checkbox, drawer, dropdown-menu, form, input, label, popover, progress,
-radio-group, select, separator, sheet, sidebar, skeleton, slider, sonner, switch,
-table, tabs, textarea, toggle, toggle-group, tooltip.
+Available shadcn primitives: avatar, badge, button, calendar, card, chart,
+checkbox, dropdown-menu, form, input, label, popover, progress, radio-group,
+select, separator, sheet, sidebar, skeleton, slider, sonner, switch, table, tabs,
+textarea, tooltip.
 
 **No `dialog` component is installed** — confirmations currently use inline
-expansion or `drawer`/`sheet`. If the design needs modals, say so and it will be
+expansion or `sheet`. If the design needs modals, say so and it will be
 added.
 
 ---

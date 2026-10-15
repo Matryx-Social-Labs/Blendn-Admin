@@ -34,10 +34,9 @@ export default function RootLayout({
           removing a member, a refused domain claim. The guard would fire, the
           product would say nothing, and the button read as broken.
 
-          `theme` is pinned rather than left to the wrapper's `useTheme()`.
-          There is no ThemeProvider, so that hook falls back to "system" and
-          would render a light toast on a dashboard whose <html> is hardcoded
-          `dark`.
+          `theme` is pinned rather than left to the wrapper's "system" default,
+          which would render a light toast on a dashboard whose <html> is
+          hardcoded `dark`.
         */}
         <Toaster theme="dark" richColors />
       </body>
