@@ -45,9 +45,8 @@ describe("discardSealedChatMedia", () => {
   })
 })
 
+// The DM route only: a room takes no media since R9 (SCRUM-626), so seals nothing to discard.
 describe.each([
-  "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts",
-  "app/api/mobile/events/[eventId]/chat/route.ts",
   "app/api/mobile/conversations/[conversationId]/messages/route.ts",
 ])("%s", (file) => {
   it("discards the sealed copy in every write that can fail after sealing", () => {

@@ -1074,9 +1074,9 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 
 ### POST /chat/groups/:chatGroupId/messages
 ```json
-{ "content": "string", "type": "text|image|video", "metadata": { "mediaUrl": "url?" }, "parentId": "uuid?" }
+{ "content": "string", "type": "text", "parentId": "uuid?", "clientId": "uuid?" }
 ```
-**Media (SCRUM-426).** `metadata` takes `mediaUrl` and nothing else; any other key is `400`. The server writes the rest, such as `sponsored_message_id`, which the app uses to draw a sponsored card. `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket). Anything else is `400` "Send photos through the app rather than linking to them". The same rules apply to `POST /events/:eventId/chat`. What is stored and sent to the room is a copy of the upload that nobody can write to (SCRUM-425), so `metadata.mediaUrl` comes back different from the one you sent. That copy's key is `chat/sealed/<uuid>` and names nobody (SCRUM-448); the upload's `chat/<yourId>/` key is never shown to anyone else. An upload that never arrived, is over 50 MB, or is not an allowed type is `400`. The same applies to a DM's `mediaUrl`.
+**Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can only be sent in a direct message". Photos go in a DM (`POST /conversations/:id/messages`). `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
 1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
@@ -1147,7 +1147,7 @@ does not offer Delist.
 | POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
-| POST | `/conversations/:id/messages` | Send message. A `mediaUrl` must be the sender's own chat upload, or `400` (SCRUM-426) |
+| POST | `/conversations/:id/messages` | Send message. See **Photos in a DM** below |
 | DELETE | `/conversations/:id` | **Leave — closes it for both people, permanently** |
 
 #### Opening a thread, delivery, replies and retries (SCRUM-406, 408, 409, 410)
@@ -1161,6 +1161,10 @@ does not offer Delist.
 - **Replies.** `POST` takes `replyToId`, which must be a message in the same conversation, otherwise `400`. Every message carries `replyTo: { id, senderName, text, mediaType, unavailable }`. `senderName` resolves through the reveal rules (a pseudonym until revealed). A quote of a hidden message is `unavailable: true` with no text.
 - **Retries.** `POST` takes `clientId` (a uuid the app makes per message). A repeat with the same `clientId` returns the first write instead of writing a second; a `clientId` already used in another conversation gets `409`. Both room write paths accept `clientId` the same way.
 - **Rate limit.** 30 sends a minute per person → `429 RATE_LIMITED`, counted before the conversation is looked up, so sends refused with `404`/`403`/`400` count too (SCRUM-451). A retry of a send that landed is answered over the limit and does not count.
+- **Photos in a DM (R9, SCRUM-626).** `{ "text?": "…", "mediaUrl?": "url", "mediaType?": "image" }`, text or a photo or both. A photo only, so `mediaType` is `image` or left out (`video` is `400`) and the row's `mediaType` is always `image`.
+  - **Whose:** `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket), or `400` "Send photos through the app rather than linking to them" (SCRUM-426).
+  - **When:** once both people are named to each other (both revealed, or a conversation that never had pseudonyms, such as an accepted message request) or are friends. Before that, `403` "You can send photos once you have both revealed who you are", and nothing is stored. Text is not gated.
+  - **What is stored:** a copy of the upload nobody can write to (SCRUM-425), under `chat/sealed/<uuid>`, which names nobody (SCRUM-448), so `mediaUrl` comes back different from the one you sent. The copy is the picture with its metadata removed: EXIF (with its GPS position), XMP, comments and anything after the image's end. An upload that never arrived, is over 10 MB, or is not a JPEG, PNG or WebP (by its bytes, whatever it was uploaded as) is `400`.
 
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
@@ -2374,8 +2378,13 @@ The type is signed into the URL, so any other type, or none, is refused by
 storage with `403 SignatureDoesNotMatch` (SCRUM-425). The URL can write its
 key for 15 minutes, so a profile or a message never stores it: attaching the
 upload stores a **copy** under a new key nobody can upload to, and the URL you
-get back (`photos`, `metadata.mediaUrl`, a DM's `mediaUrl`) is the copy's,
+get back (`photos`, a DM's `mediaUrl`) is the copy's,
 not the `publicUrl` you sent.
+
+**`profile` and `chat` take photos only: JPEG, PNG or WebP, up to 10 MB**
+(SCRUM-626). GIF, video and audio are `400` here. The copy is the picture
+without its metadata (EXIF and its GPS position, XMP, comments), so a photo
+never says where it was taken; the app also re-encodes before uploading.
 
 **Chat media is private (SCRUM-427).** `folder: "chat"` uploads go to the
 private bucket; `publicUrl` is the stored reference, which answers an
