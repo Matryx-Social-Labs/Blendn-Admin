@@ -86,7 +86,6 @@ the door. An event's room is unchanged: its door is the join.
 | `private:stopTyping` | `conversationId: string` | Stop typing in private conversation |
 | `private:markRead` | `conversationId: string, messageIds: string[]` | Mark messages as read |
 | `private:delivered` | `conversationId: string, messageIds: string[]` | Ack messages this app received (sets `delivered_at`; only messages sent to you, not yet delivered) |
-| `ping` | — | Connection health check |
 
 > **Chat messages are not sent over the socket.** There is no inbound
 > `chat:message` handler. Messages are POSTed to the REST API

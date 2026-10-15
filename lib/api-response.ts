@@ -99,9 +99,6 @@ export function successResponse<T>(
 }
 
 /**
- * Create an error response
- */
-/**
  * The code a bare status stands for, when the caller named none (SCRUM-324).
  *
  * The documented envelope promises an `errorCode` on every error, and a bare
@@ -110,22 +107,16 @@ export function successResponse<T>(
  * 400 or 422 covers everything from a missing field to "only an offer has
  * spaces", and `VALIDATION_FAILED` promises field errors it would not carry.
  */
+const CODE_FOR_STATUS: Partial<Record<number, string>> = {
+  401: ErrorCode.UNAUTHORIZED,
+  403: ErrorCode.FORBIDDEN,
+  404: ErrorCode.NOT_FOUND,
+  409: ErrorCode.CONFLICT,
+  429: ErrorCode.RATE_LIMITED,
+}
+
 function defaultErrorCode(status: number): string | undefined {
-  if (status >= 500) return ErrorCode.SERVER_ERROR
-  switch (status) {
-    case 401:
-      return ErrorCode.UNAUTHORIZED
-    case 403:
-      return ErrorCode.FORBIDDEN
-    case 404:
-      return ErrorCode.NOT_FOUND
-    case 409:
-      return ErrorCode.CONFLICT
-    case 429:
-      return ErrorCode.RATE_LIMITED
-    default:
-      return undefined
-  }
+  return status >= 500 ? ErrorCode.SERVER_ERROR : CODE_FOR_STATUS[status]
 }
 
 export function errorResponse(
@@ -170,82 +161,9 @@ export function validationErrorResponse(
   )
 }
 
-/**
- * Create an unauthorized response
- */
-export function unauthorizedResponse(
-  message: string = "Unauthorized"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.UNAUTHORIZED,
-    },
-    { status: 401 }
-  )
-}
-
-/**
- * Create a forbidden response
- */
-export function forbiddenResponse(
-  message: string = "Forbidden"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.FORBIDDEN,
-    },
-    { status: 403 }
-  )
-}
-
-/**
- * Create a not found response
- */
-export function notFoundResponse(
-  message: string = "Not found"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.NOT_FOUND,
-    },
-    { status: 404 }
-  )
-}
-
-/**
- * Create a server error response
- */
-export function serverErrorResponse(
-  message: string = "Internal server error"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.SERVER_ERROR,
-    },
-    { status: 500 }
-  )
-}
-
-/**
- * Create a conflict response (e.g., duplicate resource)
- */
-export function conflictResponse(
-  message: string = "Resource already exists"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.CONFLICT,
-    },
-    { status: 409 }
-  )
-}
+export const unauthorizedResponse = (message = "Unauthorized") => errorResponse(message, 401)
+export const forbiddenResponse = (message = "Forbidden") => errorResponse(message, 403)
+export const notFoundResponse = (message = "Not found") => errorResponse(message, 404)
+export const serverErrorResponse = (message = "Internal server error") => errorResponse(message, 500)
+/** e.g. a duplicate resource. */
+export const conflictResponse = (message = "Resource already exists") => errorResponse(message, 409)
