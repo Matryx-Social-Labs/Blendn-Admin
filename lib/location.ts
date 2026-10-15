@@ -34,9 +34,6 @@ export async function reverseGeocodeCity(
     return coordinateCache.get(cacheKey) ?? null
   }
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 3500)
-
   try {
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=10&addressdetails=1`,
@@ -49,7 +46,7 @@ export async function reverseGeocodeCity(
           "Accept-Language": "en",
           "User-Agent": "blendn-admin/1.0",
         },
-        signal: controller.signal,
+        signal: AbortSignal.timeout(3500),
         cache: "force-cache",
       }
     )
@@ -67,8 +64,6 @@ export async function reverseGeocodeCity(
   } catch {
     coordinateCache.set(cacheKey, null)
     return null
-  } finally {
-    clearTimeout(timeout)
   }
 }
 
@@ -130,9 +125,6 @@ export function geocodeBudget(limit: number = MAX_GEOCODES_PER_REQUEST) {
     get exhausted() {
       return spent >= limit
     },
-    get spent() {
-      return spent
-    },
   }
 }
 
@@ -147,14 +139,7 @@ export async function resolveEventCity(
   const normalizedCity = await normalizeLocationToCity(city, budget)
   if (normalizedCity) return normalizedCity
 
-  if (
-    latitude === null ||
-    latitude === undefined ||
-    longitude === null ||
-    longitude === undefined
-  ) {
-    return null
-  }
+  if (latitude == null || longitude == null) return null
 
   /*
    * An already-cached coordinate costs nothing, so it does not spend budget --

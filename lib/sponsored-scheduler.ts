@@ -628,16 +628,6 @@ async function emit(
   }
 }
 
-/**
- * The first window for a campaign being switched on.
- *
- * `now`, not `now + interval`: the organiser flipped the switch because they
- * want it running. An interval of silence first reads as a broken control, which
- * is what `start()` having no leading edge produced.
- */
-export function firstWindow(now: Date = new Date()): Date {
-  return now
-}
 
 let timer: NodeJS.Timeout | null = null
 

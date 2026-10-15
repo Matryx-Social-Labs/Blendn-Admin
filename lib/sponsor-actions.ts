@@ -467,6 +467,18 @@ export interface SponsorOverview {
   placements: SponsorPlacementRow[]
 }
 
+/** A sponsor screen with nothing on it yet; a fresh object per call. */
+const noOverview = (): SponsorOverview => ({
+  brandName: null,
+  next: null,
+  liveNow: 0,
+  awaitingYou: 0,
+  reach30d: null,
+  reach30dSuppressed: false,
+  nextCreative: null,
+  placements: [],
+})
+
 /**
  * Everything the sponsor overview renders, in one call.
  *
@@ -492,16 +504,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
 
   const actor = await actorFor(session.user)
   if (actor.orgIds.length === 0) {
-    return {
-      brandName: null,
-      next: null,
-      liveNow: 0,
-      awaitingYou: 0,
-      reach30d: null,
-      reach30dSuppressed: false,
-      nextCreative: null,
-      placements: [],
-    }
+    return noOverview()
   }
 
   const brand = await db.sponsors.findFirst({
@@ -520,16 +523,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
   if (!brand) {
     // No brand yet. Everything else is blocked on it, so the screen shows one
     // empty state rather than four.
-    return {
-      brandName: null,
-      next: null,
-      liveNow: 0,
-      awaitingYou: 0,
-      reach30d: null,
-      reach30dSuppressed: false,
-      nextCreative: null,
-      placements: [],
-    }
+    return noOverview()
   }
 
   const rows = await db.event_sponsors.findMany({

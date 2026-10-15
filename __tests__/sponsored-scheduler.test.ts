@@ -30,7 +30,7 @@ jest.mock("@/lib/socket-server", () => ({
 }))
 
 import { SPONSORSHIP } from "@/lib/constants"
-import { firstWindow, sweepSponsored } from "@/lib/sponsored-scheduler"
+import { sweepSponsored } from "@/lib/sponsored-scheduler"
 
 const NOW = new Date("2026-08-17T20:00:00.000Z")
 const CAMPAIGN = "11111111-1111-4111-8111-111111111111"
@@ -429,13 +429,5 @@ describe("the claim", () => {
 
   it("only claims rows whose lease has expired", () => {
     expect(SQL).toMatch(/"claimed_at" < \$\{leaseCutoff\}/)
-  })
-})
-
-describe("firstWindow", () => {
-  it("is now, so switching a campaign on is not an interval of silence", () => {
-    // `setInterval` has no leading edge. Flipping the switch and seeing nothing
-    // for thirty minutes reads as a broken control, and it was.
-    expect(firstWindow(NOW)).toEqual(NOW)
   })
 })
