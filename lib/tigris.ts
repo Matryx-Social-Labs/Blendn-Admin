@@ -803,26 +803,6 @@ export async function ensureBucketExists(): Promise<boolean> {
   }
 }
 
-/**
- * Test the Tigris connection
- */
-export async function testConnection(): Promise<{ success: boolean; message: string }> {
-  if (!validateConfig()) {
-    return { success: false, message: "Tigris not configured" }
-  }
-
-  try {
-    const bucketExists = await ensureBucketExists()
-    if (bucketExists) {
-      return { success: true, message: `Connected to Tigris. Bucket: ${TIGRIS_BUCKET}` }
-    }
-    return { success: false, message: "Failed to verify/create bucket" }
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Connection failed"
-    return { success: false, message }
-  }
-}
-
 export interface ObjectFacts {
   bytes: number
   contentType: string | null
