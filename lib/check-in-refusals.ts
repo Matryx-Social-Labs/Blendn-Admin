@@ -49,14 +49,8 @@ export function recordRefusal(input: {
         occurrence_id: input.occurrenceId ?? null,
         // Rounded: a sub-metre shortfall is false precision on a GPS fix, and
         // the number is read by a human deciding whether to move a pin.
-        shortfall_metres:
-          input.shortfallMetres === null || input.shortfallMetres === undefined
-            ? null
-            : Math.round(input.shortfallMetres),
-        accuracy_metres:
-          input.accuracyMetres === null || input.accuracyMetres === undefined
-            ? null
-            : Math.round(input.accuracyMetres),
+        shortfall_metres: input.shortfallMetres == null ? null : Math.round(input.shortfallMetres),
+        accuracy_metres: input.accuracyMetres == null ? null : Math.round(input.accuracyMetres),
       },
     })
     .catch((error: unknown) =>
@@ -119,10 +113,7 @@ export async function refusalSummary(eventId: string): Promise<RefusalSummary> {
   return {
     distinctPeopleRefused: new Set(rows.map((r) => r.user_id)).size,
     attempts: rows.length,
-    medianShortfallMetres:
-      shortfalls.length === 0
-        ? null
-        : shortfalls[Math.floor((shortfalls.length - 1) / 2)],
+    medianShortfallMetres: lowerMedian(shortfalls),
     topReason: [...byReason.entries()].sort((a, b) => b[1] - a[1])[0][0],
   }
 }
@@ -147,6 +138,18 @@ export const REFUSAL_LABEL: Record<refusal_reason, string> = {
   too_late: "After the window closed",
   day_cancelled: "Day was cancelled",
   under_age: "Under 18",
+}
+
+/** The lower median of an ascending list; null when it is empty. */
+const lowerMedian = (sorted: number[]) => (sorted.length === 0 ? null : sorted[Math.floor((sorted.length - 1) / 2)])
+
+/** Distinct people per reason, most first, ties by reason. */
+function peopleByReason(rows: Array<{ user_id: string; reason: refusal_reason }>) {
+  const people = new Map<refusal_reason, Set<string>>()
+  for (const r of rows) people.set(r.reason, (people.get(r.reason) ?? new Set<string>()).add(r.user_id))
+  return [...people.entries()]
+    .map(([reason, set]) => ({ reason, label: REFUSAL_LABEL[reason], people: set.size }))
+    .sort((a, b) => b.people - a.people || a.reason.localeCompare(b.reason))
 }
 
 export interface RefusalBreakdown {
@@ -183,18 +186,9 @@ export async function refusalsByReason(range: {
     orderBy: { created_at: "desc" },
   })
 
-  const people = new Map<refusal_reason, Set<string>>()
-  for (const r of rows) {
-    const set = people.get(r.reason) ?? new Set<string>()
-    set.add(r.user_id)
-    people.set(r.reason, set)
-  }
-
   return {
     total: new Set(rows.map((r) => r.user_id)).size,
-    byReason: [...people.entries()]
-      .map(([reason, set]) => ({ reason, label: REFUSAL_LABEL[reason], people: set.size }))
-      .sort((a, b) => b.people - a.people || a.reason.localeCompare(b.reason)),
+    byReason: peopleByReason(rows),
   }
 }
 
@@ -254,12 +248,6 @@ export async function eventRefusals(eventId: string): Promise<EventRefusals> {
     take: 1_000,
     orderBy: { created_at: "desc" },
   })
-  const perReason = new Map<refusal_reason, Set<string>>()
-  for (const r of rows) {
-    const set = perReason.get(r.reason) ?? new Set<string>()
-    set.add(r.user_id)
-    perReason.set(r.reason, set)
-  }
   const out = rows.filter((r) => r.reason === "out_of_range")
   const shortfalls = out
     .map((r) => r.shortfall_metres)
@@ -276,11 +264,8 @@ export async function eventRefusals(eventId: string): Promise<EventRefusals> {
   return {
     people: new Set(rows.map((r) => r.user_id)).size,
     attempts: rows.length,
-    byReason: [...perReason.entries()]
-      .map(([reason, set]) => ({ reason, label: REFUSAL_LABEL[reason], people: set.size }))
-      .sort((a, b) => b.people - a.people || a.reason.localeCompare(b.reason)),
-    medianShortfallMetres:
-      shortfalls.length === 0 ? null : shortfalls[Math.floor((shortfalls.length - 1) / 2)],
+    byReason: peopleByReason(rows),
+    medianShortfallMetres: lowerMedian(shortfalls),
     accuracy:
       accuracies.length === 0
         ? null

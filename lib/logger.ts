@@ -9,53 +9,17 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 
 const MIN_LEVEL = LOG_LEVELS[(process.env.LOG_LEVEL as LogLevel) || "info"]
 
-interface LogEntry {
-  level: LogLevel
-  message: string
-  timestamp: string
-  [key: string]: unknown
-}
-
-function shouldLog(level: LogLevel): boolean {
-  return LOG_LEVELS[level] >= MIN_LEVEL
-}
-
-function formatEntry(level: LogLevel, message: string, meta?: Record<string, unknown>): LogEntry {
-  return {
-    level,
-    message,
-    timestamp: new Date().toISOString(),
-    ...meta,
-  }
-}
-
 function write(level: LogLevel, message: string, meta?: Record<string, unknown>) {
-  if (!shouldLog(level)) return
-
-  const entry = formatEntry(level, message, meta)
-
-  if (process.env.NODE_ENV === "production") {
-    // Structured JSON in production
-    const output = JSON.stringify(entry)
-    if (level === "error") {
-      console.error(output)
-    } else if (level === "warn") {
-      console.warn(output)
-    } else {
-      console.log(output)
-    }
-  } else {
-    // Human-readable in development
-    const prefix = `[${level.toUpperCase()}]`
-    const metaStr = meta ? ` ${JSON.stringify(meta)}` : ""
-    if (level === "error") {
-      console.error(`${prefix} ${message}${metaStr}`)
-    } else if (level === "warn") {
-      console.warn(`${prefix} ${message}${metaStr}`)
-    } else {
-      console.log(`${prefix} ${message}${metaStr}`)
-    }
-  }
+  // Not `<`: an unknown LOG_LEVEL leaves MIN_LEVEL undefined, and then nothing logs.
+  if (!(LOG_LEVELS[level] >= MIN_LEVEL)) return
+  const out = level === "error" ? console.error : level === "warn" ? console.warn : console.log
+  out(
+    process.env.NODE_ENV === "production"
+      ? // Structured JSON in production
+        JSON.stringify({ level, message, timestamp: new Date().toISOString(), ...meta })
+      : // Human-readable in development
+        `[${level.toUpperCase()}] ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}`
+  )
 }
 
 export const logger = {
