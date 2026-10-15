@@ -41,6 +41,7 @@ import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAnd
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { readJson, isUuid } from "@/lib/api-input"
 import { createRoom } from "@/lib/check-in-core"
+import { paginationMeta } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -465,13 +466,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           isOwn: m.user_id === authUser.userId,
         }
       }),
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     logger.error("Get chat messages error", { error: error instanceof Error ? error.message : String(error) })

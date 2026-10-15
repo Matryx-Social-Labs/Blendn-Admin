@@ -2,6 +2,13 @@ import { z } from "zod"
 import { MIN_PASSWORD_LENGTH } from "@/lib/password"
 import { ACCOUNT_MIN_AGE, ADULTS_ONLY } from "@/lib/age"
 
+/** What the app says about the device a sign-in comes from. */
+export const deviceInfoSchema = z.object({
+  platform: z.string().optional(),
+  device: z.string().optional(),
+  appVersion: z.string().optional(),
+})
+
 export const signupSchema = z.object({
   // Lowercased: one address is one account whatever its case (SCRUM-328).
   email: z.string().trim().toLowerCase().email("Invalid email address"),
@@ -44,26 +51,14 @@ export const signupSchema = z.object({
     .int()
     .min(ACCOUNT_MIN_AGE, ADULTS_ONLY)
     .max(120),
-  deviceInfo: z
-    .object({
-      platform: z.string().optional(),
-      device: z.string().optional(),
-      appVersion: z.string().optional(),
-    })
-    .optional(),
+  deviceInfo: deviceInfoSchema.optional(),
 })
 
 export const signinSchema = z.object({
   // Lowercased: one address is one account whatever its case (SCRUM-328).
   email: z.string().trim().toLowerCase().email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
-  deviceInfo: z
-    .object({
-      platform: z.string().optional(),
-      device: z.string().optional(),
-      appVersion: z.string().optional(),
-    })
-    .optional(),
+  deviceInfo: deviceInfoSchema.optional(),
 })
 
 export const refreshTokenSchema = z.object({

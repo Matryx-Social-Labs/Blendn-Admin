@@ -12,6 +12,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { PAGINATION } from "@/lib/constants"
+import { paginationMeta } from "@/lib/pagination"
 
 const searchSchema = z.object({
   q: z.string().min(1).max(200),
@@ -173,13 +174,7 @@ export async function GET(request: NextRequest) {
         city: e.city,
         status: e.status,
       })),
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     logger.error("Event search error", { error: error instanceof Error ? error.message : String(error) })

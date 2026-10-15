@@ -23,6 +23,7 @@ import {
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
+import { deviceInfoSchema } from "@/lib/validations/auth"
 
 const appleAuthSchema = z.object({
   identityToken: z.string().min(1, "Identity token is required"),
@@ -32,13 +33,7 @@ const appleAuthSchema = z.object({
       familyName: z.string().nullable().optional(),
     })
     .optional(),
-  deviceInfo: z
-    .object({
-      platform: z.string().optional(),
-      device: z.string().optional(),
-      appVersion: z.string().optional(),
-    })
-    .optional(),
+  deviceInfo: deviceInfoSchema.optional(),
 })
 
 export async function POST(request: NextRequest) {

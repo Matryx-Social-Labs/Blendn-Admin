@@ -3,7 +3,7 @@ import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
-import { eventWriteSchema } from "@/lib/validations/event"
+import { eventWriteSchema, parseJsonField } from "@/lib/validations/event"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
@@ -21,16 +21,6 @@ import {
   materialEventChanges,
 } from "@/lib/services/event-notifications.service"
 import { isUuid, readJson } from "@/lib/api-input"
-
-const parseJsonField = (value: unknown) => {
-  if (typeof value !== "string") return value
-  if (value.trim() === "") return undefined
-  try {
-    return JSON.parse(value)
-  } catch {
-    return undefined
-  }
-}
 
 interface RouteContext {
   params: Promise<{

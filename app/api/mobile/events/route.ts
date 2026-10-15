@@ -24,6 +24,7 @@ import { buildEventsCacheKey } from "@/lib/events-cache-key"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
 import { realEventsWhere } from "@/lib/event-kind"
+import { paginationMeta } from "@/lib/pagination"
 
 /**
  * The most events a distance sort will pull into memory at once.
@@ -497,13 +498,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       events: transformedEvents,
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
       ...(includeSet.has("activeCheckins") && {
         activeCheckins: await Promise.all(
           activeCheckins.map(async (c) => ({

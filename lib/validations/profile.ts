@@ -293,9 +293,7 @@ export const addInterestsSchema = z.object({
   categoryIds: z.array(z.string().uuid("Invalid category ID")).min(1, "At least one category is required"),
 })
 
-export const removeInterestsSchema = z.object({
-  categoryIds: z.array(z.string().uuid("Invalid category ID")).min(1, "At least one category is required"),
-})
+export const removeInterestsSchema = addInterestsSchema
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>
 export type AddInterestsInput = z.infer<typeof addInterestsSchema>
