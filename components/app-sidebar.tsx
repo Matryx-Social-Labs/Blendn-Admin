@@ -9,23 +9,13 @@ import { NavMain } from "@/components/nav-main"
 import { ProTag } from "@/components/dashboard/kit"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, useSidebar } from "@/components/ui/sidebar"
 import { groupedNavFor } from "@/lib/dashboard-nav"
+import { initialsOf } from "@/lib/utils"
 
 const ROLE_LABELS: Record<string, string> = {
   app_admin: "Platform",
   organizer: "Organiser",
   venue_owner: "Venue owner",
   sponsor: "Sponsor",
-}
-
-function initialsOf(name: string): string {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase())
-      .join("") || "B"
-  )
 }
 
 /**

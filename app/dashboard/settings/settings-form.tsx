@@ -10,7 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { cn } from "@/lib/utils"
+import { cn, initialsOf } from "@/lib/utils"
 import { passwordStrength, MIN_LENGTH } from "@/lib/password-strength"
 import {
   changePassword,
@@ -83,13 +83,7 @@ function ProfileSection({ account }: { account: Account }) {
   const [name, setName] = useState(account.name)
   const [pending, start] = useTransition()
   const dirty = name.trim() !== account.name.trim()
-  const initials =
-    account.name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase())
-      .join("") || "B"
+  const initials = initialsOf(account.name)
 
   return (
     <Section title="Profile" description="How colleagues in your organisation see you.">
