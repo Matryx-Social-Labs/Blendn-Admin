@@ -646,10 +646,6 @@ export function isConfigured(): boolean {
 }
 
 /**
- * Set bucket policy to allow public read access.
- * This lets profile/event/chat images be served without presigned URLs.
- */
-/**
  * Applying the public-read policy is best-effort and must never decide whether
  * storage is usable.
  *
@@ -774,20 +770,7 @@ export async function ensureBucketExists(): Promise<boolean> {
 
         // Set up CORS for the bucket
         await client.send(
-          new PutBucketCorsCommand({
-            Bucket: TIGRIS_BUCKET,
-            CORSConfiguration: {
-              CORSRules: [
-                {
-                  AllowedHeaders: ["*"],
-                  AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
-                  AllowedOrigins: ["*"],
-                  ExposeHeaders: ["ETag"],
-                  MaxAgeSeconds: 3600,
-                },
-              ],
-            },
-          })
+          new PutBucketCorsCommand({ Bucket: TIGRIS_BUCKET, CORSConfiguration: BROWSER_UPLOAD_CORS })
         )
         logger.info("CORS configured for bucket", { bucket: TIGRIS_BUCKET })
         await trySetBucketPublicRead()

@@ -20,8 +20,6 @@ import { closeRoomSockets, leaveRoomSockets } from "../room-close"
 import { blocksBetween } from "./blocks"
 import { activeMemberWhere, lockCrew, settleLocked } from "./sweep"
 
-export { activeMemberWhere } from "./sweep"
-
 /**
  * Crews: friends who go out together (plan v2 §6).
  *
@@ -149,6 +147,8 @@ export const isRefusal = (value: unknown): value is CrewRefusal =>
 
 /** Every "you have no business with this crew" — no crew, not a member, dissolved — is this one 404. */
 export const NO_CREW: CrewRefusal = { refusal: "Crew not found", status: 404 }
+export const NO_EVENT: CrewRefusal = { refusal: "Event not found", status: 404 }
+export const CREWS_OFF: CrewRefusal = { refusal: "The host has turned crews off for this event.", status: 403 }
 const FULL: CrewRefusal = { refusal: `A crew has at most ${CREW.MAX_MEMBERS} people.`, status: 409 }
 /**
  * An invitee who is not your friend. One answer whoever they are — a stranger,

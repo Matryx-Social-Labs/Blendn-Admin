@@ -73,9 +73,6 @@ function istMonth(at: Date): string {
 /** A plain count of people, at the minimum cell. */
 export const held = (n: number): number | null => (n >= MIN_CELL ? n : null)
 
-/** The complement rule, kept in lib/disclosure.ts with the other floors. */
-export { heldPart }
-
 const pct = (part: number | null, whole: number): number | null =>
   part === null || whole === 0 ? null : Math.round((part / whole) * 100)
 

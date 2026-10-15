@@ -34,8 +34,6 @@ function escapeCell(value: unknown): string {
     text = value.toISOString()
   } else if (typeof value === "number") {
     return Number.isFinite(value) ? String(value) : ""
-  } else if (typeof value === "boolean") {
-    return value ? "true" : "false"
   } else {
     text = String(value)
   }

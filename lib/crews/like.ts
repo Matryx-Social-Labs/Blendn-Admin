@@ -9,7 +9,7 @@ import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { leaveRoomSockets } from "../room-close"
 import { ownerAdmits, ownerRoomClosesAt } from "../room-kind"
-import type { CrewRefusal } from "./crews"
+import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
 import { blocksBetween, blocksExclude } from "./blocks"
 import {
   crewEvent,
@@ -67,12 +67,9 @@ import {
  * arrives later has no row, and every door to the room starts from the row.
  */
 
-const NO_CREW: CrewRefusal = { refusal: "Crew not found", status: 404 }
 const NO_PERSON: CrewRefusal = { refusal: "User not found", status: 404 }
 /** Every person-level refusal of a crew → person like (C7): what a like that stood answers. */
 const NOTHING_TOLD = { liked: true, blend: null } as const
-const NO_EVENT: CrewRefusal = { refusal: "Event not found", status: 404 }
-const CREWS_OFF: CrewRefusal = { refusal: "The host has turned crews off for this event.", status: 403 }
 const NOT_IN: CrewRefusal = { refusal: "Check in before liking anyone here.", status: 403 }
 const MY_CREW_NOT_HERE: CrewRefusal = {
   refusal: "Your crew isn't here yet — two of you need to be checked in.",
@@ -112,8 +109,6 @@ async function hereFor(likerId: string, eventId: string): Promise<Here | CrewRef
   return { eventId, occurrenceId, occurrenceEnd: occurrence.end_time }
 }
 
-const refused = (v: unknown): v is CrewRefusal => typeof v === "object" && v !== null && "refusal" in v
-
 /** The people on each side of a like, as the in-transaction block check reads them. */
 interface Sides {
   a: readonly string[]
@@ -144,7 +139,7 @@ export async function likeCrew(
   asCrewId?: string
 ): Promise<LikeOutcome | CrewRefusal> {
   const here = await hereFor(likerId, eventId)
-  if (refused(here)) return here
+  if (isRefusal(here)) return here
   const target = await crewHereNow(toCrewId, here.occurrenceId)
   if (!target || target.members.includes(likerId)) return NO_CREW
 
@@ -186,7 +181,7 @@ export async function likePersonAsCrew(
   personId: string
 ): Promise<LikeOutcome | CrewRefusal> {
   const here = await hereFor(likerId, eventId)
-  if (refused(here)) return here
+  if (isRefusal(here)) return here
   const mine = await crewHereNow(asCrewId, here.occurrenceId)
   if (!mine || !mine.present.includes(likerId)) return MY_CREW_NOT_HERE
   if (!mine.open_to_solo || mine.members.length > CREW.MAX_SOLO_MATCH) return NO_ROOM_FOR_ONE

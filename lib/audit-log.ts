@@ -3,6 +3,7 @@ import { logger } from "./logger"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
 import { activeMembership, HOME_ORG_ORDER } from "./org-membership"
+import { isUuid } from "./api-input"
 
 export interface AuditLogEntry {
   userId?: string
@@ -21,14 +22,12 @@ export interface AuditLogEntry {
 
 type Client = Prisma.TransactionClient
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 /** The id a resolver reads, if the entry has a usable one. */
-const idOf = (e: AuditLogEntry) => (e.resourceId && UUID.test(e.resourceId) ? e.resourceId : null)
+const idOf = (e: AuditLogEntry) => (isUuid(e.resourceId) ? e.resourceId : null)
 const detail = (e: AuditLogEntry, key: string): string | null => {
   const d = e.details as Record<string, unknown> | undefined
   const v = d && typeof d === "object" ? d[key] : undefined
-  return typeof v === "string" && UUID.test(v) ? v : null
+  return isUuid(v) ? v : null
 }
 
 /** What a resolver must be handed: the resource's id, the room's event in the details, or the actor. */
