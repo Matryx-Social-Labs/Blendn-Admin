@@ -216,7 +216,7 @@ Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS
 
 ## Deployment
 
-Deployed to Railway via Docker (see `DEPLOYMENT.md` and `railway.json`/`nixpacks.toml`). Health check at `GET /api/health`. Production startup fails fast if required env vars are missing (checked in `server.ts` before the HTTP server binds).
+Deployed to Railway via Docker (see `DEPLOYMENT.md` and `railway.json`). Health check at `GET /api/health`. Production startup fails fast if required env vars are missing (checked in `server.ts` before the HTTP server binds).
 
 <!-- BEGIN:nextjs-agent-rules -->
 
