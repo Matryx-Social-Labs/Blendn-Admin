@@ -147,10 +147,15 @@ describe("where each kind lands", () => {
     }
   })
 
+  it("a venue's offer is on its own channel, never collapsed: two offers are two things to use (SCRUM-628)", () => {
+    // A promotion, so a person can silence it without silencing their events.
+    expect(deliveryFor({ type: "venue_offer", offerId: "o1" })).toEqual({ channelId: "offers" })
+  })
+
   it("never names a channel the app does not create", () => {
     // Every kind in the enum, so a kind added later is checked too. The app
-    // creates these three (blendn `lib/notifications.ts`); `default` only
-    // carries a payload with no type.
+    // creates these (blendn `lib/notifications.ts`; `offers` with the offer
+    // consent, SCRUM-628); `default` only carries a payload with no type.
     const block = /enum notification_kind \{([^}]*)\}/.exec(read("prisma", "schema.prisma"))![1]
     const kinds = block
       .split("\n")
@@ -159,7 +164,7 @@ describe("where each kind lands", () => {
     expect(kinds.length).toBeGreaterThan(10)
     for (const type of kinds) {
       const { channelId } = deliveryFor({ type: type as never, eventId: "e", conversationId: "c", chatGroupId: "g" })
-      expect(["messages", "rooms", "events"]).toContain(channelId)
+      expect(["messages", "rooms", "events", "offers"]).toContain(channelId)
     }
     expect(deliveryFor(undefined).channelId).toBe("default")
   })

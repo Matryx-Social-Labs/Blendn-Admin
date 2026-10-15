@@ -141,14 +141,21 @@ registry.registerPath({
 })
 
 const OffersSettingSchema = z
-  .object({ enabled: z.boolean().describe("\"Offers from places\": off, no venue's offer reaches you. On unless turned off.") })
+  .object({
+    enabled: z.boolean().describe("\"Offers from places\": off, no venue's offer reaches you. On unless turned off."),
+    pushes: z
+      .boolean()
+      .describe(
+        "Offer notifications (SCRUM-628, App Store 4.5.4): off until the person says yes in the app. Off, offers still arrive with no push. Independent of `enabled`."
+      ),
+  })
   .openapi("OffersSetting")
 
 registry.registerPath({
   method: "get",
   path: "/api/mobile/me/offers",
   tags: ["Mobile Offers"],
-  summary: "Offers from places: on or off",
+  summary: "Offers from places, and offer notifications",
   security: bearerAuth,
   responses: {
     200: { description: "The setting", content: { "application/json": { schema: wrap(OffersSettingSchema) } } },
@@ -160,9 +167,12 @@ registry.registerPath({
   method: "put",
   path: "/api/mobile/me/offers",
   tags: ["Mobile Offers"],
-  summary: "Turn offers from places on or off",
+  summary: "Change offers from places, or offer notifications",
+  description: "Each field a real boolean, at least one; a missing one is left as it is. A yes to `pushes` is stored with when it was first given (a second yes keeps it); a no clears it.",
   security: bearerAuth,
-  request: { body: { content: { "application/json": { schema: z.object({ enabled: z.boolean() }).strict() } } } },
+  request: {
+    body: { content: { "application/json": { schema: z.object({ enabled: z.boolean().optional(), pushes: z.boolean().optional() }).strict() } } },
+  },
   responses: {
     200: { description: "The setting now", content: { "application/json": { schema: wrap(OffersSettingSchema) } } },
     ...standardErrors,

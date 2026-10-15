@@ -2833,7 +2833,8 @@ A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push
 nor announcements.
 
 Every push carries an Android `channelId` the app creates — `messages`,
-`rooms` or `events` — so each can be silenced in system settings, and an iOS
+`rooms`, `events` or `offers` ("Offers from venues", a venue's offer only) —
+so each can be silenced in system settings, and an iOS
 `threadId` that stacks a conversation's or an event's notifications. Chosen by
 `deliveryFor` from `data.type`, never by the caller.
 
@@ -2963,8 +2964,13 @@ totals across its offers, published once a week, each held back when it or
 the rest is under 5. An audience under 5 is refused with one fixed sentence.
 
 The push says **"You have a new offer" / "Open Blendn to see it."** — no
-place, no words. Its `data` is `{ type: "venue_offer", offerId }`; the bell
-stores the same two lines. Open the offer with `GET /offers/:offerId`.
+place, no words. Its `data` is `{ type: "venue_offer", offerId }`, on the
+Android channel `offers`; the bell stores the same two lines. Open the offer
+with `GET /offers/:offerId`. **The push goes only to someone who said yes to
+offer notifications** (`PUT /me/offers { "pushes": true }`, SCRUM-628): an
+offer is a promotion, and App Store guideline 4.5.4 allows its push only after
+a yes given in the app. Without it the offer still arrives — the bell line and
+`GET /offers` — with no push.
 
 ### GET /offers
 
@@ -3016,7 +3022,17 @@ of these choices is written to the audit log. `known: true` — 409
 `VENUE_UNCLAIMED` while nobody runs the venue on Blendn, 403 `AGE_RESTRICTED`
 without an adult age on file. 404 for no such venue.
 
-### GET / PUT /me/offers — "Offers from places"
+### GET / PUT /me/offers — "Offers from places" and offer notifications
 
-`{ "enabled": false }` — one switch for every venue: off, no venue's offer
-reaches you. On unless turned off. Only a real boolean changes it.
+`{ "enabled": true, "pushes": false }`.
+
+- `enabled` — one switch for every venue: off, no venue's offer reaches you.
+  On unless turned off.
+- `pushes` — offer notifications. **Off until you say yes** (SCRUM-628), for
+  every account: ask in context, the first time an offer exists for the
+  person, never in onboarding. Off, offers still arrive with no push. The yes
+  is stored with when it was first given (`profiles.offer_push_consent_at`; a
+  second yes keeps it); a no clears it. Independent of `enabled`.
+
+PUT changes what it is given and answers both: each must be a real boolean, at
+least one per PUT (`{}` is 400), so "Not now" sends nothing.
