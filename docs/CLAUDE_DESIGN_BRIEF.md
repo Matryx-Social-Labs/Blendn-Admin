@@ -157,8 +157,8 @@ labels; decide what collapses and what survives.
 
 ### 1.3 Charts are pictures, not instruments
 
-`components/dashboard/charts.tsx` exports six charts — `PacingChart`, `Funnel`,
-`TrendArea`, `UtilHeatmap`, `ArrivalCurve`, `CategoryBars`. Every one is
+`components/dashboard/charts.tsx` exports five charts — `PacingChart`, `Funnel`,
+`UtilHeatmap`, `ArrivalCurve`, `CategoryBars`. Every one is
 hover-tooltip-only. You cannot click anything, change the window, zoom, or
 isolate a series.
 

@@ -31,12 +31,10 @@ export function DeltaBadge({
    * reading it as 70%, which is a different number entirely.
    */
   suffix = "%",
-  className,
 }: {
   value: number
   invert?: boolean
   suffix?: string
-  className?: string
 }) {
   const flat = value === 0
   const good = invert ? value < 0 : value > 0
@@ -44,8 +42,7 @@ export function DeltaBadge({
     <span
       className={cn(
         "inline-flex items-center gap-0.5 text-[0.75rem] font-medium tabular-nums",
-        flat ? "text-faint-foreground" : good ? "text-success" : "text-destructive",
-        className
+        flat ? "text-faint-foreground" : good ? "text-success" : "text-destructive"
       )}
     >
       {flat ? "±" : good ? "↑" : "↓"}
@@ -258,18 +255,6 @@ export function RatingBars({ counts }: { counts: [number, number, number, number
       <p className="mt-1 text-[0.75rem] text-faint-foreground">
         {total === 0 ? "No ratings yet" : `${total} rating${total === 1 ? "" : "s"}`}
       </p>
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------------------- */
-
-/** Section heading. Pages start at h2 — SiteHeader owns the single h1. */
-export function SectionTitle({ children, hint }: { children: ReactNode; hint?: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <h2 className="text-[length:var(--text-h2)] font-bold">{children}</h2>
-      {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
     </div>
   )
 }

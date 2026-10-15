@@ -1,8 +1,6 @@
 "use client"
 
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -13,8 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { useMemo, useState, type ReactNode } from "react"
-import { IconZoomReset } from "@tabler/icons-react"
+import type { ReactNode } from "react"
 
 import {
   ChartContainer,
@@ -41,7 +38,6 @@ function ChartFrame({
   children,
   empty,
   emptyText,
-  action,
 }: {
   /** None when the chart sits in a kit `Panel`, which carries the title itself. */
   title?: string
@@ -49,8 +45,6 @@ function ChartFrame({
   children: ReactNode
   empty?: boolean
   emptyText: string
-  /** Chart-level control — reset zoom, export. Sits beside the hint. */
-  action?: ReactNode
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -67,13 +61,12 @@ function ChartFrame({
 
             They are siblings on screen; they are siblings in the outline now.
           */}
-          {/* Same size as SectionTitle. A chart panel and a table section are
+          {/* Same size as a table section's h2. A chart panel and a table section are
               siblings on the overview; they read as siblings only if their
               headings are the same size. */}
           <h2 className="text-[length:var(--text-h2)] font-bold">{title}</h2>
           <span className="flex items-baseline gap-3">
             {hint ? <span className="text-[0.75rem] text-faint-foreground">{hint}</span> : null}
-            {action}
           </span>
         </div>
       ) : null}
@@ -256,18 +249,10 @@ export type FunnelStage = {
  * nobody reached must draw at zero width, and every funnel widget I know of
  * either floors it or refuses to render it.
  */
-export function Funnel({
-  stages,
-  empty,
-  verifiedAfter = "checked in",
-}: {
-  stages: FunnelStage[]
-  empty?: boolean
-  /** The last stage any events app can count; the ones after it take their own colour. */
-  verifiedAfter?: string
-}) {
+export function Funnel({ stages, empty }: { stages: FunnelStage[]; empty?: boolean }) {
   const max = Math.max(...stages.map((s) => s.value), 1)
-  const lastMeasurable = stages.findIndex((s) => s.label === verifiedAfter)
+  // The last stage any events app can count; the ones after it take their own colour.
+  const lastMeasurable = stages.findIndex((s) => s.label === "checked in")
 
   // Titled by the `Panel` it sits in (the kit's AdminOverview), not by a frame of its own.
   return (
@@ -351,199 +336,6 @@ export function Funnel({
  */
 export function stageFill(index: number, lastMeasurable: number): string {
   return lastMeasurable >= 0 && index > lastMeasurable ? "var(--chart-3)" : "var(--chart-1)"
-}
-
-/* -------------------------------------------------------------------------- */
-
-export type TrendSeries = { key: string; label: string; color: string }
-
-/**
- * Multi-series area trend on a 0-based axis.
- *
- * The admin case plots signups against active users deliberately: the gap
- * between the two lines is the vanity, and a single signups line hides it.
- */
-export function TrendArea({
-  data,
-  series,
-  title,
-  hint,
-  empty,
-  syncId,
-}: {
-  data: Array<Record<string, string | number>>
-  series: TrendSeries[]
-  title: string
-  hint?: string
-  empty?: boolean
-  /** Charts sharing this id share a crosshair, so two stacked charts read together. */
-  syncId?: string
-}) {
-  /*
-   * Exploration, per design brief §1.3. This was a picture: hover-tooltip only,
-   * no way to narrow the window, isolate a line, or get back out.
-   *
-   * Zoom is drag-to-select rather than a Brush strip — the brush costs 40px of
-   * vertical space on every chart to serve a gesture people try on the plot
-   * itself first.
-   */
-  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(() => new Set())
-  const [dragFrom, setDragFrom] = useState<string | null>(null)
-  const [dragTo, setDragTo] = useState<string | null>(null)
-  const [zoom, setZoom] = useState<[number, number] | null>(null)
-
-  const visible = useMemo(() => {
-    if (!zoom) return data
-    return data.slice(zoom[0], zoom[1] + 1)
-  }, [data, zoom])
-
-  function applyZoom() {
-    if (dragFrom === null || dragTo === null || dragFrom === dragTo) {
-      setDragFrom(null)
-      setDragTo(null)
-      return
-    }
-    const a = data.findIndex((d) => d.label === dragFrom)
-    const b = data.findIndex((d) => d.label === dragTo)
-    // Drag right-to-left is the same gesture; normalise rather than ignore it.
-    const [lo, hi] = a <= b ? [a, b] : [b, a]
-    // Two points is not a trend. Refusing a degenerate selection beats
-    // rendering a chart with nothing in it.
-    if (lo >= 0 && hi > lo) setZoom([lo, hi])
-    setDragFrom(null)
-    setDragTo(null)
-  }
-
-  const shown = series.filter((s) => !hiddenSeries.has(s.key))
-
-  return (
-    <ChartFrame
-      title={title}
-      hint={hint}
-      empty={empty}
-      emptyText="Plots as accounts and activity accrue."
-      action={
-        zoom ? (
-          <button
-            onClick={() => setZoom(null)}
-            className="inline-flex items-center gap-1 text-[0.75rem] text-primary hover:underline"
-          >
-            <IconZoomReset className="size-3.5" /> Reset zoom
-          </button>
-        ) : null
-      }
-    >
-      <ChartContainer
-        config={Object.fromEntries(series.map((s) => [s.key, { label: s.label, color: s.color }]))}
-        className="h-[200px] w-full select-none"
-      >
-        <AreaChart
-          data={visible}
-          margin={{ left: 4, right: 12, top: 8 }}
-          syncId={syncId}
-          onMouseDown={(e) => e?.activeLabel && setDragFrom(String(e.activeLabel))}
-          onMouseMove={(e) => dragFrom && e?.activeLabel && setDragTo(String(e.activeLabel))}
-          onMouseUp={applyZoom}
-          // A drag that leaves the plot would otherwise stay armed and zoom on
-          // the next unrelated click.
-          onMouseLeave={() => {
-            setDragFrom(null)
-            setDragTo(null)
-          }}
-        >
-          <defs>
-            {series.map((s) => (
-              <linearGradient key={s.key} id={`trend-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={s.color} stopOpacity={0.3} />
-                <stop offset="95%" stopColor={s.color} stopOpacity={0} />
-              </linearGradient>
-            ))}
-          </defs>
-          <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-          <XAxis
-            dataKey="label"
-            tickLine={false}
-            axisLine={false}
-            tickMargin={8}
-            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-          />
-          <YAxis
-            domain={[0, "auto"]}
-            allowDecimals={false}
-            tickLine={false}
-            axisLine={false}
-            width={32}
-            tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-          />
-          <ChartTooltip
-            content={<ChartTooltipContent className="rounded-xl border-border bg-card" />}
-          />
-          {/* `shown`, not `series` — a hidden series must leave the plot so
-              the y-axis rescales to what is left. Rendering it transparent
-              would keep the axis pinned to the value you were trying to
-              exclude. */}
-          {shown.map((s) => (
-            <Area
-              key={s.key}
-              dataKey={s.key}
-              type="monotone"
-              stroke={s.color}
-              strokeWidth={2}
-              fill={`url(#trend-${s.key})`}
-              dot={false}
-            />
-          ))}
-          {/* The live drag selection. */}
-          {dragFrom && dragTo ? (
-            <ReferenceArea x1={dragFrom} x2={dragTo} strokeOpacity={0} fill="var(--primary)" fillOpacity={0.12} />
-          ) : null}
-        </AreaChart>
-      </ChartContainer>
-
-      {/* Clicking a series name hides it and the axis rescales — the only way
-          to read a small series sitting under a large one. The last visible
-          series cannot be hidden; an empty chart is not a state worth
-          reaching by accident. */}
-      <div className="flex flex-wrap gap-3.5 text-[0.75rem]">
-        {series.map((s) => {
-          const off = hiddenSeries.has(s.key)
-          const isLastVisible = !off && shown.length === 1
-          return (
-            <button
-              key={s.key}
-              onClick={() =>
-                setHiddenSeries((prev) => {
-                  const next = new Set(prev)
-                  if (next.has(s.key)) next.delete(s.key)
-                  else if (!isLastVisible) next.add(s.key)
-                  return next
-                })
-              }
-              disabled={isLastVisible}
-              aria-pressed={!off}
-              title={isLastVisible ? "At least one series stays visible" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 transition-opacity",
-                off ? "text-faint-foreground line-through" : "text-muted-foreground",
-                isLastVisible ? "cursor-default" : "cursor-pointer hover:text-foreground"
-              )}
-            >
-              <i
-                className="inline-block size-2 rounded-[2px]"
-                style={{ background: off ? "var(--faint-foreground)" : s.color }}
-              />
-              {s.label}
-            </button>
-          )
-        })}
-        {zoom ? (
-          <span className="text-faint-foreground">
-            showing {visible.length} of {data.length}
-          </span>
-        ) : null}
-      </div>
-    </ChartFrame>
-  )
 }
 
 /* -------------------------------------------------------------------------- */
@@ -709,12 +501,10 @@ export function ArrivalCurve({
  */
 export function CategoryBars({
   data,
-  title = "By category",
+  title,
   hint,
   empty,
   emptyText = "Categorised messages count up here.",
-  onSelect,
-  selected,
 }: {
   /**
    * `count: null` means suppressed, not zero.
@@ -725,17 +515,10 @@ export function CategoryBars({
    * null as 0 would be worse than either: a false reassurance.
    */
   data: Array<{ category: string; count: number | null; suppressed?: boolean }>
-  title?: string
+  title: string
   hint?: string
   empty?: boolean
   emptyText?: string
-  /**
-   * Click-to-filter. Given this, a bar becomes the way into the rows behind
-   * it — "safety_conduct is up" turns into "here are the eleven messages",
-   * which is the single most useful thing a chart on this page can do.
-   */
-  onSelect?: (category: string | null) => void
-  selected?: string | null
 }) {
   const max = Math.max(1, ...data.map((d) => d.count ?? 0))
   return (
@@ -743,44 +526,22 @@ export function CategoryBars({
       <div className="flex flex-col gap-1.5">
         {data.map((d) => {
           const safety = d.category === "safety_conduct"
-          const isSelected = selected === d.category
-          const Row = onSelect ? "button" : "div"
           return (
-            <Row
+            <div
               key={d.category}
-              // Clicking the selected bar again clears the filter — the same
-              // gesture out as in, so nobody hunts for a reset.
-              {...(onSelect
-                ? {
-                    onClick: () => onSelect(isSelected ? null : d.category),
-                    "aria-pressed": isSelected,
-                    title: isSelected ? "Clear this filter" : `Filter to ${d.category.replace(/_/g, " ")}`,
-                  }
-                : {})}
-              className={cn(
-                "flex w-full items-center gap-2.5 rounded px-1 py-0.5 text-left",
-                onSelect && "cursor-pointer transition-colors hover:bg-accent",
-                isSelected && "bg-accent"
-              )}
+              className="flex w-full items-center gap-2.5 rounded px-1 py-0.5 text-left"
             >
               <span
                 className={cn(
                   "w-24 shrink-0 text-right text-[0.75rem]",
-                  safety ? "font-medium text-destructive" : "text-muted-foreground",
-                  isSelected && "font-bold text-foreground"
+                  safety ? "font-medium text-destructive" : "text-muted-foreground"
                 )}
               >
                 {d.category.replace(/_/g, " ")}
               </span>
               <div className="h-4 flex-1 overflow-hidden rounded bg-surface-raised">
                 <div
-                  className={cn(
-                    "h-full rounded transition-opacity",
-                    safety ? "bg-destructive" : "bg-chart-1",
-                    // Dim the others rather than hide them: the selected bar
-                    // still needs something to be big or small against.
-                    selected && !isSelected && "opacity-40"
-                  )}
+                  className={cn("h-full rounded transition-opacity", safety ? "bg-destructive" : "bg-chart-1")}
                   style={{ width: `${barWidth(d.count ?? 0, max)}%` }}
                 />
               </div>
@@ -797,7 +558,7 @@ export function CategoryBars({
                 )}
                 {safety ? <span className="text-destructive"> → mod</span> : null}
               </span>
-            </Row>
+            </div>
           )
         })}
       </div>

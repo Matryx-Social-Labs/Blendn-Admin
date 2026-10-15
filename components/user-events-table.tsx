@@ -46,10 +46,9 @@ const STATUS_STYLES: Record<event_status, string> = {
 
 interface UserEventsTableProps {
   events: EventRow[]
-  isAdmin: boolean
 }
 
-export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
+export function UserEventsTable({ events }: UserEventsTableProps) {
   const [eventList, setEventList] = React.useState<EventRow[]>(events)
   const [loadingId, setLoadingId] = React.useState<string | null>(null)
 
@@ -88,7 +87,7 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
             <TableHead>Start</TableHead>
             <TableHead>Venue</TableHead>
             <TableHead>Attended</TableHead>
-            {isAdmin && <TableHead className="w-16">Moderate</TableHead>}
+            <TableHead className="w-16">Moderate</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -111,47 +110,45 @@ export function UserEventsTable({ events, isAdmin }: UserEventsTableProps) {
                   ? `${event.attendeeCount} / ${event.max_capacity}`
                   : event.attendeeCount}
               </TableCell>
-              {isAdmin && (
-                <TableCell>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8"
-                        disabled={loadingId === event.id}
-                        aria-label={`Actions for ${event.title}`}
+              <TableCell>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8"
+                      disabled={loadingId === event.id}
+                      aria-label={`Actions for ${event.title}`}
+                    >
+                      <IconDotsVertical className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {event.status !== "published" && (
+                      <DropdownMenuItem
+                        onClick={() => handleStatusChange(event.id, "published")}
                       >
-                        <IconDotsVertical className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {event.status !== "published" && (
-                        <DropdownMenuItem
-                          onClick={() => handleStatusChange(event.id, "published")}
-                        >
-                          Publish
-                        </DropdownMenuItem>
-                      )}
-                      {event.status === "published" && (
-                        <DropdownMenuItem
-                          onClick={() => handleStatusChange(event.id, "draft")}
-                        >
-                          Unpublish
-                        </DropdownMenuItem>
-                      )}
-                      {event.status !== "cancelled" && (
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => handleStatusChange(event.id, "cancelled")}
-                        >
-                          Cancel
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableCell>
-              )}
+                        Publish
+                      </DropdownMenuItem>
+                    )}
+                    {event.status === "published" && (
+                      <DropdownMenuItem
+                        onClick={() => handleStatusChange(event.id, "draft")}
+                      >
+                        Unpublish
+                      </DropdownMenuItem>
+                    )}
+                    {event.status !== "cancelled" && (
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => handleStatusChange(event.id, "cancelled")}
+                      >
+                        Cancel
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

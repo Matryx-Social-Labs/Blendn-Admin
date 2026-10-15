@@ -1,7 +1,5 @@
 import Image from "next/image"
 
-import { cn } from "@/lib/utils"
-
 /**
  * The brand mark, placed as the design places it.
  *
@@ -18,44 +16,24 @@ import { cn } from "@/lib/utils"
  *
  * The guideline's 35px minimum height applies to the *logo lockup* as an
  * artwork; the monogram alone in UI chrome is a different case, and the design
- * uses 30px in the sidebar and 26px in the mobile header.
+ * uses 30px in the sidebar.
  */
-const SIZES = {
-  /** Sidebar header. */
-  sidebar: { mark: 30, text: "text-base" },
-  /** Compact chrome — mobile header. */
-  header: { mark: 26, text: "text-[0.9375rem]" },
-  /** Login and other full-page contexts. */
-  hero: { mark: 44, text: "text-2xl" },
-} as const
+const MARK = 30
 
-export function BrandLogo({
-  size = "sidebar",
-  /** Monogram only — for the collapsed sidebar. */
-  markOnly = false,
-  className,
-}: {
-  size?: keyof typeof SIZES
-  markOnly?: boolean
-  className?: string
-}) {
-  const { mark, text } = SIZES[size]
-
+export function BrandLogo() {
   return (
-    <span className={cn("flex items-center gap-2.5", className)}>
+    <span className="flex items-center gap-2.5">
       <Image
         src="/brand/monogram-gradient.png"
-        alt={markOnly ? "Blend'n" : ""}
-        width={mark}
-        height={mark}
+        alt=""
+        width={MARK}
+        height={MARK}
         // The mark is the brand's first paint on every page; letting it arrive
         // late is the one image worth prioritising.
         priority
-        style={{ width: mark, height: mark }}
+        style={{ width: MARK, height: MARK }}
       />
-      {markOnly ? null : (
-        <span className={cn("font-bold leading-none", text)}>Blend&apos;n</span>
-      )}
+      <span className="font-bold leading-none text-base">Blend&apos;n</span>
     </span>
   )
 }

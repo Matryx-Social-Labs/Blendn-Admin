@@ -27,7 +27,7 @@ import {
  * the page reads the same `searchParams`, so they cannot disagree about what
  * period is on screen.
  */
-export function DateRangeControl({ className }: { className?: string }) {
+export function DateRangeControl() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -55,8 +55,7 @@ export function DateRangeControl({ className }: { className?: string }) {
       aria-label="Date range for every chart and table on this page"
       className={cn(
         "inline-flex items-center gap-0.5 rounded-lg border border-border-strong bg-card p-[3px]",
-        pending && "opacity-70",
-        className
+        pending && "opacity-70"
       )}
     >
       <IconCalendarStats

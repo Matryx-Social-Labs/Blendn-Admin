@@ -92,7 +92,7 @@ export function AppSidebar({
       <nav aria-label="Dashboard" className="flex min-h-0 flex-1 flex-col">
         <SidebarHeader className="gap-[18px] px-3 pb-0 pt-4">
           <div className="px-1.5">
-            <BrandLogo size="sidebar" />
+            <BrandLogo />
           </div>
           <div data-slot="org-card" className="flex items-center gap-2.5 rounded-[10px] border border-border bg-card p-2.5">
             <span
