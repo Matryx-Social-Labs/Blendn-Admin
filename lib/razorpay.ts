@@ -68,6 +68,17 @@ export class RazorpayError extends Error {
 
 const errorBody = z.object({ error: z.object({ description: z.string().optional() }).optional() })
 
+/**
+ * Razorpay's edge answers a source IP it blocks with 406, an empty body and
+ * `server: awselb/2.0` (SCRUM-607). Name it, or it reads as an outage.
+ */
+function withoutDescription(res: Response, json: unknown): string {
+  if (res.status === 406 && json === null) {
+    return `Razorpay's edge refused this server's IP (406, empty body, server ${res.headers.get("server") ?? "unknown"}): check the service's static outbound IPs`
+  }
+  return `Razorpay answered ${res.status}`
+}
+
 async function call<S extends z.ZodType>(
   schema: S,
   method: "GET" | "POST",
@@ -89,7 +100,7 @@ async function call<S extends z.ZodType>(
     // Razorpay's own sentence when it sent one; never the request, which
     // carries the key in its header.
     const description = errorBody.safeParse(json).data?.error?.description
-    throw new RazorpayError(res.status, description ?? `Razorpay answered ${res.status}`)
+    throw new RazorpayError(res.status, description ?? withoutDescription(res, json))
   }
   const parsed = schema.safeParse(json)
   if (!parsed.success) throw new RazorpayError(502, `Razorpay answered ${path} in an unexpected shape`)
