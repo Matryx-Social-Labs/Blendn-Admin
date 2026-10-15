@@ -15,6 +15,11 @@ import { NextRequest } from "next/server"
  * server-side sockets sit in `user:<id>`, `chat:<room>` and `event:room:<id>` as
  * the connection handler and the join guards put them. Check-ins go through
  * the real route; real rows throughout.
+ *
+ * "Show online status" off reaches it too (SCRUM-620): the REST roster has
+ * left such a person out since SCRUM-141, while every arrival still sent
+ * `event:room:checkin` with their pseudonym, and the app printed "{name}
+ * walked in". The count may move — `event:checkin` names nobody.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 import { createServer } from "http"
@@ -43,18 +48,23 @@ const clients: ClientSocket[] = []
 io.on("connection", (socket) => {
   const userId = String(socket.handshake.auth.userId)
   socket.data.userId = userId
-  socket.join([`user:${userId}`, `chat:${roomId}`, `event:room:${eventId}`])
+  socket.join([`user:${userId}`, `chat:${roomId}`, `event:room:${eventId}`, `event:${eventId}`])
   serverSide.set(userId, socket as unknown as AuthenticatedSocket)
 })
 
-type Seen = { typing: { userId: string; isTyping: boolean }[]; arrivals: { userId: string }[] }
+type Seen = {
+  typing: { userId: string; isTyping: boolean }[]
+  arrivals: { userId: string }[]
+  counts: { userId: string; hereCount?: number }[]
+}
 async function listen(userId: string): Promise<Seen> {
   const { port } = httpServer.address() as AddressInfo
   const socket = connect(`http://localhost:${port}`, { auth: { userId }, transports: ["websocket"] })
   clients.push(socket)
-  const seen: Seen = { typing: [], arrivals: [] }
+  const seen: Seen = { typing: [], arrivals: [], counts: [] }
   socket.on("chat:typing", (p) => seen.typing.push(p))
   socket.on("event:room:checkin", (p) => seen.arrivals.push(p))
+  socket.on("event:checkin", (p) => seen.counts.push(p))
   await new Promise<void>((resolve) => socket.on("connect", () => resolve()))
   return seen
 }
@@ -183,5 +193,42 @@ describe("once the block is lifted", () => {
     await settle()
     expect(a.typing).toEqual([expect.objectContaining({ userId: roomHandle(eventId, B.id), isTyping: false })])
     expect(who(a.arrivals)).toContain(D.id)
+  })
+})
+
+describe("with \"Show online status\" off (SCRUM-620)", () => {
+  it("the room is not told who arrived, by name or by pseudonym; the count still moves", async () => {
+    const E = await person("lrb-e")
+    await db.profiles.update({ where: { id: E.id }, data: { show_online: false } })
+    const a = await listen(A.id)
+    // Waits for what must arrive, not a guessed sleep: a loaded host made the fixed settle() too short.
+    const until = async (check: () => boolean) => {
+      for (const end = Date.now() + 5_000; !check() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 25))
+    }
+    await checkIn(E.token)
+    await until(() => a.counts.length > 0)
+    await settle()
+
+    // Nobody's roster heard E; the counter room heard somebody, with the real number inside.
+    const inside = new Set(
+      (await db.event_check_ins.findMany({ where: { event_id: eventId, status: "checked_in" }, select: { user_id: true } })).map(
+        (r) => r.user_id
+      )
+    )
+    expect(inside).toContain(E.id)
+    expect(a.arrivals).toEqual([])
+    expect(a.counts).toEqual([expect.objectContaining({ hereCount: inside.size })])
+
+    // Positive control on the same socket: a listed arrival is still announced.
+    const F = await person("lrb-f")
+    await checkIn(F.token)
+    await until(() => a.arrivals.length > 0)
+    const { anonymous_name } = await db.chat_group_members.findUniqueOrThrow({
+      where: { chat_group_id_user_id: { chat_group_id: roomId, user_id: E.id } },
+      select: { anonymous_name: true },
+    })
+    expect(anonymous_name).toBeTruthy()
+    expect(who(a.arrivals)).toEqual([F.id])
+    expect(JSON.stringify(a.arrivals)).not.toContain(anonymous_name!)
   })
 })

@@ -178,3 +178,15 @@ it("does not announce an arrival when somebody live goes live again", async () =
   await until(async () => pb.of("event:room:checkin").length, (n) => n === before + 1)
   expect(pb.of("event:room:checkin").length).toBe(before + 1)
 })
+
+it("does not announce somebody with \"Show online status\" off going live; the count still moves (SCRUM-620)", async () => {
+  const { v, pb } = await twoLive()
+  const [rosterBefore, countBefore] = [pb.of("event:room:checkin").length, pb.of("event:checkin").length]
+  const c = await person("glc")
+  await db.profiles.update({ where: { id: c.id }, data: { show_online: false } })
+  expect((await goLive(c.token, v)).status).toBe(200)
+  await until(async () => pb.of("event:checkin").length, (n) => n === countBefore + 1)
+  await quiet()
+  expect(pb.of("event:checkin").length).toBe(countBefore + 1)
+  expect(pb.of("event:room:checkin").length).toBe(rosterBefore)
+})

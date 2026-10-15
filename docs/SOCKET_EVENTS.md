@@ -155,7 +155,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `event:room:checkin` | `{ eventId, userId, userName, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym. Never sent to the arriver's block counterparties. |
+| `event:room:checkin` | `{ eventId, userId, userName, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym. Never sent to the arriver's block counterparties, and not sent at all for an arriver with "Show online status" off — the roster leaves them out, so only `event:checkin` (no name) moves the count (SCRUM-620). |
 
 ### Room Events (room: `user:{userId}`)
 
