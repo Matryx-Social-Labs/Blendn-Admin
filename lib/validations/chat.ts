@@ -2,19 +2,31 @@ import { z } from "zod"
 import { logger } from "@/lib/logger"
 import { deleteFile, ownedObjectKey, sealedChatKey, sealUpload, type SealRefusal } from "@/lib/tigris"
 
-/**
- * What a client may put in a room message's `metadata`: its own media, and
- * nothing else (SCRUM-426).
- *
- * It was a free record, stored verbatim, and the app draws any message whose
- * metadata has `sponsored_message_id` as a sponsored card, so an attendee could
- * post one. The server's own writers (the sponsored scheduler, broadcasts) set
- * metadata on the row themselves and never come through this.
- */
-export const clientMessageMetadata = z.object({ mediaUrl: z.string().url().optional() }).strict()
-
 /** Said when a message's media is not the sender's own upload. */
 export const NOT_OWN_MEDIA = "Send photos through the app rather than linking to them"
+
+/** Said when a room message carries media: photos go in a DM (R9, SCRUM-626). */
+export const NO_ROOM_MEDIA = "Photos can only be sent in a direct message"
+
+/**
+ * What a client may send into a room, by either door (`POST /events/:id/chat`,
+ * `POST /chat/groups/:id/messages`): words.
+ *
+ * No `metadata` at all. It was a free record, stored verbatim, and the app
+ * draws any message whose metadata has `sponsored_message_id` as a sponsored
+ * card, so an attendee could post one (SCRUM-426); then it was `{ mediaUrl }`,
+ * and a room took an attendee's photo or video. A room is strangers under
+ * pseudonyms, so photos go in a DM only (R9, SCRUM-626). The server's own
+ * writers (the sponsored scheduler, broadcasts) set a room message's metadata
+ * and type on the row themselves and never come through this.
+ */
+export const roomMessageWords = {
+  type: z.literal("text", { error: NO_ROOM_MEDIA }).default("text"),
+  metadata: z.never({ error: NO_ROOM_MEDIA }).optional(),
+}
+
+/** Said when a DM photo comes before both people are named to each other (R9, SCRUM-626). */
+export const DM_PHOTOS_NOT_YET = "You can send photos once you have both revealed who you are"
 
 /**
  * A message's media is the sender's own `chat/<id>/` upload on our bucket
@@ -69,11 +81,10 @@ export async function discardSealedChatMedia(media: { url: string } | { refusal:
 
 export const sendMessageSchema = z.object({
   content: z.string().min(1, "Message cannot be empty").max(2000, "Message is too long"),
-  type: z.enum(["text", "image", "video"]).default("text"),
+  ...roomMessageWords,
   parentId: z.string().uuid().optional(), // For replies
   /** The app's own id for this send: a retry with it returns the first write (SCRUM-410). */
   clientId: z.string().uuid().optional(),
-  metadata: clientMessageMetadata.optional(),
 })
 
 export const chatQuerySchema = z.object({

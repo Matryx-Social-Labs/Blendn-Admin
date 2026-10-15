@@ -210,7 +210,7 @@ OpenAI returns a confidence score (0.0 to 1.0) for each category:
 
 ## Layer 4: OpenAI Image Moderation
 
-**When:** Asynchronous, only runs on messages with `type: "image"` or `type: "gif"` that have a `mediaUrl`.
+**When:** Asynchronous, on a room message that carries a `mediaUrl`, whatever its `type` (SCRUM-444). Since R9 (SCRUM-626) a client cannot send media into a room, and a DM photo is never sent to a model (TR5), so no room route passes media here today; the layer stays for SCRUM-387.
 **Source file:** `lib/moderation/openai-moderation.ts`
 **Model:** `omni-moderation-latest`
 

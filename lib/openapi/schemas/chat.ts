@@ -6,17 +6,11 @@ import { PaginationMetaSchema, RoomUserRefSchema, UserRefParamSchema } from "./c
 export const SendMessageRequestSchema = z
   .object({
     content: z.string().min(1).max(4000),
-    type: z.enum(["text", "image", "video"]).default("text"),
+    type: z.literal("text").default("text").openapi({
+      description:
+        "Words only. A room takes no media: any other type, or any `metadata`, is 400 \"Photos can only be sent in a direct message\" (R9, SCRUM-626).",
+    }),
     parentId: z.string().uuid().optional(),
-    metadata: z
-      .object({
-        mediaUrl: z.string().url().optional().openapi({
-          description: "The sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400.",
-        }),
-      })
-      .strict()
-      .optional()
-      .openapi({ description: "Only `mediaUrl`. Any other key is refused (400): the server writes the rest (SCRUM-426)." }),
   })
   .openapi("SendMessageRequest")
 
@@ -24,9 +18,11 @@ export const SendDMRequestSchema = z
   .object({
     text: z.string().max(5000).optional(),
     mediaUrl: z.string().url().optional().openapi({
-      description: "The sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400 (SCRUM-426).",
+      description:
+        "A photo: the sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400 (SCRUM-426). " +
+        "403 until both people are named to each other or are friends; stored as a copy with its metadata (EXIF, GPS, XMP) removed (R9, SCRUM-626).",
     }),
-    mediaType: z.enum(["image", "video"]).optional(),
+    mediaType: z.literal("image").optional().openapi({ description: "Photos only: `video` is 400 (R9, SCRUM-626)." }),
   })
   .openapi("SendDMRequest")
 

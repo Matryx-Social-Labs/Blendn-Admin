@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { blockedEitherWay } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { media_type, type Prisma } from "@prisma/client"
+import type { Prisma } from "@prisma/client"
 import { openThread, quoteOf, replyToSelect } from "@/lib/dm-thread"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal } from "@/lib/event-access"
@@ -23,7 +23,8 @@ import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
 import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
-import { discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
+import { discardSealedChatMedia, DM_PHOTOS_NOT_YET, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
+import { areFriends } from "@/lib/friends"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
@@ -40,7 +41,8 @@ interface RouteParams {
 const sendMessageSchema = z.object({
   text: z.string().min(1).max(5000).optional(),
   mediaUrl: z.string().url().optional(),
-  mediaType: z.enum(["image", "video"]).optional(),
+  /** A photo is all a DM takes (R9, SCRUM-626); stored as one whether or not this says so. */
+  mediaType: z.literal("image").optional(),
   /** The message this one replies to; must be in the same conversation. */
   replyToId: z.string().uuid().optional(),
   /** The app's own id for this send: a retry with it returns the first write. */
@@ -197,7 +199,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { text, mediaUrl, mediaType, replyToId, clientId } = parsed.data
+    const { text, mediaUrl, replyToId, clientId } = parsed.data
 
     // The sender's own upload, or no media (SCRUM-426).
     if (mediaUrl && !isOwnChatMedia(mediaUrl, authUser.userId)) {
@@ -307,6 +309,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
+     * A photo once both people are named to each other, or are friends (R9,
+     * SCRUM-626). Until then each knows the other by a pseudonym, and a photo
+     * is a face, or where somebody lives. A conversation that never had
+     * pseudonyms (an accepted message request) has names from the start.
+     */
+    if (
+      mediaUrl &&
+      !(mayShowRealName(conversation, authUser.userId) && mayShowRealName(conversation, recipientId)) &&
+      !(await areFriends(authUser.userId, recipientId))
+    ) {
+      return forbiddenResponse(DM_PHOTOS_NOT_YET)
+    }
+
+    /*
      * The deterministic checks, which this path had none of.
      *
      * `lib/moderation` was imported by exactly two files and both were group
@@ -350,8 +366,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // sent — which is every DM. Explicit undefined threw under
         // `strictUndefinedChecks`, so sending a DM returned 500. Found by
         // sending one from the simulator after a match.
-        ...(media != null && { media_url: media.url }),
-        ...(mediaType != null && { media_type: mediaType as media_type }),
+        ...(media != null && { media_url: media.url, media_type: "image" }),
         moderation_status: screen.status,
         ...(replyToId && { reply_to_id: replyToId }),
         ...(clientId && { client_id: clientId }),
@@ -416,7 +431,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       authUser.userId,
       message.sender.name
     )
-    const messagePreview = text || (mediaType === "image" ? "📷 Photo" : "🎥 Video")
+    const messagePreview = text || "📷 Photo"
     if (!hidden) {
       /*
        * What the recipient has not read from this sender, this message

@@ -26,14 +26,13 @@ import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { ownerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
-import { clientMessageMetadata, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
+import { roomMessageWords } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
-  type: z.enum(["text", "image", "video"]).default("text"),
-  metadata: clientMessageMetadata.optional(),
+  ...roomMessageWords,
   parentId: z.string().uuid().optional(),
   /** The app's own id for this send: a retry with it returns the first write (SCRUM-410). */
   clientId: z.string().uuid().optional(),
@@ -305,12 +304,7 @@ export async function POST(
       return validationErrorResponse(validation.error)
     }
 
-    const { content, type, metadata, parentId, clientId } = validation.data
-
-    // The sender's own upload, or no media (SCRUM-426).
-    if (metadata?.mediaUrl && !isOwnChatMedia(metadata.mediaUrl, user.userId)) {
-      return errorResponse(NOT_OWN_MEDIA, 400)
-    }
+    const { content, type, parentId, clientId } = validation.data
 
     /*
      * A retry of a send that already landed: answered with the first write. Its
@@ -433,14 +427,6 @@ export async function POST(
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    /*
-     * What is stored is the upload's sealed copy, which nobody can write to
-     * (SCRUM-425). Made here, after every gate, so a refused send copies nothing.
-     */
-    const media = metadata?.mediaUrl ? await sealChatMedia(metadata.mediaUrl, user.userId) : null
-    if (media && "refusal" in media) return errorResponse(media.refusal, 400)
-    const stored = media ? { ...metadata, mediaUrl: media.url } : metadata
-
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
@@ -452,7 +438,6 @@ export async function POST(
           user_id: user.userId,
           content,
           type,
-          ...(stored != null && { metadata: stored }),
           parent_id: parentId || null,
           ...(clientId && { client_id: clientId }),
           moderation_status: "hidden",
@@ -460,7 +445,6 @@ export async function POST(
         },
       })
       } catch (error) {
-        await discardSealedChatMedia(media)
         // A concurrent retry with the same clientId wrote it first.
         const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
         if (!raced) throw error
@@ -508,14 +492,6 @@ export async function POST(
         user_id: user.userId,
         content,
         type,
-        /*
-         * Conditional spread, not `metadata || undefined`. The client omits
-         * `metadata` on every plain text message, and with
-         * `strictUndefinedChecks` on, an explicit undefined here made
-         * `chat_messages.create` throw — every message sent from the app into
-         * a room returned 500. Found by sending one from a phone.
-         */
-        ...(stored != null && { metadata: stored }),
         parent_id: parentId || null,
         ...(clientId && { client_id: clientId }),
       },
@@ -544,7 +520,6 @@ export async function POST(
       },
     })
     } catch (error) {
-      await discardSealedChatMedia(media)
       // Two sends with one clientId raced; the other wrote it first.
       const raced =
         clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
@@ -561,92 +536,74 @@ export async function POST(
     /*
      * Did anybody actually look at this message?
      *
-     * Only the inline text check can answer yes. Media goes to the async
-     * pipeline, which records its own outcome, and so does anything the inline
-     * check failed to examine -- so `clean` is written here only when this
-     * request examined the content itself and found nothing.
+     * Only the inline text check can answer yes. Anything it failed to examine
+     * goes to the async pipeline, which records its own outcome -- so `clean`
+     * is written here only when this request examined the content itself and
+     * found nothing. A room message is words only (R9, SCRUM-626).
      */
     let examinedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     // Run OpenAI moderation before broadcasting. If it takes >1s, emit anyway
     // and fall back to the post-emit hide behavior for safety.
-    if (type === "text") {
-      try {
-        /*
-         * The loser of this race used to keep its timer alive: `Promise.race`
-         * settles on the first result and abandons the rest, but a pending
-         * `setTimeout` is a live handle the event loop still holds. One per
-         * message, for a second each — harmless at rest, and exactly the kind of
-         * thing that stops being harmless under load.
-         */
-        let timeoutHandle: NodeJS.Timeout | undefined
-        /*
-         * The timeout is a *reason*, not a verdict.
-         *
-         * This resolved to `null`, which was the same value the check returns
-         * for clean content -- and for a missing API key, and for an API error.
-         * Four facts in one value, and the code below then wrote
-         * `moderation_status: "clean"` for all of them.
-         */
-        const openaiCheck = await Promise.race([
-          checkTextContent(content),
-          new Promise<ModerationCheck>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
-          }),
-        ]).finally(() => clearTimeout(timeoutHandle))
-        /*
-         * The caption is checked here, before the emit, with or without media:
-         * its words go out in the push preview. The inline check reads text
-         * only, so a message that carries media is not examined until the
-         * pipeline has looked at the image too (SCRUM-444).
-         */
-        examinedInline = openaiCheck.checked && !stored?.mediaUrl
-        const openaiResult = openaiCheck.checked ? openaiCheck.result : null
-        if (openaiResult && openaiResult.action === "hide") {
-          // Hide immediately — never broadcast to other users
-          await hideMessage(message.id, chatGroupId, user.userId, openaiResult)
-          await flagForReview(message.id, chatGroupId, user.userId, openaiResult)
-          void checkAndAutoMute(user.userId, chatGroupId)
-          return successResponse({
-            id: message.id,
-            type: message.type,
-            content: null,
-            moderation_hidden: true,
-            createdAt: message.created_at.toISOString(),
-          })
-        }
-        // If flagged (not hidden), let it through but flag for review
-        if (openaiResult && openaiResult.action === "flag") {
-          void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
-        }
-        /*
-         * Anything the inline check did not examine goes to the full pipeline,
-         * which owns the verdict and will record `unchecked` if it cannot get
-         * one either.
-         *
-         * The `content.length > 5` guard is gone. It meant a short message that
-         * timed out was examined by nobody and then recorded as clean, and short
-         * messages are not a category that needs less moderation -- a slur is
-         * five characters.
-         */
-        if (!examinedInline) {
-          void moderateMessage(message.id, content, type, user.userId, chatGroupId, stored?.mediaUrl)
-        }
-      } catch {
-        // OpenAI failed — fall back to async moderation
-        void moderateMessage(message.id, content, type, user.userId, chatGroupId, stored?.mediaUrl)
+    try {
+      /*
+       * The loser of this race used to keep its timer alive: `Promise.race`
+       * settles on the first result and abandons the rest, but a pending
+       * `setTimeout` is a live handle the event loop still holds. One per
+       * message, for a second each — harmless at rest, and exactly the kind of
+       * thing that stops being harmless under load.
+       */
+      let timeoutHandle: NodeJS.Timeout | undefined
+      /*
+       * The timeout is a *reason*, not a verdict.
+       *
+       * This resolved to `null`, which was the same value the check returns
+       * for clean content -- and for a missing API key, and for an API error.
+       * Four facts in one value, and the code below then wrote
+       * `moderation_status: "clean"` for all of them.
+       */
+      const openaiCheck = await Promise.race([
+        checkTextContent(content),
+        new Promise<ModerationCheck>((resolve) => {
+          timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
+        }),
+      ]).finally(() => clearTimeout(timeoutHandle))
+      examinedInline = openaiCheck.checked
+      const openaiResult = openaiCheck.checked ? openaiCheck.result : null
+      if (openaiResult && openaiResult.action === "hide") {
+        // Hide immediately — never broadcast to other users
+        await hideMessage(message.id, chatGroupId, user.userId, openaiResult)
+        await flagForReview(message.id, chatGroupId, user.userId, openaiResult)
+        void checkAndAutoMute(user.userId, chatGroupId)
+        return successResponse({
+          id: message.id,
+          type: message.type,
+          content: null,
+          moderation_hidden: true,
+          createdAt: message.created_at.toISOString(),
+        })
       }
-    } else {
-      // For images/media, run full async moderation (can't block on image analysis)
-      void moderateMessage(
-        message.id,
-        content,
-        type,
-        user.userId,
-        chatGroupId,
-        stored?.mediaUrl
-      )
+      // If flagged (not hidden), let it through but flag for review
+      if (openaiResult && openaiResult.action === "flag") {
+        void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
+      }
+      /*
+       * Anything the inline check did not examine goes to the full pipeline,
+       * which owns the verdict and will record `unchecked` if it cannot get
+       * one either.
+       *
+       * The `content.length > 5` guard is gone. It meant a short message that
+       * timed out was examined by nobody and then recorded as clean, and short
+       * messages are not a category that needs less moderation -- a slur is
+       * five characters.
+       */
+      if (!examinedInline) {
+        void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+      }
+    } catch {
+      // OpenAI failed — fall back to async moderation
+      void moderateMessage(message.id, content, type, user.userId, chatGroupId)
     }
 
     /*

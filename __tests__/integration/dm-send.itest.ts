@@ -74,8 +74,16 @@ it("writes a media-only message with a null text, not an explicit undefined", as
   // The other side of the "text or media" refinement: `text` is optional too.
   const a = await person("dm_c")
   const b = await person("dm_d")
+  // Both revealed: a photo before then is refused (R9, SCRUM-626).
   const conversation = await db.private_conversations.create({
-    data: { user1_id: a.id, user2_id: b.id, user1_pseudonym: "Quiet Otter", user2_pseudonym: "Amber Fox" },
+    data: {
+      user1_id: a.id,
+      user2_id: b.id,
+      user1_pseudonym: "Quiet Otter",
+      user2_pseudonym: "Amber Fox",
+      user1_revealed: true,
+      user2_revealed: true,
+    },
   })
   conversations.push(conversation.id)
   // The sender's own chat upload: any other URL is refused (SCRUM-426).
