@@ -33,7 +33,7 @@ export function BrandLogo() {
         priority
         style={{ width: MARK, height: MARK }}
       />
-      <span className="font-bold leading-none text-base">Blend&apos;n</span>
+      <span className="font-bold text-base">Blend&apos;n</span>
     </span>
   )
 }
