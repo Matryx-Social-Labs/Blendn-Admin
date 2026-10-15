@@ -142,10 +142,10 @@
       "date": "2026-09-27"
     },
     "live-room-honours-blocks.itest.ts": {
-      "guards": "SCRUM-338: with a real socket.io server installed as the app's io and check-ins through the real route, while A has B blocked: B's event:room:checkin reaches C's roster and not A's, and neither A nor B receives the other's chat:typing while C receives both; once the block is lifted A hears B type and hears the next arrival. socket-guards.test.ts pins the except() list as both directions of blocked_users and the fail-safe when the lookup rejects",
-      "mutation": "M1: in lib/socket-server.ts emitChatTyping, `.except(hidden.map(...))` → `.except([])`. M2: in emitEventCheckIn, `.except(excludeUserIds.map(...))` → `.except([])`.",
-      "observed": "M1: itest 1 of 3 failing (typing), socket-guards 1 of 22. M2: itest 1 of 3 failing (roster: A received B's arrival).",
-      "date": "2026-09-27"
+      "guards": "SCRUM-338: with a real socket.io server installed as the app's io and check-ins through the real route, while A has B blocked: B's event:room:checkin reaches C's roster and not A's, and neither A nor B receives the other's chat:typing while C receives both; once the block is lifted A hears B type and hears the next arrival. socket-guards.test.ts pins the except() list as both directions of blocked_users and the fail-safe when the lookup rejects. SCRUM-620: an arriver with profiles.show_online = false (the REST roster leaves them out) sends no event:room:checkin to anyone — neither their handle nor their anonymous_name reaches A — while event:checkin still carries their arrival with a hereCount",
+      "mutation": "M1: in lib/socket-server.ts emitChatTyping, `.except(hidden.map(...))` → `.except([])`. M2: in emitEventCheckIn, `.except(excludeUserIds.map(...))` → `.except([])`. M1472: in lib/check-in-core.ts seatAtTheDoor, the `arriver?.profile?.show_online !== false` argument → `true`. M1473: in emitEventCheckIn, `listed &&` before the event:room:checkin emit → `true &&`. M1474: `listed &&` also put before the event:checkin emit (the count stops moving).",
+      "observed": "2026-09-27: M1: itest 1 of 3 failing (typing), socket-guards 1 of 22. M2: itest 1 of 3 failing (roster: A received B's arrival). 2026-10-15: M1472 and M1473: 1 of 5 failing each, the SCRUM-620 case (A received E's arrival). M1474: 1 of 5 failing, the same case (no event:checkin for E: received undefined). Restored with cp; 5 of 5 green.",
+      "date": "2026-10-15"
     },
     "announce-needs-edit.itest.ts": {
       "guards": "SCRUM-335: a venue owner on an event another org runs at their venue cannot post a poll through createPoll (default and explicit kind announcement: Forbidden, no chat_messages or chat_polls row) or announce through POST /api/mobile/events/:id/announce (403, nothing written); the organiser still posts a poll",
