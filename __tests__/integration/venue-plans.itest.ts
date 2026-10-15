@@ -914,7 +914,10 @@ describe("GAP insights: the venue's own clock (IST)", () => {
     await guestsAt(v, new Date("2026-09-05T20:00:00+05:30"), 6, "staff")
     as(admin, "app_admin")
     await actions.grantVenuePro(v, 3, "Founding venue, claimed in Bengaluru")
-    const view = (await venueInsights(v, new Date("2026-10-12T20:00:00+05:30")))!
+    // Read on the real clock: the grant starts now, so a pinned date before
+    // today reads the venue as Listed and preClaim as null. preClaim itself
+    // does not depend on `now`.
+    const view = (await venueInsights(v))!
     expect(view.preClaim).toEqual({ nights: 0, people: 0, since: null })
   })
 })
