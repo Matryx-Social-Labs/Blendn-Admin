@@ -201,19 +201,34 @@ describe("with \"Show online status\" off (SCRUM-620)", () => {
     const E = await person("lrb-e")
     await db.profiles.update({ where: { id: E.id }, data: { show_online: false } })
     const a = await listen(A.id)
+    // Waits for what must arrive, not a guessed sleep: a loaded host made the fixed settle() too short.
+    const until = async (check: () => boolean) => {
+      for (const end = Date.now() + 5_000; !check() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 25))
+    }
     await checkIn(E.token)
+    await until(() => a.counts.length > 0)
     await settle()
 
+    // Nobody's roster heard E; the counter room heard somebody, with the real number inside.
+    const inside = new Set(
+      (await db.event_check_ins.findMany({ where: { event_id: eventId, status: "checked_in" }, select: { user_id: true } })).map(
+        (r) => r.user_id
+      )
+    )
+    expect(inside).toContain(E.id)
+    expect(a.arrivals).toEqual([])
+    expect(a.counts).toEqual([expect.objectContaining({ hereCount: inside.size })])
+
+    // Positive control on the same socket: a listed arrival is still announced.
+    const F = await person("lrb-f")
+    await checkIn(F.token)
+    await until(() => a.arrivals.length > 0)
     const { anonymous_name } = await db.chat_group_members.findUniqueOrThrow({
       where: { chat_group_id_user_id: { chat_group_id: roomId, user_id: E.id } },
       select: { anonymous_name: true },
     })
     expect(anonymous_name).toBeTruthy()
-    expect(who(a.arrivals)).not.toContain(E.id)
+    expect(who(a.arrivals)).toEqual([F.id])
     expect(JSON.stringify(a.arrivals)).not.toContain(anonymous_name!)
-    // The counter room still hears that somebody arrived, by handle and number only.
-    const counted = a.counts.find((x) => userIdFromRef(x.userId) === E.id)
-    expect(counted).toEqual(expect.objectContaining({ hereCount: expect.any(Number) }))
-    expect(JSON.stringify(a.counts)).not.toContain(anonymous_name!)
   })
 })

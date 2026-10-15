@@ -2331,9 +2331,10 @@ variants of the four — nested and camelCased — and matching none of them, so
 
 They are returned **only to the profile's owner**. Whether someone has push on,
 or shares their distance, is a statement about how careful they are being and is
-not other attendees' business. `show_online` is honoured by the two surfaces where another attendee can
-see that you are in a room: `GET /events/:eventId/checkins` (the roster) and
-`GET /events/:eventId/matches` (the grid). With it off you are **counted and
+not other attendees' business. `show_online` is honoured by the three surfaces where another attendee can
+see that you are in a room: `GET /events/:eventId/checkins` (the roster),
+`GET /events/:eventId/matches` (the grid), and the live arrival on the socket —
+no `event:room:checkin` is sent for you (SCRUM-620). With it off you are **counted and
 not listed** — the room's numbers include you, nobody is offered your card, and
 nobody can like you. Chat is unaffected: posting a message is its own choice to
 be seen.
