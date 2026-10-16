@@ -143,6 +143,22 @@ export type EventQueryInput = z.infer<typeof eventQuerySchema>
 export type CheckinInput = z.infer<typeof checkinSchema>
 export type RatingInput = z.infer<typeof ratingSchema>
 
+/** The body of the three batch lookups (interests, interest counts, check-ins). */
+export const eventIdsBatchSchema = z.object({
+  eventIds: z.array(z.string().uuid()).min(1).max(50),
+})
+
+/** A Json body field for Prisma: a string is parsed; blank or unparseable is `undefined`. */
+export function parseJsonField(value: unknown) {
+  if (typeof value !== "string") return value
+  if (value.trim() === "") return undefined
+  try {
+    return JSON.parse(value)
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * The event write body.
  *

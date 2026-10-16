@@ -3,13 +3,13 @@ import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { getAuth } from "@/lib/auth"
-import { eventWriteSchema } from "@/lib/validations/event"
+import { eventWriteSchema, parseJsonField } from "@/lib/validations/event"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { cancelEventCheckIns, eventWriteAction, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
@@ -21,16 +21,6 @@ import {
   materialEventChanges,
 } from "@/lib/services/event-notifications.service"
 import { isUuid, readJson } from "@/lib/api-input"
-
-const parseJsonField = (value: unknown) => {
-  if (typeof value !== "string") return value
-  if (value.trim() === "") return undefined
-  try {
-    return JSON.parse(value)
-  } catch {
-    return undefined
-  }
-}
 
 interface RouteContext {
   params: Promise<{
@@ -215,7 +205,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     }
 
     // Fix #35: When cancelling an event, cascade to active check-ins
-    const isCancelling = status === "cancelled" && event.status !== "cancelled"
+    const isCancelling = isCancellingEvent(status ?? undefined, event.status)
 
     // And cancelled is terminal -- see lib/event-cancellation.ts.
     if (isUncancellingEvent(status, event.status)) {

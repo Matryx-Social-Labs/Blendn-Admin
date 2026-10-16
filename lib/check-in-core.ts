@@ -385,7 +385,7 @@ export async function seatAtTheDoor(input: SeatInput) {
     }),
     db.user.findUnique({
       where: { id: userId },
-      select: { name: true, profile: { select: { photos: true } } },
+      select: { name: true, profile: { select: { photos: true, show_online: true } } },
     }),
   ])
   const displayName = updatedMembership?.anonymous_name || "Someone"
@@ -398,14 +398,17 @@ export async function seatAtTheDoor(input: SeatInput) {
   const blockedIds = await blockCounterparties(userId)
 
   // Emit real-time check-in event: the pseudonym, except to whoever the
-  // roster lets recognise them (the emitter decides, per recipient).
+  // roster lets recognise them (the emitter decides, per recipient). With
+  // "Show online status" off the roster leaves them out, so the room hears
+  // only the count (SCRUM-620) — the same rule, no profile row reads as on.
   if (!input.extending) {
     emitEventCheckIn(
       eventId,
       userId,
       displayName,
       { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
-      blockedIds
+      blockedIds,
+      arriver?.profile?.show_online !== false
     )
   }
 

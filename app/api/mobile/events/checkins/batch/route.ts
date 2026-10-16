@@ -1,6 +1,5 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, createBatchRateLimit } from "@/lib/rate-limit"
@@ -11,10 +10,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
-
-const batchCheckinsSchema = z.object({
-  eventIds: z.array(z.string().uuid()).min(1).max(50),
-})
+import { eventIdsBatchSchema } from "@/lib/validations/event"
 
 export async function POST(request: NextRequest) {
   const rateLimitResult = await rateLimit(request, createBatchRateLimit())
@@ -27,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await readJson(request)
-    const parsed = batchCheckinsSchema.safeParse(body)
+    const parsed = eventIdsBatchSchema.safeParse(body)
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
     }
@@ -48,25 +44,15 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Build status map
-    const statuses: Record<
-      string,
-      { status: string; checkInId?: string; checkInTime?: Date | null }
-    > = {}
-
-    // Initialize all eventIds with no check-in status
-    for (const eventId of eventIds) {
-      statuses[eventId] = { status: "none" }
-    }
-
-    // Populate with actual check-in data
-    for (const checkIn of checkIns) {
-      statuses[checkIn.event_id] = {
-        status: checkIn.status,
-        checkInId: checkIn.id,
-        checkInTime: checkIn.check_in_time,
-      }
-    }
+    // Last row wins for an event, as the loop this replaced did.
+    const byEvent = new Map(checkIns.map((c) => [c.event_id, c]))
+    const statuses: Record<string, { status: string; checkInId?: string; checkInTime?: Date | null }> =
+      Object.fromEntries(
+        eventIds.map((id) => {
+          const c = byEvent.get(id)
+          return [id, c ? { status: c.status, checkInId: c.id, checkInTime: c.check_in_time } : { status: "none" }]
+        })
+      )
 
     return successResponse({ statuses })
   } catch (error) {

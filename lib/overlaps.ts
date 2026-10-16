@@ -370,12 +370,8 @@ export function crewHeld(members: readonly MemberTraits[]): Set<string> {
   const need = crewHoldsAt(members.length)
   const counts = new Map<string, number>()
   const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1)
-  for (const m of members) {
-    for (const id of new Set(m.interestIds)) bump(id)
-    for (const l of new Set(m.traits.languages)) bump(`lang:${l}`)
-    if (m.traits.homeState) bump(`state:${m.traits.homeState}`)
-    for (const [q, c] of Object.entries(m.traits.answers)) bump(`tot:${answerKey(q, c)}`)
-  }
+  // Each member counts once per key: personKeys is already a set.
+  for (const m of members) for (const k of personKeys(m)) bump(k)
   const held = new Set<string>()
   for (const [k, n] of counts) {
     if (n < need) continue

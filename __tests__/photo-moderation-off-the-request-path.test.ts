@@ -160,11 +160,11 @@ describe("the vendor calls have a deadline", () => {
     const { readFileSync } = await import("fs")
     const src = readFileSync(require.resolve("@/lib/moderation/openai-moderation"), "utf8")
     expect(src.match(/signal: AbortSignal\.timeout\(MODERATION_TIMEOUT_MS\)/g)?.length).toBe(2)
-    // The seal's copy and HEAD are on the profile PUT's path too.
+    // The seal's HEAD, read and write are on the profile PUT's path too.
     const tigris = readFileSync(require.resolve("@/lib/tigris"), "utf8")
     expect(tigris).toMatch(/const timeout = \(\) => \(\{ abortSignal: AbortSignal\.timeout\(SEAL_TIMEOUT_MS\) \}\)/)
-    // Used by the HEADs and the copy.
-    expect(tigris.match(/timeout\(\)/g)?.length).toBe(2)
+    // Used by each of the three (SCRUM-626 replaced the copy with a read and a write).
+    expect(tigris.match(/timeout\(\)/g)?.length).toBe(3)
   })
 })
 

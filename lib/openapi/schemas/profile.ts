@@ -424,7 +424,9 @@ export const MessageRequestRespondResponseSchema = z
 export const PresignedUrlRequestSchema = z
   .object({
     filename: z.string().max(255),
-    contentType: z.string(),
+    contentType: z.string().openapi({
+      description: "`profile` and `chat` take image/jpeg, image/png or image/webp only, up to 10 MB (SCRUM-626).",
+    }),
     folder: z.enum(["profile", "chat", "events"]).default("profile"),
   })
   .openapi("PresignedUrlRequest")

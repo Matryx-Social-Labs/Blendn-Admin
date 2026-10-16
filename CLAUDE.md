@@ -181,7 +181,8 @@ Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
 venue per local day — `lib/venue-day.ts` recovers a lost race by that name),
 `event_check_ins_expires_at_idx`, `crew_members_one_owner` (one owner per
-crew), `blends_open_closes_at` (the Blend sweeper's open-only index), the
+crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
+`venues_one_per_source_record` (a seeded venue's dataset record, once), the
 system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its
 deletion. On a `db push` database `venueDayFor` fails for want of that user,
@@ -216,7 +217,7 @@ Optional: Tigris object storage (`TIGRIS_ENDPOINT`, `TIGRIS_ACCESS_KEY`, `TIGRIS
 
 ## Deployment
 
-Deployed to Railway via Docker (see `DEPLOYMENT.md` and `railway.json`/`nixpacks.toml`). Health check at `GET /api/health`. Production startup fails fast if required env vars are missing (checked in `server.ts` before the HTTP server binds).
+Deployed to Railway via Docker (see `DEPLOYMENT.md` and `railway.json`). Health check at `GET /api/health`. Production startup fails fast if required env vars are missing (checked in `server.ts` before the HTTP server binds).
 
 <!-- BEGIN:nextjs-agent-rules -->
 

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors, PaginationMetaSchema, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { standardErrors, PaginationMetaSchema, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   UpdateProfileRequestSchema,
   InterestCategoryIdsSchema,
@@ -8,9 +8,6 @@ import {
   InterestsResponseSchema,
 } from "@/lib/openapi/schemas/profile"
 import { EventSessionSchema } from "@/lib/openapi/schemas/event"
-
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
 // GET /api/mobile/profiles/{userId}
 registry.registerPath({

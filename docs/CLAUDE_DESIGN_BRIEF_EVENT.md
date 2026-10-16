@@ -166,9 +166,9 @@ rather than rendering a broken-looking chart.
 - **Charts are honest by construction:** axes start at zero, zero draws as zero,
   funnel stages are nested subsets, empty states say what will fill them.
 - Available primitives: avatar, badge, button, calendar, card, chart, checkbox,
-  drawer, dropdown-menu, form, input, label, popover, progress, radio-group,
-  select, separator, sheet, sidebar, skeleton, slider, sonner, switch, table,
-  tabs, textarea, toggle, tooltip. **No `dialog`** — confirmations are inline or
+  dropdown-menu, form, input, label, popover, progress, radio-group, select,
+  separator, sheet, sidebar, skeleton, slider, sonner, switch, table, tabs,
+  textarea, tooltip. **No `dialog`** — confirmations are inline or
   in a sheet.
 - Charts and tables read the **global date range** from the top bar. An event
   detail page is about one event, so say whether the range applies here at all —

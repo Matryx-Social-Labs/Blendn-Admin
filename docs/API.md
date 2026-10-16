@@ -1074,9 +1074,9 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 
 ### POST /chat/groups/:chatGroupId/messages
 ```json
-{ "content": "string", "type": "text|image|video", "metadata": { "mediaUrl": "url?" }, "parentId": "uuid?" }
+{ "content": "string", "type": "text", "parentId": "uuid?", "clientId": "uuid?" }
 ```
-**Media (SCRUM-426).** `metadata` takes `mediaUrl` and nothing else; any other key is `400`. The server writes the rest, such as `sponsored_message_id`, which the app uses to draw a sponsored card. `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket). Anything else is `400` "Send photos through the app rather than linking to them". The same rules apply to `POST /events/:eventId/chat`. What is stored and sent to the room is a copy of the upload that nobody can write to (SCRUM-425), so `metadata.mediaUrl` comes back different from the one you sent. That copy's key is `chat/sealed/<uuid>` and names nobody (SCRUM-448); the upload's `chat/<yourId>/` key is never shown to anyone else. An upload that never arrived, is over 50 MB, or is not an allowed type is `400`. The same applies to a DM's `mediaUrl`.
+**Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can only be sent in a direct message". Photos go in a DM (`POST /conversations/:id/messages`). `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
 1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
@@ -1147,7 +1147,7 @@ does not offer Delist.
 | POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
-| POST | `/conversations/:id/messages` | Send message. A `mediaUrl` must be the sender's own chat upload, or `400` (SCRUM-426) |
+| POST | `/conversations/:id/messages` | Send message. See **Photos in a DM** below |
 | DELETE | `/conversations/:id` | **Leave — closes it for both people, permanently** |
 
 #### Opening a thread, delivery, replies and retries (SCRUM-406, 408, 409, 410)
@@ -1161,6 +1161,10 @@ does not offer Delist.
 - **Replies.** `POST` takes `replyToId`, which must be a message in the same conversation, otherwise `400`. Every message carries `replyTo: { id, senderName, text, mediaType, unavailable }`. `senderName` resolves through the reveal rules (a pseudonym until revealed). A quote of a hidden message is `unavailable: true` with no text.
 - **Retries.** `POST` takes `clientId` (a uuid the app makes per message). A repeat with the same `clientId` returns the first write instead of writing a second; a `clientId` already used in another conversation gets `409`. Both room write paths accept `clientId` the same way.
 - **Rate limit.** 30 sends a minute per person → `429 RATE_LIMITED`, counted before the conversation is looked up, so sends refused with `404`/`403`/`400` count too (SCRUM-451). A retry of a send that landed is answered over the limit and does not count.
+- **Photos in a DM (R9, SCRUM-626).** `{ "text?": "…", "mediaUrl?": "url", "mediaType?": "image" }`, text or a photo or both. A photo only, so `mediaType` is `image` or left out (`video` is `400`) and the row's `mediaType` is always `image`.
+  - **Whose:** `mediaUrl` must be the sender's own chat upload (`POST /uploads/presigned-url` with `folder: "chat"`, so `chat/<yourId>/…` on our bucket), or `400` "Send photos through the app rather than linking to them" (SCRUM-426).
+  - **When:** once both people are named to each other (both revealed, or a conversation that never had pseudonyms, such as an accepted message request) or are friends. Before that, `403` "You can send photos once you have both revealed who you are", and nothing is stored. Text is not gated.
+  - **What is stored:** a copy of the upload nobody can write to (SCRUM-425), under `chat/sealed/<uuid>`, which names nobody (SCRUM-448), so `mediaUrl` comes back different from the one you sent. The copy is the picture with its metadata removed: EXIF (with its GPS position), XMP, comments and anything after the image's end. An upload that never arrived, is over 10 MB, or is not a JPEG, PNG or WebP (by its bytes, whatever it was uploaded as) is `400`.
 
 `POST /conversations` does not create a channel out of nothing. It requires an
 accepted message request between the two people, or a conversation that already
@@ -2331,9 +2335,10 @@ variants of the four — nested and camelCased — and matching none of them, so
 
 They are returned **only to the profile's owner**. Whether someone has push on,
 or shares their distance, is a statement about how careful they are being and is
-not other attendees' business. `show_online` is honoured by the two surfaces where another attendee can
-see that you are in a room: `GET /events/:eventId/checkins` (the roster) and
-`GET /events/:eventId/matches` (the grid). With it off you are **counted and
+not other attendees' business. `show_online` is honoured by the three surfaces where another attendee can
+see that you are in a room: `GET /events/:eventId/checkins` (the roster),
+`GET /events/:eventId/matches` (the grid), and the live arrival on the socket —
+no `event:room:checkin` is sent for you (SCRUM-620). With it off you are **counted and
 not listed** — the room's numbers include you, nobody is offered your card, and
 nobody can like you. Chat is unaffected: posting a message is its own choice to
 be seen.
@@ -2373,8 +2378,13 @@ The type is signed into the URL, so any other type, or none, is refused by
 storage with `403 SignatureDoesNotMatch` (SCRUM-425). The URL can write its
 key for 15 minutes, so a profile or a message never stores it: attaching the
 upload stores a **copy** under a new key nobody can upload to, and the URL you
-get back (`photos`, `metadata.mediaUrl`, a DM's `mediaUrl`) is the copy's,
+get back (`photos`, a DM's `mediaUrl`) is the copy's,
 not the `publicUrl` you sent.
+
+**`profile` and `chat` take photos only: JPEG, PNG or WebP, up to 10 MB**
+(SCRUM-626). GIF, video and audio are `400` here. The copy is the picture
+without its metadata (EXIF and its GPS position, XMP, comments), so a photo
+never says where it was taken; the app also re-encodes before uploading.
 
 **Chat media is private (SCRUM-427).** `folder: "chat"` uploads go to the
 private bucket; `publicUrl` is the stored reference, which answers an
@@ -2832,7 +2842,8 @@ A room you muted (`POST /chat/groups/:id/mute`) sends you neither the reply push
 nor announcements.
 
 Every push carries an Android `channelId` the app creates — `messages`,
-`rooms` or `events` — so each can be silenced in system settings, and an iOS
+`rooms`, `events` or `offers` ("Offers from venues", a venue's offer only) —
+so each can be silenced in system settings, and an iOS
 `threadId` that stacks a conversation's or an event's notifications. Chosen by
 `deliveryFor` from `data.type`, never by the caller.
 
@@ -2962,8 +2973,13 @@ totals across its offers, published once a week, each held back when it or
 the rest is under 5. An audience under 5 is refused with one fixed sentence.
 
 The push says **"You have a new offer" / "Open Blendn to see it."** — no
-place, no words. Its `data` is `{ type: "venue_offer", offerId }`; the bell
-stores the same two lines. Open the offer with `GET /offers/:offerId`.
+place, no words. Its `data` is `{ type: "venue_offer", offerId }`, on the
+Android channel `offers`; the bell stores the same two lines. Open the offer
+with `GET /offers/:offerId`. **The push goes only to someone who said yes to
+offer notifications** (`PUT /me/offers { "pushes": true }`, SCRUM-628): an
+offer is a promotion, and App Store guideline 4.5.4 allows its push only after
+a yes given in the app. Without it the offer still arrives — the bell line and
+`GET /offers` — with no push.
 
 ### GET /offers
 
@@ -3015,7 +3031,17 @@ of these choices is written to the audit log. `known: true` — 409
 `VENUE_UNCLAIMED` while nobody runs the venue on Blendn, 403 `AGE_RESTRICTED`
 without an adult age on file. 404 for no such venue.
 
-### GET / PUT /me/offers — "Offers from places"
+### GET / PUT /me/offers — "Offers from places" and offer notifications
 
-`{ "enabled": false }` — one switch for every venue: off, no venue's offer
-reaches you. On unless turned off. Only a real boolean changes it.
+`{ "enabled": true, "pushes": false }`.
+
+- `enabled` — one switch for every venue: off, no venue's offer reaches you.
+  On unless turned off.
+- `pushes` — offer notifications. **Off until you say yes** (SCRUM-628), for
+  every account: ask in context, the first time an offer exists for the
+  person, never in onboarding. Off, offers still arrive with no push. The yes
+  is stored with when it was first given (`profiles.offer_push_consent_at`; a
+  second yes keeps it); a no clears it. Independent of `enabled`.
+
+PUT changes what it is given and answers both: each must be a real boolean, at
+least one per PUT (`{}` is 400), so "Not now" sends nothing.

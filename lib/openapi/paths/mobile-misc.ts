@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -22,9 +22,6 @@ import { LIVE_COUNT_BUCKETS, type LiveCountBucket } from "@/lib/disclosure"
 
 /** The live-count buckets, from the one list the routes bucket with — never typed out twice. */
 const LIVE_COUNT_ENUM = LIVE_COUNT_BUCKETS as unknown as [LiveCountBucket, ...LiveCountBucket[]]
-
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
 // === Categories ===
 

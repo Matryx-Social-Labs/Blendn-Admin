@@ -14,6 +14,13 @@ export interface RouteContent {
   description: string
 }
 
+/** The three claim queues share one header. */
+const CLAIMS: RouteContent = {
+  title: "Claims",
+  description:
+    "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
+}
+
 export const routeContent: Record<string, RouteContent> = {
   "/dashboard/moderation": {
     title: "Moderation",
@@ -43,21 +50,9 @@ export const routeContent: Record<string, RouteContent> = {
     description:
       "Events we added from public listings. Whether anybody tried is the difference between a wrong pin and a dead listing.",
   },
-  "/dashboard/claims": {
-    title: "Claims",
-    description:
-      "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
-  },
-  "/dashboard/claims/venues": {
-    title: "Claims",
-    description:
-      "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
-  },
-  "/dashboard/claims/brands": {
-    title: "Claims",
-    description:
-      "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
-  },
+  "/dashboard/claims": CLAIMS,
+  "/dashboard/claims/venues": CLAIMS,
+  "/dashboard/claims/brands": CLAIMS,
   "/dashboard/moderation/reports": {
     title: "Reports",
     description: "What people reported about each other, oldest first. Age is the SLA — 24 hours.",

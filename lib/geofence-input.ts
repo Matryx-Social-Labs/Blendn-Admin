@@ -5,9 +5,9 @@ import { GEOFENCE_LIMITS, phoneCheckInRadius, validateGeofence, type Geofence, t
  *
  * Nothing bounded this before: `app/api/events/route.ts` passed
  * `check_in_radius` straight from the request body into Prisma, and the only
- * limit anywhere was a client-side slider. `scripts/add-bangalore-event.ts`
- * already sets 10 km. One event with a 100 km radius silently swallows every
- * other geofence in the city, and nothing would have stopped it.
+ * limit anywhere was a client-side slider; a dev script set 10 km. One event
+ * with a 100 km radius silently swallows every other geofence in the city, and
+ * nothing would have stopped it.
  *
  * Shared by the create and update routes so the two cannot drift.
  *

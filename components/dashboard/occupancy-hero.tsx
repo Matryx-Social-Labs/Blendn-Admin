@@ -1,5 +1,4 @@
 import { IconWifiOff } from "@tabler/icons-react"
-import type { ReactNode } from "react"
 
 import { liveCountLabel, type LiveCountBucket } from "@/lib/disclosure"
 import type { Occupancy } from "@/lib/occupancy"
@@ -45,9 +44,7 @@ export function OccupancyHero({
   occupancy,
   time,
   unreliable,
-  lastGood,
   description,
-  action,
 }: {
   /**
    * Only the room, not attendance — `uniqueAttendance` is the Overview's
@@ -75,9 +72,7 @@ export function OccupancyHero({
    * by a confidently wrong number.
    */
   unreliable?: boolean
-  lastGood?: string
   description?: string
-  action?: ReactNode
 }) {
   const { inside, guestsInside, capacity } = occupancy
   // The exact figures, or null for a venue's ranges: no bar, no fill, no "N over".
@@ -165,9 +160,6 @@ export function OccupancyHero({
             <b className="font-bold tabular-nums text-foreground">{liveCountLabel(occupancy.staffInside)}</b> staff
           </span>
         ) : null}
-        {unreliable && lastGood ? (
-          <span className="text-[0.75rem] text-faint-foreground">as of {lastGood}</span>
-        ) : null}
       </div>
 
       {!exact && capacity !== null ? (
@@ -232,7 +224,6 @@ export function OccupancyHero({
       {description ? (
         <p className="mt-3 max-w-[58ch] text-sm leading-6 text-muted-foreground">{description}</p>
       ) : null}
-      {action ? <div className="mt-4">{action}</div> : null}
     </section>
   )
 }

@@ -1,6 +1,5 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, createBatchRateLimit } from "@/lib/rate-limit"
@@ -11,10 +10,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
-
-const batchInterestsSchema = z.object({
-  eventIds: z.array(z.string().uuid()).min(1).max(50),
-})
+import { eventIdsBatchSchema } from "@/lib/validations/event"
 
 export async function POST(request: NextRequest) {
   const rateLimitResult = await rateLimit(request, createBatchRateLimit())
@@ -27,7 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await readJson(request)
-    const parsed = batchInterestsSchema.safeParse(body)
+    const parsed = eventIdsBatchSchema.safeParse(body)
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
     }
@@ -45,18 +41,8 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Build interests map
-    const interests: Record<string, boolean> = {}
-
-    // Initialize all eventIds as not interested
-    for (const eventId of eventIds) {
-      interests[eventId] = false
-    }
-
-    // Mark events user is interested in
-    for (const favorite of favorites) {
-      interests[favorite.event_id] = true
-    }
+    const favorited = new Set(favorites.map((f) => f.event_id))
+    const interests: Record<string, boolean> = Object.fromEntries(eventIds.map((id) => [id, favorited.has(id)]))
 
     return successResponse({ interests })
   } catch (error) {

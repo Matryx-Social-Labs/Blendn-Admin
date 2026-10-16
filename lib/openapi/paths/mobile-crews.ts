@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, OverlapSchema, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
 
 /*
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
@@ -10,7 +10,6 @@ import { BadgeSchema, OverlapSchema, standardErrors, UserRefParamSchema } from "
  */
 
 const bearerAuth = [{ bearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 const tags = ["Mobile Crews"]
 const json = (schema: z.ZodTypeAny) => ({ content: { "application/json": { schema } } })
 

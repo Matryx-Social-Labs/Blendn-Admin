@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
 
 /*
  * Friends. Two rules shape every route here (see lib/friends.ts):
@@ -10,7 +10,6 @@ import { PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/op
  */
 
 const bearerAuth = [{ bearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 const tags = ["Mobile Friends"]
 
 const SAME_404 =

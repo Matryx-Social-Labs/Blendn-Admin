@@ -11,7 +11,7 @@ import {
   forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { boundedInt } from "@/lib/pagination"
+import { boundedInt, paginationMeta } from "@/lib/pagination"
 import { realEventsWhere } from "@/lib/event-kind"
 
 interface RouteParams {
@@ -194,13 +194,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       events,
       timeFilter,
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     logger.error("Get favorites error", { error: error instanceof Error ? error.message : String(error) })

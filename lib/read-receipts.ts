@@ -15,17 +15,6 @@
  */
 
 /**
- * Reading is recorded either way. The setting governs DISCLOSURE, not state.
- *
- * Marking a message read is the reader's own business: it clears their unread
- * badge and decides what the app shows them next. Suppressing the write as
- * well would leave someone with read receipts off staring at a badge that
- * never cleared — a settings toggle silently breaking an unrelated feature,
- * which is how people learn not to touch settings.
- */
-export const READ_IS_ALWAYS_RECORDED = true
-
-/**
  * What to report for `isRead` on a message in a conversation.
  *
  * `senderIsViewer` is the whole question. When the viewer sent it, `isRead`

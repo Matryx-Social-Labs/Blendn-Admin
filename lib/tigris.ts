@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto"
 
+import { stripImageMetadata } from "./image-metadata"
 import { logger } from "./logger"
 import { getMaxFileSize, validateContentType } from "./upload-rules"
 import {
@@ -217,11 +218,16 @@ const SEAL_TIMEOUT_MS = 10_000
  * the source is deleted once the copy is vouched for, so nothing is left for
  * the URL to rewrite that anything points at.
  *
- * Checked twice. The source first, so an oversized or wrong file is refused
- * before a byte is copied. Then the copy, because the source can change
- * between the two and Tigris ignores `CopySourceIfMatch` (a copy with a
- * stale ETag still copied the new bytes, measured on staging). The copy's
- * headers are the server's (`REPLACE`), not whatever the uploader sent
+ * The copy is the upload's picture without its metadata (SCRUM-626): a phone
+ * photo says where it was taken, and a straight storage copy kept that for
+ * every viewer. So the upload is read, stripped (`stripImageMetadata`, which
+ * also refuses bytes that are not a JPEG, PNG or WebP whatever they were
+ * uploaded as) and written. The HEAD first refuses an oversized or wrong file
+ * before a byte is read; the read is ranged one byte past the ceiling, since
+ * the upload can change after the HEAD (Tigris honours the range: `bytes=0-99`
+ * of a 26 KB object answered 100 bytes, measured on staging). What is written is what was checked,
+ * which a storage-side copy never was: Tigris ignores `CopySourceIfMatch`.
+ * The copy's headers are the server's, not whatever the uploader sent
  * alongside the one header the URL signs.
  *
  * Refusals are the person's to fix and come back as a value. A storage
@@ -268,13 +274,17 @@ export async function sealUpload(
 
   const sealedKey = folder === "chat" ? `${SEALED_CHAT_PREFIX}${randomUUID()}` : generateKey(folder, "sealed", userId)
   try {
+    const read = await client.send(new GetObjectCommand({ Bucket, Key: key, Range: `bytes=0-${maxBytes}` }), timeout())
+    const raw = (await read.Body?.transformToByteArray()) ?? new Uint8Array()
+    const refused = refusalOf({ bytes: raw.length, contentType: source.contentType })
+    const clean = refused ? null : stripImageMetadata(raw)
+    if (!clean) return { refused: refused ?? "wrong_type" }
     await client.send(
-      new CopyObjectCommand({
+      new PutObjectCommand({
         Bucket,
         Key: sealedKey,
-        CopySource: `${Bucket}/${key.split("/").map(encodeURIComponent).join("/")}`,
-        MetadataDirective: "REPLACE",
-        ContentType: source.contentType,
+        Body: clean.bytes,
+        ContentType: clean.contentType,
         /*
          * `no-cache`, so an erasure takes at once. Tigris's public endpoint
          * serves a deleted object for as long as this allows: a year kept a
@@ -293,16 +303,10 @@ export async function sealUpload(
       }),
       timeout()
     )
-    const copy = await factsOf(sealedKey)
-    const refused = refusalOf(copy)
-    if (refused || !copy) {
-      await remove(sealedKey)
-      return { refused: refused ?? "missing" }
-    }
     await remove(key)
-    return { key: sealedKey, url: getPublicUrl(sealedKey), bytes: copy.bytes, contentType: copy.contentType }
+    return { key: sealedKey, url: getPublicUrl(sealedKey), bytes: clean.bytes.length, contentType: clean.contentType }
   } catch (error) {
-    // An aborted call does not cancel a copy the storage already started.
+    // An aborted call does not cancel a write the storage already started.
     await remove(sealedKey)
     if (isNotFound(error)) return { refused: "missing" }
     throw error
@@ -646,10 +650,6 @@ export function isConfigured(): boolean {
 }
 
 /**
- * Set bucket policy to allow public read access.
- * This lets profile/event/chat images be served without presigned URLs.
- */
-/**
  * Applying the public-read policy is best-effort and must never decide whether
  * storage is usable.
  *
@@ -774,20 +774,7 @@ export async function ensureBucketExists(): Promise<boolean> {
 
         // Set up CORS for the bucket
         await client.send(
-          new PutBucketCorsCommand({
-            Bucket: TIGRIS_BUCKET,
-            CORSConfiguration: {
-              CORSRules: [
-                {
-                  AllowedHeaders: ["*"],
-                  AllowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
-                  AllowedOrigins: ["*"],
-                  ExposeHeaders: ["ETag"],
-                  MaxAgeSeconds: 3600,
-                },
-              ],
-            },
-          })
+          new PutBucketCorsCommand({ Bucket: TIGRIS_BUCKET, CORSConfiguration: BROWSER_UPLOAD_CORS })
         )
         logger.info("CORS configured for bucket", { bucket: TIGRIS_BUCKET })
         await trySetBucketPublicRead()
@@ -800,26 +787,6 @@ export async function ensureBucketExists(): Promise<boolean> {
     }
     logger.error("Error checking bucket", { bucket: TIGRIS_BUCKET, error: error instanceof Error ? error.message : String(error) })
     return false
-  }
-}
-
-/**
- * Test the Tigris connection
- */
-export async function testConnection(): Promise<{ success: boolean; message: string }> {
-  if (!validateConfig()) {
-    return { success: false, message: "Tigris not configured" }
-  }
-
-  try {
-    const bucketExists = await ensureBucketExists()
-    if (bucketExists) {
-      return { success: true, message: `Connected to Tigris. Bucket: ${TIGRIS_BUCKET}` }
-    }
-    return { success: false, message: "Failed to verify/create bucket" }
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Connection failed"
-    return { success: false, message }
   }
 }
 

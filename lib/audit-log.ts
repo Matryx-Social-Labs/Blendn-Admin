@@ -3,6 +3,7 @@ import { logger } from "./logger"
 import { db } from "./db"
 import { Prisma } from "@prisma/client"
 import { activeMembership, HOME_ORG_ORDER } from "./org-membership"
+import { isUuid } from "./api-input"
 
 export interface AuditLogEntry {
   userId?: string
@@ -21,14 +22,12 @@ export interface AuditLogEntry {
 
 type Client = Prisma.TransactionClient
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 /** The id a resolver reads, if the entry has a usable one. */
-const idOf = (e: AuditLogEntry) => (e.resourceId && UUID.test(e.resourceId) ? e.resourceId : null)
+const idOf = (e: AuditLogEntry) => (isUuid(e.resourceId) ? e.resourceId : null)
 const detail = (e: AuditLogEntry, key: string): string | null => {
   const d = e.details as Record<string, unknown> | undefined
   const v = d && typeof d === "object" ? d[key] : undefined
-  return typeof v === "string" && UUID.test(v) ? v : null
+  return isUuid(v) ? v : null
 }
 
 /** What a resolver must be handed: the resource's id, the room's event in the details, or the actor. */
@@ -305,6 +304,21 @@ export function auditLog(entry: AuditLogEntry): void {
  */
 export async function auditInTx(tx: Prisma.TransactionClient, entry: AuditLogEntry): Promise<void> {
   await tx.audit_logs.create({ data: rowFor(entry, await orgForEntry(tx, entry)) })
+}
+
+/**
+ * Many entries in one insert, for a bulk write whose organisation the caller
+ * already knows. `scripts/import-venues.ts` creates only unclaimed venues, so
+ * every row's organisation is null; resolving it per row would cost a query
+ * each, which is minutes for a city-sized file.
+ */
+export async function auditManyInTx(
+  tx: Prisma.TransactionClient,
+  entries: AuditLogEntry[],
+  orgId: string | null
+): Promise<void> {
+  if (entries.length === 0) return
+  await tx.audit_logs.createMany({ data: entries.map((entry) => rowFor(entry, orgId)) })
 }
 
 /**

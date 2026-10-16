@@ -362,6 +362,12 @@ model profiles {
   /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
   /// default (the coordinator's default, flagged to the owner).
   offers_from_places Boolean @default(true)
+  /// When they said yes to offer pushes; null is no (SCRUM-628). A venue's
+  /// offer is a promotion, and App Store guideline 4.5.4 allows a promotional
+  /// push only to someone who opted in through the app — so nobody has one
+  /// until they give it. Without it the offer still arrives, in the bell and
+  /// Passes & offers; only the push waits (`lib/push-notifications.ts`).
+  offer_push_consent_at DateTime? @db.Timestamptz(6)
   /// Honoured on the two surfaces where another attendee can see you are in
   /// a room: the roster (`GET /events/:id/checkins`) and the grid
   /// (`lib/matches.ts`). Off means counted and not listed — the numbers
@@ -1631,6 +1637,14 @@ model venues {
   /// organisation or an admin, audited. Ignored on an unclaimed venue, which is
   /// always listed (`openOnBlendnWhere` in lib/venue-visibility.ts).
   open_on_blendn Boolean      @default(true)
+  /// Where a seeded venue came from: the dataset and release, e.g.
+  /// "overture:2026-09-23.1" (scripts/places). Null for typed-in venues.
+  source         String?
+  /// The record's id in that dataset; unique (partial index in SQL), so a
+  /// re-run of an import cannot insert the same place twice.
+  source_record_id String?
+  /// When an import last listed the place; a refresh moves it forward.
+  source_seen_at DateTime?    @db.Timestamptz(6)
   created_at   DateTime     @default(now()) @db.Timestamptz(6)
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at   DateTime?    @db.Timestamptz(6)

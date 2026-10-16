@@ -30,11 +30,6 @@ import { liveCountLabel } from "@/lib/disclosure"
 import { cn } from "@/lib/utils"
 import { eventClock, livePhaseFor } from "@/lib/event-phase"
 
-// Moved to lib/event-phase.ts so a server component can ask the question
-// without importing this whole client module. Re-exported because callers
-// already import it from here.
-export { livePhaseFor, type LivePhase } from "@/lib/event-phase"
-
 function AlertCard({ alert }: { alert: LiveAlert }) {
   const critical = alert.severity === "critical"
   const Icon =

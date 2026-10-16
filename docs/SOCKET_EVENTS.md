@@ -86,7 +86,6 @@ the door. An event's room is unchanged: its door is the join.
 | `private:stopTyping` | `conversationId: string` | Stop typing in private conversation |
 | `private:markRead` | `conversationId: string, messageIds: string[]` | Mark messages as read |
 | `private:delivered` | `conversationId: string, messageIds: string[]` | Ack messages this app received (sets `delivered_at`; only messages sent to you, not yet delivered) |
-| `ping` | — | Connection health check |
 
 > **Chat messages are not sent over the socket.** There is no inbound
 > `chat:message` handler. Messages are POSTed to the REST API
@@ -156,7 +155,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `event:room:checkin` | `{ eventId, userId, userName, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym. Never sent to the arriver's block counterparties. |
+| `event:room:checkin` | `{ eventId, userId, userName, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym. Never sent to the arriver's block counterparties, and not sent at all for an arriver with "Show online status" off — the roster leaves them out, so only `event:checkin` (no name) moves the count (SCRUM-620). |
 
 ### Room Events (room: `user:{userId}`)
 

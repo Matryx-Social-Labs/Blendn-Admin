@@ -62,16 +62,3 @@ export function TableSkeleton({ rows = 6, columns = 5 }: { rows?: number; column
     </div>
   )
 }
-
-export function CardGridSkeleton({ count = 6 }: { count?: number }) {
-  return (
-    <div className="flex flex-col divide-y divide-border border-t border-border">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="flex flex-col gap-2 py-4">
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-3 w-1/2" />
-        </div>
-      ))}
-    </div>
-  )
-}

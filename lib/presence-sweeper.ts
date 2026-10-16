@@ -243,18 +243,13 @@ async function sweepRooms(
     }
 
     for (const { row, decision } of decisions) {
-      switch (decision.action) {
-        case "auto_checkout": {
-          const done = await performCheckout(
-            row.id,
-            decision.reason === "occurrence_ended" ? "occurrence_ended" : "left_area",
-            now
-          )
-          if (done?.changed) result.checkedOut++
-          break
-        }
-        default:
-          break
+      if (decision.action === "auto_checkout") {
+        const done = await performCheckout(
+          row.id,
+          decision.reason === "occurrence_ended" ? "occurrence_ended" : "left_area",
+          now
+        )
+        if (done?.changed) result.checkedOut++
       }
     }
   }

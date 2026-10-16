@@ -97,7 +97,7 @@ export interface ServerToClientEvents {
      */
     hereCount?: number
   }) => void
-  /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. */
+  /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. Never for an arriver the roster hides (`show_online` off). */
   "event:room:checkin": (data: {
     eventId: string
     userId: string
@@ -258,9 +258,6 @@ export interface ClientToServerEvents {
   "private:markRead": (conversationId: string, messageIds: string[]) => void
   /** The app received these messages (a socket delivery or a push it handled). */
   "private:delivered": (conversationId: string, messageIds: string[]) => void
-
-  // Ping for connection health
-  ping: () => void
 }
 
 interface SocketData {
@@ -1022,11 +1019,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
       void emitPrivateRead(authSocket, conversationId, messageIds)
     )
 
-    // Ping handler for connection health
-    authSocket.on("ping", () => {
-      // Socket.io handles pong automatically
-    })
-
     // Disconnect handler
     authSocket.on("disconnect", (reason) => {
       logger.debug("Socket disconnected", { socketId: authSocket.id, userId: authSocket.data.userId, reason })
@@ -1258,7 +1250,13 @@ export function emitEventCheckIn(
    */
   identity?: { name: string | null; image: string | null },
   /** The arriver's block counterparties: kept off the roster, as off the push (SCRUM-338). */
-  excludeUserIds: readonly string[] = []
+  excludeUserIds: readonly string[] = [],
+  /**
+   * False when the REST roster leaves them out ("Show online status" off):
+   * then no `event:room:checkin` at all, to anybody — only `event:checkin`,
+   * which names nobody, so the count still moves (SCRUM-620).
+   */
+  listed = true
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1297,6 +1295,7 @@ export function emitEventCheckIn(
        * room made an opted-in friend arrive as "Cosmic Panda" and turn into
        * their name on the next refresh.
        */
+      listed &&
       emitAsSeenBy(
         io.in(`event:room:${eventId}`).except(excludeUserIds.map((id) => `user:${id}`)),
         eventId,

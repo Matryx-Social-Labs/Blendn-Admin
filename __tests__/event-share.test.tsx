@@ -12,8 +12,7 @@ import { decode } from "./support/qr-decode"
  * The failure that looks like success: a code that scans to the wrong place,
  * or to the right place with something extra in it — or a door sign that
  * sends people to a page that is not there yet. So the codes are decoded, not
- * compared, the URL is held to the id and nothing else, and the slide is held
- * to showing no code while the link opens nothing.
+ * compared, and the URL is held to the id and nothing else.
  */
 
 const ID = "3f6c1e9a-0b7d-4c2e-9a51-6d2f8e4b7c10"
@@ -49,9 +48,9 @@ const codes = (markup: string) =>
     .filter((s) => /^<svg[^>]*role="img"[^>]*aria-label="QR code for Sunset Sessions/.test(s))
 
 describe("EventShare", () => {
-  const html = (linksLive = false, androidOpensApp = false) =>
+  const html = (androidOpensApp = false) =>
     renderToStaticMarkup(
-      createElement(EventShare, { url: eventShareUrl(ID), title: TITLE, when: WHEN, linksLive, androidOpensApp })
+      createElement(EventShare, { url: eventShareUrl(ID), title: TITLE, when: WHEN, androidOpensApp })
     )
 
   it("draws the code on the tab, and it scans to the event's address", () => {
@@ -72,47 +71,34 @@ describe("EventShare", () => {
     expect(html()).not.toContain("<canvas")
   })
 
-  it("says the link does not open the app while it does not, and stops saying so once it does", () => {
-    expect(html(false)).toContain("does not open the app yet")
-    expect(html(true)).not.toContain("does not open the app yet")
-  })
-
   // SCRUM-537: live on the site and on iOS first; Android opens the app directly only from its next store build.
-  it("once live, says what a scan does on each phone until Android opens the app directly, then says nothing", () => {
-    const meanwhile = html(true, false)
+  it("says what a scan does on each phone until Android opens the app directly, then says nothing", () => {
+    const meanwhile = html(false)
     expect(meanwhile).toContain("On an iPhone with Blend&#x27;n, scanning opens this event in the app.")
     expect(meanwhile).toContain("On Android it opens a blendn.app page first, with an")
     expect(meanwhile).toContain("until the app&#x27;s next Android release")
     expect(meanwhile).toContain("Phones without the app get that page too.")
     expect(meanwhile).not.toContain("not found")
-    const after = html(true, true)
-    for (const gone of ["On an iPhone", "On Android", "Phones without the app", "does not open the app yet"]) {
+    const after = html(true)
+    for (const gone of ["On an iPhone", "On Android", "Phones without the app"]) {
       expect(after).not.toContain(gone)
     }
   })
 })
 
 describe("DoorSlide", () => {
-  const slide = (linksLive: boolean) =>
-    renderToStaticMarkup(createElement(DoorSlide, { url: eventShareUrl(ID), title: TITLE, when: WHEN, linksLive }))
+  const slide = () =>
+    renderToStaticMarkup(createElement(DoorSlide, { url: eventShareUrl(ID), title: TITLE, when: WHEN }))
 
-  it("puts no code and no address on the door while the link opens nothing, and says to find the event by name", () => {
-    const sign = slide(false)
-    expect(codes(sign)).toHaveLength(0)
-    expect(sign).not.toContain("www.blendn.app")
-    expect(sign).not.toContain("Scan to check in")
-    expect(sign).toContain("find this event by its name")
-  })
-
-  it("puts the code at the size of the screen once the link is live, and it scans to the event", () => {
-    const svgs = codes(slide(true))
+  it("puts the code at the size of the screen, and it scans to the event", () => {
+    const svgs = codes(slide())
     expect(svgs).toHaveLength(1)
     expect(decode(svgs[0])).toBe(`https://www.blendn.app/event/${ID}`)
-    expect(slide(true)).toContain("Scan to check in")
+    expect(slide()).toContain("Scan to check in")
   })
 
   it("is a named dialog that takes focus, hidden until shown or printed, with the title, when and where", () => {
-    const out = slide(true)
+    const out = slide()
     expect(out).toMatch(
       /^<div data-door-slide="" role="dialog" aria-modal="true" aria-label="Door slide for Sunset Sessions at The Humming Tree" tabindex="-1" class="relative hidden /
     )

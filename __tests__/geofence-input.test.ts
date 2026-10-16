@@ -18,7 +18,7 @@ describe("check_in_radius is bounded server-side", () => {
   })
 
   it("refuses the 10 km value a seed script already sets", () => {
-    // scripts/add-bangalore-event.ts:44 sets 10000, and nothing stopped it.
+    // A dev script set 10000, and nothing stopped it.
     const r = validateLocationInput({ check_in_radius: 10_000 })
     expect(r.ok).toBe(false)
     expect(r.error).toContain("cannot exceed")

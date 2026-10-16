@@ -5,7 +5,6 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canBroadcast, eventPermissions } from "@/lib/rbac"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
-import { firstWindow } from "@/lib/sponsored-scheduler"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
 import { canActivate, creativeEditPatch, touchesCreative } from "@/lib/sponsored-moderation"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -109,7 +108,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     /*
      * `next_send_at` IS the schedule now — there is no timer to arm.
      *
-     * Switching on sets it to `firstWindow()`, which is *now*: the old
+     * Switching on sets it to *now*: the old
      * `setInterval` had no leading edge, so flipping the switch bought an
      * interval of silence and read as a broken control. Switching off clears it,
      * along with any claim a worker holds, so a pass already in flight finds
@@ -122,7 +121,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const schedule =
       is_active === true && !editsCreative
         ? {
-            next_send_at: firstWindow(),
+            next_send_at: new Date(),
             consecutive_failures: 0,
             deactivated_reason: null,
             claim_token: null,
