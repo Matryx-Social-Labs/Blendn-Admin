@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { displayNameInConversation, type ConversationIdentity } from "@/lib/conversation-identity"
-import { emitDelivered, emitRead } from "@/lib/socket-server"
+import { emitDelivered, emitRead, READ_RECEIPT_BATCH } from "@/lib/socket-server"
 
 /**
  * Opening a DM thread's first page, as the reader sees it.
@@ -21,26 +21,29 @@ export async function openThread(
   viewerId: string
 ): Promise<{ firstUnreadId: string | null; unreadCount: number }> {
   const incoming = { conversation_id: conversationId, sender_id: { not: viewerId }, ...VISIBLE_DM }
-  const [unread, undelivered] = await Promise.all([
-    db.private_messages.findMany({ where: { ...incoming, is_read: false }, orderBy: { created_at: "asc" }, select: { id: true } }),
-    db.private_messages.findMany({ where: { ...incoming, delivered_at: null }, select: { id: true }, take: 500 }),
+  const unread = { ...incoming, is_read: false }
+  const undelivered = { ...incoming, delivered_at: null }
+  const newest = { orderBy: { created_at: "desc" as const }, select: { id: true }, take: READ_RECEIPT_BATCH }
+  const [first, unreadCount, readIds, deliveredIds] = await Promise.all([
+    db.private_messages.findFirst({ where: unread, orderBy: { created_at: "asc" }, select: { id: true } }),
+    db.private_messages.count({ where: unread }),
+    // What the emits name: the newest only, which is all an open thread shows.
+    db.private_messages.findMany({ where: unread, ...newest }).then((rows) => rows.map((m) => m.id)),
+    db.private_messages.findMany({ where: undelivered, ...newest }).then((rows) => rows.map((m) => m.id)),
   ])
-  const unreadIds = unread.map((m) => m.id)
-  const undeliveredIds = undelivered.map((m) => m.id)
 
-  // ponytail: the whole backlog by id in one UPDATE — fine at thousands of
-  // rows; batch it if a thread's unread ever reaches the tens of thousands.
-  if (unreadIds.length > 0) {
-    await db.private_messages.updateMany({ where: { id: { in: unreadIds } }, data: { is_read: true } })
-  }
-  // Read counts as delivered (SCRUM-408): every message read here is delivered too.
-  const toDeliver = [...new Set([...undeliveredIds, ...unreadIds])]
-  if (toDeliver.length > 0) {
-    await db.private_messages.updateMany({ where: { id: { in: toDeliver }, delivered_at: null }, data: { delivered_at: new Date() } })
-  }
-  emitDelivered(conversationId, undeliveredIds)
-  emitRead(conversationId, unreadIds, viewerId)
-  return { firstUnreadId: unreadIds[0] ?? null, unreadCount: unreadIds.length }
+  /*
+   * The writes are the predicates, not id lists, so a backlog of any size is
+   * one statement each. Read counts as delivered (SCRUM-408), and every unread
+   * message is delivered by the second. A message arriving between the reads
+   * above and these writes is marked but not named in the emit; the next open
+   * names it. That is the whole cost of not locking.
+   */
+  if (unreadCount > 0) await db.private_messages.updateMany({ where: unread, data: { is_read: true } })
+  if (deliveredIds.length > 0) await db.private_messages.updateMany({ where: undelivered, data: { delivered_at: new Date() } })
+  emitDelivered(conversationId, deliveredIds)
+  emitRead(conversationId, readIds, viewerId)
+  return { firstUnreadId: first?.id ?? null, unreadCount }
 }
 
 /** What a reply quotes, loaded with the message. */

@@ -604,7 +604,7 @@ export async function emitPrivateTyping(
  * an unbounded `IN (…)`. Two hundred is far more than a screenful and far less
  * than a query worth worrying about.
  */
-const READ_RECEIPT_BATCH = 200
+export const READ_RECEIPT_BATCH = 200
 
 export async function emitPrivateRead(
   socket: AuthenticatedSocket,
@@ -715,19 +715,31 @@ export function emitDelivered(conversationId: string, messageIds: string[]): voi
  * conversation, unless the reader has read receipts off. The record is written
  * either way; the setting governs disclosure only, as in `emitPrivateRead`.
  * Not awaited by the route: a failure is logged and never fails the read.
+ * At most `READ_RECEIPT_BATCH` ids per conversation: the caller sends the newest.
  */
 export function emitRead(conversationId: string, messageIds: string[], readerId: string): void {
+  emitReads(readerId, [[conversationId, messageIds]])
+}
+
+/** `emitRead` for many conversations, with one look at the reader's setting. */
+export function emitReads(readerId: string, reads: ReadonlyArray<readonly [string, string[]]>): void {
+  const toSend = reads.filter(([, ids]) => ids.length > 0)
   const io = currentIo()
-  if (!io || messageIds.length === 0) return
+  if (!io || toSend.length === 0) return
   db.profiles
     .findUnique({ where: { id: readerId }, select: { read_receipts: true } })
     .then((reader) => {
       if (reader?.read_receipts === false) return
-      io.to(`conversation:${conversationId}`).emit("private:read", { conversationId, messageIds, readBy: readerId })
+      for (const [conversationId, ids] of toSend) {
+        io.to(`conversation:${conversationId}`).emit("private:read", {
+          conversationId,
+          messageIds: ids.slice(0, READ_RECEIPT_BATCH),
+          readBy: readerId,
+        })
+      }
     })
     .catch((error: unknown) => {
       logger.warn("Private read receipt failed", {
-        conversationId,
         userId: readerId,
         error: error instanceof Error ? error.message : String(error),
       })
