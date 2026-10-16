@@ -307,6 +307,21 @@ export async function auditInTx(tx: Prisma.TransactionClient, entry: AuditLogEnt
 }
 
 /**
+ * Many entries in one insert, for a bulk write whose organisation the caller
+ * already knows. `scripts/import-venues.ts` creates only unclaimed venues, so
+ * every row's organisation is null; resolving it per row would cost a query
+ * each, which is minutes for a city-sized file.
+ */
+export async function auditManyInTx(
+  tx: Prisma.TransactionClient,
+  entries: AuditLogEntry[],
+  orgId: string | null
+): Promise<void> {
+  if (entries.length === 0) return
+  await tx.audit_logs.createMany({ data: entries.map((entry) => rowFor(entry, orgId)) })
+}
+
+/**
  * The address written onto an audit row. Same reader as the rate limiters —
  * see lib/client-ip.ts for what Railway's edge actually sends. Until
  * SCRUM-195 this recorded the edge node (152.233.x), which identified nobody.
