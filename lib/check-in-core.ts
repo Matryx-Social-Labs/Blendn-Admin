@@ -259,6 +259,17 @@ export async function seatAtTheDoor(input: SeatInput) {
   // A Go Live's window, on the row the sweeper expires (null for an event).
   const window = live ? { expires_at: live.expiresAt, stay_until: live.stayUntil, stay: live.stay } : {}
 
+  /*
+   * Seen, inside the fence, now: whatever departure the row remembers is over.
+   * A re-check-in reuses the row (one per person per occurrence) and used to
+   * keep `left_area_at` from the last time they stepped out, so the presence
+   * sweeper (`evaluatePresence`) counted the new visit as an old departure
+   * and checked them out from inside the room minutes later (staging, Room A:
+   * left 21:21, back 21:29, out 21:43). Every door — event, switch, Go Live,
+   * venue day — writes through this one upsert.
+   */
+  const arrival = { last_seen_at: now, left_area_at: null, departure_prompted_at: null }
+
   // Create or update check-in record
   const checkIn = await db.event_check_ins.upsert({
     where: {
@@ -273,6 +284,7 @@ export async function seatAtTheDoor(input: SeatInput) {
       check_in_time: now,
       latitude,
       longitude,
+      ...arrival,
       ...window,
       /*
        * `deviceInfo` is optional in the request schema, so it is `undefined`
@@ -296,6 +308,7 @@ export async function seatAtTheDoor(input: SeatInput) {
       check_out_time: null,
       latitude,
       longitude,
+      ...arrival,
       ...window,
       ...(deviceInfo !== undefined && { device_info: deviceInfo }),
       updated_at: now,
