@@ -629,15 +629,11 @@ export async function emitPrivateRead(
     const ids = messageIds.slice(0, READ_RECEIPT_BATCH)
     if (ids.length === 0) return
 
-    await db.private_messages.updateMany({
-      where: {
-        id: { in: ids },
-        conversation_id: conversationId,
-        sender_id: { not: socket.data.userId },
-        is_read: false,
-      },
-      data: { is_read: true },
-    })
+    const theirs = { id: { in: ids }, conversation_id: conversationId, sender_id: { not: socket.data.userId } }
+    await db.private_messages.updateMany({ where: { ...theirs, is_read: false }, data: { is_read: true } })
+    // A read counts as delivered (SCRUM-408). No `private:delivered` here: the
+    // `private:read` below already moves the sender past ✓✓.
+    await db.private_messages.updateMany({ where: { ...theirs, delivered_at: null }, data: { delivered_at: new Date() } })
 
     /*
      * The setting governs disclosure, never the record above. Somebody with
@@ -712,6 +708,30 @@ export function emitDelivered(conversationId: string, messageIds: string[]): voi
   const io = currentIo()
   if (!io || messageIds.length === 0) return
   io.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds })
+}
+
+/**
+ * A read a route recorded (a thread opened, "Mark all read"): tell the
+ * conversation, unless the reader has read receipts off. The record is written
+ * either way; the setting governs disclosure only, as in `emitPrivateRead`.
+ * Not awaited by the route: a failure is logged and never fails the read.
+ */
+export function emitRead(conversationId: string, messageIds: string[], readerId: string): void {
+  const io = currentIo()
+  if (!io || messageIds.length === 0) return
+  db.profiles
+    .findUnique({ where: { id: readerId }, select: { read_receipts: true } })
+    .then((reader) => {
+      if (reader?.read_receipts === false) return
+      io.to(`conversation:${conversationId}`).emit("private:read", { conversationId, messageIds, readBy: readerId })
+    })
+    .catch((error: unknown) => {
+      logger.warn("Private read receipt failed", {
+        conversationId,
+        userId: readerId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
 }
 
 /**

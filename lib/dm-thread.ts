@@ -1,7 +1,7 @@
 import { db } from "@/lib/db"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { displayNameInConversation, type ConversationIdentity } from "@/lib/conversation-identity"
-import { emitDelivered } from "@/lib/socket-server"
+import { emitDelivered, emitRead } from "@/lib/socket-server"
 
 /**
  * Opening a DM thread's first page, as the reader sees it.
@@ -10,7 +10,8 @@ import { emitDelivered } from "@/lib/socket-server"
  * can open there with an "Unread messages" divider (SCRUM-406). Then the whole
  * thread is read and delivered — not only the page: marking the newest 50 left
  * an older unread behind, and the Banter kept a dot on a thread you had just
- * opened. Delivery is told to the conversation so the sender's ✓ becomes ✓✓.
+ * opened. Delivery and the read are told to the conversation, so the sender's
+ * ✓ becomes ✓✓ and then read (the read only with the reader's receipts on).
  *
  * Hidden messages are outside `VISIBLE_DM` and stay as they are: never shown,
  * never counted, never read.
@@ -20,27 +21,26 @@ export async function openThread(
   viewerId: string
 ): Promise<{ firstUnreadId: string | null; unreadCount: number }> {
   const incoming = { conversation_id: conversationId, sender_id: { not: viewerId }, ...VISIBLE_DM }
-  const [first, unreadCount, undelivered] = await Promise.all([
-    db.private_messages.findFirst({
-      where: { ...incoming, is_read: false },
-      orderBy: { created_at: "asc" },
-      select: { id: true },
-    }),
-    db.private_messages.count({ where: { ...incoming, is_read: false } }),
+  const [unread, undelivered] = await Promise.all([
+    db.private_messages.findMany({ where: { ...incoming, is_read: false }, orderBy: { created_at: "asc" }, select: { id: true } }),
     db.private_messages.findMany({ where: { ...incoming, delivered_at: null }, select: { id: true }, take: 500 }),
   ])
+  const unreadIds = unread.map((m) => m.id)
+  const undeliveredIds = undelivered.map((m) => m.id)
 
-  if (unreadCount > 0) {
-    // ponytail: one UPDATE for the whole backlog — fine at thousands of rows;
-    // batch it if a thread's unread ever reaches the tens of thousands.
-    await db.private_messages.updateMany({ where: { ...incoming, is_read: false }, data: { is_read: true } })
+  // ponytail: the whole backlog by id in one UPDATE — fine at thousands of
+  // rows; batch it if a thread's unread ever reaches the tens of thousands.
+  if (unreadIds.length > 0) {
+    await db.private_messages.updateMany({ where: { id: { in: unreadIds } }, data: { is_read: true } })
   }
-  if (undelivered.length > 0) {
-    const ids = undelivered.map((m) => m.id)
-    await db.private_messages.updateMany({ where: { id: { in: ids } }, data: { delivered_at: new Date() } })
-    emitDelivered(conversationId, ids)
+  // Read counts as delivered (SCRUM-408): every message read here is delivered too.
+  const toDeliver = [...new Set([...undeliveredIds, ...unreadIds])]
+  if (toDeliver.length > 0) {
+    await db.private_messages.updateMany({ where: { id: { in: toDeliver }, delivered_at: null }, data: { delivered_at: new Date() } })
   }
-  return { firstUnreadId: first?.id ?? null, unreadCount }
+  emitDelivered(conversationId, undeliveredIds)
+  emitRead(conversationId, unreadIds, viewerId)
+  return { firstUnreadId: unreadIds[0] ?? null, unreadCount: unreadIds.length }
 }
 
 /** What a reply quotes, loaded with the message. */
