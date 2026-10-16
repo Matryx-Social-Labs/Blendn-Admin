@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import type { venue_type } from "@prisma/client"
 
-import { auditInTx } from "../lib/audit-log"
+import { auditManyInTx } from "../lib/audit-log"
 import { parseCsvRows } from "../lib/csv"
 import { closeDb, db } from "../lib/db"
 import { haversineDistanceMeters } from "../lib/geo"
@@ -31,13 +31,19 @@ import { fenceFromOsm, lookup } from "./enrich-venues-from-osm"
  *
  * A header row, any column order, names case-insensitive:
  *
- *   name, address, lat, lng, maps_url, type, city
+ *   name, address, lat, lng, maps_url, type, city, source, source_id
  *
  * `name` and `city` are required. Coordinates are `lat` + `lng`, or a Google
  * Maps link in `maps_url` (a place link, a `?q=lat,lng` link, or a
  * maps.app.goo.gl share link, which is followed to find its coordinates).
  * `type` is a venue type's value or its label ("pub_bar" or "Pub or bar");
  * blank leaves it unclassified. Quote any cell holding a comma.
+ *
+ * `source` and `source_id` mark a row from an open dataset (`scripts/places`):
+ * the dataset and release, and the record's id in it. Such a row is a listed
+ * place, so the 100 m rule changes for it: a dense strip holds ten bars inside
+ * 100 m, and only a matching name makes a neighbour the same place. A record id
+ * already imported is a duplicate however far it has moved.
  *
  * ## Running it
  *
@@ -59,7 +65,7 @@ import { fenceFromOsm, lookup } from "./enrich-venues-from-osm"
  * The first line printed says which ran: `APPLY` or `DRY RUN`.
  */
 
-const COLUMNS = ["name", "address", "lat", "lng", "maps_url", "type", "city"] as const
+const COLUMNS = ["name", "address", "lat", "lng", "maps_url", "type", "city", "source", "source_id"] as const
 const FLAGS = new Set(["--apply", "--osm"])
 /** Overpass's anonymous rate, the same pause the enrichment script keeps. */
 const OSM_PAUSE_MS = 5000
@@ -80,6 +86,8 @@ export interface VenueRow {
   lat: number
   lng: number
   source: CoordinateSource
+  /** The open dataset the row came from (scripts/places); null for a founder's own list. */
+  origin: { source: string; recordId: string } | null
 }
 
 export type RowResult =
@@ -210,8 +218,13 @@ export async function readRow(
   }
   if (!isValidLatLng(lat, lng)) return refuse("no valid lat/lng or maps link")
 
+  const dataset = (cells.source ?? "").trim()
+  const recordId = (cells.source_id ?? "").trim()
+  if (Boolean(dataset) !== Boolean(recordId)) return refuse("source and source_id go together")
+
   const address = (cells.address ?? "").trim() || null
-  return { ok: true, row: { line, name, address, city, venueType, lat, lng, source } }
+  const origin = dataset ? { source: dataset, recordId } : null
+  return { ok: true, row: { line, name, address, city, venueType, lat, lng, source, origin } }
 }
 
 /** The header row, mapped to column names. Refuses a file missing `name`. */
@@ -228,11 +241,30 @@ export function columnsOf(header: string[]): Map<number, string> {
   return at
 }
 
-/** Whether an earlier row in the same file is within the duplicate radius. */
+/** Letters and digits only, in any script: "The Loft." and "the loft" are one name. */
+export function nameKey(name: string): string {
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
+}
+
+/**
+ * Whether a neighbour `metres` away is the place this row names. A founder's
+ * row keeps the 100 m rule. A dataset row is one listed place among many on a
+ * strip, so a neighbour is the same place only when the names match, or one
+ * holds the other ("Toit" and "Toit Brewpub").
+ */
+function samePlace(row: VenueRow, otherName: string, metres: number): boolean {
+  if (metres > DUPLICATE_RADIUS_M) return false
+  if (!row.origin) return true
+  const a = nameKey(row.name)
+  const b = nameKey(otherName)
+  return a === b || (Math.min(a.length, b.length) >= 4 && (a.includes(b) || b.includes(a)))
+}
+
+/** Whether an earlier row in the same file is the same place. */
 export function duplicateInFile(row: VenueRow, earlier: VenueRow[]): { of: VenueRow; metres: number } | null {
   for (const other of earlier) {
     const metres = Math.round(haversineDistanceMeters(row.lat, row.lng, other.lat, other.lng))
-    if (metres <= DUPLICATE_RADIUS_M) return { of: other, metres }
+    if (samePlace(row, other.name, metres)) return { of: other, metres }
   }
   return null
 }
@@ -262,6 +294,16 @@ async function plan(text: string): Promise<{ accepted: VenueRow[]; refused: numb
   const accepted: VenueRow[] = []
   let refused = 0
   let duplicates = 0
+  // Record ids already imported, in one query rather than one per row.
+  const recordIdAt = [...columns].find(([, key]) => key === "source_id")?.[0]
+  const fileIds = recordIdAt === undefined ? [] : body.map(({ cells }) => (cells[recordIdAt] ?? "").trim()).filter(Boolean)
+  const imported = new Set(
+    fileIds.length === 0
+      ? []
+      : (await db.venues.findMany({ where: { source_record_id: { in: fileIds } }, select: { source_record_id: true } })).map(
+          (v) => v.source_record_id
+        )
+  )
   for (const { line, cells } of body) {
     if (cells.length !== header.cells.length) {
       console.log(`  SKIP  line ${line} ${(cells[nameAt] ?? "").trim()}: ${cells.length} cells, the header has ${header.cells.length}`)
@@ -278,7 +320,12 @@ async function plan(text: string): Promise<{ accepted: VenueRow[]; refused: numb
     const row = result.row
     const label = row.name.slice(0, 34).padEnd(34)
 
-    const listed = (await nearbyVenues(row.lat, row.lng, true))[0]
+    if (row.origin && imported.has(row.origin.recordId)) {
+      console.log(`  DUP   line ${row.line} ${label} already imported (${row.origin.recordId})`)
+      duplicates++
+      continue
+    }
+    const listed = (await nearbyVenues(row.lat, row.lng, true)).find((v) => samePlace(row, v.name, v.distanceMetres))
     const inFile = duplicateInFile(row, accepted)
     if (listed) {
       console.log(`  DUP   line ${row.line} ${label} ${listed.name} is listed ${listed.distanceMetres} m away (${listed.id})`)
@@ -329,40 +376,47 @@ async function main() {
   const writes: { row: VenueRow; fence: Geofence; source: string }[] = []
   for (const row of accepted) writes.push({ row, ...(await footprint(row, osm)) })
 
+  // Two statements for the whole file, not two round trips per row: a city's
+  // dataset rows run to thousands. Still one transaction, so still all or nothing.
+  const seenAt = new Date()
   const written = await db.$transaction(
     async (tx) => {
-      const ids: string[] = []
-      for (const { row, fence } of writes) {
-        const created = await tx.venues.create({
-          data: {
-            name: row.name,
-            venue_type: row.venueType,
-            address: row.address,
-            city: row.city,
-            latitude: row.lat,
-            longitude: row.lng,
-            geofence: fence as object,
-            // Unclaimed, as an admin's venue is (`createVenue`).
-            owner_org_id: null,
-            claimed_at: null,
-            created_by: null,
-            created_by_org_id: null,
-          },
-          select: { id: true },
-        })
-        await auditInTx(tx, {
+      const created = await tx.venues.createManyAndReturn({
+        data: writes.map(({ row, fence }) => ({
+          name: row.name,
+          venue_type: row.venueType,
+          address: row.address,
+          city: row.city,
+          latitude: row.lat,
+          longitude: row.lng,
+          geofence: fence as object,
+          // Unclaimed, as an admin's venue is (`createVenue`).
+          owner_org_id: null,
+          claimed_at: null,
+          created_by: null,
+          created_by_org_id: null,
+          source: row.origin?.source ?? null,
+          source_record_id: row.origin?.recordId ?? null,
+          source_seen_at: row.origin ? seenAt : null,
+        })),
+        select: { id: true, name: true, venue_type: true },
+      })
+      // Every venue here is unclaimed, so its audit row belongs to no organisation.
+      await auditManyInTx(
+        tx,
+        created.map((v) => ({
           action: "venue.created",
           resource: "venue",
-          resourceId: created.id,
-          details: { name: row.name, venueType: row.venueType, claimed: false, source: "scripts/import-venues.ts", line: row.line },
-        })
-        ids.push(created.id)
-      }
-      return ids
+          resourceId: v.id,
+          details: { name: v.name, venueType: v.venue_type, claimed: false, source: "scripts/import-venues.ts" },
+        })),
+        null
+      )
+      return created
     },
     { timeout: 120_000 }
   )
-  writes.forEach(({ row, source }, i) => console.log(`  WROTE line ${row.line} ${row.name} → ${written[i]} (${source})`))
+  written.forEach((v) => console.log(`  WROTE ${v.name} → ${v.id}`))
   console.log(`Applied: ${written.length} written in one transaction.`)
 }
 
