@@ -167,6 +167,45 @@ export interface CityCount {
  * returns rows in no particular order, and without it two loads of the same
  * screen could show the same cities in different positions.
  */
+export interface BrowseCity extends CityCount {
+  /** Listed places (venues) in the city: what Places opens with. */
+  placeCount: number
+  centre: { latitude: number; longitude: number } | null
+}
+
+type PointRow = { city: string | null; latitude: number | null; longitude: number | null }
+
+/**
+ * Every city you can browse: one with events, or with listed places.
+ *
+ * The picker listed only cities with events, so a city whose venues were all
+ * seeded (no organiser has published there yet) could not be chosen, and its
+ * Places list could not be reached. Cities with events come first, busiest
+ * first, as before; then cities with places only, by how many. A city is one
+ * entry however its rows spell it (`cityKey`), under the events' spelling when
+ * it has events. The map centre is its events' when it has any, else its places'.
+ */
+export function browseCities(events: readonly PointRow[], places: readonly PointRow[]): BrowseCity[] {
+  const eventCentres = cityCentres(events)
+  const placeCentres = cityCentres(places)
+  const placeCounts = new Map(groupCities(places.map((r) => r.city)).map((c) => [cityKey(c.city), c]))
+  const withEvents = groupCities(events.map((r) => r.city)).map((c) => {
+    const key = cityKey(c.city)
+    return {
+      city: c.city,
+      eventCount: c.eventCount,
+      placeCount: placeCounts.get(key)?.eventCount ?? 0,
+      centre: eventCentres.get(key) ?? placeCentres.get(key) ?? null,
+    }
+  })
+  const listed = new Set(withEvents.map((c) => cityKey(c.city)))
+  // groupCities counts whatever it is given; here that count is places.
+  const placesOnly = [...placeCounts.values()]
+    .filter((c) => !listed.has(cityKey(c.city)))
+    .map((c) => ({ city: c.city, eventCount: 0, placeCount: c.eventCount, centre: placeCentres.get(cityKey(c.city)) ?? null }))
+  return [...withEvents, ...placesOnly]
+}
+
 /**
  * Where to point the map for each city the picker lists: the mean of its
  * events' points, keyed by `cityKey` like the counts. Events with no point, or

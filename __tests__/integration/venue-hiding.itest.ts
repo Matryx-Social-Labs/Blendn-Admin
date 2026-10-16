@@ -425,4 +425,16 @@ describe("GET /events/cities carries where to point the map (step 2 review)", ()
     const row = (JSON.parse(await res.text()).data.cities as Array<{ city: string; centre: unknown }>).find((c) => c.city === city)
     expect(row?.centre).toEqual({ latitude: Math.round((LAT + 0.001) * 1e4) / 1e4, longitude: LNG })
   })
+
+  it("lists a city that has places but no events, and Places opens it with those places", async () => {
+    const city = `Itest${TOKEN}Places`
+    const v = await place("places-only city")
+    await db.venues.update({ where: { id: v }, data: { city } })
+    const viewer = (await person()).token
+
+    const res = await citiesRoute.GET(req("/api/mobile/events/cities", viewer))
+    const list = JSON.parse(await res.text()).data.cities as Array<{ city: string; eventCount: number; placeCount: number }>
+    expect(list.find((c) => c.city === city)).toMatchObject({ eventCount: 0, placeCount: 1 })
+    expect((await places(viewer, `&city=${encodeURIComponent(city)}`)).rows.map((r) => r.id)).toEqual([v])
+  })
 })

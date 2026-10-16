@@ -3,16 +3,21 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { db } from "@/lib/db"
 import { ageFrom } from "@/lib/age"
-import { cityCentres, cityKey, groupCities } from "@/lib/address"
+import { browseCities } from "@/lib/address"
 import {
   successResponse,
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { realEventsWhere } from "@/lib/event-kind"
+import { openOnBlendnWhere } from "@/lib/venue-visibility"
 
 /**
- * The cities you can browse, with how many events are in each.
+ * The cities you can browse, with how many events and places are in each.
+ *
+ * A city with listed places but no events is a city too: its Places list is
+ * full even before any organiser publishes there (seeded venues, SCRUM-699).
+ * Listing only event cities left those unreachable from the picker.
  *
  * Browse scope is one variable — the selected city — and the client needs a
  * list to choose from before it can show anything. The server owns that list
@@ -82,13 +87,18 @@ export async function GET(request: NextRequest) {
       select: { city: true, latitude: true, longitude: true },
     })
 
-    // Where the home map goes when the city is picked (step 2): the mean of its events' points.
-    const centres = cityCentres(rows)
-    const cities = groupCities(rows.map((row) => row.city)).map((c) => ({
-      ...c,
-      centre: centres.get(cityKey(c.city) ?? "") ?? null,
-    }))
-    return successResponse({ cities })
+    /*
+     * The places Places lists, by the same visibility the venues route applies.
+     * ponytail: the venues route also hides a venue an event has taken over
+     * right now, so a city's placeCount can run a few above what opens; group
+     * in SQL with that rule if the table outgrows a scan of three columns.
+     */
+    const places = await db.venues.findMany({
+      where: { deleted_at: null, status: "active", city: { not: null }, AND: [openOnBlendnWhere] },
+      select: { city: true, latitude: true, longitude: true },
+    })
+    // Where the home map goes when the city is picked (step 2): its events' points, else its places'.
+    return successResponse({ cities: browseCities(rows, places) })
   } catch (error) {
     logger.error("Failed to list event cities", { error })
     return serverErrorResponse("Failed to load cities")
