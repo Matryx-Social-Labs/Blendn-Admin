@@ -9,23 +9,26 @@
 const fake = {
   down: false,
   counts: new Map<string, number>(),
+  /** Requests sent to Redis: a MULTI's exec is one. */
+  roundTrips: 0,
   on: jest.fn(),
   connect: jest.fn(async () => undefined),
-  async incr(key: string) {
-    if (fake.down) throw new Error("ECONNRESET")
-    const n = (fake.counts.get(key) ?? 0) + 1
-    fake.counts.set(key, n)
-    return n
-  },
-  async pExpire() {
-    if (fake.down) throw new Error("ECONNRESET")
-    return 1
-  },
-  async pTTL() {
-    if (fake.down) throw new Error("ECONNRESET")
-    return 60_000
+  multi() {
+    const ops: Array<() => unknown> = []
+    const chain = {
+      set: (key: string, value: string) => (ops.push(() => (fake.counts.has(key) ? null : (fake.counts.set(key, Number(value)), "OK"))), chain),
+      incr: (key: string) => (ops.push(() => fake.counts.set(key, (fake.counts.get(key) ?? 0) + 1).get(key)), chain),
+      pTTL: () => (ops.push(() => 60_000), chain),
+      async exec() {
+        fake.roundTrips++
+        if (fake.down) throw new Error("ECONNRESET")
+        return ops.map((op) => op())
+      },
+    }
+    return chain
   },
   async get(key: string) {
+    fake.roundTrips++
     if (fake.down) throw new Error("ECONNRESET")
     const n = fake.counts.get(key)
     return n === undefined ? null : String(n)
@@ -44,7 +47,21 @@ afterAll(() => {
 beforeEach(() => {
   fake.down = false
   fake.counts.clear()
+  fake.roundTrips = 0
   resetMemoryStore()
+})
+
+describe("a hit is one round trip", () => {
+  it("counts in one request to Redis, first hit and later ones alike", async () => {
+    // Staging's Redis is an ocean away from the app (~165 ms a trip); two
+    // sequential trips put ~330 ms on every limited request, check-in included.
+    expect((await hit("rl:checkin:u1", 60_000)).count).toBe(1)
+    expect(fake.roundTrips).toBe(1)
+    const second = await hit("rl:checkin:u1", 60_000)
+    expect(second.count).toBe(2)
+    expect(second.resetAt).toBeGreaterThan(Date.now())
+    expect(fake.roundTrips).toBe(2)
+  })
 })
 
 describe("with Redis down", () => {

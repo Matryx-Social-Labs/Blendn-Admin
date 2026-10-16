@@ -376,39 +376,17 @@ export async function seatAtTheDoor(input: SeatInput) {
 
   const chatGroupId = await seatInRoom(input, eventId, now)
 
-  // Get the anonymous name for socket emit and push notification, and who
-  // they are for the recipients whose roster would name them.
-  const [updatedMembership, arriver] = await Promise.all([
-    db.chat_group_members.findUnique({
-      where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
-      select: { anonymous_name: true },
-    }),
-    db.user.findUnique({
-      where: { id: userId },
-      select: { name: true, profile: { select: { photos: true, show_online: true } } },
-    }),
-  ])
-  const displayName = updatedMembership?.anonymous_name || "Someone"
-
   /*
-   * Whoever is in a block relationship with the arriver hears nothing of the
-   * arrival: not the live roster event, which reached them while the REST
-   * roster did not (SCRUM-338).
+   * The room hears of the arrival after the door has answered, not before:
+   * the person at the door waits on the rows above, never on the broadcast's
+   * reads. Its failure is logged and never refuses the check-in.
    */
-  const blockedIds = await blockCounterparties(userId)
-
-  // Emit real-time check-in event: the pseudonym, except to whoever the
-  // roster lets recognise them (the emitter decides, per recipient). With
-  // "Show online status" off the roster leaves them out, so the room hears
-  // only the count (SCRUM-620) — the same rule, no profile row reads as on.
   if (!input.extending) {
-    emitEventCheckIn(
-      eventId,
-      userId,
-      displayName,
-      { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
-      blockedIds,
-      arriver?.profile?.show_online !== false
+    announceArrival(eventId, userId, chatGroupId).catch((err) =>
+      logger.error("Announcing an arrival failed", {
+        eventId,
+        error: err instanceof Error ? err.message : String(err),
+      })
     )
   }
 
@@ -447,6 +425,40 @@ export async function seatAtTheDoor(input: SeatInput) {
      */
     intentNeeded: (profile?.intent_default ?? []).length === 0 && prefs.intent.length === 0,
   }
+}
+
+/** The arrival on the room's live roster: run by `seatAtTheDoor`, not awaited. */
+async function announceArrival(eventId: string, userId: string, chatGroupId: string): Promise<void> {
+  // Their pseudonym, and who they are for the recipients whose roster would name them.
+  const [membership, arriver, blockedIds] = await Promise.all([
+    db.chat_group_members.findUnique({
+      where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
+      select: { anonymous_name: true },
+    }),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { name: true, profile: { select: { photos: true, show_online: true } } },
+    }),
+    /*
+     * Whoever is in a block relationship with the arriver hears nothing of the
+     * arrival: not the live roster event, which reached them while the REST
+     * roster did not (SCRUM-338).
+     */
+    blockCounterparties(userId),
+  ])
+
+  // The pseudonym, except to whoever the roster lets recognise them (the
+  // emitter decides, per recipient). With "Show online status" off the roster
+  // leaves them out, so the room hears only the count (SCRUM-620) — the same
+  // rule, no profile row reads as on.
+  emitEventCheckIn(
+    eventId,
+    userId,
+    membership?.anonymous_name || "Someone",
+    { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
+    blockedIds,
+    arriver?.profile?.show_online !== false
+  )
 }
 
 /**
