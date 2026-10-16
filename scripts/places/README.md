@@ -30,6 +30,7 @@ From the repo root, with the DuckDB CLI (`brew install duckdb`):
 3. `duckdb < scripts/places/to-import.sql` — the kept rows, as `out/import/slug=<city>/data_0.csv`
    in the format `import-venues.ts` reads, plus `out/sports-bars.csv` for match nights.
 4. `DATABASE_URL=… npx tsx scripts/import-venues.ts <file>` — a dry run; then `--apply`.
+   Leave out `--osm` for these files: it pauses 5 s per row for Overpass, hours for a city.
    Staging first, driven in the app, then production with the same files.
 
 `out/` is gitignored: everything in it is regenerated from the pinned release.

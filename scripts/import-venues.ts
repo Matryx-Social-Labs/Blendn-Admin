@@ -260,6 +260,15 @@ function samePlace(row: VenueRow, otherName: string, metres: number): boolean {
   return a === b || (Math.min(a.length, b.length) >= 4 && (a.includes(b) || b.includes(a)))
 }
 
+/**
+ * The listed venue this row duplicates, among `nearbyVenues`' answers. A
+ * neighbour further than 100 m came back only because the pin is inside its
+ * outline, so its distance counts as within the radius and the name decides.
+ */
+export function listedDuplicate<V extends { name: string; distanceMetres: number }>(row: VenueRow, nearby: V[]): V | undefined {
+  return nearby.find((v) => samePlace(row, v.name, Math.min(v.distanceMetres, DUPLICATE_RADIUS_M)))
+}
+
 /** Whether an earlier row in the same file is the same place. */
 export function duplicateInFile(row: VenueRow, earlier: VenueRow[]): { of: VenueRow; metres: number } | null {
   for (const other of earlier) {
@@ -325,7 +334,7 @@ async function plan(text: string): Promise<{ accepted: VenueRow[]; refused: numb
       duplicates++
       continue
     }
-    const listed = (await nearbyVenues(row.lat, row.lng, true)).find((v) => samePlace(row, v.name, v.distanceMetres))
+    const listed = listedDuplicate(row, await nearbyVenues(row.lat, row.lng, true))
     const inFile = duplicateInFile(row, accepted)
     if (listed) {
       console.log(`  DUP   line ${row.line} ${label} ${listed.name} is listed ${listed.distanceMetres} m away (${listed.id})`)
@@ -338,6 +347,8 @@ async function plan(text: string): Promise<{ accepted: VenueRow[]; refused: numb
       continue
     }
     accepted.push(row)
+    // A record id twice in one file is the same place twice; the second is a DUP, not a P2002 at write.
+    if (row.origin) imported.add(row.origin.recordId)
     console.log(
       `  NEW   line ${row.line} ${label} ${(row.venueType ?? "unclassified").padEnd(18)} ${row.city} ${row.lat.toFixed(5)},${row.lng.toFixed(5)} (${row.source})`
     )

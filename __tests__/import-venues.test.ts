@@ -4,6 +4,7 @@ import {
   columnsOf,
   coordinatesFromMapsUrl,
   duplicateInFile,
+  listedDuplicate,
   nameKey,
   followShortLink,
   readRow,
@@ -132,6 +133,18 @@ describe("duplicateInFile", () => {
     expect(duplicateInFile(fromDataset(3, "Hoot", 12.9795), [first])).toBeNull()
     expect(duplicateInFile(fromDataset(4, "TOIT brew pub", 12.9795), [first])).toMatchObject({ of: first, metres: 33 })
     expect(duplicateInFile(fromDataset(5, "Toit", 12.9795), [first])).toMatchObject({ of: first })
+  })
+})
+
+describe("listedDuplicate", () => {
+  const fromDataset: VenueRow = {
+    line: 2, name: "Phoenix Mall", address: null, city: "Bengaluru", venueType: null,
+    lat: 12.9972, lng: 77.6963, source: "lat/lng", origin: { source: "overture:2026-09-23.1", recordId: "id2" },
+  }
+
+  it("matches a same-named venue whose outline holds the pin, though its own pin is 167 m off", () => {
+    expect(listedDuplicate(fromDataset, [{ name: "Phoenix Mall", distanceMetres: 167 }])).toEqual({ name: "Phoenix Mall", distanceMetres: 167 })
+    expect(listedDuplicate(fromDataset, [{ name: "Toit", distanceMetres: 40 }])).toBeUndefined()
   })
 })
 
