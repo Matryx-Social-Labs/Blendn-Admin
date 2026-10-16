@@ -153,19 +153,29 @@ describe("Mark all read", () => {
 })
 
 describe("the socket's own read", () => {
+  const socketEmits: Array<{ event: string; payload: unknown }> = []
+  const socket = {
+    data: { userId: "reader" },
+    to: () => ({ emit: (event: string, payload: unknown) => socketEmits.push({ event, payload }) }),
+  } as unknown as AuthenticatedSocket
+
+  beforeEach(() => {
+    socketEmits.length = 0
+    mockDb.private_messages.findMany.mockReset()
+    mockDb.private_messages.findMany.mockResolvedValue([{ id: "m1" }]) // not yet delivered
+  })
+
   it("counts as delivered, and announces the read once (no second private:read, no private:delivered)", async () => {
-    const socketEmits: string[] = []
-    const socket = {
-      data: { userId: "reader" },
-      to: () => ({ emit: (event: string) => socketEmits.push(event) }),
-    } as unknown as AuthenticatedSocket
     await emitPrivateRead(socket, "c1", ["m1"])
-    expect(deliveredWrite()).toEqual({
-      where: { id: { in: ["m1"] }, conversation_id: "c1", sender_id: { not: "reader" }, delivered_at: null },
-      data: { delivered_at: expect.any(Date) },
-    })
+    expect(deliveredWrite()).toEqual({ where: { id: { in: ["m1"] }, delivered_at: null }, data: { delivered_at: expect.any(Date) } })
     await settle()
-    expect(socketEmits).toEqual(["private:read"])
+    expect(socketEmits.map((e) => e.event)).toEqual(["private:read"])
     expect(emitted).toEqual([])
+  })
+
+  it("with receipts off, still says delivered — delivery is not private", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({ read_receipts: false })
+    await emitPrivateRead(socket, "c1", ["m1"])
+    expect(socketEmits).toEqual([{ event: "private:delivered", payload: { conversationId: "c1", messageIds: ["m1"] } }])
   })
 })

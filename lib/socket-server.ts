@@ -630,10 +630,14 @@ export async function emitPrivateRead(
     if (ids.length === 0) return
 
     const theirs = { id: { in: ids }, conversation_id: conversationId, sender_id: { not: socket.data.userId } }
+    // A read counts as delivered (SCRUM-408): the ones not delivered yet, named for the off branch below.
+    const undelivered = (
+      await db.private_messages.findMany({ where: { ...theirs, delivered_at: null }, select: { id: true } })
+    ).map((m) => m.id)
     await db.private_messages.updateMany({ where: { ...theirs, is_read: false }, data: { is_read: true } })
-    // A read counts as delivered (SCRUM-408). No `private:delivered` here: the
-    // `private:read` below already moves the sender past ✓✓.
-    await db.private_messages.updateMany({ where: { ...theirs, delivered_at: null }, data: { delivered_at: new Date() } })
+    if (undelivered.length > 0) {
+      await db.private_messages.updateMany({ where: { id: { in: undelivered }, delivered_at: null }, data: { delivered_at: new Date() } })
+    }
 
     /*
      * The setting governs disclosure, never the record above. Somebody with
@@ -644,7 +648,15 @@ export async function emitPrivateRead(
       where: { id: socket.data.userId },
       select: { read_receipts: true },
     })
-    if (reader?.read_receipts === false) return
+    if (reader?.read_receipts === false) {
+      // Delivery is not private (it goes out whatever the setting): the sender
+      // still sees ✓✓ for what this read delivered. With receipts on, the
+      // `private:read` below says more than that, so it is not sent twice.
+      if (undelivered.length > 0) {
+        socket.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds: undelivered })
+      }
+      return
+    }
 
     socket.to(`conversation:${conversationId}`).emit("private:read", {
       conversationId,
@@ -1249,8 +1261,8 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
  * somebody arrived or left matters more than the number, and a client that
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
-function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): void {
-  hereCountFor(eventId)
+function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): Promise<void> {
+  return hereCountFor(eventId)
     .catch((error: unknown) => {
       logger.warn("hereCount lookup failed; emitting without it", {
         eventId,
@@ -1289,13 +1301,13 @@ export function emitEventCheckIn(
    * which names nobody, so the count still moves (SCRUM-620).
    */
   listed = true
-): void {
+): Promise<void> {
   const io = currentIo()
-  if (!io) return
+  if (!io) return Promise.resolve()
 
   const checkInTime = new Date().toISOString()
 
-  sendWithHereCount(eventId, (hereCount) => {
+  return sendWithHereCount(eventId, (hereCount) => {
     /*
      * Two rooms, because two audiences want different things.
      *

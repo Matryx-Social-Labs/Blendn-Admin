@@ -170,7 +170,7 @@ already know each other's ids.
 |-------|------|---------|
 | `private:message` | `conversation:{id}` & `user:{recipientId}` | `{ id, conversationId, senderId, senderName, senderImage, messageText, mediaUrl, mediaType, createdAt }` |
 | `private:typing` | `conversation:{id}` | `{ conversationId, userId, userName }` |
-| `private:read` | `conversation:{id}` | `{ conversationId, messageIds, readBy }`. From the reader's socket, opening the thread (messages GET) or Mark all read; not sent when the reader has read receipts off. A read also sets `delivered_at` |
+| `private:read` | `conversation:{id}` | `{ conversationId, messageIds, readBy }`. From the reader's socket, opening the thread (messages GET) or Mark all read; not sent when the reader has read receipts off (then the newly delivered ids go out as `private:delivered`). A read also sets `delivered_at`. It also reaches the reader's own other devices in the room: the app's thread screen drops it when `readBy` is the signed-in user (`app/private-chat/[conversationId].tsx`), not `lib/socketClient.ts`, which forwards it to every subscriber |
 | `private:delivered` | `conversation:{id}` | `{ conversationId, messageIds }`. The recipient's app has these messages (✓✓ delivered). Sent whatever the read-receipt setting |
 
 ### User Events (room: `user:{userId}`)

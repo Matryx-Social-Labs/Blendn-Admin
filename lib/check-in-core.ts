@@ -14,6 +14,7 @@ import { claimAnonymousName } from "@/lib/anonymous-names"
 import { recordRefusal } from "@/lib/check-in-refusals"
 import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
+import { trackArrival } from "@/lib/arrivals-in-flight"
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
 
@@ -395,11 +396,16 @@ export async function seatAtTheDoor(input: SeatInput) {
    * reads. Its failure is logged and never refuses the check-in.
    */
   if (!input.extending) {
-    announceArrival(eventId, userId, chatGroupId).catch((err) =>
-      logger.error("Announcing an arrival failed", {
-        eventId,
-        error: err instanceof Error ? err.message : String(err),
-      })
+    // Tracked, so a checkout right behind it waits for it (lib/arrivals-in-flight.ts).
+    void trackArrival(
+      eventId,
+      userId,
+      announceArrival(eventId, userId, chatGroupId).catch((err) =>
+        logger.error("Announcing an arrival failed", {
+          eventId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      )
     )
   }
 
@@ -464,7 +470,7 @@ async function announceArrival(eventId: string, userId: string, chatGroupId: str
   // emitter decides, per recipient). With "Show online status" off the roster
   // leaves them out, so the room hears only the count (SCRUM-620) — the same
   // rule, no profile row reads as on.
-  emitEventCheckIn(
+  await emitEventCheckIn(
     eventId,
     userId,
     membership?.anonymous_name || "Someone",

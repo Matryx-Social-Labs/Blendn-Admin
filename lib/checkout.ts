@@ -6,6 +6,7 @@
 import { db } from "./db"
 import { closeSession } from "./presence-sessions"
 import { logger } from "./logger"
+import { arrivalAnnounced } from "./arrivals-in-flight"
 import { emitEventCheckOut, evictFromVenueDay } from "./socket-server"
 
 /**
@@ -149,7 +150,9 @@ export async function performCheckout(
   }
 
   // Emitted here rather than by each caller, so the sweeper cannot forget it
-  // and leave the live screen showing someone who has gone.
+  // and leave the live screen showing someone who has gone. After their
+  // arrival's broadcast, never before it, or the roster keeps a ghost.
+  await arrivalAnnounced(checkIn.event_id, checkIn.user_id)
   emitEventCheckOut(checkIn.event_id, checkIn.user_id)
 
   logger.info("Checked out", {
