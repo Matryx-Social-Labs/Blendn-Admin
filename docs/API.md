@@ -626,16 +626,21 @@ and Carnatic as a party.
 
 ### GET /events/cities
 
-The city picker's list — every city with events, busiest first.
+The city picker's list — every city with upcoming events or listed places.
+Cities with events come first, busiest first; then cities with places only, by
+place count.
 
 ```json
 { "success": true, "data": { "cities": [
-  { "city": "Bengaluru", "eventCount": 12, "centre": { "latitude": 12.9716, "longitude": 77.5946 } },
-  { "city": "Mumbai", "eventCount": 3, "centre": null }
+  { "city": "Bengaluru", "eventCount": 12, "placeCount": 1505, "centre": { "latitude": 12.9716, "longitude": 77.5946 } },
+  { "city": "Mumbai", "eventCount": 0, "placeCount": 1206, "centre": { "latitude": 19.0612, "longitude": 72.8521 } }
 ] } }
 ```
 
-Pass `city` straight back to `GET /events` or `GET /events/search`.
+Pass `city` straight back to `GET /events`, `GET /events/search` or
+`GET /venues`. A city with `eventCount: 0` is still a city: its Places list is
+full. `placeCount` uses the venues route's visibility, except that a venue an
+event has taken over right now is still counted.
 
 **`centre` is where the home map goes when the city is picked** (plan v2
 step 2): the mean of the city's listed events' points, folded on the same key
