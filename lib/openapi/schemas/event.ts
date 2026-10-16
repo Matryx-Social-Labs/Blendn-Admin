@@ -134,13 +134,14 @@ export const EventCitiesResponseSchema = z
     cities: z.array(
       z.object({
         city: z.string().openapi({ description: "Pass this back as the `city` query parameter." }),
-        eventCount: z.number().int(),
+        eventCount: z.number().int().openapi({ description: "Upcoming events this city opens with; 0 for a city with places only." }),
+        placeCount: z.number().int().openapi({ description: "Listed places (venues) in the city: what Places opens with." }),
         centre: z
           .object({ latitude: z.number(), longitude: z.number() })
           .nullable()
           .openapi({
             description:
-              "Where to point a map for this city: the mean of its listed events' points (events with no point, or 0,0, left out). Null when none has a point; keep the map where it is.",
+              "Where to point a map for this city: the mean of its listed events' points, or of its places' points when it has no events (rows with no point, or 0,0, left out). Null when none has a point; keep the map where it is.",
           }),
       })
     ),
