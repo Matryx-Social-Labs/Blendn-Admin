@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
-import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { distinctAttendeeCounts, hereCountFor } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
 import { offersClaim } from "@/lib/curation"
 import { dashboardUrl } from "@/lib/email"
@@ -168,7 +168,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Counted from check-in rows rather than a stored column.
     const occupancy = await getOccupancy(eventId)
 
-    const [attendedCounts, userFavorite, userRating, userCheckIn, userRsvp] =
+    const [attendedCounts, hereNow, userFavorite, userRating, userCheckIn, userRsvp] =
       await Promise.all([
         /*
          * `checkInCount` was `_count.check_ins` filtered to `checked_in`, which
@@ -177,6 +177,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
          * the night went on.
          */
         distinctAttendeeCounts([eventId]),
+        // Here now, the Room's number: `checkInCount` above keeps who has left.
+        hereCountFor(eventId),
         db.event_favorites.findUnique({
           where: {
             event_id_user_id: {
@@ -335,6 +337,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       chatGroup: event.chat_group,
       stats: {
         checkInCount: attendedCounts.get(eventId) ?? 0,
+        hereCount: hereNow,
         favoriteCount: event._count.favorites,
         /*
          * No average. Anyone who can open the event could poll it as people
