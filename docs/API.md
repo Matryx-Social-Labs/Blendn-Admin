@@ -561,6 +561,13 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 | sortOrder | enum | asc | `asc`, `desc` |
 | include | string | - | Comma-separated: `checkins,activeCheckins,profile` |
 
+**"Here now" is `hereCount`, not `checkInCount`.** Each event (and the
+detail's `stats`) carries both. `checkInCount` — and `currentCapacity`, the
+same number — is everybody who checked in, left or not, so a night's headline
+does not fall as people go home. `hereCount` is who is inside right now:
+checked in, not checked out, guests only — the Room's and the room preview's
+number. A live card that says "here now" reads `hereCount`.
+
 **Each event carries `goingCount`**: RSVPs with status `going` — not
 `waitlisted`, `maybe` or `not_going`. It is the number `GET /events/:eventId`
 calls `stats.rsvpCount`, on the card so a list need not open every event to

@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client"
-import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { distinctAttendeeCounts, hereCounts } from "@/lib/attendee-counts"
 import { resolveEventCity, geocodeBudget, type GeocodeBudget } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
 import { eventHost } from "@/lib/event-host"
@@ -153,7 +153,8 @@ interface TransformContext {
 async function transformEvent(
   event: EventListItem,
   ctx: TransformContext,
-  attended: Map<string, number>
+  attended: Map<string, number>,
+  here: Map<string, number>
 ) {
   return {
     id: event.id,
@@ -247,7 +248,14 @@ async function transformEvent(
     claimUrl: event.curated_at && !event.claimed_at ? `${appUrl()}/claim/${event.id}` : null,
     categories: event.categories.map((c) => c.category),
     media: event.media,
+    // Came: everybody who checked in, left or not. Never "here now".
     checkInCount: attended.get(event.id) ?? 0,
+    /*
+     * Here now: the Room's number (`hereCountFor`) — checked in, not checked
+     * out, guests only. A live card's "14 here now" read `currentCapacity`,
+     * which is the attended count above, so it kept two people who had left.
+     */
+    hereCount: here.get(event.id) ?? 0,
     favoriteCount: event._count.favorites,
     ratingCount: event._count.ratings,
     // The detail's `stats.rsvpCount`, the same number: RSVPs `going` only, never
@@ -292,8 +300,9 @@ export async function transformEvents(
    * night went on and people checked out. The headline count on the feed fell
    * while the event was at its busiest.
    */
-  const attended = await distinctAttendeeCounts(events.map((e) => e.id))
+  const ids = events.map((e) => e.id)
+  const [attended, here] = await Promise.all([distinctAttendeeCounts(ids), hereCounts(ids)])
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
-  return Promise.all(events.map((event) => transformEvent(event, withBudget, attended)))
+  return Promise.all(events.map((event) => transformEvent(event, withBudget, attended, here)))
 }
