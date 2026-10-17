@@ -119,3 +119,14 @@ it("a checkout right behind the arrival waits for it: the room never hears the l
   const checkedOut = (emitEventCheckOut as jest.Mock).mock.invocationCallOrder[0]
   expect(checkedIn).toBeLessThan(checkedOut)
 })
+
+it("seats them in the room while the preferences are still being written, not after", async () => {
+  const prefs = deferred<{ intent: string[] }>()
+  mockDb.event_match_preferences.upsert.mockReturnValueOnce(prefs.promise)
+  const seated = seat()
+  await settle()
+  // The room is found while the preferences write is still open.
+  expect(mockDb.chat_groups.findUnique).toHaveBeenCalled()
+  prefs.resolve({ intent: [] })
+  expect((await seated).chatGroupId).toBe("room1")
+})

@@ -219,7 +219,8 @@ export async function seatAtTheDoor(input: SeatInput) {
   // You cannot be in two rooms. Goes through the shared checkout path so the
   // socket event and the chat cutoff cannot be forgotten here and remembered
   // in the manual route.
-  await checkOutOfOtherEvents(userId, eventId, now)
+  // Beside the membership read below: neither waits on the other.
+  const leavingOthers = checkOutOfOtherEvents(userId, eventId, now)
 
   /*
    * Capacity does not gate check-in.
@@ -239,10 +240,13 @@ export async function seatAtTheDoor(input: SeatInput) {
   // dashboard role the mobile JWT does not carry. Passing a fabricated role
   // to get at the membership lookup would break the day `actorFor` starts
   // branching on it.
-  const memberships = await db.organisation_members.findMany({
-    where: { user_id: userId, ...activeMembership },
-    select: { org_id: true },
-  })
+  const [memberships] = await Promise.all([
+    db.organisation_members.findMany({
+      where: { user_id: userId, ...activeMembership },
+      select: { org_id: true },
+    }),
+    leavingOthers,
+  ])
   // At a venue day too: staff of the organisation that owns the venue going
   // live at their own venue are working, as at an event there (step 4).
   const kind = checkInKindFor({ orgIds: memberships.map((m) => m.org_id) }, event)
@@ -362,7 +366,7 @@ export async function seatAtTheDoor(input: SeatInput) {
    * stopped being the same thing the day check-ins became per-occurrence: on
    * a five-day event, every new day was a create.
    */
-  const prefs = await db.event_match_preferences.upsert({
+  const preferencesSeeded = db.event_match_preferences.upsert({
     where: { event_id_user_id: { event_id: eventId, user_id: userId } },
     create: {
       event_id: eventId,
@@ -388,7 +392,8 @@ export async function seatAtTheDoor(input: SeatInput) {
     select: { intent: true },
   })
 
-  const chatGroupId = await seatInRoom(input, eventId, now)
+  // The preferences and the seat are independent writes: together, not one after the other.
+  const [prefs, chatGroupId] = await Promise.all([preferencesSeeded, seatInRoom(input, eventId, now)])
 
   /*
    * The room hears of the arrival after the door has answered, not before:
