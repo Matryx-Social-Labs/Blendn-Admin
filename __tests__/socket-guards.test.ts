@@ -7,7 +7,7 @@ const mockDb = {
   profiles: { findUnique: jest.fn() },
   // `emitPrivateRead` persists before it relays: the receipt used to be a live
   // broadcast that reverted to a single tick on reload.
-  private_messages: { updateMany: jest.fn() },
+  private_messages: { updateMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   // The emitter asks a room's kind: a venue day's goes only to the people live in it.
   events: { findUnique: jest.fn().mockResolvedValue({ kind: "event" }) },
 }
