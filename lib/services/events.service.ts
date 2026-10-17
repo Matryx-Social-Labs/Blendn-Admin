@@ -113,6 +113,9 @@ export const eventListSelect = {
     select: {
       favorites: true,
       ratings: true,
+      // One correlated count per row, on `event_rsvps(event_id, status, …)`;
+      // the page is at most PAGINATION.MAX_LIMIT rows.
+      rsvps: { where: { status: "going" } },
     },
   },
 } satisfies Prisma.eventsSelect
@@ -247,6 +250,10 @@ async function transformEvent(
     checkInCount: attended.get(event.id) ?? 0,
     favoriteCount: event._count.favorites,
     ratingCount: event._count.ratings,
+    // The detail's `stats.rsvpCount`, the same number: RSVPs `going` only, never
+    // `waitlisted`, `maybe` or `not_going`. On the card so the Pulse need not
+    // fetch every event's detail to show it.
+    goingCount: event._count.rsvps,
     isFavorited: ctx.favoriteEventIds.has(event.id),
     userCheckin: ctx.includeCheckins
       ? ctx.userCheckinMap?.[event.id] || { status: "none" }
