@@ -169,7 +169,8 @@ const EventCategorySchema = z.object({
 })
 
 const EventStatsSchema = z.object({
-  checkInCount: z.number(),
+  checkInCount: z.number().openapi({ description: "People who checked in, including those who have since left (came, not here now)." }),
+  hereCount: z.number().openapi({ description: "People checked in right now: not checked out, guests only, the Room's count. Use this for \"here now\"." }),
   favoriteCount: z.number(),
   ratingCount: z.number(),
   rsvpCount: z.number().openapi({ description: "RSVPs with status `going`." }),
@@ -328,7 +329,7 @@ export const EventListResponseSchema = z
     events: z.array(
       z.unknown().openapi({
         description:
-          "Transformed event objects. Each carries `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named. Counts: `checkInCount`, `favoriteCount`, `ratingCount`, and `goingCount` — RSVPs with status `going` only (not `waitlisted`, `maybe` or `not_going`), the same number as the detail's `stats.rsvpCount`.",
+          "Transformed event objects. Each carries `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named. Counts: `checkInCount` (came: everybody who checked in, left or not; `currentCapacity` is the same number), `hereCount` (here now: checked in and not checked out, guests only — the Room's count; use this for 'here now'), `favoriteCount`, `ratingCount`, and `goingCount` — RSVPs with status `going` only (not `waitlisted`, `maybe` or `not_going`), the same number as the detail's `stats.rsvpCount`.",
       })
     ),
     pagination: PaginationMetaSchema,

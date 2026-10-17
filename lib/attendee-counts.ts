@@ -81,6 +81,9 @@ export async function distinctAttendeeCountsByDay(
   return new Map(rows.map((r) => [r.occurrence_id, Number(r.people)]))
 }
 
+/** Inside now, as `hereCountFor` says it — one predicate for the Room, the list and the detail. */
+const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspended_at: null } } as const
+
 /**
  * The Room's headline number: how many people are inside RIGHT NOW.
  *
@@ -97,21 +100,33 @@ export async function distinctAttendeeCountsByDay(
  * rule is "in the room, counted, not listed" (SCRUM-141), and a count names
  * nobody.
  *
- * Read by the socket emitters (`hereCount`) and `room-preview`, and nothing
- * else.
+ * Read by the socket emitters (`hereCount`), `room-preview`, and the events
+ * list and detail (`hereCount`, through `hereCounts`).
  */
 export async function hereCountFor(eventId: string): Promise<number> {
   const rows = await db.event_check_ins.findMany({
-    where: {
-      event_id: eventId,
-      status: "checked_in",
-      kind: "attendee",
-      user: { suspended_at: null },
-    },
+    where: { event_id: eventId, ...HERE_NOW },
     distinct: ["user_id"],
     select: { user_id: true },
   })
   return rows.length
+}
+
+/**
+ * `hereCountFor` for a page of events in one read: the events list's
+ * `hereCount`, so a card's "here now" is the Room's number and never the
+ * attended one (`checkInCount`), which keeps everyone who has left.
+ */
+export async function hereCounts(eventIds: readonly string[]): Promise<Map<string, number>> {
+  if (eventIds.length === 0) return new Map()
+  const rows = await db.event_check_ins.findMany({
+    where: { event_id: { in: [...eventIds] }, ...HERE_NOW },
+    distinct: ["event_id", "user_id"],
+    select: { event_id: true },
+  })
+  const counts = new Map<string, number>()
+  for (const { event_id } of rows) counts.set(event_id, (counts.get(event_id) ?? 0) + 1)
+  return counts
 }
 
 /**
