@@ -561,6 +561,11 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 | sortOrder | enum | asc | `asc`, `desc` |
 | include | string | - | Comma-separated: `checkins,activeCheckins,profile` |
 
+**Each event carries `goingCount`**: RSVPs with status `going` — not
+`waitlisted`, `maybe` or `not_going`. It is the number `GET /events/:eventId`
+calls `stats.rsvpCount`, on the card so a list need not open every event to
+show it.
+
 **`radius` lost its default, and that was the point.** It used to be `10` km, so
 any request carrying coordinates — which the home screen sends in order to sort
 by distance — was silently cut to a 10 km box. Every section of that screen

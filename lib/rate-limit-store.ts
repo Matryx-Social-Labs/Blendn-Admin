@@ -55,10 +55,15 @@ function hitMemory(key: string, windowMs: number, now: number): HitResult {
 /* Redis                                                                       */
 /* -------------------------------------------------------------------------- */
 
+type RedisMulti = {
+  set(key: string, value: string, options: { expiration: { type: "PX"; value: number }; condition: "NX" }): RedisMulti
+  incr(key: string): RedisMulti
+  pTTL(key: string): RedisMulti
+  exec(): Promise<unknown[]>
+}
+
 type RedisLike = {
-  incr(key: string): Promise<number>
-  pExpire(key: string, ms: number): Promise<unknown>
-  pTTL(key: string): Promise<number>
+  multi(): RedisMulti
 }
 
 let clientPromise: Promise<RedisLike | null> | null = null
@@ -137,15 +142,23 @@ export async function hit(key: string, windowMs: number, opts: StoreOptions = {}
   if (!redis) return hitMemory(key, windowMs, now)
 
   try {
-    const count = await redis.incr(key)
-    if (count === 1) {
-      // Only on the first hit, so the window is fixed rather than sliding
-      // forward with every request — otherwise a steady caller would never
-      // reset and would be locked out permanently.
-      await redis.pExpire(key, windowMs)
-      return { count, resetAt: now + windowMs }
-    }
-    const ttl = await redis.pTTL(key)
+    /*
+     * One round trip, not two. This was INCR, then PEXPIRE or PTTL — two
+     * sequential trips on every limited request — and staging's Redis is in
+     * us-west2 while the app is in asia-southeast1: ~165 ms a trip, measured
+     * as ~330 ms on every check-in (and every other limited route) before the
+     * route did any work of its own.
+     *
+     * SET NX PX starts the window only when the key is new, so it stays fixed
+     * rather than sliding forward with every request (a steady caller would
+     * otherwise never reset); INCR keeps the TTL. MULTI makes the three atomic.
+     */
+    const [, count, ttl] = (await redis
+      .multi()
+      .set(key, "0", { expiration: { type: "PX", value: windowMs }, condition: "NX" })
+      .incr(key)
+      .pTTL(key)
+      .exec()) as [unknown, number, number]
     return { count, resetAt: now + (ttl > 0 ? ttl : windowMs) }
   } catch (error) {
     if (opts.failClosed) {

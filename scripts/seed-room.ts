@@ -482,7 +482,16 @@ async function main() {
 
     await db.event_check_ins.upsert({
       where: { occurrence_id_user_id: { occurrence_id: occurrence.id, user_id: id } },
-      update: { status: "checked_in", check_in_time: arrived },
+      // A re-seed is a fresh arrival: an old departure left on the row is read
+      // by the presence sweeper as still outside, and it checks them out.
+      update: {
+        status: "checked_in",
+        check_in_time: arrived,
+        check_out_time: null,
+        last_seen_at: arrived,
+        left_area_at: null,
+        departure_prompted_at: null,
+      },
       create: {
         event_id: event.id,
         occurrence_id: occurrence.id,
@@ -490,6 +499,7 @@ async function main() {
         kind: "attendee",
         status: "checked_in",
         check_in_time: arrived,
+        last_seen_at: arrived,
         latitude: CITY.latitude,
         longitude: CITY.longitude,
       },

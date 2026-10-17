@@ -604,7 +604,7 @@ export async function emitPrivateTyping(
  * an unbounded `IN (…)`. Two hundred is far more than a screenful and far less
  * than a query worth worrying about.
  */
-const READ_RECEIPT_BATCH = 200
+export const READ_RECEIPT_BATCH = 200
 
 export async function emitPrivateRead(
   socket: AuthenticatedSocket,
@@ -629,15 +629,15 @@ export async function emitPrivateRead(
     const ids = messageIds.slice(0, READ_RECEIPT_BATCH)
     if (ids.length === 0) return
 
-    await db.private_messages.updateMany({
-      where: {
-        id: { in: ids },
-        conversation_id: conversationId,
-        sender_id: { not: socket.data.userId },
-        is_read: false,
-      },
-      data: { is_read: true },
-    })
+    const theirs = { id: { in: ids }, conversation_id: conversationId, sender_id: { not: socket.data.userId } }
+    // A read counts as delivered (SCRUM-408): the ones not delivered yet, named for the off branch below.
+    const undelivered = (
+      await db.private_messages.findMany({ where: { ...theirs, delivered_at: null }, select: { id: true } })
+    ).map((m) => m.id)
+    await db.private_messages.updateMany({ where: { ...theirs, is_read: false }, data: { is_read: true } })
+    if (undelivered.length > 0) {
+      await db.private_messages.updateMany({ where: { id: { in: undelivered }, delivered_at: null }, data: { delivered_at: new Date() } })
+    }
 
     /*
      * The setting governs disclosure, never the record above. Somebody with
@@ -648,7 +648,15 @@ export async function emitPrivateRead(
       where: { id: socket.data.userId },
       select: { read_receipts: true },
     })
-    if (reader?.read_receipts === false) return
+    if (reader?.read_receipts === false) {
+      // Delivery is not private (it goes out whatever the setting): the sender
+      // still sees ✓✓ for what this read delivered. With receipts on, the
+      // `private:read` below says more than that, so it is not sent twice.
+      if (undelivered.length > 0) {
+        socket.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds: undelivered })
+      }
+      return
+    }
 
     socket.to(`conversation:${conversationId}`).emit("private:read", {
       conversationId,
@@ -712,6 +720,42 @@ export function emitDelivered(conversationId: string, messageIds: string[]): voi
   const io = currentIo()
   if (!io || messageIds.length === 0) return
   io.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds })
+}
+
+/**
+ * A read a route recorded (a thread opened, "Mark all read"): tell the
+ * conversation, unless the reader has read receipts off. The record is written
+ * either way; the setting governs disclosure only, as in `emitPrivateRead`.
+ * Not awaited by the route: a failure is logged and never fails the read.
+ * At most `READ_RECEIPT_BATCH` ids per conversation: the caller sends the newest.
+ */
+export function emitRead(conversationId: string, messageIds: string[], readerId: string): void {
+  emitReads(readerId, [[conversationId, messageIds]])
+}
+
+/** `emitRead` for many conversations, with one look at the reader's setting. */
+export function emitReads(readerId: string, reads: ReadonlyArray<readonly [string, string[]]>): void {
+  const toSend = reads.filter(([, ids]) => ids.length > 0)
+  const io = currentIo()
+  if (!io || toSend.length === 0) return
+  db.profiles
+    .findUnique({ where: { id: readerId }, select: { read_receipts: true } })
+    .then((reader) => {
+      if (reader?.read_receipts === false) return
+      for (const [conversationId, ids] of toSend) {
+        io.to(`conversation:${conversationId}`).emit("private:read", {
+          conversationId,
+          messageIds: ids.slice(0, READ_RECEIPT_BATCH),
+          readBy: readerId,
+        })
+      }
+    })
+    .catch((error: unknown) => {
+      logger.warn("Private read receipt failed", {
+        userId: readerId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
 }
 
 /**
@@ -1217,8 +1261,8 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
  * somebody arrived or left matters more than the number, and a client that
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
-function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): void {
-  hereCountFor(eventId)
+function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): Promise<void> {
+  return hereCountFor(eventId)
     .catch((error: unknown) => {
       logger.warn("hereCount lookup failed; emitting without it", {
         eventId,
@@ -1257,13 +1301,13 @@ export function emitEventCheckIn(
    * which names nobody, so the count still moves (SCRUM-620).
    */
   listed = true
-): void {
+): Promise<void> {
   const io = currentIo()
-  if (!io) return
+  if (!io) return Promise.resolve()
 
   const checkInTime = new Date().toISOString()
 
-  sendWithHereCount(eventId, (hereCount) => {
+  return sendWithHereCount(eventId, (hereCount) => {
     /*
      * Two rooms, because two audiences want different things.
      *

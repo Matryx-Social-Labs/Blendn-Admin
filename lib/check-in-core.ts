@@ -14,6 +14,7 @@ import { claimAnonymousName } from "@/lib/anonymous-names"
 import { recordRefusal } from "@/lib/check-in-refusals"
 import { checkInKindFor } from "@/lib/checkin-kind"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
+import { trackArrival } from "@/lib/arrivals-in-flight"
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
 
@@ -218,7 +219,8 @@ export async function seatAtTheDoor(input: SeatInput) {
   // You cannot be in two rooms. Goes through the shared checkout path so the
   // socket event and the chat cutoff cannot be forgotten here and remembered
   // in the manual route.
-  await checkOutOfOtherEvents(userId, eventId, now)
+  // Beside the membership read below: neither waits on the other.
+  const leavingOthers = checkOutOfOtherEvents(userId, eventId, now)
 
   /*
    * Capacity does not gate check-in.
@@ -238,10 +240,13 @@ export async function seatAtTheDoor(input: SeatInput) {
   // dashboard role the mobile JWT does not carry. Passing a fabricated role
   // to get at the membership lookup would break the day `actorFor` starts
   // branching on it.
-  const memberships = await db.organisation_members.findMany({
-    where: { user_id: userId, ...activeMembership },
-    select: { org_id: true },
-  })
+  const [memberships] = await Promise.all([
+    db.organisation_members.findMany({
+      where: { user_id: userId, ...activeMembership },
+      select: { org_id: true },
+    }),
+    leavingOthers,
+  ])
   // At a venue day too: staff of the organisation that owns the venue going
   // live at their own venue are working, as at an event there (step 4).
   const kind = checkInKindFor({ orgIds: memberships.map((m) => m.org_id) }, event)
@@ -259,6 +264,17 @@ export async function seatAtTheDoor(input: SeatInput) {
   // A Go Live's window, on the row the sweeper expires (null for an event).
   const window = live ? { expires_at: live.expiresAt, stay_until: live.stayUntil, stay: live.stay } : {}
 
+  /*
+   * Seen, inside the fence, now: whatever departure the row remembers is over.
+   * A re-check-in reuses the row (one per person per occurrence) and used to
+   * keep `left_area_at` from the last time they stepped out, so the presence
+   * sweeper (`evaluatePresence`) counted the new visit as an old departure
+   * and checked them out from inside the room minutes later (staging, Room A:
+   * left 21:21, back 21:29, out 21:43). Every door — event, switch, Go Live,
+   * venue day — writes through this one upsert.
+   */
+  const arrival = { last_seen_at: now, left_area_at: null, departure_prompted_at: null }
+
   // Create or update check-in record
   const checkIn = await db.event_check_ins.upsert({
     where: {
@@ -273,6 +289,7 @@ export async function seatAtTheDoor(input: SeatInput) {
       check_in_time: now,
       latitude,
       longitude,
+      ...arrival,
       ...window,
       /*
        * `deviceInfo` is optional in the request schema, so it is `undefined`
@@ -296,6 +313,7 @@ export async function seatAtTheDoor(input: SeatInput) {
       check_out_time: null,
       latitude,
       longitude,
+      ...arrival,
       ...window,
       ...(deviceInfo !== undefined && { device_info: deviceInfo }),
       updated_at: now,
@@ -348,7 +366,7 @@ export async function seatAtTheDoor(input: SeatInput) {
    * stopped being the same thing the day check-ins became per-occurrence: on
    * a five-day event, every new day was a create.
    */
-  const prefs = await db.event_match_preferences.upsert({
+  const preferencesSeeded = db.event_match_preferences.upsert({
     where: { event_id_user_id: { event_id: eventId, user_id: userId } },
     create: {
       event_id: eventId,
@@ -374,41 +392,25 @@ export async function seatAtTheDoor(input: SeatInput) {
     select: { intent: true },
   })
 
-  const chatGroupId = await seatInRoom(input, eventId, now)
-
-  // Get the anonymous name for socket emit and push notification, and who
-  // they are for the recipients whose roster would name them.
-  const [updatedMembership, arriver] = await Promise.all([
-    db.chat_group_members.findUnique({
-      where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
-      select: { anonymous_name: true },
-    }),
-    db.user.findUnique({
-      where: { id: userId },
-      select: { name: true, profile: { select: { photos: true, show_online: true } } },
-    }),
-  ])
-  const displayName = updatedMembership?.anonymous_name || "Someone"
+  // The preferences and the seat are independent writes: together, not one after the other.
+  const [prefs, chatGroupId] = await Promise.all([preferencesSeeded, seatInRoom(input, eventId, now)])
 
   /*
-   * Whoever is in a block relationship with the arriver hears nothing of the
-   * arrival: not the live roster event, which reached them while the REST
-   * roster did not (SCRUM-338).
+   * The room hears of the arrival after the door has answered, not before:
+   * the person at the door waits on the rows above, never on the broadcast's
+   * reads. Its failure is logged and never refuses the check-in.
    */
-  const blockedIds = await blockCounterparties(userId)
-
-  // Emit real-time check-in event: the pseudonym, except to whoever the
-  // roster lets recognise them (the emitter decides, per recipient). With
-  // "Show online status" off the roster leaves them out, so the room hears
-  // only the count (SCRUM-620) — the same rule, no profile row reads as on.
   if (!input.extending) {
-    emitEventCheckIn(
+    // Tracked, so a checkout right behind it waits for it (lib/arrivals-in-flight.ts).
+    void trackArrival(
       eventId,
       userId,
-      displayName,
-      { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
-      blockedIds,
-      arriver?.profile?.show_online !== false
+      announceArrival(eventId, userId, chatGroupId).catch((err) =>
+        logger.error("Announcing an arrival failed", {
+          eventId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      )
     )
   }
 
@@ -447,6 +449,40 @@ export async function seatAtTheDoor(input: SeatInput) {
      */
     intentNeeded: (profile?.intent_default ?? []).length === 0 && prefs.intent.length === 0,
   }
+}
+
+/** The arrival on the room's live roster: run by `seatAtTheDoor`, not awaited. */
+async function announceArrival(eventId: string, userId: string, chatGroupId: string): Promise<void> {
+  // Their pseudonym, and who they are for the recipients whose roster would name them.
+  const [membership, arriver, blockedIds] = await Promise.all([
+    db.chat_group_members.findUnique({
+      where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
+      select: { anonymous_name: true },
+    }),
+    db.user.findUnique({
+      where: { id: userId },
+      select: { name: true, profile: { select: { photos: true, show_online: true } } },
+    }),
+    /*
+     * Whoever is in a block relationship with the arriver hears nothing of the
+     * arrival: not the live roster event, which reached them while the REST
+     * roster did not (SCRUM-338).
+     */
+    blockCounterparties(userId),
+  ])
+
+  // The pseudonym, except to whoever the roster lets recognise them (the
+  // emitter decides, per recipient). With "Show online status" off the roster
+  // leaves them out, so the room hears only the count (SCRUM-620) — the same
+  // rule, no profile row reads as on.
+  await emitEventCheckIn(
+    eventId,
+    userId,
+    membership?.anonymous_name || "Someone",
+    { name: arriver?.name ?? null, image: arriver?.profile?.photos?.[0] ?? null },
+    blockedIds,
+    arriver?.profile?.show_online !== false
+  )
 }
 
 /**
