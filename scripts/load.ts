@@ -19,6 +19,7 @@
 import { io, type Socket } from "socket.io-client"
 import { db, closeDb, makeUser, onboard } from "../__tests__/integration/helpers"
 import { signAccessToken } from "../lib/mobile-auth"
+import { realEventsWhere } from "../lib/event-kind"
 
 const BASE = (process.env.BASE_URL ?? "http://localhost:3200").replace(/\/$/, "")
 const [MEMBERS, SENDERS, SECONDS, READERS] = [200, 20, 60, 50].map((d, i) => Number(process.argv[2 + i] ?? d))
@@ -50,9 +51,9 @@ const line = (label: string, xs: number[]) =>
 async function liveRoom() {
   const now = new Date()
   const room = await db.chat_groups.findFirst({
-    where: { kind: "event", event: { status: "published", deleted_at: null, start_time: { lte: now }, end_time: { gte: now } } },
+    where: { kind: "event", event: { ...realEventsWhere, status: "published", deleted_at: null, start_time: { lte: now }, end_time: { gte: now } } },
     orderBy: { members: { _count: "desc" } },
-    select: { id: true, event: { select: { title: true } } },
+    select: { id: true },
   })
   if (!room) throw new Error("no live event room — run scripts/seed-blr-scenarios.ts --apply (or --refresh-times)")
   return room
@@ -145,7 +146,7 @@ async function chat(roomId: string, tokens: string[]) {
 async function main() {
   if (!isLocal(BASE) || !isLocal(process.env.DATABASE_URL ?? "")) throw new Error("load.ts is local only: BASE_URL and DATABASE_URL must be localhost")
   const room = await liveRoom()
-  console.log(`room: ${room.event?.title} (${room.id}) · members=${MEMBERS} senders=${SENDERS} readers=${READERS} ${SECONDS}s · ${BASE}`)
+  console.log(`room: ${room.id} · members=${MEMBERS} senders=${SENDERS} readers=${READERS} ${SECONDS}s · ${BASE}`)
 
   const ids: string[] = []
   try {
