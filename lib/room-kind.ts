@@ -219,15 +219,6 @@ interface BlendOwner {
 }
 
 /**
- * Every kind's door, for a SELECT OVER MANY ROOMS of mixed kinds (the chat
- * list), where no one kind is known up front. One room's lookup uses
- * `withOwnerDoor` instead: this on a single room is 34 statements.
- */
-export function ownerDoor(viewerId: string) {
-  return { board_post: boardPostDoor(viewerId), crew: crewDoor(viewerId), blend: blendDoor(viewerId) }
-}
-
-/**
  * The door rows for ONE kind of room, for one caller: `{}` for an event's room,
  * which has no owner to ask. Not all three kinds' doors at once: Prisma 7 runs
  * every `include` level as its own statement even under a null parent, so

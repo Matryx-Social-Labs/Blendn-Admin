@@ -359,11 +359,10 @@ describe("every door goes through the one rule (structural)", () => {
     for (const file of files) {
       const src = read(file)
       expect({ file, byHand: /\b(?:boardPostDoor|crewDoor|blendDoor)\(/.test(src) }).toEqual({ file, byHand: false })
-      expect({ file, allKinds: /\.\.\.ownerDoor\(/.test(src) }).toEqual({ file, allKinds: false })
       expect({ file, withOwnerDoor: /withOwnerDoor\(/.test(src) }).toEqual({ file, withOwnerDoor: true })
     }
-    // The chat LIST reads many rooms of mixed kinds, so it spreads every kind's door.
-    expect(read("app/api/mobile/chat/groups/route.ts")).toMatch(/\.\.\.ownerDoor\(/)
+    // The chat LIST reads rooms of two known kinds, so it asks each kind's own door, side by side.
+    expect(read("app/api/mobile/chat/groups/route.ts")).toMatch(/crew: crewDoor\(userId\)[\s\S]*blend: blendDoor\(userId\)/)
     const kind = read("lib/room-kind.ts")
     const door = kind.slice(kind.indexOf("function doorSelect"), kind.indexOf("interface OwnerDoors"))
     expect(door).toMatch(/board_post: boardPostSelect\(viewerIds\)/)
@@ -371,10 +370,6 @@ describe("every door goes through the one rule (structural)", () => {
     expect(door).toMatch(/blend: blendSelect\(viewerIds\)/)
     // The arm TypeScript fails on when a kind is added without a door.
     expect(door).toMatch(/const \w+: never = kind/)
-    const all = kind.slice(kind.indexOf("export function ownerDoor("), kind.indexOf("export function ownerDoorFor"))
-    expect(all).toMatch(/board_post: boardPostDoor\(viewerId\)/)
-    expect(all).toMatch(/crew: crewDoor\(viewerId\)/)
-    expect(all).toMatch(/blend: blendDoor\(viewerId\)/)
   })
 
   it("no route that takes a room by id reads it by the event-only rules", () => {
