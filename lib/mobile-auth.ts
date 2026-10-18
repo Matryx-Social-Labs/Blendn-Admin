@@ -86,7 +86,9 @@ const hashRefreshToken = (token: string): string => createHash("sha256").update(
  * Rows written before the switch hold a bcrypt hash and still verify through
  * bcrypt, so nobody is signed out by the deploy.
  * ponytail: drop the bcrypt branch once every pre-switch row has expired —
- * 30 days (REFRESH_TOKEN_EXPIRY) after this ships to production.
+ * 30 days (REFRESH_TOKEN_EXPIRY) after this ships to production. Confirm with
+ * `SELECT count(*) FROM mobile_refresh_tokens WHERE token_hash LIKE '$2%' AND
+ * expires_at > now()` returning 0 first.
  */
 async function refreshTokenMatches(token: string, stored: string): Promise<boolean> {
   if (stored.startsWith("$2")) return bcrypt.compare(token, stored)
