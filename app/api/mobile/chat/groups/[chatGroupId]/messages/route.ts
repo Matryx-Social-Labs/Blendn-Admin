@@ -26,6 +26,7 @@ import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { withOwnerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { replyCounts } from "@/lib/reply-counts"
 import { roomMessageWords } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -157,11 +158,6 @@ export async function GET(
             },
           },
         },
-        _count: {
-          select: {
-            replies: true,
-          },
-        },
       },
       orderBy: { created_at: "desc" },
       take: limit + 1, // Fetch one extra to check if there are more
@@ -177,12 +173,13 @@ export async function GET(
      * a crew's or a Blend's room is read only through this route, and its row
      * in `GET /chat/groups` counted everything as unread for ever without it.
      */
-    if (!before && membership && messagesToReturn.length > 0) {
-      await db.chat_group_members.update({
-        where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
-        data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
-      })
-    }
+    const markRead =
+      !before && membership && messagesToReturn.length > 0
+        ? db.chat_group_members.update({
+            where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
+            data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
+          })
+        : null
 
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()
@@ -206,8 +203,19 @@ export async function GET(
       pseudonymFor.add(m.user.id)
       if (m.parent_message) pseudonymFor.add(m.parent_message.user.id)
     }
-    // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
-    const anonMap = await namesInRoom(chatGroup, [...pseudonymFor])
+    /*
+     * The reply counts, for this page's messages. `_count.replies` on the page's
+     * query made Prisma join a COUNT(*) GROUP BY over every message on the
+     * platform (a HashAggregate over a Seq Scan of chat_messages). The same
+     * numbers, from the `parent_id` index, beside the read marker and the names,
+     * which wait on nothing here.
+     */
+    const [, anonMap, repliesByParent] = await Promise.all([
+      markRead,
+      // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
+      namesInRoom(chatGroup, [...pseudonymFor]),
+      replyCounts(messagesToReturn.map((m) => m.id)),
+    ])
 
     /*
      * Every other person's id as their handle in this room, yours as yours
@@ -223,6 +231,7 @@ export async function GET(
         const isHidden = m.moderation_status === "hidden"
         return {
           ...m,
+          _count: { replies: repliesByParent.get(m.id) ?? 0 },
           user_id: idFor(m.user_id),
           deleted_by: m.deleted_by && idFor(m.deleted_by),
           /*
