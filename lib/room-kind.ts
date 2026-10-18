@@ -82,21 +82,16 @@ function boardPostSelect(viewerIds: string[]) {
   }
 }
 
-/**
- * The board post behind a room, as its door reads it for one caller. Put it in
- * the room's select. The rows it reads carry the caller's id, and
- * `roomOwnerDenial` checks them against the id it is asked about: a door built
- * for one person never admits another.
+/*
+ * What the board-post door reads (`boardPostSelect`) carries the caller's id on
+ * every viewer-specific row, and `roomOwnerDenial` checks them against the id
+ * it is asked about: a door built for one person never admits another.
  */
-export function boardPostDoor(viewerId: string) {
-  return boardPostSelect([viewerId])
-}
-
 interface BoardPostOwner {
   author_id: string
   deleted_at: Date | null
   event: { status: string; deleted_at: Date | null; end_time: Date }
-  /** Accepted asks, by asker (`boardPostDoor`: the caller's only). */
+  /** Accepted asks, by asker (`boardPostSelect`: the caller's only). */
   requests: { from_user_id: string }[]
   author: { blocked_users: { blocked_id: string }[]; blocked_by: { blocker_id: string }[] }
 }

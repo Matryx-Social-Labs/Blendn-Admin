@@ -362,7 +362,7 @@ describe("every door goes through the one rule (structural)", () => {
       expect({ file, withOwnerDoor: /withOwnerDoor\(/.test(src) }).toEqual({ file, withOwnerDoor: true })
     }
     // The chat LIST reads rooms of two known kinds, so it asks each kind's own door, side by side.
-    expect(read("app/api/mobile/chat/groups/route.ts")).toMatch(/crew: crewDoor\(userId\)[\s\S]*blend: blendDoor\(userId\)/)
+    expect(read("lib/chat-list.ts")).toMatch(/crew: crewDoor\(userId\)[\s\S]*blend: blendDoor\(userId\)/)
     const kind = read("lib/room-kind.ts")
     const door = kind.slice(kind.indexOf("function doorSelect"), kind.indexOf("interface OwnerDoors"))
     expect(door).toMatch(/board_post: boardPostSelect\(viewerIds\)/)
