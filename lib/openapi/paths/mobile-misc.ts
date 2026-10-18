@@ -131,6 +131,7 @@ registry.registerPath({
       lon: z.coerce.number().min(-180).max(180).optional(),
       radius: z.coerce.number().min(0.1).max(100).optional(),
       venueType: z.string().optional(),
+      order: z.enum(["live"]).optional().describe("`live`: three tiers — live now (`liveNow` not `quiet`), then open tonight (hours for the venue's current day, or a public event starting before its day ends), then the rest — each in the chosen sort, id as tiebreak, so pages never repeat or skip. A caller who may not go live gets the last two tiers. The response echoes `pagination.order: \"live\"` when applied. Venues can move between tiers between two page requests: de-duplicate by `id` across pages."),
       sortBy: z.enum(["name", "distance"]).optional(),
       sortOrder: z.enum(["asc", "desc"]).optional(),
     }),
@@ -143,7 +144,9 @@ registry.registerPath({
           schema: wrap(
             z.object({
               venues: z.array(VenueListItemSchema),
-              pagination: PaginationMetaSchema,
+              pagination: PaginationMetaSchema.extend({
+                order: z.literal("live").optional().describe("Echoed only when `order=live` was applied. Pages are windows over a ranking that can shift between requests (a venue goes live), so de-duplicate by venue `id` across pages."),
+              }),
             })
           ),
         },
@@ -177,6 +180,26 @@ const VenueDetailSchema = z
             "`floors × 3.2` m tall over the building data's own height. `null`: use the map's height."
         ),
       claimed: z.boolean().describe("False: the app may offer \"Own this place? Claim it\"."),
+      capacity: z.number().int().nullable().describe("Null when unknown."),
+      dayResetHour: z.number().int().min(0).max(23).describe("The local hour (venue timezone) its day starts."),
+      hours: z
+        .array(z.object({ day: z.number().int().min(0).max(6), open: z.string(), close: z.string() }))
+        .nullable()
+        .describe("Opening hours: `day` 0 (Sunday) to 6, wall-clock `HH:MM` in the venue's own timezone; a close at or before the open runs past midnight. Null until given."),
+      description: z.string().nullable(),
+      amenities: z.array(z.string()).describe("Names from the shared amenity vocabulary (`venue_amenities`), in display order. `[]` until given."),
+      upcoming: z
+        .array(
+          z.object({
+            id: z.string().uuid(),
+            title: z.string(),
+            slug: z.string(),
+            coverImageUrl: z.string().nullable(),
+            startTime: z.string().datetime(),
+            endTime: z.string().datetime(),
+          })
+        )
+        .describe("Its next public events, soonest first (id as tiebreak), at most 5: published, public, not ended, link not disputed by the venue, within your age; never its own live rooms."),
     }),
     live: z.object({
       open: z.boolean().describe("Whether `POST .../live` would be accepted here now (the fence aside)."),
@@ -193,6 +216,7 @@ const VenueDetailSchema = z
         .nullable()
         .describe("When your window here ends. Count down from this, not from the tap."),
       stay: z.boolean(),
+      stayUntil: z.string().datetime().nullable().describe("The furthest \"stay\" can carry your window (four hours from the first stay today); null until you chose stay."),
       venueDayId: z.string().uuid().nullable().describe("Today's room here, when you are live in it."),
       chatGroupId: z.string().uuid().nullable(),
     }),

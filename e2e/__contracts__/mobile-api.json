@@ -486,13 +486,19 @@
     "nested": {
       "venue": [
         "address",
+        "amenities",
+        "capacity",
         "city",
         "claimed",
+        "dayResetHour",
+        "description",
         "floors",
+        "hours",
         "id",
         "latitude",
         "longitude",
         "name",
+        "upcoming",
         "venueType",
         "venueTypeLabel"
       ],
@@ -504,6 +510,7 @@
         "liveNow",
         "open",
         "stay",
+        "stayUntil",
         "venueDayId",
         "youAreLive"
       ]

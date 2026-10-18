@@ -51,6 +51,13 @@ export const venueQuerySchema = z.object({
    * matters the moment there is more than one page — which is why this is
    * recorded here rather than papered over with an in-page sort.
    */
+  /**
+   * `live`: venues somebody is live at now come first, in the chosen sort, then
+   * the rest — so "Live now" does not depend on paging to wherever a name sort
+   * happens to put them. "Live" is the `liveNow` the card shows (not `quiet`),
+   * so the order never knows more than the label does.
+   */
+  order: z.enum(["live"]).optional(),
   sortBy: z.enum(["name", "distance"]).default("name"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
 })

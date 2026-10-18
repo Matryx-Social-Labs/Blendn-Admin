@@ -43,6 +43,7 @@ const crewSelect = {
   emblem_seed: true,
   open_to_solo: true,
   created_at: true,
+  hidden_at: true,
   room: { select: { id: true } },
   members: {
     where: { user: { suspended_at: null, deletedAt: null } },
@@ -60,6 +61,7 @@ type CrewRow = {
   emblem_seed: string
   open_to_solo: boolean
   created_at: Date
+  hidden_at: Date | null
   room: { id: string } | null
   members: {
     user_id: string
@@ -73,7 +75,21 @@ type CrewRow = {
 const tagsOf = (tags: string[]) =>
   tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] }))
 
-function crewView(viewerId: string, crew: CrewRow, apart: ReadonlySet<string>, friends: ReadonlySet<string>) {
+/** The members of these crews that `viewerId` has blocked themselves: their own act, so theirs to be told of. */
+async function blockedByViewer(viewerId: string, crews: readonly CrewRow[]): Promise<ReadonlySet<string>> {
+  const ids = [...new Set(crews.flatMap((c) => c.members.map((m) => m.user_id)))]
+  if (ids.length === 0) return new Set()
+  const rows = await db.blocked_users.findMany({ where: { blocker_id: viewerId, blocked_id: { in: ids } }, select: { blocked_id: true } })
+  return new Set(rows.map((r) => r.blocked_id))
+}
+
+function crewView(
+  viewerId: string,
+  crew: CrewRow,
+  apart: ReadonlySet<string>,
+  friends: ReadonlySet<string>,
+  blockedByMe: ReadonlySet<string>
+) {
   const roomId = crew.room?.id
   const me = crew.members.find((m) => m.user_id === viewerId)
   const shown = crew.members.filter((m) => !apart.has(`${viewerId}|${m.user_id}`))
@@ -86,8 +102,13 @@ function crewView(viewerId: string, crew: CrewRow, apart: ReadonlySet<string>, f
     emblemSeed: crew.emblem_seed,
     openToSolo: crew.open_to_solo,
     createdAt: crew.created_at,
+    // A moderator hid it: off every surface outside the crew, and takes nobody new.
+    hidden: crew.hidden_at !== null,
     chatGroupId: roomId ?? null,
     size: shown.length,
+    // Somebody in the crew is left out of this list because YOU blocked them. Never because they
+    // blocked you or a conversation closed: a bare "fewer shown" would say a crewmate is hiding from you.
+    apart: crew.members.some((m) => blockedByMe.has(m.user_id)),
     you: me ? { role: me.role, keepMeAnonymous: me.keep_me_anonymous } : null,
     members: shown.map((m) => ({
       // Yours real; everyone else's as their handle in the crew's room.
@@ -115,7 +136,7 @@ export async function crewsOf(userId: string) {
       select: {
         created_at: true,
         invited_by: true,
-        inviter: { select: { name: true, profile: { select: { name: true } } } },
+        inviter: { select: { name: true, profile: { select: { name: true, photos: true } } } },
         crew: {
           select: {
             id: true,
@@ -130,7 +151,7 @@ export async function crewsOf(userId: string) {
       orderBy: { created_at: "desc" },
     }),
   ])
-  const [apart, friends] = await Promise.all([
+  const [apart, friends, blockedByMe] = await Promise.all([
     blocksBetween(
       [userId],
       [
@@ -141,6 +162,7 @@ export async function crewsOf(userId: string) {
       ]
     ),
     friendIdsOf(userId).then((ids) => new Set(ids)),
+    blockedByViewer(userId, crews),
   ])
   /*
    * Only an invite the accept would take (`acceptCrewInvite`, step 9 review
@@ -153,7 +175,7 @@ export async function crewsOf(userId: string) {
     return active.includes(i.invited_by) && friends.has(i.invited_by) && !active.some((id) => apart.has(`${userId}|${id}`))
   })
   return {
-    crews: crews.map((c) => crewView(userId, c, apart, friends)),
+    crews: crews.map((c) => crewView(userId, c, apart, friends, blockedByMe)),
     invites: acceptable.map((i) => ({
       crewId: i.crew.id,
       name: i.crew.name,
@@ -163,6 +185,9 @@ export async function crewsOf(userId: string) {
       size: i.crew.members.length,
       // A friend asked them in: their first name, the friend-surface rule.
       invitedBy: firstName(i.inviter.profile?.name || i.inviter.name || UNNAMED),
+      // Their first photo, shown to exactly who is shown their name: the invite is only listed
+      // while the sender is still your friend and in the crew (`acceptable`).
+      invitedByPhoto: i.inviter.profile?.photos?.[0] ?? null,
       invitedAt: i.created_at,
     })),
   }
@@ -175,9 +200,10 @@ export async function crewDetail(userId: string, crewId: string) {
     select: crewSelect,
   })
   if (!crew) return null
-  const [apart, friends] = await Promise.all([
+  const [apart, friends, blockedByMe] = await Promise.all([
     blocksBetween([userId], crew.members.map((m) => m.user_id)),
     friendIdsOf(userId).then((ids) => new Set(ids)),
+    blockedByViewer(userId, [crew]),
   ])
-  return crewView(userId, crew, apart, friends)
+  return crewView(userId, crew, apart, friends, blockedByMe)
 }
