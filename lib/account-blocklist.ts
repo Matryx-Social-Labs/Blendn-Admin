@@ -13,6 +13,13 @@ import { logger } from "./logger"
  * dashboard action can call `blockAccountNow` without importing the JWT stack.
  */
 const BLOCKLIST_REFRESH_MS = 30 * 1000
+/**
+ * The longest the set may be served while it is refreshed in the background.
+ * Past it (a quiet spell, an instance that was idle) the request waits for the
+ * refresh, exactly as every request used to: this is a security list, and "stale
+ * while revalidating" must not become "stale for as long as nobody asked".
+ */
+const BLOCKLIST_MAX_STALE_MS = 2 * 30 * 1000
 const BLOCKLIST_LOOKBACK_MS = 20 * 60 * 1000 // an access token's life, plus a margin
 
 /*
@@ -80,7 +87,8 @@ export function blockAccountNow(userId: string): void {
  * a tie goes to the sign-out, as in lib/session-revocation.ts).
  */
 export async function recentlyBlocked(userId: string, issuedAt: number): Promise<boolean> {
-  if (Date.now() - state.fetchedAt > BLOCKLIST_REFRESH_MS) {
+  const age = Date.now() - state.fetchedAt
+  if (age > BLOCKLIST_REFRESH_MS) {
     // One refresh at a time; a failure keeps the previous set rather than
     // failing every request, and is retried on the next.
     state.refresh ??= refreshBlocklist()
@@ -93,7 +101,11 @@ export async function recentlyBlocked(userId: string, issuedAt: number): Promise
       .finally(() => {
         state.refresh = null
       })
-    await state.refresh
+    // Every 30 s one request used to wait here for a full User query. Within
+    // the stale limit it is answered from the set it has, which an action in
+    // this process has already amended (`blockAccountNow`, `phonesSignedOutNow`
+    // are applied below). The first load (fetchedAt 0) is always past the limit.
+    if (age > BLOCKLIST_MAX_STALE_MS) await state.refresh
   }
   if (state.blocked.has(userId) || state.blockedNow.has(userId)) return true
   const phonesEnded = Math.max(state.phonesEndedAt.get(userId) ?? 0, state.phonesEndedNow.get(userId) ?? 0)
