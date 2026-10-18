@@ -132,6 +132,17 @@ export interface BlendSideView {
    */
   revealed: number | null
   keptPrivate: number | null
+  /**
+   * `revealed` / `keptPrivate` under the names the reveal toast reads. The same
+   * numbers and the same rule: their side only, null on yours.
+   */
+  revealedCount: number | null
+  privateCount: number | null
+  /**
+   * Your own side only (null on theirs): whether your crew has revealed in this
+   * Blend. One bit about the crew, never which member — and never a count.
+   */
+  crewRevealed: boolean | null
   /** Their side: each person. Your side: you alone. */
   people: BlendPerson[]
 }
@@ -220,6 +231,10 @@ export async function blendsOf(viewerId: string) {
             (id === viewerId || (!apart.has(`${viewerId}|${id}`) && profileOf.get(id)?.profile?.show_online !== false))
         )
       const isRevealed = (id: string) => revealed.has(`${blend.id}|${id}`)
+      // Everyone a reveal here reaches: the people the door admits, kept-apart pairs out (a
+      // crewmate hiding from you is not counted, as in a crew's `size`), but INCLUDING anyone with
+      // "show online" off — they sit in the room and see the faces, though no side lists them.
+      const roomSize = room.members.filter((m) => admitted.has(m.user_id) && (m.user_id === viewerId || !apart.has(`${viewerId}|${m.user_id}`))).length
       const person = (id: string): BlendPerson => {
         const p = profileOf.get(id)
         const named = id === viewerId || isRevealed(id) || !!visible.get(eventId)?.has(id)
@@ -233,6 +248,8 @@ export async function blendsOf(viewerId: string) {
       const crewSide = (crew: { id: string; name: string; emblem_seed: string }): BlendSideView => {
         const rows = memberships.filter((m) => m.crew_id === crew.id && shown.includes(m.user_id))
         const mine = rows.some((m) => m.user_id === viewerId)
+        const revealedCount = mine ? null : rows.filter((m) => isRevealed(m.user_id)).length
+        const privateCount = mine ? null : rows.filter((m) => m.keep_me_anonymous && !isRevealed(m.user_id)).length
         return {
           kind: "crew",
           crewId: crew.id,
@@ -240,8 +257,11 @@ export async function blendsOf(viewerId: string) {
           emblemSeed: crew.emblem_seed,
           mine,
           count: rows.length,
-          revealed: mine ? null : rows.filter((m) => isRevealed(m.user_id)).length,
-          keptPrivate: mine ? null : rows.filter((m) => m.keep_me_anonymous && !isRevealed(m.user_id)).length,
+          revealed: revealedCount,
+          keptPrivate: privateCount,
+          revealedCount,
+          privateCount,
+          crewRevealed: mine ? rows.some((m) => isRevealed(m.user_id)) : null,
           people: mine ? [person(viewerId)] : rows.map((m) => person(m.user_id)),
         }
       }
@@ -258,10 +278,13 @@ export async function blendsOf(viewerId: string) {
           count: 1,
           revealed: mine ? null : isRevealed(blend.b_user_id) ? 1 : 0,
           keptPrivate: mine ? null : 0,
+          revealedCount: mine ? null : isRevealed(blend.b_user_id) ? 1 : 0,
+          privateCount: mine ? null : 0,
+          crewRevealed: mine ? isRevealed(blend.b_user_id) : null,
           people: [person(blend.b_user_id)],
         })
       }
-      return { blendId: blend.id, chatGroupId: room.id, eventId, closesAt: blend.closes_at, sides }
+      return { blendId: blend.id, chatGroupId: room.id, eventId, closesAt: blend.closes_at, roomSize, sides }
     }),
   }
 }

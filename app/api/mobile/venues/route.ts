@@ -16,8 +16,8 @@ import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
-import { realEventsWhere } from "@/lib/event-kind"
-import { liveGuestIds, venueLiveBucket } from "@/lib/live-count"
+import { realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
+import { liveGuestIds, liveGuestsWhere, venueLiveBucket } from "@/lib/live-count"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere, venuesTakenOver } from "@/lib/venue-visibility"
 import { paginationMeta } from "@/lib/pagination"
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { page, limit, search, city, lat, lon, radius, venueType, sortBy, sortOrder } =
+    const { page, limit, search, city, lat, lon, radius, venueType, order, sortBy, sortOrder } =
       parsed.data
 
     const viewer = await db.profiles.findUnique({
@@ -209,6 +209,9 @@ export async function GET(request: NextRequest) {
 
     type VenueRow = Prisma.venuesGetPayload<{ select: typeof venueSelect }>
 
+    // Live first: the venues the card would show as live, among the ones this query lists.
+    const liveFirst = order === "live" && mayCountLive ? await liveVenueIds(where, authUser.userId, now) : new Set<string>()
+
     const shouldSortByDistance =
       sortBy === "distance" && lat !== undefined && lon !== undefined
 
@@ -259,7 +262,8 @@ export async function GET(request: NextRequest) {
         })
 
       totalCount = withDistance.length
-      const pageIds = withDistance.slice((page - 1) * limit, page * limit).map((v) => v.id)
+      const ranked = order === "live" ? [...withDistance.filter((v) => liveFirst.has(v.id)), ...withDistance.filter((v) => !liveFirst.has(v.id))] : withDistance
+      const pageIds = ranked.slice((page - 1) * limit, page * limit).map((v) => v.id)
 
       const pageVenues = await db.venues.findMany({
         where: { id: { in: pageIds } },
@@ -269,15 +273,32 @@ export async function GET(request: NextRequest) {
       const byId = new Map(pageVenues.map((v) => [v.id, v]))
       venues = pageIds.map((id) => byId.get(id)).filter((v): v is VenueRow => Boolean(v))
     } else {
-      venues = await db.venues.findMany({
-        where,
-        select: venueSelect,
-        // `id` after the name: two venues with one name keep one order, so a page
-        // boundary between them never repeats or skips one.
-        orderBy: [{ name: sortOrder }, { id: "asc" }],
-        skip: (page - 1) * limit,
-        take: limit,
-      })
+      // `id` after the name: two venues with one name keep one order, so a page
+      // boundary between them never repeats or skips one.
+      const orderBy = [{ name: sortOrder }, { id: "asc" as const }]
+      const skip = (page - 1) * limit
+      const liveIds = [...liveFirst]
+      if (liveIds.length === 0) {
+        venues = await db.venues.findMany({ where, select: venueSelect, orderBy, skip, take: limit })
+      } else {
+        // The live venues are one segment, the rest another; the page is a window over both.
+        const liveWhere = { AND: [where, { id: { in: liveIds } }] }
+        const liveSkip = Math.min(skip, liveIds.length)
+        const liveTake = Math.max(0, Math.min(limit, liveIds.length - skip))
+        const [live, rest] = await Promise.all([
+          liveTake > 0 ? db.venues.findMany({ where: liveWhere, select: venueSelect, orderBy, skip: liveSkip, take: liveTake }) : [],
+          limit - liveTake > 0
+            ? db.venues.findMany({
+                where: { AND: [where, { id: { notIn: liveIds } }] },
+                select: venueSelect,
+                orderBy,
+                skip: Math.max(0, skip - liveIds.length),
+                take: limit - liveTake,
+              })
+            : [],
+        ])
+        venues = [...live, ...rest]
+      }
       totalCount = await db.venues.count({ where })
     }
 
@@ -347,4 +368,16 @@ async function liveBuckets(venueIds: string[], viewerId: string, now: Date) {
     venueIds.map((id) => venueLiveBucket(id, viewerId, async () => live.get(id) ?? new Set<string>(), now.getTime()))
   )
   return new Map(venueIds.map((id, i) => [id, buckets[i]]))
+}
+
+/** The venues matching `where` whose `liveNow` is not `quiet` for this viewer. */
+async function liveVenueIds(where: Prisma.venuesWhereInput, viewerId: string, now: Date): Promise<Set<string>> {
+  const rows = await db.event_check_ins.findMany({
+    where: { ...liveGuestsWhere(now), event: { ...venueDaysWhere, venue: where } },
+    select: { event: { select: { venue_id: true } } },
+    distinct: ["event_id"],
+  })
+  const ids = [...new Set(rows.flatMap((r) => (r.event.venue_id ? [r.event.venue_id] : [])))]
+  const buckets = await liveBuckets(ids, viewerId, now)
+  return new Set(ids.filter((id) => buckets.get(id) !== "quiet"))
 }

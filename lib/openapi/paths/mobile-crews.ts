@@ -48,8 +48,10 @@ const CrewSchema = z
     emblemSeed: z.string().describe("Seeds the generated emblem"),
     openToSolo: z.boolean().describe("\"Room for one more tonight\""),
     createdAt: z.string(),
+    hidden: z.boolean().describe("A moderator hid it: off every surface outside the crew, and it takes nobody new"),
     chatGroupId: z.string().uuid().nullable().describe("The crew chat: `/chat/groups/{chatGroupId}/…`"),
     size: z.number().int().describe("Its active members you are shown: one kept apart from you is neither listed nor counted"),
+    apart: z.boolean().describe("Somebody in the crew is left out of `members` because YOU blocked them. Never set by them blocking you or by a closed conversation: that would say a crewmate is hiding from you"),
     you: z.object({ role: z.enum(["owner", "member"]), keepMeAnonymous: z.boolean() }).nullable(),
     members: z.array(CrewMemberSchema),
   })
@@ -64,6 +66,7 @@ const CrewInviteSchema = z
     tags: z.array(Tag),
     size: z.number().int().describe("Its active members"),
     invitedBy: z.string().describe("The friend who invited you, by first name"),
+    invitedByPhoto: z.string().nullable().describe("Their first photo, shown to exactly who is shown their name (the invite is listed only while they are still your friend and in the crew); null without one"),
     invitedAt: z.string(),
   })
   .openapi("CrewInvite")
@@ -410,6 +413,7 @@ registry.registerPath({
                 chatGroupId: z.string().uuid(),
                 eventId: z.string().uuid(),
                 closesAt: z.string(),
+                roomSize: z.number().int().describe("Everyone a reveal here reaches: the people the door admits, minus anybody kept apart from you, INCLUDING people with \"show online\" off (they are in the room but listed on no side)"),
                 sides: z.array(
                   z.object({
                     kind: z.enum(["crew", "person"]),
@@ -420,6 +424,9 @@ registry.registerPath({
                     count: z.number().int().describe("How many on this side are shown to me (me included, on mine)"),
                     revealed: z.number().int().nullable().describe("Their side only; null on mine"),
                     keptPrivate: z.number().int().nullable().describe("Their side only; null on mine"),
+                    revealedCount: z.number().int().nullable().describe("Same number as `revealed`, under the name the reveal toast reads. Their side only; null on mine"),
+                    privateCount: z.number().int().nullable().describe("Same number as `keptPrivate`. Their side only; null on mine"),
+                    crewRevealed: z.boolean().nullable().describe("Mine only (null on theirs): whether my crew has revealed in this Blend. One bit about the crew, never which member"),
                     people: z.array(BlendPersonSchema).describe("Their side: each person. Mine: me alone"),
                   })
                 ),

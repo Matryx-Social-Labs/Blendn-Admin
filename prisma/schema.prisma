@@ -1632,6 +1632,13 @@ model venues {
   /// over the building data's own height (owner, 2026-10-09). Null leaves the
   /// map's height. Set by the venue's owner or an admin; CHECK 1–200 in SQL.
   floors         Int?         @db.SmallInt
+  /// Opening hours as the venue page shows them: `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]`
+  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. No writer yet.
+  hours          Json?
+  /// A few lines about the place, shown on the venue page. Null: not given.
+  description    String?
+  /// Short labels ("Wi-Fi", "Outdoor seating") for the venue page. Empty: not given.
+  amenities      String[]     @default([])
   /// "Open on Blendn" (D-13): false takes a CLAIMED venue out of the app's
   /// Places and home map; its events still show. Set by the owner's
   /// organisation or an admin, audited. Ignored on an unclaimed venue, which is

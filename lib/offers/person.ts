@@ -1,8 +1,11 @@
 import "server-only"
 
+import { Prisma } from "@prisma/client"
+
 import { ageFrom, isAdult } from "../age"
 import { db } from "../db"
 import { violatedConstraint } from "../prisma-errors"
+import { nightsSql, REGULAR_NIGHTS, regularsWindow } from "../regulars"
 import { venueDayBounds } from "../venue-day"
 import { currentPass } from "./pass-code"
 
@@ -24,6 +27,8 @@ export interface PersonOffer {
   venue: { id: string; name: string }
   text: string
   sentAt: string
+  /** When the pass was redeemed at the door; null until it was. */
+  redeemedAt: string | null
   endsAt: string
   state: OfferState
 }
@@ -79,6 +84,7 @@ function shape(send: SendRow, state: OfferState): PersonOffer {
     venue: { id: send.offer.venue.id, name: send.offer.venue.name },
     text: send.offer.text,
     sentAt: send.sent_at.toISOString(),
+    redeemedAt: send.redeemed_at?.toISOString() ?? null,
     endsAt: send.offer.ends_at.toISOString(),
     state,
   }
@@ -146,12 +152,43 @@ export interface RegularPrefs {
   offersMuted: boolean
   /** Who would see it: the organisation that runs the venue on Blendn now; null while nobody does. */
   ownerName: string | null
+  /**
+   * The venue's regulars feature, for this person. `active`: whether the venue
+   * has turned it on — FALSE for every venue until the dashboard toggle exists
+   * (owner, 2026-10-17: the feature is deferred), so the app shows no regulars
+   * UI. `eligible`: whether they would count as a regular now (3+ nights here
+   * in the last 30), which is their own data and says nothing about anyone else.
+   */
+  regulars: { active: boolean; eligible: boolean }
+}
+
+type OwnedVenue = NonNullable<Awaited<ReturnType<typeof venueAndOwner>>>
+
+/**
+ * Whether this person has been here on `REGULAR_NIGHTS` or more of the last
+ * 30 nights, by the rule an offer's audience uses (`lib/regulars.ts`: counted
+ * from the claim, never before it). Only their own nights are read. An unclaimed
+ * venue has no window to count in.
+ */
+async function isEligibleRegular(userId: string, venue: OwnedVenue): Promise<boolean> {
+  if (!venue.owner_org_id || !venue.claimed_at) return false
+  const v = { id: venue.id, timezone: venue.timezone, day_reset_hour: venue.day_reset_hour, claimed_at: venue.claimed_at, owner_org_id: venue.owner_org_id }
+  const { from, to } = regularsWindow(v)
+  const rows = await db.$queryRaw<{ nights: number }[]>(nightsSql(v, from, to, Prisma.sql`${userId}`))
+  return (rows[0]?.nights ?? 0) >= REGULAR_NIGHTS
 }
 
 async function venueAndOwner(venueId: string) {
   return db.venues.findFirst({
     where: { id: venueId, deleted_at: null },
-    select: { id: true, owner_org_id: true, owner_org: { select: { display_name: true } } },
+    select: {
+      id: true,
+      owner_org_id: true,
+      claimed_at: true,
+      timezone: true,
+      day_reset_hour: true,
+      owner_org: { select: { display_name: true } },
+    },
   })
 }
 
@@ -159,7 +196,7 @@ async function venueAndOwner(venueId: string) {
 export async function regularPrefs(userId: string, venueId: string): Promise<RegularPrefs | null> {
   const venue = await venueAndOwner(venueId)
   if (!venue) return null
-  const [known, muted] = await Promise.all([
+  const [known, muted, eligible] = await Promise.all([
     // A yes to an earlier owner is not a yes to this one.
     venue.owner_org_id
       ? db.venue_regular_optins.findUnique({
@@ -168,8 +205,15 @@ export async function regularPrefs(userId: string, venueId: string): Promise<Reg
         })
       : null,
     db.venue_offer_mutes.findUnique({ where: { venue_id_user_id: { venue_id: venueId, user_id: userId } }, select: { user_id: true } }),
+    isEligibleRegular(userId, venue),
   ])
-  return { known: known !== null, offersMuted: muted !== null, ownerName: venue.owner_org?.display_name ?? null }
+  return {
+    known: known !== null,
+    offersMuted: muted !== null,
+    ownerName: venue.owner_org?.display_name ?? null,
+    // ponytail: hard false until a venue/organiser can switch regulars on (a dashboard toggle, not built); then read it off the venue here.
+    regulars: { active: false, eligible },
+  }
 }
 
 export type PrefsRefusal = "not_found" | "unclaimed" | "not_adult"
@@ -208,7 +252,7 @@ export async function setRegularPrefs(
   else if (change.offersMuted === false) await db.venue_offer_mutes.deleteMany({ where: key })
 
   const prefs = await regularPrefs(userId, venueId)
-  return { prefs: prefs ?? { known: false, offersMuted: false, ownerName: null } }
+  return { prefs: prefs ?? { known: false, offersMuted: false, ownerName: null, regulars: { active: false, eligible: false } } }
 }
 
 export interface OfferSettings {

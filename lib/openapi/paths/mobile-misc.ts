@@ -131,6 +131,7 @@ registry.registerPath({
       lon: z.coerce.number().min(-180).max(180).optional(),
       radius: z.coerce.number().min(0.1).max(100).optional(),
       venueType: z.string().optional(),
+      order: z.enum(["live"]).optional().describe("`live`: venues with a non-`quiet` `liveNow` come first, in the chosen sort, then the rest. Ignored for a caller who may not go live."),
       sortBy: z.enum(["name", "distance"]).optional(),
       sortOrder: z.enum(["asc", "desc"]).optional(),
     }),
