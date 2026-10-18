@@ -5,7 +5,9 @@ const CITY_PLACES_TTL_MS = 60 * 1000
 
 type PlacePoint = { city: string | null; latitude: number | null; longitude: number | null }
 
-let cached: { expiresAt: number; places: Promise<PlacePoint[]> } | null = null
+type Cached = { expiresAt: number; places: Promise<PlacePoint[]> } | null
+// On globalThis like the live-count and open-tonight caches: Next bundles its own copy of a lib per layer.
+const shared = globalThis as typeof globalThis & { __blendnCityPlaces?: Cached }
 
 /**
  * Every listed place's city and point: the input to the city picker's
@@ -25,6 +27,7 @@ let cached: { expiresAt: number; places: Promise<PlacePoint[]> } | null = null
  */
 export function cityPlaces(): Promise<PlacePoint[]> {
   const now = Date.now()
+  const cached = shared.__blendnCityPlaces
   if (cached && cached.expiresAt > now) return cached.places
   const places = db.venues
     .findMany({
@@ -32,14 +35,9 @@ export function cityPlaces(): Promise<PlacePoint[]> {
       select: { city: true, latitude: true, longitude: true },
     })
     .catch((error) => {
-      cached = null
+      shared.__blendnCityPlaces = null
       throw error
     })
-  cached = { expiresAt: now + CITY_PLACES_TTL_MS, places }
+  shared.__blendnCityPlaces = { expiresAt: now + CITY_PLACES_TTL_MS, places }
   return places
-}
-
-/** For tests that write a venue and then read the picker. */
-export function clearCityPlaces(): void {
-  cached = null
 }

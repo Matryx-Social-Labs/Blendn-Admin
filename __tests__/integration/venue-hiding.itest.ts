@@ -5,7 +5,7 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
-import { clearCityPlaces } from "@/lib/city-places"
+import { clearCityPlaces } from "../support/city-places"
 import { venueDayFor } from "@/lib/venue-day"
 import { venuesTakenOver } from "@/lib/venue-visibility"
 

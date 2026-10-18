@@ -15,7 +15,7 @@ jest.mock("@/lib/mobile-auth", () => ({ getAuthenticatedUser: async () => ({ use
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn() } }))
 
 import { GET } from "@/app/api/mobile/events/cities/route"
-import { clearCityPlaces } from "@/lib/city-places"
+import { clearCityPlaces } from "./support/city-places"
 
 const call = () => GET(new NextRequest("http://localhost/api/mobile/events/cities"))
 const PLACE = { city: "Bengaluru", latitude: 12.97, longitude: 77.59 }

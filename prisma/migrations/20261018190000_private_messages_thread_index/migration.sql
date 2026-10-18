@@ -10,6 +10,6 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 CREATE INDEX "private_messages_conversation_id_created_at_idx" ON "private_messages"("conversation_id", "created_at");
-DROP INDEX "private_messages_conversation_id_idx";
+DROP INDEX IF EXISTS "private_messages_conversation_id_idx";
 
 COMMIT;
