@@ -2,10 +2,11 @@
 // __tests__/server-import-boundary.test.ts.
 import { randomBytes } from "crypto"
 import type { Prisma, connection_intent } from "@prisma/client"
+import { NextResponse } from "next/server"
 import { z } from "zod"
 
 import { ageFrom, isAdult, mayParticipate } from "../age"
-import { errorResponse } from "../api-response"
+import { ErrorCode, errorResponse } from "../api-response"
 import { CREW } from "../constants"
 import { conversationPair } from "../conversations"
 import { db } from "../db"
@@ -140,6 +141,8 @@ export const inviteSchema = z.object({
 export interface CrewRefusal {
   refusal: string
   status: 400 | 403 | 404 | 409 | 429
+  /** Which text was refused (a name or a bio), when a refusal is about one of them. */
+  field?: "name" | "bio"
 }
 
 export const isRefusal = (value: unknown): value is CrewRefusal =>
@@ -208,7 +211,7 @@ async function textRefusal(fields: { name?: string; bio?: string | null }): Prom
     const text = fields[field]
     if (!text) continue
     const refusal = await crewTextRefusal(field, text)
-    if (refusal) return { refusal, status: 400 }
+    if (refusal) return { refusal, status: 400, field }
   }
   return null
 }
@@ -704,5 +707,10 @@ function notifyCrewInvite(recipientId: string, crewId: string): void {
 
 /** A refusal, answered the way every mobile route answers (`lib/api-response`). */
 export function refusalResponse(r: CrewRefusal) {
-  return errorResponse(r.refusal, r.status)
+  if (!r.field) return errorResponse(r.refusal, r.status)
+  // The field twice: `field` for the form, and `errors` as every validation answer carries it.
+  return NextResponse.json(
+    { success: false, error: r.refusal, errorCode: ErrorCode.VALIDATION_FAILED, field: r.field, errors: [{ field: r.field, message: r.refusal }] },
+    { status: r.status }
+  )
 }

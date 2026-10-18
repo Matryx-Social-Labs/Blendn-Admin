@@ -239,6 +239,34 @@ registry.registerPath({
   },
 })
 
+// POST /api/mobile/chat/groups/{chatGroupId}/members/{userId}/report
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/chat/groups/{chatGroupId}/members/{userId}/report",
+  tags: ["Mobile Safety"],
+  summary: "Report a person in a crew's or a Blend's room",
+  description:
+    "`userId` is the handle that room showed you (`GET /crews/{id}`, `GET /blends`). Members of the room only. Lands in the same admin queue as " +
+    "`POST /users/{userId}/report`, with the room's kind in the description. Nobody is told who reported. 400 for yourself; 404 `NOT_FOUND` for a malformed id, " +
+    "a room you are not let into, a room that is not a crew's or a Blend's, a handle from another room, a forged one, or somebody not in the room. " +
+    "Capped per minute and per day, as every report is.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ chatGroupId: z.string().uuid(), userId: z.string().describe("The person's handle in this room") }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ reason: z.string().min(1).max(200), description: z.string().max(2000).optional() }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: { description: "Report filed", content: { "application/json": { schema: wrap(z.object({ reported: z.literal(true) })) } } },
+    ...standardErrors,
+  },
+})
+
 // GET /api/mobile/chat/groups/{chatGroupId}/participants
 registry.registerPath({
   method: "get",

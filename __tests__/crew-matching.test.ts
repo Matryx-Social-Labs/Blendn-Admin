@@ -92,6 +92,7 @@ describe("one writer (CR-G03)", () => {
       "lib/crews/like.ts": "the writer",
       "lib/crews/sweep.ts": "a dissolved or hidden crew's Blends closed; lapsed likes purged",
       "lib/chat-lifecycle.ts": "a Blend closed on its clock",
+      "lib/crews/blends.ts": "a reveal tap stamps its side (a_revealed_at / b_revealed_at)",
       "scripts/seed-room.ts": "--clean removes the fixture's rows",
     }
     const PURGE = /DELETE FROM "?(crew_likes|blends)\b/

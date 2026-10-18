@@ -15,6 +15,7 @@ const OfferSchema = z
     venue: z.object({ id: z.string().uuid(), name: z.string() }),
     text: z.string().max(140).describe("The venue's words."),
     sentAt: z.string().datetime(),
+    redeemedAt: z.string().datetime().nullable().describe("When the pass was redeemed at the door; null until it was."),
     endsAt: z.string().datetime(),
     state: z
       .enum(["live", "redeemed", "used_tonight", "ended"])
@@ -41,6 +42,12 @@ const RegularPrefsSchema = z
       .describe("\"Let this venue know I'm a regular\", to the organisation that runs it now: it sees your first name and your nights there in the last 30. A new owner sees none of an earlier owner's yeses."),
     offersMuted: z.boolean().describe("No offers from this venue (kept across a change of owner)."),
     ownerName: z.string().nullable().describe("Who would see it: the organisation that runs the venue on Blendn now; null while nobody does."),
+    regulars: z
+      .object({
+        active: z.boolean().describe("Whether the venue has turned its regulars feature on. FALSE for every venue until the dashboard toggle exists; show no regulars UI while false."),
+        eligible: z.boolean().describe("Whether you would count as a regular now: 3+ nights here in the last 30, counted from the venue's claim. Your own data only."),
+      })
+      .describe("The regulars feature, for you."),
   })
   .openapi("RegularPrefs")
 

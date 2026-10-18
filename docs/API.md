@@ -739,6 +739,7 @@ vocabulary, meaning exactly what it means there.
 | `radius` | km. **No default.** Only bites when you send it |
 | `venueType` | One of the 35 slugs; anything else is a 400 |
 | `sortBy` | `name` (default) or `distance` |
+| `order` | `live`: three tiers — **live now** (`liveNow` not `quiet`), then **open tonight** (`venues.hours` has a row for the weekday of the venue's current day, or a public event starts before that day ends), then the rest. Each tier is in the chosen sort with the id as tiebreak, so pages never repeat or skip a venue; read until the first quiet venue and nothing open tonight is lost. A caller who may not go live (`liveNow` null) gets the last two tiers. The response echoes `pagination.order: "live"` when applied; without it the server did not honour the order. A venue can change tier (somebody goes live) between two page requests, so **de-duplicate by venue `id` across pages** |
 
 `floors` is the 3D map's height override for the venue's building, set by its
 owner or an admin on the dashboard (1–200): draw it `floors × 3.2` m tall,
@@ -822,10 +823,15 @@ for one with no known adult age (as at its door). 60 a minute per person, then
   "venue": { "id": "…", "name": "The Humming Tree", "address": "…", "city": "Bengaluru",
              "latitude": 12.97, "longitude": 77.64,
              "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
-             "floors": null, "claimed": false },
+             "floors": null, "claimed": false,
+             "capacity": 300, "dayResetHour": 6,
+             "hours": [{ "day": 5, "open": "17:00", "close": "01:00" }],
+             "description": null, "amenities": ["Live Music", "Outdoor Seating"],
+             "upcoming": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
+                            "startTime": "…", "endTime": "…" }] },
   "live": { "open": true, "closedReason": null, "eventId": null,
             "liveNow": "quiet",
-            "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false,
+            "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false, "stayUntil": null,
             "venueDayId": "…", "chatGroupId": "…" },
   "tonight": { "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
                "startTime": "…", "endTime": "…" },
@@ -839,6 +845,11 @@ for one with no known adult age (as at its door). 60 a minute per person, then
 | `live.closedReason` | `event_live_here` (a real event has the venue: check in to `live.eventId`) or `no_check_in_area` (nobody drew this venue's area — judged against the same area as the door: today's copy once anybody went live) |
 | `live.liveNow` | `quiet` (fewer than 5, none included), `5-9`, `10-19` or `20+`. **Never a number** (D-19, D-x2): a count that moved from 4 to 5 as you watched would tell you somebody just walked in. Guests only (not the venue's staff), never counting you, read at most once a minute per venue, and slow to fall (it drops a bucket only once one more person would not hold it) |
 | `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
+| `live.stayUntil` | The furthest "stay" can carry your window (four hours from the first stay today); null until you chose stay |
+| `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given |
+| `venue.description`, `venue.amenities` | Free text about the place (null) and amenity names from the shared vocabulary (`[]`) until given |
+| `venue.capacity`, `venue.dayResetHour` | The venue's capacity (null if unknown) and the local hour its day starts |
+| `venue.upcoming` | Its next public events, at most 5, soonest first: the Places card's filter (published, public, not ended, link not disputed by the venue, within your age) — never its own live rooms |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
 | `claim` | `{ url }` for an unclaimed venue: the public claim page (`/claim/venue/:venueId`) on the dashboard host, built for the environment the app talks to — open it as given. Null once claimed. As `claim` on `GET /events/:eventId` |
 | `tonight` | The next public event here before the venue's day resets (06:00 local by default), age-filtered for you, or null |
@@ -1487,6 +1498,7 @@ at an event. `lib/crews/`.
 | DELETE | `/crews/:crewId/members/:userId` | Leave (my id), or the owner removes a member (their handle) → `{ dissolved }` |
 | POST | `/crews/:crewId/here` | "We're here" `{ eventId }` → `{ notified, repeated }` |
 | POST | `/crews/:crewId/report` | Report a crew's card `{ reason, description? }` → 201 `{ reported: true }` |
+| POST | `/chat/groups/:chatGroupId/members/:userId/report` | Report a person in a crew's or Blend's room by the handle that room showed you, `{ reason, description? }` → 201 `{ reported: true }`. Members of that room only; 404 for any other room, a foreign or forged handle, or somebody not in it; 400 for yourself. Same admin queue as `POST /users/:id/report` |
 | GET | `/events/:eventId/crews` | The crews here now, as cards, a page at a time (`?limit=&offset=`) → `{ crewsEnabled, crews, myCrews, total, hasMore }` |
 
 **Made from friends.** Every invitee must be a friend of whoever invites them —
@@ -1556,6 +1568,14 @@ found, and nothing is stored. Tags are curated slugs (`quiz-team`, `run-club`,
 `techno-heads`, `office-gang`, `birthday-crew`, `foodies`, `board-gamers`,
 `gig-goers`, `book-club`, `dance-floor`), at most 3. Intent is the person
 intent enum.
+
+**Card fields.** `GET /crews` and `GET /crews/:id` carry `hidden` (a moderator hid
+it) and `apart` (somebody in the crew is missing from `members` because **you**
+blocked them — never because they blocked you or a conversation closed, which
+would say a crewmate hides from you). An invite carries `invitedByPhoto`, the
+sender's first photo, shown to exactly who is shown their name. A crew name or
+bio refused for its words answers 400 with `field: "name" | "bio"` (and the same
+in `errors`).
 
 **Reports.** `POST /crews/:crewId/report` (`reason`: `spam`, `offensive`,
 `contact_details`, `impersonation`, `other`) files a `message_reports` row
@@ -1679,6 +1699,15 @@ room), handles scoped to the Blend's room. `GET /blends` lists the snapshot as
 its door admits it now, minus anybody kept apart from you and anybody who
 turned "show online" off. Anyone may leave on their own
 (`POST /chat/groups/:id/leave`); the room stays for the rest.
+
+**What `GET /blends` adds for the reveal sheet.** There is deliberately no room
+size: any figure for "everyone a reveal reaches" would count people who turned
+"show online" off. Per side: `revealedCount` / `privateCount` (the same numbers as
+`revealed` / `keptPrivate`: their side only, null on yours) and `crewRevealed`
+(yours only, null on theirs): whether anybody on your side has tapped reveal
+here. It is stored per side when the tap happens (`blends.a_revealed_at` /
+`b_revealed_at`), whoever consented, so it never depends on which crewmate said
+yes or no — one bit about the tap, never which member and never a count.
 
 **A block inside a Blend hides that pair; the room goes on** (D-9). Anybody on
 one side kept apart from anybody on the other — a block, or a closed
@@ -3004,7 +3033,7 @@ a yes given in the app. Without it the offer still arrives — the bell line and
 { "success": true, "data": { "offers": [ {
   "id": "…", "venue": { "id": "…", "name": "Toit" },
   "text": "First drink on the house, Thu–Sun before 10",
-  "sentAt": "2026-10-11T12:00:00.000Z", "endsAt": "2026-10-18T12:00:00.000Z",
+  "sentAt": "2026-10-11T12:00:00.000Z", "redeemedAt": null, "endsAt": "2026-10-18T12:00:00.000Z",
   "state": "live"
 } ] } }
 ```
@@ -3037,11 +3066,11 @@ you were not sent; 409 `CONFLICT` while your earlier report is pending.
 { "offersMuted": true }
 ```
 
-Answers `{ known, offersMuted, ownerName }`. `known` is "Let this venue know
+Answers `{ known, offersMuted, ownerName, regulars: { active, eligible } }`. `known` is "Let this venue know
 I'm a regular", given to the organisation that runs it now (`ownerName`): it
 sees your first name and your nights there in the last 30, and can greet you;
 off, it sees nothing of you again, from the next request. A new owner sees
-none of an earlier owner's yeses. `offersMuted`: no offers from this venue,
+none of an earlier owner's yeses. `regulars.active` is whether the venue has the regulars feature on: **false for every venue** until its dashboard toggle exists, so show no regulars UI. `regulars.eligible` is whether you would count as a regular now (3+ nights here in the last 30, counted from the venue's claim): your own nights only. `offersMuted`: no offers from this venue,
 kept across a change of owner. Each field must be a real boolean, at least one
 per PUT; a missing one is left as it is, so "Maybe later" sends nothing. None
 of these choices is written to the audit log. `known: true` — 409
