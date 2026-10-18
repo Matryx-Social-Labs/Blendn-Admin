@@ -1,5 +1,7 @@
 import { db, closeDb, makeUser, testId } from "./helpers"
-import { storeRefreshToken, signRefreshToken } from "@/lib/mobile-auth"
+import bcrypt from "bcryptjs"
+import jwt from "jsonwebtoken"
+import { storeRefreshToken, signRefreshToken, verifyRefreshToken } from "@/lib/mobile-auth"
 
 /**
  * Storing a refresh token, against a real Postgres.
@@ -64,5 +66,30 @@ describe("storing a refresh token", () => {
     const id = await makeUser(testId("rt-nojti"))
     users.push(id)
     await expect(storeRefreshToken(id, "not-a-jwt")).rejects.toThrow()
+  })
+
+  it("still verifies a row written as bcrypt before the switch to SHA-256", async () => {
+    /*
+     * Every phone in the field holds a token whose row is a bcrypt hash. The
+     * deploy that switched to SHA-256 must not sign them out.
+     */
+    const id = await makeUser(testId("rt-legacy"))
+    users.push(id)
+    const token = signRefreshToken(id, `${id}@itest.invalid`)
+    const { jti } = jwt.decode(token) as { jti: string }
+    await db.mobile_refresh_tokens.create({
+      data: { id: jti, user_id: id, token_hash: await bcrypt.hash(token, 4), expires_at: new Date(Date.now() + 60_000) },
+    })
+
+    await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: id })
+  })
+
+  it("verifies a freshly stored token", async () => {
+    const id = await makeUser(testId("rt-sha"))
+    users.push(id)
+    const token = signRefreshToken(id, `${id}@itest.invalid`)
+    await storeRefreshToken(id, token)
+
+    await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: id })
   })
 })

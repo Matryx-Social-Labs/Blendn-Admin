@@ -1,6 +1,6 @@
 import { logger } from "./logger"
 import jwt from "jsonwebtoken"
-import { randomUUID } from "crypto"
+import { createHash, randomUUID, timingSafeEqual } from "crypto"
 import bcrypt from "bcryptjs"
 import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
@@ -73,7 +73,27 @@ export interface DecodedToken extends TokenPayload {
   exp: number
 }
 
-const BCRYPT_ROUNDS = 12
+/*
+ * Refresh tokens are hashed with SHA-256, not bcrypt. A slow hash protects a
+ * guessable secret; a refresh token is a signed JWT carrying a random jti, so
+ * bcrypt bought nothing and cost two ~250 ms bcryptjs runs on the event loop per
+ * refresh (579 ms p50 on staging, 2026-10-18). It also read only the first 72
+ * bytes — the header and the start of `userId`, alike for every token a user holds.
+ */
+const hashRefreshToken = (token: string): string => createHash("sha256").update(token).digest("hex")
+
+/**
+ * Rows written before the switch hold a bcrypt hash and still verify through
+ * bcrypt, so nobody is signed out by the deploy.
+ * ponytail: drop the bcrypt branch once every pre-switch row has expired —
+ * 30 days (REFRESH_TOKEN_EXPIRY) after this ships to production.
+ */
+async function refreshTokenMatches(token: string, stored: string): Promise<boolean> {
+  if (stored.startsWith("$2")) return bcrypt.compare(token, stored)
+  const given = Buffer.from(hashRefreshToken(token))
+  const want = Buffer.from(stored)
+  return given.length === want.length && timingSafeEqual(given, want)
+}
 
 /**
  * Why this account may not hold a session — or `null` if it may.
@@ -173,7 +193,7 @@ export function verifyAccessToken(token: string): DecodedToken | null {
 }
 
 /**
- * Store a bcrypt-hashed refresh token in the database
+ * Store a hashed refresh token in the database
  * Uses the JWT's jti claim as the record ID for lookups
  */
 export async function storeRefreshToken(
@@ -189,7 +209,7 @@ export async function storeRefreshToken(
     throw new Error("Cannot store a refresh token without a jti")
   }
 
-  const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS)
+  const tokenHash = hashRefreshToken(token)
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS)
 
   await db.mobile_refresh_tokens.create({
@@ -345,8 +365,7 @@ export async function verifyRefreshToken(
       return null
     }
 
-    // Verify the token against the stored bcrypt hash
-    const isValid = await bcrypt.compare(token, storedToken.token_hash)
+    const isValid = await refreshTokenMatches(token, storedToken.token_hash)
     if (!isValid) {
       return null
     }
