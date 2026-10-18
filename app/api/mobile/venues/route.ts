@@ -16,11 +16,13 @@ import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
-import { realEventsWhere } from "@/lib/event-kind"
-import { liveGuestIds, venueLiveBucket } from "@/lib/live-count"
+import { realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
+import { liveGuestIds, liveGuestsWhere, venueLiveBucket } from "@/lib/live-count"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere, venuesTakenOver } from "@/lib/venue-visibility"
 import { paginationMeta } from "@/lib/pagination"
+import { venueDayBounds } from "@/lib/venue-day"
+import { venueHours } from "@/lib/venue-hours"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -102,7 +104,7 @@ export async function GET(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { page, limit, search, city, lat, lon, radius, venueType, sortBy, sortOrder } =
+    const { page, limit, search, city, lat, lon, radius, venueType, order, sortBy, sortOrder } =
       parsed.data
 
     const viewer = await db.profiles.findUnique({
@@ -194,7 +196,8 @@ export async function GET(request: NextRequest) {
       _count: { select: { events: { where: upcomingEventFilter } } },
       events: {
         where: upcomingEventFilter,
-        orderBy: { start_time: "asc" },
+        // Id as the tiebreak, as the venue page's `upcoming`: card and page agree on which is next.
+        orderBy: [{ start_time: "asc" }, { id: "asc" }],
         take: 1,
         select: {
           id: true,
@@ -208,6 +211,18 @@ export async function GET(request: NextRequest) {
     } satisfies Prisma.venuesSelect
 
     type VenueRow = Prisma.venuesGetPayload<{ select: typeof venueSelect }>
+
+    /*
+     * `order=live`: three tiers — live now, then open tonight, then the rest —
+     * each in the chosen sort with the id as tiebreak, so a page boundary never
+     * repeats or skips a venue. Disjoint by construction (tonight excludes live).
+     */
+    // What the open-tonight read depends on besides time: the query's own scope and the viewer's age rule.
+    const tonightScope = JSON.stringify({ search, city: cityScope, venueType, lat, lon, radius, viewerAge, taken })
+    const liveTier = order === "live" && mayCountLive ? await liveVenueIds(where, authUser.userId, now) : new Set<string>()
+    const tonightTier =
+      order === "live" ? await openTonightVenueIds(where, upcomingEventFilter, now, liveTier, tonightScope) : new Set<string>()
+    const tiers = [[...liveTier], [...tonightTier]].filter((t) => t.length > 0)
 
     const shouldSortByDistance =
       sortBy === "distance" && lat !== undefined && lon !== undefined
@@ -259,7 +274,13 @@ export async function GET(request: NextRequest) {
         })
 
       totalCount = withDistance.length
-      const pageIds = withDistance.slice((page - 1) * limit, page * limit).map((v) => v.id)
+      const tierOf = (id: string) => {
+        const i = tiers.findIndex((t) => t.includes(id))
+        return i === -1 ? tiers.length : i
+      }
+      // Array sort is stable: the distance order holds inside each tier.
+      const ranked = tiers.length === 0 ? withDistance : [...withDistance].sort((a, b) => tierOf(a.id) - tierOf(b.id))
+      const pageIds = ranked.slice((page - 1) * limit, page * limit).map((v) => v.id)
 
       const pageVenues = await db.venues.findMany({
         where: { id: { in: pageIds } },
@@ -269,15 +290,14 @@ export async function GET(request: NextRequest) {
       const byId = new Map(pageVenues.map((v) => [v.id, v]))
       venues = pageIds.map((id) => byId.get(id)).filter((v): v is VenueRow => Boolean(v))
     } else {
-      venues = await db.venues.findMany({
-        where,
-        select: venueSelect,
-        // `id` after the name: two venues with one name keep one order, so a page
-        // boundary between them never repeats or skips one.
-        orderBy: [{ name: sortOrder }, { id: "asc" }],
-        skip: (page - 1) * limit,
-        take: limit,
-      })
+      // `id` after the name: two venues with one name keep one order, so a page
+      // boundary between them never repeats or skips one.
+      const orderBy = [{ name: sortOrder }, { id: "asc" as const }]
+      const skip = (page - 1) * limit
+      venues =
+        tiers.length === 0
+          ? await db.venues.findMany({ where, select: venueSelect, orderBy, skip, take: limit })
+          : await tieredPage(tiers, (w, o) => db.venues.findMany({ where: { AND: [where, w] }, select: venueSelect, orderBy, ...o }), skip, limit)
       totalCount = await db.venues.count({ where })
     }
 
@@ -327,7 +347,8 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       venues: items,
-      pagination: paginationMeta(page, limit, totalCount),
+      // `order` is echoed only when it was applied, so the app knows the server honoured it.
+      pagination: { ...paginationMeta(page, limit, totalCount), ...(order === "live" && { order: "live" as const }) },
     })
   } catch (error) {
     logger.error("List venues error", { error: String(error) })
@@ -347,4 +368,106 @@ async function liveBuckets(venueIds: string[], viewerId: string, now: Date) {
     venueIds.map((id) => venueLiveBucket(id, viewerId, async () => live.get(id) ?? new Set<string>(), now.getTime()))
   )
   return new Map(venueIds.map((id, i) => [id, buckets[i]]))
+}
+
+/** The venues matching `where` whose `liveNow` is not `quiet` for this viewer. */
+async function liveVenueIds(where: Prisma.venuesWhereInput, viewerId: string, now: Date): Promise<Set<string>> {
+  const rows = await db.event_check_ins.findMany({
+    where: { ...liveGuestsWhere(now), event: { ...venueDaysWhere, venue: where } },
+    select: { event: { select: { venue_id: true } } },
+    distinct: ["event_id"],
+  })
+  const ids = [...new Set(rows.flatMap((r) => (r.event.venue_id ? [r.event.venue_id] : [])))]
+  const buckets = await liveBuckets(ids, viewerId, now)
+  return new Set(ids.filter((id) => buckets.get(id) !== "quiet"))
+}
+
+/** How long the open-tonight set is kept per scope, like the live count's minute. */
+const TONIGHT_TTL_MS = 60_000
+/** The most venues one open-tonight read looks at per source: a scope this large is logged, not walked. */
+const TONIGHT_CEILING = 5000
+const tonightShared = globalThis as typeof globalThis & { __blendnTonight?: Map<string, { ids: Set<string>; at: number }> }
+const tonightCache = (tonightShared.__blendnTonight ??= new Map())
+
+/**
+ * The venues matching `where`, not already live, that are open tonight: their
+ * hours (`venues.hours`, in the venue's own zone) have a row for the weekday of
+ * the venue's current day, or a public event (`eventFilter`, the card's) starts
+ * before that day ends. "Tonight" is the venue's day, not the clock's midnight.
+ *
+ * `where` already carries the query's city / bounding box / search, so a read
+ * is scoped to what the caller listed; the result is kept a minute per scope
+ * (`scope`), so paging and refreshing do not repeat it.
+ */
+async function openTonightVenueIds(
+  where: Prisma.venuesWhereInput,
+  eventFilter: Prisma.eventsWhereInput,
+  now: Date,
+  live: ReadonlySet<string>,
+  scope: string
+): Promise<Set<string>> {
+  let entry = tonightCache.get(scope)
+  if (!entry || now.getTime() - entry.at >= TONIGHT_TTL_MS) {
+    entry = { ids: await readOpenTonight(where, eventFilter, now), at: now.getTime() }
+    if (tonightCache.size > 1000) tonightCache.clear()
+    tonightCache.set(scope, entry)
+  }
+  return new Set([...entry.ids].filter((id) => !live.has(id)))
+}
+
+async function readOpenTonight(where: Prisma.venuesWhereInput, eventFilter: Prisma.eventsWhereInput, now: Date): Promise<Set<string>> {
+  const pick = { id: true, timezone: true, day_reset_hour: true } as const
+  // Events starting within a day and a half can start before some venue's day ends; each is checked against its own venue's end below.
+  const soon = { ...realEventsWhere, ...eventFilter, start_time: { lt: new Date(now.getTime() + 36 * 3_600_000) } }
+  const [withHours, withEvents] = await Promise.all([
+    db.venues.findMany({ where: { AND: [where, { hours: { not: Prisma.DbNull } }] }, select: { ...pick, hours: true }, take: TONIGHT_CEILING }),
+    db.venues.findMany({
+      where: { AND: [where, { events: { some: soon } }] },
+      select: { ...pick, events: { where: soon, orderBy: [{ start_time: "asc" }, { id: "asc" }], take: 1, select: { start_time: true } } },
+      take: TONIGHT_CEILING,
+    }),
+  ])
+  if (withHours.length === TONIGHT_CEILING || withEvents.length === TONIGHT_CEILING) {
+    logger.warn("Open-tonight read hit its ceiling; the tier is truncated", { ceiling: TONIGHT_CEILING })
+  }
+  const ids = new Set<string>()
+  for (const v of withHours) {
+    const { localDate, end } = venueDayBounds(v.timezone, v.day_reset_hour, now)
+    const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay()
+    if (end > now && venueHours(v.hours)?.some((h) => h.day === weekday)) ids.add(v.id)
+  }
+  for (const v of withEvents) {
+    const next = v.events[0]
+    if (next && next.start_time < venueDayBounds(v.timezone, v.day_reset_hour, now).end) ids.add(v.id)
+  }
+  return ids
+}
+
+/**
+ * One page over disjoint tiers of venue ids followed by everyone else: each
+ * tier is a segment in sequence and the page is a window across them, so a
+ * page boundary never repeats or skips a venue. `read` is the venue query
+ * (already ordered, id as tiebreak) narrowed by `w`.
+ */
+async function tieredPage<T>(
+  tiers: string[][],
+  read: (w: Prisma.venuesWhereInput, o: { skip: number; take: number }) => Promise<T[]>,
+  skip: number,
+  limit: number
+): Promise<T[]> {
+  const segments = [
+    ...tiers.map((ids) => ({ w: { id: { in: ids } } as Prisma.venuesWhereInput, size: ids.length })),
+    { w: { id: { notIn: tiers.flat() } } as Prisma.venuesWhereInput, size: Infinity },
+  ]
+  const out: T[] = []
+  let offset = 0
+  for (const seg of segments) {
+    const wanted = limit - out.length
+    if (wanted <= 0) break
+    const segSkip = Math.max(0, skip - offset)
+    offset += seg.size
+    if (segSkip >= seg.size) continue
+    out.push(...(await read(seg.w, { skip: segSkip, take: Math.min(wanted, seg.size - segSkip) })))
+  }
+  return out
 }
