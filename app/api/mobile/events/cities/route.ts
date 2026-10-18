@@ -10,7 +10,37 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { realEventsWhere } from "@/lib/event-kind"
-import { openOnBlendnWhere } from "@/lib/venue-visibility"
+import { cityPlaces } from "@/lib/city-places"
+
+async function viewerEvents(userId: string) {
+  /*
+   * Deliberately the same shape as the browse filter in `../route.ts`,
+   * including the age gate. An 18+ event counted here but hidden there is
+   * exactly the drift this endpoint exists to avoid.
+   */
+  const viewer = await db.profiles.findUnique({
+    where: { id: userId },
+    select: { age: true, date_of_birth: true },
+  })
+  // Derived rather than read off the row — see `ageFrom` in lib/age.ts. The
+  // counts here must match the browse filter exactly, and that one derives.
+  const viewerAge = ageFrom(viewer)
+
+  return db.events.findMany({
+    where: {
+      deleted_at: null,
+      ...realEventsWhere,
+      status: "published",
+      visibility: "public",
+      end_time: { gte: new Date() },
+      city: { not: null },
+      ...(typeof viewerAge === "number"
+        ? { OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }
+        : {}),
+    },
+    select: { city: true, latitude: true, longitude: true },
+  })
+}
 
 /**
  * The cities you can browse, with how many events and places are in each.
@@ -60,43 +90,14 @@ export async function GET(request: NextRequest) {
     }
 
     /*
-     * Deliberately the same shape as the browse filter in `../route.ts`,
-     * including the age gate. An 18+ event counted here but hidden there is
-     * exactly the drift this endpoint exists to avoid.
-     */
-    const viewer = await db.profiles.findUnique({
-      where: { id: user.userId },
-      select: { age: true, date_of_birth: true },
-    })
-    // Derived rather than read off the row — see `ageFrom` in lib/age.ts. The
-    // counts here must match the browse filter exactly, and that one derives.
-    const viewerAge = ageFrom(viewer)
-
-    const rows = await db.events.findMany({
-      where: {
-        deleted_at: null,
-        ...realEventsWhere,
-        status: "published",
-        visibility: "public",
-        end_time: { gte: new Date() },
-        city: { not: null },
-        ...(typeof viewerAge === "number"
-          ? { OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }
-          : {}),
-      },
-      select: { city: true, latitude: true, longitude: true },
-    })
-
-    /*
-     * The places Places lists, by the same visibility the venues route applies.
+     * The places Places lists, by the same visibility the venues route applies
+     * (`cityPlaces`, cached). They do not depend on the viewer, so they load
+     * alongside profile -> events rather than after them.
      * ponytail: the venues route also hides a venue an event has taken over
      * right now, so a city's placeCount can run a few above what opens; group
      * in SQL with that rule if the table outgrows a scan of three columns.
      */
-    const places = await db.venues.findMany({
-      where: { deleted_at: null, status: "active", city: { not: null }, AND: [openOnBlendnWhere] },
-      select: { city: true, latitude: true, longitude: true },
-    })
+    const [places, rows] = await Promise.all([cityPlaces(), viewerEvents(user.userId)])
     // Where the home map goes when the city is picked (step 2): its events' points, else its places'.
     return successResponse({ cities: browseCities(rows, places) })
   } catch (error) {

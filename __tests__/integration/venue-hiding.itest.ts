@@ -5,6 +5,7 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
+import { clearCityPlaces } from "@/lib/city-places"
 import { venueDayFor } from "@/lib/venue-day"
 import { venuesTakenOver } from "@/lib/venue-visibility"
 
@@ -430,6 +431,8 @@ describe("GET /events/cities carries where to point the map (step 2 review)", ()
     const city = `Itest${TOKEN}Places`
     const v = await place("places-only city")
     await db.venues.update({ where: { id: v }, data: { city } })
+    // The picker's places are cached for 60 s; this one was written just now.
+    clearCityPlaces()
     const viewer = (await person()).token
 
     const res = await citiesRoute.GET(req("/api/mobile/events/cities", viewer))
