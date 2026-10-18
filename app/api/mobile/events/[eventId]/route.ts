@@ -20,7 +20,7 @@ import { canPublish } from "@/lib/geofence-input"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
-import { getOccupancy } from "@/lib/occupancy"
+import { getInsideCount } from "@/lib/occupancy"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import {
   successResponse,
@@ -80,8 +80,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .filter(Boolean)
     )
 
-    // Fetch event with all related data
-    const event = await db.events.findUnique({
+    // Fetch event with all related data. Not awaited yet: nothing below needs
+    // its row, so the reads after it start with it (one wave instead of three).
+    const eventRead = db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       include: {
         organizer: {
@@ -153,15 +154,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    if (!event) {
-      return notFoundResponse("Event not found")
-    }
-
-    // Counted from check-in rows rather than a stored column.
-    const occupancy = await getOccupancy(eventId)
-
-    const [attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
+    const [event, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
       await Promise.all([
+        eventRead,
+        // Counted from check-in rows rather than a stored column. Just the
+        // headcount: `getOccupancy`'s capacity and unique-attendance reads are
+        // not on this page.
+        getInsideCount(eventId),
         /*
          * `checkInCount` was `_count.check_ins` filtered to `checked_in`, which
          * counted rows on a table holding one per person **per day** — and
@@ -205,6 +204,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           },
         }),
       ])
+
+    if (!event) {
+      return notFoundResponse("Event not found")
+    }
 
     // Calculate distance if coordinates provided
     let distance: number | null = null
@@ -263,7 +266,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // the client draws nothing for it, falling back to remaining capacity.
       doorPolicy: event.door_policy,
       // Counted, not stored. The field name stays so no client breaks.
-      currentCapacity: occupancy.inside,
+      currentCapacity: inside,
       // Covers the whole area, outline or circle, from the pin (SCRUM-350) —
       // the app judges "near enough" and "has left" by this circle alone.
       checkInRadius: phoneCheckInRadius(event),
