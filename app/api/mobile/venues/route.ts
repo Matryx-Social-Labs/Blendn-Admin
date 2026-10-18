@@ -23,15 +23,7 @@ import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere, venuesTakenOver
 import { paginationMeta } from "@/lib/pagination"
 import { venueDayBounds } from "@/lib/venue-day"
 import { venueHours } from "@/lib/venue-hours"
-
-/**
- * The most venues a distance sort will pull into memory at once.
- *
- * Same shape and the same reasoning as `DISTANCE_SORT_CEILING` in the events
- * route: this bounds what gets *sorted*, not what gets returned, and it is
- * sized to be unreachable and to say so in the log if it ever is not.
- */
-const DISTANCE_SORT_CEILING = 5000
+import { DISTANCE_SORT_CEILING, distanceCandidates } from "@/lib/venue-distance"
 
 /**
  * Hotspots — the venue-shaped twin of The Pulse.
@@ -244,14 +236,15 @@ export async function GET(request: NextRequest) {
        * same reason: the relation count and the nested next-event are far too
        * expensive to fetch for rows that will be thrown away.
        */
-      const lightweight = await db.venues.findMany({
+      const { rows: lightweight, truncated } = await distanceCandidates(
         where,
-        select: { id: true, latitude: true, longitude: true },
-        orderBy: [{ name: "asc" }, { id: "asc" }],
-        take: DISTANCE_SORT_CEILING,
-      })
+        lat,
+        lon,
+        sortOrder === "asc",
+        DISTANCE_SORT_CEILING
+      )
 
-      if (lightweight.length === DISTANCE_SORT_CEILING) {
+      if (truncated) {
         logger.warn("Venue distance sort hit its ceiling; results are truncated", {
           ceiling: DISTANCE_SORT_CEILING,
           city: city ?? null,
