@@ -164,8 +164,12 @@ describe("the visibility predicate", () => {
      * its producer, already recorded twice in this project.
      */
     const inbox = codeOnly(read("app", "api", "mobile", "conversations", "route.ts"))
-    expect(blockAfter(inbox, "messages: {")).toContain("VISIBLE_DM")
-    expect(blockAfter(inbox, "_count: {")).toContain("VISIBLE_DM")
+    // The preview is raw SQL now (a LATERAL ... LIMIT 1: Prisma does not send a nested `take`),
+    // so it writes the predicate out; the unread count still spreads the constant.
+    expect(blockAfter(inbox, "async function lastVisibleMessages")).toContain(
+      "(moderation_status IS NULL OR moderation_status <> 'hidden')"
+    )
+    expect(blockAfter(inbox, "async function unreadCounts")).toContain("VISIBLE_DM")
 
     const MODERATION_READS = [
       // Reviewing a report. Must see what was hidden.
