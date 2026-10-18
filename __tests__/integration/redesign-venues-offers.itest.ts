@@ -212,6 +212,48 @@ describe("GET /venues?order=live", () => {
   })
 })
 
+describe("GET /venues?order=live, three tiers", () => {
+  it("returns live, then open tonight, then the rest, in order across two pages, and echoes meta.order", async () => {
+    const live = await venue("zt D live")
+    const byHours = await venue("zt C hours", { hours: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: "10:00", close: "23:00" })) })
+    const byEvent = await venue("zt B event")
+    await eventAt(byEvent, 3)
+    const rest1 = await venue("zt A rest")
+    const rest2 = await venue("zt E rest")
+    // A later event is not tonight; hours on no day are not tonight either.
+    const farEvent = await venue("zt F far")
+    await eventAt(farEvent, 30)
+    const day = (await venueDayFor(live))!
+    events.push(day.id)
+    const occ = await occurrenceOf(day.id)
+    for (let i = 0; i < 5; i++) {
+      const p = await adult(`rv_t${i}`)
+      await db.event_check_ins.create({
+        data: { event_id: day.id, occurrence_id: occ, user_id: p.id, kind: "attendee", status: "checked_in", expires_at: new Date(Date.now() + HOUR) },
+      })
+    }
+    const page = async (n: number) => {
+      const res = await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20zt&order=live&limit=3&page=${n}`))
+      return res.data
+    }
+    const [one, two] = [await page(1), await page(2)]
+    const ids = (d: { venues: { id: string }[] }) => d.venues.map((v) => v.id)
+    // live; then open tonight (by event "B", by hours "C", name order); then the rest by name.
+    expect(ids(one)).toEqual([live, byEvent, byHours])
+    expect(ids(two)).toEqual([rest1, rest2, farEvent])
+    expect(one.meta).toEqual({ order: "live" })
+    expect(two.meta).toEqual({ order: "live" })
+    // Without the order there is no meta, and the plain name order stands.
+    const plain = (await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20zt&limit=6`))).data
+    expect(plain.meta).toBeUndefined()
+    expect(ids(plain)).toEqual([rest1, byEvent, byHours, live, rest2, farEvent])
+    // By distance the tiers hold too.
+    const dist = (await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20zt&order=live&sortBy=distance&lat=12.97&lon=77.59&limit=3`))).data
+    expect(ids(dist)[0]).toBe(live)
+    expect(new Set(ids(dist).slice(1))).toEqual(new Set([byEvent, byHours]))
+  })
+})
+
 describe("regulars: { active, eligible }", () => {
   const today = () => venueDayBounds("UTC", 6, new Date()).start
   async function night(venueId: string, userId: string, k: number) {

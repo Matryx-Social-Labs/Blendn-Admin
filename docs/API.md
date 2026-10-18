@@ -739,7 +739,7 @@ vocabulary, meaning exactly what it means there.
 | `radius` | km. **No default.** Only bites when you send it |
 | `venueType` | One of the 35 slugs; anything else is a 400 |
 | `sortBy` | `name` (default) or `distance` |
-| `order` | `live`: venues whose `liveNow` is not `quiet` come first, in the chosen sort, then the rest — so "Live now" needs no paging past the first page. Ignored (and `liveNow` null) for a caller who may not go live |
+| `order` | `live`: three tiers — **live now** (`liveNow` not `quiet`), then **open tonight** (`venues.hours` has a row for the weekday of the venue's current day, or a public event starts before that day ends), then the rest. Each tier is in the chosen sort with the id as tiebreak, so pages never repeat or skip a venue; read until the first quiet venue and nothing open tonight is lost. A caller who may not go live (`liveNow` null) gets the last two tiers. The response echoes `data.meta.order: "live"` when applied; without it the server did not honour the order |
 
 `floors` is the 3D map's height override for the venue's building, set by its
 owner or an admin on the dashboard (1–200): draw it `floors × 3.2` m tall,

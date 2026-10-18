@@ -131,7 +131,7 @@ registry.registerPath({
       lon: z.coerce.number().min(-180).max(180).optional(),
       radius: z.coerce.number().min(0.1).max(100).optional(),
       venueType: z.string().optional(),
-      order: z.enum(["live"]).optional().describe("`live`: venues with a non-`quiet` `liveNow` come first, in the chosen sort, then the rest. Ignored for a caller who may not go live."),
+      order: z.enum(["live"]).optional().describe("`live`: three tiers — live now (`liveNow` not `quiet`), then open tonight (hours for the venue's current day, or a public event starting before its day ends), then the rest — each in the chosen sort, id as tiebreak, so pages never repeat or skip. A caller who may not go live gets the last two tiers. The response echoes `meta.order: \"live\"` when applied."),
       sortBy: z.enum(["name", "distance"]).optional(),
       sortOrder: z.enum(["asc", "desc"]).optional(),
     }),
@@ -145,6 +145,7 @@ registry.registerPath({
             z.object({
               venues: z.array(VenueListItemSchema),
               pagination: PaginationMetaSchema,
+              meta: z.object({ order: z.literal("live") }).optional().describe("Present only when `order=live` was applied"),
             })
           ),
         },
