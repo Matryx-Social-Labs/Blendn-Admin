@@ -6,6 +6,7 @@ import { eventHost } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
+import { eventTallies, type EventTallies } from "@/lib/event-tallies"
 
 export const eventListSelect = {
   id: true,
@@ -109,15 +110,7 @@ export const eventListSelect = {
     orderBy: { order: "asc" },
     take: 5,
   },
-  _count: {
-    select: {
-      favorites: true,
-      ratings: true,
-      // One correlated count per row, on `event_rsvps(event_id, status, …)`;
-      // the page is at most PAGINATION.MAX_LIMIT rows.
-      rsvps: { where: { status: "going" } },
-    },
-  },
+  // No `_count`: it aggregates each whole table per call. See `eventTallies`.
 } satisfies Prisma.eventsSelect
 
 export type EventListItem = Prisma.eventsGetPayload<{
@@ -154,7 +147,8 @@ async function transformEvent(
   event: EventListItem,
   ctx: TransformContext,
   attended: Map<string, number>,
-  here: Map<string, number>
+  here: Map<string, number>,
+  tallies: EventTallies
 ) {
   return {
     id: event.id,
@@ -256,12 +250,12 @@ async function transformEvent(
      * which is the attended count above, so it kept two people who had left.
      */
     hereCount: here.get(event.id) ?? 0,
-    favoriteCount: event._count.favorites,
-    ratingCount: event._count.ratings,
+    favoriteCount: tallies.favorites.get(event.id) ?? 0,
+    ratingCount: tallies.ratings.get(event.id) ?? 0,
     // The detail's `stats.rsvpCount`, the same number: RSVPs `going` only, never
     // `waitlisted`, `maybe` or `not_going`. On the card so the Pulse need not
     // fetch every event's detail to show it.
-    goingCount: event._count.rsvps,
+    goingCount: tallies.going.get(event.id) ?? 0,
     isFavorited: ctx.favoriteEventIds.has(event.id),
     userCheckin: ctx.includeCheckins
       ? ctx.userCheckinMap?.[event.id] || { status: "none" }
@@ -301,8 +295,12 @@ export async function transformEvents(
    * while the event was at its busiest.
    */
   const ids = events.map((e) => e.id)
-  const [attended, here] = await Promise.all([distinctAttendeeCounts(ids), hereCounts(ids)])
+  const [attended, here, tallies] = await Promise.all([
+    distinctAttendeeCounts(ids),
+    hereCounts(ids),
+    eventTallies(ids),
+  ])
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
-  return Promise.all(events.map((event) => transformEvent(event, withBudget, attended, here)))
+  return Promise.all(events.map((event) => transformEvent(event, withBudget, attended, here, tallies)))
 }

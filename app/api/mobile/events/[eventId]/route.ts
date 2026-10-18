@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { distinctAttendeeCounts, hereCountFor } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
+import { eventTallies } from "@/lib/event-tallies"
 import { offersClaim } from "@/lib/curation"
 import { dashboardUrl } from "@/lib/email"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -149,15 +150,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             member_count: true,
           },
         },
-        _count: {
-          select: {
-            favorites: true,
-            ratings: true,
-            rsvps: {
-              where: { status: "going" },
-            },
-          },
-        },
       },
     })
 
@@ -168,7 +160,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Counted from check-in rows rather than a stored column.
     const occupancy = await getOccupancy(eventId)
 
-    const [attendedCounts, hereNow, userFavorite, userRating, userCheckIn, userRsvp] =
+    const [attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
       await Promise.all([
         /*
          * `checkInCount` was `_count.check_ins` filtered to `checked_in`, which
@@ -179,6 +171,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         distinctAttendeeCounts([eventId]),
         // Here now, the Room's number: `checkInCount` above keeps who has left.
         hereCountFor(eventId),
+        // Not `_count`: that aggregates each whole table per call. See `eventTallies`.
+        eventTallies([eventId]),
         db.event_favorites.findUnique({
           where: {
             event_id_user_id: {
@@ -338,14 +332,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       stats: {
         checkInCount: attendedCounts.get(eventId) ?? 0,
         hereCount: hereNow,
-        favoriteCount: event._count.favorites,
+        favoriteCount: tallies.favorites.get(eventId) ?? 0,
         /*
          * No average. Anyone who can open the event could poll it as people
          * rate and read each new score from the change, and the app promises
          * a rater the night's score is "only ever seen by us" (SCRUM-437).
          */
-        ratingCount: event._count.ratings,
-        rsvpCount: event._count.rsvps,
+        ratingCount: tallies.ratings.get(eventId) ?? 0,
+        rsvpCount: tallies.going.get(eventId) ?? 0,
       },
       userStatus: {
         isFavorited: !!userFavorite,
