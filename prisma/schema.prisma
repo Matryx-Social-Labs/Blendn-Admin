@@ -712,6 +712,7 @@ model amenities {
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   events event_amenities[]
+  venues venue_amenities[]
 
   @@index([is_active, sort_order])
 }
@@ -737,6 +738,22 @@ model event_amenities {
   amenity amenities @relation(fields: [amenity_id], references: [id], onDelete: Restrict)
 
   @@id([event_id, amenity_id])
+  @@index([amenity_id])
+}
+
+/// What a venue offers, from the same vocabulary events tick from (`amenities`).
+/// Shown on the venue page; nothing writes it yet (no dashboard field), so a
+/// venue lists none until one does. `Restrict` for the same reason as
+/// `event_amenities`: retiring an amenity is `is_active`, not a delete.
+model venue_amenities {
+  venue_id   String   @db.Uuid
+  amenity_id String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  venue   venues    @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  amenity amenities @relation(fields: [amenity_id], references: [id], onDelete: Restrict)
+
+  @@id([venue_id, amenity_id])
   @@index([amenity_id])
 }
 
@@ -1637,8 +1654,6 @@ model venues {
   hours          Json?
   /// A few lines about the place, shown on the venue page. Null: not given.
   description    String?
-  /// Short labels ("Wi-Fi", "Outdoor seating") for the venue page. Empty: not given.
-  amenities      String[]     @default([])
   /// "Open on Blendn" (D-13): false takes a CLAIMED venue out of the app's
   /// Places and home map; its events still show. Set by the owner's
   /// organisation or an admin, audited. Ignored on an unclaimed venue, which is
@@ -1664,6 +1679,7 @@ model venues {
   billing_checkouts billing_checkouts[]
   created_by_org organisations? @relation("VenueCreatedByOrg", fields: [created_by_org_id], references: [id], onDelete: SetNull)
   events         events[]
+  amenity_links  venue_amenities[]
   offers         venue_offers[]
   offer_sends    venue_offer_sends[]
   regular_optins venue_regular_optins[]
@@ -3550,6 +3566,12 @@ model blends {
   created_at    DateTime  @default(now()) @db.Timestamptz(6)
   closes_at     DateTime  @db.Timestamptz(6)
   closed_at     DateTime? @db.Timestamptz(6)
+  /// When someone on side A / side B tapped "reveal" in this Blend. Set by every
+  /// tap, whoever consented, so "has my crew revealed?" is a fact about the tap
+  /// and never about which member said yes (`crewRevealed`). Side B is a crew or
+  /// the one matched person.
+  a_revealed_at DateTime? @db.Timestamptz(6)
+  b_revealed_at DateTime? @db.Timestamptz(6)
 
   occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Restrict)
   a_crew     crews             @relation("BlendSideA", fields: [a_crew_id], references: [id], onDelete: Restrict)

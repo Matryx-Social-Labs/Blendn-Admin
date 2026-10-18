@@ -66,7 +66,10 @@ export async function revealInBlend(
 
   // The matched person reveals themselves; a crew member, their crew.
   if (blend.b_user_id === userId) {
-    await db.blend_reveals.createMany({ data: [{ blend_id: blend.id, user_id: userId }], skipDuplicates: true })
+    await db.$transaction([
+      db.blend_reveals.createMany({ data: [{ blend_id: blend.id, user_id: userId }], skipDuplicates: true }),
+      db.blends.updateMany({ where: { id: blend.id, b_revealed_at: null }, data: { b_revealed_at: new Date() } }),
+    ])
     return { revealed: true }
   }
   const sides = [blend.a_crew_id, ...(blend.b_crew_id ? [blend.b_crew_id] : [])]
@@ -93,6 +96,12 @@ export async function revealInBlend(
     const switches = await tx.crew_members.findMany({
       where: { crew_id: side.crew_id, user_id: { in: targets } },
       select: { user_id: true, keep_me_anonymous: true },
+    })
+    // The tap itself, kept per side and whoever consented: "has my crew revealed?" must not
+    // be derivable from which of its members showed up in `blend_reveals`.
+    await tx.blends.updateMany({
+      where: { id: blend.id, ...(side.crew_id === blend.a_crew_id ? { a_revealed_at: null } : { b_revealed_at: null }) },
+      data: side.crew_id === blend.a_crew_id ? { a_revealed_at: new Date() } : { b_revealed_at: new Date() },
     })
     const consenting = switches.filter((m) => !m.keep_me_anonymous).map((m) => m.user_id)
     await tx.blend_reveals.createMany({
@@ -178,6 +187,8 @@ export async function blendsOf(viewerId: string) {
           id: true,
           closes_at: true,
           b_user_id: true,
+          a_revealed_at: true,
+          b_revealed_at: true,
           occurrence: { select: { event_id: true } },
           a_crew: crewCard,
           b_crew: crewCard,
@@ -231,10 +242,6 @@ export async function blendsOf(viewerId: string) {
             (id === viewerId || (!apart.has(`${viewerId}|${id}`) && profileOf.get(id)?.profile?.show_online !== false))
         )
       const isRevealed = (id: string) => revealed.has(`${blend.id}|${id}`)
-      // Everyone a reveal here reaches: the people the door admits, kept-apart pairs out (a
-      // crewmate hiding from you is not counted, as in a crew's `size`), but INCLUDING anyone with
-      // "show online" off — they sit in the room and see the faces, though no side lists them.
-      const roomSize = room.members.filter((m) => admitted.has(m.user_id) && (m.user_id === viewerId || !apart.has(`${viewerId}|${m.user_id}`))).length
       const person = (id: string): BlendPerson => {
         const p = profileOf.get(id)
         const named = id === viewerId || isRevealed(id) || !!visible.get(eventId)?.has(id)
@@ -245,7 +252,10 @@ export async function blendsOf(viewerId: string) {
           photo: named ? (p?.profile?.photos?.[0] ?? null) : null,
         }
       }
-      const crewSide = (crew: { id: string; name: string; emblem_seed: string }): BlendSideView => {
+      // Whether someone tapped reveal on this side: a fact about the tap (`*_revealed_at`), set whoever
+      // consented, so it can never say which crewmate declined.
+      const sideTapped = (side: "a" | "b") => (side === "a" ? blend.a_revealed_at : blend.b_revealed_at) !== null
+      const crewSide = (crew: { id: string; name: string; emblem_seed: string }, side: "a" | "b"): BlendSideView => {
         const rows = memberships.filter((m) => m.crew_id === crew.id && shown.includes(m.user_id))
         const mine = rows.some((m) => m.user_id === viewerId)
         const revealedCount = mine ? null : rows.filter((m) => isRevealed(m.user_id)).length
@@ -261,12 +271,12 @@ export async function blendsOf(viewerId: string) {
           keptPrivate: privateCount,
           revealedCount,
           privateCount,
-          crewRevealed: mine ? rows.some((m) => isRevealed(m.user_id)) : null,
+          crewRevealed: mine ? sideTapped(side) : null,
           people: mine ? [person(viewerId)] : rows.map((m) => person(m.user_id)),
         }
       }
-      const sides: BlendSideView[] = [crewSide(blend.a_crew)]
-      if (blend.b_crew) sides.push(crewSide(blend.b_crew))
+      const sides: BlendSideView[] = [crewSide(blend.a_crew, "a")]
+      if (blend.b_crew) sides.push(crewSide(blend.b_crew, "b"))
       else if (blend.b_user_id && shown.includes(blend.b_user_id)) {
         const mine = blend.b_user_id === viewerId
         sides.push({
@@ -280,11 +290,11 @@ export async function blendsOf(viewerId: string) {
           keptPrivate: mine ? null : 0,
           revealedCount: mine ? null : isRevealed(blend.b_user_id) ? 1 : 0,
           privateCount: mine ? null : 0,
-          crewRevealed: mine ? isRevealed(blend.b_user_id) : null,
+          crewRevealed: mine ? blend.b_revealed_at !== null : null,
           people: [person(blend.b_user_id)],
         })
       }
-      return { blendId: blend.id, chatGroupId: room.id, eventId, closesAt: blend.closes_at, roomSize, sides }
+      return { blendId: blend.id, chatGroupId: room.id, eventId, closesAt: blend.closes_at, sides }
     }),
   }
 }

@@ -32,6 +32,7 @@ const TOKEN = `zrv${Date.now().toString(36).replace(/\d/g, "")}q`
 const users: string[] = []
 const venues: string[] = []
 const events: string[] = []
+const amenityIds: string[] = []
 const orgs: string[] = []
 let viewer: { id: string; token: string }
 let host: string
@@ -92,6 +93,8 @@ beforeAll(async () => {
 })
 beforeEach(() => resetMemoryStore())
 afterAll(async () => {
+  await db.venue_amenities.deleteMany({ where: { venue_id: { in: venues } } })
+  await db.amenities.deleteMany({ where: { id: { in: amenityIds } } })
   await db.venue_offer_sends.deleteMany({ where: { venue_id: { in: venues } } })
   await db.venue_offers.deleteMany({ where: { venue_id: { in: venues } } })
   const dayIds = (await db.events.findMany({ where: { venue_id: { in: venues } }, select: { id: true } })).map((e) => e.id)
@@ -109,12 +112,21 @@ afterAll(async () => {
 describe("GET /venues/:id carries the venue page's facts", () => {
   it("returns hours, description, amenities, capacity and dayResetHour as set, and null / [] when not", async () => {
     const hours = [{ day: 5, open: "17:00", close: "01:00" }]
-    const full = await venue("Full", { capacity: 80, hours, description: "A rooftop.", amenities: ["Wi-Fi", "Outdoor seating"] })
+    const full = await venue("Full", { capacity: 80, hours, description: "A rooftop." })
+    const [first, second, retired] = await Promise.all(
+      [["Zed Outdoor", 2, true], ["Zed Music", 1, true], ["Zed Retired", 0, false]].map(([name, sort_order, is_active]) =>
+        db.amenities.create({ data: { name: name as string, slug: testId("am"), sort_order: sort_order as number, is_active: is_active as boolean } })
+      )
+    )
+    amenityIds.push(first.id, second.id, retired.id)
+    await db.venue_amenities.createMany({ data: [first, second, retired].map((a) => ({ venue_id: full, amenity_id: a.id })) })
     const bare = await venue("Bare")
     const garbled = await venue("Garbled", { hours: { monday: "late" } })
 
     const a = await body(await get(detail, `/api/mobile/venues/${full}`, viewer, { venueId: full }))
-    expect(a.data.venue).toMatchObject({ capacity: 80, dayResetHour: 6, hours, description: "A rooftop.", amenities: ["Wi-Fi", "Outdoor seating"], upcoming: [] })
+    expect(a.data.venue).toMatchObject({ capacity: 80, dayResetHour: 6, hours, description: "A rooftop.", upcoming: [] })
+    // The shared vocabulary, in its display order, without a retired amenity.
+    expect(a.data.venue.amenities).toEqual(["Zed Music", "Zed Outdoor"])
     const b = await body(await get(detail, `/api/mobile/venues/${bare}`, viewer, { venueId: bare }))
     expect(b.data.venue).toMatchObject({ capacity: null, hours: null, description: null, amenities: [] })
     // A value that is not the documented shape reads as not given, never a broken page.
@@ -134,9 +146,28 @@ describe("GET /venues/:id carries the venue page's facts", () => {
     await eventAt(v, 13, { min_age: 40 })
     await eventAt(v, 14, { deleted_at: new Date() })
     await eventAt(v, -9) // ended
-    const day = await venueDayFor(v)
-    if (day) events.push(day.id)
-
+    // A venue day that every other filter would let through: the database refuses a public venue
+    // day (`events_venue_day_shape`), so lift the CHECK for this row only and put it back. Only
+    // `...realEventsWhere` keeps it off the page.
+    const day = (await venueDayFor(v))!
+    events.push(day.id)
+    await db.$executeRawUnsafe(`ALTER TABLE events DROP CONSTRAINT events_venue_day_shape`)
+    try {
+      await db.events.update({
+        where: { id: day.id },
+        data: { visibility: "public", status: "published", start_time: new Date(Date.now() + 2 * HOUR), end_time: new Date(Date.now() + 20 * HOUR) },
+      })
+      const res = await body(await get(detail, `/api/mobile/venues/${v}`, viewer, { venueId: v }))
+      expect(res.data.venue.upcoming.map((e: { id: string }) => e.id)).toEqual([sooner, control, later])
+      const card = (await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20Upcoming`))).data.venues[0]
+      expect(card.upcomingEventCount).toBe(3)
+      expect(card.nextEvent.id).toBe(sooner)
+    } finally {
+      await db.events.update({ where: { id: day.id }, data: { visibility: "unlisted" } })
+      await db.$executeRawUnsafe(
+        `ALTER TABLE events ADD CONSTRAINT events_venue_day_shape CHECK ("kind" = 'event' OR ("venue_id" IS NOT NULL AND "visibility" = 'unlisted' AND "organizer_org_id" IS NULL))`
+      )
+    }
     const res = await body(await get(detail, `/api/mobile/venues/${v}`, viewer, { venueId: v }))
     expect(res.data.venue.upcoming.map((e: { id: string }) => e.id)).toEqual([sooner, control, later])
     expect(res.data.venue.upcoming[0]).toEqual({
@@ -213,7 +244,7 @@ describe("GET /venues?order=live", () => {
 })
 
 describe("GET /venues?order=live, three tiers", () => {
-  it("returns live, then open tonight, then the rest, in order across two pages, and echoes meta.order", async () => {
+  it("returns live, then open tonight, then the rest, in order across two pages, and echoes pagination.order", async () => {
     const live = await venue("zt D live")
     const byHours = await venue("zt C hours", { hours: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: "10:00", close: "23:00" })) })
     const byEvent = await venue("zt B event")
@@ -241,11 +272,11 @@ describe("GET /venues?order=live, three tiers", () => {
     // live; then open tonight (by event "B", by hours "C", name order); then the rest by name.
     expect(ids(one)).toEqual([live, byEvent, byHours])
     expect(ids(two)).toEqual([rest1, rest2, farEvent])
-    expect(one.meta).toEqual({ order: "live" })
-    expect(two.meta).toEqual({ order: "live" })
+    expect(one.pagination.order).toBe("live")
+    expect(two.pagination.order).toBe("live")
     // Without the order there is no meta, and the plain name order stands.
     const plain = (await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20zt&limit=6`))).data
-    expect(plain.meta).toBeUndefined()
+    expect(plain.pagination.order).toBeUndefined()
     expect(ids(plain)).toEqual([rest1, byEvent, byHours, live, rest2, farEvent])
     // By distance the tiers hold too.
     const dist = (await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20zt&order=live&sortBy=distance&lat=12.97&lon=77.59&limit=3`))).data

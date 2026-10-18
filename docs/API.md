@@ -739,7 +739,7 @@ vocabulary, meaning exactly what it means there.
 | `radius` | km. **No default.** Only bites when you send it |
 | `venueType` | One of the 35 slugs; anything else is a 400 |
 | `sortBy` | `name` (default) or `distance` |
-| `order` | `live`: three tiers — **live now** (`liveNow` not `quiet`), then **open tonight** (`venues.hours` has a row for the weekday of the venue's current day, or a public event starts before that day ends), then the rest. Each tier is in the chosen sort with the id as tiebreak, so pages never repeat or skip a venue; read until the first quiet venue and nothing open tonight is lost. A caller who may not go live (`liveNow` null) gets the last two tiers. The response echoes `data.meta.order: "live"` when applied; without it the server did not honour the order |
+| `order` | `live`: three tiers — **live now** (`liveNow` not `quiet`), then **open tonight** (`venues.hours` has a row for the weekday of the venue's current day, or a public event starts before that day ends), then the rest. Each tier is in the chosen sort with the id as tiebreak, so pages never repeat or skip a venue; read until the first quiet venue and nothing open tonight is lost. A caller who may not go live (`liveNow` null) gets the last two tiers. The response echoes `pagination.order: "live"` when applied; without it the server did not honour the order. A venue can change tier (somebody goes live) between two page requests, so **de-duplicate by venue `id` across pages** |
 
 `floors` is the 3D map's height override for the venue's building, set by its
 owner or an admin on the dashboard (1–200): draw it `floors × 3.2` m tall,
@@ -826,7 +826,7 @@ for one with no known adult age (as at its door). 60 a minute per person, then
              "floors": null, "claimed": false,
              "capacity": 300, "dayResetHour": 6,
              "hours": [{ "day": 5, "open": "17:00", "close": "01:00" }],
-             "description": null, "amenities": ["Wi-Fi", "Outdoor seating"],
+             "description": null, "amenities": ["Live Music", "Outdoor Seating"],
              "upcoming": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
                             "startTime": "…", "endTime": "…" }] },
   "live": { "open": true, "closedReason": null, "eventId": null,
@@ -847,7 +847,7 @@ for one with no known adult age (as at its door). 60 a minute per person, then
 | `live.youAreLive` … `chatGroupId` | Your own window. Count down from `expiresAt`, never from the tap; open the room by `venueDayId` / `chatGroupId` |
 | `live.stayUntil` | The furthest "stay" can carry your window (four hours from the first stay today); null until you chose stay |
 | `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given |
-| `venue.description`, `venue.amenities` | Free text about the place (null) and short labels (`[]`) until given |
+| `venue.description`, `venue.amenities` | Free text about the place (null) and amenity names from the shared vocabulary (`[]`) until given |
 | `venue.capacity`, `venue.dayResetHour` | The venue's capacity (null if unknown) and the local hour its day starts |
 | `venue.upcoming` | Its next public events, at most 5, soonest first: the Places card's filter (published, public, not ended, link not disputed by the venue, within your age) — never its own live rooms |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
@@ -1700,13 +1700,14 @@ its door admits it now, minus anybody kept apart from you and anybody who
 turned "show online" off. Anyone may leave on their own
 (`POST /chat/groups/:id/leave`); the room stays for the rest.
 
-**What `GET /blends` adds for the reveal sheet.** `roomSize`: everyone a reveal
-reaches — the people the door admits, minus anybody kept apart from you, but
-**including** people with "show online" off (they are in the room though no side
-lists them). Per side: `revealedCount` / `privateCount` (the same numbers as
+**What `GET /blends` adds for the reveal sheet.** There is deliberately no room
+size: any figure for "everyone a reveal reaches" would count people who turned
+"show online" off. Per side: `revealedCount` / `privateCount` (the same numbers as
 `revealed` / `keptPrivate`: their side only, null on yours) and `crewRevealed`
-(yours only, null on theirs): whether your crew has revealed here — one bit
-about the crew, never which member and never a count.
+(yours only, null on theirs): whether anybody on your side has tapped reveal
+here. It is stored per side when the tap happens (`blends.a_revealed_at` /
+`b_revealed_at`), whoever consented, so it never depends on which crewmate said
+yes or no — one bit about the tap, never which member and never a count.
 
 **A block inside a Blend hides that pair; the room goes on** (D-9). Anybody on
 one side kept apart from anybody on the other — a block, or a closed

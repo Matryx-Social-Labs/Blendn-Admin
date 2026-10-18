@@ -1,8 +1,7 @@
 /*
  * The server changes the client redesign needs for crews and Blends, on a
  * migrate-deploy database: what a crew and its invites say (`hidden`, `apart`,
- * `invitedByPhoto`), what a Blend says for the reveal sheet (`roomSize`,
- * `crewRevealed`, the toast counts), the refusal naming its field, and
+ * `invitedByPhoto`), what a Blend says for the reveal sheet (`crewRevealed`, the toast counts), the refusal naming its field, and
  * reporting a person in a crew's or Blend's room by handle.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
@@ -98,21 +97,12 @@ describe("a crew and its invites", () => {
 })
 
 describe("a Blend, for the reveal sheet", () => {
-  it("`roomSize` counts the people a reveal reaches, show-online-off included, kept-apart out", async () => {
-    const w = await blended("room")
-    const [a1, a2] = w.a
-    const [b1, b2] = w.b
-    expect((await blendOf(a1, w.blendId)).roomSize).toBe(4)
-    // a2 turns "show online" off: gone from every side's count, still in the room that sees the faces.
-    await db.profiles.update({ where: { id: a2.id }, data: { show_online: false } })
-    const seen = await blendOf(b1, w.blendId)
-    expect(seen.roomSize).toBe(4)
-    expect(side(seen, false).count).toBe(1)
-    expect(side(seen, true).count).toBe(2)
-    // b1 blocks b2: a pair kept apart is not counted to b1 (their own `size` rule), still is to a1.
-    await db.blocked_users.create({ data: { blocker_id: b1.id, blocked_id: b2.id } })
-    expect((await blendOf(b1, w.blendId)).roomSize).toBe(3)
-    expect((await blendOf(a1, w.blendId)).roomSize).toBe(4)
+  it("has no room size: a count of everyone a reveal reaches would count people who turned show-online off", async () => {
+    const w = await blended("nosize")
+    await db.profiles.update({ where: { id: w.a[1].id }, data: { show_online: false } })
+    const seen = await blendOf(w.b[0], w.blendId)
+    expect(seen).not.toHaveProperty("roomSize")
+    expect(JSON.stringify(seen)).not.toMatch(/roomSize|room_size/)
   })
 
   it("`crewRevealed` is a bit about your own crew; the toast counts stay on their side only", async () => {
@@ -131,6 +121,49 @@ describe("a Blend, for the reveal sheet", () => {
     expect(side(mine, true)).toMatchObject({ crewRevealed: true, revealedCount: null, privateCount: null })
     expect(side(mine, false).crewRevealed).toBeNull()
     expect(side(await blendOf(b1, w.blendId), true).crewRevealed).toBe(false)
+  })
+})
+
+describe("`crewRevealed` is a fact about the tap, never about who consented", () => {
+  /** Two-person crews X and Y at one event; `viewer` (x1) is anonymous; the other member of X (x2) taps if asked. */
+  async function pair(label: string, opts: { tapperConsents: boolean; tap: boolean }) {
+    const host = await person(`${label}-host`)
+    const { eventId, occurrenceId } = await liveEvent(host.id)
+    const [x1, x2, y1, y2] = await Promise.all(["x1", "x2", "y1", "y2"].map((l) => person(`${label}-${l}`, `Name ${l} Surname`)))
+    const X = await crewOf(x1, [x2], "Crew X")
+    const Y = await crewOf(y1, [y2], "Crew Y")
+    for (const p of [x1, x2, y1, y2]) await arrive(eventId, occurrenceId, p)
+    await api.settings(x1, X.crewId, true)
+    if (!opts.tapperConsents) await api.settings(x2, X.crewId, true)
+    await api.likeCrew(x1, eventId, Y.crewId, X.crewId)
+    const back = await api.likeCrew(y1, eventId, X.crewId, Y.crewId)
+    const blendId = back.body.data.blend.blendId as string
+    if (opts.tap) expect((await api.reveal(x2, blendId)).body.data).toEqual({ revealed: true })
+    return { viewer: x1, blendId }
+  }
+  /** What the anonymous viewer is shown of their own side, ids aside. */
+  const shown = async (v: { viewer: Person; blendId: string }) => {
+    const mine = side(await blendOf(v.viewer, v.blendId), true) as { people: { name: string | null }[]; crewRevealed: boolean } & Record<string, unknown>
+    return { ...mine, people: mine.people.map((p) => p.name !== null), crewId: undefined, emblemSeed: undefined, name: undefined }
+  }
+
+  it("shows an anonymous viewer the same thing whether the other member consented or declined", async () => {
+    const consenting = await shown(await pair("cr1", { tapperConsents: true, tap: true }))
+    const declining = await shown(await pair("cr2", { tapperConsents: false, tap: true }))
+    const nobody = await shown(await pair("cr3", { tapperConsents: true, tap: false }))
+    expect(consenting.crewRevealed).toBe(true)
+    // Identical to the view where the other member said no: nothing says which they did.
+    expect(declining).toEqual(consenting)
+    expect(nobody).toMatchObject({ crewRevealed: false })
+    expect({ ...nobody, crewRevealed: true }).toEqual(consenting)
+  })
+
+  it("is stored per side at the tap, not derived from the reveals", async () => {
+    const w = await pair("cr4", { tapperConsents: false, tap: true })
+    const row = await db.blends.findUniqueOrThrow({ where: { id: w.blendId }, select: { a_revealed_at: true, b_revealed_at: true } })
+    // Nobody consented, so `blend_reveals` is empty, yet the side's tap is recorded (and only one side's).
+    expect(await db.blend_reveals.count({ where: { blend_id: w.blendId } })).toBe(0)
+    expect([row.a_revealed_at, row.b_revealed_at].filter(Boolean)).toHaveLength(1)
   })
 })
 

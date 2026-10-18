@@ -413,7 +413,6 @@ registry.registerPath({
                 chatGroupId: z.string().uuid(),
                 eventId: z.string().uuid(),
                 closesAt: z.string(),
-                roomSize: z.number().int().describe("Everyone a reveal here reaches: the people the door admits, minus anybody kept apart from you, INCLUDING people with \"show online\" off (they are in the room but listed on no side)"),
                 sides: z.array(
                   z.object({
                     kind: z.enum(["crew", "person"]),
@@ -426,7 +425,7 @@ registry.registerPath({
                     keptPrivate: z.number().int().nullable().describe("Their side only; null on mine"),
                     revealedCount: z.number().int().nullable().describe("Same number as `revealed`, under the name the reveal toast reads. Their side only; null on mine"),
                     privateCount: z.number().int().nullable().describe("Same number as `keptPrivate`. Their side only; null on mine"),
-                    crewRevealed: z.boolean().nullable().describe("Mine only (null on theirs): whether my crew has revealed in this Blend. One bit about the crew, never which member"),
+                    crewRevealed: z.boolean().nullable().describe("Mine only (null on theirs): whether anybody on my side has tapped reveal in this Blend. Stored per side at the tap, whoever consented: never which member"),
                     people: z.array(BlendPersonSchema).describe("Their side: each person. Mine: me alone"),
                   })
                 ),

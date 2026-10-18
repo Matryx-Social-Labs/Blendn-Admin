@@ -83,7 +83,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         capacity: true,
         hours: true,
         description: true,
-        amenities: true,
+        amenity_links: {
+          where: { amenity: { is_active: true } },
+          orderBy: [{ amenity: { sort_order: "asc" } }, { amenity_id: "asc" }],
+          select: { amenity: { select: { name: true } } },
+        },
       },
     })
     if (!venue) return notFoundResponse("Venue not found")
@@ -156,7 +160,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         dayResetHour: venue.day_reset_hour,
         hours: venueHours(venue.hours),
         description: venue.description,
-        amenities: venue.amenities,
+        amenities: venue.amenity_links.map((l) => l.amenity.name),
         upcoming: upcoming.map((e) => ({
           id: e.id,
           title: e.title,
