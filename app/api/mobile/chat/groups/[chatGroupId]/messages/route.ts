@@ -419,6 +419,7 @@ export async function POST(
     }
 
     // If replying, verify parent message exists in this group
+    let parentAuthorId: string | null = null
     if (parentId) {
       const parentMessage = await db.chat_messages.findFirst({
         where: {
@@ -431,6 +432,7 @@ export async function POST(
       if (!parentMessage) {
         return errorResponse("Parent message not found", 400)
       }
+      parentAuthorId = parentMessage.user_id
     }
 
     // Spam check (sync — block before saving)
@@ -483,6 +485,22 @@ export async function POST(
         createdAt: message.created_at.toISOString(),
       })
     }
+
+    /*
+     * Everything that does not wait on the write starts now, beside it: the
+     * OpenAI check (~95% of a send's server time, a ~300 ms floor Singapore to
+     * the US — keep-alive was measured and does not help), who this sender is
+     * kept apart from, and the names the response and the emit use. The check
+     * is still raced and still finishes, or times out at 1 s, before anything
+     * is emitted; it just no longer starts after the insert. `pendingText`
+     * never rejects; the other two are marked handled here because a hide below
+     * returns without reading them, and are awaited where they are used.
+     */
+    const pendingText = checkTextContent(content)
+    const blocked = keptApartIn(user.userId, chatGroup.kind)
+    const namesPending = namesInRoom(chatGroup, parentAuthorId ? [user.userId, parentAuthorId] : [user.userId])
+    blocked.catch(() => undefined)
+    namesPending.catch(() => undefined)
 
     /*
      * Contact details are detected by `moderateMessage`, not here.
@@ -581,7 +599,7 @@ export async function POST(
        * `moderation_status: "clean"` for all of them.
        */
       const openaiCheck = await Promise.race([
-        checkTextContent(content),
+        pendingText,
         new Promise<ModerationCheck>((resolve) => {
           timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
         }),
@@ -616,11 +634,12 @@ export async function POST(
        * five characters.
        */
       if (!examinedInline) {
-        void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+        // The check already in flight is the pipeline's text check: one call per message.
+        void moderateMessage(message.id, content, type, user.userId, chatGroupId, undefined, pendingText)
       }
     } catch {
       // OpenAI failed — fall back to async moderation
-      void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+      void moderateMessage(message.id, content, type, user.userId, chatGroupId, undefined, pendingText)
     }
 
     /*
@@ -654,19 +673,23 @@ export async function POST(
         )
     }
 
-    // Update chat group's last_message_at
-    await db.chat_groups.update({
-      where: { id: chatGroupId },
-      data: { last_message_at: new Date() },
-    })
-
     /*
+     * Update chat group's last_message_at — here, after every hide above has
+     * returned: a hidden message must not bump the room. Beside it, the names
+     * started with the write.
+     *
      * The sender and the quoted author by the names this room gives them — a
      * pseudonym, or a first name in a crew's room (`namesInRoom`) — for the
      * socket emit, the push and the response alike.
      */
     const quoted = message.parent_message
-    const names = await namesInRoom(chatGroup, quoted ? [user.userId, quoted.user.id] : [user.userId])
+    const [, names] = await Promise.all([
+      db.chat_groups.update({
+        where: { id: chatGroupId },
+        data: { last_message_at: new Date() },
+      }),
+      namesPending,
+    ])
     const senderAnonName = names.get(user.userId) ?? "Attendee"
 
     /*
@@ -677,11 +700,14 @@ export async function POST(
      * anyone who already had the room open. Two write paths into one table, and
      * only one of them delivered.
      *
-     * Awaited: it never throws, and a reply's push is looked up before the
-     * sender is answered. It does NOT put the room's copy ahead of the 201 —
-     * the emit inside is fire-and-forget (`void toChatRoom`), and across two
-     * connections, or the Redis adapter, arrival order is not ours to promise.
-     * The app takes the echo on either side of its response (SCRUM-440).
+     * Awaited: it never throws, and the emit has gone out when it returns. A
+     * reply's push is NOT waited for: it runs on after this (`pushed`), as
+     * nothing about the 201 depends on it. Awaiting it held the sender ~230-260
+     * ms for an Expo round trip. It does not put the room's copy ahead of the
+     * 201 either way — the emit inside is fire-and-forget (`void toChatRoom`),
+     * and across two connections, or the Redis adapter, arrival order is not
+     * ours to promise. The app takes the echo on either side of its response
+     * (SCRUM-440).
      */
     await deliverToRoom({
       chatGroupId,
@@ -691,6 +717,8 @@ export async function POST(
       senderAnonName,
       message,
       preview: previewFor(type, content),
+      blocked,
+      parentAuthorId: message.parent_message?.user.id ?? (message.parent_id ? undefined : null),
     })
 
     /*

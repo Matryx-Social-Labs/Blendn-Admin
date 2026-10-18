@@ -57,7 +57,7 @@ const READERS: Record<string, string> = {
   "lib/polls.ts#castVote": "polls are an event room's: the URL's event must be the room's, else not found",
   "lib/sentiment-sweeper.ts#sweepSentiment": "selects event rooms only (kind = 'event')",
   "lib/socket-server.ts#emitChatTyping": "a venue day's liveness, asked only when there is an event; the door (roomOwnerDenial) runs first",
-  "lib/room-delivery.ts#deliverToRoom": "a venue day's liveness for the reply push, asked only when there is an event; the door runs first",
+  "lib/room-delivery.ts#pushReplyAuthor": "a venue day's liveness for the reply push, asked only when there is an event; the door runs first",
   "lib/crews/blends.ts#blendsOf":
     "tonight's pseudonyms, read from the event rooms its where selects by event id (so the id is there); a Blend room has no event and is never asked for one",
   // Not rooms: an Event Pass names its event (step 16). These read that column.

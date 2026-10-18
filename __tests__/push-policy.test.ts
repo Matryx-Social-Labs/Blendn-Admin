@@ -331,7 +331,7 @@ describe("a room pushes replies, and only to the person replied to", () => {
         parent_id: parentId,
       },
       preview: "same, see you there",
-    })
+    }).then((delivered) => delivered.pushed)
 
   it("an ordinary message pushes nobody", async () => {
     await send(null)

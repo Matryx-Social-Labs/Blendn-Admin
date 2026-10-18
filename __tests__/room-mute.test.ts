@@ -126,7 +126,7 @@ describe("a muted room does not ring", () => {
         parent_id: "p1",
       },
       preview: "same",
-    })
+    }).then((delivered) => delivered.pushed)
 
   it("a reply to somebody who muted the room pushes nothing", async () => {
     membershipOf.mockResolvedValue({ status: "active", notification_preferences: { muted: true, muted_until: null }, ...EVENT_ROOM })
