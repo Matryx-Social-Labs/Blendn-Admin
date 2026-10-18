@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 
 import {
   asTheAskerSees,
-  boardPseudonyms,
+  boardPseudonymsAcross,
   isLiveRequest,
   isLiveToTheAsker,
   liveRequest,
@@ -52,7 +52,8 @@ export async function GET(request: NextRequest) {
       from_user_id: true,
       to_user_id: true,
       event_id: true,
-      event: { select: { id: true, title: true, start_time: true, end_time: true } },
+      // `created_at` picks the event's pseudonym scheme without a lookup per event (`boardPseudonymsAcross`).
+      event: { select: { id: true, title: true, start_time: true, end_time: true, created_at: true } },
       post: { select: { id: true, kind: true, body: true, deleted_at: true } },
     } as const
 
@@ -165,19 +166,14 @@ export async function GET(request: NextRequest) {
      * prevent.
      */
     const rows = [...incoming, ...outgoing]
-    const byEvent = new Map<string, Set<string>>()
+    const byEvent = new Map<string, { createdAt: Date; userIds: Set<string> }>()
     for (const r of rows) {
       const counterpart = r.from_user_id === user.userId ? r.to_user_id : r.from_user_id
-      const set = byEvent.get(r.event_id) ?? new Set<string>()
-      set.add(counterpart)
-      byEvent.set(r.event_id, set)
+      const entry = byEvent.get(r.event_id) ?? { createdAt: r.event.created_at, userIds: new Set<string>() }
+      entry.userIds.add(counterpart)
+      byEvent.set(r.event_id, entry)
     }
-    const resolved = new Map<string, Map<string, string>>()
-    await Promise.all(
-      [...byEvent].map(async ([eventId, ids]) =>
-        resolved.set(eventId, await boardPseudonyms(eventId, [...ids]))
-      )
-    )
+    const resolved = await boardPseudonymsAcross(byEvent)
 
     const shape = (r: (typeof rows)[number]) => {
       const mine = r.from_user_id === user.userId

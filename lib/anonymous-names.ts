@@ -98,6 +98,15 @@ export async function pseudonymSchemeFor(
   return event && event.created_at < KEYED_PSEUDONYMS_FROM ? "legacy" : "keyed"
 }
 
+/**
+ * `pseudonymSchemeFor` for a caller that already holds the event's `created_at`
+ * (a list that selected it with the rows), so the names cost no lookup per event.
+ * The same cut-off; keep the two in step.
+ */
+export function pseudonymSchemeAt(createdAt: Date): PseudonymScheme {
+  return createdAt < KEYED_PSEUDONYMS_FROM ? "legacy" : "keyed"
+}
+
 function fnv1a(seed: string): number {
   let h = 0x811c9dc5
   for (let i = 0; i < seed.length; i++) {
