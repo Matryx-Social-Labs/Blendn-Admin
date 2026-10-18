@@ -18,6 +18,7 @@ import {
   eventListSelect,
   type EventListItem,
   transformEvents,
+  listCounts,
 } from "@/lib/services/events.service"
 import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
 import { buildEventsCacheKey } from "@/lib/events-cache-key"
@@ -457,11 +458,15 @@ export async function GET(request: NextRequest) {
         })
       : Promise.resolve(null)
 
-    const [userFavorites, userCheckins, activeCheckins, profile] = await Promise.all([
+    // The counts are per request, never cached with the list. Beside the
+    // viewer's own reads: run after them they were one more full round trip on
+    // every cache hit.
+    const [userFavorites, userCheckins, activeCheckins, profile, counts] = await Promise.all([
       userFavoritesPromise,
       userCheckinsPromise,
       activeCheckinsPromise,
       profilePromise,
+      listCounts(events),
     ])
 
     const favoriteEventIds = new Set(userFavorites.map((f) => f.event_id))
@@ -492,6 +497,7 @@ export async function GET(request: NextRequest) {
       userLon: lon,
       includeCheckins: includeSet.has("checkins"),
       geocodes,
+      counts,
     })
 
     const normalizedProfile = await selfProfileEnvelope(profile)

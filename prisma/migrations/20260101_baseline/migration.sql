@@ -678,8 +678,10 @@ CREATE INDEX IF NOT EXISTS "private_conversations_last_message_at_idx" ON "priva
 -- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "private_conversations_user1_id_user2_id_key" ON "private_conversations"("user1_id", "user2_id");
 
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "private_messages_conversation_id_idx" ON "private_messages"("conversation_id");
+-- DELIBERATELY NOT CREATED: private_messages_conversation_id_idx. The later
+-- migration `20261018190000_private_messages_thread_index` replaces it with an
+-- index on (conversation_id, created_at) and drops it; created here it would
+-- come back on a database where that drop has already run.
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "private_messages_sender_id_idx" ON "private_messages"("sender_id");

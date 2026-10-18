@@ -27,6 +27,69 @@ const createConversationSchema = z.object({
   otherUserId: z.string().min(1, "Other user ID is required"),
 })
 
+/**
+ * The preview on each inbox row: the newest message the thread would show.
+ *
+ * Raw, because Prisma 7 does not send a nested `take` to SQL: the relation read
+ * was `WHERE conversation_id IN (...) ORDER BY created_at DESC` with no LIMIT,
+ * so every DM of every conversation came back to keep one per thread. This is
+ * one index probe per conversation on (conversation_id, created_at), newest
+ * first, one row each. `VISIBLE_DM` in SQL: a hidden message would put words on
+ * the inbox row that the thread refuses to show.
+ */
+async function lastVisibleMessages(conversationIds: string[]) {
+  if (conversationIds.length === 0) return new Map<string, LastMessage>()
+  const rows = await db.$queryRaw<(LastMessage & { conversation_id: string })[]>`
+    SELECT m.conversation_id, m.id, m.message_text, m.sender_id, m.created_at, m.is_read
+    FROM unnest(${conversationIds}::uuid[]) AS c(id)
+    CROSS JOIN LATERAL (
+      SELECT conversation_id, id, message_text, sender_id, created_at, is_read
+      FROM private_messages
+      WHERE conversation_id = c.id AND (moderation_status IS NULL OR moderation_status <> 'hidden')
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) m
+  `
+  return new Map(rows.map((r) => [r.conversation_id, r]))
+}
+
+/**
+ * Unread, per conversation: not yours, not read, and visible.
+ *
+ * Was a relation `_count`, which Prisma emits as a LEFT JOIN onto
+ * `SELECT conversation_id, COUNT(*) … GROUP BY conversation_id` over ALL of
+ * private_messages (a Parallel Seq Scan of every unread DM on the platform per
+ * inbox open, 210k rows locally); this names the person's own conversations.
+ */
+async function unreadCounts(conversationIds: string[], viewerId: string) {
+  if (conversationIds.length === 0) return new Map<string, number>()
+  const rows = await db.private_messages.groupBy({
+    by: ["conversation_id"],
+    where: {
+      conversation_id: { in: conversationIds },
+      is_read: false,
+      sender_id: { not: viewerId },
+      /*
+       * The reader that gets forgotten. A hidden message is never
+       * delivered, so it is never marked read — leaving it in this
+       * count is a badge that cannot be cleared, on a thread with
+       * nothing in it to clear.
+       */
+      ...VISIBLE_DM,
+    },
+    _count: true,
+  })
+  return new Map(rows.map((r) => [r.conversation_id, r._count]))
+}
+
+type LastMessage = {
+  id: string
+  message_text: string | null
+  sender_id: string
+  created_at: Date
+  is_read: boolean
+}
+
 // GET /api/mobile/conversations - List user's conversations
 export async function GET(request: NextRequest) {
   try {
@@ -69,47 +132,19 @@ export async function GET(request: NextRequest) {
             profile: { select: { read_receipts: true } },
           },
         },
-        messages: {
-          // The preview. A hidden message here would put words on the inbox row
-          // that the thread refuses to show.
-          where: VISIBLE_DM,
-          orderBy: { created_at: "desc" },
-          take: 1,
-          select: {
-            id: true,
-            message_text: true,
-            sender_id: true,
-            created_at: true,
-            is_read: true,
-          },
-        },
-        _count: {
-          select: {
-            messages: {
-              where: {
-                is_read: false,
-                sender_id: { not: authUser.userId },
-                /*
-                 * The reader that gets forgotten. A hidden message is never
-                 * delivered, so it is never marked read — leaving it in this
-                 * count is a badge that cannot be cleared, on a thread with
-                 * nothing in it to clear.
-                 */
-                ...VISIBLE_DM,
-              },
-            },
-          },
-        },
       },
       orderBy: {
         last_message_at: "desc",
       },
     })
 
+    const ids = conversations.map((c) => c.id)
+    const [lastMessages, unread] = await Promise.all([lastVisibleMessages(ids), unreadCounts(ids, authUser.userId)])
+
     // Format conversations for the mobile app
     const formattedConversations = conversations.map((conv) => {
       const otherUser = conv.user1_id === authUser.userId ? conv.user2 : conv.user1
-      const lastMessage = conv.messages[0] || null
+      const lastMessage = lastMessages.get(conv.id) ?? null
 
       /*
        * The other person's name and photo, gated on their reveal state.
@@ -162,7 +197,7 @@ export async function GET(request: NextRequest) {
               }),
             }
           : null,
-        unreadCount: conv._count.messages,
+        unreadCount: unread.get(conv.id) ?? 0,
         updatedAt: conv.last_message_at || conv.created_at,
       }
     })

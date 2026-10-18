@@ -29,6 +29,8 @@ const ALLOWED = new Set([
   "lib/reports.ts",
   // Selects who rated (user_id), to leave them out of the "rate the night" push.
   "lib/services/event-notifications.service.ts",
+  // Counts raters per event (`_count` only, never a rating value): `ratingCount`, which the `_count` relation it replaced already exposed.
+  "lib/event-tallies.ts",
 ])
 
 const READS_SCORES = [
