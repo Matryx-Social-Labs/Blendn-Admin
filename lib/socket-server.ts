@@ -631,6 +631,12 @@ export async function emitPrivateRead(
     if (ids.length === 0) return
 
     const theirs = { id: { in: ids }, conversation_id: conversationId, sender_id: { not: socket.data.userId } }
+    // The reader's setting is independent of the writes below, so it is read beside them.
+    const readerPending = db.profiles.findUnique({
+      where: { id: socket.data.userId },
+      select: { read_receipts: true },
+    })
+    readerPending.catch(() => undefined) // awaited below; marked handled in case a write throws first
     // A read counts as delivered (SCRUM-408): the ones not delivered yet, named for the off branch below.
     const undelivered = (
       await db.private_messages.findMany({ where: { ...theirs, delivered_at: null }, select: { id: true } })
