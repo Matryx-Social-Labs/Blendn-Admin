@@ -93,8 +93,19 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
-    // Every row carries a live count; the venue page's limit, for the same reason.
-    const limited = await rateLimit(request, userLimit("read", "venues", authUser.userId))
+    /*
+     * The limit and the viewer's profile are independent, so they go out
+     * together: a Singapore round trip each, in series, for every list (staging
+     * p50 58 ms). A refused request wastes one primary-key read.
+     */
+    const [limited, viewer] = await Promise.all([
+      // Every row carries a live count; the venue page's limit, for the same reason.
+      rateLimit(request, userLimit("read", "venues", authUser.userId)),
+      db.profiles.findUnique({
+        where: { id: authUser.userId },
+        select: { age: true, date_of_birth: true, onboarded: true },
+      }),
+    ])
     if (limited) return limited
 
     const parsed = venueQuerySchema.safeParse(
@@ -107,10 +118,6 @@ export async function GET(request: NextRequest) {
     const { page, limit, search, city, lat, lon, radius, venueType, order, sortBy, sortOrder } =
       parsed.data
 
-    const viewer = await db.profiles.findUnique({
-      where: { id: authUser.userId },
-      select: { age: true, date_of_birth: true, onboarded: true },
-    })
     // Derived, never the stored column — see lib/age.ts. A stored age is the
     // number that was true on the day they signed up.
     const viewerAge = ageFrom(viewer)
@@ -294,11 +301,13 @@ export async function GET(request: NextRequest) {
       // boundary between them never repeats or skips one.
       const orderBy = [{ name: sortOrder }, { id: "asc" as const }]
       const skip = (page - 1) * limit
-      venues =
+      // The total does not depend on the page, so it is asked beside it.
+      const count = db.venues.count({ where })
+      const pageRead =
         tiers.length === 0
-          ? await db.venues.findMany({ where, select: venueSelect, orderBy, skip, take: limit })
-          : await tieredPage(tiers, (w, o) => db.venues.findMany({ where: { AND: [where, w] }, select: venueSelect, orderBy, ...o }), skip, limit)
-      totalCount = await db.venues.count({ where })
+          ? db.venues.findMany({ where, select: venueSelect, orderBy, skip, take: limit })
+          : tieredPage(tiers, (w, o) => db.venues.findMany({ where: { AND: [where, w] }, select: venueSelect, orderBy, ...o }), skip, limit)
+      ;[venues, totalCount] = await Promise.all([pageRead, count])
     }
 
     const liveNow = mayCountLive ? await liveBuckets(venues.map((v) => v.id), authUser.userId, now) : null
