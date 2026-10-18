@@ -1,7 +1,7 @@
 import { db } from "./db"
 import { actorFor } from "./org-membership"
 import { inRoomWhere } from "./event-kind"
-import { ownerDoor, roomReadDenialFor } from "./room-kind"
+import { roomReadDenialFor, withOwnerDoor } from "./room-kind"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 
 /**
@@ -42,13 +42,13 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
         select: {
           kind: true,
           event: { select: { status: true, deleted_at: true, kind: true } },
-          ...ownerDoor(userId),
         },
       },
     },
   })
   if (!membership) return false
-  return roomReadDenialFor(membership.chat_group, membership, userId) === null
+  // The owner's door for this room's kind only; an event's room has none to read.
+  return roomReadDenialFor(await withOwnerDoor(chatGroupId, userId, membership.chat_group), membership, userId) === null
 }
 
 /**

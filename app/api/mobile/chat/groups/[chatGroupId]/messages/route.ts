@@ -25,7 +25,7 @@ import {
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
-import { ownerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { withOwnerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { roomMessageWords } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -61,16 +61,20 @@ export async function GET(
     if (before && !isUuid(before)) return errorResponse("Invalid cursor", 400)
 
     // Check if chat group exists and user is a member
-    const chatGroup = await db.chat_groups.findUnique({
-      where: { id: chatGroupId },
-      include: {
-        members: {
-          where: { user_id: user.userId },
+    // The owner's door is read for this room's kind alone (`withOwnerDoor`): an event's room has none.
+    const chatGroup = await withOwnerDoor(
+      chatGroupId,
+      user.userId,
+      await db.chat_groups.findUnique({
+        where: { id: chatGroupId },
+        include: {
+          members: {
+            where: { user_id: user.userId },
+          },
+          event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
         },
-        event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
-        ...ownerDoor(user.userId),
-      },
-    })
+      })
+    )
 
     if (!chatGroup) {
       return notFoundResponse("Chat group not found")
@@ -316,22 +320,26 @@ export async function POST(
     }
 
     // Check if chat group exists and user is a member
-    const chatGroup = await db.chat_groups.findUnique({
-      where: { id: chatGroupId },
-      include: {
-        members: {
-          where: { user_id: user.userId },
+    // The owner's door, for this room's kind alone (`withOwnerDoor`).
+    const chatGroup = await withOwnerDoor(
+      chatGroupId,
+      user.userId,
+      await db.chat_groups.findUnique({
+        where: { id: chatGroupId },
+        include: {
+          members: {
+            where: { user_id: user.userId },
+          },
+          // end_time decides the write window; without it this path had no idea
+          // how long ago the event finished.
+          // `start_time` joins it now that the room also has a floor. Selecting
+          // only `end_time` would leave this path silently un-floored --
+          // `chatWindowState` treats a missing start as "no lower bound", which
+          // is the right default for old callers and the wrong one here.
+          event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
         },
-        // end_time decides the write window; without it this path had no idea
-        // how long ago the event finished.
-        // `start_time` joins it now that the room also has a floor. Selecting
-        // only `end_time` would leave this path silently un-floored --
-        // `chatWindowState` treats a missing start as "no lower bound", which
-        // is the right default for old callers and the wrong one here.
-        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
-        ...ownerDoor(user.userId),
-      },
-    })
+      })
+    )
 
     if (!chatGroup) {
       return notFoundResponse("Chat group not found")

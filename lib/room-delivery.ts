@@ -4,7 +4,7 @@ import { keptApartIn } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
 import { roomHandle, type RoomScope } from "@/lib/room-handle"
-import { ownerDoor, roomOwnerDenial } from "@/lib/room-kind"
+import { roomOwnerDenial, withOwnerDoor } from "@/lib/room-kind"
 import { isRoomMuted } from "@/lib/room-mute"
 import { liveInVenueDay } from "@/lib/chat-window"
 
@@ -131,16 +131,17 @@ export async function deliverToRoom(input: {
             crew_id: true,
             blend_id: true,
             event: { select: { status: true, deleted_at: true, kind: true } },
-            ...ownerDoor(recipientId),
           },
         },
       },
     })
     if (membership?.status !== "active" && membership?.status !== "muted") return
     // The room's door, for every kind: nobody its owner no longer admits is pushed from it.
-    if (roomOwnerDenial(membership.chat_group, recipientId)) return
+    // …read for this room's kind alone (`withOwnerDoor`).
+    const room = await withOwnerDoor(chatGroupId, recipientId, membership.chat_group)
+    if (roomOwnerDenial(room, recipientId)) return
     // A venue day's room is the people live in it: an ended Go Live hears nothing from it.
-    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
+    if (room.event && !liveInVenueDay(room.event, membership)) return
     // And they have not silenced the room (`POST /chat/groups/:id/mute`).
     if (isRoomMuted(membership.notification_preferences)) return
 

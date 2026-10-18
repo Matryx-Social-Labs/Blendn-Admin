@@ -24,6 +24,7 @@ const created = jest.fn()
 const createdMany = jest.fn()
 const parentOf = jest.fn()
 const membershipOf = jest.fn()
+const doorOf = jest.fn()
 const blocks = jest.fn()
 const mockSent: ExpoPushMessage[] = []
 
@@ -36,6 +37,7 @@ jest.mock("@/lib/db", () => ({
     },
     chat_messages: { findUnique: (...a: unknown[]) => parentOf(...a) },
     chat_group_members: { findUnique: (...a: unknown[]) => membershipOf(...a) },
+    chat_groups: { findUnique: (...a: unknown[]) => doorOf(...a) },
   },
 }))
 
@@ -373,8 +375,11 @@ describe("a room pushes replies, and only to the person replied to", () => {
         b_user: null,
       },
     }
-    membershipOf.mockResolvedValue({ status: "active", last_allowed_at: null, chat_group: { kind, event: null, ...owner, ...door } })
+    // The door is its own read, for this room's kind alone (`withOwnerDoor`).
+    membershipOf.mockResolvedValue({ status: "active", last_allowed_at: null, chat_group: { kind, event: null, ...owner } })
+    doorOf.mockResolvedValue(door)
     await send("p1")
+    expect(Object.keys(doorOf.mock.lastCall![0].select)).toEqual([kind])
     expect(mockSent).toHaveLength(1)
     expect(mockSent[0].data).toMatchObject({ type: "group_message", chatGroupId: "g1", ...data })
     // Only its own room's owner: a crew reply names no Blend, a Blend reply no crew.

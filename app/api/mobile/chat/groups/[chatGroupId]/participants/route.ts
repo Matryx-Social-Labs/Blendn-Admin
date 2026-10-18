@@ -4,7 +4,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { keptApartIn } from "@/lib/conversations"
 import { NOT_LIVE_MESSAGE } from "@/lib/chat-window"
-import { ownerDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { ownerRoster, withOwnerDoor, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
 import { namesInRoom } from "@/lib/identity"
@@ -42,16 +42,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const offset = boundedInt(searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER)
 
     // Check if chat group exists
-    const chatGroup = await db.chat_groups.findUnique({
+    const found = await db.chat_groups.findUnique({
       where: { id: chatGroupId, deleted_at: null },
       select: {
         id: true,
         kind: true,
         event_id: true,
         event: { select: { status: true, deleted_at: true, kind: true } },
-        ...ownerDoor(authUser.userId),
       },
     })
+    // The owner's door, for this room's kind alone (`withOwnerDoor`).
+    const chatGroup = await withOwnerDoor(chatGroupId, authUser.userId, found)
 
     if (!chatGroup) {
       return notFoundResponse("Chat group not found")

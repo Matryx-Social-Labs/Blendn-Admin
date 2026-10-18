@@ -12,7 +12,7 @@ import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
-import { ownerDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
+import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
 import { readableUrl } from "./tigris"
 import { isUuid } from "./api-input"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
@@ -477,7 +477,6 @@ export async function emitChatTyping(
             kind: true,
             event_id: true,
             event: { select: { status: true, deleted_at: true, kind: true } },
-            ...ownerDoor(socket.data.userId),
           },
         },
       },
@@ -486,9 +485,11 @@ export async function emitChatTyping(
     if (!membership || membership.status !== "active") return
     // The room's door, for every kind: a member row whose owner no longer
     // admits them (a board post's ask that is not accepted) types to nobody.
-    if (roomOwnerDenial(membership.chat_group, socket.data.userId)) return
+    // …read for this room's kind alone (`withOwnerDoor`).
+    const room = await withOwnerDoor(chatGroupId, socket.data.userId, membership.chat_group)
+    if (roomOwnerDenial(room, socket.data.userId)) return
     // A venue day's room is the people live in it: an ended Go Live types into nothing.
-    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
+    if (room.event && !liveInVenueDay(room.event, membership)) return
 
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
