@@ -651,10 +651,7 @@ export async function emitPrivateRead(
      * read receipts off still clears their own unread badge; they simply do
      * not tell the sender.
      */
-    const reader = await db.profiles.findUnique({
-      where: { id: socket.data.userId },
-      select: { read_receipts: true },
-    })
+    const reader = await readerPending
     if (reader?.read_receipts === false) {
       // Delivery is not private (it goes out whatever the setting): the sender
       // still sees ✓✓ for what this read delivered. With receipts on, the
@@ -811,7 +808,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const pubClient = createClient({ url: redisUrl })
         const subClient = pubClient.duplicate()
         await Promise.all([pubClient.connect(), subClient.connect()])
-        io?.adapter(createAdapter(pubClient, subClient))
+        /*
+         * `requestsTimeout` is how long a cross-replica request (`fetchSockets`,
+         * `serverSideEmit` acks) waits for every other replica to answer. The
+         * default is 5 s: with two or more replicas one slow replica holds every
+         * `fetchSockets` for up to 5 s, and when it times out the call rejects
+         * and that socket delivery is dropped. 1 s is far above a healthy
+         * round trip over the Redis in the same region and bounds both.
+         */
+        io?.adapter(createAdapter(pubClient, subClient, { requestsTimeout: 1000 }))
         logger.info("Socket.io Redis adapter attached")
       } catch (error) {
         // Falling back to in-memory is correct at one replica and wrong at
