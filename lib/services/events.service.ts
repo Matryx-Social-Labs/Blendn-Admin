@@ -136,6 +136,12 @@ interface TransformContext {
    * rather than the page waiting on a public API.
    */
   geocodes?: GeocodeBudget
+  /**
+   * `listCounts(events)`, already awaited by a caller that started it beside its
+   * own reads (the list route's favourites and check-ins), so the counts do not
+   * wait for them or they for the counts. Omitted: `transformEvents` asks.
+   */
+  counts?: ListCounts
 }
 
 /*
@@ -282,10 +288,18 @@ async function transformEvent(
   }
 }
 
-export async function transformEvents(
-  events: EventListItem[],
-  ctx: TransformContext
-) {
+export interface ListCounts {
+  attended: Map<string, number>
+  here: Map<string, number>
+  tallies: EventTallies
+}
+
+/**
+ * How many people, for a page of events: came, here now, favourited, rated,
+ * going. Four independent reads; a caller with reads of its own starts this
+ * first and awaits both together.
+ */
+export async function listCounts(events: readonly { id: string }[]): Promise<ListCounts> {
   /*
    * `checkInCount` was `_count.check_ins` filtered to `status: "checked_in"`,
    * which was wrong twice over. `_count` has no DISTINCT and the table holds
@@ -300,6 +314,14 @@ export async function transformEvents(
     hereCounts(ids),
     eventTallies(ids),
   ])
+  return { attended, here, tallies }
+}
+
+export async function transformEvents(
+  events: EventListItem[],
+  ctx: TransformContext
+) {
+  const { attended, here, tallies } = ctx.counts ?? (await listCounts(events))
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
   return Promise.all(events.map((event) => transformEvent(event, withBudget, attended, here, tallies)))
