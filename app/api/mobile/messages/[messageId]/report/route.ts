@@ -13,7 +13,7 @@ import {
   errorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
-import { ownerDoor, roomOwnerDenial } from "@/lib/room-kind"
+import { roomOwnerDenial, withOwnerDoor } from "@/lib/room-kind"
 
 interface RouteParams {
   params: Promise<{ messageId: string }>
@@ -77,12 +77,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
               },
               select: {
                 id: true,
-                chat_group: {
-                  select: { kind: true, event: { select: { status: true, deleted_at: true } }, ...ownerDoor(authUser.userId) },
-                },
+                chat_group_id: true,
+                chat_group: { select: { kind: true, event: { select: { status: true, deleted_at: true } } } },
               },
             })
-            .then((m) => (m && roomOwnerDenial(m.chat_group, authUser.userId) !== "not_member" ? m : null))
+            // The owner's door, for this room's kind alone (`withOwnerDoor`).
+            .then(async (m) => {
+              if (!m) return null
+              const room = await withOwnerDoor(m.chat_group_id, authUser.userId, m.chat_group)
+              return roomOwnerDenial(room, authUser.userId) !== "not_member" ? m : null
+            })
         : await db.private_messages.findFirst({
             where: {
               id: messageId,

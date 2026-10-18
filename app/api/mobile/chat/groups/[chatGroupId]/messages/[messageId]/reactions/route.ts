@@ -5,7 +5,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE } from "@/lib/chat-window"
-import { ownerDoor, mayWriteToRoomFor } from "@/lib/room-kind"
+import { mayWriteToRoomFor, withOwnerDoor } from "@/lib/room-kind"
 import { bannedRefusal, mutedRefusal } from "@/lib/moderation/actions"
 import { emitChatReaction } from "@/lib/socket-server"
 import {
@@ -72,13 +72,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!validation.success) return validationErrorResponse(validation.error)
     const { emoji } = validation.data
 
-    const chatGroup = await db.chat_groups.findUnique({
+    const found = await db.chat_groups.findUnique({
       where: { id: chatGroupId },
       select: {
         id: true,
         kind: true,
         status: true,
-        ...ownerDoor(user.userId),
         members: { where: { user_id: user.userId }, select: { status: true, muted_by: true, banned_by: true, last_allowed_at: true } },
         // Spread of both bounds, not just `end_time`: `chatWindowState` reads a
         // missing start as "no lower bound", which would open a room that has
@@ -86,10 +85,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
       },
     })
-    if (!chatGroup) return notFoundResponse("Chat group not found")
+    if (!found) return notFoundResponse("Chat group not found")
 
-    const membership = chatGroup.members[0]
+    const membership = found.members[0]
     if (!membership) return forbiddenResponse("You are not a member of this chat group")
+    // The owner's door, for this room's kind alone (`withOwnerDoor`).
+    const chatGroup = await withOwnerDoor(chatGroupId, user.userId, found)
 
     /*
      * The same sentences and codes as a message, because a reaction is refused

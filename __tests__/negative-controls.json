@@ -1933,6 +1933,12 @@
       "mutation": "M1443 the sentence printed whatever the plan. M1444 Buy offered beside an open mandate (the old `pro || !owned` condition). M1463 the row ignoring openElsewhere.",
       "observed": "2026-10-11: M1443: 4 failing (every case that must not say it). M1444: 2 failing (paused, authenticated). Reverted; 6 green. 2026-10-11: M1463 1 failing (the L7 case). Reverted; 7 green.",
       "date": "2026-10-11"
+    },
+    "socket-redis-adapter.test.ts": {
+      "guards": "perf/chat-path: the socket server's Redis adapter is created with requestsTimeout: 1000, not the 5 s default (with two or more replicas one slow replica holds every fetchSockets up to 5 s, and a timeout drops that socket delivery).",
+      "mutation": "M1517 createAdapter(pubClient, subClient) with no options (the default 5000 ms).",
+      "observed": "2026-10-18: M1517: 1 of 1 failing. Reverted; 1 green.",
+      "date": "2026-10-18"
     }
   },
   "grandfathered": [

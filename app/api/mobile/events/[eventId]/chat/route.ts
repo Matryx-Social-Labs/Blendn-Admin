@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest, NextResponse } from "next/server"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
-import { blockCounterparties } from "@/lib/conversations"
+import { blockCounterparties, keptApartIn } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -41,6 +41,7 @@ import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/modera
 import { readJson, isUuid } from "@/lib/api-input"
 import { createRoom } from "@/lib/check-in-core"
 import { paginationMeta } from "@/lib/pagination"
+import { replyCounts } from "@/lib/reply-counts"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -320,56 +321,35 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       where.created_at = { ...(where.created_at || {}), gt: new Date(after) }
     }
 
-    // Get total count
-    const totalCount = await db.chat_messages.count({ where })
-
-    // Fetch messages with user info
-    const messages = await db.chat_messages.findMany({
-      where,
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
+    // The total and the page are independent: one level, not two. Messages carry user info.
+    const [totalCount, messages] = await Promise.all([
+      db.chat_messages.count({ where }),
+      db.chat_messages.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              image: true,
+            },
           },
-        },
-        reactions: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
+          reactions: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                },
               },
             },
           },
         },
-        _count: {
-          select: {
-            replies: true,
-          },
-        },
-      },
-      orderBy: { created_at: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    })
-
-    // Update last read message for user
-    if (messages.length > 0) {
-      await db.chat_group_members.update({
-        where: {
-          chat_group_id_user_id: {
-            chat_group_id: chatGroup.id,
-            user_id: authUser.userId,
-          },
-        },
-        data: {
-          last_read_message_id: messages[0].id,
-          updated_at: new Date(),
-        },
-      })
-    }
+        orderBy: { created_at: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ])
 
     /*
      * Whether this room takes writes, and why not.
@@ -403,12 +383,36 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * to discard it.
        */
     }
-    const pageMembers = pseudonymFor.size
-      ? await db.chat_group_members.findMany({
-          where: { chat_group_id: chatGroup.id, user_id: { in: [...pseudonymFor] } },
-          select: { user_id: true, anonymous_name: true },
-        })
-      : []
+    /*
+     * Four reads that wait on nothing but the page: the read marker, the
+     * senders' names and the reply counts. The counts were `_count.replies` on
+     * the page's query, which made Prisma join a COUNT(*) GROUP BY over every
+     * message on the platform; they are taken for the page's ids now.
+     */
+    const [, pageMembers, repliesByParent] = await Promise.all([
+      // Update last read message for user
+      messages.length > 0
+        ? db.chat_group_members.update({
+            where: {
+              chat_group_id_user_id: {
+                chat_group_id: chatGroup.id,
+                user_id: authUser.userId,
+              },
+            },
+            data: {
+              last_read_message_id: messages[0].id,
+              updated_at: new Date(),
+            },
+          })
+        : null,
+      pseudonymFor.size
+        ? db.chat_group_members.findMany({
+            where: { chat_group_id: chatGroup.id, user_id: { in: [...pseudonymFor] } },
+            select: { user_id: true, anonymous_name: true },
+          })
+        : [],
+      replyCounts(messages.map((m) => m.id)),
+    ])
     const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
 
     const denial = mayWriteToRoom(
@@ -452,7 +456,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           createdAt: m.created_at,
           editedAt: m.edited_at,
           parentId: m.parent_id,
-          replyCount: m._count.replies,
+          replyCount: repliesByParent.get(m.id) ?? 0,
           user: {
             // Yours real, so the app can align your bubbles; anybody else's —
             // an organiser's announcement included — as their handle in this
@@ -693,6 +697,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // If replying, verify parent message exists
+    let parentAuthorId: string | null = null
     if (parentId) {
       const parentMessage = await db.chat_messages.findUnique({
         where: { id: parentId, chat_group_id: chatGroup.id },
@@ -700,6 +705,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (!parentMessage) {
         return notFoundResponse("Parent message not found")
       }
+      parentAuthorId = parentMessage.user_id
     }
 
     // Spam check (sync — block before saving)
@@ -760,6 +766,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     }
 
+    /*
+     * Everything that does not wait on the write starts now, beside it: the
+     * OpenAI check (~95% of a send's server time, a ~300 ms floor Singapore to
+     * the US — keep-alive was measured and does not help), who this sender is
+     * kept apart from, and the sender's pseudonym for the response and the emit.
+     * The check is still raced and still finishes, or times out at 1 s, before
+     * anything is emitted; it just no longer starts after the insert.
+     * `pendingText` never rejects; the other two are marked handled here
+     * because a hide below returns without reading them, and are awaited where
+     * they are used.
+     */
+    const pendingText = checkTextContent(content)
+    const blocked = keptApartIn(authUser.userId, "event")
+    const senderMembershipPending = db.chat_group_members.findUnique({
+      where: {
+        chat_group_id_user_id: {
+          chat_group_id: chatGroup.id,
+          user_id: authUser.userId,
+        },
+      },
+      select: { anonymous_name: true },
+    })
+    blocked.catch(() => undefined)
+    senderMembershipPending.catch(() => undefined)
+
     // Create message
     let message
     try {
@@ -810,7 +841,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * `moderation_status: "clean"` for all of them.
        */
       const openaiCheck = await Promise.race([
-        checkTextContent(content),
+        pendingText,
         new Promise<ModerationCheck>((resolve) => {
           timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
         }),
@@ -845,10 +876,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * five characters.
        */
       if (!examinedInline) {
-        void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
+        // The check already in flight is the pipeline's text check: one call per message.
+        void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id, undefined, pendingText)
       }
     } catch {
-      void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
+      void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id, undefined, pendingText)
     }
 
     // Mark clean if passed all checks
@@ -883,25 +915,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         )
     }
 
-    // Get anonymous name for response
-    const senderMembership = await db.chat_group_members.findUnique({
-      where: {
-        chat_group_id_user_id: {
-          chat_group_id: chatGroup.id,
-          user_id: authUser.userId,
+    // Update chat group last_message_at — here, after every hide above has
+    // returned: a hidden message must not bump the room. Beside it, the
+    // anonymous name for the response, read with the write.
+    const [senderMembership] = await Promise.all([
+      senderMembershipPending,
+      db.chat_groups.update({
+        where: { id: chatGroup.id },
+        data: {
+          last_message_at: new Date(),
+          updated_at: new Date(),
         },
-      },
-      select: { anonymous_name: true },
-    })
-
-    // Update chat group last_message_at
-    await db.chat_groups.update({
-      where: { id: chatGroup.id },
-      data: {
-        last_message_at: new Date(),
-        updated_at: new Date(),
-      },
-    })
+      }),
+    ])
 
     /*
      * Deliver it. This handler persisted the message and stopped.
@@ -925,6 +951,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       senderAnonName: senderMembership?.anonymous_name || "Attendee",
       message,
       preview: previewFor(type, content),
+      blocked,
+      parentAuthorId,
     })
 
     return successResponse(

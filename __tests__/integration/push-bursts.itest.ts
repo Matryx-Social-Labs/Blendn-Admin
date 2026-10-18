@@ -243,6 +243,8 @@ describe("a room", () => {
     expect(mockSent).toHaveLength(0)
 
     await say(ben, "yes, by the window", asked)
+    // The reply's push runs on after the 201.
+    await settle()
     expect(mockSent.map((m) => m.to)).toEqual([ana.device])
     expect(mockSent.some((m) => m.to === cat.device)).toBe(false)
     // SCRUM-371: the reply names Ben by his handle in this room, never his id.
