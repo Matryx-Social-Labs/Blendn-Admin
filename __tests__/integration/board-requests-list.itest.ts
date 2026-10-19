@@ -107,5 +107,7 @@ it("names each counterpart per event, and resolves them in one members read", as
   // One read of the room members for the page, however many events it spans; and no
   // `SELECT id, created_at FROM events` per event just to pick a scheme.
   expect(statements.filter((s) => /\bchat_group_members\b/.test(s.sql)).length).toBe(1)
+  // Positive: the requests themselves were read, six directions' worth.
+  expect(statements.filter((s) => /FROM "public"\."board_requests"/.test(s.sql)).length).toBeGreaterThanOrEqual(6)
   expect(statements.filter((s) => /"events"\."id", "public"\."events"\."created_at" FROM "public"\."events"/.test(s.sql)).length).toBe(0)
 })

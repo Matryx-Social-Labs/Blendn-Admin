@@ -1933,6 +1933,24 @@
       "mutation": "M1443 the sentence printed whatever the plan. M1444 Buy offered beside an open mandate (the old `pro || !owned` condition). M1463 the row ignoring openElsewhere.",
       "observed": "2026-10-11: M1443: 4 failing (every case that must not say it). M1444: 2 failing (paused, authenticated). Reverted; 6 green. 2026-10-11: M1463 1 failing (the L7 case). Reverted; 7 green.",
       "date": "2026-10-11"
+    },
+    "event-counts-not-whole-table.itest.ts": {
+      "guards": "perf/read-routes fix 1: the events list and detail count favourites, ratings and going RSVPs with exactly three GROUP BY statements, one per table, each restricted to the page's events (`\"event_id\" IN`), and not with a relation `_count` folded into the events statement; the counts themselves (4 / 2 / 3, waitlisted, maybe and not_going excluded).",
+      "mutation": "lib/event-tallies.ts: the page restriction `const where = { event_id: { in: [...eventIds] } }` replaced by `const where = {}`.",
+      "observed": "2026-10-19: fails in both tests; the received statements are `SELECT COUNT(*) ... FROM event_favorites WHERE 1=1 GROUP BY event_id` with no IN. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "event-detail-occupancy.itest.ts": {
+      "guards": "perf/read-routes fix 5: the event detail's currentCapacity is who is inside (staff counted) and equals getOccupancy().inside, from a headcount read and without the unique-attendance read (every attendee's check-in row).",
+      "mutation": "app/api/mobile/events/[eventId]/route.ts: getInsideCount(eventId) replaced by getOccupancy(eventId).then((o) => o.inside).",
+      "observed": "2026-10-19: fails, the unique-attendance statement count is 1 where 0 is expected. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "board-requests-list.itest.ts": {
+      "guards": "perf/read-routes fix 6: GET /board/requests names each counterpart by the pseudonym of the event the ask belongs to (legacy, keyed, a room name that wins, a room name never used at another event), from ONE chat_group_members read and no created_at-only event lookups.",
+      "mutation": "M1 lib/board-access.ts boardPseudonymsAcross: room names keyed by user id alone. M2 the scheme looked up per event (`await pseudonymSchemeFor(eventId)`). M3 a members read per event added.",
+      "observed": "2026-10-19: M1 fails on the third event's names (b2 shown with her other event's room name). M2 fails, 3 created_at-only event lookups where 0 are expected. M3 fails, 4 members reads where 1 is expected. All reverted; green.",
+      "date": "2026-10-19"
     }
   },
   "grandfathered": [

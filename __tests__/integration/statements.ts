@@ -48,6 +48,12 @@ export async function recordStatements<T>(
   }
   try {
     const result = await run()
+    /*
+     * Every assertion on these is "no statement looks like X", which a recorder
+     * that saw nothing satisfies. A driver that stops going through
+     * `pg.Client.query` would turn every such test green; fail it here instead.
+     */
+    if (statements.length === 0) throw new Error("recordStatements saw no SQL: the recorder is not attached to the driver")
     return { result, statements }
   } finally {
     Client.prototype.query = original
