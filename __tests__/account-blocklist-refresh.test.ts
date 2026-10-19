@@ -110,4 +110,16 @@ describe("recentlyBlocked refresh", () => {
     await settle()
     expect(await recentlyBlocked("u1", issued())).toBe(true)
   })
+
+  it("a failed first load is not marked fresh: the next request awaits a retry, not 60 s of an empty set", async () => {
+    mockFindMany.mockRejectedValueOnce(new Error("db down"))
+    const { recentlyBlocked } = freshCopy()
+    // Nothing is known yet, so this one has nothing to refuse with.
+    expect(await recentlyBlocked("u1", issued())).toBe(false)
+
+    mockFindMany.mockResolvedValueOnce([blockedRow("u1")])
+    jest.advanceTimersByTime(1_000)
+    expect(await recentlyBlocked("u1", issued())).toBe(true)
+    expect(mockFindMany).toHaveBeenCalledTimes(2)
+  })
 })
