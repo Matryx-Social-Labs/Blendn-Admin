@@ -241,6 +241,7 @@ export async function GET(request: NextRequest) {
         lat,
         lon,
         sortOrder === "asc",
+        page * limit,
         DISTANCE_SORT_CEILING
       )
 

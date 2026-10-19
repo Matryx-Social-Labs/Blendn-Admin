@@ -68,6 +68,22 @@ describe("GET /events/cities", () => {
     expect(venues).toHaveBeenCalledTimes(2)
   })
 
+  it("a slow scan that fails after a newer one was cached does not drop the newer one", async () => {
+    jest.useFakeTimers({ doNotFake: ["setImmediate", "nextTick"] })
+    let failFirst: (e: Error) => void = () => {}
+    venues.mockReturnValueOnce(new Promise((_, reject) => (failFirst = reject)))
+    const first = call()
+    await new Promise((r) => setImmediate(r))
+
+    jest.advanceTimersByTime(61_000)
+    expect((await call()).status).toBe(200) // a second scan, cached
+    failFirst(new Error("slow and late"))
+    expect((await first).status).toBe(500)
+
+    expect((await call()).status).toBe(200)
+    expect(venues).toHaveBeenCalledTimes(2) // the third request hit the second scan's cache
+  })
+
   it("still applies the viewer's age to events but not to places", async () => {
     profile.mockResolvedValue({ age: 19, date_of_birth: null })
     await call()

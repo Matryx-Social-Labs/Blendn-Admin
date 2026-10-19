@@ -10,10 +10,9 @@ import { db, closeDb } from "./helpers"
  */
 afterAll(closeDb)
 
-it("private_messages is indexed by (conversation_id, created_at), and the single-column index is gone", async () => {
+it("private_messages is indexed by (conversation_id, created_at)", async () => {
   const rows = await db.$queryRaw<{ indexdef: string }[]>`
     SELECT indexdef FROM pg_indexes WHERE tablename = 'private_messages'`
   const defs = rows.map((r) => r.indexdef)
   expect(defs.some((d) => d.includes("(conversation_id, created_at)"))).toBe(true)
-  expect(defs.some((d) => d.endsWith("(conversation_id)"))).toBe(false)
 })

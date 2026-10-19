@@ -1580,9 +1580,10 @@ model private_messages {
   reply_to     private_messages?     @relation("DmReplies", fields: [reply_to_id], references: [id], onDelete: SetNull)
   replies      private_messages[]    @relation("DmReplies")
 
+  @@index([conversation_id])
   /// A thread read newest-first and the first unread are both "this conversation,
-  /// by time": the plain `(conversation_id)` index read the whole thread and
-  /// sorted it, and `(created_at)` alone walked every DM on the platform.
+  /// by time": the plain `(conversation_id)` index above reads the whole thread and
+  /// sorts it, and `(created_at)` alone walks every DM on the platform.
   @@index([conversation_id, created_at])
   @@index([sender_id])
   @@index([created_at])

@@ -1939,6 +1939,48 @@
       "mutation": "M1517 createAdapter(pubClient, subClient) with no options (the default 5000 ms).",
       "observed": "2026-10-18: M1517: 1 of 1 failing. Reverted; 1 green.",
       "date": "2026-10-18"
+    },
+    "event-counts-not-whole-table.itest.ts": {
+      "guards": "perf/read-routes fix 1: the events list and detail count favourites, ratings and going RSVPs with exactly three GROUP BY statements, one per table, each restricted to the page's events (`\"event_id\" IN`), and not with a relation `_count` folded into the events statement; the counts themselves (4 / 2 / 3, waitlisted, maybe and not_going excluded).",
+      "mutation": "lib/event-tallies.ts: the page restriction `const where = { event_id: { in: [...eventIds] } }` replaced by `const where = {}`.",
+      "observed": "2026-10-19: fails in both tests; the received statements are `SELECT COUNT(*) ... FROM event_favorites WHERE 1=1 GROUP BY event_id` with no IN. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "event-detail-occupancy.itest.ts": {
+      "guards": "perf/read-routes fix 5: the event detail's currentCapacity is who is inside (staff counted) and equals getOccupancy().inside, from a headcount read and without the unique-attendance read (every attendee's check-in row).",
+      "mutation": "app/api/mobile/events/[eventId]/route.ts: getInsideCount(eventId) replaced by getOccupancy(eventId).then((o) => o.inside).",
+      "observed": "2026-10-19: fails, the unique-attendance statement count is 1 where 0 is expected. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "board-requests-list.itest.ts": {
+      "guards": "perf/read-routes fix 6: GET /board/requests names each counterpart by the pseudonym of the event the ask belongs to (legacy, keyed, a room name that wins, a room name never used at another event), from ONE chat_group_members read and no created_at-only event lookups.",
+      "mutation": "M1 lib/board-access.ts boardPseudonymsAcross: room names keyed by user id alone. M2 the scheme looked up per event (`await pseudonymSchemeFor(eventId)`). M3 a members read per event added.",
+      "observed": "2026-10-19: M1 fails on the third event's names (b2 shown with her other event's room name). M2 fails, 3 created_at-only event lookups where 0 are expected. M3 fails, 4 members reads where 1 is expected. All reverted; green.",
+      "date": "2026-10-19"
+    },
+    "inbox-last-message.itest.ts": {
+      "guards": "perf/read-routes fix 7: the inbox preview is the newest VISIBLE message per conversation (NULL moderation_status counts as visible, hidden never shows) with the id, ISO instant and read flag the Prisma include gave, from one LIMIT 1 read, and unread counts that name only the person's conversations.",
+      "mutation": "app/api/mobile/conversations/route.ts lastVisibleMessages: `(moderation_status IS NULL OR moderation_status <> 'hidden')` reduced to `(moderation_status <> 'hidden')`.",
+      "observed": "2026-10-19: fails, conversation D (newest message and the unread one both NULL) has no preview: received undefined where 'null status newest' is expected. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "account-blocklist-refresh.test.ts": {
+      "guards": "perf/read-routes fix 9: the blocked-accounts set is served while it refreshes, but only up to 60 s old (a request at 59 s is answered with the read pending, at 61 s it waits), the first load is awaited, and a failed first load is never marked fresh (a request after one, and after two, awaits a retry).",
+      "mutation": "M1 lib/account-blocklist.ts: the failure handler sets fetchedAt unconditionally (the cold-start empty set served as fresh). M2 BLOCKLIST_MAX_STALE_MS doubled to 120 s.",
+      "observed": "2026-10-19: M1 2 failing (a failed first load; two failures then a request). M2 1 failing (the 61 s request is answered while its read is pending). Both reverted; 9 green.",
+      "date": "2026-10-19"
+    },
+    "event-detail-parallel.itest.ts": {
+      "guards": "perf/read-routes fix 5, the speed claim: with every Prisma operation held 60 ms, the event detail's own event read overlaps its favourite, occurrence and check-in reads, and the whole request takes at most 4 sequential waves.",
+      "mutation": "app/api/mobile/events/[eventId]/route.ts replaced by origin/dev's (event, then getOccupancy, then the rest).",
+      "observed": "2026-10-19: fails, the event read no longer overlaps the occurrence read (6 waves, 491 ms against 3 waves, ~330 ms). Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "inbox-parallel.itest.ts": {
+      "guards": "perf/read-routes fix 7, the speed claim: with every Prisma operation held 60 ms, the inbox's last-message read and unread-count read overlap, and both start after the conversations read.",
+      "mutation": "app/api/mobile/conversations/route.ts: the Promise.all of lastVisibleMessages and unreadCounts made two sequential awaits.",
+      "observed": "2026-10-19: fails, the two reads no longer overlap. Reverted; green.",
+      "date": "2026-10-19"
     }
   },
   "grandfathered": [

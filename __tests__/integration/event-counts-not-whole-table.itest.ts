@@ -29,8 +29,19 @@ const CITY = `Qatally${testId("c").replace(/[^a-z0-9]/gi, "").slice(-8)}`
 let eventId: string
 let auth: string
 
-// The whole-table shape `_count` emitted: a GROUP BY with no restriction on event_id.
-const WHOLE_TABLE_AGGREGATE = /WHERE 1=1\s+GROUP BY/i
+/*
+ * The counts are aggregates over event_favorites / event_ratings / event_rsvps.
+ * Positive checks: there are exactly three of them (one per table, so not a
+ * `_count` folded into the events statement) and each one names the page's
+ * events with `"event_id" IN`.
+ */
+const aggregatesOver = (statements: { sql: string }[]) =>
+  statements.filter((s) => /GROUP BY/i.test(s.sql) && /event_(favorites|ratings|rsvps)/.test(s.sql))
+const expectRestrictedToThePage = (statements: { sql: string }[]) => {
+  const aggregates = aggregatesOver(statements)
+  expect(aggregates).toHaveLength(3)
+  for (const a of aggregates) expect(a.sql).toContain('"event_id" IN')
+}
 
 beforeAll(async () => {
   const organiser = await makeUser(testId("tally_org"), "organizer")
@@ -72,7 +83,7 @@ it("the list gives the same counts, from statements that name the page's events"
   )
   expect(row).toMatchObject({ favoriteCount: 4, ratingCount: 2, goingCount: 3 })
   console.log("list:", shape(statements))
-  expect(statements.filter((s) => WHOLE_TABLE_AGGREGATE.test(s.sql)).length).toBe(0)
+  expectRestrictedToThePage(statements)
 })
 
 it("the detail gives the same counts, from statements that name the event", async () => {
@@ -82,5 +93,5 @@ it("the detail gives the same counts, from statements that name the event", asyn
   expect(res.status).toBe(200)
   expect((await res.json()).data.stats).toMatchObject({ favoriteCount: 4, ratingCount: 2, rsvpCount: 3 })
   console.log("detail:", shape(statements))
-  expect(statements.filter((s) => WHOLE_TABLE_AGGREGATE.test(s.sql)).length).toBe(0)
+  expectRestrictedToThePage(statements)
 })

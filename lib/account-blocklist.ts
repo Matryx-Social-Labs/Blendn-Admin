@@ -96,7 +96,9 @@ export async function recentlyBlocked(userId: string, issuedAt: number): Promise
         logger.warn("Could not refresh the blocked-accounts set", {
           error: error instanceof Error ? error.message : String(error),
         })
-        state.fetchedAt = Date.now()
+        // Never loaded (fetchedAt 0): stay unloaded, so the next request awaits a
+        // retry instead of being served an empty set as fresh for 60 s.
+        if (state.fetchedAt !== 0) state.fetchedAt = Date.now()
       })
       .finally(() => {
         state.refresh = null

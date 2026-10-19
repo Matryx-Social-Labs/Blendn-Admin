@@ -65,5 +65,7 @@ it("currentCapacity is who is inside, staff included, as getOccupancy says; the 
   expect(body.currentCapacity).toBe(3)
   expect(body.currentCapacity).toBe((await getOccupancy(eventId)).inside)
   console.log("detail:", shape(statements))
+  // The headcount itself was read (positive), and the unique-attendance read was not.
+  expect(statements.some((s) => /presence_sessions/.test(s.sql))).toBe(true)
   expect(statements.filter((s) => UNIQUE_ATTENDANCE_READ.test(s.sql)).length).toBe(0)
 })

@@ -49,7 +49,11 @@ it("lists the nearest venue first although its name sorts after more than the ca
     req(`/api/mobile/venues?search=${TOKEN}&lat=${LAT}&lon=${LNG}&sortBy=distance&sortOrder=asc&limit=3`, me.token)
   )
   expect(res.status).toBe(200)
-  const venues = (await res.json()).data.venues as { id: string; distance: number }[]
+  const venues = (await res.clone().json()).data.venues as { id: string; distance: number }[]
+  // A page of three, from twelve-plus matches: never one row because the nearest box was narrow.
+  expect(venues).toHaveLength(3)
+  const body = (await res.clone().json()).data
+  expect(body.pagination.totalCount).toBeGreaterThanOrEqual(3)
   expect(venues[0].id).toBe(nearestId)
   expect(venues.map((v) => v.distance)).toEqual([...venues.map((v) => v.distance)].sort((a, b) => a - b))
 })
