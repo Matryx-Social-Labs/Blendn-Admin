@@ -17,6 +17,7 @@ import { venueTypeLabel } from "@/lib/venue-types"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
 import { realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
+import type { LiveCountBucket } from "@/lib/disclosure"
 import { liveGuestIds, liveGuestsWhere, venueLiveBucket } from "@/lib/live-count"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere, venuesTakenOver } from "@/lib/venue-visibility"
@@ -193,6 +194,10 @@ export async function GET(request: NextRequest) {
       capacity: true,
       venue_type: true,
       floors: true,
+      // What `tierOf` needs to say whether the venue is open tonight.
+      timezone: true,
+      day_reset_hour: true,
+      hours: true,
       _count: { select: { events: { where: upcomingEventFilter } } },
       events: {
         where: upcomingEventFilter,
@@ -332,6 +337,21 @@ export async function GET(request: NextRequest) {
         distance,
         upcomingEventCount: venue._count.events,
         liveNow: liveNow ? (liveNow.get(venue.id) ?? "quiet") : null,
+        // `live`, `open` (open tonight) or `quiet`: the tier `order=live` ranks by. Under that order
+        // it is read from the very sets that ordered the page; otherwise by the same rule, per venue.
+        tier:
+          order === "live"
+            ? liveTier.has(venue.id)
+              ? "live"
+              : tonightTier.has(venue.id)
+                ? "open"
+                : "quiet"
+            : venueTier(
+                venue,
+                liveNow?.get(venue.id) ?? "quiet",
+                next?.start_time ?? null,
+                now
+              ),
         nextEvent: next
           ? {
               id: next.id,
@@ -431,15 +451,8 @@ async function readOpenTonight(where: Prisma.venuesWhereInput, eventFilter: Pris
     logger.warn("Open-tonight read hit its ceiling; the tier is truncated", { ceiling: TONIGHT_CEILING })
   }
   const ids = new Set<string>()
-  for (const v of withHours) {
-    const { localDate, end } = venueDayBounds(v.timezone, v.day_reset_hour, now)
-    const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay()
-    if (end > now && venueHours(v.hours)?.some((h) => h.day === weekday)) ids.add(v.id)
-  }
-  for (const v of withEvents) {
-    const next = v.events[0]
-    if (next && next.start_time < venueDayBounds(v.timezone, v.day_reset_hour, now).end) ids.add(v.id)
-  }
+  for (const v of withHours) if (isOpenByHours(v, now)) ids.add(v.id)
+  for (const v of withEvents) if (startsBeforeDayEnds(v, v.events[0]?.start_time ?? null, now)) ids.add(v.id)
   return ids
 }
 
@@ -470,4 +483,33 @@ async function tieredPage<T>(
     out.push(...(await read(seg.w, { skip: segSkip, take: Math.min(wanted, seg.size - segSkip) })))
   }
   return out
+}
+
+type DaySpan = { timezone: string; day_reset_hour: number }
+
+/** Hours with a row for the weekday of the venue's current day (its day, not the clock's midnight). */
+function isOpenByHours(v: DaySpan & { hours: unknown }, now: Date): boolean {
+  const { localDate, end } = venueDayBounds(v.timezone, v.day_reset_hour, now)
+  const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay()
+  return end > now && (venueHours(v.hours)?.some((h) => h.day === weekday) ?? false)
+}
+
+/** The venue's next public event starts before its current day ends. */
+function startsBeforeDayEnds(v: DaySpan, nextStart: Date | null, now: Date): boolean {
+  return nextStart !== null && nextStart < venueDayBounds(v.timezone, v.day_reset_hour, now).end
+}
+
+/**
+ * One venue's tier by the rule `order=live` ranks by: live now (`liveNow` is
+ * not `quiet`), else open tonight (`isOpenByHours` or `startsBeforeDayEnds`),
+ * else quiet. `nextStart` is its next public event, the card's `nextEvent`.
+ */
+function venueTier(
+  v: DaySpan & { hours: unknown },
+  liveNow: LiveCountBucket,
+  nextStart: Date | null,
+  now: Date
+): "live" | "open" | "quiet" {
+  if (liveNow !== "quiet") return "live"
+  return isOpenByHours(v, now) || startsBeforeDayEnds(v, nextStart, now) ? "open" : "quiet"
 }

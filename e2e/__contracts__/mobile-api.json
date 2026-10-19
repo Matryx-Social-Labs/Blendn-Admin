@@ -96,7 +96,33 @@
     "data": [
       "pagination",
       "venues"
-    ]
+    ],
+    "nested": {
+      "venues[]": [
+        "address",
+        "capacity",
+        "city",
+        "distance",
+        "floors",
+        "id",
+        "latitude",
+        "liveNow",
+        "longitude",
+        "name",
+        "nextEvent",
+        "tier",
+        "upcomingEventCount",
+        "venueType",
+        "venueTypeLabel"
+      ],
+      "pagination": [
+        "hasMore",
+        "limit",
+        "page",
+        "totalCount",
+        "totalPages"
+      ]
+    }
   },
   "/api/mobile/conversations": {
     "status": 200,

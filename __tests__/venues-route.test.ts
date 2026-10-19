@@ -55,6 +55,9 @@ const venueRow = (over: Record<string, unknown> = {}) => ({
   longitude: 77.59,
   capacity: 300,
   venue_type: "live_music_venue",
+  timezone: "Asia/Kolkata",
+  day_reset_hour: 6,
+  hours: null,
   _count: { events: 2 },
   events: [
     {

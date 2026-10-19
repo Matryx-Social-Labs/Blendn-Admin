@@ -272,6 +272,19 @@ describe("GET /venues?order=live, three tiers", () => {
     // live; then open tonight (by event "B", by hours "C", name order); then the rest by name.
     expect(ids(one)).toEqual([live, byEvent, byHours])
     expect(ids(two)).toEqual([rest1, rest2, farEvent])
+    // Every item names its tier, and the tiers read down both pages in the order they were ranked.
+    const tiers = [...one.venues, ...two.venues].map((v: { tier: string }) => v.tier)
+    expect(tiers).toEqual(["live", "open", "open", "quiet", "quiet", "quiet"])
+    // The same rule without the order: each venue's own tier, whatever the sort.
+    const plainTiers = (await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20zt&limit=6`))).data.venues
+    expect(Object.fromEntries(plainTiers.map((v: { id: string; tier: string }) => [v.id, v.tier]))).toEqual({
+      [live]: "live",
+      [byEvent]: "open",
+      [byHours]: "open",
+      [rest1]: "quiet",
+      [rest2]: "quiet",
+      [farEvent]: "quiet",
+    })
     expect(one.pagination.order).toBe("live")
     expect(two.pagination.order).toBe("live")
     // Without the order there is no meta, and the plain name order stands.
