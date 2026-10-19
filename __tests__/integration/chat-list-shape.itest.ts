@@ -3,7 +3,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 import { db } from "./helpers"
 import { api, arrive, cleanupCrewWorld, crewOf, liveEvent, person, type Person } from "./crew-world"
-import { sqlCounter } from "./sql-count"
+import { sqlCounter, waveCounter } from "./sql-count"
 
 /**
  * GET /api/mobile/chat/groups, byte for byte (perf/chat-path).
@@ -124,5 +124,23 @@ describe("the chat list's response", () => {
     expect(res.body.data.groups).toEqual([])
     expect(res.body.data.rooms).toEqual([])
     expect(res.body.data.pagination).toMatchObject({ page: 1, totalCount: 0 })
+  })
+
+  it("waits on the database in few waves, not one read after another", async () => {
+    const { v } = await world()
+    const nobody = await person("cl-nobody-w")
+    const lagged = waveCounter(40)
+    try {
+      const withCrews = await lagged.during(() => api.chatGroups(v))
+      const none = await lagged.during(() => api.chatGroups(nobody))
+      expect(withCrews.result.status).toBe(200)
+      // Each Prisma operation held 40 ms, so a wave is a read that waited on another.
+      // Before: the block list, count, page, crew rooms, read markers, last messages,
+      // unread counts, check-ins and names, one after another (7+ with crews, 4 without).
+      expect(withCrews.waves).toBeLessThanOrEqual(4)
+      expect(none.waves).toBeLessThanOrEqual(2)
+    } finally {
+      await lagged.stop()
+    }
   })
 })

@@ -32,6 +32,8 @@ export function sqlCounter() {
       statements.length = 0
       spans.length = 0
       const result = await fn()
+      // A recorder that has stopped recording reads as a route that costs nothing.
+      expect(statements.length).toBeGreaterThan(0)
       return { result, sql: [...statements], levels: levelsOf(spans) }
     },
     async stop() {
@@ -54,4 +56,42 @@ function levelsOf(spans: { start: number; end: number }[]): number {
     reach = Math.max(reach, span.end)
   }
   return levels
+}
+
+/**
+ * Waves of database work, deterministically: every Prisma operation is held for
+ * `lagMs` before it runs, so operations started together overlap (one wave) and
+ * operations that wait on one another are at least `lagMs` apart (a wave each).
+ * Installed on `globalThis.prisma` until `stop()`; the previous client is restored.
+ */
+export function waveCounter(lagMs = 40) {
+  const previous = globalThis.prisma
+  const base = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) })
+  const spans: { start: number; end: number }[] = []
+  globalThis.prisma = base.$extends({
+    query: {
+      async $allOperations({ args, query }: { args: unknown; query: (a: unknown) => Promise<unknown> }) {
+        const span = { start: performance.now(), end: 0 }
+        spans.push(span)
+        await new Promise((r) => setTimeout(r, lagMs))
+        try {
+          return await query(args)
+        } finally {
+          span.end = performance.now()
+        }
+      },
+    },
+  }) as unknown as PrismaClient
+  return {
+    async during<T>(fn: () => Promise<T>): Promise<{ result: T; waves: number }> {
+      spans.length = 0
+      const result = await fn()
+      expect(spans.length).toBeGreaterThan(0)
+      return { result, waves: levelsOf(spans) }
+    },
+    async stop() {
+      globalThis.prisma = previous
+      await base.$disconnect()
+    },
+  }
 }

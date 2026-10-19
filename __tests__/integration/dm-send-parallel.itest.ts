@@ -33,6 +33,8 @@ interface Span {
   end: number
 }
 const spans: Span[] = []
+/** Operations (`model.operation`) that fail once when next run, as a database error would. */
+const failNext = new Set<string>()
 const overlap = (a: string, b: string) => {
   const x = spans.find((s) => s.op === a)
   const y = spans.find((s) => s.op === b)
@@ -54,6 +56,10 @@ beforeAll(() => {
         const span = { op: `${model}.${operation}`, start: performance.now(), end: 0 }
         spans.push(span)
         await new Promise((r) => setTimeout(r, LAG))
+        if (failNext.delete(span.op)) {
+          span.end = performance.now()
+          throw new Error(`injected failure of ${span.op}`)
+        }
         try {
           return await query(args)
         } finally {
@@ -77,6 +83,7 @@ afterAll(async () => {
   await closeDb()
 })
 beforeEach(() => {
+  failNext.clear()
   spans.length = 0
   emitted.length = 0
 })
@@ -153,6 +160,29 @@ describe("sending", () => {
     await db.blocked_users.create({ data: { blocker_id: b.id, blocked_id: a.id } })
     expect((await send(conversationId, a.token, { text: "hi", replyToId: crypto.randomUUID() })).status).toBe(400)
     expect((await send(conversationId, a.token, { text: "hi" })).status).toBe(403)
+  })
+
+  it("when the clock write fails after the emit: the sender gets a 500, the recipient has it, a retry by clientId is answered with the first write", async () => {
+    const { a, conversationId } = await pair()
+    const clientId = crypto.randomUUID()
+    failNext.add("private_conversations.update")
+    const failed = await send(conversationId, a.token, { text: "lands anyway", clientId })
+    expect(failed.status).toBe(500)
+    expect(emitted).toHaveLength(1)
+    const row = await db.private_messages.findFirstOrThrow({ where: { conversation_id: conversationId, client_id: clientId } })
+    expect(row.message_text).toBe("lands anyway")
+
+    const retried = await send(conversationId, a.token, { text: "lands anyway", clientId })
+    expect(retried.status).toBe(200)
+    expect((await retried.json()).data.id).toBe(row.id)
+    // The retry wrote and told nobody twice.
+    expect(emitted).toHaveLength(1)
+    expect(await db.private_messages.count({ where: { conversation_id: conversationId } })).toBe(1)
+  })
+
+  it("answers an invalid body from a finished account with a 400, after the standing check", async () => {
+    const { a, conversationId } = await pair()
+    expect((await send(conversationId, a.token, { nonsense: true })).status).toBe(400)
   })
 
   it("does not tell the room about, or bump the conversation for, a message that was hidden", async () => {

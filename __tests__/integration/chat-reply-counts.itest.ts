@@ -22,6 +22,16 @@ afterAll(async () => {
   await cleanupCrewWorld()
 })
 
+/**
+ * The reply count is taken from the `parent_id` index for the page's ids: there
+ * is such a statement, and every statement that counts by parent has the filter.
+ */
+function expectScopedReplyCount(sql: string[]) {
+  const counting = sql.filter((q) => /COUNT\(\*\)/i.test(q) && /"parent_id"/.test(q))
+  expect(counting.length).toBeGreaterThan(0)
+  for (const q of counting) expect(q).toMatch(/"parent_id" IN \(/)
+}
+
 const MIN = 60_000
 const T0 = Date.parse("2026-01-01T10:00:00Z")
 
@@ -51,7 +61,7 @@ describe("reply counts on a page of history", () => {
     expect(result.status).toBe(200)
     const byId = new Map<string, { _count: { replies: number } }>(result.body.data.messages.map((m: { id: string; _count: { replies: number } }) => [m.id, m]))
     expect({ parent: byId.get(w.parent)?._count, lonely: byId.get(w.lonely)?._count }).toEqual({ parent: { replies: 3 }, lonely: { replies: 0 } })
-    expect(sql.some((q) => /LEFT JOIN \(SELECT[^)]*COUNT\(\*\)/i.test(q))).toBe(false)
+    expectScopedReplyCount(sql)
   })
 
   it("the event chat route carries the same counts without scanning the platform", async () => {
@@ -62,6 +72,6 @@ describe("reply counts on a page of history", () => {
     expect(result.status).toBe(200)
     const byId = new Map<string, { replyCount: number }>(result.body.data.messages.map((m: { id: string; replyCount: number }) => [m.id, m]))
     expect({ parent: byId.get(w.parent)?.replyCount, lonely: byId.get(w.lonely)?.replyCount }).toEqual({ parent: 3, lonely: 0 })
-    expect(sql.some((q) => /LEFT JOIN \(SELECT[^)]*COUNT\(\*\)/i.test(q))).toBe(false)
+    expectScopedReplyCount(sql)
   })
 })
