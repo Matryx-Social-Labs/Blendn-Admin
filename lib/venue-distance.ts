@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client"
 
 import { db } from "./db"
-import { getBoundingBox } from "./geo"
+import { getBoundingBox, haversineDistance } from "./geo"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -14,6 +14,8 @@ export const DISTANCE_SORT_CEILING = 5000
 
 /** Box half-widths tried, widest first, when a city has more venues than the ceiling. */
 const BOX_LADDER_KM = [200, 100, 50, 25, 12, 6, 3, 1.5]
+/** The part of a box's half-width inside which every venue is certainly ranked. */
+const BOX_CERTAIN = 0.99
 
 export type DistanceCandidate = { id: string; latitude: number | null; longitude: number | null }
 
@@ -27,9 +29,10 @@ export type DistanceCandidate = { id: string; latitude: number | null; longitude
  *
  * Past the ceiling, ascending, this narrows to a box around the caller: the
  * widest on the ladder that holds fewer venues than the ceiling. Everything
- * inside that box is ranked, and anything outside it is farther than the box's
- * half-width, so the nearest venues within it are the true nearest. Venues
- * with no coordinates fall out of a box, which is where they sort anyway.
+ * inside that box's inscribed circle is ranked (the corners are farther than
+ * the edge, and a venue just outside an edge may be nearer than a corner row),
+ * so the nearest venues are the true nearest. The answer says `truncated`.
+ * Venues with no coordinates fall out of a box, which is where they sort anyway.
  * Descending ("farthest first") keeps the name-ordered fetch: a box around the
  * caller would hold exactly the wrong ones.
  *
@@ -62,7 +65,18 @@ export async function distanceCandidates(
     boxed = await read({
       AND: [where, { latitude: { gte: box.minLat, lte: box.maxLat }, longitude: { gte: box.minLon, lte: box.maxLon } }],
     })
-    if (boxed.length < ceiling) return { rows: boxed, truncated: false }
+    if (boxed.length < ceiling) {
+      /*
+       * The box is a square: its corners reach 1.41x the half-width, so a venue
+       * just outside an edge can be nearer than a corner row. Only the inscribed
+       * circle is certain to hold the true nearest, with 1 % to spare for the
+       * flat-earth box maths. And a boxed answer is a partial one, so say so.
+       */
+      const certain = boxed.filter(
+        (v) => v.latitude !== null && v.longitude !== null && haversineDistance(lat, lon, v.latitude, v.longitude) <= km * BOX_CERTAIN
+      )
+      return { rows: certain, truncated: true }
+    }
   }
   return { rows: boxed, truncated: true }
 }
