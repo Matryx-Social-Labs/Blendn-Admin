@@ -102,7 +102,15 @@ export async function moderateMessage(
     }
 
     // 3. OpenAI text moderation (async)
-    const text = await (textCheck ?? checkTextContent(content))
+    let text = await (textCheck ?? checkTextContent(content))
+    /*
+     * The in-flight check is reused so a message costs one call, but a call that
+     * FAILED outright (a 429, a 5xx, a reset) is not an answer: this pipeline
+     * always asked again, and a line that went out unchecked must not stay
+     * visible for want of a second look. A timeout is not retried (another 8 s
+     * wait on the same stalled API) and neither is a missing key.
+     */
+    if (textCheck && !text.checked && text.reason === "error") text = await checkTextContent(content)
     const textResult = text.checked ? text.result : null
     if (textResult && textResult.action === "hide") {
       await hideMessage(messageId, chatGroupId, userId, textResult)

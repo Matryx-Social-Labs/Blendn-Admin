@@ -87,6 +87,7 @@ afterAll(async () => {
   }
   if (users.length) {
     await db.notifications.deleteMany({ where: { user_id: { in: users } } })
+    await db.blocked_users.deleteMany({ where: { OR: [{ blocker_id: { in: users } }, { blocked_id: { in: users } }] } })
     await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
     await db.user.deleteMany({ where: { id: { in: users } } })
   }
@@ -204,6 +205,38 @@ describe.each([
     expect(await lastMessageAt(r.groupId)).toEqual(before)
   })
 
+  it("holds a message the model hides within the wait: nothing emitted, the room not bumped, the sender told", async () => {
+    const r = await room()
+    const ana = await r.member("ro_f")
+    const before = await lastMessageAt(r.groupId)
+    mockCheckText.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      return { checked: true, result: { action: "hide", source: "openai_text", categories: { hate: 0.99 }, confidence: 0.99 } }
+    })
+    const res = await send(r, ana, "slow to be hidden")
+    expect(res.status).toBe(200)
+    expect(JSON.stringify(await res.json())).toContain('"moderation_hidden":true')
+    expect(order.some((e) => e.startsWith("emit:"))).toBe(false)
+    expect(await lastMessageAt(r.groupId)).toEqual(before)
+  })
+
+  it("hides, flags and records one call for a hide that lands after the 1 s wait", async () => {
+    const r = await room()
+    const ana = await r.member("ro_g")
+    mockCheckText.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1300))
+      return { checked: true, result: { action: "hide", source: "openai_text", categories: { hate: 0.99 }, confidence: 0.99 } }
+    })
+    const res = await send(r, ana, "very slow to be hidden")
+    expect(res.status).toBe(201)
+    const id = await idOf(res)
+    // Out already (the wait ran out), then taken back by the first call's own answer.
+    expect(order).toContain("emit:very slow to be hidden")
+    expect(await until(async () => (await db.chat_messages.findUniqueOrThrow({ where: { id } })).moderation_status === "hidden")).toBe(true)
+    expect(await until(async () => (await db.moderation_flags.count({ where: { message_id: id } })) > 0)).toBe(true)
+    expect(mockCheckText).toHaveBeenCalledTimes(1)
+  })
+
   it("answers a reply before its push has gone out, and still sends the push", async () => {
     const r = await room()
     const ana = await r.member("ro_d")
@@ -219,5 +252,21 @@ describe.each([
     expect(await until(() => pushDone.length === 1)).toBe(true)
     expect(pushDone[0]).toBeGreaterThan(answeredAt)
     expect(order).toContain("push:sent")
+  })
+})
+
+describe("a reply to somebody in a block with the sender", () => {
+  it("is delivered to nobody's lock screen, through the real route", async () => {
+    const r = await room()
+    const ana = await r.member("ro_h")
+    const ben = await r.member("ro_i")
+    const asked = (await (await viaGroup(r, ana, "who is by the bar?")).json()) as { data: { id: string } }
+    await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: ben.id } })
+    order.length = 0
+    const res = await viaGroup(r, ben, "me", asked.data.id)
+    expect(res.status).toBe(201)
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    expect(order).not.toContain("push:sent")
+    expect(pushDone).toHaveLength(0)
   })
 })
