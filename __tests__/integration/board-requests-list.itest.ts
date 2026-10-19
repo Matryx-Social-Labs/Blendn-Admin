@@ -74,6 +74,8 @@ it("names each counterpart per event, and resolves them in one members read", as
   await ask(keyedEvent, b2.id, me.id)
   await ask(thirdEvent, c1.id, me.id)
   await ask(legacyEvent, me.id, c1.id)
+  // b2 asks at a second event too, where she has no room name: a name belongs to the event it was made at.
+  await ask(thirdEvent, b2.id, me.id)
 
   // b2 already carries a name in the keyed event's room: that wins over the derived one.
   const group = await db.chat_groups.create({ data: { event_id: keyedEvent, name: "room" } })
@@ -97,7 +99,9 @@ it("names each counterpart per event, and resolves them in one members read", as
   expect(nameOf(body.incoming, keyedEvent)).toEqual(
     ["Room Name Already", preferredPseudonymFor(keyedEvent, b1.id, "keyed")].sort()
   )
-  expect(nameOf(body.incoming, thirdEvent)).toEqual([preferredPseudonymFor(thirdEvent, c1.id, "keyed")])
+  expect(nameOf(body.incoming, thirdEvent)).toEqual(
+    [preferredPseudonymFor(thirdEvent, c1.id, "keyed"), preferredPseudonymFor(thirdEvent, b2.id, "keyed")].sort()
+  )
   expect(nameOf(body.outgoing, legacyEvent)).toEqual([preferredPseudonymFor(legacyEvent, c1.id, "legacy")])
 
   // One read of the room members for the page, however many events it spans; and no
