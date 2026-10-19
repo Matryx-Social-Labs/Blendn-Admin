@@ -84,6 +84,19 @@ describe("storing a refresh token", () => {
     await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: id })
   })
 
+  it("refuses a bcrypt row hashed from some other string", async () => {
+    // Not another token of the same user: bcrypt reads 72 bytes, identical for those.
+    const id = await makeUser(testId("rt-legacy-wrong"))
+    users.push(id)
+    const token = signRefreshToken(id, `${id}@itest.invalid`)
+    const { jti } = jwt.decode(token) as { jti: string }
+    await db.mobile_refresh_tokens.create({
+      data: { id: jti, user_id: id, token_hash: await bcrypt.hash("not-this-token", 4), expires_at: new Date(Date.now() + 60_000) },
+    })
+
+    await expect(verifyRefreshToken(token)).resolves.toBeNull()
+  })
+
   it("verifies a freshly stored token", async () => {
     const id = await makeUser(testId("rt-sha"))
     users.push(id)
