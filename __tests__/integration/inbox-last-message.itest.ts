@@ -55,7 +55,7 @@ async function thread(me: string, other: string, messages: { text: string; from:
 
 it("shows the newest visible message per conversation, with its unread count, from a LIMITed read", async () => {
   const me = await person("inbox-me")
-  const [a, b, c] = await Promise.all([person("inbox-a"), person("inbox-b"), person("inbox-c")])
+  const [a, b, c, d] = await Promise.all([person("inbox-a"), person("inbox-b"), person("inbox-c"), person("inbox-d")])
 
   // A: 40 messages; the newest two are hidden/flagged-but-visible. Hidden never shows; flagged does.
   const many = Array.from({ length: 40 }, (_, i) => ({ text: `old ${i}`, from: i % 2 ? me.id : a.id, ago: 1000 - i, read: true }))
@@ -67,22 +67,35 @@ it("shows the newest visible message per conversation, with its unread count, fr
   // B: one message of mine. C: no messages at all.
   const withB = await thread(me.id, b.id, [{ text: "mine last", from: me.id, ago: 3, status: "clean", read: true }])
   const withC = await thread(me.id, c.id, [])
+  // D: the newest message AND the unread one have a NULL moderation_status (never screened, the
+  // common case). `<> 'hidden'` alone is NULL for them and would drop both; the predicate is an OR.
+  const withD = await thread(me.id, d.id, [
+    { text: "read earlier", from: d.id, ago: 30, read: true },
+    { text: "null status newest", from: d.id, ago: 2, status: null },
+  ])
 
   const { result: res, statements } = await recordStatements(() =>
     inboxRoute.GET(new NextRequest("http://localhost/api/mobile/conversations", { headers: { authorization: `Bearer ${me.token}` } }))
   )
   expect(res.status).toBe(200)
-  const list = (await res.json()).data.conversations as { id: string; lastMessage: { text: string; senderId: string } | null; unreadCount: number }[]
+  const list = (await res.json()).data.conversations as { id: string; lastMessage: { id: string; text: string; senderId: string; createdAt: string; isRead: boolean } | null; unreadCount: number }[]
   const byId = new Map(list.map((c) => [c.id, c]))
   console.log("inbox:", shape(statements))
 
   expect(byId.get(withA)?.lastMessage?.text).toBe("visible newest")
   expect(byId.get(withA)?.lastMessage?.senderId).toBe(a.id)
+  // The raw read gives the same fields the Prisma row did: the id, the instant (as an ISO string) and the read flag.
+  for (const [conv, text] of [[withA, "visible newest"], [withB, "mine last"]] as const) {
+    const row = await db.private_messages.findFirstOrThrow({ where: { conversation_id: conv, message_text: text } })
+    expect(byId.get(conv)?.lastMessage).toMatchObject({ id: row.id, createdAt: row.created_at.toISOString(), isRead: row.is_read })
+  }
   // unread = not mine, not read, visible: only "visible newest" ("hidden newest" is never delivered)
   expect(byId.get(withA)?.unreadCount).toBe(1)
   expect(byId.get(withB)?.lastMessage?.text).toBe("mine last")
   expect(byId.get(withB)?.unreadCount).toBe(0)
   expect(byId.get(withC)?.lastMessage).toBeNull()
+  expect(byId.get(withD)?.lastMessage?.text).toBe("null status newest")
+  expect(byId.get(withD)?.unreadCount).toBe(1)
 
   // The last message is one LIMITed read, not "every message of these conversations".
   const lastReads = statements.filter((s) => /private_messages/.test(s.sql) && /message_text/.test(s.sql))

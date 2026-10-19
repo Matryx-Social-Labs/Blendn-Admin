@@ -1951,6 +1951,12 @@
       "mutation": "M1 lib/board-access.ts boardPseudonymsAcross: room names keyed by user id alone. M2 the scheme looked up per event (`await pseudonymSchemeFor(eventId)`). M3 a members read per event added.",
       "observed": "2026-10-19: M1 fails on the third event's names (b2 shown with her other event's room name). M2 fails, 3 created_at-only event lookups where 0 are expected. M3 fails, 4 members reads where 1 is expected. All reverted; green.",
       "date": "2026-10-19"
+    },
+    "inbox-last-message.itest.ts": {
+      "guards": "perf/read-routes fix 7: the inbox preview is the newest VISIBLE message per conversation (NULL moderation_status counts as visible, hidden never shows) with the id, ISO instant and read flag the Prisma include gave, from one LIMIT 1 read, and unread counts that name only the person's conversations.",
+      "mutation": "app/api/mobile/conversations/route.ts lastVisibleMessages: `(moderation_status IS NULL OR moderation_status <> 'hidden')` reduced to `(moderation_status <> 'hidden')`.",
+      "observed": "2026-10-19: fails, conversation D (newest message and the unread one both NULL) has no preview: received undefined where 'null status newest' is expected. Reverted; green.",
+      "date": "2026-10-19"
     }
   },
   "grandfathered": [

@@ -4,7 +4,7 @@ import { join } from "path"
 jest.mock("@/lib/moderation/spam-detector", () => ({ checkSpam: jest.fn() }))
 
 import { checkSpam } from "@/lib/moderation/spam-detector"
-import { screenDirectMessage } from "@/lib/dm-moderation"
+import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 
 /**
  * The one channel nothing was watching.
@@ -135,6 +135,12 @@ describe("the visibility predicate", () => {
     const src = codeOnly(read("lib", "dm-moderation.ts"))
     const decl = src.slice(src.indexOf("export const VISIBLE_DM"))
     expect(decl).toContain("moderation_status: null")
+  })
+
+  it("is exactly 'no verdict, or any verdict but hidden' (the inbox preview writes the same thing in SQL)", () => {
+    // lastVisibleMessages in app/api/mobile/conversations/route.ts spells this predicate out as
+    // `(moderation_status IS NULL OR moderation_status <> 'hidden')`; if this changes, so must that.
+    expect(VISIBLE_DM).toEqual({ OR: [{ moderation_status: null }, { moderation_status: { not: "hidden" } }] })
   })
 
   it("is carried by every participant-facing read of a DM", () => {
