@@ -63,6 +63,23 @@ describe("distanceCandidates", () => {
     expect(out.truncated).toBe(true)
   })
 
+  it("probes the ladder with counts and reads the box once, at the first step that fits", async () => {
+    for (let i = 0; i < 12; i++) add(`a${String(i).padStart(2, "0")}`, 0.5 + i * 0.05, 0)
+    add("zzz next door", 0.001, 0)
+    await distanceCandidates({}, LAT, LON, true, CEILING)
+    // 200 km and 100 km hold five or more; 50 km holds one. Two row reads in all: the first look, and the box.
+    expect(count).toHaveBeenCalledTimes(3)
+    expect(findMany).toHaveBeenCalledTimes(2)
+  })
+
+  it("when even the narrowest box is over the ceiling, reads it once and still ranks only its circle", async () => {
+    for (let i = 0; i < 9; i++) add(`near${i}`, 0.0001 * i, 0)
+    const out = await distanceCandidates({}, LAT, LON, true, CEILING)
+    expect(findMany).toHaveBeenCalledTimes(2)
+    expect(out.rows.length).toBeLessThanOrEqual(CEILING)
+    expect(out.truncated).toBe(true)
+  })
+
   it("keeps only rows inside the box's inscribed circle: a corner is up to 1.41x the half-width away", async () => {
     // Five venues 67-71 km out fill the 100 km box, so the ladder lands on 50 km. The corner (~69 km away)
     // is inside that box but farther than a venue just beyond its edge would be, so it must not be ranked.

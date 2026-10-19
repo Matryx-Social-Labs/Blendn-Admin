@@ -59,24 +59,29 @@ export async function distanceCandidates(
   if (all.length < ceiling) return { rows: all, truncated: false }
   if (!ascending) return { rows: all, truncated: true }
 
-  let boxed = all
-  for (const km of BOX_LADDER_KM) {
+  // Count down the ladder (one cheap probe each) and read rows once, at the first box that fits.
+  const boxWhere = (km: number): Prisma.venuesWhereInput => {
     const box = getBoundingBox(lat, lon, km)
-    boxed = await read({
+    return {
       AND: [where, { latitude: { gte: box.minLat, lte: box.maxLat }, longitude: { gte: box.minLon, lte: box.maxLon } }],
-    })
-    if (boxed.length < ceiling) {
-      /*
-       * The box is a square: its corners reach 1.41x the half-width, so a venue
-       * just outside an edge can be nearer than a corner row. Only the inscribed
-       * circle is certain to hold the true nearest, with 1 % to spare for the
-       * flat-earth box maths. And a boxed answer is a partial one, so say so.
-       */
-      const certain = boxed.filter(
-        (v) => v.latitude !== null && v.longitude !== null && haversineDistance(lat, lon, v.latitude, v.longitude) <= km * BOX_CERTAIN
-      )
-      return { rows: certain, truncated: true }
     }
   }
-  return { rows: boxed, truncated: true }
+  let km = BOX_LADDER_KM[BOX_LADDER_KM.length - 1]
+  for (const step of BOX_LADDER_KM) {
+    if ((await db.venues.count({ where: boxWhere(step) })) < ceiling) {
+      km = step
+      break
+    }
+  }
+  /*
+   * The box is a square: its corners reach 1.41x the half-width, so a venue just
+   * outside an edge can be nearer than a corner row. Only the inscribed circle
+   * is certain to hold the true nearest, with 1 % to spare for the flat-earth
+   * box maths. And a boxed answer is a partial one, so say so.
+   */
+  const boxed = await read(boxWhere(km))
+  const certain = boxed.filter(
+    (v) => v.latitude !== null && v.longitude !== null && haversineDistance(lat, lon, v.latitude, v.longitude) <= km * BOX_CERTAIN
+  )
+  return { rows: certain, truncated: true }
 }
