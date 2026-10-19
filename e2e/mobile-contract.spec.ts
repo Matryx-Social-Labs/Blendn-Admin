@@ -48,7 +48,6 @@ const ROUTES = [
   // Matching v2's vocabulary and your this-or-that answers (step 10).
   "/api/mobile/profile-options",
   "/api/mobile/me/this-or-that",
-  "/api/mobile/venues",
   "/api/mobile/conversations",
   "/api/mobile/notifications",
   "/api/mobile/message-requests",
@@ -183,6 +182,8 @@ test.describe("mobile API contract", () => {
       "/api/mobile/chat/groups": { url: "/api/mobile/chat/groups", pin: ["groups[]", "groups[].event"] },
       // A Go Live is an active check-in too: `kind`, `expiresAt`, `stay` and `venueId` say which (step 4, 5).
       "/api/mobile/checkins/active": { url: "/api/mobile/checkins/active", pin: ["checkIns[]"] },
+      // The Places list, one row down: `tier` is what `order=live` ranks by.
+      "/api/mobile/venues": { url: "/api/mobile/venues", pin: ["venues[]", "pagination"] },
       // Go Live's venue (PL-C02): `venue` must never grow a `geofence`.
       "/api/mobile/venues/:venueId": { url: `/api/mobile/venues/${live!.venue_id}`, pin: ["venue", "live"] },
     }

@@ -58,6 +58,7 @@ const VenueListItemSchema = z
     latitude: z.number().nullable(),
     longitude: z.number().nullable(),
     capacity: z.number().int().nullable(),
+    tier: z.enum(["live", "open", "quiet"]).describe("The tier `order=live` ranks by: `live` (somebody is live here now, `liveNow` not `quiet`), `open` (open tonight: hours for the venue's current day, or a public event starting before its day ends), else `quiet`. Present on every item, whatever the order; null `liveNow` (a caller who may not go live) never makes a venue `live`."),
     venueType: z.string().nullable(),
     venueTypeLabel: z.string(),
     floors: z.number().int().min(1).max(200).nullable()
