@@ -1963,6 +1963,18 @@
       "mutation": "M1 lib/account-blocklist.ts: the failure handler sets fetchedAt unconditionally (the cold-start empty set served as fresh). M2 BLOCKLIST_MAX_STALE_MS doubled to 120 s.",
       "observed": "2026-10-19: M1 2 failing (a failed first load; two failures then a request). M2 1 failing (the 61 s request is answered while its read is pending). Both reverted; 9 green.",
       "date": "2026-10-19"
+    },
+    "event-detail-parallel.itest.ts": {
+      "guards": "perf/read-routes fix 5, the speed claim: with every Prisma operation held 60 ms, the event detail's own event read overlaps its favourite, occurrence and check-in reads, and the whole request takes at most 4 sequential waves.",
+      "mutation": "app/api/mobile/events/[eventId]/route.ts replaced by origin/dev's (event, then getOccupancy, then the rest).",
+      "observed": "2026-10-19: fails, the event read no longer overlaps the occurrence read (6 waves, 491 ms against 3 waves, ~330 ms). Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "inbox-parallel.itest.ts": {
+      "guards": "perf/read-routes fix 7, the speed claim: with every Prisma operation held 60 ms, the inbox's last-message read and unread-count read overlap, and both start after the conversations read.",
+      "mutation": "app/api/mobile/conversations/route.ts: the Promise.all of lastVisibleMessages and unreadCounts made two sequential awaits.",
+      "observed": "2026-10-19: fails, the two reads no longer overlap. Reverted; green.",
+      "date": "2026-10-19"
     }
   },
   "grandfathered": [
