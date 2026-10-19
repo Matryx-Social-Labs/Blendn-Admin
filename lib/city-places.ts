@@ -35,7 +35,8 @@ export function cityPlaces(): Promise<PlacePoint[]> {
       select: { city: true, latitude: true, longitude: true },
     })
     .catch((error) => {
-      shared.__blendnCityPlaces = null
+      // Only if the cache still holds this scan; a newer one is not ours to drop.
+      if (shared.__blendnCityPlaces?.places === places) shared.__blendnCityPlaces = null
       throw error
     })
   shared.__blendnCityPlaces = { expiresAt: now + CITY_PLACES_TTL_MS, places }
