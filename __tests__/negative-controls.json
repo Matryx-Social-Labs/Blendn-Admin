@@ -1957,6 +1957,12 @@
       "mutation": "app/api/mobile/conversations/route.ts lastVisibleMessages: `(moderation_status IS NULL OR moderation_status <> 'hidden')` reduced to `(moderation_status <> 'hidden')`.",
       "observed": "2026-10-19: fails, conversation D (newest message and the unread one both NULL) has no preview: received undefined where 'null status newest' is expected. Reverted; green.",
       "date": "2026-10-19"
+    },
+    "account-blocklist-refresh.test.ts": {
+      "guards": "perf/read-routes fix 9: the blocked-accounts set is served while it refreshes, but only up to 60 s old (a request at 59 s is answered with the read pending, at 61 s it waits), the first load is awaited, and a failed first load is never marked fresh (a request after one, and after two, awaits a retry).",
+      "mutation": "M1 lib/account-blocklist.ts: the failure handler sets fetchedAt unconditionally (the cold-start empty set served as fresh). M2 BLOCKLIST_MAX_STALE_MS doubled to 120 s.",
+      "observed": "2026-10-19: M1 2 failing (a failed first load; two failures then a request). M2 1 failing (the 61 s request is answered while its read is pending). Both reverted; 9 green.",
+      "date": "2026-10-19"
     }
   },
   "grandfathered": [

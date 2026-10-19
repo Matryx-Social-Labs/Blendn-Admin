@@ -122,4 +122,36 @@ describe("recentlyBlocked refresh", () => {
     expect(await recentlyBlocked("u1", issued())).toBe(true)
     expect(mockFindMany).toHaveBeenCalledTimes(2)
   })
+
+  it("keeps retrying, awaited each time, while nothing has ever loaded", async () => {
+    mockFindMany.mockRejectedValueOnce(new Error("down 1")).mockRejectedValueOnce(new Error("down 2"))
+    const { recentlyBlocked } = freshCopy()
+    expect(await recentlyBlocked("u1", issued())).toBe(false)
+    expect(await recentlyBlocked("u1", issued())).toBe(false)
+
+    mockFindMany.mockResolvedValueOnce([blockedRow("u1")])
+    expect(await recentlyBlocked("u1", issued())).toBe(true)
+    expect(mockFindMany).toHaveBeenCalledTimes(3)
+  })
+
+  it("serves the old set up to 60 s and waits for the refresh past it", async () => {
+    // Whether a request, `ms` after the set was loaded, is answered while the refresh read is still pending.
+    const answeredWhileReadPends = async (ms: number) => {
+      mockFindMany.mockReset().mockResolvedValueOnce([])
+      delete shared.__blendnBlocklist
+      const { recentlyBlocked } = freshCopy()
+      await recentlyBlocked("u1", issued())
+      jest.advanceTimersByTime(ms)
+      const refresh = slowRead()
+      let answered = false
+      const asking = recentlyBlocked("u1", issued()).then((v) => ((answered = true), v))
+      await settle()
+      const whilePending = answered
+      refresh.answer([])
+      await asking
+      return whilePending
+    }
+    expect(await answeredWhileReadPends(59_000)).toBe(true)
+    expect(await answeredWhileReadPends(61_000)).toBe(false)
+  })
 })
