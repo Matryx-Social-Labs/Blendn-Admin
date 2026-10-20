@@ -1933,6 +1933,12 @@
       "mutation": "M1443 the sentence printed whatever the plan. M1444 Buy offered beside an open mandate (the old `pro || !owned` condition). M1463 the row ignoring openElsewhere.",
       "observed": "2026-10-11: M1443: 4 failing (every case that must not say it). M1444: 2 failing (paused, authenticated). Reverted; 6 green. 2026-10-11: M1463 1 failing (the L7 case). Reverted; 7 green.",
       "date": "2026-10-11"
+    },
+    "venue-area.test.ts": {
+      "guards": "scripts/places/areas.sql names no country and reads polygons by the cells venues sit in, so a venue in any country gets the polygon that holds it (home panes C4).",
+      "mutation": "M900 `d.country = 'IN' AND` put back in the localities WHERE. M901 the `cells` table renamed back to a single `extent` box.",
+      "observed": "M900: 1 of 11 failing ('names no country'). M901: 1 of 11 failing ('reads the polygons near the venues'). Each reverted; 11 of 11.",
+      "date": "2026-10-20"
     }
   },
   "grandfathered": [

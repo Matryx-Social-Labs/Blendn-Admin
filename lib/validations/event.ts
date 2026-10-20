@@ -53,6 +53,18 @@ export const eventQuerySchema = z.object({
     .optional()
     .default(false),
 
+  /**
+   * Only the featured events: published, public, age-gated and not ended (the
+   * same `where` as ever), `is_featured`, ordered by start time, at most
+   * `FEATURED_MAX` (5) however large `limit` is. `sortBy` is ignored: the order
+   * is the rank (`featured.rank`).
+   */
+  featured: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .transform((v) => v === true || v === "true")
+    .optional()
+    .default(false),
+
   // Status filter
   status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
 

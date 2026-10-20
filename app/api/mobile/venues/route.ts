@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client"
+import type { Prisma } from "@prisma/client"
 import { NextRequest } from "next/server"
 
 import { ageFrom, isAdult, mayParticipate } from "@/lib/age"
@@ -14,16 +14,19 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
-import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
-import { realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
-import type { LiveCountBucket } from "@/lib/disclosure"
-import { liveGuestIds, liveGuestsWhere, venueLiveBucket } from "@/lib/live-count"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere, venuesTakenOver } from "@/lib/venue-visibility"
+import { venuesTakenOver } from "@/lib/venue-visibility"
 import { paginationMeta } from "@/lib/pagination"
-import { venueDayBounds } from "@/lib/venue-day"
-import { venueHours } from "@/lib/venue-hours"
+import {
+  listedVenuesWhere,
+  liveBuckets,
+  liveVenueIds,
+  openTonightVenueIds,
+  upcomingEventsWhere,
+  venueTier,
+} from "@/lib/venue-listing"
+import { tonightHours } from "@/lib/venue-tonight"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -105,8 +108,10 @@ export async function GET(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { page, limit, search, city, lat, lon, radius, venueType, order, sortBy, sortOrder } =
+    const { page, limit, search, city, lat, lon, radius, venueType, venueTypes, area, order, sortBy, sortOrder } =
       parsed.data
+    // `venueType=a,b` and its spelling `venueTypes=a,b`, one set.
+    const types = [...new Set([...(venueType ?? []), ...(venueTypes ?? [])])]
 
     const viewer = await db.profiles.findUnique({
       where: { id: authUser.userId },
@@ -120,55 +125,33 @@ export async function GET(request: NextRequest) {
     const mayCountLive = mayParticipate(viewer) && isAdult(viewerAge)
 
     /*
-     * The events that count, both for `upcomingEventCount` and for `nextEvent`.
-     *
-     * One object used in both places on purpose. When these were allowed to
-     * drift on the events side, a card could say "3 upcoming" and then headline
-     * an event that was not one of them.
+     * The events that count, both for `upcomingEventCount` and for `nextEvent`:
+     * one filter, written in lib/venue-listing.ts beside the summary's.
      */
     const now = new Date()
-    const upcomingEventFilter = {
-      deleted_at: null,
-      // A venue's own live room is not an event at it: counted, it would make
-      // every venue anyone went live at read "1 upcoming" (F3).
-      ...realEventsWhere,
-      status: "published" as const,
-      visibility: "public" as const,
-      end_time: { gte: now },
-      /*
-       * Two ORs, so under `AND` (F4), and both from lib/venue-visibility.ts,
-       * where the takeover reads them. A link the venue's owner disputed is the
-       * owner saying the event is not here, so it is no headline here either.
-       */
-      AND: [undisputedLinkWhere, ...(typeof viewerAge === "number" ? [mayAttendWhere(viewerAge)] : [])],
-    }
+    const upcomingEventFilter = upcomingEventsWhere(typeof viewerAge === "number" ? viewerAge : null, now)
 
-    const where: Prisma.venuesWhereInput = {
-      deleted_at: null,
-      // `archived` is how a venue is retired without deleting the events that
-      // happened in it, so it must not appear in discovery.
-      status: "active",
-      // A claimed venue its owner took off Blendn (D-13). Under `AND`: the
-      // search below sets `OR`, and two ORs on one object replace each other.
-      AND: [openOnBlendnWhere],
-    }
+    const where = listedVenuesWhere(city)
 
     if (search) {
       where.OR = [
         { name: { contains: search, mode: "insensitive" } },
         { address: { contains: search, mode: "insensitive" } },
         { city: { contains: search, mode: "insensitive" } },
+        // The neighbourhood, so "Search places or areas" finds "Indiranagar" by name.
+        { area: { contains: search, mode: "insensitive" } },
       ]
     }
 
-    // Trimmed like the events filter, so the two agree on what a city is.
     const cityScope = cityKey(city)
-    if (cityScope) {
-      where.city = { equals: likeLiteral(cityScope), mode: "insensitive" }
+
+    if (types.length > 0) {
+      where.venue_type = { in: types }
     }
 
-    if (venueType) {
-      where.venue_type = venueType
+    // The neighbourhood, by its slug (`areaSlug`); venues with no area are in none.
+    if (area) {
+      where.area_slug = area
     }
 
     // A bounding box only when the caller asked for one. Sending coordinates
@@ -193,6 +176,8 @@ export async function GET(request: NextRequest) {
       longitude: true,
       capacity: true,
       venue_type: true,
+      area: true,
+      area_slug: true,
       floors: true,
       // What `tierOf` needs to say whether the venue is open tonight.
       timezone: true,
@@ -223,7 +208,7 @@ export async function GET(request: NextRequest) {
      * repeats or skips a venue. Disjoint by construction (tonight excludes live).
      */
     // What the open-tonight read depends on besides time: the query's own scope and the viewer's age rule.
-    const tonightScope = JSON.stringify({ search, city: cityScope, venueType, lat, lon, radius, viewerAge, taken })
+    const tonightScope = JSON.stringify({ search, city: cityScope, types, area, lat, lon, radius, viewerAge, taken })
     const liveTier = order === "live" && mayCountLive ? await liveVenueIds(where, authUser.userId, now) : new Set<string>()
     const tonightTier =
       order === "live" ? await openTonightVenueIds(where, upcomingEventFilter, now, liveTier, tonightScope) : new Set<string>()
@@ -330,11 +315,16 @@ export async function GET(request: NextRequest) {
         // The label the dashboard already shows, so the app never ships a
         // second copy of the vocabulary and never renders a raw `pub_bar`.
         venueTypeLabel: venueTypeLabel(venue.venue_type),
+        // The neighbourhood and its slug (the `area=` filter's value): `null` for both when unknown, never guessed.
+        area: venue.area,
+        areaSlug: venue.area_slug,
         // The 3D map's height override: floors × 3.2 m (lib/venue-floors.ts). Null: the map's own.
         floors: venue.floors,
         // Kilometres, or null when either side has no fix. The client formats
         // it — `formatDistance` there already owns km-versus-miles.
         distance,
+        // Tonight's opening from `venues.hours` in the venue's own zone, or null when none is given for its current day.
+        tonight: tonightHours(venue, now),
         upcomingEventCount: venue._count.events,
         liveNow: liveNow ? (liveNow.get(venue.id) ?? "quiet") : null,
         // `live`, `open` (open tonight) or `quiet`: the tier `order=live` ranks by. Under that order
@@ -377,86 +367,6 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * `liveNow` for a page of venues, as `GET /venues/:id` reads it for one: the
- * same `liveGuestIds` (one read for the page, never one per venue — HM-I05)
- * and the same per-venue minute cache (`venueLiveBucket`), the caller left
- * out only if counted.
- */
-async function liveBuckets(venueIds: string[], viewerId: string, now: Date) {
-  const live = await liveGuestIds(venueIds, now)
-  const buckets = await Promise.all(
-    venueIds.map((id) => venueLiveBucket(id, viewerId, async () => live.get(id) ?? new Set<string>(), now.getTime()))
-  )
-  return new Map(venueIds.map((id, i) => [id, buckets[i]]))
-}
-
-/** The venues matching `where` whose `liveNow` is not `quiet` for this viewer. */
-async function liveVenueIds(where: Prisma.venuesWhereInput, viewerId: string, now: Date): Promise<Set<string>> {
-  const rows = await db.event_check_ins.findMany({
-    where: { ...liveGuestsWhere(now), event: { ...venueDaysWhere, venue: where } },
-    select: { event: { select: { venue_id: true } } },
-    distinct: ["event_id"],
-  })
-  const ids = [...new Set(rows.flatMap((r) => (r.event.venue_id ? [r.event.venue_id] : [])))]
-  const buckets = await liveBuckets(ids, viewerId, now)
-  return new Set(ids.filter((id) => buckets.get(id) !== "quiet"))
-}
-
-/** How long the open-tonight set is kept per scope, like the live count's minute. */
-const TONIGHT_TTL_MS = 60_000
-/** The most venues one open-tonight read looks at per source: a scope this large is logged, not walked. */
-const TONIGHT_CEILING = 5000
-const tonightShared = globalThis as typeof globalThis & { __blendnTonight?: Map<string, { ids: Set<string>; at: number }> }
-const tonightCache = (tonightShared.__blendnTonight ??= new Map())
-
-/**
- * The venues matching `where`, not already live, that are open tonight: their
- * hours (`venues.hours`, in the venue's own zone) have a row for the weekday of
- * the venue's current day, or a public event (`eventFilter`, the card's) starts
- * before that day ends. "Tonight" is the venue's day, not the clock's midnight.
- *
- * `where` already carries the query's city / bounding box / search, so a read
- * is scoped to what the caller listed; the result is kept a minute per scope
- * (`scope`), so paging and refreshing do not repeat it.
- */
-async function openTonightVenueIds(
-  where: Prisma.venuesWhereInput,
-  eventFilter: Prisma.eventsWhereInput,
-  now: Date,
-  live: ReadonlySet<string>,
-  scope: string
-): Promise<Set<string>> {
-  let entry = tonightCache.get(scope)
-  if (!entry || now.getTime() - entry.at >= TONIGHT_TTL_MS) {
-    entry = { ids: await readOpenTonight(where, eventFilter, now), at: now.getTime() }
-    if (tonightCache.size > 1000) tonightCache.clear()
-    tonightCache.set(scope, entry)
-  }
-  return new Set([...entry.ids].filter((id) => !live.has(id)))
-}
-
-async function readOpenTonight(where: Prisma.venuesWhereInput, eventFilter: Prisma.eventsWhereInput, now: Date): Promise<Set<string>> {
-  const pick = { id: true, timezone: true, day_reset_hour: true } as const
-  // Events starting within a day and a half can start before some venue's day ends; each is checked against its own venue's end below.
-  const soon = { ...realEventsWhere, ...eventFilter, start_time: { lt: new Date(now.getTime() + 36 * 3_600_000) } }
-  const [withHours, withEvents] = await Promise.all([
-    db.venues.findMany({ where: { AND: [where, { hours: { not: Prisma.DbNull } }] }, select: { ...pick, hours: true }, take: TONIGHT_CEILING }),
-    db.venues.findMany({
-      where: { AND: [where, { events: { some: soon } }] },
-      select: { ...pick, events: { where: soon, orderBy: [{ start_time: "asc" }, { id: "asc" }], take: 1, select: { start_time: true } } },
-      take: TONIGHT_CEILING,
-    }),
-  ])
-  if (withHours.length === TONIGHT_CEILING || withEvents.length === TONIGHT_CEILING) {
-    logger.warn("Open-tonight read hit its ceiling; the tier is truncated", { ceiling: TONIGHT_CEILING })
-  }
-  const ids = new Set<string>()
-  for (const v of withHours) if (isOpenByHours(v, now)) ids.add(v.id)
-  for (const v of withEvents) if (startsBeforeDayEnds(v, v.events[0]?.start_time ?? null, now)) ids.add(v.id)
-  return ids
-}
-
-/**
  * One page over disjoint tiers of venue ids followed by everyone else: each
  * tier is a segment in sequence and the page is a window across them, so a
  * page boundary never repeats or skips a venue. `read` is the venue query
@@ -483,33 +393,4 @@ async function tieredPage<T>(
     out.push(...(await read(seg.w, { skip: segSkip, take: Math.min(wanted, seg.size - segSkip) })))
   }
   return out
-}
-
-type DaySpan = { timezone: string; day_reset_hour: number }
-
-/** Hours with a row for the weekday of the venue's current day (its day, not the clock's midnight). */
-function isOpenByHours(v: DaySpan & { hours: unknown }, now: Date): boolean {
-  const { localDate, end } = venueDayBounds(v.timezone, v.day_reset_hour, now)
-  const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay()
-  return end > now && (venueHours(v.hours)?.some((h) => h.day === weekday) ?? false)
-}
-
-/** The venue's next public event starts before its current day ends. */
-function startsBeforeDayEnds(v: DaySpan, nextStart: Date | null, now: Date): boolean {
-  return nextStart !== null && nextStart < venueDayBounds(v.timezone, v.day_reset_hour, now).end
-}
-
-/**
- * One venue's tier by the rule `order=live` ranks by: live now (`liveNow` is
- * not `quiet`), else open tonight (`isOpenByHours` or `startsBeforeDayEnds`),
- * else quiet. `nextStart` is its next public event, the card's `nextEvent`.
- */
-function venueTier(
-  v: DaySpan & { hours: unknown },
-  liveNow: LiveCountBucket,
-  nextStart: Date | null,
-  now: Date
-): "live" | "open" | "quiet" {
-  if (liveNow !== "quiet") return "live"
-  return isOpenByHours(v, now) || startsBeforeDayEnds(v, nextStart, now) ? "open" : "quiet"
 }

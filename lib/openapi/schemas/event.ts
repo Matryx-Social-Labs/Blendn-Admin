@@ -45,6 +45,13 @@ export const EventQuerySchema = z
         description:
           "Include events that have already ended. Off by default — discovery only returns events you can still go to. Set true for history screens.",
       }),
+    featured: z
+      .boolean()
+      .default(false)
+      .openapi({
+        description:
+          "Only the featured events: published, public, within your age, not ended, in `city`, in the day's rotation (`featured.rank`; a hash of the UTC day and the city, so one order for everyone in a city all day), **at most 5** however large `limit` is. `sortBy` is ignored, and the answer is always page 1: `page=2` returns the same five. Today's only source is the admin-set `isFeatured`, so every one is `featured.kind: \"editorial\"`.",
+      }),
     status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
     sortBy: z.enum(["start_time", "created_at", "distance"]).default("start_time"),
     sortOrder: z.enum(["asc", "desc"]).default("asc"),
@@ -329,7 +336,7 @@ export const EventListResponseSchema = z
     events: z.array(
       z.unknown().openapi({
         description:
-          "Transformed event objects. Each carries `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named. Counts: `checkInCount` (came: everybody who checked in, left or not; `currentCapacity` is the same number), `hereCount` (here now: checked in and not checked out, guests only — the Room's count; use this for 'here now'), `favoriteCount`, `ratingCount`, and `goingCount` — RSVPs with status `going` only (not `waitlisted`, `maybe` or `not_going`), the same number as the detail's `stats.rsvpCount`.",
+          "Transformed event objects. Each carries `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named. Counts: `checkInCount` (came: everybody who checked in, left or not; `currentCapacity` is the same number), `hereCount` (here now: checked in and not checked out, guests only — the Room's count; use this for 'here now'), `favoriteCount`, `ratingCount`, and `goingCount` — RSVPs with status `going` only (not `waitlisted`, `maybe` or `not_going`), the same number as the detail's `stats.rsvpCount`. `featured`: `{ kind: \"editorial\" | \"promoted\", rank: number, by: string | null }` or null. `kind` `editorial` is Blendn's own pick (`by: \"blendn\"`, drawn without a label); `promoted` is a paid placement and must be labelled \"Promoted\" (nothing sells one yet, so none is returned; handle it anyway). `rank` is 1-based in the day's rotation among the featured events in this response (for `featured=true`, the whole section); it is not start-time order. `isFeatured` is the same fact as `featured !== null`, kept for older builds. Build a section with `featured=true`, not by filtering a page.",
       })
     ),
     pagination: PaginationMetaSchema,
