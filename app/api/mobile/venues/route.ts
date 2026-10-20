@@ -138,6 +138,8 @@ export async function GET(request: NextRequest) {
         { name: { contains: search, mode: "insensitive" } },
         { address: { contains: search, mode: "insensitive" } },
         { city: { contains: search, mode: "insensitive" } },
+        // The neighbourhood, so "Search places or areas" finds "Indiranagar" by name.
+        { area: { contains: search, mode: "insensitive" } },
       ]
     }
 

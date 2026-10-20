@@ -1,4 +1,4 @@
-import { EDITORIAL_BY, FEATURED_MAX, featuredKind, featuredOf } from "@/lib/featured"
+import { EDITORIAL_BY, FEATURED_MAX, featuredKind, featuredOf, featuredSeed, rotated } from "@/lib/featured"
 import { buildEventsCacheKey } from "@/lib/events-cache-key"
 import { eventQuerySchema } from "@/lib/validations/event"
 
@@ -8,7 +8,7 @@ import { eventQuerySchema } from "@/lib/validations/event"
  * `promoted` kind will fit without a client change.
  */
 const at = (iso: string) => new Date(iso)
-const ev = (id: string, start: string, is_featured: boolean) => ({ id, start_time: at(start), is_featured })
+const ev = (id: string, is_featured: boolean) => ({ id, is_featured })
 
 describe("featuredKind", () => {
   it("is editorial for an admin pick and null for everything else", () => {
@@ -17,26 +17,65 @@ describe("featuredKind", () => {
   })
 })
 
+describe("featuredSeed", () => {
+  it("is the day and the city, the city as the filter reads it", () => {
+    const now = at("2026-10-21T08:00:00Z")
+    expect(featuredSeed("Bengaluru", now)).toBe("2026-10-21|bengaluru")
+    expect(featuredSeed(" bengaluru ", now)).toBe(featuredSeed("Bengaluru", now))
+    expect(featuredSeed(undefined, now)).toBe("2026-10-21|")
+    expect(featuredSeed("Bengaluru", at("2026-10-22T08:00:00Z"))).not.toBe(featuredSeed("Bengaluru", now))
+  })
+})
+
+describe("rotated", () => {
+  const ids = Array.from({ length: 12 }, (_, i) => ({ id: `evt-${i}` }))
+  const order = (seed: string, list = ids) => rotated(list, seed).map((e) => e.id)
+
+  it("is the same order for everyone on one day in one city, whatever order they were read in", () => {
+    const seed = "2026-10-21|bengaluru"
+    expect(order(seed, [...ids].reverse())).toEqual(order(seed))
+    expect(order(seed)).toHaveLength(12)
+  })
+
+  it("turns over with the day and differs by city", () => {
+    expect(order("2026-10-21|bengaluru")).not.toEqual(order("2026-10-22|bengaluru"))
+    expect(order("2026-10-21|bengaluru")).not.toEqual(order("2026-10-21|mumbai"))
+  })
+
+  it("does not mutate what it was given", () => {
+    const copy = [...ids]
+    rotated(ids, "x")
+    expect(ids).toEqual(copy)
+  })
+
+  it("gives every event the lead on some day: no pick is stuck at the bottom", () => {
+    const leaders = new Set(
+      Array.from({ length: 60 }, (_, d) => order(`2026-11-${String(d + 1).padStart(2, "0")}|bengaluru`)[0])
+    )
+    expect(leaders.size).toBeGreaterThan(6)
+  })
+})
+
 describe("featuredOf", () => {
-  it("ranks the featured events by start time, 1-based, and never an unfeatured one", () => {
-    const ranks = featuredOf([
-      ev("late", "2026-10-21T20:00:00Z", true),
-      ev("plain", "2026-10-21T17:00:00Z", false),
-      ev("early", "2026-10-21T18:00:00Z", true),
-    ])
-    expect(ranks.get("early")).toEqual({ kind: "editorial", rank: 1, by: EDITORIAL_BY })
-    expect(ranks.get("late")).toEqual({ kind: "editorial", rank: 2, by: "blendn" })
+  const SEED = "2026-10-21|bengaluru"
+
+  it("ranks the featured events 1-based in the day's rotation, and never an unfeatured one", () => {
+    const events = [ev("late", true), ev("plain", false), ev("early", true), ev("mid", true)]
+    const ranks = featuredOf(events, SEED)
+    const expected = rotated(events.filter((e) => e.is_featured), SEED).map((e) => e.id)
+    expect([...ranks.entries()].sort((a, b) => a[1].rank - b[1].rank).map(([id]) => id)).toEqual(expected)
+    expect(ranks.get(expected[0])).toEqual({ kind: "editorial", rank: 1, by: EDITORIAL_BY })
     expect(ranks.has("plain")).toBe(false)
   })
 
-  it("breaks a tie on start time by id, so two requests rank them alike", () => {
-    const a = featuredOf([ev("b", "2026-10-21T18:00:00Z", true), ev("a", "2026-10-21T18:00:00Z", true)])
-    expect(a.get("a")?.rank).toBe(1)
-    expect(a.get("b")?.rank).toBe(2)
+  it("is not start-time order any more: the same events rank differently on another day", () => {
+    const events = Array.from({ length: 8 }, (_, i) => ev(`e${i}`, true))
+    const rankOn = (seed: string) => [...featuredOf(events, seed)].map(([id, f]) => `${id}:${f.rank}`).sort()
+    expect(rankOn("2026-10-21|bengaluru")).not.toEqual(rankOn("2026-10-22|bengaluru"))
   })
 
   it("returns nothing for a page with no featured event", () => {
-    expect(featuredOf([ev("x", "2026-10-21T18:00:00Z", false)]).size).toBe(0)
+    expect(featuredOf([ev("x", false)], SEED).size).toBe(0)
   })
 })
 
@@ -61,5 +100,14 @@ describe("featured=true on the query", () => {
     const base = { page: 1, limit: 5, viewerAge: null, sortBy: "start_time", sortOrder: "asc" }
     expect(buildEventsCacheKey({ ...base, featured: true })).not.toBe(buildEventsCacheKey({ ...base, featured: false }))
     expect(buildEventsCacheKey(base)).toBe(buildEventsCacheKey({ ...base, featured: false }))
+  })
+
+  it("turns over with the day's rotation for a featured page, and ignores the seed for any other", () => {
+    const base = { page: 1, limit: 5, viewerAge: null, sortBy: "start_time", sortOrder: "asc", featured: true }
+    expect(buildEventsCacheKey({ ...base, featuredSeed: "2026-10-21|bengaluru" })).not.toBe(
+      buildEventsCacheKey({ ...base, featuredSeed: "2026-10-22|bengaluru" })
+    )
+    const plain = { ...base, featured: false }
+    expect(buildEventsCacheKey({ ...plain, featuredSeed: "a" })).toBe(buildEventsCacheKey({ ...plain, featuredSeed: "b" }))
   })
 })

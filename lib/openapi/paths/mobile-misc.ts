@@ -135,7 +135,7 @@ registry.registerPath({
     query: z.object({
       page: z.coerce.number().int().min(1).optional(),
       limit: z.coerce.number().int().min(1).max(100).optional(),
-      search: z.string().max(200).optional(),
+      search: z.string().max(200).optional().describe("Matches name, address, city and area (the neighbourhood)."),
       city: z.string().min(1).max(100).optional(),
       lat: z.coerce.number().min(-90).max(90).optional(),
       lon: z.coerce.number().min(-180).max(180).optional(),

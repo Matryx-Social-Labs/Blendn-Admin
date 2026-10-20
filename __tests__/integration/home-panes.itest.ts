@@ -5,6 +5,7 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
 
+import { featuredSeed, rotated } from "@/lib/featured"
 import { venueDayFor } from "@/lib/venue-day"
 
 import { closeDb, db, makeUser, testId } from "./helpers"
@@ -115,6 +116,11 @@ describe("C4: area", () => {
     expect(idsOf(await listed("area=nowhere"))).toEqual([])
   })
 
+  it("is found by its name in the search, though no name, address or city holds it", async () => {
+    const found = await listed("search=hsr%20lay")
+    expect(idsOf(found)).toEqual([ids.cafe, ids.live].sort())
+  })
+
   it("says null for both when the area is unknown, never a guess", async () => {
     const all = await listed("")
     const none = all.venues.find((v) => v.id === ids.noArea)
@@ -167,6 +173,7 @@ describe("C1: featured", () => {
   let ended = ""
   let unfeatured = ""
   let adultsOnly = ""
+  const allSeven = new Set<string>()
 
   /** A real event in the suite's city, at a venue the city list does not read. */
   async function featuredEvent(venueId: string, startsInMin: number, data: { is_featured: boolean; minAge?: number; hours?: number }) {
@@ -179,8 +186,9 @@ describe("C1: featured", () => {
   beforeAll(async () => {
     const host = await venue()
     const day = 24 * 60
-    for (let i = 0; i < 6; i++) await featuredEvent(host, (2 + i) * day, { is_featured: true })
+    for (let i = 0; i < 6; i++) allSeven.add(await featuredEvent(host, (2 + i) * day, { is_featured: true }))
     adultsOnly = await featuredEvent(host, 2 * day - 30, { is_featured: true, minAge: 18 })
+    allSeven.add(adultsOnly)
     unfeatured = await featuredEvent(host, 3 * day + 30, { is_featured: false })
     ended = await featuredEvent(host, -600, { is_featured: true, hours: 3 })
   })
@@ -190,23 +198,30 @@ describe("C1: featured", () => {
     expect(status).toBe(200)
     return body.data as {
       events: { id: string; isFeatured: boolean; startTime: string; featured: { kind: string; rank: number; by: string } | null }[]
-      pagination: { totalCount: number; limit: number }
+      pagination: { totalCount: number; limit: number; page: number; hasMore: boolean }
     }
   }
 
-  it("returns at most five, in start order, each with its rank, and never an unfeatured, ended or too-young event", async () => {
+  it("returns at most five, in the day's rotation with their ranks, and never an unfeatured, ended or too-young event", async () => {
     const { events, pagination } = await featuredList("featured=true&limit=50")
     expect(events).toHaveLength(5)
     expect(pagination).toMatchObject({ totalCount: 5, limit: 5 })
     expect(events.map((e) => e.featured?.rank)).toEqual([1, 2, 3, 4, 5])
     expect(events.every((e) => e.featured?.kind === "editorial" && e.featured.by === "blendn" && e.isFeatured)).toBe(true)
-    const starts = events.map((e) => Date.parse(e.startTime))
-    expect(starts).toEqual([...starts].sort((a, b) => a - b))
+    // The rotation of the seven an adult may see (six plus the 18+ night), seeded by today and the city.
+    const candidates = [...allSeven].map((id) => ({ id }))
+    const expected = rotated(candidates, featuredSeed(CITY, new Date())).slice(0, 5).map((e) => e.id)
+    expect(events.map((e) => e.id)).toEqual(expected)
     const returned = events.map((e) => e.id)
     expect(returned).not.toContain(unfeatured)
     expect(returned).not.toContain(ended)
-    // An adult (30) may see the 18+ night; it is the earliest, so it is rank 1.
-    expect(returned[0]).toBe(adultsOnly)
+  })
+
+  it("is page 1 whatever page was asked: page 2 cannot be a second five", async () => {
+    const first = await featuredList("featured=true")
+    const second = await featuredList("featured=true&page=2")
+    expect(second.events.map((e) => e.id)).toEqual(first.events.map((e) => e.id))
+    expect(second.pagination).toMatchObject({ page: 1, totalCount: 5, hasMore: false })
   })
 
   it("keeps the age gate: a 17-year-old's five do not include the 18+ night", async () => {
@@ -214,6 +229,9 @@ describe("C1: featured", () => {
     const { events } = await featuredList("featured=true", teen.token)
     expect(events.map((e) => e.id)).not.toContain(adultsOnly)
     expect(events).toHaveLength(5)
+    // Rotated among the six they may see, not the seven.
+    const six = [...allSeven].filter((id) => id !== adultsOnly).map((id) => ({ id }))
+    expect(events.map((e) => e.id)).toEqual(rotated(six, featuredSeed(CITY, new Date())).slice(0, 5).map((e) => e.id))
   })
 
   it("does not bring an ended event back with includePast", async () => {
@@ -221,12 +239,14 @@ describe("C1: featured", () => {
     expect(events.map((e) => e.id)).not.toContain(ended)
   })
 
-  it("without the filter, is on every item: null for an unfeatured event, a rank for the rest", async () => {
+  it("without the filter, is on every item: null for an unfeatured event, ranks in the same rotation for the rest", async () => {
     const { events } = await featuredList("limit=50")
     const byId = new Map(events.map((e) => [e.id, e]))
     expect(byId.get(unfeatured)?.featured).toBeNull()
     expect(byId.get(unfeatured)?.isFeatured).toBe(false)
-    expect(byId.get(adultsOnly)?.featured).toMatchObject({ kind: "editorial", rank: 1 })
-    expect(events.filter((e) => e.featured).map((e) => e.featured?.rank)).toEqual([1, 2, 3, 4, 5, 6, 7])
+    const ranked = events.filter((e) => e.featured).sort((a, b) => a.featured!.rank - b.featured!.rank)
+    expect(ranked.map((e) => e.featured!.rank)).toEqual([1, 2, 3, 4, 5, 6, 7])
+    const expected = rotated([...allSeven].map((id) => ({ id })), featuredSeed(CITY, new Date())).map((e) => e.id)
+    expect(ranked.map((e) => e.id)).toEqual(expected)
   })
 })

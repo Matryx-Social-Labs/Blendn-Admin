@@ -6,7 +6,7 @@ import { eventHost } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
-import { featuredOf, type Featured } from "@/lib/featured"
+import { featuredOf, featuredSeed, type Featured } from "@/lib/featured"
 
 export const eventListSelect = {
   id: true,
@@ -134,6 +134,8 @@ interface TransformContext {
   userLat?: number
   userLon?: number
   includeCheckins?: boolean
+  /** The day's rotation seed (`featuredSeed`); the rank of a featured event is its place in that order. */
+  featuredSeed?: string
   /**
    * How many reverse-geocodes this request may still make.
    *
@@ -308,7 +310,7 @@ export async function transformEvents(
   const [attended, here] = await Promise.all([distinctAttendeeCounts(ids), hereCounts(ids)])
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
-  const featured = featuredOf(events)
+  const featured = featuredOf(events, ctx.featuredSeed ?? featuredSeed(undefined, new Date()))
   return Promise.all(
     events.map((event) => transformEvent(event, withBudget, attended, here, featured.get(event.id) ?? null))
   )

@@ -556,7 +556,7 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 | categorySlug | string | - | Same, by slug |
 | startDate | ISO date | - | Events starting after |
 | endDate | ISO date | - | Events ending before |
-| featured | bool | false | `true`: only the featured events (published, public, within your age, not ended, in `city`), ordered by start time, **at most 5** however large `limit` is; `sortBy` is ignored. Build the Featured section with this, not by filtering a page |
+| featured | bool | false | `true`: only the featured events (published, public, within your age, not ended, in `city`), in the day's rotation, **at most 5** however large `limit` is; `sortBy` is ignored, and the response is always page 1 (`page=2` returns the same five, not a second five). Build the Featured section with this, not by filtering a page |
 | status | string | published | Event status filter |
 | sortBy | enum | start_time | `start_time`, `created_at`, `distance` |
 | sortOrder | enum | asc | `asc`, `desc` |
@@ -567,9 +567,12 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 `"blendn"`; drawn without a label) or `promoted` (a paid placement: always
 labelled "Promoted"; `by` is the placing organisation). Nothing sells a
 placement yet, so no event is `promoted`, but a client that switches on `kind`
-should already handle it. `rank` is 1-based by start time among the featured
+should already handle it. `rank` is 1-based in the day's rotation among the featured
 events in the same response, so with `featured=true` it is the order of the
-section. `isFeatured` stays for older builds and is the same fact as
+section. The rotation is a hash of the UTC day and the city (`featuredSeed`,
+`rotated` in `lib/featured.ts`): the same order for everyone in a city all
+day, a different one tomorrow, so which five of a larger set lead is stable
+and fair over time. It is not start-time order. `isFeatured` stays for older builds and is the same fact as
 `featured !== null`. Computed by `featuredOf` in `lib/featured.ts`.
 
 **"Here now" is `hereCount`, not `checkInCount`.** Each event (and the
@@ -748,6 +751,7 @@ vocabulary, meaning exactly what it means there.
 
 | Parameter | Notes |
 |---|---|
+| `search` | Matches name, address, city **and area** (the neighbourhood), so "Indiranagar" finds its venues |
 | `city` | Exact, case-insensitive. Venues with no city are unreachable this way, as with events |
 | `lat` + `lon` | Enables `sortBy=distance` and populates `distance`. **Does not filter** |
 | `radius` | km. **No default.** Only bites when you send it |

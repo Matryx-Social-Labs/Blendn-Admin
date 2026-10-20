@@ -237,6 +237,13 @@ describe("GET /api/mobile/venues", () => {
     expect(mockDb.venues.findMany.mock.calls[0][0].where).not.toHaveProperty("venue_type")
   })
 
+  it("searches the neighbourhood name too, beside name, address and city", async () => {
+    await GET(req("?search=indiranagar"))
+    const or = mockDb.venues.findMany.mock.calls[0][0].where.OR
+    expect(or).toContainEqual({ area: { contains: "indiranagar", mode: "insensitive" } })
+    expect(or).toHaveLength(4)
+  })
+
   // C4 (home panes): the neighbourhood.
   it("filters by area slug, and carries the area and its slug, null when unknown", async () => {
     await GET(req("?area=indiranagar"))

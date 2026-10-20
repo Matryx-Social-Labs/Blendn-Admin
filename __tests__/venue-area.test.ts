@@ -51,3 +51,18 @@ describe("readAreas", () => {
     expect(() => readAreas(`id,place\n${A},x\n`)).toThrow(/id and an area/)
   })
 })
+
+describe("scripts/places/areas.sql", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sql = (require("node:fs") as typeof import("node:fs")).readFileSync("scripts/places/areas.sql", "utf8").replace(/--.*$/gm, "")
+
+  it("names no country: a venue anywhere gets the polygon that holds it", () => {
+    expect(sql).not.toMatch(/country/i)
+    expect(sql).not.toMatch(/'IN'/)
+  })
+
+  it("reads the polygons near the venues, a cell at a time, not one box around all of them", () => {
+    expect(sql).toMatch(/CREATE TABLE cells/)
+    expect(sql).not.toMatch(/\bextent\b/)
+  })
+})
