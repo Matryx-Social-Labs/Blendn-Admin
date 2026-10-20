@@ -57,7 +57,8 @@ describe("one hiding rule (HM-G01)", () => {
 
   it.each([
     ["app/api/mobile/venues/route.ts", /\bvenuesTakenOver\b[\s\S]*from "@\/lib\/venue-visibility"|from "@\/lib\/venue-visibility"[\s\S]*\bvenuesTakenOver\(/],
-    ["app/api/mobile/venues/route.ts", /\bundisputedLinkWhere\b/],
+    ["lib/venue-listing.ts", /\bundisputedLinkWhere\b/],
+    ["lib/venue-summary.ts", /\bvenuesTakenOver\b[\s\S]*from "@\/lib\/venue-visibility"|from "@\/lib\/venue-visibility"[\s\S]*\bvenuesTakenOver\(/],
     ["lib/services/events.service.ts", /import \{[^}]*\beventVenue\b[^}]*\} from "@\/lib\/venue-visibility"/],
     ["app/api/mobile/venues/[venueId]/route.ts", /import \{[^}]*\beventTakingOver\b[^}]*\} from "@\/lib\/venue-visibility"/],
   ])("%s reads the rule from lib/venue-visibility.ts", (rel, shape) => {

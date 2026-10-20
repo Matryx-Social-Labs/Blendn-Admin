@@ -61,6 +61,15 @@ const VenueListItemSchema = z
     tier: z.enum(["live", "open", "quiet"]).describe("The tier `order=live` ranks by: `live` (somebody is live here now, `liveNow` not `quiet`), `open` (open tonight: hours for the venue's current day, or a public event starting before its day ends), else `quiet`. Present on every item, whatever the order; null `liveNow` (a caller who may not go live) never makes a venue `live`."),
     venueType: z.string().nullable(),
     venueTypeLabel: z.string(),
+    area: z.string().nullable().describe("The neighbourhood, as the dataset names it (Overture's own division polygons): \"Indiranagar\". Null when unknown: never guessed, so fall back to the address or city."),
+    areaSlug: z.string().nullable().describe("`area`'s slug, the value of the `area=` filter and of `areas[].slug` on `GET /api/mobile/venues/summary`. Null with `area`."),
+    tonight: z
+      .object({
+        opensAt: z.string().regex(/^\d\d:\d\d$/),
+        closesAt: z.string().regex(/^\d\d:\d\d$/),
+      })
+      .nullable()
+      .describe("Tonight's opening from `venues.hours`: wall-clock `HH:MM` in the venue's own timezone, for the weekday of its current day (a day resets at its `dayResetHour`, not midnight). A close at or before the open runs past midnight. With two openings in a day, the later one. Null when no hours are given for that day (all of them, today: nothing writes `hours` yet)."),
     floors: z.number().int().min(1).max(200).nullable()
       .describe(
         "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
@@ -131,7 +140,9 @@ registry.registerPath({
       lat: z.coerce.number().min(-90).max(90).optional(),
       lon: z.coerce.number().min(-180).max(180).optional(),
       radius: z.coerce.number().min(0.1).max(100).optional(),
-      venueType: z.string().optional(),
+      venueType: z.string().optional().describe("One venue type, or a comma list (`pub_bar,brewery`): a venue of any of them. Each must be a known type; an unknown one is a 400."),
+      venueTypes: z.string().optional().describe("The same filter as `venueType`; if both are sent, a venue of either matches."),
+      area: z.string().min(1).max(100).optional().describe("A neighbourhood by `areaSlug`. A venue with no area is in none."),
       order: z.enum(["live"]).optional().describe("`live`: three tiers — live now (`liveNow` not `quiet`), then open tonight (hours for the venue's current day, or a public event starting before its day ends), then the rest — each in the chosen sort, id as tiebreak, so pages never repeat or skip. A caller who may not go live gets the last two tiers. The response echoes `pagination.order: \"live\"` when applied. Venues can move between tiers between two page requests: de-duplicate by `id` across pages."),
       sortBy: z.enum(["name", "distance"]).optional(),
       sortOrder: z.enum(["asc", "desc"]).optional(),
@@ -152,6 +163,55 @@ registry.registerPath({
           ),
         },
       },
+    },
+    ...standardErrors,
+  },
+})
+
+const VenueSummarySchema = z
+  .object({
+    total: z.number().int().describe("Venues `GET /api/mobile/venues` lists for you in this city."),
+    liveCount: z.number().int().describe("Venues with live guests (`liveNow` not `quiet`) for a caller who may go live; 0 for anyone else, as their `liveNow` is null. Places, never people."),
+    openTonightCount: z.number().int().describe("Venues whose tier is `open` (not also live): hours for their current day, or a public event starting before it ends."),
+    types: z
+      .array(z.object({ venueType: z.string(), label: z.string(), count: z.number().int() }))
+      .describe("Venues per type, most first; unclassified venues are in `total` only."),
+    areas: z
+      .array(
+        z.object({
+          slug: z.string(),
+          name: z.string(),
+          count: z.number().int(),
+          liveCount: z.number().int(),
+          typeMix: z.array(z.string()).max(4).describe("Up to the 4 most common venue types here, most first."),
+        })
+      )
+      .describe("Busiest first: live venues, then places, then slug. At most 100. Venues with no area are in no entry."),
+  })
+  .openapi("VenueSummary")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/venues/summary",
+  tags: ["Mobile Venues"],
+  summary: "Places counts by type and by area",
+  description:
+    "Counts of places, never of people, over exactly the venues `GET /api/mobile/venues` lists for you in `city`: " +
+    "active, not deleted, not taken off Blendn by its owner, and not taken over by an event (the takeover rule is " +
+    "per your age). The split is one grouped read; the answer is kept 60 s per city, per your age and per whether you " +
+    "may go live. `lat` and `lon` are accepted and ignored. Without `city`, every city. Same limit as the list: 60 reads a minute per person.",
+  security: bearerAuth,
+  request: {
+    query: z.object({
+      city: z.string().min(1).max(100).optional(),
+      lat: z.coerce.number().min(-90).max(90).optional(),
+      lon: z.coerce.number().min(-180).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Counts",
+      content: { "application/json": { schema: wrap(VenueSummarySchema) } },
     },
     ...standardErrors,
   },

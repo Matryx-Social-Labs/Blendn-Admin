@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
@@ -25,6 +26,7 @@ import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
 import { realEventsWhere } from "@/lib/event-kind"
 import { paginationMeta } from "@/lib/pagination"
+import { FEATURED_MAX } from "@/lib/featured"
 
 /**
  * The most events a distance sort will pull into memory at once.
@@ -103,11 +105,20 @@ export async function GET(request: NextRequest) {
       startDate,
       endDate,
       includePast,
+      featured,
       status,
       sortBy,
       sortOrder,
       include,
     } = parsed.data
+
+    /*
+     * `featured=true`: the featured section, at most FEATURED_MAX however big
+     * `limit` is, in rank order (start time, id as the tiebreak). Every other
+     * rule of discovery below still applies to it, so a featured event the
+     * viewer is too young for, or that has ended, is not one of the five.
+     */
+    const pageSize = featured ? Math.min(limit, FEATURED_MAX) : limit
 
     const includeSet = new Set(
       (include || "")
@@ -171,8 +182,11 @@ export async function GET(request: NextRequest) {
      * `includePast=true` still returns them, because "my past events" and
      * "search history" are real screens; they just have to ask.
      */
-    if (!includePast) {
+    if (!includePast || featured) {
       where.end_time = { gte: new Date() }
+    }
+    if (featured) {
+      where.is_featured = true
     }
 
     // Search filter
@@ -259,12 +273,13 @@ export async function GET(request: NextRequest) {
       where.end_time = { ...(where.end_time as object ?? {}), lte: new Date(endDate) }
     }
 
+    // The featured section is ranked by start time, not by distance.
     const shouldSortByDistance =
-      sortBy === "distance" && lat !== undefined && lon !== undefined
+      !featured && sortBy === "distance" && lat !== undefined && lon !== undefined
 
     const cacheKey = buildEventsCacheKey({
       page,
-      limit,
+      limit: pageSize,
       search,
       city,
       // The DERIVED age, matching the filter above. Keying on the stored number
@@ -282,6 +297,7 @@ export async function GET(request: NextRequest) {
       // return different event sets, so omitting it would let a history
       // response be served straight back to a discovery request.
       includePast,
+      featured,
       status,
       sortBy,
       sortOrder,
@@ -294,9 +310,9 @@ export async function GET(request: NextRequest) {
       ;({ events, totalCount } = cached)
     } else {
       // Build orderBy
-      const orderBy: Record<string, string> = shouldSortByDistance
-        ? { start_time: "asc" }
-        : { [sortBy]: sortOrder }
+      const orderBy: Prisma.eventsOrderByWithRelationInput[] = featured
+        ? [{ start_time: "asc" }, { id: "asc" }]
+        : [shouldSortByDistance ? { start_time: "asc" } : { [sortBy]: sortOrder }]
 
       if (shouldSortByDistance) {
         /*
@@ -355,7 +371,7 @@ export async function GET(request: NextRequest) {
 
         totalCount = withDistance.length
         const pageIds = withDistance
-          .slice((page - 1) * limit, page * limit)
+          .slice((page - 1) * pageSize, page * pageSize)
           .map((e) => e.id)
 
         // Fetch full data only for the current page's events
@@ -378,12 +394,14 @@ export async function GET(request: NextRequest) {
             where,
             select: eventListSelect,
             orderBy,
-            skip: (page - 1) * limit,
-            take: limit,
+            skip: (page - 1) * pageSize,
+            take: pageSize,
           }),
           db.events.count({ where }),
         ])
       }
+      // Five at most: a sixth featured event is not on page two of the section.
+      if (featured) totalCount = Math.min(totalCount, FEATURED_MAX)
 
       setCache(cacheKey, {
         expiresAt: Date.now() + EVENTS_CACHE_TTL_MS,
@@ -498,7 +516,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       events: transformedEvents,
-      pagination: paginationMeta(page, limit, totalCount),
+      pagination: paginationMeta(page, pageSize, totalCount),
       ...(includeSet.has("activeCheckins") && {
         activeCheckins: await Promise.all(
           activeCheckins.map(async (c) => ({

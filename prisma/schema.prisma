@@ -1654,6 +1654,11 @@ model venues {
   hours          Json?
   /// A few lines about the place, shown on the venue page. Null: not given.
   description    String?
+  /// The neighbourhood a person would name ("Koramangala"), as the dataset names it:
+  /// scripts/backfill-venue-areas.ts sets it from Overture's own division polygons
+  /// (scripts/places/areas.sql). Null: unknown, never guessed. `area_slug` is `areaSlug(area)`.
+  area           String?
+  area_slug      String?
   /// "Open on Blendn" (D-13): false takes a CLAIMED venue out of the app's
   /// Places and home map; its events still show. Set by the owner's
   /// organisation or an admin, audited. Ignored on an unclaimed venue, which is
@@ -1690,6 +1695,7 @@ model venues {
   @@index([created_by_org_id])
   @@index([city])
   @@index([status])
+  @@index([area_slug])
   /// The Hotspots feed bounding-boxes on these. `events` has had the matching
   /// index since it shipped; this table did not, so the venue-proximity query
   /// was the one geo lookup in the product doing a scan.

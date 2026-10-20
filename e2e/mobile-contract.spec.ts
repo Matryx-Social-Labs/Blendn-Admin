@@ -39,7 +39,6 @@ const UPDATE = process.env.UPDATE_CONTRACTS === "1"
  * covers is the *read* surface a client renders.
  */
 const ROUTES = [
-  "/api/mobile/events",
   "/api/mobile/events/cities",
   "/api/mobile/events/search?q=sessions",
   "/api/mobile/categories",
@@ -67,6 +66,8 @@ const ROUTES = [
   "/api/mobile/me/plus",
   // The offers venues sent me (step 12): \`{ offers }\`. The venue's side is counts, on the dashboard.
   "/api/mobile/offers",
+  // Places' counts by type and by area (home panes C5): `{ total, liveCount, openTonightCount, types, areas }`.
+  "/api/mobile/venues/summary",
 ]
 
 /**
@@ -167,6 +168,8 @@ test.describe("mobile API contract", () => {
 
     const eventId = live!.id
     const PARAM_ROUTES: Record<string, ParamRoute> = {
+      // The feed, one card down: `featured` is `{ kind, rank, by }` or null (home panes C1).
+      "/api/mobile/events": { url: "/api/mobile/events", pin: ["events[]", "pagination"] },
       "/api/mobile/events/:eventId": { url: `/api/mobile/events/${eventId}`, pin: ["chatGroup"] },
       "/api/mobile/events/:eventId/interested-users": { url: `/api/mobile/events/${eventId}/interested-users` },
       "/api/mobile/events/:eventId/chat": {
@@ -182,7 +185,7 @@ test.describe("mobile API contract", () => {
       "/api/mobile/chat/groups": { url: "/api/mobile/chat/groups", pin: ["groups[]", "groups[].event"] },
       // A Go Live is an active check-in too: `kind`, `expiresAt`, `stay` and `venueId` say which (step 4, 5).
       "/api/mobile/checkins/active": { url: "/api/mobile/checkins/active", pin: ["checkIns[]"] },
-      // The Places list, one row down: `tier` is what `order=live` ranks by.
+      // The Places list, one row down: `tier` is what `order=live` ranks by; `area`/`areaSlug` and `tonight` are home panes C4/C6.
       "/api/mobile/venues": { url: "/api/mobile/venues", pin: ["venues[]", "pagination"] },
       // Go Live's venue (PL-C02): `venue` must never grow a `geofence`.
       "/api/mobile/venues/:venueId": { url: `/api/mobile/venues/${live!.venue_id}`, pin: ["venue", "live"] },

@@ -41,6 +41,8 @@ export interface EventsCacheKeyInput {
   startDate?: string
   endDate?: string
   includePast?: boolean
+  /** `featured=true` is a different result set from the same page without it. */
+  featured?: boolean
   status?: string
   sortBy: string
   sortOrder: string
@@ -79,6 +81,7 @@ export function buildEventsCacheKey(input: EventsCacheKeyInput): string {
     startDate: input.startDate || null,
     endDate: input.endDate || null,
     includePast: input.includePast,
+    featured: input.featured ?? false,
     status: input.status || null,
     sortBy: input.sortBy,
     sortOrder: input.sortOrder,

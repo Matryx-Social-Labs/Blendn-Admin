@@ -60,6 +60,8 @@ const KIND_SCOPED_HELPERS: Record<string, string> = {
   reportScope: "lib/reports.ts",
   eventScopeFor: "lib/reports.ts",
   venueTakeoverWhere: "lib/venue-visibility.ts",
+  // What the venues list and its summary count as a venue's events.
+  upcomingEventsWhere: "lib/venue-listing.ts",
 }
 
 /** Whole files that are about venue days, and so read both kinds by design. */

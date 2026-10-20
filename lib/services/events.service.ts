@@ -6,6 +6,7 @@ import { eventHost } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
+import { featuredOf, type Featured } from "@/lib/featured"
 
 export const eventListSelect = {
   id: true,
@@ -154,7 +155,8 @@ async function transformEvent(
   event: EventListItem,
   ctx: TransformContext,
   attended: Map<string, number>,
-  here: Map<string, number>
+  here: Map<string, number>,
+  featured: Featured | null
 ) {
   return {
     id: event.id,
@@ -218,6 +220,8 @@ async function transformEvent(
      */
     doorPolicy: event.door_policy,
     isFeatured: event.is_featured,
+    // `{ kind, rank, by }` or null (lib/featured.ts); `isFeatured` above is the same fact for builds before it.
+    featured,
     /*
      * Resolved, never passed through.
      *
@@ -304,5 +308,8 @@ export async function transformEvents(
   const [attended, here] = await Promise.all([distinctAttendeeCounts(ids), hereCounts(ids)])
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
-  return Promise.all(events.map((event) => transformEvent(event, withBudget, attended, here)))
+  const featured = featuredOf(events)
+  return Promise.all(
+    events.map((event) => transformEvent(event, withBudget, attended, here, featured.get(event.id) ?? null))
+  )
 }

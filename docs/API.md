@@ -556,10 +556,21 @@ someone open to dating on a Friday is often only there for the talk on Tuesday.
 | categorySlug | string | - | Same, by slug |
 | startDate | ISO date | - | Events starting after |
 | endDate | ISO date | - | Events ending before |
+| featured | bool | false | `true`: only the featured events (published, public, within your age, not ended, in `city`), ordered by start time, **at most 5** however large `limit` is; `sortBy` is ignored. Build the Featured section with this, not by filtering a page |
 | status | string | published | Event status filter |
 | sortBy | enum | start_time | `start_time`, `created_at`, `distance` |
 | sortOrder | enum | asc | `asc`, `desc` |
 | include | string | - | Comma-separated: `checkins,activeCheckins,profile` |
+
+**`featured` on each event is `{ kind, rank, by }` or `null`.** `kind` is
+`editorial` (Blendn's own pick, today's `isFeatured`, set by an admin; `by` is
+`"blendn"`; drawn without a label) or `promoted` (a paid placement: always
+labelled "Promoted"; `by` is the placing organisation). Nothing sells a
+placement yet, so no event is `promoted`, but a client that switches on `kind`
+should already handle it. `rank` is 1-based by start time among the featured
+events in the same response, so with `featured=true` it is the order of the
+section. `isFeatured` stays for older builds and is the same fact as
+`featured !== null`. Computed by `featuredOf` in `lib/featured.ts`.
 
 **"Here now" is `hereCount`, not `checkInCount`.** Each event (and the
 detail's `stats`) carries both. `checkInCount` — and `currentCapacity`, the
@@ -721,6 +732,8 @@ vocabulary, meaning exactly what it means there.
   "city": "Bengaluru", "latitude": 12.97, "longitude": 77.59,
   "capacity": 300,
   "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
+  "area": "Indiranagar", "areaSlug": "indiranagar",
+  "tonight": { "opensAt": "18:00", "closesAt": "01:00" },
   "floors": 3,
   "distance": 1.4,
   "upcomingEventCount": 2,
@@ -738,7 +751,10 @@ vocabulary, meaning exactly what it means there.
 | `city` | Exact, case-insensitive. Venues with no city are unreachable this way, as with events |
 | `lat` + `lon` | Enables `sortBy=distance` and populates `distance`. **Does not filter** |
 | `radius` | km. **No default.** Only bites when you send it |
-| `venueType` | One of the 35 slugs; anything else is a 400 |
+| `venueType` | One of the 35 slugs, or a comma list (`pub_bar,brewery`): a venue of any of them. An unknown slug is a 400. `venueTypes` is the same filter under its plural name; send both and a venue of either matches |
+| `area` | A neighbourhood by `areaSlug` (`koramangala-1st-block`). A venue with no area is in none |
+| `area` / `areaSlug` (on every item) | The neighbourhood a person would name, from Overture's own division polygons (`scripts/places/areas.sql`, set by `scripts/backfill-venue-areas.ts`); both `null` when unknown, never guessed: fall back to the address or city. The list of areas is `GET /venues/summary` |
+| `tonight` (on every item) | `{ opensAt, closesAt }` (`HH:MM`, wall clock in the venue's own timezone) from `venues.hours` for the weekday of the venue's current day, or `null` when no hours are given for it. A close at or before the open runs past midnight. A day with two openings answers with the later one. `venues.hours` has no writer yet, so this is `null` everywhere until one exists |
 | `sortBy` | `name` (default) or `distance` |
 | `tier` (on every item) | `live`, `open` or `quiet`: the tier `order=live` ranks by, computed by the same rule whatever the order — `live` if `liveNow` is not `quiet`; `open` if open tonight (hours for the venue's current day, or its next public event starts before that day ends); else `quiet`. Under `order=live` it is read from the sets that ordered the page, so it can never disagree with the order; a caller whose `liveNow` is null is never shown `live` |
 | `order` | `live`: three tiers — **live now** (`liveNow` not `quiet`), then **open tonight** (`venues.hours` has a row for the weekday of the venue's current day, or a public event starts before that day ends), then the rest. Each tier is in the chosen sort with the id as tiebreak, so pages never repeat or skip a venue; read until the first quiet venue and nothing open tonight is lost. A caller who may not go live (`liveNow` null) gets the last two tiers. The response echoes `pagination.order: "live"` when applied; without it the server did not honour the order. A venue can change tier (somebody goes live) between two page requests, so **de-duplicate by venue `id` across pages** |
@@ -812,6 +828,31 @@ counts *every* related row, so it would rank by an all-time total including
 cancelled drafts — a different number from the one on the card. Ranking the page
 you were handed is not ranking the set, and the difference shows the moment
 there is a second page. Needs raw SQL.
+
+### GET /venues/summary
+
+Counts of places, never of people, for the Places screen: `?city=` (optional;
+`lat` and `lon` are accepted and ignored).
+
+```json
+{ "success": true, "data": {
+  "total": 1513, "liveCount": 4, "openTonightCount": 61,
+  "types": [{ "venueType": "pub_bar", "label": "Pub or bar", "count": 640 }],
+  "areas": [{ "slug": "indiranagar", "name": "Indiranagar", "count": 36, "liveCount": 1,
+              "typeMix": ["pub_bar", "cafe", "restaurant", "brewery"] }]
+} }
+```
+
+It counts exactly the venues `GET /venues` lists for you in that city (active,
+not deleted, not taken off Blendn by its owner, not taken over by an event for
+your age), so `total` is the list's `totalCount`. `liveCount` and
+`openTonightCount` are venues, by the list's own reads (`liveNow` not `quiet`;
+tier `open`), and `liveCount` is 0 for a caller who may not go live (their
+`liveNow` is null). `types` is most first; an unclassified venue is in `total`
+only. `areas` is live venues first, then places, at most 100; a venue with no
+area is in none. The type and area split is one grouped query; the answer is
+kept 60 s per city (and per your age and whether you may go live). 60 a minute
+per person, then 429.
 
 ### GET /venues/:venueId
 
