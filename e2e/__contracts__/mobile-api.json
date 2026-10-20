@@ -8,7 +8,52 @@
     "data": [
       "events",
       "pagination"
-    ]
+    ],
+    "nested": {
+      "events[]": [
+        "address",
+        "categories",
+        "checkInCount",
+        "city",
+        "claimUrl",
+        "country",
+        "coverImageUrl",
+        "currentCapacity",
+        "distance",
+        "doorPolicy",
+        "endTime",
+        "favoriteCount",
+        "featured",
+        "goingCount",
+        "hereCount",
+        "id",
+        "isFavorited",
+        "isFeatured",
+        "latitude",
+        "longitude",
+        "maxCapacity",
+        "media",
+        "organizer",
+        "ratingCount",
+        "session",
+        "shortDescription",
+        "slug",
+        "startTime",
+        "state",
+        "status",
+        "timezone",
+        "title",
+        "venue",
+        "venueName"
+      ],
+      "pagination": [
+        "hasMore",
+        "limit",
+        "page",
+        "totalCount",
+        "totalPages"
+      ]
+    }
   },
   "/api/mobile/events/cities": {
     "status": 200,
@@ -100,6 +145,8 @@
     "nested": {
       "venues[]": [
         "address",
+        "area",
+        "areaSlug",
         "capacity",
         "city",
         "distance",
@@ -111,6 +158,7 @@
         "name",
         "nextEvent",
         "tier",
+        "tonight",
         "upcomingEventCount",
         "venueType",
         "venueTypeLabel"
@@ -123,6 +171,20 @@
         "totalPages"
       ]
     }
+  },
+  "/api/mobile/venues/summary": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "areas",
+      "liveCount",
+      "openTonightCount",
+      "total",
+      "types"
+    ]
   },
   "/api/mobile/conversations": {
     "status": 200,

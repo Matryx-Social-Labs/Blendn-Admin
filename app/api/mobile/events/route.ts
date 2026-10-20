@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
@@ -25,6 +26,7 @@ import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
 import { realEventsWhere } from "@/lib/event-kind"
 import { paginationMeta } from "@/lib/pagination"
+import { FEATURED_MAX, featuredSeed, rotated } from "@/lib/featured"
 
 /**
  * The most events a distance sort will pull into memory at once.
@@ -91,7 +93,7 @@ export async function GET(request: NextRequest) {
     }
 
     const {
-      page,
+      page: requestedPage,
       limit,
       search,
       city,
@@ -103,11 +105,23 @@ export async function GET(request: NextRequest) {
       startDate,
       endDate,
       includePast,
+      featured,
       status,
       sortBy,
       sortOrder,
       include,
     } = parsed.data
+
+    /*
+     * `featured=true`: the featured section, at most FEATURED_MAX however big
+     * `limit` is, in the day's rotation (`rotated`, seeded by day and city).
+     * Every other rule of discovery below still applies to it, so a featured
+     * event the viewer is too young for, or that has ended, is not one of the
+     * five. It is always page 1: a page 2 would be a second five, past the cap.
+     */
+    const pageSize = featured ? Math.min(limit, FEATURED_MAX) : limit
+    const page = featured ? 1 : requestedPage
+    const seed = featuredSeed(city, new Date())
 
     const includeSet = new Set(
       (include || "")
@@ -171,8 +185,11 @@ export async function GET(request: NextRequest) {
      * `includePast=true` still returns them, because "my past events" and
      * "search history" are real screens; they just have to ask.
      */
-    if (!includePast) {
+    if (!includePast || featured) {
       where.end_time = { gte: new Date() }
+    }
+    if (featured) {
+      where.is_featured = true
     }
 
     // Search filter
@@ -259,12 +276,13 @@ export async function GET(request: NextRequest) {
       where.end_time = { ...(where.end_time as object ?? {}), lte: new Date(endDate) }
     }
 
+    // The featured section is in the day's rotation, not by distance.
     const shouldSortByDistance =
-      sortBy === "distance" && lat !== undefined && lon !== undefined
+      !featured && sortBy === "distance" && lat !== undefined && lon !== undefined
 
     const cacheKey = buildEventsCacheKey({
       page,
-      limit,
+      limit: pageSize,
       search,
       city,
       // The DERIVED age, matching the filter above. Keying on the stored number
@@ -282,6 +300,9 @@ export async function GET(request: NextRequest) {
       // return different event sets, so omitting it would let a history
       // response be served straight back to a discovery request.
       includePast,
+      featured,
+      // The day's rotation is part of what a featured page is, so the cache turns over with the day.
+      featuredSeed: featured ? seed : undefined,
       status,
       sortBy,
       sortOrder,
@@ -294,11 +315,31 @@ export async function GET(request: NextRequest) {
       ;({ events, totalCount } = cached)
     } else {
       // Build orderBy
-      const orderBy: Record<string, string> = shouldSortByDistance
+      const orderBy: Prisma.eventsOrderByWithRelationInput = shouldSortByDistance
         ? { start_time: "asc" }
         : { [sortBy]: sortOrder }
 
-      if (shouldSortByDistance) {
+      if (featured) {
+        /*
+         * The featured set is small (an admin's picks), so every candidate's id
+         * is read, put in the day's rotation, and only the first five get the
+         * full select. `take` is the same kind of backstop as the distance sort's.
+         */
+        const candidates = await db.events.findMany({
+          where,
+          select: { id: true },
+          orderBy: [{ start_time: "asc" }, { id: "asc" }],
+          take: DISTANCE_SORT_CEILING,
+        })
+        totalCount = Math.min(candidates.length, FEATURED_MAX)
+        const topIds = rotated(candidates, seed).slice(0, FEATURED_MAX).map((e) => e.id)
+        const picked = await db.events.findMany({
+          where: { id: { in: topIds }, ...realEventsWhere },
+          select: eventListSelect,
+        })
+        const byId = new Map(picked.map((e) => [e.id, e]))
+        events = topIds.map((id) => byId.get(id)).filter((e): e is EventListItem => Boolean(e))
+      } else if (shouldSortByDistance) {
         /*
          * Fetch only id + coordinates to sort by distance in-memory, avoiding
          * loading full relations for all rows. Only the page's worth of events
@@ -355,7 +396,7 @@ export async function GET(request: NextRequest) {
 
         totalCount = withDistance.length
         const pageIds = withDistance
-          .slice((page - 1) * limit, page * limit)
+          .slice((page - 1) * pageSize, page * pageSize)
           .map((e) => e.id)
 
         // Fetch full data only for the current page's events
@@ -378,8 +419,8 @@ export async function GET(request: NextRequest) {
             where,
             select: eventListSelect,
             orderBy,
-            skip: (page - 1) * limit,
-            take: limit,
+            skip: (page - 1) * pageSize,
+            take: pageSize,
           }),
           db.events.count({ where }),
         ])
@@ -491,6 +532,7 @@ export async function GET(request: NextRequest) {
       userLat: lat,
       userLon: lon,
       includeCheckins: includeSet.has("checkins"),
+      featuredSeed: seed,
       geocodes,
     })
 
@@ -498,7 +540,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       events: transformedEvents,
-      pagination: paginationMeta(page, limit, totalCount),
+      pagination: paginationMeta(page, pageSize, totalCount),
       ...(includeSet.has("activeCheckins") && {
         activeCheckins: await Promise.all(
           activeCheckins.map(async (c) => ({
