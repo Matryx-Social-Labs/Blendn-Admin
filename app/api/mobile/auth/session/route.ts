@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
-    if (blocked || !user) return errorResponse("User not found", 404, ErrorCode.ACCOUNT_DELETED)
+    if (blocked || !user) return errorResponse("User not found", 404, ErrorCode.NOT_FOUND, ErrorCode.ACCOUNT_DELETED)
 
     // Return user directly (not wrapped in { user: ... })
     const normalizedLocation = await normalizeLocationToCity(user.profile?.location)

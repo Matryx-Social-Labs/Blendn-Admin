@@ -104,8 +104,8 @@ export async function participationRefusal(userId: string): Promise<string | nul
 /** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
   if (denial.kind === "age") {
-    return errorResponse(denial.message, 403, denial.unknownAge ? ErrorCode.AGE_UNKNOWN : ErrorCode.AGE_RESTRICTED)
+    return errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED, denial.unknownAge ? ErrorCode.AGE_UNKNOWN : undefined)
   }
-  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.PROFILE_INCOMPLETE)
+  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
   return notFoundResponse("Event not found")
 }

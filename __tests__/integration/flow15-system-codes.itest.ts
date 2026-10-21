@@ -125,18 +125,22 @@ function blocklistJustRead() {
   if (shared.__blendnBlocklist) shared.__blendnBlocklist.fetchedAt = Date.now()
 }
 
+/*
+ * `errorCode` stays `FORBIDDEN` on these: installed builds show the sentence on
+ * exactly that pair (socialSignInMessage), and the reason is `reasonCode`.
+ */
 const THE_REFUSALS = [
   ["suspended", 403, "ACCOUNT_SUSPENDED", SUSPENDED_MESSAGE],
   ["staff", 403, "ACCOUNT_STAFF", STAFF_MESSAGE],
 ] as const
 
-describe("account codes: the sentence stays, the code is added", () => {
+describe("account codes: errorCode and sentence stay, the reason is added beside them", () => {
   describe.each(THE_REFUSALS)("%s", (state, status, code, sentence) => {
     it("sign-in", async () => {
       const a = await account(`sg-${state}`, state)
       const res = await signinRoute.POST(post("/api/mobile/auth/signin", { email: a.email, password: PASSWORD }))
       expect(res.status).toBe(status)
-      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: code })
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
     })
 
     it("Google", async () => {
@@ -144,7 +148,7 @@ describe("account codes: the sentence stays, the code is added", () => {
       jest.mocked(verifyGoogleIdToken).mockResolvedValue({ sub: a.googleId, email: a.email } as never)
       const res = await googleRoute.POST(post("/api/mobile/auth/google", { idToken: "t" }))
       expect(res.status).toBe(status)
-      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: code })
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
     })
 
     it("Apple", async () => {
@@ -152,7 +156,7 @@ describe("account codes: the sentence stays, the code is added", () => {
       jest.mocked(verifyAppleIdToken).mockResolvedValue({ sub: a.appleId, email: a.email } as never)
       const res = await appleRoute.POST(post("/api/mobile/auth/apple", { identityToken: "t" }))
       expect(res.status).toBe(status)
-      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: code })
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
     })
 
     it("refresh, for a token that is still live", async () => {
@@ -161,7 +165,7 @@ describe("account codes: the sentence stays, the code is added", () => {
       await storeRefreshToken(a.id, token)
       const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
       expect(res.status).toBe(status)
-      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: code })
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
     })
 
     it("session", async () => {
@@ -169,7 +173,7 @@ describe("account codes: the sentence stays, the code is added", () => {
       blocklistJustRead()
       const res = await sessionRoute.GET(get("/api/mobile/auth/session", signAccessToken(a.id, a.email)))
       expect(res.status).toBe(status)
-      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: code })
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
     })
   })
 
@@ -182,7 +186,7 @@ describe("account codes: the sentence stays, the code is added", () => {
     await db.user.update({ where: { id: a.id }, data: { suspended_at: new Date(at.getTime() - 1000) } })
     const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
     expect(res.status).toBe(403)
-    expect(await res.json()).toEqual({ success: false, error: SUSPENDED_MESSAGE, errorCode: "ACCOUNT_SUSPENDED" })
+    expect(await res.json()).toEqual({ success: false, error: SUSPENDED_MESSAGE, errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" })
   })
 
   describe("deleted", () => {
@@ -191,7 +195,7 @@ describe("account codes: the sentence stays, the code is added", () => {
       jest.mocked(verifyGoogleIdToken).mockResolvedValue({ sub: a.googleId, email: a.email } as never)
       const res = await googleRoute.POST(post("/api/mobile/auth/google", { idToken: "t" }))
       expect(res.status).toBe(401)
-      expect(await res.json()).toEqual({ success: false, error: DELETED_SENTENCE, errorCode: "ACCOUNT_DELETED" })
+      expect(await res.json()).toEqual({ success: false, error: DELETED_SENTENCE, errorCode: "ACCOUNT_DELETED", reasonCode: "ACCOUNT_DELETED" })
     })
 
     it("Apple: 401 ACCOUNT_DELETED, 'Account not found'", async () => {
@@ -199,7 +203,7 @@ describe("account codes: the sentence stays, the code is added", () => {
       jest.mocked(verifyAppleIdToken).mockResolvedValue({ sub: a.appleId, email: a.email } as never)
       const res = await appleRoute.POST(post("/api/mobile/auth/apple", { identityToken: "t" }))
       expect(res.status).toBe(401)
-      expect(await res.json()).toEqual({ success: false, error: DELETED_SENTENCE, errorCode: "ACCOUNT_DELETED" })
+      expect(await res.json()).toEqual({ success: false, error: DELETED_SENTENCE, errorCode: "ACCOUNT_DELETED", reasonCode: "ACCOUNT_DELETED" })
     })
 
     it("refresh: a signed token of a deleted account is ACCOUNT_DELETED, with the generic sentence", async () => {
@@ -213,6 +217,7 @@ describe("account codes: the sentence stays, the code is added", () => {
         success: false,
         error: "Invalid or expired refresh token",
         errorCode: "ACCOUNT_DELETED",
+        reasonCode: "ACCOUNT_DELETED",
       })
     })
 
@@ -224,12 +229,12 @@ describe("account codes: the sentence stays, the code is added", () => {
       expect((await res.json()).errorCode).toBe("UNAUTHORIZED")
     })
 
-    it("session: ACCOUNT_DELETED on the 404, with its sentence", async () => {
+    it("session: the 404 stays NOT_FOUND, with ACCOUNT_DELETED as its reasonCode", async () => {
       const a = await account("se-deleted", "deleted")
       blocklistJustRead()
       const res = await sessionRoute.GET(get("/api/mobile/auth/session", signAccessToken(a.id, a.email)))
       expect(res.status).toBe(404)
-      expect(await res.json()).toEqual({ success: false, error: "User not found", errorCode: "ACCOUNT_DELETED" })
+      expect(await res.json()).toEqual({ success: false, error: "User not found", errorCode: "NOT_FOUND", reasonCode: "ACCOUNT_DELETED" })
     })
 
     it("sign-in with a password still never confirms the account existed", async () => {
@@ -272,6 +277,7 @@ describe("session-end reasons, read back from the refresh", () => {
         success: false,
         error: "Invalid or expired refresh token",
         errorCode: "SESSION_REVOKED_ELSEWHERE",
+        reasonCode: "SESSION_REVOKED_ELSEWHERE",
       })
     }
   })
@@ -288,7 +294,7 @@ describe("session-end reasons, read back from the refresh", () => {
     expect(rows.every((r) => r.revoked_reason === "password_reset")).toBe(true)
     const refused = await refresh(a.tokens[0])
     expect(refused.status).toBe(401)
-    expect((await refused.json()).errorCode).toBe("PASSWORD_RESET")
+    expect(await refused.json()).toMatchObject({ errorCode: "PASSWORD_RESET", reasonCode: "PASSWORD_RESET" })
   })
 
   it("signing out one device sets no reason: its refresh is the plain 401", async () => {
@@ -301,7 +307,9 @@ describe("session-end reasons, read back from the refresh", () => {
     expect(row.revoked_reason).toBeNull()
     const refused = await refresh(a.tokens[0])
     expect(refused.status).toBe(401)
-    expect((await refused.json()).errorCode).toBe("UNAUTHORIZED")
+    const body = await refused.json()
+    expect(body.errorCode).toBe("UNAUTHORIZED")
+    expect(body).not.toHaveProperty("reasonCode")
     // And the other phone is untouched.
     expect((await refresh(a.tokens[1])).status).toBe(200)
   })

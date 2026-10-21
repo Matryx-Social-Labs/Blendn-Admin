@@ -365,7 +365,7 @@ registry.registerPath({
     "the window, never shortens it; going live elsewhere, or checking in to an event, ends it as a " +
     "switch. When it ends you are checked out (`expired`) and the venue's room closes to you.\n\n" +
     "Refusals, in order: 404 unknown, archived or deleted venue; " +
-    "(403 `AGE_UNKNOWN` instead of `AGE_RESTRICTED` when no age is on file, same sentence); " +
+    "(403 `AGE_RESTRICTED` carries `reasonCode` `AGE_UNKNOWN` when no age is on file, same sentence); " +
     PARTICIPATION_GATE +
     "409 `EVENT_LIVE_HERE` with `eventId` when a public event linked to this venue is on or starts " +
     "within the hour — check in to it instead; 400 `GPS_TOO_VAGUE` for a fix worse than 150 m, " +

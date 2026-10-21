@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*
+Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*. The body can also carry **`reasonCode`** (`ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`) beside an `errorCode` that keeps its old value
 
 A refusal that names no specific code carries the one its status stands for:
 401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
@@ -151,23 +151,28 @@ address. Google, Apple, `session` and a signed refresh token say
 
 ### Why an account was refused or a session ended (Flow 15)
 
-Every refusal below keeps its sentence **word for word**, because installed
-builds match on the sentence; the `errorCode` is added beside it, and a client
-that knows the code reads that first.
+**Backward compatibility is the rule.** Builds in the field match on a response's
+`errorCode` and its sentence (`FORBIDDEN` plus the sentence is what they show for
+a suspended or staff account; `AGE_RESTRICTED` and `FORBIDDEN` drive the check-in
+and Go Live sheets). So an `errorCode` that already existed **never changes**, and
+the reason goes in a separate body field, **`reasonCode`**. A client that knows it
+reads `reasonCode ?? errorCode`. The sentences are unchanged too. Only where a
+response had nothing but the default 401 code (which no installed build reads) is
+the new code in `errorCode` as well, and `reasonCode` repeats it.
 
-| Where | Status | `errorCode` | Sentence (unchanged) |
-|---|---|---|---|
-| `signin`, `google`, `apple`, `refresh`, `session` | 403 | `ACCOUNT_SUSPENDED` | "This account has been suspended. Contact support@blendn.app if you think that's a mistake." |
-| the same five | 403 | `ACCOUNT_STAFF` | "This app is for attendees. Organisers, venue owners and sponsors sign in at the dashboard." |
-| `google`, `apple` | 401 | `ACCOUNT_DELETED` | "Account not found" |
-| `session` | 404 | `ACCOUNT_DELETED` | "User not found" |
-| `refresh`, a signed unexpired token of a deleted account | 401 | `ACCOUNT_DELETED` | "Invalid or expired refresh token" |
-| `refresh`, a session a password reset or change ended | 401 | `PASSWORD_RESET` | "Invalid or expired refresh token" |
-| `refresh`, a session `signout` with no token ended (every phone) | 401 | `SESSION_REVOKED_ELSEWHERE` | "Invalid or expired refresh token" |
+| Where | Status | `errorCode` | `reasonCode` | Sentence (unchanged) |
+|---|---|---|---|---|
+| `signin`, `google`, `apple`, `refresh`, `session` | 403 | `FORBIDDEN` | `ACCOUNT_SUSPENDED` | "This account has been suspended. Contact support@blendn.app if you think that's a mistake." |
+| the same five | 403 | `FORBIDDEN` | `ACCOUNT_STAFF` | "This app is for attendees. Organisers, venue owners and sponsors sign in at the dashboard." |
+| `google`, `apple` | 401 | `ACCOUNT_DELETED` | `ACCOUNT_DELETED` | "Account not found" |
+| `session` | 404 | `NOT_FOUND` | `ACCOUNT_DELETED` | "User not found" |
+| `refresh`, a signed unexpired token of a deleted account | 401 | `ACCOUNT_DELETED` | `ACCOUNT_DELETED` | "Invalid or expired refresh token" |
+| `refresh`, a session a password reset or change ended | 401 | `PASSWORD_RESET` | `PASSWORD_RESET` | "Invalid or expired refresh token" |
+| `refresh`, a session `signout` with no token ended (every phone) | 401 | `SESSION_REVOKED_ELSEWHERE` | `SESSION_REVOKED_ELSEWHERE` | "Invalid or expired refresh token" |
 
 `signin` with a password never says `ACCOUNT_DELETED`: it is the generic 401
 `UNAUTHORIZED` "Invalid email or password", so it still confirms nothing. A
-forged or expired refresh token learns no reason and gets `UNAUTHORIZED`. Signing
+forged or expired refresh token learns no reason: `UNAUTHORIZED`, no `reasonCode`. Signing
 out **one** device, a rotation and an old token with no recorded reason are also
 plain `UNAUTHORIZED`.
 
@@ -223,13 +228,14 @@ affected; they do not pass through the mobile gate. Both gates are in
 `middleware.ts` through `lib/mobile-gate.ts`, and `X-App-Version` is in
 `Access-Control-Allow-Headers`.
 
-**At the door.** Two refusals a person can fix now say so, with the sentence
-unchanged: 403 `PROFILE_INCOMPLETE` (onboarding unfinished and no adult age on
-file) on check-in, Go Live, RSVP, favourite/interest and the board, and 403
-`AGE_UNKNOWN` where those routes used to answer `AGE_RESTRICTED` for an age that is
-**not on file** (`GET /events/:eventId` never refused an unknown age, and still does not). A known age below the
-line is still `AGE_RESTRICTED`. The messaging and friend routes keep `FORBIDDEN` for
-the same unfinished-profile sentence.
+**At the door.** Two refusals a person can fix now say so in `reasonCode`, with
+`errorCode` and the sentence exactly as before: `reasonCode: "PROFILE_INCOMPLETE"`
+beside `errorCode: "FORBIDDEN"` (onboarding unfinished and no adult age on file),
+and `reasonCode: "AGE_UNKNOWN"` beside `errorCode: "AGE_RESTRICTED"` (an age that is
+**not on file**; `GET /events/:eventId` never refused an unknown age, and still does
+not). On check-in, Go Live, RSVP, favourite/interest and the board. A known age
+below the line has no `reasonCode`. The messaging and friend routes are unchanged:
+`FORBIDDEN`, no `reasonCode`.
 
 
 ### Password reset
@@ -946,8 +952,8 @@ per person, then 429.
 ### GET /venues/:venueId
 
 One venue, as the Go Live screen needs it. 404 for an unknown, archived or
-deleted venue; 403 `PROFILE_INCOMPLETE` for a profile not onboarded, `AGE_UNKNOWN`
-for one with no age on file, `AGE_RESTRICTED` for a known age under 18 (as at its door). 60 a minute per person, then
+deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile not onboarded, `AGE_RESTRICTED`
+(`reasonCode` `AGE_UNKNOWN` when no age is on file) for one without a known adult age (as at its door). 60 a minute per person, then
 429.
 
 ```json
@@ -1038,7 +1044,7 @@ today (choosing it again does not restart the four hours). Anything else is
 | Refusal | When |
 |---|---|
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
-| 403 `PROFILE_INCOMPLETE` / `AGE_UNKNOWN` / `AGE_RESTRICTED` | Not onboarded / no age on file (refused here) / a known age under 18 |
+| 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file) | Not onboarded / no adult age (an unknown age is refused here) |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
 | 400 `NO_CHECK_IN_AREA` | Nobody has drawn this venue's area: no position fixes it |
@@ -2434,7 +2440,7 @@ shipped `orientation` and `gender` together to any authenticated caller.
 
 - **Check-in returns 403 with `errorCode: "AGE_RESTRICTED"`** — this is the real
   door, and it refuses an unknown age as well as one below the line. An age that
-  is not on file is `AGE_UNKNOWN` (same sentence): the one the person can fix.
+  is not on file adds `reasonCode: "AGE_UNKNOWN"` (same `errorCode`, same sentence): the one the person can fix.
 - **The events list and search omit the event** for anyone whose stated age is
   below it. An unknown age does **not** hide restricted events: OAuth accounts
   have no age, and hiding them all would empty the feed to punish a missing
@@ -2444,7 +2450,7 @@ shipped `orientation` and `gender` together to any authenticated caller.
   viewer whose derived age is **below** the line it returns 403
   `AGE_RESTRICTED` instead, like the door; an unknown age is shown the event.
 - **RSVP, favourite/interest and the board (`/rsvp`, `/favorite`, `/interest`,
-  `/board`, `/board/:postId/requests`) refuse 403 `AGE_RESTRICTED`** (`AGE_UNKNOWN` when no age is on file) for an under-age
+  `/board`, `/board/:postId/requests`) refuse 403 `AGE_RESTRICTED`** (with `reasonCode` `AGE_UNKNOWN` when no age is on file) for an under-age
   *or unknown* age — these are the beginning of being there, so they take the
   door's posture, not discovery's. Until this, only the feed and the door
   applied the rule, and a 17-year-old could RSVP to, save and read the board

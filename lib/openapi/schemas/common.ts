@@ -22,6 +22,14 @@ export const ErrorResponseSchema = z
     success: z.literal(false),
     error: z.string(),
     errorCode: z.string().optional(),
+    reasonCode: z
+      .string()
+      .optional()
+      .describe(
+        "Why, beside an `errorCode` that keeps the value installed builds match on: `ACCOUNT_SUSPENDED`, " +
+          "`ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, " +
+          "`PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`."
+      ),
   })
   .openapi("ErrorResponse")
 
@@ -113,8 +121,8 @@ registry.register("DeviceInfo", DeviceInfoSchema)
  */
 export const PARTICIPATION_GATE =
   "403 \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
-  "profile has neither finished onboarding nor an adult age on file (SCRUM-331) — `errorCode` " +
-  "`PROFILE_INCOMPLETE` on the event, check-in and Go Live routes, `FORBIDDEN` on the messaging and friend ones. "
+  "profile has neither finished onboarding nor an adult age on file (SCRUM-331) — `errorCode` stays " +
+  "`FORBIDDEN`; the event, check-in and Go Live routes add `reasonCode` `PROFILE_INCOMPLETE`. "
 
 const errorBody = (description: string, schema: z.ZodTypeAny = ErrorResponseSchema) => ({
   description,

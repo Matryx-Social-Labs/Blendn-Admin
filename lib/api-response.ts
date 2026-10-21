@@ -7,6 +7,13 @@ export interface ApiResponse<T = unknown> {
   data?: T
   error?: string
   errorCode?: string
+  /**
+   * Why, for a client that knows how to read it, beside an `errorCode` that
+   * stays exactly what installed builds already match on (Flow 15):
+   * `ACCOUNT_*`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`,
+   * `PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`.
+   */
+  reasonCode?: string
   errors?: Array<{ field: string; message: string }>
 }
 
@@ -79,9 +86,10 @@ export const ErrorCode = {
    */
   VENUE_UNCLAIMED: "VENUE_UNCLAIMED",
   /**
-   * Why an account was refused or a session ended (Flow 15). The sentences that
-   * ride with them are unchanged, because installed builds match on them; a
-   * client that knows the code reads that first.
+   * Why an account was refused or a session ended (Flow 15). Where a response
+   * already carried an `errorCode` installed builds match on (`FORBIDDEN`,
+   * `AGE_RESTRICTED`, `NOT_FOUND`), that stays and these go in `reasonCode`
+   * beside it; where it carried only the default 401, the code is both.
    */
   ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
   /** An organiser, venue owner, sponsor or admin in the attendee app. */
@@ -144,7 +152,9 @@ function defaultErrorCode(status: number): string | undefined {
 export function errorResponse(
   message: string,
   status: number = 400,
-  errorCode?: string
+  errorCode?: string,
+  /** The reason, in `reasonCode`, when `errorCode` must stay what it was. */
+  reasonCode?: string
 ): NextResponse<ApiResponse> {
   const code = errorCode ?? defaultErrorCode(status)
   return NextResponse.json(
@@ -152,6 +162,7 @@ export function errorResponse(
       success: false,
       error: message,
       ...(code && { errorCode: code }),
+      ...(reasonCode && { reasonCode }),
     },
     { status }
   )

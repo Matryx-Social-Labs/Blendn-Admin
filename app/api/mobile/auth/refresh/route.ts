@@ -51,12 +51,12 @@ export async function POST(request: NextRequest) {
       // below is unreachable (SCRUM-290). Scoped in `revokedBySuspension`.
       if (await revokedBySuspension(oldRefreshToken)) return accountRefusal("suspended")
       if (await belongsToDeletedAccount(oldRefreshToken)) {
-        return errorResponse("Invalid or expired refresh token", 401, ErrorCode.ACCOUNT_DELETED)
+        return errorResponse("Invalid or expired refresh token", 401, ErrorCode.ACCOUNT_DELETED, ErrorCode.ACCOUNT_DELETED)
       }
       // And one a password reset or a sign-out-everywhere ended, told why (Flow 15):
       // the sentence stays the generic one, the code is the reason.
       const sessionCode = await revokedSessionCode(oldRefreshToken)
-      return errorResponse("Invalid or expired refresh token", 401, sessionCode ?? ErrorCode.UNAUTHORIZED)
+      return errorResponse("Invalid or expired refresh token", 401, sessionCode ?? ErrorCode.UNAUTHORIZED, sessionCode ?? undefined)
     }
 
     // Check if user still exists
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
-    if (blocked || !user) return errorResponse("User not found", 401, ErrorCode.ACCOUNT_DELETED)
+    if (blocked || !user) return errorResponse("User not found", 401, ErrorCode.ACCOUNT_DELETED, ErrorCode.ACCOUNT_DELETED)
 
     // Generate new tokens
     const accessToken = signAccessToken(user.id, user.email)

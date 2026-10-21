@@ -102,8 +102,10 @@ const postParams = (eventId: string, postId: string) => ({ params: Promise.resol
 
 /** `status` and `errorCode` of a response, so a 403 says which 403 it was. */
 async function outcome(res: Response) {
-  const body = (await res.json()) as { errorCode?: string; error?: string }
-  return res.status === 200 || res.status === 201 ? "ok" : `${res.status} ${body.errorCode ?? body.error}`
+  const body = (await res.json()) as { errorCode?: string; reasonCode?: string; error?: string }
+  // `errorCode/reasonCode` when there is a reason: the first is what installed builds match on.
+  const code = body.reasonCode ? `${body.errorCode}/${body.reasonCode}` : (body.errorCode ?? body.error)
+  return res.status === 200 || res.status === 201 ? "ok" : `${res.status} ${code}`
 }
 
 /** Every attendee route that takes one event id, as the given person. */
@@ -192,17 +194,17 @@ describe("an 18+ event reached by id", () => {
     expect(r.get).toBe("ok")
     expect(r.interested).toBe("ok")
     expect([r.rsvp, r.favorite, r.interest, r.boardGet, r.boardPost, r.boardRequest]).toEqual(
-      // The one a person can fix by adding their age (Flow 15), not the plain no a known age gets.
-      Array(6).fill("403 AGE_UNKNOWN")
+      // errorCode unchanged; the one a person can fix by adding their age says so in reasonCode (Flow 15).
+      Array(6).fill("403 AGE_RESTRICTED/AGE_UNKNOWN")
     )
   })
 
-  it("holds an account that never finished onboarding at PROFILE_INCOMPLETE, before the age rule", async () => {
+  it("holds an account that never finished onboarding at FORBIDDEN/PROFILE_INCOMPLETE, before the age rule", async () => {
     const unfinished = await person("ea-unfinished", null)
     await db.profiles.update({ where: { id: unfinished.id }, data: { onboarded: false } })
     const r = await everyRoute(eventId, unfinished.token, postId)
     expect([r.rsvp, r.favorite, r.interest, r.boardGet, r.boardPost, r.boardRequest]).toEqual(
-      Array(6).fill("403 PROFILE_INCOMPLETE")
+      Array(6).fill("403 FORBIDDEN/PROFILE_INCOMPLETE")
     )
   })
 
