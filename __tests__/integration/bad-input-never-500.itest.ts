@@ -122,6 +122,16 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   const { me, other, admin } = people
+  /*
+   * `POST /auth/signout` with a body it cannot read signs every phone out, which
+   * stamps `mobile_sessions_revoked_at` and refuses this person's earlier access
+   * token (lib/session-end.ts) -- as it should. Every case after that one would
+   * stop at a 401 before reaching its input, so the world is put back.
+   */
+  await db.user.update({ where: { id: me }, data: { mobile_sessions_revoked_at: null } })
+  const blocklist = (globalThis as typeof globalThis & { __blendnBlocklist?: { phonesEndedAt: Map<string, number>; phonesEndedNow: Map<string, number> } }).__blendnBlocklist
+  blocklist?.phonesEndedAt.delete(me)
+  blocklist?.phonesEndedNow.delete(me)
   const eventId = await makeEvent(admin)
   events.push(eventId)
   await putInRoom({ eventId, occurrenceId: await occurrenceOf(eventId), userId: me })
