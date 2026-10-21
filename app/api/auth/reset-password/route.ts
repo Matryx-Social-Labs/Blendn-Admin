@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
     const hashed = await bcrypt.hash(password, 12)
 
     const at = new Date()
+    let phonesEndedAt = at
     await db.$transaction(async (tx) => {
       // Claiming with `used_at: null` in the filter is the concurrency guard:
       // the second of two simultaneous submissions matches zero rows.
@@ -111,11 +112,11 @@ export async function POST(req: NextRequest) {
       await tx.user.update({ where: { id: row.user.id }, data: { password: hashed, password_changed_at: at } })
 
       // The point of resetting after a compromise: every phone too.
-      await endPhoneSessions(tx, row.user.id, at, "password_reset")
+      phonesEndedAt = (await endPhoneSessions(tx, row.user.id, "password_reset")).at
     })
     // And what was live when it changed closes now (SCRUM-603).
     dashboardSessionsEnded(row.user.id)
-    phoneSessionsEnded(row.user.id, at)
+    phoneSessionsEnded(row.user.id, phonesEndedAt)
 
     auditLog({
       userId: row.user.id,

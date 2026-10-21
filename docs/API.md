@@ -186,6 +186,14 @@ account's earlier access tokens and closes its live sockets, as the other
 after the reuse grace is **not** read as theft (it used to revoke every session
 opened since).
 
+The row is kept until the token's own `expires_at` (the hourly sweep of revoked
+rows leaves any row that carries a reason), so a phone that comes back a day
+later is still told why. `revoked_reason` is limited by a CHECK to those two
+values. A refresh and a sign-out-everywhere are serialised on the account's row
+(`FOR SHARE` against `FOR NO KEY UPDATE`): a refresh in flight can never leave a
+live session behind a sign-out, and sign-out reads its stamp only once it holds
+the lock, so no access token issued before the commit outlives it.
+
 An account suspended, deleted or signed out in the last twenty minutes is turned
 away at `GET /auth/session` earlier still, as a bare 401 "Invalid or expired
 token" (`lib/account-blocklist.ts`); the refresh that follows says why.

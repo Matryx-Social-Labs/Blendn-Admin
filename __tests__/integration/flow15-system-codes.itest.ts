@@ -10,17 +10,28 @@
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 // Only the two identity-provider checks are replaced; everything after them is real.
-jest.mock("@/lib/mobile-auth", () => ({
-  ...jest.requireActual("@/lib/mobile-auth"),
-  verifyGoogleIdToken: jest.fn(),
-  verifyAppleIdToken: jest.fn(),
-}))
+// And `storeRefreshToken` can be held, by a test that interleaves the refresh with another writer.
+let beforeStore: (() => Promise<void>) | null = null
+jest.mock("@/lib/mobile-auth", () => {
+  const actual = jest.requireActual("@/lib/mobile-auth")
+  return {
+    ...actual,
+    verifyGoogleIdToken: jest.fn(),
+    verifyAppleIdToken: jest.fn(),
+    storeRefreshToken: async (...args: Parameters<typeof actual.storeRefreshToken>) => {
+      await beforeStore?.()
+      return actual.storeRefreshToken(...args)
+    },
+  }
+})
 
 import bcrypt from "bcryptjs"
 import { createServer } from "http"
 import type { AddressInfo } from "net"
 import { NextRequest } from "next/server"
 import { io as connect } from "socket.io-client"
+
+import jwt from "jsonwebtoken"
 
 import { POST as resetPassword } from "@/app/api/auth/reset-password/route"
 import {
@@ -34,6 +45,8 @@ import {
 } from "@/lib/mobile-auth"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
+import { cleanupExpiredTokens } from "@/lib/mobile-auth"
+import { endPhoneSessions } from "@/lib/session-end"
 import { initSocketServer } from "@/lib/socket-server"
 import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 
@@ -221,6 +234,18 @@ describe("account codes: errorCode and sentence stay, the reason is added beside
       })
     })
 
+    it("refresh: a row that still exists says nothing about deletion (no 30-day oracle on a revoked token)", async () => {
+      const a = await account("rf-deleted-row", "deleted")
+      const token = signRefreshToken(a.id, a.email)
+      await storeRefreshToken(a.id, token)
+      await db.mobile_refresh_tokens.updateMany({ where: { user_id: a.id }, data: { revoked_at: new Date(Date.now() - 3_600_000) } })
+      const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+      expect(res.status).toBe(401)
+      const body = await res.json()
+      expect(body.errorCode).toBe("UNAUTHORIZED")
+      expect(body).not.toHaveProperty("reasonCode")
+    })
+
     it("refresh: a forged token learns nothing", async () => {
       const a = await account("rf-forged", "deleted")
       const forged = `${signRefreshToken(a.id, a.email)}x`
@@ -340,6 +365,126 @@ describe("session-end reasons, read back from the refresh", () => {
   })
 })
 
+describe("the sweeper keeps the reason until the token expires", () => {
+  it("deletes an old revoked row that has no reason, and keeps one that has", async () => {
+    const a = await account("sweep")
+    const hourAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000)
+    const row = (revokedHoursAgo: number | null, reason: string | null, expiresInHours = 24) => ({
+      id: crypto.randomUUID(),
+      user_id: a.id,
+      token_hash: testId("hash"),
+      expires_at: new Date(Date.now() + expiresInHours * 3_600_000),
+      revoked_at: revokedHoursAgo === null ? null : hourAgo(revokedHoursAgo),
+      revoked_reason: reason,
+    })
+    const swept = row(2, null)
+    const keptForReason = row(2, "signout_all")
+    const keptLive = row(null, null)
+    const keptRecent = row(0.1, null)
+    const expired = row(null, "password_reset", -1)
+    await db.mobile_refresh_tokens.createMany({ data: [swept, keptForReason, keptLive, keptRecent, expired] })
+
+    await cleanupExpiredTokens()
+
+    const left = new Set((await db.mobile_refresh_tokens.findMany({ where: { user_id: a.id } })).map((r) => r.id))
+    expect(left.has(swept.id)).toBe(false)
+    expect(left.has(expired.id)).toBe(false)
+    expect([keptForReason.id, keptLive.id, keptRecent.id].every((id) => left.has(id))).toBe(true)
+  })
+})
+
+describe("refresh against sign-out-everywhere, interleaved: no session survives", () => {
+  const refresh = (token: string) => refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+  const settled = (promise: Promise<unknown>, ms: number) =>
+    Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms))])
+
+  async function onePhone(label: string) {
+    const a = await account(label)
+    // Issued a second ago, so the stamp sign-out reads is after its `iat` whatever the clock's grain.
+    const old = jwt.sign({ userId: a.id, email: a.email, type: "refresh", jti: crypto.randomUUID() }, process.env.MOBILE_JWT_SECRET!, {
+      expiresIn: "30d",
+      noTimestamp: true,
+    })
+    const aged = jwt.sign({ ...(jwt.decode(old) as object), iat: Math.floor(Date.now() / 1000) - 5 }, process.env.MOBILE_JWT_SECRET!)
+    await storeRefreshToken(a.id, aged)
+    return { ...a, old: aged }
+  }
+
+  const live = (userId: string) => db.mobile_refresh_tokens.count({ where: { user_id: userId, revoked_at: null } })
+
+  afterEach(() => {
+    beforeStore = null
+  })
+
+  it("a refresh that holds the user row first: sign-out waits, then revokes the token the refresh just stored", async () => {
+    const a = await onePhone("race-refresh-first")
+    let inTransaction!: () => void
+    const reached = new Promise<void>((resolve) => (inTransaction = resolve))
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    beforeStore = async () => {
+      inTransaction()
+      await held
+    }
+
+    const refreshing = refresh(a.old)
+    await reached
+    beforeStore = null
+
+    const signingOut = signoutRoute.POST(post("/api/mobile/auth/signout", {}, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` }))
+    // It cannot finish while the refresh holds the row.
+    expect(await settled(signingOut, 500)).toBe(false)
+
+    release()
+    const refreshed = await refreshing
+    expect((await signingOut).status).toBe(200)
+
+    // The refresh won the lock, so it succeeded; its new session is exactly what sign-out then ended.
+    expect(refreshed.status).toBe(200)
+    const { accessToken, refreshToken } = (await refreshed.json()).data
+    expect(await live(a.id)).toBe(0)
+    const stamp = (await db.user.findUniqueOrThrow({ where: { id: a.id } })).mobile_sessions_revoked_at!
+    expect((jwt.decode(accessToken) as { iat: number }).iat * 1000).toBeLessThanOrEqual(stamp.getTime())
+    const again = await refresh(refreshToken)
+    expect(again.status).toBe(401)
+    expect((await again.json()).errorCode).toBe("SESSION_REVOKED_ELSEWHERE")
+  })
+
+  it("a sign-out that holds the user row first: the refresh waits, sees the stamp, stores nothing", async () => {
+    const a = await onePhone("race-signout-first")
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    let ended!: () => void
+    const endedLock = new Promise<void>((resolve) => (ended = resolve))
+    const signingOut = db.$transaction(async (tx) => {
+      await endPhoneSessions(tx, a.id, "signout_all")
+      ended()
+      await held
+    })
+    await endedLock
+
+    const refreshing = refresh(a.old)
+    expect(await settled(refreshing, 500)).toBe(false)
+
+    release()
+    await signingOut
+    const res = await refreshing
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ errorCode: "SESSION_REVOKED_ELSEWHERE", reasonCode: "SESSION_REVOKED_ELSEWHERE" })
+    expect(await live(a.id)).toBe(0)
+    expect(await db.mobile_refresh_tokens.count({ where: { user_id: a.id } })).toBe(1)
+  })
+
+  it("a refresh after sign-out, with a token issued since, still works", async () => {
+    const a = await onePhone("race-after")
+    await db.$transaction((tx) => endPhoneSessions(tx, a.id, "signout_all"))
+    await new Promise((r) => setTimeout(r, 1100))
+    const fresh = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, fresh)
+    expect((await refresh(fresh)).status).toBe(200)
+  })
+})
+
 describe("signInMethod on /auth/session", () => {
   const method = async (a: { id: string; email: string }) => {
     const res = await sessionRoute.GET(get("/api/mobile/auth/session", signAccessToken(a.id, a.email)))
@@ -427,5 +572,16 @@ describe("the migration, on a database built by `migrate deploy`", () => {
       SELECT data_type, is_nullable, column_default FROM information_schema.columns
       WHERE table_name = 'mobile_refresh_tokens' AND column_name = 'revoked_reason'`
     expect(rows).toEqual([{ data_type: "text", is_nullable: "YES", column_default: null }])
+  })
+
+  it("refuses a reason the refresh cannot say, by the CHECK db push would not have made", async () => {
+    const a = await account("check")
+    const insert = (reason: string | null) =>
+      db.mobile_refresh_tokens.create({
+        data: { user_id: a.id, token_hash: testId("hash"), expires_at: new Date(Date.now() + 3_600_000), revoked_at: new Date(), revoked_reason: reason },
+      })
+    await expect(insert("bogus")).rejects.toThrow(/mobile_refresh_tokens_revoked_reason_known/)
+    await expect(insert("signout_all")).resolves.toBeDefined()
+    await expect(insert(null)).resolves.toBeDefined()
   })
 })

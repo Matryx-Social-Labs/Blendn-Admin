@@ -62,7 +62,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockAuth.mockResolvedValue({ userId: USER })
   mockDb.push_tokens.deleteMany.mockResolvedValue({ count: 1 })
-  mockEndPhones.mockResolvedValue(1)
+  mockEndPhones.mockResolvedValue({ live: 1, at: new Date() })
 })
 
 describe("signing out clears the push token", () => {
@@ -88,7 +88,7 @@ describe("signing out clears the push token", () => {
      */
     await POST(req({}))
 
-    expect(mockEndPhones).toHaveBeenCalledWith(mockTx, USER, expect.any(Date), "signout_all")
+    expect(mockEndPhones).toHaveBeenCalledWith(mockTx, USER, "signout_all")
     expect(mockPhonesEnded).toHaveBeenCalledWith(USER, expect.any(Date))
     expect(mockDb.push_tokens.deleteMany).toHaveBeenCalledWith({
       where: { user_id: USER },
@@ -113,7 +113,7 @@ describe("signing out clears the push token", () => {
   it("clears every token when the body is absent entirely", async () => {
     await POST(req())
 
-    expect(mockEndPhones).toHaveBeenCalledWith(mockTx, USER, expect.any(Date), "signout_all")
+    expect(mockEndPhones).toHaveBeenCalledWith(mockTx, USER, "signout_all")
     expect(mockPhonesEnded).toHaveBeenCalledWith(USER, expect.any(Date))
     expect(mockDb.push_tokens.deleteMany).toHaveBeenCalledWith({
       where: { user_id: USER },

@@ -63,9 +63,8 @@ export async function POST(request: NextRequest) {
       // The same end every other "all phones" caller gives (lib/session-end.ts):
       // the other phones are told why, their old access tokens stop, their
       // sockets close.
-      const at = new Date()
-      await db.$transaction((tx) => endPhoneSessions(tx, authUser.userId, at, "signout_all"))
-      phoneSessionsEnded(authUser.userId, at)
+      const ended = await db.$transaction((tx) => endPhoneSessions(tx, authUser.userId, "signout_all"))
+      phoneSessionsEnded(authUser.userId, ended.at)
       revokedAll = true
     }
 

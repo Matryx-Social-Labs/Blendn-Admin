@@ -110,17 +110,18 @@ export async function changePassword(
    */
   const hash = await bcrypt.hash(newPassword, 12)
   const at = new Date()
-  const revoked = await db.$transaction(async (tx) => {
+  const ended = await db.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: user.id },
       // Every dashboard session signed in before now ends, this one included (M6).
       data: { password: hash, password_changed_at: at },
     })
-    return endPhoneSessions(tx, user.id, at, "password_reset")
+    return endPhoneSessions(tx, user.id, "password_reset")
   })
+  const revoked = ended.live
   // And what was live when it changed closes now (SCRUM-603).
   dashboardSessionsEnded(user.id)
-  phoneSessionsEnded(user.id, at)
+  phoneSessionsEnded(user.id, ended.at)
 
   auditLog({
     userId: user.id,
@@ -166,21 +167,20 @@ export async function endDashboardSessions(): Promise<void> {
  */
 export async function revokeMobileSessions(): Promise<number> {
   const user = await requireUser()
-  const at = new Date()
-  const count = await db.$transaction(async (tx) => {
-    const live = await endPhoneSessions(tx, user.id, at, "signout_all")
+  const ended = await db.$transaction(async (tx) => {
+    const result = await endPhoneSessions(tx, user.id, "signout_all")
     await auditInTx(tx, {
       userId: user.id,
       action: "account.mobile_tokens_revoked",
       resource: "user",
       resourceId: user.id,
-      details: { count: live },
+      details: { count: result.live },
     })
-    return live
+    return result
   })
-  phoneSessionsEnded(user.id, at)
+  phoneSessionsEnded(user.id, ended.at)
   revalidatePath("/dashboard/settings")
-  return count
+  return ended.live
 }
 
 export async function getAccount() {
