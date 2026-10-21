@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (the last five: Go Live, below)
+Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*
 
 A refusal that names no specific code carries the one its status stands for:
 401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
@@ -54,8 +54,8 @@ the route's catch-all called the caller's mistake an outage.
 | POST | `/auth/google` | Google OAuth login | 10/15min |
 | POST | `/auth/apple` | Apple Sign In | 10/15min |
 | POST | `/auth/refresh` | Refresh access token | 20/15min |
-| GET | `/auth/session` | Get current session info | - |
-| POST | `/auth/signout` | Revoke refresh token | - |
+| GET | `/auth/session` | Get current session info, with `signInMethod` | - |
+| POST | `/auth/signout` | Revoke refresh token (none given: every phone session) | - |
 
 Password reset is **not** under `/api/mobile`. See [Password reset](#password-reset) below.
 
@@ -144,8 +144,93 @@ token — `getAuthenticatedUser` verifies the JWT without a database read, and
 adding one there would cost a query on every mobile request to shorten that
 window.
 
-A deleted account keeps returning the generic 401 or `User not found` it always
-did; deletion is never confirmed to a caller.
+A deleted account is told nothing at a **password** sign-in: the generic 401
+it always was, so deletion is never confirmed to a caller who only has an
+address. Google, Apple, `session` and a signed refresh token say
+`ACCOUNT_DELETED` (below).
+
+### Why an account was refused or a session ended (Flow 15)
+
+Every refusal below keeps its sentence **word for word**, because installed
+builds match on the sentence; the `errorCode` is added beside it, and a client
+that knows the code reads that first.
+
+| Where | Status | `errorCode` | Sentence (unchanged) |
+|---|---|---|---|
+| `signin`, `google`, `apple`, `refresh`, `session` | 403 | `ACCOUNT_SUSPENDED` | "This account has been suspended. Contact support@blendn.app if you think that's a mistake." |
+| the same five | 403 | `ACCOUNT_STAFF` | "This app is for attendees. Organisers, venue owners and sponsors sign in at the dashboard." |
+| `google`, `apple` | 401 | `ACCOUNT_DELETED` | "Account not found" |
+| `session` | 404 | `ACCOUNT_DELETED` | "User not found" |
+| `refresh`, a signed unexpired token of a deleted account | 401 | `ACCOUNT_DELETED` | "Invalid or expired refresh token" |
+| `refresh`, a session a password reset or change ended | 401 | `PASSWORD_RESET` | "Invalid or expired refresh token" |
+| `refresh`, a session `signout` with no token ended (every phone) | 401 | `SESSION_REVOKED_ELSEWHERE` | "Invalid or expired refresh token" |
+
+`signin` with a password never says `ACCOUNT_DELETED`: it is the generic 401
+`UNAUTHORIZED` "Invalid email or password", so it still confirms nothing. A
+forged or expired refresh token learns no reason and gets `UNAUTHORIZED`. Signing
+out **one** device, a rotation and an old token with no recorded reason are also
+plain `UNAUTHORIZED`.
+
+The reason is stored on the revoked `mobile_refresh_tokens` row
+(`revoked_reason`: `password_reset` | `signout_all`), written by
+`endPhoneSessions` (`lib/session-end.ts`) for a password reset or change and for
+Settings' sign-out of every phone. `POST /auth/signout` with **no**
+`refreshToken` takes that same path, which means it now also refuses the
+account's earlier access tokens and closes its live sockets, as the other
+"all phones" callers always did. A token revoked that way and presented again
+after the reuse grace is **not** read as theft (it used to revoke every session
+opened since).
+
+An account suspended, deleted or signed out in the last twenty minutes is turned
+away at `GET /auth/session` earlier still, as a bare 401 "Invalid or expired
+token" (`lib/account-blocklist.ts`); the refresh that follows says why.
+
+**`GET /auth/session` also returns `signInMethod`**: `"password" | "google" |
+"apple"`. The tokens do not carry how this phone signed in, so it answers for the
+account: `password` when it has one, else the provider linked most recently.
+
+**Socket handshake.** `io` refuses a mobile token whose account is not live with
+`Error("Authentication required")` and `error.data.code` of `ACCOUNT_SUSPENDED`,
+`ACCOUNT_STAFF` or `ACCOUNT_DELETED`. A phone signed out everywhere is refused with the
+same message and no code.
+
+**Update required.** The app sends `X-App-Version` (native only). When
+`MOBILE_MIN_APP_VERSION` is set and the header is a plain dotted version
+(`1.4.0`, up to four numbers) below it, any `/api/mobile` request is refused
+before its route runs:
+
+```json
+HTTP 426
+{ "success": false, "error": "This version of Blendn is no longer supported. Update the app to continue.", "errorCode": "UPDATE_REQUIRED" }
+```
+
+A missing header (every installed build, and the web), `unknown` or an
+unparsable one is **never** refused; neither is a preflight. Unset: no minimum.
+A `MOBILE_MIN_APP_VERSION` that is not a version enforces nothing and logs a warning once.
+
+**Maintenance.** With `MAINTENANCE_MODE=1` (or `true`) every `/api/mobile`
+request is refused before its route runs, whatever the version:
+
+```json
+HTTP 503   Retry-After: 300
+{ "success": false, "error": "Blendn is down for maintenance. Try again shortly.", "errorCode": "MAINTENANCE", "retryAfter": 300 }
+```
+
+`MAINTENANCE_RETRY_AFTER_SECONDS` sets the wait (default 300, at most 3600; a
+non-number or non-positive value is the default). Unset: off. `/api/health`
+(Railway's healthcheck), the dashboard and the socket handshake are never
+affected; they do not pass through the mobile gate. Both gates are in
+`middleware.ts` through `lib/mobile-gate.ts`, and `X-App-Version` is in
+`Access-Control-Allow-Headers`.
+
+**At the door.** Two refusals a person can fix now say so, with the sentence
+unchanged: 403 `PROFILE_INCOMPLETE` (onboarding unfinished and no adult age on
+file) on check-in, Go Live, RSVP, favourite/interest and the board, and 403
+`AGE_UNKNOWN` where those routes used to answer `AGE_RESTRICTED` for an age that is
+**not on file** (`GET /events/:eventId` never refused an unknown age, and still does not). A known age below the
+line is still `AGE_RESTRICTED`. The messaging and friend routes keep `FORBIDDEN` for
+the same unfinished-profile sentence.
+
 
 ### Password reset
 
@@ -861,8 +946,8 @@ per person, then 429.
 ### GET /venues/:venueId
 
 One venue, as the Go Live screen needs it. 404 for an unknown, archived or
-deleted venue; 403 `FORBIDDEN` for a profile not onboarded, `AGE_RESTRICTED`
-for one with no known adult age (as at its door). 60 a minute per person, then
+deleted venue; 403 `PROFILE_INCOMPLETE` for a profile not onboarded, `AGE_UNKNOWN`
+for one with no age on file, `AGE_RESTRICTED` for a known age under 18 (as at its door). 60 a minute per person, then
 429.
 
 ```json
@@ -953,7 +1038,7 @@ today (choosing it again does not restart the four hours). Anything else is
 | Refusal | When |
 |---|---|
 | 404 | Unknown, archived or deleted venue, or today's room there was deleted |
-| 403 `FORBIDDEN` / `AGE_RESTRICTED` | Not onboarded / no known adult age (an unknown age is refused here) |
+| 403 `PROFILE_INCOMPLETE` / `AGE_UNKNOWN` / `AGE_RESTRICTED` | Not onboarded / no age on file (refused here) / a known age under 18 |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
 | 400 `NO_CHECK_IN_AREA` | Nobody has drawn this venue's area: no position fixes it |
@@ -2348,7 +2433,8 @@ shipped `orientation` and `gender` together to any authenticated caller.
 `events.min_age` is null for almost every event. When set:
 
 - **Check-in returns 403 with `errorCode: "AGE_RESTRICTED"`** — this is the real
-  door, and it refuses an unknown age as well as one below the line.
+  door, and it refuses an unknown age as well as one below the line. An age that
+  is not on file is `AGE_UNKNOWN` (same sentence): the one the person can fix.
 - **The events list and search omit the event** for anyone whose stated age is
   below it. An unknown age does **not** hide restricted events: OAuth accounts
   have no age, and hiding them all would empty the feed to punish a missing
@@ -2358,7 +2444,7 @@ shipped `orientation` and `gender` together to any authenticated caller.
   viewer whose derived age is **below** the line it returns 403
   `AGE_RESTRICTED` instead, like the door; an unknown age is shown the event.
 - **RSVP, favourite/interest and the board (`/rsvp`, `/favorite`, `/interest`,
-  `/board`, `/board/:postId/requests`) refuse 403 `AGE_RESTRICTED`** for an under-age
+  `/board`, `/board/:postId/requests`) refuse 403 `AGE_RESTRICTED`** (`AGE_UNKNOWN` when no age is on file) for an under-age
   *or unknown* age — these are the beginning of being there, so they take the
   door's posture, not discovery's. Until this, only the feed and the door
   applied the rule, and a 17-year-old could RSVP to, save and read the board

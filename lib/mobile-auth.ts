@@ -255,6 +255,80 @@ export async function revokedBySuspension(token: string): Promise<boolean> {
 }
 
 /**
+ * Whether this refused refresh token belongs to a **deleted** account (Flow 15).
+ *
+ * Erasure hard-deletes the account's refresh-token rows, so `verifyRefreshToken`
+ * refuses its tokens as plain unknowns and the route's own deleted branch is
+ * unreachable. A token we signed and that has not expired, for a user whose
+ * `deletedAt` is set, is the holder being told what happened rather than that
+ * "something" did; a forged or expired one tells nobody anything.
+ */
+export async function belongsToDeletedAccount(token: string): Promise<boolean> {
+  let claim: DecodedToken
+  try {
+    claim = jwt.verify(token, getJwtSecret()) as DecodedToken
+  } catch {
+    return false
+  }
+  if (claim.type !== "refresh") return false
+
+  const user = await db.user.findUnique({ where: { id: claim.userId }, select: { deletedAt: true } })
+  return Boolean(user?.deletedAt)
+}
+
+/**
+ * Why `endPhoneSessions` revoked a refresh token, as stored in
+ * `mobile_refresh_tokens.revoked_reason` — and the `errorCode` the refresh
+ * answers with when that token is presented again (Flow 15). Suspension and
+ * deletion are not here: they answer `ACCOUNT_SUSPENDED` / `ACCOUNT_DELETED`
+ * from the account itself.
+ */
+export const REVOKED_REASON_CODE = {
+  password_reset: "PASSWORD_RESET",
+  signout_all: "SESSION_REVOKED_ELSEWHERE",
+} as const
+export type RevokedReason = keyof typeof REVOKED_REASON_CODE
+
+/**
+ * The code for a refresh token a password reset or a sign-out-everywhere
+ * revoked, or null. Scoped like `revokedBySuspension`: only a token we signed,
+ * unexpired, whose stored row belongs to the same user and carries a reason — so
+ * a forged or foreign token learns nothing, and one revoked by an ordinary
+ * sign-out or a rotation (no reason) is the plain 401 it always was.
+ */
+export async function revokedSessionCode(token: string): Promise<(typeof REVOKED_REASON_CODE)[RevokedReason] | null> {
+  let claim: DecodedToken
+  try {
+    claim = jwt.verify(token, getJwtSecret()) as DecodedToken
+  } catch {
+    return null
+  }
+  if (claim.type !== "refresh" || !claim.jti) return null
+
+  const row = await db.mobile_refresh_tokens.findUnique({
+    where: { id: claim.jti },
+    select: { user_id: true, revoked_at: true, revoked_reason: true },
+  })
+  if (!row || row.user_id !== claim.userId || !row.revoked_at || !row.revoked_reason) return null
+  return REVOKED_REASON_CODE[row.revoked_reason as RevokedReason] ?? null
+}
+
+export type SignInMethod = "password" | "google" | "apple"
+
+/**
+ * What this account can sign in with, for the one row the app shows or hides.
+ * The session does not know which way *this* phone signed in (the tokens carry
+ * no method), so it answers for the account: a password first — it is the
+ * method that has a password to change — else the provider linked most
+ * recently. `oauth_accounts` must be loaded newest first.
+ */
+export function signInMethodOf(user: { password: string | null; oauth_accounts: { provider: string }[] }): SignInMethod {
+  if (user.password) return "password"
+  const provider = user.oauth_accounts[0]?.provider
+  return provider === "google" || provider === "apple" ? provider : "password"
+}
+
+/**
  * Verify a refresh token against the database
  * Returns the decoded token if valid, null otherwise
  */
@@ -298,6 +372,12 @@ export async function verifyRefreshToken(
     // kills the legitimate successor, and the legitimate device's next
     // refresh then trips reuse detection and ends the family.
     if (storedToken.revoked_at) {
+      // Ended on purpose (a password reset, a sign-out-everywhere), never
+      // rotated: there is no successor to retire and nothing was stolen. Without
+      // this a phone still holding such a token, replaying it after the grace,
+      // read as theft and signed out the sessions the person has opened since.
+      if (storedToken.revoked_reason) return null
+
       const sinceRevokedMs = Date.now() - storedToken.revoked_at.getTime()
 
       if (sinceRevokedMs <= REFRESH_REUSE_GRACE_MS) {

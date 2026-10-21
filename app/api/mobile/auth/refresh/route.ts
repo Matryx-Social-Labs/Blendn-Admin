@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { accountRefusal } from "@/lib/account-refusal"
 import jwt from "jsonwebtoken"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
@@ -10,14 +11,14 @@ import {
   storeRefreshToken,
   verifyRefreshToken,
   revokeRefreshToken,
-  STAFF_MESSAGE,
-  SUSPENDED_MESSAGE,
+  revokedSessionCode,
+  belongsToDeletedAccount,
 } from "@/lib/mobile-auth"
 import {
   successResponse,
   validationErrorResponse,
-  unauthorizedResponse,
-  forbiddenResponse,
+  errorResponse,
+  ErrorCode,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { refreshTokenSchema } from "@/lib/validations/auth"
@@ -48,8 +49,14 @@ export async function POST(request: NextRequest) {
       // A session the suspension ended is told why, not just refused: the
       // suspension revoked this very token, so without it the suspended check
       // below is unreachable (SCRUM-290). Scoped in `revokedBySuspension`.
-      if (await revokedBySuspension(oldRefreshToken)) return forbiddenResponse(SUSPENDED_MESSAGE)
-      return unauthorizedResponse("Invalid or expired refresh token")
+      if (await revokedBySuspension(oldRefreshToken)) return accountRefusal("suspended")
+      if (await belongsToDeletedAccount(oldRefreshToken)) {
+        return errorResponse("Invalid or expired refresh token", 401, ErrorCode.ACCOUNT_DELETED)
+      }
+      // And one a password reset or a sign-out-everywhere ended, told why (Flow 15):
+      // the sentence stays the generic one, the code is the reason.
+      const sessionCode = await revokedSessionCode(oldRefreshToken)
+      return errorResponse("Invalid or expired refresh token", 401, sessionCode ?? ErrorCode.UNAUTHORIZED)
     }
 
     // Check if user still exists
@@ -66,11 +73,10 @@ export async function POST(request: NextRequest) {
      * rotating means the token they are holding stays revoked-free but useless.
      */
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
-    if (blocked === "staff") return forbiddenResponse(STAFF_MESSAGE)
+    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
-    if (blocked || !user) return unauthorizedResponse("User not found")
+    if (blocked || !user) return errorResponse("User not found", 401, ErrorCode.ACCOUNT_DELETED)
 
     // Generate new tokens
     const accessToken = signAccessToken(user.id, user.email)

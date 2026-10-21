@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
       await tx.user.update({ where: { id: row.user.id }, data: { password: hashed, password_changed_at: at } })
 
       // The point of resetting after a compromise: every phone too.
-      await endPhoneSessions(tx, row.user.id, at)
+      await endPhoneSessions(tx, row.user.id, at, "password_reset")
     })
     // And what was live when it changed closes now (SCRUM-603).
     dashboardSessionsEnded(row.user.id)

@@ -1,6 +1,8 @@
 // Relative imports: reachable from server.ts (__tests__/server-import-boundary.test.ts).
 import type { Prisma } from "@prisma/client"
 
+import type { RevokedReason } from "./mobile-auth"
+
 import { phonesSignedOutNow } from "./account-blocklist"
 import { evictUserSockets } from "./socket-server"
 
@@ -23,11 +25,19 @@ import { evictUserSockets } from "./socket-server"
  * no longer delete its own, and kept receiving the account's notifications,
  * DM text included), and the stamp makes every access token issued until now
  * refused. Returns how many refresh tokens were live.
+ *
+ * `reason` is stored on each revoked refresh token, so the phone that presents
+ * it next is told why it was signed out (`revokedSessionCode`, Flow 15).
  */
-export async function endPhoneSessions(tx: Prisma.TransactionClient, userId: string, at: Date): Promise<number> {
+export async function endPhoneSessions(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  at: Date,
+  reason: RevokedReason
+): Promise<number> {
   const { count } = await tx.mobile_refresh_tokens.updateMany({
     where: { user_id: userId, revoked_at: null },
-    data: { revoked_at: at },
+    data: { revoked_at: at, revoked_reason: reason },
   })
   await tx.push_tokens.deleteMany({ where: { user_id: userId } })
   await tx.user.update({ where: { id: userId }, data: { mobile_sessions_revoked_at: at } })

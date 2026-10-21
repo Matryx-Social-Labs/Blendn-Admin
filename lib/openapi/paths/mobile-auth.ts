@@ -51,7 +51,9 @@ registry.registerPath({
   description:
     "Authenticate with credentials. Rate limited twice: 5 requests per 15 minutes per IP, and " +
     "10 per 15 minutes per email address — the second stops a distributed attempt walking one " +
-    "account's password from many addresses.",
+    "account's password from many addresses. 403 `ACCOUNT_SUSPENDED` or `ACCOUNT_STAFF` (with the sentence " +
+    "to show), checked after the password. A deleted account is the generic 401 `UNAUTHORIZED`: a password " +
+    "sign-in never confirms an account existed.",
   request: {
     body: {
       content: { "application/json": { schema: SigninRequestSchema } },
@@ -75,7 +77,9 @@ registry.registerPath({
   path: "/api/mobile/auth/google",
   tags: ["Mobile Auth"],
   summary: "Sign in or register with Google",
-  description: "Authenticate using a Google ID token. Creates account if new. Rate limited: 10 requests per 15 minutes.",
+  description:
+    "Authenticate using a Google ID token. Creates account if new. Rate limited: 10 requests per 15 minutes. " +
+    "403 `ACCOUNT_SUSPENDED` / `ACCOUNT_STAFF`; 401 `ACCOUNT_DELETED` (\"Account not found\"). The Apple route answers the same.",
   request: {
     body: {
       content: { "application/json": { schema: GoogleAuthRequestSchema } },
@@ -109,8 +113,12 @@ registry.registerPath({
   summary: "Refresh access token",
   description:
     "Exchange a refresh token for a new access/refresh token pair. Rate limited: 20 requests per 15 minutes. " +
-    "403 with a sentence to show when the account is suspended or is a staff account — for a suspension, also " +
-    "for the token the suspension revoked (signed by us, unexpired); 401 for any other refused token.",
+    "403 with a sentence to show when the account is suspended (`ACCOUNT_SUSPENDED`) or is a staff account " +
+    "(`ACCOUNT_STAFF`) — for a suspension, also for the token the suspension revoked (signed by us, unexpired). " +
+    "Any other refused token is a 401 whose `errorCode` is the reason when we know it, always with the sentence " +
+    "\"Invalid or expired refresh token\": `ACCOUNT_DELETED` (a signed, unexpired token of a deleted account), " +
+    "`PASSWORD_RESET` (its session was ended by a password reset or change), `SESSION_REVOKED_ELSEWHERE` (ended by " +
+    "sign-out-everywhere), else `UNAUTHORIZED`. A forged or expired token learns nothing.",
   request: {
     body: {
       content: { "application/json": { schema: RefreshTokenRequestSchema } },
@@ -134,7 +142,11 @@ registry.registerPath({
   path: "/api/mobile/auth/session",
   tags: ["Mobile Auth"],
   summary: "Get current session",
-  description: "Returns the authenticated user's profile and session info.",
+  description:
+    "Returns the authenticated user's profile and session info, and `signInMethod`. 403 `ACCOUNT_SUSPENDED` / " +
+    "`ACCOUNT_STAFF` with the sentence to show; 404 `ACCOUNT_DELETED` (\"User not found\"). An account " +
+    "suspended, deleted or signed out in the last twenty minutes is turned away earlier, as a bare 401 \"Invalid or " +
+    "expired token\"; the refresh then says why.",
   security: [{ BearerAuth: [] }],
   responses: {
     200: {
@@ -154,7 +166,10 @@ registry.registerPath({
   path: "/api/mobile/auth/signout",
   tags: ["Mobile Auth"],
   summary: "Sign out",
-  description: "Revoke the current refresh token. Optionally pass a specific refresh token to revoke.",
+  description:
+    "Revoke the current refresh token. Optionally pass a specific refresh token to revoke. With none, every phone " +
+    "session of the account ends (refresh tokens, push tokens, earlier access tokens, live sockets) and the other " +
+    "phones' next refresh answers 401 `SESSION_REVOKED_ELSEWHERE`.",
   security: [{ BearerAuth: [] }],
   request: {
     body: {

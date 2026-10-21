@@ -78,6 +78,28 @@ export const ErrorCode = {
    * there is nobody to tell (step 12). Not `NOT_FOUND`: the venue is there.
    */
   VENUE_UNCLAIMED: "VENUE_UNCLAIMED",
+  /**
+   * Why an account was refused or a session ended (Flow 15). The sentences that
+   * ride with them are unchanged, because installed builds match on them; a
+   * client that knows the code reads that first.
+   */
+  ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
+  /** An organiser, venue owner, sponsor or admin in the attendee app. */
+  ACCOUNT_STAFF: "ACCOUNT_STAFF",
+  /** The account was deleted. Never sent at sign-in with a password, which would confirm it existed. */
+  ACCOUNT_DELETED: "ACCOUNT_DELETED",
+  /** Refresh: every phone was signed out (Settings, or another device). */
+  SESSION_REVOKED_ELSEWHERE: "SESSION_REVOKED_ELSEWHERE",
+  /** Refresh: the password was reset or changed. */
+  PASSWORD_RESET: "PASSWORD_RESET",
+  /** 426, from `middleware.ts`: a build below `MOBILE_MIN_APP_VERSION`. */
+  UPDATE_REQUIRED: "UPDATE_REQUIRED",
+  /** 503, from `middleware.ts`: `MAINTENANCE_MODE` is on. Carries `retryAfter`. */
+  MAINTENANCE: "MAINTENANCE",
+  /** The age rule refused somebody whose age is not on file: the one case they can fix by adding it. */
+  AGE_UNKNOWN: "AGE_UNKNOWN",
+  /** Onboarding is unfinished, and no adult age on file stands in for it. */
+  PROFILE_INCOMPLETE: "PROFILE_INCOMPLETE",
 } as const
 
 /**

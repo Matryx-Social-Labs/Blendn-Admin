@@ -87,7 +87,7 @@ export async function personAtTheDoor(
   const profileAge = ageFrom(profile)
 
   // Not onboarded and no adult age on file: held here as at every door (SCRUM-331).
-  if (!mayParticipate(profile)) return { refusal: errorResponse(FINISH_ONBOARDING, 403, ErrorCode.FORBIDDEN) }
+  if (!mayParticipate(profile)) return { refusal: errorResponse(FINISH_ONBOARDING, 403, ErrorCode.PROFILE_INCOMPLETE) }
 
   /*
    * A venue's live room is an adult room with no event to carry an age rule,
@@ -97,13 +97,15 @@ export async function personAtTheDoor(
    * must not let either into a room of strangers at a bar (step 4 review).
    */
   if (!room && !isAdult(profileAge)) {
-    return { refusal: errorResponse(`${ADULTS_ONLY} Add your date of birth to your profile to go live.`, 403, ErrorCode.AGE_RESTRICTED) }
+    // Only an age that is not on file is the person's to fix; a known age under 18 is a no.
+    const code = profileAge == null ? ErrorCode.AGE_UNKNOWN : ErrorCode.AGE_RESTRICTED
+    return { refusal: errorResponse(`${ADULTS_ONLY} Add your date of birth to your profile to go live.`, 403, code) }
   }
 
   const ageRefusal = room && minAgeRefusal(profileAge, room.minAge)
   if (room && ageRefusal) {
     recordRefusal({ eventId: room.eventId, userId, reason: "under_age" })
-    return { refusal: errorResponse(ageRefusal, 403, ErrorCode.AGE_RESTRICTED) }
+    return { refusal: errorResponse(ageRefusal, 403, profileAge == null ? ErrorCode.AGE_UNKNOWN : ErrorCode.AGE_RESTRICTED) }
   }
   return { profile }
 }

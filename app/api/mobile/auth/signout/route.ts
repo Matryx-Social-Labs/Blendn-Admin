@@ -1,10 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import {
-  getAuthenticatedUser,
-  revokeUserRefreshTokens,
-  revokeRefreshToken,
-} from "@/lib/mobile-auth"
+import { getAuthenticatedUser, revokeRefreshToken } from "@/lib/mobile-auth"
+import { endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { db } from "@/lib/db"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import {
@@ -63,7 +60,12 @@ export async function POST(request: NextRequest) {
     if (body.refreshToken) {
       await revokeRefreshToken(body.refreshToken)
     } else {
-      await revokeUserRefreshTokens(authUser.userId)
+      // The same end every other "all phones" caller gives (lib/session-end.ts):
+      // the other phones are told why, their old access tokens stop, their
+      // sockets close.
+      const at = new Date()
+      await db.$transaction((tx) => endPhoneSessions(tx, authUser.userId, at, "signout_all"))
+      phoneSessionsEnded(authUser.userId, at)
       revokedAll = true
     }
 

@@ -20,19 +20,25 @@
  * the row is gone by the time this handler returns.
  */
 
+const mockTx = {}
 const mockDb = {
   push_tokens: { deleteMany: jest.fn() },
+  $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(mockTx)),
 }
 
 const mockAuth = jest.fn()
-const mockRevokeAll = jest.fn()
+const mockEndPhones = jest.fn()
+const mockPhonesEnded = jest.fn()
 const mockRevokeOne = jest.fn()
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/mobile-auth", () => ({
   getAuthenticatedUser: (...a: unknown[]) => mockAuth(...a),
-  revokeUserRefreshTokens: (...a: unknown[]) => mockRevokeAll(...a),
   revokeRefreshToken: (...a: unknown[]) => mockRevokeOne(...a),
+}))
+jest.mock("@/lib/session-end", () => ({
+  endPhoneSessions: (...a: unknown[]) => mockEndPhones(...a),
+  phoneSessionsEnded: (...a: unknown[]) => mockPhonesEnded(...a),
 }))
 jest.mock("@/lib/audit-log", () => ({
   auditLog: jest.fn(),
@@ -56,6 +62,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockAuth.mockResolvedValue({ userId: USER })
   mockDb.push_tokens.deleteMany.mockResolvedValue({ count: 1 })
+  mockEndPhones.mockResolvedValue(1)
 })
 
 describe("signing out clears the push token", () => {
@@ -81,7 +88,8 @@ describe("signing out clears the push token", () => {
      */
     await POST(req({}))
 
-    expect(mockRevokeAll).toHaveBeenCalledWith(USER)
+    expect(mockEndPhones).toHaveBeenCalledWith(mockTx, USER, expect.any(Date), "signout_all")
+    expect(mockPhonesEnded).toHaveBeenCalledWith(USER, expect.any(Date))
     expect(mockDb.push_tokens.deleteMany).toHaveBeenCalledWith({
       where: { user_id: USER },
     })
@@ -96,6 +104,7 @@ describe("signing out clears the push token", () => {
      */
     await POST(req({ refreshToken: "rt-abc" }))
 
+    expect(mockEndPhones).not.toHaveBeenCalled()
     expect(mockDb.push_tokens.deleteMany).toHaveBeenCalledWith({
       where: { user_id: USER },
     })
@@ -104,7 +113,8 @@ describe("signing out clears the push token", () => {
   it("clears every token when the body is absent entirely", async () => {
     await POST(req())
 
-    expect(mockRevokeAll).toHaveBeenCalledWith(USER)
+    expect(mockEndPhones).toHaveBeenCalledWith(mockTx, USER, expect.any(Date), "signout_all")
+    expect(mockPhonesEnded).toHaveBeenCalledWith(USER, expect.any(Date))
     expect(mockDb.push_tokens.deleteMany).toHaveBeenCalledWith({
       where: { user_id: USER },
     })

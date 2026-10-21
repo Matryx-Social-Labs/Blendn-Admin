@@ -2,13 +2,14 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
-import { accountBlockReason, getAuthenticatedUser, STAFF_MESSAGE, SUSPENDED_MESSAGE } from "@/lib/mobile-auth"
+import { accountBlockReason, getAuthenticatedUser, signInMethodOf } from "@/lib/mobile-auth"
+import { accountRefusal } from "@/lib/account-refusal"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
-  notFoundResponse,
-  forbiddenResponse,
+  ErrorCode,
+  errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 
@@ -25,6 +26,7 @@ export async function GET(request: NextRequest) {
       where: { id: authUser.userId },
       include: {
         profile: true,
+        oauth_accounts: { select: { provider: true }, orderBy: { created_at: "desc" } },
       },
     })
 
@@ -32,11 +34,10 @@ export async function GET(request: NextRequest) {
     // user has not yet been told about surfaces as something other than a
     // screen that silently fails to load.
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
-    if (blocked === "staff") return forbiddenResponse(STAFF_MESSAGE)
+    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
-    if (blocked || !user) return notFoundResponse("User not found")
+    if (blocked || !user) return errorResponse("User not found", 404, ErrorCode.ACCOUNT_DELETED)
 
     // Return user directly (not wrapped in { user: ... })
     const normalizedLocation = await normalizeLocationToCity(user.profile?.location)
@@ -48,6 +49,8 @@ export async function GET(request: NextRequest) {
       emailVerified: user.emailVerified,
       image: user.image,
       createdAt: user.createdAt,
+      // What the account can sign in with, for the one row Settings shows or hides (the Password row).
+      signInMethod: signInMethodOf(user),
       profile: user.profile
         ? { ...profileForSelfResponse(user.profile), location: normalizedLocation }
         : null,

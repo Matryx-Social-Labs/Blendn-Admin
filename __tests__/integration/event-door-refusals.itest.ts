@@ -106,6 +106,31 @@ describe("the event door refuses, and records why", () => {
   })
 })
 
+describe("the event door says which refusal the person can fix (Flow 15)", () => {
+  it("is AGE_UNKNOWN for an 18+ event when no age is on file, with the sentence unchanged", async () => {
+    const eventId = await event({ minAge: 18 })
+    const p = await person("door", { age: null })
+    const res = await checkIn(p.token, eventId)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      errorCode: "AGE_UNKNOWN",
+      error: "This event is 18+. Add your age to your profile to check in.",
+    })
+  })
+
+  it("is PROFILE_INCOMPLETE before onboarding, with the sentence unchanged", async () => {
+    const eventId = await event({})
+    const p = await person("door", { age: null })
+    await db.profiles.update({ where: { id: p.id }, data: { onboarded: false } })
+    const res = await checkIn(p.token, eventId)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      errorCode: "PROFILE_INCOMPLETE",
+      error: "Finish setting up your profile first. Blend'n is for people 18 and over.",
+    })
+  })
+})
+
 describe("the event door lets in", () => {
   it("answers in the shape it always did, with the reveal suggestion", async () => {
     const eventId = await event({})

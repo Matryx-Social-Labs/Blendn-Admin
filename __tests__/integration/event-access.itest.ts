@@ -192,7 +192,17 @@ describe("an 18+ event reached by id", () => {
     expect(r.get).toBe("ok")
     expect(r.interested).toBe("ok")
     expect([r.rsvp, r.favorite, r.interest, r.boardGet, r.boardPost, r.boardRequest]).toEqual(
-      Array(6).fill("403 AGE_RESTRICTED")
+      // The one a person can fix by adding their age (Flow 15), not the plain no a known age gets.
+      Array(6).fill("403 AGE_UNKNOWN")
+    )
+  })
+
+  it("holds an account that never finished onboarding at PROFILE_INCOMPLETE, before the age rule", async () => {
+    const unfinished = await person("ea-unfinished", null)
+    await db.profiles.update({ where: { id: unfinished.id }, data: { onboarded: false } })
+    const r = await everyRoute(eventId, unfinished.token, postId)
+    expect([r.rsvp, r.favorite, r.interest, r.boardGet, r.boardPost, r.boardRequest]).toEqual(
+      Array(6).fill("403 PROFILE_INCOMPLETE")
     )
   })
 

@@ -116,7 +116,7 @@ export async function changePassword(
       // Every dashboard session signed in before now ends, this one included (M6).
       data: { password: hash, password_changed_at: at },
     })
-    return endPhoneSessions(tx, user.id, at)
+    return endPhoneSessions(tx, user.id, at, "password_reset")
   })
   // And what was live when it changed closes now (SCRUM-603).
   dashboardSessionsEnded(user.id)
@@ -168,7 +168,7 @@ export async function revokeMobileSessions(): Promise<number> {
   const user = await requireUser()
   const at = new Date()
   const count = await db.$transaction(async (tx) => {
-    const live = await endPhoneSessions(tx, user.id, at)
+    const live = await endPhoneSessions(tx, user.id, at, "signout_all")
     await auditInTx(tx, {
       userId: user.id,
       action: "account.mobile_tokens_revoked",

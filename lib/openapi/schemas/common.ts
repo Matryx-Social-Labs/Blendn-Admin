@@ -112,8 +112,9 @@ registry.register("DeviceInfo", DeviceInfoSchema)
  * RSVP, favourite, board, check-in, and starting or sending a DM.
  */
 export const PARTICIPATION_GATE =
-  "403 `FORBIDDEN` \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
-  "profile has neither finished onboarding nor an adult age on file (SCRUM-331). "
+  "403 \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
+  "profile has neither finished onboarding nor an adult age on file (SCRUM-331) — `errorCode` " +
+  "`PROFILE_INCOMPLETE` on the event, check-in and Go Live routes, `FORBIDDEN` on the messaging and friend ones. "
 
 const errorBody = (description: string, schema: z.ZodTypeAny = ErrorResponseSchema) => ({
   description,

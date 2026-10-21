@@ -243,16 +243,17 @@ describe("POST /venues/:id/live", () => {
   })
 
   it.each([
-    ["not onboarded, no age", { age: null, onboarded: false }],
-    ["onboarded, no age on file", { age: null, onboarded: true }],
-    ["onboarded at 17, from before the 18+ ruling", { age: 17, onboarded: true }],
-  ])("refuses somebody %s (strictly 18+, known age)", async (_label, opts) => {
+    ["not onboarded, no age", { age: null, onboarded: false }, "PROFILE_INCOMPLETE"],
+    ["onboarded, no age on file", { age: null, onboarded: true }, "AGE_UNKNOWN"],
+    ["onboarded at 17, from before the 18+ ruling", { age: 17, onboarded: true }, "AGE_RESTRICTED"],
+  ])("refuses somebody %s (strictly 18+, known age)", async (_label, opts, code) => {
     const v = await venue()
     const p = await person("glage", { age: opts.age })
     if (!opts.onboarded) await db.profiles.update({ where: { id: p.id }, data: { onboarded: false } })
     const { status, json } = await goLive(p.token, v)
     expect(status).toBe(403)
-    expect(json.errorCode).toBe(opts.onboarded ? "AGE_RESTRICTED" : "FORBIDDEN")
+    // The two a person can fix say so (Flow 15); a known age under 18 is a plain no.
+    expect(json.errorCode).toBe(code)
     expect(await db.event_check_ins.count({ where: { user_id: p.id } })).toBe(0)
     expect((await venueDetail(p.token, v)).status).toBe(403)
   })

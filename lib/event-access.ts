@@ -45,7 +45,7 @@ export const hostNotSuspended = {
  */
 export type EventAccessDenial =
   | { kind: "not_found" }
-  | { kind: "age"; message: string }
+  | { kind: "age"; message: string; unknownAge: boolean }
   | { kind: "unfinished"; message: string }
 
 /*
@@ -86,7 +86,7 @@ export async function attendeeEventAccess(
   const age = ageFrom(profile)
   if (age == null && intent === "view") return null
   const message = minAgeRefusal(age, event.min_age)
-  return message ? { kind: "age", message } : null
+  return message ? { kind: "age", message, unknownAge: age == null } : null
 }
 
 /**
@@ -103,7 +103,9 @@ export async function participationRefusal(userId: string): Promise<string | nul
 
 /** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
-  if (denial.kind === "age") return errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED)
-  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN)
+  if (denial.kind === "age") {
+    return errorResponse(denial.message, 403, denial.unknownAge ? ErrorCode.AGE_UNKNOWN : ErrorCode.AGE_RESTRICTED)
+  }
+  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.PROFILE_INCOMPLETE)
   return notFoundResponse("Event not found")
 }

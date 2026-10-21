@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { accountRefusal } from "@/lib/account-refusal"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import {
@@ -8,15 +9,13 @@ import {
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
-  STAFF_MESSAGE,
-  SUSPENDED_MESSAGE,
 } from "@/lib/mobile-auth"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
 import {
   successResponse,
   errorResponse,
-  forbiddenResponse,
+  ErrorCode,
   validationErrorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -93,11 +92,10 @@ export async function POST(request: NextRequest) {
     })
 
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
-    if (blocked === "staff") return forbiddenResponse(STAFF_MESSAGE)
+    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked)
     // `!user` is already covered by `blocked === "deleted"`; naming it again is
     // what narrows the type for everything below.
-    if (blocked || !user) return errorResponse("Account not found", 401)
+    if (blocked || !user) return errorResponse("Account not found", 401, ErrorCode.ACCOUNT_DELETED)
 
     const accessToken = signAccessToken(userId, email)
     const refreshToken = signRefreshToken(userId, email)
