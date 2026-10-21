@@ -107,19 +107,33 @@ export async function POST(request: NextRequest) {
       await tx.$queryRaw`SELECT 1 FROM "User" WHERE id = ${user.id} FOR SHARE`
       const current = await tx.user.findUnique({
         where: { id: user.id },
-        select: { id: true, deletedAt: true, suspended_at: true, role: true },
+        select: { id: true, deletedAt: true, suspended_at: true, role: true, mobile_sessions_revoked_at: true },
       })
       const blockedNow = accountBlockReason(current)
       if (blockedNow) return { kind: "blocked", reason: blockedNow } as const
       /*
-       * Ended since the check above? `endPhoneSessions` revokes every live row of
-       * the account, with its reason, under the lock this holds: so this token's
-       * own row says whether a sign-out or a reset landed in between. (Not the
-       * stamp against the token's `iat`: that is second-grained, and refused a
-       * token signed in the same second after the stamp for its whole life.)
+       * Ended since the check above, or before it by a path that left this row
+       * alone? Two ways to know, both under the lock:
+       *
+       * - the row says so: gone (erasure), or carrying a reason;
+       * - the account's stamp is **at or after the row's `created_at`**: the
+       *   session was opened before the sign-out or reset. A token already
+       *   rotated out (revoked, no reason, still inside the reuse grace) is the
+       *   case this exists for: `endPhoneSessions` only revoked rows that were
+       *   live, so replaying it would otherwise mint a new live session after
+       *   "sign out everywhere". Compared on the row's millisecond `created_at`,
+       *   never the token's `iat`: that is second-grained, and refused a token
+       *   signed in the same second after the stamp for its whole life. A token
+       *   issued after the sign-out has a later `created_at` and refreshes.
        */
-      const own = await tx.mobile_refresh_tokens.findUnique({ where: { id: decoded.jti }, select: { revoked_reason: true } })
-      if (!own || own.revoked_reason) return { kind: "ended" } as const
+      const own = await tx.mobile_refresh_tokens.findUnique({
+        where: { id: decoded.jti },
+        select: { created_at: true, revoked_reason: true },
+      })
+      const stamp = current?.mobile_sessions_revoked_at
+      if (!own || own.revoked_reason || (stamp && stamp.getTime() >= own.created_at.getTime())) {
+        return { kind: "ended" } as const
+      }
 
       await storeRefreshToken(user.id, refreshToken, undefined, { client: tx, tokenHash })
       await tx.mobile_refresh_tokens.updateMany({

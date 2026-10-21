@@ -50,6 +50,13 @@ export async function endPhoneSessions(
     where: { user_id: userId, revoked_at: null },
     data: { revoked_at: at, revoked_reason: reason },
   })
+  // Rows already revoked but not yet expired (a token rotated out a moment ago)
+  // get the reason too, without moving their `revoked_at`: a replay of one then
+  // says why instead of a bare 401, and is not read as theft (verifyRefreshToken).
+  await tx.mobile_refresh_tokens.updateMany({
+    where: { user_id: userId, revoked_at: { not: null }, revoked_reason: null, expires_at: { gt: at } },
+    data: { revoked_reason: reason },
+  })
   await tx.push_tokens.deleteMany({ where: { user_id: userId } })
   return { live: count, at }
 }

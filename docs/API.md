@@ -194,6 +194,13 @@ values. A refresh and a sign-out-everywhere are serialised on the account's row
 live session behind a sign-out, and sign-out reads its stamp only once it holds
 the lock, so no access token issued before the commit outlives it.
 
+A token that was already rotated out (revoked, no reason, still inside the reuse
+grace) is ended too: `endPhoneSessions` also stamps the reason on revoked,
+unexpired rows, and the refresh refuses, under the lock, any token whose row was
+created at or before the account's `mobile_sessions_revoked_at`. A replay after a
+sign-out-everywhere or a password reset is therefore a 401 with the reason and
+mints no session; a token issued after the sign-out refreshes normally.
+
 An account suspended, deleted or signed out in the last twenty minutes is turned
 away at `GET /auth/session` earlier still, as a bare 401 "Invalid or expired
 token" (`lib/account-blocklist.ts`); the refresh that follows says why.

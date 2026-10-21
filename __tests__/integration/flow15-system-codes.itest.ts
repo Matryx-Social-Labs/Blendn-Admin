@@ -12,12 +12,18 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 // Only the two identity-provider checks are replaced; everything after them is real.
 // And `storeRefreshToken` can be held, by a test that interleaves the refresh with another writer.
 let beforeStore: (() => Promise<void>) | null = null
+// Between the refresh's first look at the token and its locked transaction.
+let beforeLock: (() => Promise<void>) | null = null
 jest.mock("@/lib/mobile-auth", () => {
   const actual = jest.requireActual("@/lib/mobile-auth")
   return {
     ...actual,
     verifyGoogleIdToken: jest.fn(),
     verifyAppleIdToken: jest.fn(),
+    hashRefreshToken: async (...args: Parameters<typeof actual.hashRefreshToken>) => {
+      await beforeLock?.()
+      return actual.hashRefreshToken(...args)
+    },
     storeRefreshToken: async (...args: Parameters<typeof actual.storeRefreshToken>) => {
       await beforeStore?.()
       return actual.storeRefreshToken(...args)
@@ -414,6 +420,7 @@ describe("refresh against sign-out-everywhere, interleaved: no session survives"
 
   afterEach(() => {
     beforeStore = null
+    beforeLock = null
   })
 
   it("a refresh that holds the user row first: sign-out waits, then revokes the token the refresh just stored", async () => {
@@ -473,6 +480,86 @@ describe("refresh against sign-out-everywhere, interleaved: no session survives"
     expect(await res.json()).toMatchObject({ errorCode: "SESSION_REVOKED_ELSEWHERE", reasonCode: "SESSION_REVOKED_ELSEWHERE" })
     expect(await live(a.id)).toBe(0)
     expect(await db.mobile_refresh_tokens.count({ where: { user_id: a.id } })).toBe(1)
+  })
+
+  /** A phone whose token T has been rotated to S by a real refresh, so T is revoked, reason-less, and inside the reuse grace. */
+  async function rotated(label: string) {
+    const a = await onePhone(label)
+    const first = await refresh(a.old)
+    expect(first.status).toBe(200)
+    return { ...a, successor: (await first.json()).data.refreshToken as string }
+  }
+
+  const endings = [
+    ["sign-out-everywhere", "SESSION_REVOKED_ELSEWHERE"],
+    ["a password reset", "PASSWORD_RESET"],
+  ] as const
+  async function end(how: (typeof endings)[number][0], a: { id: string; email: string }) {
+    if (how === "sign-out-everywhere") {
+      const res = await signoutRoute.POST(post("/api/mobile/auth/signout", {}, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` }))
+      expect(res.status).toBe(200)
+      return
+    }
+    const link = await issuePasswordResetLink(a.id, 3_600_000)
+    const res = await resetPassword(
+      post("/api/auth/reset-password", { token: new URL(link).searchParams.get("token"), password: "Copper-Meadow-Lighthouse-47" })
+    )
+    expect(res.status).toBe(200)
+  }
+
+  describe.each(endings)("a token rotated out a moment ago, replayed after %s", (how, code) => {
+    it("is refused, says why, and mints no live session", async () => {
+      const a = await rotated(`replay-${how}`)
+      await end(how, a)
+      const replay = await refresh(a.old)
+      expect(replay.status).toBe(401)
+      expect(await replay.json()).toMatchObject({ errorCode: code, reasonCode: code })
+      expect(await live(a.id)).toBe(0)
+      // And the successor, which was live when it ended, is refused with the same reason.
+      expect((await (await refresh(a.successor)).json()).errorCode).toBe(code)
+    })
+
+    it("is refused when the end lands between its first check and its transaction", async () => {
+      const a = await rotated(`replay-race-${how}`)
+      let paused!: () => void
+      const atTheLock = new Promise<void>((resolve) => (paused = resolve))
+      let go!: () => void
+      const held = new Promise<void>((resolve) => (go = resolve))
+      beforeLock = async () => {
+        paused()
+        await held
+      }
+      const replaying = refresh(a.old)
+      await atTheLock
+      beforeLock = null
+      // The grace path has already accepted the replay and retired the successor: nothing is live to revoke.
+      await end(how, a)
+      go()
+      const replay = await replaying
+      expect(replay.status).toBe(401)
+      expect(await live(a.id)).toBe(0)
+    })
+  })
+
+  it("is refused by the stamp alone, for a row no ending ever marked (before this reason existed)", async () => {
+    const a = await rotated("replay-stamp-only")
+    let paused!: () => void
+    const atTheLock = new Promise<void>((resolve) => (paused = resolve))
+    let go!: () => void
+    const held = new Promise<void>((resolve) => (go = resolve))
+    beforeLock = async () => {
+      paused()
+      await held
+    }
+    const replaying = refresh(a.old)
+    await atTheLock
+    beforeLock = null
+    // Only the stamp, as a sign-out from before `revoked_reason` left it: the rows carry no reason.
+    await db.user.update({ where: { id: a.id }, data: { mobile_sessions_revoked_at: new Date() } })
+    go()
+    const replay = await replaying
+    expect(replay.status).toBe(401)
+    expect(await live(a.id)).toBe(0)
   })
 
   it("a refresh after sign-out, with a token issued since, still works", async () => {
