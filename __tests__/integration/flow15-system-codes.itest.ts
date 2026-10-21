@@ -412,3 +412,12 @@ describe("socket handshake codes", () => {
     expect(error.data).toBeUndefined()
   })
 })
+
+describe("the migration, on a database built by `migrate deploy`", () => {
+  it("adds mobile_refresh_tokens.revoked_reason as nullable text, with no default", async () => {
+    const rows = await db.$queryRaw<{ data_type: string; is_nullable: string; column_default: string | null }[]>`
+      SELECT data_type, is_nullable, column_default FROM information_schema.columns
+      WHERE table_name = 'mobile_refresh_tokens' AND column_name = 'revoked_reason'`
+    expect(rows).toEqual([{ data_type: "text", is_nullable: "YES", column_default: null }])
+  })
+})
