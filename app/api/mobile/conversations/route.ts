@@ -5,6 +5,7 @@ import { NextRequest } from "next/server"
 import { ConversationClosedError, blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
+import { latestVisibleMessages } from "@/lib/inbox-preview"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
@@ -90,20 +91,6 @@ export async function GET(request: NextRequest) {
             profile: { select: { read_receipts: true } },
           },
         },
-        messages: {
-          // The preview. A hidden message here would put words on the inbox row
-          // that the thread refuses to show.
-          where: VISIBLE_DM,
-          orderBy: { created_at: "desc" },
-          take: 1,
-          select: {
-            id: true,
-            message_text: true,
-            sender_id: true,
-            created_at: true,
-            is_read: true,
-          },
-        },
         _count: {
           select: {
             messages: {
@@ -132,12 +119,14 @@ export async function GET(request: NextRequest) {
     ])
     const page = keysetPage(rows, limit, (c) => ({ at: c.last_message_at, id: c.id, createdAt: c.created_at }))
     const conversations = page.items
+    // The preview of each, in one query (`latestVisibleMessages`).
+    const previews = await latestVisibleMessages(conversations.map((c) => c.id))
     const pagination: ListPagination = { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount }
 
     // Format conversations for the mobile app
     const formattedConversations = conversations.map((conv) => {
       const otherUser = conv.user1_id === authUser.userId ? conv.user2 : conv.user1
-      const lastMessage = conv.messages[0] || null
+      const lastMessage = previews.get(conv.id) ?? null
 
       /*
        * The other person's name and photo, gated on their reveal state.

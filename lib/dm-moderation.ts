@@ -1,5 +1,6 @@
 // Relative imports — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
+import { Prisma } from "@prisma/client"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkSpam } from "./moderation/spam-detector"
@@ -117,3 +118,10 @@ export const VISIBLE_DM: {
 } = {
   OR: [{ moderation_status: null }, { moderation_status: { not: "hidden" } }],
 }
+
+/**
+ * `VISIBLE_DM` as SQL, for the raw reads (the inbox preview): the same rule in
+ * the other dialect, so it is spelled once beside the original and a test runs
+ * both over the same rows. `private_messages` must be unaliased in the query.
+ */
+export const VISIBLE_DM_SQL = Prisma.sql`("private_messages"."moderation_status" IS NULL OR "private_messages"."moderation_status" <> 'hidden')`
