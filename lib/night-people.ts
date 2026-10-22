@@ -122,6 +122,13 @@ export async function nightPeople(
   const ban = await eventRoomBan(eventId, viewerId)
   if (ban) return { refused: "banned", banned_by: ban.banned_by }
 
+  /*
+   * Friends: every one, whatever their room setting — plans/friends-in-room.md
+   * D1, the "was here" row of its 4.2 table. Read with `friendIdsOf` because
+   * the plan's `notStrangersTo` (lib/room-people.ts, on top of
+   * feat/friend-after-reveal) is not on this branch; at the merge this becomes
+   * `notStrangersTo(viewerId)`, which adds friendships ended in the last 24 h (B4).
+   */
   const [blocked, closed, friends] = await Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId), friendIdsOf(viewerId)])
   const hidden = [...new Set([viewerId, ...blocked, ...closed, ...friends])]
 
