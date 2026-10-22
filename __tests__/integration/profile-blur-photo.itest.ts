@@ -359,6 +359,31 @@ describe("a replaced or cleared blur leaves storage", () => {
     expect(deleteFile).not.toHaveBeenCalled()
   })
 
+  it("keeps a blur that has no photo_checks row at all (a legacy blur is never reclaimed here)", async () => {
+    const p = await withJudgedBlur()
+    await db.photo_checks.delete({ where: { url: sealedOf(p.id, "a-blur.jpg") } })
+    expect((await p.put({ blur_photo: null })).status).toBe(200)
+    await runAfter()
+    expect(deleteFile).not.toHaveBeenCalled()
+  })
+
+  it("keeps a blur moderation has pulled (hidden): the hold is not ours to delete", async () => {
+    const p = await withJudgedBlur()
+    await db.photo_checks.update({ where: { url: sealedOf(p.id, "a-blur.jpg") }, data: { hidden: true } })
+    expect((await p.put({ blur_photo: null })).status).toBe(200)
+    await runAfter()
+    expect(deleteFile).not.toHaveBeenCalled()
+  })
+
+  it("a late hide verdict on a replaced blur withdraws it and never deletes it", async () => {
+    const p = await withBlur()
+    jest.clearAllMocks()
+    expect((await p.put({ blur_photo: upload(p.id, "a-blur-edge.jpg") })).status).toBe(200)
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: true, result: { action: "hide" } })
+    await moderateBlurPhoto(sealedOf(p.id, "a-blur.jpg"), p.id)
+    expect(deleteFile).not.toHaveBeenCalled()
+  })
+
   it("deletes nothing when the blur stays", async () => {
     const p = await withJudgedBlur()
     expect((await p.put({ bio: "only the bio" })).status).toBe(200)

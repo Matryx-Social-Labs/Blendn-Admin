@@ -265,7 +265,11 @@ async function withdraw(url: string, userId: string): Promise<void> {
  *
  * One replaced while its verdict was pending is deleted by `moderateBlurPhoto`
  * when the verdict passes. An outage that never judges it leaves it until the
- * account's prefix sweep. ponytail: a sweep of unreferenced keys under
+ * account's prefix sweep. Known edges: two concurrent writes can orphan the blur one
+ * of them replaced (a leak); a borderline "flag" verdict is
+ * kept by the late path but deleted here (photo_checks records it as a pass); a clean late verdict racing a pull's few-ms gap between clearing the column
+ * and marking the row hidden can delete the object before its private copy is made.
+ * ponytail: a sweep of unreferenced keys under
  * `profile/<uid>/` is the upgrade if those show up.
  */
 export async function deleteReplacedBlur(url: string, userId: string): Promise<void> {
