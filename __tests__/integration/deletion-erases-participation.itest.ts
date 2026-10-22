@@ -163,11 +163,8 @@ it("stops being here now in a room they were standing in, and keeps the attendan
   await putInRoom({ eventId, occurrenceId, userId: leaver })
   await putInRoom({ eventId, occurrenceId, userId: stayer })
   expect((await getOccupancy(eventId)).inside).toBe(2)
-  // A second event's check-in still open too: a multi-day event leaves the
-  // earlier day's row open beside today's until the sweeper closes it.
-  const otherEventId = await makeEvent(host)
-  events.push(otherEventId)
-  await putInRoom({ eventId: otherEventId, occurrenceId: await occurrenceOf(otherEventId), userId: leaver })
+  // A second open room used to be set up here (an earlier day left open beside
+  // today's); the database holds one open check-in per person now (SCRUM-705).
 
   const { email } = await db.user.findUniqueOrThrow({ where: { id: leaver }, select: { email: true } })
   const res = await accountRoute.DELETE(req("DELETE", "/api/mobile/account", signAccessToken(leaver, email)))
@@ -196,6 +193,6 @@ it("stops being here now in a room they were standing in, and keeps the attendan
   expect(await db.event_check_ins.count({ where: { user_id: leaver, status: "checked_in" } })).toBe(0)
   expect(await db.presence_sessions.count({ where: { user_id: leaver, departed_at: null } })).toBe(0)
 
-  await db.presence_sessions.deleteMany({ where: { event_id: { in: [eventId, otherEventId] } } })
-  await db.event_check_ins.deleteMany({ where: { event_id: { in: [eventId, otherEventId] } } })
+  await db.presence_sessions.deleteMany({ where: { event_id: eventId } })
+  await db.event_check_ins.deleteMany({ where: { event_id: eventId } })
 })

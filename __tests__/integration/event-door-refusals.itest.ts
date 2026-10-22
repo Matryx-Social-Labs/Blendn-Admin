@@ -143,7 +143,7 @@ describe("the event door lets in", () => {
     const res = await checkIn(p.token, eventId)
     expect(res.status).toBe(200)
     const { data } = await res.json()
-    expect(Object.keys(data).sort()).toEqual(["checkIn", "intentNeeded", "message", "revealSuggestion"])
+    expect(Object.keys(data).sort()).toEqual(["checkIn", "intentNeeded", "left", "message", "revealSuggestion"])
     expect(Object.keys(data.checkIn).sort()).toEqual(["checkInTime", "eventId", "id", "status"])
     expect(data.revealSuggestion).toBe(true)
     expect(data.intentNeeded).toBe(true)

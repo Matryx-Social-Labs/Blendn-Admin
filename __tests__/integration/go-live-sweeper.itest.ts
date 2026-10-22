@@ -46,7 +46,7 @@ import { SYSTEM_USER_ID } from "@/lib/venue-day"
 
 import { signAccessToken } from "@/lib/mobile-auth"
 
-import { closeDb, db, makeUser, testId } from "./helpers"
+import { closeDb, db, testId } from "./helpers"
 import {
   checkInOf,
   cleanupWorld,
@@ -133,8 +133,10 @@ describe("bounds (F5)", () => {
   it("sweeps the venue days past the first 200 on the next pass", async () => {
     // 250 venue days, one person each who walked out half an hour ago; older
     // than anything else live, so they are the first 250 in the queue.
-    const runner = await makeUser(testId("gltail"))
-    world.users.push(runner)
+    // One person per day: the database holds one open check-in per person (SCRUM-705).
+    const runners = Array.from({ length: 250 }, () => testId("gltail"))
+    await db.user.createMany({ data: runners.map((id) => ({ id, email: `${id}@itest.invalid`, name: "runner", role: "attendee" as const })) })
+    world.users.push(...runners)
     const now = Date.now()
     const venues = Array.from({ length: 250 }, () => ({ id: randomUUID(), name: testId("Vtail"), latitude: LAT, longitude: LNG, geofence: FENCE }))
     await db.venues.createMany({ data: venues })
@@ -160,10 +162,10 @@ describe("bounds (F5)", () => {
     const occs = days.map((d) => ({ id: randomUUID(), event_id: d.id, occurs_on: new Date(), start_time: d.start_time, end_time: d.end_time }))
     await db.event_occurrences.createMany({ data: occs })
     await db.event_check_ins.createMany({
-      data: occs.map((o) => ({
+      data: occs.map((o, i) => ({
         event_id: o.event_id,
         occurrence_id: o.id,
-        user_id: runner,
+        user_id: runners[i],
         status: "checked_in" as const,
         check_in_time: new Date(now - 5 * 3_600_000),
         created_at: new Date(now - 5 * 3_600_000),
@@ -171,7 +173,7 @@ describe("bounds (F5)", () => {
         left_area_at: new Date(now - 30 * 60_000),
       })),
     })
-    const open = () => db.event_check_ins.count({ where: { user_id: runner, status: "checked_in" } })
+    const open = () => db.event_check_ins.count({ where: { user_id: { in: runners }, status: "checked_in" } })
     const first = await sweepVenueDays()
     expect(first.rooms.checkedOut).toBeGreaterThanOrEqual(MAX_VENUE_DAYS_PER_SWEEP - 10)
     expect(await open()).toBe(250 - MAX_VENUE_DAYS_PER_SWEEP)
@@ -180,8 +182,10 @@ describe("bounds (F5)", () => {
   }, 120_000)
 
   it("does not let 300 venue days starve a real event (PL-I06)", async () => {
-    const runner = await makeUser(testId("gl300"))
-    world.users.push(runner)
+    // One person per day: the database holds one open check-in per person (SCRUM-705).
+    const runners = Array.from({ length: 300 }, () => testId("gl300"))
+    await db.user.createMany({ data: runners.map((id) => ({ id, email: `${id}@itest.invalid`, name: "runner", role: "attendee" as const })) })
+    world.users.push(...runners)
     const older = new Date(Date.now() - 6 * 3_600_000)
     const now = Date.now()
     const venues = Array.from({ length: 300 }, () => ({ id: randomUUID(), name: testId("V300"), latitude: LAT, longitude: LNG, geofence: FENCE }))
@@ -208,10 +212,10 @@ describe("bounds (F5)", () => {
     const occs = days.map((d) => ({ id: randomUUID(), event_id: d.id, occurs_on: new Date(), start_time: d.start_time, end_time: d.end_time }))
     await db.event_occurrences.createMany({ data: occs })
     await db.event_check_ins.createMany({
-      data: occs.map((o) => ({
+      data: occs.map((o, i) => ({
         event_id: o.event_id,
         occurrence_id: o.id,
-        user_id: runner,
+        user_id: runners[i],
         status: "checked_in" as const,
         check_in_time: older,
         expires_at: new Date(now + 3_600_000),

@@ -189,6 +189,11 @@ export async function putInRoom(opts: {
   const lastSeen = opts.lastSeen ?? new Date()
   const kind = opts.kind ?? "attendee"
 
+  // One open check-in per person (SCRUM-705): a fixture moves them, as the door does.
+  const elsewhere = { user_id: opts.userId, occurrence_id: { not: opts.occurrenceId } }
+  await db.event_check_ins.updateMany({ where: { ...elsewhere, status: "checked_in" }, data: { status: "checked_out", check_out_time: at } })
+  await db.presence_sessions.updateMany({ where: { ...elsewhere, departed_at: null, arrived_at: { lte: at } }, data: { departed_at: at, departed_source: "switch" } })
+
   await db.event_check_ins.create({
     data: {
       event_id: opts.eventId,

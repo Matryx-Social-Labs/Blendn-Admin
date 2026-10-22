@@ -62,7 +62,7 @@ describe("POST /venues/:id/live", () => {
 
     // The contract: these keys, no others (PL-C02).
     expect(Object.keys(json.data).sort()).toEqual(
-      ["chatGroupId", "checkIn", "expiresAt", "intentNeeded", "revealSuggestion", "stay", "stayUntil", "venueDayId"]
+      ["chatGroupId", "checkIn", "expiresAt", "intentNeeded", "left", "revealSuggestion", "stay", "stayUntil", "venueDayId"]
     )
     const { venueDayId, chatGroupId, expiresAt, stay } = json.data
     expect(stay).toBe(false)

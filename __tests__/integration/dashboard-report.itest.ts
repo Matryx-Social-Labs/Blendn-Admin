@@ -220,7 +220,8 @@ describe("organiser overview", () => {
     const [firstOcc, secondOcc] = await Promise.all([occurrenceOf(first), occurrenceOf(second)])
     await db.event_check_ins.createMany({
       data: [
-        { event_id: first, occurrence_id: firstOcc, user_id: loyal, status: "checked_in", check_in_time: new Date() },
+        // The earlier night is over: one person is open in one room at most (SCRUM-705).
+        { event_id: first, occurrence_id: firstOcc, user_id: loyal, status: "checked_out", check_in_time: new Date() },
         { event_id: second, occurrence_id: secondOcc, user_id: loyal, status: "checked_in", check_in_time: new Date() },
         { event_id: first, occurrence_id: firstOcc, user_id: once, status: "checked_in", check_in_time: new Date() },
       ],
