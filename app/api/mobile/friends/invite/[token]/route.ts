@@ -2,14 +2,14 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal } from "@/lib/event-access"
+import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { INVITE_TOKEN, friendState, mayConnect, personCard, personSelect } from "@/lib/friends"
 import {
   successResponse,
   unauthorizedResponse,
-  notFoundResponse,
-  forbiddenResponse,
+  errorResponse,
+  ErrorCode,
   serverErrorResponse,
 } from "@/lib/api-response"
 
@@ -34,10 +34,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     // The owner's name and photo are part of taking part; so is the gate (SCRUM-331).
     const unfinished = await participationRefusal(me)
-    if (unfinished) return forbiddenResponse(unfinished)
+    if (unfinished) return unfinishedResponse(unfinished)
 
     const { token } = await params
-    const notFound = () => notFoundResponse("This invite link doesn't work any more")
+    // `errorCode` stays NOT_FOUND; one reason for every way a link can fail.
+    const notFound = () =>
+      errorResponse("This invite link doesn't work any more", 404, ErrorCode.NOT_FOUND, ErrorCode.INVITE_UNAVAILABLE)
     if (!INVITE_TOKEN.test(token)) return notFound()
 
     const invite = await db.friend_invites.findUnique({

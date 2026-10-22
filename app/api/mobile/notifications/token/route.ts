@@ -19,6 +19,13 @@ const pushTokenSchema = z.object({
   platform: z.enum(["ios", "android"], {
     error: "Platform must be 'ios' or 'android'",
   }),
+  /**
+   * Which Android channels this install created (`CHANNEL_SET_FLOW9` in
+   * `lib/push-notifications.ts`). Omitted by every build before Flow 9, which
+   * stays on the channels it has; 2 also has `matches`, `crew` and `after-the-night` and
+   * knows the `event_changed` and `report_actioned` kinds.
+   */
+  channelSet: z.number().int().min(1).max(100).optional(),
 })
 
 export async function POST(request: NextRequest) {
@@ -39,7 +46,7 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse(validation.error)
     }
 
-    const { token, platform } = validation.data
+    const { token, platform, channelSet } = validation.data
 
     // Upsert the push token
     // If the same user+token combination exists, update it
@@ -55,12 +62,15 @@ export async function POST(request: NextRequest) {
       },
       update: {
         platform,
+        // Only when the app says: a token re-registered by an older build must not lose it.
+        ...(channelSet !== undefined && { channel_set: channelSet }),
         updated_at: now,
       },
       create: {
         user_id: user.userId,
         token,
         platform,
+        ...(channelSet !== undefined && { channel_set: channelSet }),
         created_at: now,
         updated_at: now,
       },

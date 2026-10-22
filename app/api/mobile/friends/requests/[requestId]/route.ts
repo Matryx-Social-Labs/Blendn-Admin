@@ -3,14 +3,15 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { acceptFriendRequest, dismissFriendRequest, withdrawFriendRequest } from "@/lib/friends"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal } from "@/lib/event-access"
+import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
   validationErrorResponse,
+  errorResponse,
+  ErrorCode,
   notFoundResponse,
-  forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -38,16 +39,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
     const { requestId } = await params
-    if (!isUuid(requestId)) return notFoundResponse("Not found")
+    // `errorCode` stays NOT_FOUND. One reason for a request that is gone, withdrawn or somebody else's.
+    const gone = () => errorResponse("Not found", 404, ErrorCode.NOT_FOUND, ErrorCode.REQUEST_UNAVAILABLE)
+    if (!isUuid(requestId)) return gone()
 
     if (parsed.data.action === "accept") {
       // Becoming friends is taking part, as asking is (SCRUM-331).
       const unfinished = await participationRefusal(authUser.userId)
-      if (unfinished) return forbiddenResponse(unfinished)
-      if (!(await acceptFriendRequest(requestId, authUser.userId))) return notFoundResponse("Not found")
+      if (unfinished) return unfinishedResponse(unfinished)
+      if (!(await acceptFriendRequest(requestId, authUser.userId))) return gone()
       return successResponse({ state: "friends" })
     }
-    if (!(await dismissFriendRequest(requestId, authUser.userId))) return notFoundResponse("Not found")
+    if (!(await dismissFriendRequest(requestId, authUser.userId))) return gone()
     return successResponse({ dismissed: true })
   } catch (error) {
     logger.error("Respond to friend request error", { error: error instanceof Error ? error.message : String(error) })

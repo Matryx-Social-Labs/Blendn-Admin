@@ -163,7 +163,8 @@ describe("every payload the app judges 'live' by carries the session", () => {
   ])("%s", (file) => {
     const code = src(file)
     expect(code).toContain("session: eventSession(event)")
-    expect(code).toContain("occurrences: sessionOccurrencesSelect")
+    // The detail adds the local day to the same select (`dayOccurrencesSelect`), for `days`.
+    expect(code).toMatch(/occurrences: (sessionOccurrencesSelect|dayOccurrencesSelect)\b/)
   })
 
   it("the door's refusal copy comes from closedDoorMessage", () => {

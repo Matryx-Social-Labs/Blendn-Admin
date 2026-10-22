@@ -2,7 +2,7 @@ import { checkImageContent } from "./moderation/openai-moderation"
 import { deleteFile, ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
-import { recordPhotoCheck, recordPhotoPulled } from "./photo-checks"
+import { notePulledProfilePhoto, recordPhotoCheck, recordPhotoPulled } from "./photo-checks"
 
 /**
  * Whether a photo may go on a profile.
@@ -148,14 +148,15 @@ export async function pullPhoto(url: string, userId: string): Promise<void> {
    * `User.image` in the same transaction, as the PUT writes both.
    */
   const row = await db.$transaction(async (tx) => {
-    const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null }[]>`
+    const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null; was_main: boolean | null }[]>`
       UPDATE profiles p
          SET photos = array_remove(p.photos, ${url}),
              blur_photo = CASE WHEN p.photos[1] = ${url} THEN NULL ELSE p.blur_photo END
         FROM (SELECT id, photos, blur_photo FROM profiles WHERE id = ${userId} FOR UPDATE) prior
        WHERE prior.id = p.id
    RETURNING p.photos,
-             CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur
+             CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur,
+             (prior.photos[1] = ${url}) AS was_main
     `
     if (pulledRow) {
       await tx.user.update({ where: { id: userId }, data: { image: pulledRow.photos[0] ?? null } })
@@ -166,6 +167,20 @@ export async function pullPhoto(url: string, userId: string): Promise<void> {
   if (row?.cleared_blur) await recordPhotoPulled(row.cleared_blur, userId)
   await withdraw(url, userId)
   if (row?.cleared_blur) await withdraw(row.cleared_blur, userId)
+  /*
+   * Last, and on its own: telling the owner (`photo_states`, lib/photo-checks.ts)
+   * is a courtesy, and it ran BEFORE the withdrawals once, so a failed write
+   * left the photo off the profile and still in the public bucket. A failure
+   * here costs the owner the notice, and nothing else.
+   */
+  if (row) {
+    await notePulledProfilePhoto(url, userId, row.was_main === true).catch((error: unknown) => {
+      logger.warn("Could not record that a photo was pulled for its owner's notice", {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
   logger.warn("Profile photo removed after moderation", { userId })
 }
 

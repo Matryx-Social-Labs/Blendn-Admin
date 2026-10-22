@@ -108,7 +108,7 @@ describe("redaction is actually wired into both write paths", () => {
 
   it("neither insert passes the raw body through", () => {
     // `body,` on its own inside a notifications insert is the bug.
-    const inserts = SRC().match(/db\.notifications\s*\n?\s*\.?(?:create|createMany)\([\s\S]{0,400}?\}\)/g) ?? []
+    const inserts = SRC().match(/db\.notifications\s*\n?\s*\.?(?:create|createMany|createManyAndReturn)\([\s\S]{0,400}?\}\)/g) ?? []
     expect(inserts.length).toBeGreaterThan(0)
     for (const insert of inserts) {
       expect(insert).not.toMatch(/^\s*body,\s*$/m)

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { eventNotFoundResponse, suspensionReasonFor } from "@/lib/event-access"
 import { tallyReactions } from "@/lib/reactions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -120,7 +121,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        */
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
       if (!entitlement) {
-        return notFoundResponse("Chat not available for this event")
+        return eventNotFoundResponse(authUser.userId, eventId, "Chat not available for this event")
       }
 
       const event = await db.events.findUnique({
@@ -130,7 +131,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // No room is ever made for a missing or hidden event — refusing it only
       // after creation left a row the 404 concealed (SCRUM-205).
       if (!event || event.status === "draft") {
-        return notFoundResponse("Chat not available for this event")
+        return eventNotFoundResponse(authUser.userId, eventId, "Chat not available for this event")
       }
 
       // The one room writer, which reads back a room somebody made a moment ago.
@@ -164,7 +165,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * non-member is not refused here: the join below is how they get in.
      */
     const readDenial = roomReadDenial(membership, roomEvent)
-    if (readDenial === "hidden") return notFoundResponse("Chat not available for this event")
+    if (readDenial === "hidden") return eventNotFoundResponse(authUser.userId, eventId, "Chat not available for this event")
     if (readDenial === "banned" && membership) {
       return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
     }
@@ -520,7 +521,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        */
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
       if (!entitlement) {
-        return notFoundResponse("Chat not available for this event")
+        return eventNotFoundResponse(authUser.userId, eventId, "Chat not available for this event")
       }
 
       const event = await db.events.findUnique({
@@ -532,7 +533,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         select: { title: true, start_time: true, end_time: true, status: true, kind: true, venue_name: true },
       })
       if (!event || event.status === "draft") {
-        return notFoundResponse("Chat not available for this event")
+        return eventNotFoundResponse(authUser.userId, eventId, "Chat not available for this event")
       }
 
       const room = await createRoom(event, eventId)
@@ -557,7 +558,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     const window = chatWindowState(roomEvent, chatGroup)
     if (!window.open) {
-      return forbiddenResponse(chatClosedMessage(window.reason))
+      // A hidden event is the suspended organisation's, to the people with a stake in it: the same reasonCode the event's page gives.
+      const { reason } = window.reason === "hidden" ? await suspensionReasonFor(authUser.userId, eventId) : {}
+      return errorResponse(chatClosedMessage(window.reason), 403, ErrorCode.FORBIDDEN, reason)
     }
 
     // Check if user is a member of the chat group

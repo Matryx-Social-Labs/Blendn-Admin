@@ -67,7 +67,7 @@ function checkHost(pathname: string, host: string | null): HostVerdict {
 function getCorsHeaders(origin: string | null): Record<string, string> {
   const baseHeaders = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Version",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Version, X-Channel-Set",
   }
 
   // Native mobile clients (Expo/React Native fetch) don't send an Origin

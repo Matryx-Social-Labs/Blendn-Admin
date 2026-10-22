@@ -1,0 +1,16 @@
+-- The app-icon badge (`badgeCount` on GET /notifications) asks "which of my
+-- conversations has something unread from the other person" on every feed
+-- read. `private_messages` is the product's biggest table and read messages
+-- are nearly all of it, so a partial index over only the unread rows stays
+-- small and starts the scan at them.
+--
+-- CONCURRENTLY, so building it does not block the DM writers, which means this
+-- file is ONE statement and has no BEGIN/COMMIT: CREATE INDEX CONCURRENTLY
+-- cannot run in a transaction (`__tests__/migration-tx.test.ts` allows exactly
+-- this shape). A failed build leaves an INVALID index of this name, which
+-- IF NOT EXISTS would then skip: if that happens, a NEW forward migration drops
+-- it and builds it again, never SQL by hand.
+--
+-- Rolling back: a new forward migration with
+--   DROP INDEX CONCURRENTLY IF EXISTS "private_messages_unread_idx";
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "private_messages_unread_idx" ON "private_messages" ("conversation_id") WHERE "is_read" = false;
