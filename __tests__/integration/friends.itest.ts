@@ -548,7 +548,7 @@ describe("the edges the first reviews found", () => {
     expect((await listRequests(ana)).body.data.incoming).toEqual([])
   })
 
-  it("refuses a user id for someone who was public in a room you were in, match or not", async () => {
+  it("refuses a user id for someone who was public in a room you were in, when you did not match", async () => {
     const [ana, ben] = [await person("fr-rev-a", "Ana"), await person("fr-rev-b", "Ben")]
     const eventId = await room()
     await attend(ana, eventId)

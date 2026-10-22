@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { closeConversation } from "@/lib/conversations"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
+import { lockPair } from "@/lib/friends"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
@@ -153,6 +154,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     // so a double tap or a client retry never rewrites who left or when.
     const otherId = conversation.user1_id === authUser.userId ? conversation.user2_id : conversation.user1_id
     await db.$transaction(async (tx) => {
+      // Under the pair's lock, as a block is: a friend request racing this
+      // either sees the conversation closed or is written before it.
+      await lockPair(tx, authUser.userId, otherId)
       await closeConversation(conversationId, authUser.userId, "unmatch", tx)
       // An unmatch keeps the two apart on every crew surface (C6): the crew
       // invites between them go with it (lib/crews/blocks.ts).

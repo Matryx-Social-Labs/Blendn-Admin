@@ -22,8 +22,10 @@ export const FriendOfferSchema = z
     canAdd: z
       .boolean()
       .describe(
-        "Show the add button: you matched, both of you have revealed, and you are not friends or waiting on them. " +
-          "True for `incoming` too (adding someone who asked you accepts). Call `POST /friends/requests` with `{ userId }`."
+        "Show the add button. True only when you matched and BOTH of you have revealed, the conversation is open, " +
+          "nobody has blocked anybody, the account exists, and `state` is `none` or `incoming` (adding somebody who asked you " +
+          "accepts). False for `requested` and `friends`, and for every pair that is not a revealed match. " +
+          "Call `POST /friends/requests` with `{ userId }`."
       ),
   })
   .openapi("FriendOffer")

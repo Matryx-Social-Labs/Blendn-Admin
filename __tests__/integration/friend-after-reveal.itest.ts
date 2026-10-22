@@ -5,9 +5,10 @@ process.env.MOBILE_JWT_SECRET =
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
-import { revealedMatch } from "@/lib/friends"
+import { lockPair, revealedMatch } from "@/lib/friends"
+import { roomHandle } from "@/lib/room-handle"
 
-import { cleanup, closeDb, db, makeUser, onboard } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard } from "./helpers"
 
 /**
  * "If users have matched and they have revealed themselves we can then give an
@@ -79,8 +80,8 @@ const profileOf = (as: Person, userId: string) =>
 
 interface Match {
   matched?: boolean
-  /** [first side by id order, second side] */
-  revealed?: [boolean, boolean]
+  /** Whether each person has revealed to the other. Both by default; `a` is the first person passed. */
+  revealed?: { a?: boolean; b?: boolean }
   closed?: boolean
   board?: boolean
 }
@@ -89,7 +90,8 @@ interface Match {
 async function converse(a: Person, b: Person, o: Match = {}) {
   const [user1_id, user2_id] = conversationPair(a.id, b.id)
   const matched = o.matched ?? true
-  const [r1, r2] = o.revealed ?? [true, true]
+  const [revealedA, revealedB] = [o.revealed?.a ?? true, o.revealed?.b ?? true]
+  const [r1, r2] = user1_id === a.id ? [revealedA, revealedB] : [revealedB, revealedA]
   const row = await db.private_conversations.create({
     data: {
       user1_id,
@@ -103,6 +105,22 @@ async function converse(a: Person, b: Person, o: Match = {}) {
   return row.id
 }
 
+const events: string[] = []
+
+async function attendTogether(a: Person, b: Person) {
+  const host = await makeUser("far-host", "organizer")
+  users.push(host)
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+  const occurrence_id = await occurrenceOf(eventId)
+  for (const p of [a, b]) {
+    await db.event_check_ins.create({
+      data: { user_id: p.id, event_id: eventId, occurrence_id, check_in_time: new Date(), status: "checked_in" },
+    })
+  }
+  return eventId
+}
+
 const notificationsOf = async (userId: string) => {
   for (let i = 0; i < 30; i++) {
     const rows = await db.notifications.findMany({ where: { user_id: userId, kind: "friend_request" } })
@@ -114,7 +132,7 @@ const notificationsOf = async (userId: string) => {
 
 afterAll(async () => {
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
-  await cleanup(users, [])
+  await cleanup(users, events)
   await closeDb()
 })
 
@@ -144,20 +162,48 @@ describe("POST /friends/requests { userId }", () => {
     expect((await ask(ben, { userId: ana.id })).body.data).toEqual({ state: "friends" })
   })
 
-  it("answers an incomplete reveal as unknown plus NOT_A_REVEALED_MATCH, to the matched asker only", async () => {
+  it("says NOT_A_REVEALED_MATCH only to somebody the other person has revealed to", async () => {
     const unknown = (await ask(await person("far-u-x", "Xan"), { userId: "no-such-user" })).body
-    for (const revealed of [[true, false], [false, true], [false, false]] as [boolean, boolean][]) {
+    // `a` is the asker; `b` is the person asked about. Each flag is "has revealed to the other".
+    for (const revealed of [{ a: true, b: true }, { a: false, b: true }, { a: true, b: false }, { a: false, b: false }]) {
       const [ana, ben] = [await person("far-in-a", "Ana"), await person("far-in-b", "Ben")]
       await converse(ana, ben, { revealed })
       const res = await ask(ana, { userId: ben.id })
+      const seesBen = revealed.b
+      if (revealed.a && revealed.b) {
+        expect(res.body.data).toEqual({ state: "requested" })
+        continue
+      }
       expect(res.status).toBe(404)
-      expect(res.body.reasonCode).toBe("NOT_A_REVEALED_MATCH")
+      // Ben revealed to Ana, so she knows who he is; if he has not, the code would say who a pseudonym is.
+      if (seesBen) expect(res.body.reasonCode).toBe("NOT_A_REVEALED_MATCH")
       const { reasonCode: _reason, ...rest } = res.body
       expect(rest).toEqual(unknown)
+      if (!seesBen) expect(res.body).toEqual(unknown)
       expect(await db.friend_requests.count({ where: { sender_id: ana.id } })).toBe(0)
-      // The other side asks the same.
-      expect((await ask(ben, { userId: ana.id })).body.reasonCode).toBe("NOT_A_REVEALED_MATCH")
+      // The same from Ben's side: he sees Ana only if she revealed.
+      const back = await ask(ben, { userId: ana.id })
+      expect(back.body.reasonCode).toBe(revealed.a ? "NOT_A_REVEALED_MATCH" : undefined)
     }
+  })
+
+  it("does not say who a pseudonym is: a pending match asked by a raw id or a room handle is an unknown person", async () => {
+    // Tanvi is revealed at event A and matched Ana anonymously as "Otter"; neither has revealed in the DM.
+    const [ana, tanvi] = [await person("far-h1-a", "Ana"), await person("far-h1-t", "Tanvi")]
+    const eventId = await attendTogether(ana, tanvi)
+    await db.event_match_preferences.create({ data: { event_id: eventId, user_id: tanvi.id, revealed: true } })
+    await converse(ana, tanvi, { revealed: { a: false, b: false } })
+    const unknown = await ask(ana, { userId: "no-such-user" })
+    // By her raw id (a friend's, or learned at the event) and by her handle at A, where she is revealed.
+    expect(await ask(ana, { userId: tanvi.id })).toEqual(unknown)
+    expect(await ask(ana, { userId: roomHandle(eventId, tanvi.id) })).toEqual(unknown)
+    // And asked as the one who revealed to her, the reason is no news.
+    await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: tanvi.id }, { user2_id: tanvi.id }] } })
+    await converse(ana, tanvi, { revealed: { a: false, b: true } })
+    expect((await ask(ana, { userId: tanvi.id })).body.reasonCode).toBeDefined()
+    // But not by her handle at an event where she stayed anonymous: that would say which pseudonym there is her.
+    const eventC = await attendTogether(ana, tanvi)
+    expect(await ask(ana, { userId: roomHandle(eventC, tanvi.id) })).toEqual(unknown)
   })
 
   it.each([
@@ -173,8 +219,8 @@ describe("POST /friends/requests { userId }", () => {
 
   it("refuses a pending-reveal pair exactly as unknown once closed, blocked either way, or deleted", async () => {
     const unknown = await ask(await person("far-ref-u", "Xan"), { userId: "no-such-user" })
-    // Each person is both fully revealed and half revealed: no reasonCode may leak from either.
-    for (const revealed of [[true, true], [true, false]] as [boolean, boolean][]) {
+    // Fully revealed, and half revealed in the way that would say "you matched" to Ana: no reasonCode may leak.
+    for (const revealed of [{ a: true, b: true }, { a: false, b: true }]) {
       const [ana, ben, cam, dee, eve] = [
         await person("far-b-a", "Ana"),
         await person("far-b-b", "Ben"),
@@ -197,12 +243,15 @@ describe("POST /friends/requests { userId }", () => {
     }
   })
 
-  it("refuses a stranger who was revealed in a room, with no match, as unknown", async () => {
+  it("refuses a stranger who was revealed in a room both attended, with no match, as unknown", async () => {
     const [ana, ben] = [await person("far-room-a", "Ana"), await person("far-room-b", "Ben")]
+    const eventId = await attendTogether(ana, ben)
     const unknown = await ask(ana, { userId: "no-such-user" })
-    // `friends_see_me_in_rooms` is the other way a user id used to get through.
+    // The two ways a user id used to get through: public in a shared room, and a friend who let friends see them.
+    await db.event_match_preferences.create({ data: { event_id: eventId, user_id: ben.id, revealed: true } })
     await db.profiles.update({ where: { id: ben.id }, data: { friends_see_me_in_rooms: true } })
     expect(await ask(ana, { userId: ben.id })).toEqual(unknown)
+    expect(await ask(ana, { userId: roomHandle(eventId, ben.id) })).toEqual(unknown)
   })
 
   it("leaves the invite link alone: a stranger with the token still asks, with no via", async () => {
@@ -242,13 +291,11 @@ describe("the friend offer on conversations and profiles", () => {
       await person("far-of-c", "Cam"),
       await person("far-of-d", "Dee"),
     ]
-    const [user1_id] = conversationPair(ana.id, ben.id)
-    const aIsFirst = user1_id === ana.id
     // Ana has revealed, Ben has not.
-    const half = await converse(ana, ben, { revealed: aIsFirst ? [true, false] : [false, true] })
+    const half = await converse(ana, ben, { revealed: { a: true, b: false } })
     const request = await converse(ana, cam, { matched: false })
     // Dee is already Ana's friend but still a pseudonym to her: the offer must not say so.
-    const hidden = await converse(ana, dee, { revealed: conversationPair(ana.id, dee.id)[0] === ana.id ? [true, false] : [false, true] })
+    const hidden = await converse(ana, dee, { revealed: { a: true, b: false } })
     const [x, y] = conversationPair(ana.id, dee.id)
     await db.friendships.create({ data: { user1_id: x, user2_id: y } })
 
@@ -272,5 +319,111 @@ describe("the friend offer on conversations and profiles", () => {
     expect(await profileOf(ana, stranger.id)).toMatchObject({ status: 200 })
     expect((await profileOf(ana, stranger.id)).body.data).not.toHaveProperty("friend")
     expect((await profileOf(ana, ana.id)).body.data).not.toHaveProperty("friend")
+  })
+})
+
+/**
+ * Hold the pair's lock from here — the lock an unmatch or a block takes — so a
+ * request that has already passed its first check is stopped at the write, do
+ * `whileHeld` (what the other person does in that moment), then let it go.
+ */
+async function raceTheLock(a: Person, b: Person, request: () => Promise<{ status: number; body: any }>, whileHeld: () => Promise<unknown>) { // eslint-disable-line @typescript-eslint/no-explicit-any
+  let release!: () => void
+  const held = new Promise<void>((r) => (release = r))
+  let locked!: () => void
+  const lockTaken = new Promise<void>((r) => (locked = r))
+  const holder = db.$transaction(
+    async (tx) => {
+      await lockPair(tx, a.id, b.id)
+      locked()
+      await held
+    },
+    { timeout: 20_000 }
+  )
+  await lockTaken
+  let settled = false
+  const pending = request().then((res) => ((settled = true), res))
+  // Long enough for the request to pass its first check and queue on the lock.
+  await new Promise((r) => setTimeout(r, 600))
+  expect(settled).toBe(false)
+  await whileHeld()
+  release()
+  await holder
+  return pending
+}
+
+describe("a request racing an unmatch or a block", () => {
+  it("is refused when the conversation closes after the first check, and writes nothing", async () => {
+    const [ana, ben] = [await person("far-rc-a", "Ana"), await person("far-rc-b", "Ben")]
+    const id = await converse(ana, ben)
+    const res = await raceTheLock(ana, ben, () => ask(ana, { userId: ben.id }), () =>
+      db.private_conversations.update({ where: { id }, data: { closed_at: new Date(), closed_reason: "unmatch" } })
+    )
+    expect(res).toEqual(await ask(ana, { userId: "no-such-user" }))
+    expect(await db.friend_requests.count({ where: { sender_id: ana.id } })).toBe(0)
+  })
+
+  it("is refused when a block lands after the first check, on the invite-link path too", async () => {
+    const [ana, ben, cam] = [await person("far-rb-a", "Ana"), await person("far-rb-b", "Ben"), await person("far-rb-c", "Cam")]
+    await converse(ana, ben)
+    const token = (await call(invite.GET as Handler, "/api/mobile/friends/invite", cam)).body.data.token as string
+    const viaMatch = await raceTheLock(ana, ben, () => ask(ana, { userId: ben.id }), () =>
+      db.blocked_users.create({ data: { blocker_id: ben.id, blocked_id: ana.id } })
+    )
+    const viaLink = await raceTheLock(ana, cam, () => ask(ana, { token }), () =>
+      db.blocked_users.create({ data: { blocker_id: cam.id, blocked_id: ana.id } })
+    )
+    const unknown = await ask(ana, { userId: "no-such-user" })
+    expect(viaMatch).toEqual(unknown)
+    expect(viaLink).toEqual(unknown)
+    expect(await db.friend_requests.count({ where: { sender_id: ana.id } })).toBe(0)
+  })
+
+  it("an unmatch takes the pair's lock, so it cannot land between a request's check and its write", async () => {
+    const [ana, ben] = [await person("far-ru-a", "Ana"), await person("far-ru-b", "Ben")]
+    const id = await converse(ana, ben)
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    let locked!: () => void
+    const lockTaken = new Promise<void>((r) => (locked = r))
+    const holder = db.$transaction(
+      async (tx) => {
+        await lockPair(tx, ana.id, ben.id)
+        locked()
+        await held
+      },
+      { timeout: 20_000 }
+    )
+    await lockTaken
+    let settled = false
+    const unmatch = call(conversation.DELETE as Handler, `/api/mobile/conversations/${id}`, ana, {
+      method: "DELETE",
+      params: { conversationId: id },
+    }).then((r) => ((settled = true), r))
+    await new Promise((r) => setTimeout(r, 600))
+    expect(settled).toBe(false)
+    release()
+    await holder
+    expect((await unmatch).status).toBe(200)
+    expect((await db.private_conversations.findUniqueOrThrow({ where: { id } })).closed_at).not.toBeNull()
+  })
+})
+
+describe("the offer drops for somebody who is gone or blocked", () => {
+  it("is canAdd false for a deleted account and for a block, with the conversation still open", async () => {
+    const [ana, ben, dee, cam] = [
+      await person("far-g-a", "Ana"),
+      await person("far-g-b", "Ben"),
+      await person("far-g-d", "Dee"),
+      await person("far-g-c", "Cam"),
+    ]
+    const [blocked, deleted, fine] = [await converse(ana, ben), await converse(ana, dee), await converse(ana, cam)]
+    await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: ben.id } })
+    await db.user.update({ where: { id: dee.id }, data: { deletedAt: new Date() } })
+    const list = await inbox(ana)
+    const offer = (id: string) => list.find((c) => c.id === id)?.friend
+    expect(offer(fine)).toEqual({ state: "none", canAdd: true })
+    expect(offer(blocked)).toEqual({ state: "none", canAdd: false })
+    expect(offer(deleted)).toEqual({ state: "none", canAdd: false })
   })
 })

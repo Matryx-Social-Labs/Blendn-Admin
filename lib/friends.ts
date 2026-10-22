@@ -2,9 +2,9 @@ import { randomBytes } from "crypto"
 import type { Prisma } from "@prisma/client"
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
-import { blockedEitherWay, conversationPair, pairIsClosed } from "@/lib/conversations"
+import { conversationPair } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
-import { UNNAMED, cameFromMatch } from "@/lib/conversation-identity"
+import { UNNAMED, cameFromMatch, mayShowRealName } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 
 /**
@@ -170,13 +170,14 @@ export async function friendState(viewerId: string, otherId: string): Promise<Fr
   return "none"
 }
 
+/** What `readPair` needs: the transaction client or `db`. */
+type PairReader = Pick<Prisma.TransactionClient, "user" | "blocked_users" | "private_conversations">
+
 /**
- * Could `askerId` be connected to `otherId` at all?
- *
- * False for anything a stranger must not be able to tell apart from a link
- * that does not exist: a deleted account, a block in either direction, or a
- * pair who left each other (unmatch is permanent, as it is for message
- * requests). Callers answer all of them with the same 404.
+ * The three facts every friend decision about a pair rests on, read together:
+ * the other account is alive, nobody has blocked anybody, and the pair's
+ * conversation (if any) is still open. Takes the client so a request can re-ask
+ * it inside the pair's lock (`requestFriend`).
  *
  * **Always the same three queries**, whatever the answer — even for the
  * caller themselves, which is what a route passes when a link resolved to
@@ -184,17 +185,44 @@ export async function friendState(viewerId: string, otherId: string): Promise<Fr
  * and "this link was reset" would be distinguishable by its timing from "the
  * person behind it blocked you".
  */
-export async function mayConnect(askerId: string, otherId: string): Promise<boolean> {
-  const [other, blocked, closed] = await Promise.all([
-    db.user.findUnique({ where: { id: otherId, deletedAt: null }, select: { id: true } }),
-    blockedEitherWay(askerId, otherId),
-    pairIsClosed(askerId, otherId),
+async function readPair(client: PairReader, askerId: string, otherId: string) {
+  const [user1_id, user2_id] = conversationPair(askerId, otherId)
+  const [other, blocked, conversation] = await Promise.all([
+    client.user.findUnique({ where: { id: otherId, deletedAt: null }, select: { id: true } }),
+    client.blocked_users.findFirst({
+      where: {
+        OR: [
+          { blocker_id: askerId, blocked_id: otherId },
+          { blocker_id: otherId, blocked_id: askerId },
+        ],
+      },
+      select: { id: true },
+    }),
+    client.private_conversations.findUnique({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+      select: matchSelect,
+    }),
   ])
-  return askerId !== otherId && other !== null && !blocked && !closed
+  const connectable = askerId !== otherId && other !== null && blocked === null && conversation?.closed_at == null
+  return { connectable, conversation }
+}
+
+/**
+ * Could `askerId` be connected to `otherId` at all?
+ *
+ * False for anything a stranger must not be able to tell apart from a link
+ * that does not exist: a deleted account, a block in either direction, or a
+ * pair who left each other (unmatch is permanent, as it is for message
+ * requests). Callers answer all of them with the same 404.
+ */
+export async function mayConnect(askerId: string, otherId: string): Promise<boolean> {
+  return (await readPair(db, askerId, otherId)).connectable
 }
 
 /** What the match rule reads of a conversation. */
 export const matchSelect = {
+  user1_id: true,
+  user2_id: true,
   user1_pseudonym: true,
   user2_pseudonym: true,
   user1_revealed: true,
@@ -203,7 +231,7 @@ export const matchSelect = {
   closed_at: true,
 } as const
 
-type MatchRow = {
+type MatchFacts = {
   user1_pseudonym: string | null
   user2_pseudonym: string | null
   user1_revealed: boolean
@@ -212,37 +240,42 @@ type MatchRow = {
   closed_at: Date | null
 }
 
+type MatchRow = MatchFacts & { user1_id: string; user2_id: string }
+
 /** An open conversation that came from a match: the pair that liked each other. */
-const isOpenMatch = (c: MatchRow) => c.closed_at === null && cameFromMatch(c)
+const isOpenMatch = (c: MatchFacts) => c.closed_at === null && cameFromMatch(c)
 
 /**
  * The conversation half of `revealedMatch`. Pure, so the conversation list can
  * apply the same rule to rows it already holds without asking again.
  */
-export const isRevealedMatch = (c: MatchRow) => isOpenMatch(c) && c.user1_revealed && c.user2_revealed
+export const isRevealedMatch = (c: MatchFacts) => isOpenMatch(c) && c.user1_revealed && c.user2_revealed
 
-/**
- * Where a pair stands on the match rule, from one side's view:
- *
- * - `revealed`: an open match, both sides have shown their names, and nothing
- *   (a block, a deleted account, an unmatch) stands between them.
- * - `pending`: the same, but a side has not revealed yet.
- * - `none`: anything else.
- *
- * **Always the same four queries**, whatever the answer, for the reason
- * `mayConnect` gives.
- */
-export async function matchStanding(askerId: string, otherId: string): Promise<"revealed" | "pending" | "none"> {
-  const [user1_id, user2_id] = conversationPair(askerId, otherId)
-  const [connectable, conversation] = await Promise.all([
-    mayConnect(askerId, otherId),
-    db.private_conversations.findUnique({
-      where: { user1_id_user2_id: { user1_id, user2_id } },
-      select: matchSelect,
-    }),
-  ])
-  if (!connectable || !conversation || !isOpenMatch(conversation)) return "none"
-  return isRevealedMatch(conversation) ? "revealed" : "pending"
+/** Where a pair stands on the match rule, from the asker's side. */
+export interface MatchStanding {
+  /**
+   * - `revealed`: an open match, both sides have shown their names, and nothing
+   *   (a block, a deleted account, an unmatch) stands between them.
+   * - `pending`: the same, but a side has not revealed yet.
+   * - `none`: anything else.
+   */
+  standing: "revealed" | "pending" | "none"
+  /**
+   * The asker may already see who the other is: they revealed to them
+   * (`mayShowRealName`). Only then is saying "you matched but not both
+   * revealed" no news — for a pseudonym the asker cannot name, it would say who
+   * the pseudonym is (an id found elsewhere, a friend's, a room handle).
+   */
+  askerSeesThem: boolean
+}
+
+/** Three queries, whatever the answer: see `readPair`. */
+export async function matchStanding(askerId: string, otherId: string): Promise<MatchStanding> {
+  const { connectable, conversation } = await readPair(db, askerId, otherId)
+  if (!connectable || !conversation || !isOpenMatch(conversation)) return { standing: "none", askerSeesThem: false }
+  return isRevealedMatch(conversation)
+    ? { standing: "revealed", askerSeesThem: true }
+    : { standing: "pending", askerSeesThem: mayShowRealName(conversation, otherId) }
 }
 
 /**
@@ -254,7 +287,7 @@ export async function matchStanding(askerId: string, otherId: string): Promise<"
  * not an accepted message request, which is not a match.
  */
 export async function revealedMatch(me: string, other: string): Promise<boolean> {
-  return (await matchStanding(me, other)) === "revealed"
+  return (await matchStanding(me, other)).standing === "revealed"
 }
 
 /**
@@ -267,16 +300,26 @@ export async function revealedMatch(me: string, other: string): Promise<boolean>
  *   withdrawing — finds the same row, notifies nobody, and leaves a "Not now"
  *   in place.
  *
- * Eligibility (`mayConnect`, and how the asker found this person) is the
- * caller's; this records the answer under the pair's lock.
+ * How the asker found this person is the caller's to decide. Whether the pair
+ * can still be connected (not blocked, not closed, not deleted — and for
+ * `via: "match"`, still a match both revealed in) is asked again here under the
+ * pair's lock, because an unmatch or a block between the caller's check and this
+ * write would otherwise let the request through. `"refused"` is that answer.
  */
 export async function requestFriend(
   senderId: string,
   recipientId: string,
   via?: "match"
-): Promise<"friends" | "requested"> {
+): Promise<"friends" | "requested" | "refused"> {
   const outcome = await db.$transaction(async (tx) => {
     await lockPair(tx, senderId, recipientId)
+
+    // The caller checked before taking the lock; an unmatch or a block holds the
+    // same lock, so what it did is visible now and the answer can be re-asked.
+    const { connectable, conversation } = await readPair(tx, senderId, recipientId)
+    if (!connectable || (via === "match" && !(conversation && isRevealedMatch(conversation)))) {
+      return { state: "refused" as const }
+    }
 
     const [friends, theirs, mine] = await Promise.all([
       tx.friendships.findUnique({ where: pairWhere(senderId, recipientId), select: { id: true } }),

@@ -243,8 +243,9 @@ registry.registerPath({
     "a handle its room keeps anonymous is refused as unknown). Idempotent and cannot nag: asking again neither notifies again " +
     "nor un-dismisses. `friends` when they had already asked you. 400 for your own link. " +
     "A request made by `userId` notifies with `data.via` = `match`, never an event or room. " +
-    "One 404 differs: it carries `reasonCode` `NOT_A_REVEALED_MATCH` when you are in an open match with that person " +
-    "and one of you has not revealed yet (you already know you matched). Every other refusal is byte-identical to an unknown id.",
+    "One 404 differs: it carries `reasonCode` `NOT_A_REVEALED_MATCH` when you are in an open match with that person, " +
+    "they have already revealed to you, and you have not revealed back (you know who they are). While they are still a " +
+    "pseudonym to you, and for every other refusal, the 404 is byte-identical to an unknown id.",
   security: bearerAuth,
   request: {
     body: {

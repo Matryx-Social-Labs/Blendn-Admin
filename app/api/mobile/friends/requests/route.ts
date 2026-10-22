@@ -112,10 +112,13 @@ export async function POST(request: NextRequest) {
       // 200 there would say which pseudonym in that room is them.
       const target = await identityForRef(me, parsed.data.userId)
       recipientId = target.userId
-      const standing = await matchStanding(me, recipientId)
+      const { standing, askerSeesThem } = await matchStanding(me, recipientId)
       const nameable = !target.room || target.identified
       connectable = nameable && standing === "revealed"
-      notYetRevealed = nameable && standing === "pending"
+      // Only to somebody who can already name them, or the 404 says who a
+      // pseudonym is: "Otter" asked by a friend's id, or by a handle from a
+      // room where she is revealed, would come back "you matched her".
+      notYetRevealed = nameable && standing === "pending" && askerSeesThem
     }
 
     if (recipientId === me) return errorResponse("You can't add yourself")
@@ -123,6 +126,8 @@ export async function POST(request: NextRequest) {
     if (!connectable) return notFound()
 
     const state = await requestFriend(me, recipientId, "token" in parsed.data ? undefined : "match")
+    // An unmatch or a block landed between the check above and the pair's lock.
+    if (state === "refused") return notFound()
     // Their invite link brought me: the first link a person uses is the one
     // that counts toward its owner's Blendn+ referral month (lib/plus.ts).
     if ("token" in parsed.data) await recordReferral(me, recipientId)
