@@ -468,7 +468,8 @@ GET /api/mobile/me/rsvps?page=1&limit=20
     { "id": "…", "slug": "…", "title": "Rooftop Sessions",
       "coverImageUrl": null, "coverImage": null,
       "startTime": "…", "endTime": "…", "timezone": "Asia/Kolkata",
-      "status": "published", "venueName": "…", "address": "…", "city": "Bengaluru",
+      "status": "published", "visibility": "public",
+      "venueName": "…", "address": "…", "city": "Bengaluru",
       "latitude": 12.97, "longitude": 77.59,
       "rsvpStatus": "waitlisted", "rsvpAt": "2026-09-20T10:12:00.000Z" }
   ],
@@ -480,6 +481,9 @@ GET /api/mobile/me/rsvps?page=1&limit=20
   correlation, in the future tense.
 - **`going` and `waitlisted`**, with `rsvpStatus` saying which, so a waitlisted
   place is never shown as a confirmed one. Not `maybe` or `not_going`.
+- **`visibility`** is `public`, `unlisted` or `private`, so a card can say an
+  event is unlisted (Flow 16). `GET /users/:userId/favorites` and `GET /events`
+  carry it too; `GET /events` only lists public events.
 - **Upcoming only, soonest first.** An event is listed until its `endTime`.
   Cancelled events stay, with `status: "cancelled"`; drafts and deleted events
   do not appear.
@@ -700,12 +704,27 @@ a moderator's decision is *resolved* (a message or post removed, an account
 suspended, a listing delisted, a crew hidden or dissolved); **not** for a dismissal
 or a reinstatement. It names no one and no thing, and it has no switch.
 
+## Public share read (landing site, server to server)
+
+Not for the app. The landing site's functions call these to draw `www.blendn.app/e/<id>`, `/v/<id>`
+and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-public.ts`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/public/share/events/:eventId` | `{ available: true, event }`: `id`, `title`, `description`, `startsAt`, `endsAt`, `timezone`, `state` (`upcoming` / `cancelled` / `ended`), `indexable`, `minAge`, `place` `{ venue, name, address, area }`, `coverUrl`, `venueUpcoming` (at most 3 public events at its venue). Published, cancelled or completed events that are `public` or `unlisted`, host not suspended |
+| GET | `/api/public/share/venues/:venueId` | `{ available: true, venue }`: `id`, `name`, `typeLabel`, `area`, `address`, `city`, `indexable`, `upcoming` (at most 5, public published future events only). An active venue; `indexable` is false for a claimed venue with Open on Blendn off |
+
+- **An unlisted event** carries `place.area` only (no venue, address or description), an empty `venueUpcoming`, and `indexable: false`.
+- **Unavailable is one answer.** Private, draft, deleted, suspended host, venue day, unknown and malformed ids: `404 {"available":false}`, the same bytes and headers as a 200 (`Cache-Control: public, s-maxage=60, stale-while-revalidate=60`). A failed read is `503 {"available":false,"retry":true}` with `no-store`, never that 404.
+- **`coverUrl`** is only an object under `events/` on the public bucket, else null; the landing checks the host again before fetching it.
+- **Rate limit:** 120 a minute per client network under the fixed key `share:<network>`; a 429 is `no-store`. The landing sends the visitor in `x-share-client` and proves itself with `x-share-proxy` (= `SHARE_PROXY_SECRET`, compared in constant time); without a matching secret the header is ignored and the caller is limited by its own address.
+
 ## Events
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
-| GET | `/events/:eventId` | Get event details. Also carries `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case, the row as selected — or null. `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
+| GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case, the row as selected — or null. `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
 | POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`) |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
@@ -3049,7 +3068,7 @@ be seen.
 | GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
 | GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their board post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow |
-| GET | `/users/:userId/favorites` | Get your saved events — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
+| GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
 | GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |

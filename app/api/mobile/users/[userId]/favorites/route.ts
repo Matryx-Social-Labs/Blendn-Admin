@@ -171,6 +171,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         endTime: event.end_time,
         timezone: event.timezone,
         status: event.status,
+        visibility: event.visibility,
         venueName: event.venue_name,
         address: event.address,
         city: await resolveEventCity(event.city, event.latitude, event.longitude, geocodes),
