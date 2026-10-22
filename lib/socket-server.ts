@@ -5,6 +5,7 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
+import { notStrangersTo } from "./room-people"
 import { idInConversation } from "./conversation-handle"
 import { keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
@@ -96,7 +97,8 @@ export interface ServerToClientEvents {
    */
   "event:checkin": (data: {
     eventId: string
-    userId: string
+    /** Their handle in this room; ABSENT on a friend's copy (D23: a friend knows the handle's pseudonym), and on nobody else's. */
+    userId?: string
     checkInTime: string
     /**
      * Distinct people inside right now (`hereCountFor`) — goes down on a
@@ -117,7 +119,8 @@ export interface ServerToClientEvents {
   }) => void
   "event:checkout": (data: {
     eventId: string
-    userId: string
+    /** As on `event:checkin`: absent on a friend's copy. */
+    userId?: string
     checkOutTime: string
     /** As on `event:checkin`. */
     hereCount?: number
@@ -1221,7 +1224,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   /** The room the handles are minted in: an event id, or a room of another kind (`RoomScope`). */
   scope: RoomScope,
   event: E,
-  build: (idFor: (userId: string) => string, recognises: boolean) => Payload<E>,
+  build: (idFor: (userId: string) => string, recognises: boolean, viewer: string) => Payload<E>,
   skipSocketId?: string,
   about?: string
 ): Promise<void> {
@@ -1261,7 +1264,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
     let copy = copies.get(viewer)
     if (!copy) {
       const idFor = (userId: string) => (userId === viewer ? userId : handleOf(userId))
-      copies.set(viewer, (copy = build(idFor, recognising.has(viewer))))
+      copies.set(viewer, (copy = build(idFor, recognising.has(viewer), viewer)))
     }
     ;(recipient.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
   }
@@ -1364,7 +1367,15 @@ export function emitEventCheckIn(
 
   const checkInTime = new Date().toISOString()
 
-  return sendWithHereCount(eventId, (hereCount) => {
+  /*
+   * Friends of the arriver hear NOTHING of them as a stranger (the owner's rule,
+   * 2026-10-22): no `event:room:checkin` (they are in the exclusion with the
+   * blocks), and on the counter room's `event:checkin` a copy without the handle
+   * — a friend knows which pseudonym is theirs, so the handle beside a chat line
+   * timed to this arrival would name it. The count still moves. An opted-in
+   * friend gets `room:friends` instead (Friends here), by real id.
+   */
+  return notStrangersTo(userId).then((friends) => sendWithHereCount(eventId, (hereCount) => {
     /*
      * Two rooms, because two audiences want different things.
      *
@@ -1382,9 +1393,9 @@ export function emitEventCheckIn(
      * `room-preview` serves the same number to anyone who can open the event.
      */
     return Promise.all([
-      emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkin", (idFor) => ({
+      emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkin", (idFor, _recognises, viewer) => ({
         eventId,
-        userId: idFor(userId),
+        ...(friends.has(viewer) ? {} : { userId: idFor(userId) }),
         checkInTime,
         hereCount,
       })),
@@ -1398,7 +1409,7 @@ export function emitEventCheckIn(
        */
       listed &&
       emitAsSeenBy(
-        io.in(`event:room:${eventId}`).except(excludeUserIds.map((id) => `user:${id}`)),
+        io.in(`event:room:${eventId}`).except([...excludeUserIds, ...friends].map((id) => `user:${id}`)),
         eventId,
         "event:room:checkin",
         (idFor, recognises) => {
@@ -1416,7 +1427,7 @@ export function emitEventCheckIn(
         identity ? userId : undefined
       ),
     ]).then(() => undefined)
-  })
+  }))
 }
 
 /**
@@ -1427,14 +1438,19 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
   if (!io) return
 
   const checkOutTime = new Date().toISOString()
-  sendWithHereCount(eventId, (hereCount) =>
-    emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor) => ({
-      eventId,
-      userId: idFor(userId),
-      checkOutTime,
-      hereCount,
-    }))
-  )
+  // As an arrival: a friend's copy carries the count and no handle (D23).
+  void notStrangersTo(userId)
+    .then((friends) =>
+      sendWithHereCount(eventId, (hereCount) =>
+        emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor, _recognises, viewer) => ({
+          eventId,
+          ...(friends.has(viewer) ? {} : { userId: idFor(userId) }),
+          checkOutTime,
+          hereCount,
+        }))
+      )
+    )
+    .catch((error: unknown) => logger.warn("Check-out emit failed", { eventId, error: error instanceof Error ? error.message : String(error) }))
 }
 
 /**

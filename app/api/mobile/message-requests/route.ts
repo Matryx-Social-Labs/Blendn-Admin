@@ -5,6 +5,7 @@ import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
 import { identityForRef } from "@/lib/identity"
 import { userIdFromRef } from "@/lib/room-handle"
+import { knownToEachOther } from "@/lib/room-people"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal } from "@/lib/event-access"
@@ -170,7 +171,11 @@ export async function POST(request: NextRequest) {
         : existingRequest.status !== "declined"
           ? "This user has already sent you a request. Check your incoming requests."
           : null
-    const refusal = conflict ?? (existingConversation ? "You already have a conversation with this user" : null)
+    // A friend, with or without a DM yet, is "something already exists": the
+    // friend DM door is theirs (`POST /friends/:id/conversation`), and a real
+    // request to a friend would be a stranger's card in a room.
+    const friends = await knownToEachOther(authUser.userId, recipientId)
+    const refusal = conflict ?? (existingConversation || friends ? "You already have a conversation with this user" : null)
 
     if (refusal) {
       /*

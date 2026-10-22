@@ -20,7 +20,7 @@ const mockDb = {
   // and friends. Empty unless a case sets them.
   blocked_users: { findMany: jest.fn() },
   private_conversations: { findMany: jest.fn() },
-  friendships: { findMany: jest.fn() },
+  friendships: { findMany: jest.fn(), findFirst: jest.fn(async () => null) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
@@ -87,6 +87,7 @@ beforeEach(() => {
   mockDb.blocked_users.findMany.mockResolvedValue([])
   mockDb.private_conversations.findMany.mockResolvedValue([])
   mockDb.friendships.findMany.mockResolvedValue([])
+  mockDb.friendships.findFirst.mockResolvedValue(null)
 })
 
 it("sends, and emits room:wave to the recipient with the sender's pseudonym", async () => {

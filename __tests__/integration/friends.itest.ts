@@ -399,7 +399,7 @@ describe("friends are still pseudonyms in a room", () => {
     expect(await maySeeIdentity(cam.id, ben.id)).toBe(false)
   })
 
-  it("friends leave each other's match pool only where they can recognise each other", async () => {
+  it("friends leave each other's deck whatever either switch says (the owner's rule: friends are never strangers in a room)", async () => {
     const host = await makeUser("fr-host", "organizer")
     users.push(host)
     const eventId = await makeEvent(host)
@@ -417,21 +417,18 @@ describe("friends are still pseudonyms in a room", () => {
       (await matchesForEvent(eventId, viewer.id))!.map((m) => resolveUserRef(m.userId)!.userId).sort()
     expect(await deck(ana)).toEqual([ben.id, cam.id].sort())
 
-    /*
-     * Friends, both switches off: each is a stranger to the other in this room,
-     * so each stays in the other's deck. Dropping Ben here while the roster
-     * lists him made "on the roster, not in the deck" the handle that is Ana's
-     * friend — the recognition his switch refuses, by subtraction.
-     */
+    // Friends, both switches off: each is gone from the other's deck. This used
+    // to keep a friend with the switch off as a pseudonymous card, so that
+    // "on the roster, not in the deck" would not name the friend; the roster
+    // drops friends the same way now, so there is nothing left to name.
     await befriend(ana, ben)
-    expect(await deck(ana)).toEqual([ben.id, cam.id].sort())
-    expect(await deck(ben)).toEqual([ana.id, cam.id].sort())
+    expect(await deck(ana)).toEqual([cam.id])
+    expect(await deck(ben)).toEqual([cam.id])
 
-    // Ben lets friends recognise him: now Ana knows he is here, and a friend
-    // she can see is not a match. Ana's switch is still off, so Ben keeps her.
+    // Ben's switch changes who is in Friends here, not who is in the deck.
     await db.profiles.update({ where: { id: ben.id }, data: { friends_see_me_in_rooms: true } })
     expect(await deck(ana)).toEqual([cam.id])
-    expect(await deck(ben)).toEqual([ana.id, cam.id].sort())
+    expect(await deck(ben)).toEqual([cam.id])
   })
 })
 

@@ -481,6 +481,12 @@ async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): P
     })
   }
   await tx.friend_requests.deleteMany({ where: eitherWay(a, b) })
+  // Likes between them go inert for good (the owner's rule: friends are never
+  // strangers): an unfriend later must not resurrect a match from an old like,
+  // and a friend never counts toward anyone's "liked you" ranking.
+  if (connectable) {
+    await tx.event_likes.deleteMany({ where: { OR: [{ liker_id: a, liked_id: b }, { liker_id: b, liked_id: a }] } })
+  }
   return connectable
 }
 
@@ -584,6 +590,8 @@ export async function releaseHeldRequests(userIds: readonly string[]): Promise<v
     const mutual = releasedPairs.filter(([a, b]) => (senders.get(`${a}|${b}`)?.size ?? 0) > 1)
     if (mutual.length > 0) {
       await tx.friendships.createMany({ data: mutual.map(([user1_id, user2_id]) => ({ user1_id, user2_id })), skipDuplicates: true })
+      // Likes between friends are inert for good (see `befriendIn`).
+      await tx.event_likes.deleteMany({ where: { OR: mutual.flatMap(([a, b]) => [{ liker_id: a, liked_id: b }, { liker_id: b, liked_id: a }]) } })
       await tx.friend_requests.deleteMany({ where: { OR: mutual.map(([a, b]) => eitherWay(a, b)) } })
     }
     const mutualKeys = new Set(mutual.map((p) => p.join("|")))

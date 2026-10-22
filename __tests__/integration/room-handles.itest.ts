@@ -178,9 +178,12 @@ describe("a friend who holds your real id reads the room and finds nothing", () 
     ;[ana, ben, cam] = [await person("rh-ana"), await person("rh-ben"), await person("rh-cam")]
     for (const p of [ana, ben, cam]) await checkIn(eventId, p)
     chatGroupId = (await db.chat_groups.findUniqueOrThrow({ where: { event_id: eventId }, select: { id: true } })).id
-    // Friends, with Ben's switch at its default: off.
-    await befriend(ana, ben)
-
+    /*
+     * Ana holds Ben's real id from somewhere (an invite, a past event). She is
+     * not his friend: friends no longer meet as strangers in a room at all
+     * (`room-people.ts`; what they see is pinned in `friends-in-room.itest.ts`),
+     * so the roster-handle mechanics below are those of anyone who knows an id.
+     */
     const post = (p: Person, content: string) =>
       call(eventChatRoute.POST, `/api/mobile/events/${eventId}/chat`, p, {
         method: "POST",
@@ -454,7 +457,7 @@ describe("a friend who holds your real id reads the room and finds nothing", () 
   })
 })
 
-describe("a response that differs for a friend is the id by another route", () => {
+describe("a response that differs for a friend is the id by another route (and a friend is no card)", () => {
   let eventId: string
   let ana: Person, ben: Person, sam: Person
   let hBen: string, hSam: string
@@ -484,8 +487,18 @@ describe("a response that differs for a friend is the id by another route", () =
     })
     expect(dm.status).toBe(200)
     dmId = dm.body.data.conversationId
-    hBen = await rosterRef(eventId, ana, ben)
+    // A friend is on no roster for Ana, so the handle is the one a CHAT LINE of
+    // Ben's carries: the room handle for him, exactly.
+    hBen = roomHandle(eventId, ben.id)
     hSam = await rosterRef(eventId, ana, sam)
+  })
+
+  it("a friend is on no roster and in no deck for his friend, whatever his switch", async () => {
+    expect((await roster(eventId, ana)).map((a) => resolveUserRef(a.userId)?.userId)).not.toContain(ben.id)
+    const deck = await call(matchesRoute.GET, `/api/mobile/events/${eventId}/matches`, ana, { params: { eventId } })
+    const refs = (deck.body.data.matches as { userId: string }[]).map((m) => m.userId)
+    expect(refs).toContain(hSam)
+    expect(refs).not.toContain(hBen)
   })
 
   it("a message request to the friend's handle answers exactly as one to a stranger's, and writes nothing", async () => {
@@ -538,12 +551,6 @@ describe("a response that differs for a friend is the id by another route", () =
     expect(ben404).toEqual(sam404)
     // The raw id still works for a friend who holds it — nothing new learned.
     expect((await call(friendRoute.GET, `/api/mobile/friends/${ben.id}`, ana, { params: { userId: ben.id } })).status).toBe(200)
-  })
-
-  it("the friend stays in the deck as the stranger they chose to be", async () => {
-    const deck = await call(matchesRoute.GET, `/api/mobile/events/${eventId}/matches`, ana, { params: { eventId } })
-    const refs = (deck.body.data.matches as { userId: string }[]).map((m) => m.userId)
-    expect(refs).toEqual(expect.arrayContaining([hBen, hSam]))
   })
 
   it("the card says nothing about the friend DM while the switch is off", async () => {

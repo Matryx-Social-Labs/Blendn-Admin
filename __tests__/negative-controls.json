@@ -1987,6 +1987,18 @@
       "mutation": "B1 pairIsLinked ignores a conversation. B2 it ignores a withdrawn or dismissed request. B3 the ask is never silenced. B4 the author is pushed for a silenced ask. B5 the settled list shows silenced asks. B6 the accept's linked check removed. B7 a block answers 409 again. B8 an accept of a silenced ask is answerable.",
       "observed": "B1: 2 failing. B2: 2 failing. B3: 5 failing. B4: 5 failing. B5: 6 failing (the silenced row would list as settled). B6: 1 failing. B7: 2 failing. B8: 5 failing. Each reverted; 49 of 49.",
       "date": "2026-10-22"
+    },
+    "friends-in-room.itest.ts": {
+      "guards": "B1 (friends in the room, owner's rule 2026-10-22): a friend, whatever their switch, is absent from the deck, the roster page and its total, the room preview's taste count, an event room's participants (which now honour Show online status off); a like at a friend is 200 {mutual:false} with no row, a wave is the show-online-off 403, a message request the synthetic 201 even with no DM; becoming friends deletes their likes; arrivals are not sent to the arriver's friends and a friend's event:checkin/checkout copy has no userId.",
+      "mutation": "G1 the friend exclusion removed from the deck. G2 from the roster. G3 from the room preview. G4 from participants. G5 the participants show-online filter removed. G6 the wave check removed. G7 the like check removed. G8 the message-request friend check removed. G9 the befriend like delete removed. G10 friends dropped from the arrival's exception. G11 the handle kept on a friend's event:checkin copy.",
+      "observed": "G1: 2 failing. G2: 2 failing. G3: 1 failing. G4: 2 failing. G5: 1 failing. G6: 1 failing. G7: 1 failing. G8: 1 failing. G9: 1 failing. G10: 1 failing. G11: 1 failing. Each reverted; 10 of 10.",
+      "date": "2026-10-22"
+    },
+    "people-surfaces-exclude-friends.test.ts": {
+      "guards": "Every listed people surface references lib/room-people.ts (notStrangersTo / knownToEachOther / strangersApartBetween).",
+      "mutation": "G12 the helper import and call removed from lib/room-preview.ts (and from each listed surface in turn). The control inside the test: a source without the helper is rejected by the same regex.",
+      "observed": "G12: 1 failing (the missing file is named). Reverted; 3 of 3.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [

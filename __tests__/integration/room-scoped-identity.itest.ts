@@ -348,18 +348,20 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect((await get(hA)).status).toBe(200)
   })
 
-  it("and as a friend she stays in C's deck, as the stranger C shows", async () => {
+  it("and as a friend she is in no deck: C's, as in every room (friends are never strangers)", async () => {
     /*
-     * The deck drops friends the viewer can recognise. Asked unscoped, the
-     * reveal at A made her recognisable at C, so she alone left C's deck —
-     * "on the roster, not in the deck" picked out which pseudonym was the
-     * friend. Asked in C's terms she is a stranger there, and stays.
+     * This used to pin that she STAYED in C's deck as the stranger C shows,
+     * because dropping only the card the viewer could recognise picked out the
+     * friend ("on the roster, not in the deck"). The owner's rule moved: every
+     * friend leaves every stranger surface (lib/room-people.ts), the roster
+     * included, so there is no pseudonym left to pick out. A stranger's card
+     * stays.
      */
     const deck = await call(matchesRoute.GET, `/api/mobile/events/${C}/matches`, viewer, { params: { eventId: C } })
     expect(deck.status).toBe(200)
-    expect((deck.body.data.matches as { userId: string }[]).map((m) => m.userId)).toEqual(
-      expect.arrayContaining([hC, hStrangerC])
-    )
+    const refs = (deck.body.data.matches as { userId: string }[]).map((m) => m.userId)
+    expect(refs).toContain(hStrangerC)
+    expect(refs).not.toContain(hC)
   })
 
   it("a handle for a room the viewer was never in names nobody, revealed or not", async () => {

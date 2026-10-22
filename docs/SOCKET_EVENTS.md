@@ -147,7 +147,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `event:checkin` | `{ eventId, userId, checkInTime, hereCount? }` | Someone checked in. No name: this room is open to anyone viewing the event. |
+| `event:checkin` | `{ eventId, userId?, checkInTime, hereCount? }` | Someone checked in. No name: this room is open to anyone viewing the event. `userId` is their room handle, **absent on a friend's copy** (a friend knows which pseudonym is theirs, so the handle beside a chat line timed to this arrival would name it); the count still moves. `event:checkout` is the same. |
 | `event:checkout` | `{ eventId, userId, checkOutTime, hereCount? }` | Someone checked out |
 | `event:interestUpdate` | `{ eventId, userId, interested, interestCount }` | Interest toggled |
 
@@ -155,7 +155,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `event:room:checkin` | `{ eventId, userId, userName, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym. Never sent to the arriver's block counterparties, and not sent at all for an arriver with "Show online status" off — the roster leaves them out, so only `event:checkin` (no name) moves the count (SCRUM-620). |
+| `event:room:checkin` | `{ eventId, userId, userName, userImage?, checkInTime, hereCount? }` | Who arrived, by pseudonym. Never sent to the arriver's block counterparties, and not sent at all for an arriver with "Show online status" off — the roster leaves them out, so only `event:checkin` (no name) moves the count (SCRUM-620). Nor to the arriver's **friends**, whatever their switch: friends never meet as strangers in a room. |
 
 ### Room Events (room: `user:{userId}`)
 

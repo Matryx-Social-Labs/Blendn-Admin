@@ -1677,6 +1677,32 @@ which request ids are real.
 
 ---
 
+## Friends in rooms
+
+The owner's rule (2026-10-22): **two friends never meet as strangers in a
+room.** A friend is never a card, a face, a row, an arrival, a wave, a like or a
+message request to the other, whatever either switch says. To you, a friend who
+is not in "Friends here" is exactly what someone with "Show online status" off
+already is: counted in the headcount, listed nowhere.
+
+- **Absent for a viewer's friends:** the match deck / Meet next / was here
+  (`GET /events/:id/matches`), the roster page and its `pagination.totalCount`
+  (`GET /events/:id/checkins`), the room preview's taste count, an event room's
+  participants list (`GET /chat/groups/:id/participants`; that list also now
+  honours "Show online status" off, as the roster does — crew and Blend rooms are
+  unchanged), and the live arrival (`event:room:checkin` is not sent to the
+  arriver's friends). On `event:checkin` and `event:checkout` a friend's copy has
+  no `userId` (the count only).
+- **Refusals that must look like an unlisted stranger's:** a like at a friend is
+  `200 { mutual: false }` and writes nothing; a wave is `403 RECIPIENT_NOT_HERE`
+  (the show-online-off body); a message request is the synthetic `201` with
+  nothing written, even when no friend DM exists yet.
+- **Likes between friends go inert for good:** becoming friends deletes the
+  `event_likes` between them, so an unfriend cannot resurrect a match.
+- The helpers are `lib/room-people.ts` (`notStrangersTo`, `knownToEachOther`,
+  `strangersApartBetween`); a guard test fails the build when a people surface
+  does not use them.
+
 ## Friends
 
 | Method | Endpoint | Description |

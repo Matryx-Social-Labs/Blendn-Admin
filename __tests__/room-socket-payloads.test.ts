@@ -22,6 +22,8 @@ jest.mock("@/lib/db", () => ({
     chat_groups: { findUnique: (...a: unknown[]) => mockChatGroup(...a) },
     // The emitter asks a room's kind: a venue day's goes only to the people live in it.
     events: { findUnique: async () => ({ kind: "event" }) },
+    // Friends of the arriver are excluded and get no handle (lib/room-people.ts).
+    friendships: { findMany: async () => [] },
   },
 }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn(), accountBlockReason: jest.fn() }))
