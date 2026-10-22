@@ -350,6 +350,58 @@ registry.registerPath({
   },
 })
 
+// GET /api/mobile/events/{eventId}/people
+const NightPersonSchema = z
+  .object({
+    userId: z.string().describe("Their handle in this room (`rh_…`), never an account id. `POST /matches/likes` and message requests take it."),
+    displayName: z.string().describe("The room's pseudonym, or their name where they revealed here."),
+    photo: z.string().nullable().describe("Only beside a name; null beside a pseudonym."),
+    age: z.number().int().nullable(),
+    insideNow: z.boolean().describe("Still checked in. False reads \"Was here\"."),
+    youLiked: z.boolean(),
+    overlap: z.string().nullable().describe("One sentence of what you share, or null. Always null on a night under 8 people."),
+  })
+  .openapi("NightPerson")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/people",
+  tags: ["Mobile Events"],
+  summary: "People from a night you attended",
+  description:
+    "The Recap's \"People from tonight\" deck (Flow 4 · 4.5): who checked in, as the room shows them, until the room's " +
+    "chat closes 24 hours after the end; after that `open: false` and the count only. Never listed: you, staff, " +
+    "anyone in a block with you either way, anyone you closed a conversation with, your friends (whatever their " +
+    "room setting — friends never meet as stranger cards), anyone with Show online status off, a member a host " +
+    "banned from the room, a suspended or deleted account. `total` counts who may be listed.\n\n" +
+    "Paged by `cursor`: send `nextCursor` (the last card's handle) back; it is valid in this room only. Ordered by " +
+    "first arrival. `limit` 1–50, default 30. 404 for an unknown, draft or deleted event and for a venue's live " +
+    "room; 403 if you never checked in; 400 `INVALID_CURSOR` for a cursor that is not a card from this room.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    query: z.object({ cursor: z.string().optional(), limit: z.coerce.number().int().min(1).max(50).optional() }),
+  },
+  responses: {
+    200: {
+      description: "The deck, a page at a time",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              open: z.boolean(),
+              total: z.number().int(),
+              people: z.array(NightPersonSchema),
+              nextCursor: z.string().nullable(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 // POST /api/mobile/events/{eventId}/checkout
 registry.registerPath({
   method: "post",

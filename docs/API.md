@@ -698,7 +698,8 @@ or a reinstatement. It names no one and no thing, and it has no switch.
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
 | GET | `/events/:eventId` | Get event details. Also carries `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case, the row as selected — or null. `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
-| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`) |
+| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). `left` names the rooms it took you out of (see "One room at a time, and the switch") |
+| GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
@@ -871,6 +872,49 @@ both people agreed to talk, and two likes are exactly that.
 revealed?: boolean, remember?: boolean }`. Per event, because both change —
 someone open to dating on a Friday is often only there for the talk on Tuesday.
 `remember` also writes the profile default.
+
+### GET /events/:eventId/people — people from tonight
+
+The Recap's "People from tonight" row and its deck (Flow 4 · 4.5): who checked
+in to a night you attended, as the room shows them, marked "Was here", with
+Like (`POST /events/:eventId/matches/likes` takes the handle) and Message.
+
+```
+GET /events/:eventId/people?limit=30&cursor=rh_…
+```
+
+```json
+{ "success": true, "data": {
+  "open": true, "total": 5120, "nextCursor": "rh_…",
+  "people": [
+    { "userId": "rh_…", "displayName": "Cosmic Panda", "photo": null, "age": 27,
+      "insideNow": false, "youLiked": false, "overlap": "You both picked chai over filter coffee" }
+  ]
+} }
+```
+
+- **As the room shows them.** `userId` is the person's handle in this room,
+  never an account id; `displayName` is their pseudonym, or their name (with a
+  `photo`) only where they revealed here — the roster's rule.
+- **Never listed:** you; staff; anyone in a block with you, either way; anyone
+  you closed a conversation with; **your friends**, whatever their "friends can
+  see me in rooms" setting — friends never meet as stranger cards (owner,
+  2026-10-22); Show online status off; a member a host banned from the room; a
+  suspended or deleted account. `total` counts who may be listed.
+- **Until the room's chat closes** (24 hours after the end). After that
+  `{ open: false, total, people: [], nextCursor: null }` — the count only. A
+  `total` of 0 means nobody to show: leave the row out.
+- **Paged by cursor** for a concert-sized night: ordered by first arrival; send
+  `nextCursor` (the last card's handle) back until it is null. `limit` 1–50,
+  default 30. `overlap` is one sentence of what you share, and always null on a
+  night under 8 people.
+
+| Refusal | When |
+|---|---|
+| 404 | Unknown, draft or deleted event, or a venue's live room (its people are for whoever is live there now) |
+| 403 | You never checked in to it |
+| 400 `INVALID_CURSOR` | A cursor that is not a card from this room (another room's, forged, or an id): start from the top |
+| 429 `RATE_LIMITED` | 60 a minute per person |
 
 ### GET /events - Query Parameters
 
@@ -1257,7 +1301,7 @@ today (choosing it again does not restart the four hours). Anything else is
   "venueDayId": "…", "chatGroupId": "…",
   "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false, "stayUntil": null,
   "checkIn": { "id": "…", "status": "checked_in", "checkInTime": "…" },
-  "revealSuggestion": false, "intentNeeded": false
+  "revealSuggestion": false, "intentNeeded": false, "left": []
 } }
 ```
 
@@ -1296,6 +1340,63 @@ today (choosing it again does not restart the four hours). Anything else is
 { "success": false, "error": "Friday session is on here. Check in to it instead.",
   "errorCode": "EVENT_LIVE_HERE", "eventId": "…" }
 ```
+
+### POST /checkins/inside — which places am I inside
+
+The places whose door would admit you where you stand (SCRUM-704). Light the
+disc and dock the pass from this alone: the phone's own "nearest pin within
+100 m" disagreed with the doors, which judge the real fence.
+
+```json
+{ "latitude": 12.9784, "longitude": 77.6408, "deviceInfo": { "gpsAccuracy": 12 } }
+```
+
+```json
+{ "success": true, "data": {
+  "places": [
+    { "kind": "event", "eventId": "…", "venueId": null, "name": "Neon Nights",
+      "venueName": "Toit", "startTime": "…", "endTime": "…",
+      "going": true, "saved": false, "checkedIn": false },
+    { "kind": "venue", "eventId": null, "venueId": "…", "name": "Toit",
+      "venueName": null, "startTime": null, "endTime": null,
+      "going": false, "saved": false, "checkedIn": false }
+  ],
+  "total": 2,
+  "current": { "eventId": "…", "kind": "event", "venueId": null, "name": "Fandom" }
+} }
+```
+
+- **Judged as the doors judge:** the event's fence (or a venue's Go Live area,
+  today's copy once somebody went live), the accuracy allowance, the event's
+  day (a cancelled day or one not yet open is out), onboarding, the age rule,
+  a private event's guest list, and a venue a linked event has taken over (the
+  event is listed instead). A fix worse than 150 m is inside nothing.
+- **Order** — the first is the one the pass docks: an event you're `going` to
+  or `saved`; events before venues; the event whose day started first; the
+  nearest. At most 10, with `total` ("2 here · Switch").
+- **`current`** is the room you're in now, or null. Beside a place that is not
+  `checkedIn`, say "Checking in here takes you out of {current.name}." before
+  the hold — the switch is never silent (SCRUM-635).
+- **No distance**, ever: a venue's area is shown to nobody. POST so the
+  position never sits in a logged URL. 20 a minute per person (`429`).
+
+### One room at a time, and the switch
+
+You are checked in to one place at a time — the database holds it (one open
+check-in per person, SCRUM-705), so two doors at once leave exactly one open:
+the later one. Checking in somewhere else (an event's door or Go Live) takes
+you out of where you were, and both doors now say so: their responses carry
+`left`, the rooms the switch took you out of, for the toast "You left {name}."
+
+```json
+"left": [{ "eventId": "…", "kind": "event", "name": "Fandom" }]
+```
+
+`kind: "venue_day"` is a venue's room, and `name` is the venue's. Empty when
+you were in nothing, when you checked in again where you already were, when a
+Go Live you had there had already run out, or when it was an earlier day of the
+same event (that day is over, and its room is this one). A venue's room also
+gets `live:ended { reason: "switched_event" }` on your sockets, as before.
 
 ---
 
@@ -3185,6 +3286,7 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | GET | `/categories` | List all categories |
 | GET | `/amenities` | The amenity vocabulary — what an event can say it offers |
 | GET | `/work-fields` | The eighteen coarse fields of work, as `{ slug, label }` |
+| POST | `/checkins/inside` | Which places am I inside — see "POST /checkins/inside" under Venues |
 | GET | `/checkins/active` | Get user's active check-ins. Each carries `kind` (`venue_day` is a Go Live: label it by `event.venueName`), `venueId` (the venue a Go Live is at, to extend or go again; null at an event), `expiresAt` (a Go Live's end; null at an event) and `stay`. A Go Live past its end is never listed, swept or not |
 | POST | `/notifications/token` | Register push token. Optional `channelSet` (2: the build has the `matches`, `crew` and `after-the-night` channels) |
 | DELETE | `/notifications/token` | Remove push token |
