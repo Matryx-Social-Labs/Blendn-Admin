@@ -833,6 +833,24 @@ export async function headObject(key: string): Promise<ObjectFacts | null> {
   }
 }
 
+/**
+ * Whether an object exists, told apart from not being able to tell.
+ *
+ * `headObject` folds "missing" and "permissions, network, 5xx" into one null
+ * because its callers only need "cannot vouch for this". A caller about to
+ * DELETE a record on the strength of "it is gone" needs the difference: only
+ * a confirmed 404 is gone (SCRUM-732).
+ */
+export async function objectPresence(key: string): Promise<"present" | "gone" | "unknown"> {
+  try {
+    await getS3Client().send(new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }))
+    return "present"
+  } catch (error) {
+    const e = error as { name?: string; $metadata?: { httpStatusCode?: number } }
+    return e?.$metadata?.httpStatusCode === 404 || e?.name === "NotFound" || e?.name === "NoSuchKey" ? "gone" : "unknown"
+  }
+}
+
 /** The public URL for a key, pinned to a version when there is one. */
 export function pinnedUrl(key: string, versionId: string | null): string {
   const base = getPublicUrl(key)

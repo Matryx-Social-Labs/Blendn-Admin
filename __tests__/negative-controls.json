@@ -1957,6 +1957,30 @@
       "mutation": "M900 `d.country = 'IN' AND` put back in the localities WHERE. M901 the `cells` table renamed back to a single `extent` box.",
       "observed": "M900: 1 of 11 failing ('names no country'). M901: 1 of 11 failing ('reads the polygons near the venues'). Each reverted; 11 of 11.",
       "date": "2026-10-20"
+    },
+    "openai-image-moderation-retry.test.ts": {
+      "guards": "SCRUM-732: checkImageContent retries a vendor download failure (400 'Failed to download image.'), a 429 and a 5xx when the caller asks (the after() photo path), returns the retry's verdict, gives up as 'did not look' after the retries, never retries a different 400, never retries by default (the chat path waits on it), and logs the vendor's error body.",
+      "mutation": "M1517 the retry loop ignores `retries`. M1518 every 400 counts as transient. M1519 a download failure is not transient. M1520 the vendor's body is not logged. M1540 the vendor's error body logged with any URL it echoes (a private image's is a signed link).",
+      "observed": "M1517: 4 of 6 failing. M1518: 1 of 6 ('does not retry a 400 that is not a download failure'). M1519: 2 of 6. M1520: 1 of 6. M1540: 1 of 7 failing. Each reverted; 7 of 7.",
+      "date": "2026-10-22"
+    },
+    "integration/photo-moderation-sweep.itest.ts": {
+      "guards": "SCRUM-732: the sweep re-asks the vendor about photo_checks rows left unchecked (photo and blur, through moderateProfilePhoto/moderateBlurPhoto, with retries), pulls what the second look finds unsafe, leaves a still-failing row for the next pass, waits out the write's own check (SWEEP_SETTLE_MS), drops a row only for an object confirmed gone (objectPresence) that nothing on the profile points at, pulls a URL that is not the person's own object (fail closed, never sent to the vendor), stamps each attempt, takes the least recently attempted first and at most PER_USER_SLOTS a person so one pile cannot starve the queue, backs a row off after MAX_ATTEMPTS_PER_DAY_AFTER tries, reports what it settled. The cap is a window function in the query, so no pile of rows can fill a read-ahead (a 300-row pile and one honest row: the honest row is checked).",
+      "mutation": "M1521 the ownership gate dropped (a foreign URL kept, not pulled). M1522 the confirmed-gone drop dropped. M1523 the settle window dropped. M1524 a blur routed as a photo. M1525 the photo path without retries. M1527 `settled` counts the rows selected. M1528 'could not tell' read as gone. M1529 a gone object's row dropped though the profile points at it. M1530 the per-person cap dropped. M1531 least-recently-attempted ordering dropped (oldest first). M1532 the attempt not stamped. M1533 the daily back-off dropped. M1535 the per-person cap dropped from the query (slot >= 1), so a pile bigger than any read-ahead fills the batch. M1536 a URL that only looks like ours (right host family and path, other bucket) pulled instead of left alone. M1537 storage 'unknown' counted as an attempt. M1538 no key guard (rows stamped and backed off with nothing to ask). M1539 the profile check moved out of the delete (a save during the storage call loses the row).",
+      "observed": "M1521: 1 of 14 failing. M1522: 1 of 14 failing. M1523: 1 of 14 failing. M1524: 1 of 14 failing. M1525: 1 of 14 failing (after asserting retries > 0, not just a number). M1527: 1 of 14 failing. M1528: 1 of 14 failing. M1529: 1 of 14 failing. M1530: 1 of 14 failing. M1531: 1 of 14 failing (after giving the rows distinct ages; with equal ages the heap order rotated them by accident). M1532: 2 of 14 failing. M1533: 1 of 14 failing. M1535: failing (the 300-row pile starves the honest row; 2 of 15). M1536: 1 of 19 failing. M1537: 1 of 19. M1538: 1 of 19. M1539: 2 of 19 failing. Each reverted; 19 of 19.",
+      "date": "2026-10-22"
+    },
+    "photo-sweeper-started.test.ts": {
+      "guards": "SCRUM-732: lib/background.ts starts the photo moderation sweeper and stops it on shutdown, and lib/photo-sweeper.ts imports by relative path because server.ts compiles with plain tsc.",
+      "mutation": "M1526 the sweeper not started in background.ts.",
+      "observed": "M1526: 1 of 2 failing (the start/stop test). Reverted; 2 of 2.",
+      "date": "2026-10-22"
+    },
+    "object-presence.test.ts": {
+      "guards": "SCRUM-732: objectPresence says 'gone' only for a confirmed 404 (NotFound); a 403, a 5xx and a network failure are 'unknown', so the sweep never deletes a record on a storage error.",
+      "mutation": "M1534 every error read as gone.",
+      "observed": "M1534: 4 of 6 failing. Reverted; 6 of 6.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [
