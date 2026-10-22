@@ -168,6 +168,8 @@ export interface ServerToClientEvents {
        * from "Sponsored" and the client drew it as a peer's bubble (K3.4).
        */
       kind?: "sponsored"
+      /** On a `poll` message: the poll to read and vote on (`/events/:eventId/polls/:pollId`). */
+      pollId?: string
       userId: string
       userName: string
       userImage?: string
@@ -1567,6 +1569,7 @@ export function emitChatMessage(
     content: string
     type: string
     kind?: "sponsored"
+    pollId?: string
     userId: string
     userName: string
     userImage?: string

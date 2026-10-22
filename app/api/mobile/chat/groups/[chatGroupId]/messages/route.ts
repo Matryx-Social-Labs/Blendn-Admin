@@ -153,6 +153,8 @@ export async function GET(
             },
           },
         },
+        // A poll message's poll, for `pollId`. One join on the page, not a lookup each.
+        poll: { select: { id: true } },
         _count: {
           select: {
             replies: true,
@@ -215,10 +217,12 @@ export async function GET(
     const idFor = (userId: string) => idForViewer(user.userId, scope, userId)
 
     return successResponse({
-      messages: messagesToReturn.map((m) => {
+      messages: messagesToReturn.map(({ poll, ...m }) => {
         const isHidden = m.moderation_status === "hidden"
         return {
           ...m,
+          // The poll a `poll` message carries; absent on every other type.
+          ...(m.type === "poll" ? { pollId: isHidden ? null : (poll?.id ?? null) } : {}),
           user_id: idFor(m.user_id),
           deleted_by: m.deleted_by && idFor(m.deleted_by),
           /*

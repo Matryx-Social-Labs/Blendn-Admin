@@ -2459,6 +2459,24 @@ the room. The question doubles as the message `content`, which means a client
 that does not yet know the `poll` type still renders something meaningful rather
 than an empty bubble.
 
+**A `poll` message carries `pollId`** in `GET /chat/groups/:id/messages`,
+`GET /events/:eventId/chat` and the `chat:message` socket payload (`message.pollId`):
+the id to read and vote on above. It is absent on every other type, and `null`
+on a poll message that moderation hid. An older client ignores it.
+
+**Every vote refusal is a 409 `CONFLICT` with its reason in `reasonCode`**, the
+sentence in `error` unchanged: `POLL_CLOSED` ("This poll has closed"),
+`ROOM_CLOSED` ("The chatroom is not open"), `NOT_IN_ROOM` ("You are not in this
+chatroom"), `NOT_AN_OPTION` ("That is not an option on this poll"), `NOT_LIVE`
+(a venue day's room, after Go Live ended). A banned member reading the results
+back is a 403 with the room's ban sentence.
+
+**Why a result is hidden**: beside `suppressed` and `suppressedLabel`, a poll's
+results carry `suppressedReason` (`hidden_until_close`: open, results not published until it
+closes, label "Results appear when the poll closes"; `few_votes`: a count under
+the floor or one that would give a hidden one away; null when nothing is
+withheld), so the app can draw the two differently. Optional and additive.
+
 **Who may read or vote is the room.** The poll must belong to the event in the
 URL, and its message must not be deleted: otherwise `404 Poll not found`, as it
 is for a draft event. The read then applies the room's own read rule

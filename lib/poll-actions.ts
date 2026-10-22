@@ -166,6 +166,7 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       id: created.messageId,
       content: question,
       type: "poll",
+      pollId: created.pollId,
       ...(kind === "sponsored" ? { kind: "sponsored" as const } : {}),
       userId: session.user.id,
       userName: roomSenderName({ type: "poll", metadata: { kind } }, undefined, event),

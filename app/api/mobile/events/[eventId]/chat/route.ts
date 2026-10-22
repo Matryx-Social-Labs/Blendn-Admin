@@ -345,6 +345,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         },
+        // A poll message's poll, for `pollId`. One join on the page, not a lookup each.
+        poll: { select: { id: true } },
         _count: {
           select: {
             replies: true,
@@ -448,6 +450,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           content: isHidden ? null : m.content,
           moderation_hidden: isHidden,
           metadata: isHidden ? null : m.metadata,
+          // The poll a `poll` message carries; absent on every other type.
+          ...(m.type === "poll" ? { pollId: isHidden ? null : (m.poll?.id ?? null) } : {}),
           isEdited: m.is_edited,
           isPinned: m.is_pinned,
           createdAt: m.created_at,
