@@ -1,5 +1,5 @@
 import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
-import { friendIdsOf } from "@/lib/friends"
+import { areFriends, friendIdsOf } from "@/lib/friends"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
@@ -770,6 +770,15 @@ export async function likeAtEvent(
     select: { id: true },
   })
   if (!back) return { mutual: false }
+
+  /*
+   * Friends already have their DM, and a match between them would hand back
+   * that DM's id (the like's response, the `room:match` event), which says which
+   * card on the roster is the friend — past `friends_see_me_in_rooms`. So a
+   * mutual like between friends is no match at all: the like is recorded, and
+   * the answer is the one a like nobody returned gets.
+   */
+  if (await areFriends(likerId, likedId)) return { mutual: false }
 
   /*
    * A closed pair can still reach here.

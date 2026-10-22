@@ -28,6 +28,7 @@ const requestById = require("@/app/api/mobile/friends/requests/[requestId]/route
 const conversations = require("@/app/api/mobile/conversations/route") as typeof import("@/app/api/mobile/conversations/route")
 const conversation = require("@/app/api/mobile/conversations/[conversationId]/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/route")
 const leaveRoute = require("@/app/api/mobile/conversations/[conversationId]/leave/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/leave/route")
+const likesRoute = require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route")
 const blockRoute = require("@/app/api/mobile/users/[userId]/block/route") as typeof import("@/app/api/mobile/users/[userId]/block/route")
 const profile = require("@/app/api/mobile/profiles/[userId]/route") as typeof import("@/app/api/mobile/profiles/[userId]/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -471,6 +472,76 @@ describe("leaving from the DM", () => {
     expect(await db.blocked_users.count({ where: { blocker_id: ana.id, blocked_id: ben.id } })).toBe(1)
     await unblock(ana, ben.id)
     expect(await friends(ben)).toBe(0)
+  })
+})
+
+describe("a mutual like between friends", () => {
+  type Emit = [string, unknown]
+  let emits: Emit[] = []
+  const shared = globalThis as { __blendnSocketIo?: unknown }
+  beforeEach(() => {
+    emits = []
+    const to = () => ({ emit: (event: string, payload: unknown) => void emits.push([event, payload]), to })
+    shared.__blendnSocketIo = { to }
+  })
+  afterEach(() => {
+    shared.__blendnSocketIo = undefined
+  })
+
+  async function room(...people: Person[]) {
+    const host = await makeUser("far-lk-host", "organizer")
+    users.push(host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const occurrence_id = await occurrenceOf(eventId)
+    for (const p of people) {
+      await db.event_check_ins.create({
+        data: { user_id: p.id, event_id: eventId, occurrence_id, check_in_time: new Date(), status: "checked_in" },
+      })
+    }
+    return eventId
+  }
+  const like = (as: Person, eventId: string, who: Person) =>
+    call(likesRoute.POST as Handler, `/api/mobile/events/${eventId}/matches/likes`, as, {
+      method: "POST",
+      body: { userId: roomHandle(eventId, who.id) },
+      params: { eventId },
+    })
+  const befriended = async (a: Person, b: Person) => {
+    const [user1_id, user2_id] = conversationPair(a.id, b.id)
+    await db.friendships.create({ data: { user1_id, user2_id } })
+  }
+
+  it("is no match: the response and the socket are exactly those of a like nobody returned", async () => {
+    const [ana, ben, cam, dee, eve] = [
+      await person("far-lk-a", "Ana"),
+      await person("far-lk-b", "Ben"),
+      await person("far-lk-c", "Cam"),
+      await person("far-lk-d", "Dee"),
+      await person("far-lk-e", "Eve"),
+    ]
+    const eventId = await room(ana, ben, cam, dee, eve)
+    await befriended(ana, ben)
+
+    // The control: a like nobody returned, and the same like between strangers, which does match.
+    const unreturned = await like(ana, eventId, dee)
+    expect(unreturned.body.data).toEqual({ mutual: false })
+    await like(cam, eventId, eve)
+    emits = []
+    const strangers = await like(eve, eventId, cam)
+    expect(strangers.body.data).toMatchObject({ mutual: true, conversationId: expect.any(String) })
+    expect(emits.some(([event]) => event === "room:match")).toBe(true)
+
+    // Friends: ben likes ana, then ana likes ben.
+    await like(ben, eventId, ana)
+    emits = []
+    const friends = await like(ana, eventId, ben)
+    expect(friends).toEqual(unreturned)
+    expect(emits.filter(([event]) => event === "room:match")).toEqual([])
+    expect(JSON.stringify(emits)).not.toContain("conversationId")
+    expect(await db.private_conversations.count({ where: { OR: [{ user1_id: ana.id, user2_id: ben.id }, { user1_id: ben.id, user2_id: ana.id }] } })).toBe(0)
+    // The like itself is recorded.
+    expect(await db.event_likes.count({ where: { event_id: eventId, liker_id: ana.id, liked_id: ben.id } })).toBe(1)
   })
 })
 

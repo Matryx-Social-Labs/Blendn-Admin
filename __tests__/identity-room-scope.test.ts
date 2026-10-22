@@ -154,10 +154,10 @@ describe("the staging case: revealed at A and B, anonymous at C", () => {
 })
 
 describe("in a room's terms, only what that room shows", () => {
-  it("a mutual like at another event does not name her in C", async () => {
+  it("a mutual like names her nowhere: not unscoped, not in C, not in A", async () => {
     state.revealed = []
     state.likes.push({ event_id: A, liker_id: VIEWER, liked_id: TANVI })
-    expect((await maySeeIdentityFor(VIEWER, [TANVI])).has(TANVI)).toBe(true)
+    expect((await maySeeIdentityFor(VIEWER, [TANVI])).has(TANVI)).toBe(false)
     expect((await maySeeIdentityFor(VIEWER, [TANVI], { room: C })).has(TANVI)).toBe(false)
     // Nor in A itself: the roster names people who revealed, not matches.
     expect((await maySeeIdentityFor(VIEWER, [TANVI], { room: A })).has(TANVI)).toBe(false)
