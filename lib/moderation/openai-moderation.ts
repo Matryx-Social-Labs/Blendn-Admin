@@ -151,17 +151,53 @@ export async function checkTextContent(content: string): Promise<ModerationCheck
   }
 }
 
+export interface ImageCheckOptions {
+  /** Extra attempts after a transient vendor failure. Default 0: the chat path waits on this call. */
+  retries?: number
+  retryDelayMs?: number
+}
+
+/**
+ * OpenAI fetches the image itself, and now and then cannot: a freshly written
+ * object answered `400 "Failed to download image."` in 2 of 12 immediate calls
+ * on staging (SCRUM-732), 200 for the same URL a moment later. That, a 429 and
+ * a 5xx are the vendor's trouble, not a verdict on the image.
+ */
+const DOWNLOAD_FAILED = /failed to download/i
+const isTransient = (status: number, body: string) =>
+  status === 429 || status >= 500 || (status === 400 && DOWNLOAD_FAILED.test(body))
+const BODY_LOG_CHARS = 300
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 /**
  * Check image content with the OpenAI Moderation API. Same contract as
  * `checkTextContent`: delivers on failure, and says it did not look.
+ *
+ * `retries` is for callers that are not holding a person's request (the
+ * profile photo checks, which run in `after()`).
  */
-export async function checkImageContent(imageUrl: string): Promise<ModerationCheck> {
+export async function checkImageContent(imageUrl: string, options: ImageCheckOptions = {}): Promise<ModerationCheck> {
   const apiKey = getApiKey()
   if (!apiKey) {
     logger.debug("OpenAI API key not configured, skipping image moderation")
     return notChecked("no_key")
   }
+  const { retries = 0, retryDelayMs = 1_000 } = options
 
+  let last: ModerationCheck = notChecked("error")
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await sleep(retryDelayMs * attempt)
+    const { check, transient } = await imageAttempt(imageUrl, apiKey)
+    if (check.checked || !transient) return check
+    last = check
+  }
+  return last
+}
+
+async function imageAttempt(
+  imageUrl: string,
+  apiKey: string
+): Promise<{ check: ModerationCheck; transient: boolean }> {
   try {
     const response = await fetch(OPENAI_MODERATION_URL, {
       method: "POST",
@@ -182,27 +218,34 @@ export async function checkImageContent(imageUrl: string): Promise<ModerationChe
     })
 
     if (!response.ok) {
+      // The body says why (it is the vendor's error text, never our content).
+      const body = (await response.text().catch(() => "")).slice(0, BODY_LOG_CHARS)
       logger.warn("OpenAI Image Moderation API returned non-OK status", {
         status: response.status,
         statusText: response.statusText,
+        body,
       })
-      return notChecked("error")
+      return { check: notChecked("error"), transient: isTransient(response.status, body) }
     }
 
     const data = await response.json()
     const result = data.results?.[0]
-    if (!result) return notChecked("error")
+    if (!result) return { check: notChecked("error"), transient: false }
 
     return {
-      checked: true,
-      result: evaluateScores(
-        result.category_scores as OpenAIModerationCategory,
-        result.flagged as boolean,
-        "openai_image"
-      ),
+      check: {
+        checked: true,
+        result: evaluateScores(
+          result.category_scores as OpenAIModerationCategory,
+          result.flagged as boolean,
+          "openai_image"
+        ),
+      },
+      transient: false,
     }
   } catch (error) {
     logger.error("OpenAI Image Moderation API call failed", { error: String(error) })
-    return notChecked(abortedByTimeout(error) ? "timeout" : "error")
+    const timedOut = abortedByTimeout(error)
+    return { check: notChecked(timedOut ? "timeout" : "error"), transient: true }
   }
 }

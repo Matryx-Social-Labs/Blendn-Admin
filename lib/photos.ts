@@ -128,6 +128,9 @@ const BLUR_REFUSAL: Record<SealRefusal, PhotoRejection> = {
   too_large: { ok: false, code: "too_large", message: "The blurred copy of your photo is too sharp to send. Update the app and try again." },
 }
 
+/** These run in `after()` or the sweep, never under a person's request, so a vendor hiccup is retried before it counts (SCRUM-732). */
+const PHOTO_CHECK = { retries: 2 } as const
+
 /**
  * The vendor check, after the response. Pulls the photo if it fails.
  *
@@ -142,7 +145,7 @@ const BLUR_REFUSAL: Record<SealRefusal, PhotoRejection> = {
  */
 export async function moderateProfilePhoto(url: string, userId: string): Promise<void> {
   try {
-    const check = await checkImageContent(url)
+    const check = await checkImageContent(url, PHOTO_CHECK)
     if (check.checked && check.result?.action === "hide") {
       await recordPhotoPulled(url, userId)
       /*
@@ -199,7 +202,7 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
  */
 export async function moderateBlurPhoto(url: string, userId: string): Promise<void> {
   try {
-    const check = await checkImageContent(url)
+    const check = await checkImageContent(url, PHOTO_CHECK)
     if (check.checked && check.result?.action === "hide") {
       await recordPhotoPulled(url, userId)
       await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
