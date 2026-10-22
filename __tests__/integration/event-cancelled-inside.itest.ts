@@ -149,7 +149,7 @@ it("an event nobody is inside emits and sends nothing", async () => {
   expect(heard.filter((h) => h.event === "event:cancelled")).toHaveLength(0)
 })
 
-it("a room bigger than a page is read in pages and pushed in batches", async () => {
+it("a big room is cancelled in one statement and pushed in batches", async () => {
   const r = await room()
   const total = 1250 // past one page of 1000
   const ids = Array.from({ length: total }, (_, i) => testId(`ci-big${i}`))
@@ -185,4 +185,33 @@ it("a build that predates the kind is sent event_update, which it opens on the e
   await putInRoom({ ...r, userId: old })
   await cancelEventCheckIns(r.eventId)
   expect(typesSent()).toEqual([`event_update:ExponentPushToken[itest-${old}]`])
+})
+
+it("two cancels at once tell each person exactly once", async () => {
+  const r = await room()
+  const people = await Promise.all(Array.from({ length: 12 }, (_, i) => person(`ci-race${i}`)))
+  for (const who of people) await putInRoom({ ...r, userId: who })
+
+  const [a, b] = await Promise.all([cancelEventCheckIns(r.eventId), cancelEventCheckIns(r.eventId)])
+
+  // Every row changed by exactly one of them, and every person returned by exactly one.
+  expect(a.count + b.count).toBe(12)
+  expect([...a.inside, ...b.inside].sort()).toEqual([...people].sort())
+  expect(a.inside.filter((id) => b.inside.includes(id))).toEqual([])
+  const told = typesSent().filter((t) => t.startsWith("event_cancelled:"))
+  expect(told.sort()).toEqual(people.map((id) => `event_cancelled:ExponentPushToken[itest-${id}]`).sort())
+  const bell = await db.notifications.count({ where: { user_id: { in: people }, kind: "event_cancelled" } })
+  expect(bell).toBe(12)
+})
+
+it("somebody who had not arrived yet (pending) is cancelled but not told they were inside", async () => {
+  const r = await room()
+  const arrived = await person("ci-arrived")
+  const waiting = await person("ci-pending")
+  await putInRoom({ ...r, userId: arrived })
+  await db.event_check_ins.create({ data: { event_id: r.eventId, occurrence_id: r.occurrenceId, user_id: waiting, status: "pending" } })
+  const { count, inside } = await cancelEventCheckIns(r.eventId)
+  expect(count).toBe(2)
+  expect(inside).toEqual([arrived])
+  expect((await db.event_check_ins.findFirstOrThrow({ where: { event_id: r.eventId, user_id: waiting } })).status).toBe("cancelled")
 })

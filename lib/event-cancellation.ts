@@ -37,17 +37,30 @@ import { logger } from "@/lib/logger"
  * have been told (`tellInsideCancelled`), for `notifyEventCancelled` to skip.
  */
 export async function cancelEventCheckIns(eventId: string): Promise<{ count: number; inside: string[] }> {
-  // Read BEFORE the cascade: afterwards nothing says who was inside.
-  const inside = await userIdsInside(eventId)
   const now = new Date()
-  const [{ count }] = await db.$transaction([
-    db.event_check_ins.updateMany({
-      where: {
-        event_id: eventId,
-        status: { in: ["pending", "checked_in"] },
-      },
-      data: { status: "cancelled", updated_at: now },
-    }),
+  /*
+   * Who was inside is read BY the update that cancels them: `UPDATE … RETURNING`
+   * hands back exactly the rows this statement changed, with their status as it
+   * was. A read before the cascade could name somebody a concurrent cancel then
+   * cancelled first, and both would tell them. `FOR UPDATE` in the CTE makes the
+   * second of two simultaneous cancels wait for the first and then match nothing,
+   * so each person is returned by one of them, once. Unbounded by design: the
+   * rows must all change, and a uuid per person is all this holds.
+   */
+  const [cancelled] = await db.$transaction([
+    db.$queryRaw<{ user_id: string; was: string }[]>`
+      WITH standing AS (
+        SELECT id, user_id, status::text AS was
+          FROM event_check_ins
+         WHERE event_id = ${eventId}::uuid AND status IN ('pending', 'checked_in')
+           FOR UPDATE
+      )
+      UPDATE event_check_ins c
+         SET status = 'cancelled', updated_at = ${now}
+        FROM standing s
+       WHERE c.id = s.id
+      RETURNING s.user_id AS user_id, s.was AS was
+    `,
     /*
      * GREATEST, not `now`: `departed_at >= arrived_at` is a CHECK, and an
      * arrival can be later than this clock (another instance's, a check-in
@@ -62,31 +75,13 @@ export async function cancelEventCheckIns(eventId: string): Promise<{ count: num
        WHERE event_id = ${eventId}::uuid AND departed_at IS NULL
     `,
   ])
+  const inside = [...new Set(cancelled.filter((r) => r.was === "checked_in").map((r) => r.user_id))]
   await tellInsideCancelled(eventId, inside)
-  return { count, inside }
+  return { count: cancelled.length, inside }
 }
 
-/** People per page when reading who is inside, and per push batch. A concert room is thousands. */
-export const CANCEL_PAGE = 1000
+/** People per push batch. A concert room is thousands. */
 export const CANCEL_PUSH_BATCH = 500
-
-/** Who is checked in to the event right now, a page at a time, never one unbounded read. */
-async function userIdsInside(eventId: string): Promise<string[]> {
-  const ids = new Set<string>()
-  let after: string | undefined
-  for (;;) {
-    const page = await db.event_check_ins.findMany({
-      where: { event_id: eventId, status: "checked_in" },
-      select: { id: true, user_id: true },
-      orderBy: { id: "asc" },
-      take: CANCEL_PAGE,
-      ...(after ? { cursor: { id: after }, skip: 1 } : {}),
-    })
-    for (const row of page) ids.add(row.user_id)
-    if (page.length < CANCEL_PAGE) return [...ids]
-    after = page[page.length - 1].id
-  }
-}
 
 /**
  * Tell the people who were inside that it is off, and that they are no longer
