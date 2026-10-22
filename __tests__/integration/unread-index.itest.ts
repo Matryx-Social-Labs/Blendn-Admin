@@ -3,6 +3,10 @@
  * CONCURRENTLY migration, applied by `migrate deploy` as one statement). A
  * failed concurrent build leaves an INVALID index that `IF NOT EXISTS` would
  * skip, so validity is the thing to read.
+ *
+ * Not in negative-controls.json: it checks that a database exists in a state,
+ * not a guard in code, so there is no source mutation that fails it other than
+ * deleting the migration.
  */
 import { closeDb, db } from "./helpers"
 
