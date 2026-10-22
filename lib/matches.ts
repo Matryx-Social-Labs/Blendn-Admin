@@ -1,5 +1,6 @@
 import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
-import { friendIdsOf } from "@/lib/friends"
+import { lockPair, pairIsLinked, releaseHeldRequests } from "@/lib/friends"
+import { notStrangersTo } from "@/lib/room-people"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
@@ -281,10 +282,9 @@ export async function matchesForEvent(
     // Leaving is permanent: an unmatched pair never appears to each other
     // again. Same `hidden` set as blocks below -- one exclusion, two reasons.
     closedPairKeys(viewerId),
-    // Friends are not matches (a decision recorded in the app's HANDOFF.md):
-    // the grid is for meeting people, and your friends are people you know —
-    // when you can tell they are here. See `recognisedFriends` below.
-    friendIdsOf(viewerId),
+    // Friends are not strangers (the owner's rule, 2026-10-22): they leave the
+    // deck whatever their switch (`notStrangersTo`).
+    notStrangersTo(viewerId).then((set) => [...set]),
     db.event_likes.findMany({
       where: { event_id: eventId, liker_id: viewerId },
       select: { liked_id: true },
@@ -292,33 +292,26 @@ export async function matchesForEvent(
   ])
 
   /*
-   * Only the friends you can recognise here leave the deck (SCRUM-371).
-   *
-   * A friend with `friends_see_me_in_rooms` off is a stranger in this room by
-   * their own choice, and the roster lists them under a handle like everyone
-   * else. Leaving them out of the deck made "on the roster, not in the deck"
-   * the one handle that is your friend — the recognition the switch exists to
-   * refuse, answered by subtraction. So they stay, as the stranger they chose
-   * to be; a friend you can already tell is here still leaves, since hiding a
-   * card you would recognise gives nothing away.
+   * Who the card names: people who revealed in THIS room (`visibleInRoom`),
+   * asked once for the whole room, so blocks and closed pairs beat a reveal here
+   * as they do on the roster. Friends are not part of this question any more.
    */
-  // In this room's terms, like the roster and the card: a friend recognised
-  // only because of a reveal at some other event is still a stranger here.
-  //
-  // Asked once for the friends and the whole room together, because the same
-  // answer names a card below — so the deck names exactly whom the roster
-  // names, and blocks and closed pairs beat a reveal here as they do there.
-  const recognised = await visibleInRoom(viewerId, eventId, [
-    ...new Set([...friends, ...checkIns.map((c) => c.user_id)]),
-  ])
-  const recognisedFriends = new Set(friends.filter((id) => recognised.has(id)))
+  const recognised = await visibleInRoom(viewerId, eventId, [...new Set(checkIns.map((c) => c.user_id))])
 
-  // Blocks hide people in both directions. Someone you blocked should not
-  // reappear as a suggestion, and neither should someone who blocked you.
+  /*
+   * EVERY friend leaves the deck, whatever their switch (the owner's rule,
+   * 2026-10-22: two friends never meet as strangers). This used to remove only
+   * the friends you could recognise and keep the rest as pseudonymous cards, on
+   * the argument that "on the roster, not in the deck" would name the one handle
+   * that is your friend. That argument is gone with the roster: a friend leaves
+   * the roster the same way (`notStrangersTo`), and a friend who allows it is in
+   * "Friends here" instead, by real id. The deck now answers, for a friend, what
+   * it answers for someone with "Show online status" off: absent.
+   */
   const hidden = new Set([
     ...blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id)),
     ...closedPairs,
-    ...recognisedFriends,
+    ...friends,
   ])
   const liked = new Set(likes.map((l) => l.liked_id))
 
@@ -766,50 +759,70 @@ export async function likeAtEvent(
     update: {},
   })
 
-  const back = await db.event_likes.findUnique({
-    where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likedId, liked_id: likerId } },
-    select: { id: true },
-  })
-  if (!back) return { mutual: false }
-
   /*
-   * A closed pair can still reach here.
+   * Not a match when the pair already have anything between them
+   * (`pairIsLinked`: a friendship, any conversation open or closed, any friend
+   * request). Opening one would hand back the existing DM — its id on the
+   * like's response and on `room:match` says which card is the friend, or which
+   * real-name thread this is — and a second pseudonymous DM would link this
+   * event's pseudonyms to the first's. They already have somewhere to talk. The
+   * like is recorded and the answer is that of a like nobody returned.
    *
-   * `POST /matches/likes` refuses closed pairs before calling in, and closed
-   * pairs are hidden from the ranked list -- but this function is the shared
-   * write path, and defending the invariant where it lives beats trusting every
-   * present and future caller to have checked. `mutual: false` is the honest
-   * answer: the like is recorded, and there is no conversation to point at.
-   */
-  /*
-   * The pseudonyms and room-reveal state, snapshotted at the moment of the
-   * match.
+   * Everything from here is under the pair's lock (`lockPair`), so a request or
+   * an accept cannot land between the check and the write, and the linked check
+   * runs BEFORE the reciprocal-like lookup: a like that was returned and one that
+   * was not do the same work up to that point, so how long it takes says nothing
+   * about whether the other person liked back.
    *
-   * Both come from this event: the pseudonym because a DM outlives its event
-   * and the chat lifecycle sweeper deletes old groups, so a lookup would go
-   * null exactly when the history matters; the reveal because somebody already
-   * public in this room has nothing left to reveal to a person who saw their
-   * card, and pretending otherwise would be theatre.
+   * A closed pair is linked too, which is the invariant the old closed-pair
+   * guard defended: `POST /matches/likes` refuses closed pairs before calling in,
+   * but this is the shared write path.
    */
-  const [pseudonymRows, revealedRows] = await Promise.all([
-    db.chat_group_members.findMany({
-      where: { chat_group: { event_id: eventId }, user_id: { in: [likerId, likedId] } },
-      select: { user_id: true, anonymous_name: true },
-    }),
-    db.event_match_preferences.findMany({
-      where: { event_id: eventId, user_id: { in: [likerId, likedId] }, revealed: true },
-      select: { user_id: true },
-    }),
-  ])
-
   try {
-    const conversation = await openConversation(likerId, likedId, {
-      eventId,
-      pseudonyms: Object.fromEntries(
-        pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"])
-      ),
-      revealed: revealedRows.map((r) => r.user_id),
+    const opened = await db.$transaction(async (tx) => {
+      await lockPair(tx, likerId, likedId)
+      const linked = await pairIsLinked(tx, likerId, likedId)
+      const back = await tx.event_likes.findUnique({
+        where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likedId, liked_id: likerId } },
+        select: { id: true },
+      })
+      if (!back || linked) return null
+
+      /*
+       * The pseudonyms and room-reveal state, snapshotted at the moment of the
+       * match.
+       *
+       * Both come from this event: the pseudonym because a DM outlives its event
+       * and the chat lifecycle sweeper deletes old groups, so a lookup would go
+       * null exactly when the history matters; the reveal because somebody
+       * already public in this room has nothing left to reveal to a person who
+       * saw their card, and pretending otherwise would be theatre.
+       */
+      const [pseudonymRows, revealedRows] = await Promise.all([
+        tx.chat_group_members.findMany({
+          where: { chat_group: { event_id: eventId }, user_id: { in: [likerId, likedId] } },
+          select: { user_id: true, anonymous_name: true },
+        }),
+        tx.event_match_preferences.findMany({
+          where: { event_id: eventId, user_id: { in: [likerId, likedId] }, revealed: true },
+          select: { user_id: true },
+        }),
+      ])
+      const conversation = await openConversation(
+        likerId,
+        likedId,
+        {
+          eventId,
+          // A pseudonym this room never gave is "Attendee", never null: a null reads as real names.
+          pseudonyms: Object.fromEntries(pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"])),
+          revealed: revealedRows.map((r) => r.user_id),
+        },
+        tx
+      )
+      return { conversation, pseudonymRows }
     })
+    if (!opened) return { mutual: false }
+    const { conversation, pseudonymRows } = opened
     /*
      * Only the EARLIER liker gets the push.
      *
@@ -859,4 +872,8 @@ export async function revealConversationsFrom(eventId: string, userIds: readonly
       data: { user2_revealed: true },
     }),
   ])
+  // A friend request held for one of these pairs may be deliverable now. Never
+  // allowed to fail the reveal that caused it: a request this misses is still
+  // delivered by the next read.
+  await releaseHeldRequests(ids).catch(() => undefined)
 }

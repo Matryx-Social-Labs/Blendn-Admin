@@ -1,5 +1,6 @@
 import { db } from "@/lib/db"
 import { personCard, personSelect } from "@/lib/friends"
+import { VISIBLE_TO_AUTHOR } from "@/lib/board-access"
 import { getAccessibleMediaUrl } from "@/lib/tigris"
 import { firstName } from "@/lib/conversation-identity"
 
@@ -89,6 +90,8 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
           where: {
             id: { in: unique(friendRows.map((r) => uuidOf(r.payload, "requestId"))) },
             recipient_id: viewerId,
+            // A request still held for a pseudonymous match is not delivered, so a bell row for it decorates nothing.
+            held_at: null,
             dismissed_at: null,
             withdrawn_at: null,
             sender: { deletedAt: null },
@@ -121,7 +124,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       : [],
     boardRows.length
       ? db.board_requests.findMany({
-          where: { id: { in: unique(boardRows.map((r) => uuidOf(r.payload, "requestId"))) }, to_user_id: viewerId, status: "pending" },
+          where: { id: { in: unique(boardRows.map((r) => uuidOf(r.payload, "requestId"))) }, to_user_id: viewerId, ...VISIBLE_TO_AUTHOR, status: "pending" },
           select: { id: true },
         })
       : [],

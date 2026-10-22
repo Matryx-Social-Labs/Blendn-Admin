@@ -1821,6 +1821,88 @@ card showed**. Real name and photos appear only when that side reveals.
 | `POST /conversations/:id/reveal` | Your side becomes visible to them |
 | `POST /conversations/:id/reveal` with `{ "ask": true }` | Ask them to reveal |
 
+Until they reveal, the other person is a stranger on every raw-id surface too
+(SCRUM-752): `GET /profiles/:id` and `GET /users/:id` answer their `otherUser.id`
+exactly as they answer anyone you may not see — `name: "Attendee"`, the blurred
+photo, no bio or photos — and carry no `friend`. A mutual like alone no longer
+identifies; their reveal does. A room-level reveal, a friend who turned on
+`friends_see_me_in_rooms` and a conversation that never was pseudonymous still
+identify as before.
+
+**The other person's id in a DM is a handle until they reveal.** In `GET
+/conversations`, `GET /conversations/:id`, `POST /conversations`, a message's
+`senderId` / `sender.id` and the `private:*` socket events, the other person of
+a match who has not revealed to you is an opaque `rh_…` handle scoped to that
+conversation (the same one on every one of those surfaces, so a sender still
+matches the other person). Your own id is always your real id. Once they reveal
+the real id comes back, everywhere at once. The handle is accepted by `POST
+/users/:id/block`, `POST /users/:id/report` and `POST /conversations`, and by no
+profile or friend route (they answer it as an id nobody has): it names a person
+only inside that DM. It exists because every other surface that carries an
+account id also carries a name, so the id beside a pseudonym was a join key.
+`private:message` is sent per recipient (their copy names the sender by the
+handle; the sender's devices get their own id); `private:typing` and
+`private:read` go to the other person alone while the sender is a pseudonym to
+them. A mutual like between two people who already know each other — any
+conversation between them, a friendship, or a friend request waiting — is not a
+match: the like is recorded and answers exactly as a like nobody returned
+(`mutual: false`, no `room:match`), under the pair's lock. Opening one would
+hand back the old DM or link this event's pseudonym to the first one's. A
+conversation made with pseudonyms is pseudonymous on both sides: a side the room
+never named is `Attendee`, never null (null reads as real names). A handle
+carries no photo, ever: the stored blur is one URL for every room.
+
+Like the room handles, a conversation handle is keyed to the server secret:
+rotating `NEXTAUTH_SECRET` retires every one a client holds, and the next inbox
+fetch hands back fresh ones (the DM itself is addressed by `conversationId`,
+which does not change). Blocking by a handle severs the friendship with that
+person, as `POST /users/:id/block` always has.
+
+**A friend request between two people who are still pseudonyms is held.**
+`POST /friends/requests` still answers `{ state: "requested" }`, but when the
+pair's only conversation is a pseudonymous one (a match, a board post) not yet
+revealed on both sides, no push goes out, it is absent from the recipient's
+`incoming`, `friend.state` is `none` for the recipient, and accepting it is a
+`404`. When both have revealed it is released: it appears in `incoming` and the
+push goes out then (from the reveal route, or from a reveal in the room carrying
+into the DM); two people who had each asked become friends at that moment. An
+unmatch closes the pair as it always did. For such a pair that are already
+friends, `GET /friends/:id` has `conversationId: null` and `POST
+/friends/:id/conversation` answers `409` as for a closed pair (the app shows
+"The conversation didn't open. Try again."); they keep talking in the inbox.
+`friend_requests.held_at` (migration `20261022120000_friend_request_held`)
+records it. A held request is shown only on a positive test — the pair's
+conversation is open AND both sides have revealed — so a closed conversation
+never releases anything, and an unmatch (or block) deletes what was held.
+Asking again after a withdrawal while the pair is still pseudonymous is held
+too. A released request is announced exactly once (the release clears `held_at`
+in one statement and only what it cleared is pushed) and carries no `via`: it
+may have come by invite link. Migration `20261022140000_pseudonym_and_held_backfills`
+repaired existing rows (a conversation with one null pseudonym becomes
+`Attendee`; requests between a pair still pseudonymous became held).
+
+`GET /events/:id/peer-ratings` lists the people you matched with **at that
+event** (conversations born of a mutual like there), each by the id the inbox
+shows for them: a handle until they reveal, their id after. `POST` takes that
+ref, or a handle from before they revealed; a raw id for somebody still a
+pseudonym is `403`.
+
+**A board ask between people who already have a link is silent.** The link is
+`pairIsLinked`: a friendship, any conversation (open or closed), or any friend
+request (including withdrawn and dismissed). The same question decides a
+mutual like (`mutual: false`, no match) and a board ask, so they cannot drift.
+`POST /events/:id/board/:postId/requests` for such a pair answers `201` and
+`status: "pending"` exactly as for a stranger, and records the ask as declined
+with `board_requests.silenced_at`: no push to the author, not in their lists,
+not answerable (`PATCH /board/requests/:id` is `404`), no seat taken. If the pair
+becomes linked between ask and accept, or has blocked, the accept (a `PATCH`) is
+that same `404` and the ask is silenced; there is no `409` for a closed pair any
+more. A real accept always returns the new `conversationId`.
+
+`POST /message-requests` to somebody you matched with who has not revealed to
+you answers the same synthetic `201` it gives a stranger, never the `409`: the
+409 would say a request or DM exists for an id the pseudonym is hiding.
+
 Each side moves independently — revealing is a standing offer, not a trade, so
 going first does not expose the other person and waiting is not a refusal. It is
 **not retractable**: nothing can unsee a name and a face, and there is no path
@@ -1849,6 +1931,22 @@ it renders before anything is opened.
 
 Conversations from an accepted **message request** have no pseudonym and show
 real names throughout, as they always have.
+
+`GET /users/:id` also carries `badges` (top level, the same list and rule as
+`profile.badges` on `GET /profiles/:id`: present when `show_badges` is on and
+you may see who they are), so the app needs no second read for either.
+`GET /conversations/:id`, `GET /profiles/:id` and `GET /users/:id` (for somebody
+you may see, never yourself) carry **`friend: { state, canAdd }`**; the
+`GET /conversations` LIST does not (it is per row of an unpaginated list and no
+client reads it there) — whether to offer "add as
+friend". `canAdd` is true only for a match (not a message request or a board
+conversation) that is open, where **both** sides have revealed, and you are not
+friends or waiting on them. `state` is `none | requested | incoming | friends`
+from your side; `incoming` (they asked you) is still `canAdd: true`, because
+asking back accepts. While the other person is still a pseudonym to you it is
+always `{ state: "none", canAdd: false }`: any other answer would say which
+pseudonym is already your friend. The button calls `POST /friends/requests`
+with `{ userId }`.
 
 ### Notifications from a match
 
@@ -1941,6 +2039,49 @@ which request ids are real.
 
 ---
 
+## Friends in rooms
+
+The owner's rule (2026-10-22): **two friends never meet as strangers in a
+room.** A friend is never a card, a face, a row, an arrival, a wave, a like or a
+message request to the other, whatever either switch says. To you, a friend who
+is not in "Friends here" is exactly what someone with "Show online status" off
+already is: counted in the headcount, listed nowhere.
+
+- **Absent for a viewer's friends:** the match deck / Meet next / was here
+  (`GET /events/:id/matches`), the roster page and its `pagination.totalCount`
+  (`GET /events/:id/checkins`), the room preview's taste count, an event room's
+  participants list (`GET /chat/groups/:id/participants`; that list also now
+  honours "Show online status" off, as the roster does — crew and Blend rooms are
+  unchanged), and the live arrival (`event:room:checkin` is not sent to the
+  arriver's friends). On `event:checkin` and `event:checkout` a friend's copy has
+  no `userId` (the count only).
+- **Refusals that must look like an unlisted stranger's:** a like at a friend is
+  `200 { mutual: false }` and writes nothing; a wave is `403 RECIPIENT_NOT_HERE`
+  (the show-online-off body); a message request is the synthetic `201` with
+  nothing written, even when no friend DM exists yet.
+- **Likes between friends go inert for good:** becoming friends deletes the
+  `event_likes` between them, so an unfriend cannot resurrect a match.
+- **Friends here:** `GET /events/:id/friends-here?order=recent|name&limit&cursor&q`
+  → `{ friends: [{ userId, name, photo }], total, nextCursor }`. Your friends
+  checked in at the event who turned on "Friends can see I'm here"
+  (`friends_see_me_in_rooms`) and have "Show online status" on, by REAL id (open
+  the DM with `POST /friends/:userId/conversation`). Not reciprocal (it is the
+  friend's consent). Not listed: staff, suspended, checked out, a match still
+  pseudonymous. `recent` (default, `limit` 8, max 50): the friend you last talked
+  to first, then the newest arrival. `name`: A-Z, `cursor` is opaque, `q` filters
+  (1-40 chars, a word prefix). `total` is every friend listed for you, never the
+  page. No event, room or arrival time in the payload. 403 `NOT_CHECKED_IN` when
+  you are not checked in. The socket event `room:friends { eventId }` says "refetch".
+- **An ended friendship keeps the pair apart for 24 hours** (table
+  `ended_friendships`, migration `20261023120000_ended_friendships`): an unfriend
+  is silent, and without this the ex-friend's stranger card would appear in the
+  other's deck at that moment. For 24 h the pair stay off each other's deck,
+  roster and arrivals, and the like/wave/message-request refusals above apply.
+  Re-friending deletes the row; a block writes none (it already hides both ways).
+- The helpers are `lib/room-people.ts` (`notStrangersTo`, `knownToEachOther`,
+  `strangersApartBetween`); a guard test fails the build when a people surface
+  does not use them.
+
 ## Friends
 
 | Method | Endpoint | Description |
@@ -1954,23 +2095,53 @@ which request ids are real.
 | GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
 | GET | `/friends/invite/:token/preview` | **No auth.** Signed-out invite screen → `{ name, photoUrl }` — first name only. Per-IP limit (20/min). Same 404 |
 | GET | `/friends/requests` | `{ incoming, outgoing, pagination }` — 50 of each; `?list=incoming\|outgoing&cursor=` pages one alone |
-| POST | `/friends/requests` | Ask: `{ token }` or `{ userId }` → `{ state: "requested" \| "friends" }` |
+| POST | `/friends/requests` | Ask: `{ token }`, or `{ userId }` for a revealed match → `{ state: "requested" \| "friends" }`. 404, plus `reasonCode` `NOT_A_REVEALED_MATCH` for a match not yet revealed on both sides |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
 | DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
 
 **Nobody can be looked up.** There is no search. A request reaches someone only
 through their invite link (`https://www.blendn.app/f/<token>`, 128 random bits,
-resettable) or, by `userId`, someone you can already see under
-`maySeeIdentity` — a match, a conversation, someone public in your room. Every
-refusal a stranger could reach answers with the **same 404**: an unknown,
+resettable) or, by `userId`, a **revealed match** (owner, 2026-10-22: "if users
+have matched and they have revealed themselves we can then give an option to add
+as friend"). `revealedMatch(me, other)` in `lib/friends.ts` is true only when
+there is an open (`closed_at` null) conversation between the two, it came from a
+match (`cameFromMatch`: not a message request, not a board conversation), **both**
+sides have revealed, and `mayConnect` passes (not deleted, not blocked, not
+closed). A room-level reveal, `friends_see_me_in_rooms` and an accepted message
+request no longer open this path. A room handle still resolves, but one its room
+keeps anonymous is refused as unknown even for a revealed match: a 200 would say
+which pseudonym in that room is them.
+
+Every refusal a stranger could reach answers with the **same 404**: an unknown,
 malformed or reset token, a deleted account, a block either way, a pair who
-left each other, an id you have no relationship with.
+left each other, an id you have no relationship with. The one addition is
+`reasonCode: "NOT_A_REVEALED_MATCH"` on that 404 (`errorCode` stays
+`NOT_FOUND`), said only to someone in an open match with that person who has
+**already revealed to them** and where you have not revealed back — they know who
+it is. Where the other person is still a pseudonym to you, the 404 is plain: the
+code would say who the pseudonym is, to anyone holding an id or a handle for them. A request made
+this way notifies with `data.via = "match"` (so the app can say "from your
+match"), and never names an event or room. The invite-link path is unchanged.
+`GET /profiles/:id` also carries `friend` (same shape as above) for somebody you
+may see, and never for yourself or a stranger.
+
+A pair whose conversation began as an accepted message request or a board post
+is never on this path: only a conversation born of a mutual like counts, however
+well they know each other. They can still become friends by invite link.
 
 Opening a link, asking and accepting all need a finished profile (the
 participation gate, SCRUM-331). Ask, accept and block take a lock on the pair,
 so two people asking each other at once become friends once, and an accept
 racing a block never leaves a blocked person on the list. Refusals cost the
 same work as a link that never existed, so timing tells a caller nothing either.
+
+**Why a send, an accept or an invite open was refused.** An unfinished profile
+is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; a
+rate limit is `429` `errorCode: "RATE_LIMITED"` with `reasonCode:
+"RATE_LIMITED"` and `retryAfter` (seconds; also the `Retry-After` header) —
+on `POST /friends/requests`, `POST /friends/requests/:id`, `GET
+/friends/invite/:token` (and the friend DM's profile gate). The `errorCode`s are
+unchanged; read `reasonCode ?? errorCode`.
 
 **"Not now" is never delivered.** `dismiss` hides the request from the
 recipient; the sender keeps seeing it in `outgoing`. Asking again neither

@@ -1,9 +1,10 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { ConversationClosedError, blockedEitherWay, openConversation } from "@/lib/conversations"
+import { ConversationClosedError, blockedEitherWay, conversationPair, openConversation } from "@/lib/conversations"
 import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
-import { areFriends } from "@/lib/friends"
+import { areFriends, holdingPair, matchSelect } from "@/lib/friends"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
+import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -44,6 +45,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     try {
+      // A DM that is still a pseudonym ("Heron") to either of you is not the
+      // friend DM: opening it from a friend's card would tie name to pseudonym.
+      // Answered as a closed pair is, and the pair keeps messaging in the inbox.
+      const [user1_id, user2_id] = conversationPair(me, userId)
+      const existing = await db.private_conversations.findUnique({
+        where: { user1_id_user2_id: { user1_id, user2_id } },
+        select: matchSelect,
+      })
+      if (holdingPair(existing)) throw new ConversationClosedError()
       const conversation = await openConversation(me, userId, { friendship: true })
       return successResponse({ conversationId: conversation.id })
     } catch (error) {

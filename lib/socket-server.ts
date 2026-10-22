@@ -4,8 +4,10 @@ import { Server, Socket, type RemoteSocket } from "socket.io"
 import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
-import { displayNameInConversation } from "./conversation-identity"
-import { keptApartIn } from "./conversations"
+import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
+import { notStrangersTo } from "./room-people"
+import { idInConversation } from "./conversation-handle"
+import { blockCounterparties, keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
@@ -95,7 +97,8 @@ export interface ServerToClientEvents {
    */
   "event:checkin": (data: {
     eventId: string
-    userId: string
+    /** Their handle in this room; ABSENT on a friend's copy (D23: a friend knows the handle's pseudonym), and on nobody else's. */
+    userId?: string
     checkInTime: string
     /**
      * Distinct people inside right now (`hereCountFor`) — goes down on a
@@ -116,7 +119,8 @@ export interface ServerToClientEvents {
   }) => void
   "event:checkout": (data: {
     eventId: string
-    userId: string
+    /** As on `event:checkin`: absent on a friend's copy. */
+    userId?: string
     checkOutTime: string
     /** As on `event:checkin`. */
     hereCount?: number
@@ -146,6 +150,11 @@ export interface ServerToClientEvents {
     conversationId: string
     name: string
   }) => void
+  /**
+   * "Your Friends here changed: refetch `GET /events/:id/friends-here`." Content-free
+   * (no id, no name) and only to the people it concerns, never to the room.
+   */
+  "room:friends": (data: { eventId: string }) => void
   /** Somebody in the room waved. Ephemeral; nothing is stored. `fromUserId` is their handle here. */
   "room:wave": (data: {
     eventId: string
@@ -552,6 +561,18 @@ export async function emitChatTyping(
   }
 }
 
+/** What the DM events need of a conversation to decide how to name somebody. */
+const sidesSelect = {
+  user1_id: true,
+  user2_id: true,
+  user1_pseudonym: true,
+  user2_pseudonym: true,
+  user1_revealed: true,
+  user2_revealed: true,
+} as const
+
+const otherOf = (c: { user1_id: string; user2_id: string }, userId: string) => (c.user1_id === userId ? c.user2_id : c.user1_id)
+
 /**
  * Broadcast a typing indicator into a private conversation.
  *
@@ -599,12 +620,21 @@ export async function emitPrivateTyping(
     ])
     if (!conversation) return
 
-    socket.to(`conversation:${conversationId}`).emit("private:typing", {
+    const typer = socket.data.userId
+    const payload = {
       conversationId,
-      userId: socket.data.userId,
-      userName: displayNameInConversation(conversation, socket.data.userId, profile?.name),
+      userId: idInConversation({ ...conversation, id: conversationId }, otherOf(conversation, typer), typer),
+      userName: displayNameInConversation(conversation, typer, profile?.name),
       isTyping,
-    })
+    }
+    // Still a pseudonym to the other person: their copy names the typer by the
+    // conversation's handle, and goes to them alone, so the typer's own other
+    // devices never see a handle where they expect their id.
+    if (!mayShowRealName(conversation, typer)) {
+      socket.nsp.to(`user:${otherOf(conversation, typer)}`).emit("private:typing", payload)
+      return
+    }
+    socket.to(`conversation:${conversationId}`).emit("private:typing", payload)
   } catch (error) {
     logger.warn("Private typing indicator failed", {
       conversationId,
@@ -680,6 +710,15 @@ export async function emitPrivateRead(
       return
     }
 
+    const sides = await db.private_conversations.findUnique({ where: { id: conversationId }, select: sidesSelect })
+    if (sides && !mayShowRealName(sides, socket.data.userId)) {
+      socket.nsp.to(`user:${otherOf(sides, socket.data.userId)}`).emit("private:read", {
+        conversationId,
+        messageIds: ids,
+        readBy: idInConversation({ ...sides, id: conversationId }, otherOf(sides, socket.data.userId), socket.data.userId),
+      })
+      return
+    }
     socket.to(`conversation:${conversationId}`).emit("private:read", {
       conversationId,
       messageIds: ids,
@@ -762,14 +801,30 @@ export function emitReads(readerId: string, reads: ReadonlyArray<readonly [strin
   if (!io || toSend.length === 0) return
   db.profiles
     .findUnique({ where: { id: readerId }, select: { read_receipts: true } })
-    .then((reader) => {
+    .then(async (reader) => {
       if (reader?.read_receipts === false) return
+      const sides = new Map(
+        (
+          await db.private_conversations.findMany({
+            where: { id: { in: toSend.map(([id]) => id) } },
+            select: { id: true, ...sidesSelect },
+          })
+        ).map((c) => [c.id, c])
+      )
       for (const [conversationId, ids] of toSend) {
-        io.to(`conversation:${conversationId}`).emit("private:read", {
-          conversationId,
-          messageIds: ids.slice(0, READ_RECEIPT_BATCH),
-          readBy: readerId,
-        })
+        const messageIds = ids.slice(0, READ_RECEIPT_BATCH)
+        const c = sides.get(conversationId)
+        if (c && !mayShowRealName(c, readerId)) {
+          // A pseudonym to the other person: their copy names the reader by the
+          // conversation's handle and goes to them alone (see `emitPrivateTyping`).
+          io.to(`user:${otherOf(c, readerId)}`).emit("private:read", {
+            conversationId,
+            messageIds,
+            readBy: idInConversation(c, otherOf(c, readerId), readerId),
+          })
+          continue
+        }
+        io.to(`conversation:${conversationId}`).emit("private:read", { conversationId, messageIds, readBy: readerId })
       }
     })
     .catch((error: unknown) => {
@@ -1189,7 +1244,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   /** The room the handles are minted in: an event id, or a room of another kind (`RoomScope`). */
   scope: RoomScope,
   event: E,
-  build: (idFor: (userId: string) => string, recognises: boolean) => Payload<E>,
+  build: (idFor: (userId: string) => string, recognises: boolean, viewer: string) => Payload<E>,
   skipSocketId?: string,
   about?: string
 ): Promise<void> {
@@ -1229,7 +1284,7 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
     let copy = copies.get(viewer)
     if (!copy) {
       const idFor = (userId: string) => (userId === viewer ? userId : handleOf(userId))
-      copies.set(viewer, (copy = build(idFor, recognising.has(viewer))))
+      copies.set(viewer, (copy = build(idFor, recognising.has(viewer), viewer)))
     }
     ;(recipient.emit as (ev: E, payload: Payload<E>) => boolean)(event, copy)
   }
@@ -1332,7 +1387,24 @@ export function emitEventCheckIn(
 
   const checkInTime = new Date().toISOString()
 
-  return sendWithHereCount(eventId, (hereCount) => {
+  /*
+   * Friends of the arriver hear NOTHING of them as a stranger (the owner's rule,
+   * 2026-10-22): no `event:room:checkin` (they are in the exclusion with the
+   * blocks), and on the counter room's `event:checkin` a copy without the handle
+   * — a friend knows which pseudonym is theirs, so the handle beside a chat line
+   * timed to this arrival would name it. The count still moves. An opted-in
+   * friend gets `room:friends` instead (Friends here), by real id.
+   *
+   * The counter room's copy names the arriver (their handle) ONLY to the arriver
+   * themself and to a viewer whose roster would show this arrival: the arriver is
+   * listed (show-online on), and the viewer is neither their friend nor in a block
+   * with them. For everybody else the copy is the bare count, byte for byte: a
+   * handle on the copy of an arriver the roster hides would name that hidden person
+   * to the whole room, and a friend's copy lacking it while a show-online-off
+   * stranger's has it would tell a friend which of the two arrivals was a friend.
+   */
+  return notStrangersTo(userId).then((friends) => sendWithHereCount(eventId, (hereCount) => {
+    const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !excludeUserIds.includes(viewer))
     /*
      * Two rooms, because two audiences want different things.
      *
@@ -1350,9 +1422,9 @@ export function emitEventCheckIn(
      * `room-preview` serves the same number to anyone who can open the event.
      */
     return Promise.all([
-      emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkin", (idFor) => ({
+      emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkin", (idFor, _recognises, viewer) => ({
         eventId,
-        userId: idFor(userId),
+        ...(shown(viewer) ? { userId: idFor(userId) } : {}),
         checkInTime,
         hereCount,
       })),
@@ -1366,7 +1438,7 @@ export function emitEventCheckIn(
        */
       listed &&
       emitAsSeenBy(
-        io.in(`event:room:${eventId}`).except(excludeUserIds.map((id) => `user:${id}`)),
+        io.in(`event:room:${eventId}`).except([...excludeUserIds, ...friends].map((id) => `user:${id}`)),
         eventId,
         "event:room:checkin",
         (idFor, recognises) => {
@@ -1384,7 +1456,7 @@ export function emitEventCheckIn(
         identity ? userId : undefined
       ),
     ]).then(() => undefined)
-  })
+  }))
 }
 
 /**
@@ -1395,14 +1467,32 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
   if (!io) return
 
   const checkOutTime = new Date().toISOString()
-  sendWithHereCount(eventId, (hereCount) =>
-    emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor) => ({
-      eventId,
-      userId: idFor(userId),
-      checkOutTime,
-      hereCount,
-    }))
-  )
+  // As an arrival: the handle only to the leaver and to a viewer whose roster showed them (D23, H1).
+  void Promise.all([
+    notStrangersTo(userId),
+    blockCounterparties(userId),
+    db.profiles.findUnique({ where: { id: userId }, select: { show_online: true } }),
+  ])
+    .then(([friends, blocked, profile]) => {
+      const listed = profile?.show_online !== false
+      const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !blocked.includes(viewer))
+      return sendWithHereCount(eventId, (hereCount) =>
+        emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor, _recognises, viewer) => ({
+          eventId,
+          ...(shown(viewer) ? { userId: idFor(userId) } : {}),
+          checkOutTime,
+          hereCount,
+        }))
+      )
+    })
+    .catch((error: unknown) => logger.warn("Check-out emit failed", { eventId, error: error instanceof Error ? error.message : String(error) }))
+}
+
+/** `room:friends` to these people's own rooms (`user:{id}`): bounded by a person's friends, never by the audience. */
+export function emitRoomFriends(userIds: readonly string[], eventId: string): void {
+  const io = currentIo()
+  if (!io || userIds.length === 0) return
+  io.to(userIds.map((id) => `user:${id}`)).emit("room:friends", { eventId })
 }
 
 /**
@@ -1766,10 +1856,25 @@ export function emitPrivateMessage(
     mediaType: string | null
     isRead: boolean
     createdAt: Date
-  }
+  },
+  /**
+   * The same message as the sender's own devices read it, when it differs from
+   * the recipient's: the sender is a handle to the recipient until they reveal,
+   * and always their real id to themselves. Same object (the default) is one
+   * emit to three rooms, as before; different is one emit each, to the two
+   * `user:` rooms, since the conversation room holds both people.
+   */
+  senderCopy: typeof message = message
 ): void {
   const io = currentIo()
   if (!io) return
+  if (senderCopy.senderId !== message.senderId) {
+    void (message.mediaUrl ? readableUrl(message.mediaUrl) : Promise.resolve(null)).then((mediaUrl) => {
+      io.to(`user:${recipientId}`).emit("private:message", { conversationId, message: { ...message, mediaUrl } })
+      io.to(`user:${senderCopy.senderId}`).emit("private:message", { conversationId, message: { ...senderCopy, mediaUrl } })
+    })
+    return
+  }
 
   /*
    * One emit to three rooms: the conversation (whoever has the chat open), the

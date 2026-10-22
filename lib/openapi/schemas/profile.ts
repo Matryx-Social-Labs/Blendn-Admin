@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PaginationMetaSchema, UserRefParamSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -205,6 +205,9 @@ export const ProfileResponseSchema = z
       .datetime()
       .optional()
       .describe("Absent through a room handle for somebody that room keeps anonymous."),
+    friend: FriendOfferSchema.optional().describe(
+      "Only on somebody else's profile you may see, never your own or a stranger's or a room-anonymous card."
+    ),
     profile: z.object({
       id: z.string().uuid(),
       phone: z.string().nullable(),
@@ -322,6 +325,15 @@ export const UserPublicProfileSchema = z
         "The `userId` path segment as sent — a room handle in, the same handle out — so the real id behind a handle is never echoed. Your own profile answers with your own id.",
     }),
     name: z.string(),
+    friend: FriendOfferSchema.optional().describe(
+      "Only on somebody else you may see (`identityVisible`), under the same rule as `GET /profiles/{userId}`; never your own or a card a room keeps anonymous."
+    ),
+    badges: z
+      .array(z.object({ kind: z.enum(["shows_up", "nights_out"]), label: z.string() }))
+      .optional()
+      .describe(
+        "What check-ins earned, on the flat card: the same badges, under the same rule, as `profile.badges` on `GET /profiles/{userId}` — present (possibly empty) when the person has not turned `show_badges` off and you may see who they are (`identityVisible`); absent otherwise."
+      ),
     image: z.string().nullable().optional(),
     photos: z.array(z.string()).optional(),
     age: z.number().nullable(),

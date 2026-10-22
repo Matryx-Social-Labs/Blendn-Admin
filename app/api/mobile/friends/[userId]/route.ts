@@ -7,7 +7,7 @@ import { normalizeLocationToCity } from "@/lib/location"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { UNNAMED } from "@/lib/conversation-identity"
-import { unfriend } from "@/lib/friends"
+import { holdingPair, matchSelect, unfriend } from "@/lib/friends"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
 import {
   successResponse,
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }),
       db.private_conversations.findUnique({
         where: { user1_id_user2_id: { user1_id, user2_id } },
-        select: { id: true, closed_at: true },
+        select: { id: true, ...matchSelect },
       }),
     ])
     if (!user) return notFoundResponse("Not found")
@@ -94,8 +94,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       interests: user.user_interests.map((ui) => ui.category),
       friendsSince: friendship.created_at,
       // An open DM, so "Message" goes straight to it. A closed one is not
-      // offered: leaving a conversation is the pair's own decision.
-      conversationId: conversation && !conversation.closed_at ? conversation.id : null,
+      // offered: leaving a conversation is the pair's own decision. Nor is one
+      // that is still a pseudonym ("Heron") to either of you: this card names
+      // the person, and the DM beside it must not tie the two together.
+      conversationId: conversation && !conversation.closed_at && !holdingPair(conversation) ? conversation.id : null,
     })
   } catch (error) {
     logger.error("Get friend error", { error: error instanceof Error ? error.message : String(error) })

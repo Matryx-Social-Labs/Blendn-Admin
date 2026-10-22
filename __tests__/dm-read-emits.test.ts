@@ -14,7 +14,21 @@ const mockDb = {
     updateMany: jest.fn().mockResolvedValue({ count: 0 }),
   },
   profiles: { findUnique: jest.fn() },
-  private_conversations: { findUnique: jest.fn(async () => ({ user1_id: "reader", user2_id: "sender", closed_at: null })) },
+  private_conversations: {
+    findUnique: jest.fn(async () => ({ user1_id: "reader", user2_id: "sender", closed_at: null })),
+    // Never pseudonymous: the read keeps its old shape, to the conversation room, by the real id.
+    findMany: jest.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
+      where.id.in.map((id) => ({
+        id,
+        user1_id: "reader",
+        user2_id: "sender",
+        user1_pseudonym: null,
+        user2_pseudonym: null,
+        user1_revealed: false,
+        user2_revealed: false,
+      }))
+    ),
+  },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/mobile-auth", () => ({

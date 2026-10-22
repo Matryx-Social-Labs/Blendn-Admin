@@ -12,6 +12,11 @@ import { ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErro
 const bearerAuth = [{ bearerAuth: [] }]
 const tags = ["Mobile Friends"]
 
+/** The invite landing's reasons, beside the errorCodes installed builds match on (SV10). */
+const REASONS =
+  "A refusal for an unfinished profile is 403 `FORBIDDEN` with `reasonCode` `PROFILE_INCOMPLETE`; a rate limit is 429 `RATE_LIMITED` " +
+  "with `reasonCode` `RATE_LIMITED`, `retryAfter` (seconds, also the `Retry-After` header). The `errorCode`s are unchanged: read `reasonCode ?? errorCode`. "
+
 const SAME_404 =
   "Every refusal a stranger could reach — unknown, malformed or reset token, deleted account, a block either way, " +
   "a pair who left each other, a user id you have no relationship with — answers with the same 404, so nothing here " +
@@ -78,7 +83,7 @@ registry.registerPath({
   description:
     "The identified profile, for a friend only; 404 for anyone else whether or not they exist. Separate from " +
     "`GET /users/{userId}`, which is what a room card opens — a friend there is still a pseudonym. " +
-    "`conversationId` is an open DM, if there is one. " +
+    "`conversationId` is an open DM, if there is one; null while it is still a pseudonymous one (a match or board DM not revealed on both sides). " +
     "A room handle resolves here only for a friend you can already recognise in that room (`friends_see_me_in_rooms` on); " +
     "any other handle is the same 404 as a stranger, so the route cannot say which card on a roster is a friend (SCRUM-371).",
   security: bearerAuth,
@@ -134,7 +139,7 @@ registry.registerPath({
     PARTICIPATION_GATE +
     "No shared event needed. Returns the existing conversation if there is one; a new one is marked as opened " +
     "between friends, so it does not make either of you recognisable in rooms. 404 unless you are friends; 409 if " +
-    "the conversation was closed. A room handle counts only for a friend you can recognise in that room, as on `GET /friends/{userId}`.",
+    "the conversation was closed, or is still a pseudonymous DM not revealed on both sides (the same 409). A room handle counts only for a friend you can recognise in that room, as on `GET /friends/{userId}`.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
@@ -179,6 +184,7 @@ registry.registerPath({
   summary: "Open an invite link",
   description:
     PARTICIPATION_GATE +
+    REASONS +
     SAME_404 +
     "Shows the link owner's name and photo — handing the link out is their consent — and where you stand with them.",
   security: bearerAuth,
@@ -253,10 +259,16 @@ registry.registerPath({
   summary: "Ask to be friends",
   description:
     PARTICIPATION_GATE +
+    REASONS +
     SAME_404 +
-    "Exactly one of `token` (somebody's invite link) or `userId` (only for someone you can already see: a match, " +
-    "a conversation, someone public in your room; a room handle works too, SCRUM-371). Idempotent and cannot nag: asking again neither notifies again " +
-    "nor un-dismisses. `friends` when they had already asked you. 400 for yourself, `reasonCode` `CANNOT_ADD_SELF`.",
+    "Exactly one of `token` (somebody's invite link) or `userId` (only for a match where you have BOTH revealed: an " +
+    "open conversation that came from a mutual like, neither side closed or blocked. A room handle resolves too, but " +
+    "a handle its room keeps anonymous is refused as unknown). Idempotent and cannot nag: asking again neither notifies again " +
+    "nor un-dismisses. `friends` when they had already asked you. Between two people still pseudonyms to each other (an open match or board DM not revealed on both sides) the request is HELD: still `requested`, but no push, not in the recipient's list, not acceptable, until both reveal, when it is released and delivered.  400 for yourself, `reasonCode` `CANNOT_ADD_SELF`. " +
+    "A request made by `userId` notifies with `data.via` = `match`, never an event or room. " +
+    "One 404 differs: it carries `reasonCode` `NOT_A_REVEALED_MATCH` when you are in an open match with that person, " +
+    "they have already revealed to you, and you have not revealed back (you know who they are). While they are still a " +
+    "pseudonym to you, and for every other refusal, the 404 is byte-identical to an unknown id (`reasonCode` `PERSON_UNAVAILABLE`).",
   security: bearerAuth,
   request: {
     body: {

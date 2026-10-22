@@ -1,10 +1,11 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { closeConversation } from "@/lib/conversations"
-import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
+import { leaveConversationIn } from "@/lib/leave-conversation"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
+import { friendOffersFor } from "@/lib/friend-offer"
+import { idInConversation } from "@/lib/conversation-ref"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -68,11 +69,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // kept pseudonymous would make the rule one tap deep.
     const theyRevealed = mayShowRealName(conversation, otherUser.id)
     const isUser1 = conversation.user1_id === authUser.userId
+    const friend = (await friendOffersFor(authUser.userId, [conversation])).get(conversation.id)
 
     return successResponse({
       id: conversation.id,
       otherUser: {
         ...otherUser,
+        id: idInConversation(conversation, authUser.userId, otherUser.id),
         name: displayNameInConversation(conversation, otherUser.id, otherUser.name),
         image: theyRevealed ? otherUser.image : null,
       },
@@ -82,6 +85,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       pseudonymous: isPseudonymous(conversation),
       youRevealed: isUser1 ? conversation.user1_revealed : conversation.user2_revealed,
       theyRevealed,
+      /** Whether to offer "add as friend": a match, both revealed (lib/friend-offer.ts). */
+      friend,
       revealRequested: isUser1
         ? conversation.user1_reveal_requested
         : conversation.user2_reveal_requested,
@@ -148,12 +153,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     // Idempotent: closing an already-closed conversation keeps the first close,
     // so a double tap or a client retry never rewrites who left or when.
     const otherId = conversation.user1_id === authUser.userId ? conversation.user2_id : conversation.user1_id
-    await db.$transaction(async (tx) => {
-      await closeConversation(conversationId, authUser.userId, "unmatch", tx)
-      // An unmatch keeps the two apart on every crew surface (C6): the crew
-      // invites between them go with it (lib/crews/blocks.ts).
-      await dropCrewInvitesBetween(tx, authUser.userId, otherId)
-    })
+    await db.$transaction((tx) =>
+      leaveConversationIn(tx, { conversationId, userId: authUser.userId, otherId, action: "unmatch" })
+    )
     // And out of any Blend room that now refuses them (the Blend goes on for the rest).
     await evictBlockedFromBlends(authUser.userId, otherId)
 

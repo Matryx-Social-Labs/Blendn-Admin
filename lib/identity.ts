@@ -1,4 +1,4 @@
-import { firstName, UNNAMED } from "./conversation-identity"
+import { firstName, mayShowRealName, UNNAMED } from "./conversation-identity"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
 import { resolveUserRef } from "./room-handle"
@@ -40,11 +40,15 @@ import { resolveUserRef } from "./room-handle"
  * You see someone's real identity when one of these is true, and not otherwise:
  *
  * - **It is you.**
- * - **You matched.** A mutual like at a shared event. This is the documented
- *   exchange: "if two people both like each other, a conversation opens and
- *   identity is exchanged".
- * - **You are in a conversation.** An accepted message request already required
- *   co-presence and consent from the other side.
+ * - **You are in a conversation, and it names them.** An accepted message
+ *   request already required co-presence and consent from the other side. A
+ *   mutual like at a shared event opens a conversation where each side keeps the
+ *   room's pseudonym until they choose to show their name (`mayShowRealName`,
+ *   lib/conversation-identity.ts), and so does a board post's. **A like alone
+ *   identifies nobody; the conversation decides.** This gate used to say
+ *   "identity is exchanged" at the like, true until the reveal model (#201),
+ *   and the inbox sent the raw id beside the pseudonym, so one profile read
+ *   skipped the reveal (SCRUM-752).
  * - **They chose to be public in a room you were in.** `event_check_ins.revealed`
  *   is someone opting out of the pseudonym for that event, so it would be
  *   strange to keep hiding them from the people who were there.
@@ -67,9 +71,9 @@ import { resolveUserRef } from "./room-handle"
  *
  * ## Why the plural one is the real one
  *
- * `maySeeIdentity` runs six queries. Every surface that resolves identity is a
+ * `maySeeIdentity` runs four queries. Every surface that resolves identity is a
  * **list** — the roster, the participants list, the match deck, the blocked
- * list — so a singular gate invites `list.map(maySeeIdentity)`, which is six
+ * list — so a singular gate invites `list.map(maySeeIdentity)`, which is four
  * queries per person and looks completely correct in review. That is exactly
  * what `GET /users/blocked` was doing.
  *
@@ -78,12 +82,7 @@ import { resolveUserRef } from "./room-handle"
  * module exists to fix, and it would arrive here first: the singular is the one
  * everybody reaches for, so it is the one that would drift.
  *
- * Six queries regardless of how many people are asked about. The mutual-like
- * check costs two, because "we liked each other at the same event" cannot be
- * expressed as one Prisma query over a *set* of targets — the inner filter
- * would have to reference the outer row's `liked_id`. Both directions are
- * fetched and intersected on `(event_id, other_person)` instead, which is the
- * same predicate the singular version expresses as a correlated subquery.
+ * Four queries regardless of how many people are asked about.
  */
 export async function maySeeIdentityFor(
   viewerId: string,
@@ -93,7 +92,7 @@ export async function maySeeIdentityFor(
   /*
    * In one room, only what that room shows — and in exactly the terms every
    * room surface uses, because it is the same function (`visibleInRoom`). See
-   * `IdentityScope`: the mutual like and the open conversation are facts about
+   * `IdentityScope`: the open conversation is a fact about
    * a pair, not about this room, and the reveal branch narrows to this event.
    */
   if (scope.room) return visibleInRoom(viewerId, scope.room, targetIds)
@@ -105,16 +104,7 @@ export async function maySeeIdentityFor(
   if (targetIds.includes(viewerId)) visible.add(viewerId)
   if (others.length === 0) return visible
 
-  const [sent, received, conversations, revealedTo, blocks, friendsOptedIn] = await Promise.all([
-    db.event_likes.findMany({
-      where: { liker_id: viewerId, liked_id: { in: others } },
-      select: { event_id: true, liked_id: true },
-    }),
-    db.event_likes.findMany({
-      where: { liked_id: viewerId, liker_id: { in: others } },
-      select: { event_id: true, liker_id: true },
-    }),
-
+  const [conversations, revealedTo, blocks, friendsOptedIn] = await Promise.all([
     /*
      * Open and closed in one read, because the fold needs both and they differ
      * only by a predicate. `closed_at` overrides every positive branch — see
@@ -127,7 +117,16 @@ export async function maySeeIdentityFor(
           { user2_id: viewerId, user1_id: { in: others } },
         ],
       },
-      select: { user1_id: true, user2_id: true, closed_at: true, origin_friendship: true },
+      select: {
+        user1_id: true,
+        user2_id: true,
+        closed_at: true,
+        origin_friendship: true,
+        user1_pseudonym: true,
+        user2_pseudonym: true,
+        user1_revealed: true,
+        user2_revealed: true,
+      },
     }),
 
     /*
@@ -187,13 +186,6 @@ export async function maySeeIdentityFor(
     }),
   ])
 
-  const sentAt = new Set(sent.map((r) => `${r.event_id}:${r.liked_id}`))
-  const mutual = new Set(
-    received
-      .filter((r) => sentAt.has(`${r.event_id}:${r.liker_id}`))
-      .map((r) => r.liker_id)
-  )
-
   const open = new Set<string>()
   const closed = new Set<string>()
   for (const c of conversations) {
@@ -206,7 +198,7 @@ export async function maySeeIdentityFor(
      * — undoing `friends_see_me_in_rooms` for anyone who ever said hello.
      * Closed still counts as closed above: leaving beats everything.
      */
-    else if (!c.origin_friendship) open.add(other)
+    else if (!c.origin_friendship && mayShowRealName(c, other)) open.add(other)
   }
   const friendVisible = new Set(
     friendsOptedIn.map((f) => (f.user1_id === viewerId ? f.user2_id : f.user1_id))
@@ -220,17 +212,15 @@ export async function maySeeIdentityFor(
    * Blocked and closed override every positive branch, and that ordering is the
    * load-bearing part of this function rather than an implementation detail.
    *
-   * `event_likes` are never deleted, so a mutual like survives an unmatch and
-   * would keep the first branch true forever; someone who was public in a
-   * shared room stays public there, so the reveal branch would too. Leaving has
-   * to beat both, or "they can no longer see who I am" is false in the two most
-   * common ways of having met — and blocking somebody you had revealed to would
-   * leave them able to pull your real name and photographs indefinitely, which
-   * is the one thing blocking is supposed to stop.
+   * Someone who was public in a shared room stays public there, so the reveal
+   * branch would stay true after an unmatch. Leaving has to beat it, or "they
+   * can no longer see who I am" is false — and blocking somebody you had
+   * revealed to would leave them able to pull your real name and photographs
+   * indefinitely, which is the one thing blocking is supposed to stop.
    */
   for (const id of others) {
     if (blocked.has(id) || closed.has(id)) continue
-    if (mutual.has(id) || open.has(id) || revealedTo.has(id) || friendVisible.has(id)) visible.add(id)
+    if (open.has(id) || revealedTo.has(id) || friendVisible.has(id)) visible.add(id)
   }
   return visible
 }
