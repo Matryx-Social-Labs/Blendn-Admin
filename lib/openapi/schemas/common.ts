@@ -9,6 +9,25 @@ export const SuccessResponseSchema = z
   })
   .openapi("SuccessResponse")
 
+/**
+ * Whether to offer "add as friend" for a person you are looking at. Present on a
+ * DM (detail and inbox) and on `GET /profiles/{userId}` for somebody you may see;
+ * never on a stranger. See lib/friend-offer.ts.
+ */
+export const FriendOfferSchema = z
+  .object({
+    state: z
+      .enum(["none", "requested", "incoming", "friends"])
+      .describe("From your side. `incoming`: they asked you. Always `none` while their name is still a pseudonym to you."),
+    canAdd: z
+      .boolean()
+      .describe(
+        "Show the add button: you matched, both of you have revealed, and you are not friends or waiting on them. " +
+          "True for `incoming` too (adding someone who asked you accepts). Call `POST /friends/requests` with `{ userId }`."
+      ),
+  })
+  .openapi("FriendOffer")
+
 /** The success envelope around one route's `data`. */
 export const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
@@ -28,7 +47,7 @@ export const ErrorResponseSchema = z
       .describe(
         "Why, beside an `errorCode` that keeps the value installed builds match on: `ACCOUNT_SUSPENDED`, " +
           "`ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, " +
-          "`PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`."
+          "`PROFILE_INCOMPLETE`, `NOT_A_REVEALED_MATCH` (404 on `POST /friends/requests`). Read `reasonCode ?? errorCode`."
       ),
   })
   .openapi("ErrorResponse")

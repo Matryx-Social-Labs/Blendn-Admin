@@ -1957,6 +1957,12 @@
       "mutation": "M900 `d.country = 'IN' AND` put back in the localities WHERE. M901 the `cells` table renamed back to a single `extent` box.",
       "observed": "M900: 1 of 11 failing ('names no country'). M901: 1 of 11 failing ('reads the polygons near the venues'). Each reverted; 11 of 11.",
       "date": "2026-10-20"
+    },
+    "friend-after-reveal.itest.ts": {
+      "guards": "The owner's rule for adding a friend by user id (2026-10-22): `revealedMatch` in lib/friends.ts is true only for an open, match-born conversation with both sides revealed and `mayConnect` passing; POST /friends/requests { userId } is gated on it (a handle the room keeps anonymous stays unknown), refuses everything else byte-identically to an unknown id except NOT_A_REVEALED_MATCH for a matched pair with an incomplete reveal; `friend { state, canAdd }` on the conversation detail, the inbox and GET /profiles/:id; `via: match` on the notification.",
+      "mutation": "M1 `&& c.user2_revealed` dropped from isRevealedMatch. M3 `!connectable ||` dropped from matchStanding. M4 `cameFromMatch(c)` dropped from isOpenMatch. M5 `nameable &&` dropped from the route's connectable (a hidden room handle). M6 the `mayShowRealName` guard dropped from friendOffersFor. M7 `identified &&` dropped from the profile's friend. M8 `via` set on the token path. M9 canAdd forced true for any addable state. M10 reasonCode given on every non-revealed standing. M2 `c.closed_at === null` dropped from isOpenMatch is an EQUIVALENT mutant: mayConnect (pairIsClosed) and the inbox query refuse a closed pair first, so it is defence in depth and no test can tell.",
+      "observed": "M1: 2 failing (incomplete-reveal reasonCode, offer until both revealed). M3: 1 failing (blocked/deleted/closed refuse as unknown). M4: 3 failing (message-request refusal, friends.itest user-id gate, offer). M5: 1 failing (room-scoped-identity handle test). M6: 1 failing (pseudonym gets no friend state). M7: 1 failing (profile friend only for a visible person). M8: 1 failing (token path carries no via). M9: 1 failing (offer). M10: 4 failing. M2: 51 of 51 still green, as expected. Each reverted; 51 of 51.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [

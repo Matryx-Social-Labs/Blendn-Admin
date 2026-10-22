@@ -5,6 +5,7 @@ import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
+import { friendOffersFor } from "@/lib/friend-offer"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -68,6 +69,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // kept pseudonymous would make the rule one tap deep.
     const theyRevealed = mayShowRealName(conversation, otherUser.id)
     const isUser1 = conversation.user1_id === authUser.userId
+    const friend = (await friendOffersFor(authUser.userId, [conversation])).get(conversation.id)
 
     return successResponse({
       id: conversation.id,
@@ -82,6 +84,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       pseudonymous: isPseudonymous(conversation),
       youRevealed: isUser1 ? conversation.user1_revealed : conversation.user2_revealed,
       theyRevealed,
+      /** Whether to offer "add as friend": a match, both revealed (lib/friend-offer.ts). */
+      friend,
       revealRequested: isUser1
         ? conversation.user1_reveal_requested
         : conversation.user2_reveal_requested,

@@ -16,6 +16,7 @@ import {
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
+import { friendOfferFor } from "@/lib/friend-offer"
 import { identityForRef } from "@/lib/identity"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { profileForSelfResponse } from "@/lib/self-profile"
@@ -227,12 +228,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       suggested_sun_sign: westernSignFor(p?.date_of_birth),
     }
 
+    // Only for somebody this viewer may see, and never for themselves: the
+    // offer to add a stranger as a friend would be a lookup (lib/friend-offer.ts).
+    const friend = identified && !isSelf ? await friendOfferFor(authUser.userId, userId) : undefined
+
     return successResponse({
       id: isSelf ? user.id : ref,
       email: isSelf ? user.email : undefined,
       name: identified ? user.name : "Attendee",
       ...(identified ? { image: user.image } : {}),
       createdAt: user.createdAt,
+      ...(friend && { friend }),
       profile: user.profile
         ? {
             /*

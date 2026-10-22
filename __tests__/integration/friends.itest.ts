@@ -262,20 +262,26 @@ describe("asking and answering", () => {
     expect((await listFriends(ben)).body.data.count).toBe(1)
   })
 
-  it("accepts a user id only for someone the asker can already see", async () => {
+  it("accepts a user id only for a match both people revealed in", async () => {
     const [ana, ben, stranger] = [
       await person("fr-id-a", "Ana"),
       await person("fr-id-b", "Ben"),
       await person("fr-id-s", "Sam"),
     ]
-    // An accepted message request: they already know each other.
     const [user1_id, user2_id] = conversationPair(ana.id, ben.id)
+    // An accepted message request is not a match, however well they know each other.
     await db.private_conversations.create({ data: { user1_id, user2_id } })
+    const missing = await ask(ana, { userId: "no-such-user" })
+    expect(missing.status).toBe(404)
+    expect(await ask(ana, { userId: ben.id })).toEqual(missing)
+
+    await db.private_conversations.update({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+      data: { user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
+    })
     expect((await ask(ana, { userId: ben.id })).body.data).toEqual({ state: "requested" })
 
     // Anybody else by id is a lookup, and it answers like a nonexistent id.
-    const missing = await ask(ana, { userId: "no-such-user" })
-    expect(missing.status).toBe(404)
     expect(await ask(ana, { userId: stranger.id })).toEqual(missing)
   })
 
@@ -542,13 +548,14 @@ describe("the edges the first reviews found", () => {
     expect((await listRequests(ana)).body.data.incoming).toEqual([])
   })
 
-  it("accepts a user id for someone who was public in a room you were in", async () => {
+  it("refuses a user id for someone who was public in a room you were in, match or not", async () => {
     const [ana, ben] = [await person("fr-rev-a", "Ana"), await person("fr-rev-b", "Ben")]
     const eventId = await room()
     await attend(ana, eventId)
     await attend(ben, eventId)
     await db.event_match_preferences.create({ data: { event_id: eventId, user_id: ben.id, revealed: true } })
-    expect((await ask(ana, { userId: ben.id })).body.data).toEqual({ state: "requested" })
+    const missing = await ask(ana, { userId: "no-such-user" })
+    expect(await ask(ana, { userId: ben.id })).toEqual(missing)
   })
 
   it("keeps someone who has not finished onboarding out of links and accepting", async () => {

@@ -316,13 +316,26 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect((await ask(hA)).status).toBe(409)
   })
 
-  it("a friend request by C's handle is refused as a stranger's; by A's it is not", async () => {
+  it("a friend request by any handle is refused as a stranger's until they are a revealed match; then C's still is", async () => {
     const ask = (ref: string) =>
       call(friendRequestsRoute.POST, "/api/mobile/friends/requests", viewer, { method: "POST", body: { userId: ref } })
-    const [toHer, toStranger] = [await ask(hC), await ask(hStrangerC)]
-    expect(toHer).toEqual(toStranger)
-    expect(toHer.status).toBe(404)
+    // A room-level reveal and a mutual like are not a match both revealed in.
+    const [toHerAtA, toHerAtC, toStranger] = [await ask(hA), await ask(hC), await ask(hStrangerC)]
+    expect(toHerAtA).toEqual(toStranger)
+    expect(toHerAtC).toEqual(toStranger)
+    expect(toStranger.status).toBe(404)
+
+    const [user1_id, user2_id] = [viewer.id, tanvi.id].sort()
+    await db.private_conversations.create({
+      data: { user1_id, user2_id, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
+    })
+    // C keeps her anonymous: a 200 there would say which pseudonym in C is her.
+    expect(await ask(hC)).toEqual(toStranger)
     expect((await ask(hA)).status).toBe(200)
+
+    // Leave the room as the next test expects it.
+    await db.friend_requests.deleteMany({ where: { sender_id: viewer.id, recipient_id: tanvi.id } })
+    await db.private_conversations.deleteMany({ where: { user1_id, user2_id } })
   })
 
   it("once friends, A's handle opens the friend route and C's does not", async () => {

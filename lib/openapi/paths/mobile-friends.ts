@@ -238,9 +238,13 @@ registry.registerPath({
   description:
     PARTICIPATION_GATE +
     SAME_404 +
-    "Exactly one of `token` (somebody's invite link) or `userId` (only for someone you can already see: a match, " +
-    "a conversation, someone public in your room; a room handle works too, SCRUM-371). Idempotent and cannot nag: asking again neither notifies again " +
-    "nor un-dismisses. `friends` when they had already asked you. 400 for your own link.",
+    "Exactly one of `token` (somebody's invite link) or `userId` (only for a match where you have BOTH revealed: an " +
+    "open conversation that came from a mutual like, neither side closed or blocked. A room handle resolves too, but " +
+    "a handle its room keeps anonymous is refused as unknown). Idempotent and cannot nag: asking again neither notifies again " +
+    "nor un-dismisses. `friends` when they had already asked you. 400 for your own link. " +
+    "A request made by `userId` notifies with `data.via` = `match`, never an event or room. " +
+    "One 404 differs: it carries `reasonCode` `NOT_A_REVEALED_MATCH` when you are in an open match with that person " +
+    "and one of you has not revealed yet (you already know you matched). Every other refusal is byte-identical to an unknown id.",
   security: bearerAuth,
   request: {
     body: {

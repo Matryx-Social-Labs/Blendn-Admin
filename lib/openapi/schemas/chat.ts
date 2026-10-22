@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, RoomUserRefSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PaginationMetaSchema, RoomUserRefSchema, UserRefParamSchema } from "./common"
 
 // Request schemas
 export const SendMessageRequestSchema = z
@@ -312,6 +312,7 @@ export const ConversationSchema = z
       ),
     youRevealed: z.boolean(),
     theyRevealed: z.boolean(),
+    friend: FriendOfferSchema,
     revealRequested: z.boolean(),
     lastMessage: z
       .object({
@@ -331,6 +332,7 @@ export const ConversationDetailSchema = z
   .object({
     id: z.string().uuid(),
     otherUser: ChatUserSchema,
+    friend: FriendOfferSchema,
     createdAt: z.string().datetime(),
     lastMessageAt: z.string().datetime().nullable(),
   })

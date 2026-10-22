@@ -1491,6 +1491,16 @@ it renders before anything is opened.
 Conversations from an accepted **message request** have no pseudonym and show
 real names throughout, as they always have.
 
+Both also carry **`friend: { state, canAdd }`** — whether to offer "add as
+friend". `canAdd` is true only for a match (not a message request or a board
+conversation) that is open, where **both** sides have revealed, and you are not
+friends or waiting on them. `state` is `none | requested | incoming | friends`
+from your side; `incoming` (they asked you) is still `canAdd: true`, because
+asking back accepts. While the other person is still a pseudonym to you it is
+always `{ state: "none", canAdd: false }`: any other answer would say which
+pseudonym is already your friend. The button calls `POST /friends/requests`
+with `{ userId }`.
+
 ### Notifications from a match
 
 Three, and **none of them carries a name — not even a pseudonym.**
@@ -1595,17 +1605,33 @@ which request ids are real.
 | GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
 | GET | `/friends/invite/:token/preview` | **No auth.** Signed-out invite screen → `{ name, photoUrl }` — first name only. Per-IP limit (20/min). Same 404 |
 | GET | `/friends/requests` | `{ incoming, outgoing }` |
-| POST | `/friends/requests` | Ask: `{ token }` or `{ userId }` → `{ state: "requested" \| "friends" }` |
+| POST | `/friends/requests` | Ask: `{ token }`, or `{ userId }` for a revealed match → `{ state: "requested" \| "friends" }`. 404, plus `reasonCode` `NOT_A_REVEALED_MATCH` for a match not yet revealed on both sides |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
 | DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
 
 **Nobody can be looked up.** There is no search. A request reaches someone only
 through their invite link (`https://www.blendn.app/f/<token>`, 128 random bits,
-resettable) or, by `userId`, someone you can already see under
-`maySeeIdentity` — a match, a conversation, someone public in your room. Every
-refusal a stranger could reach answers with the **same 404**: an unknown,
+resettable) or, by `userId`, a **revealed match** (owner, 2026-10-22: "if users
+have matched and they have revealed themselves we can then give an option to add
+as friend"). `revealedMatch(me, other)` in `lib/friends.ts` is true only when
+there is an open (`closed_at` null) conversation between the two, it came from a
+match (`cameFromMatch`: not a message request, not a board conversation), **both**
+sides have revealed, and `mayConnect` passes (not deleted, not blocked, not
+closed). A room-level reveal, `friends_see_me_in_rooms` and an accepted message
+request no longer open this path. A room handle still resolves, but one its room
+keeps anonymous is refused as unknown even for a revealed match: a 200 would say
+which pseudonym in that room is them.
+
+Every refusal a stranger could reach answers with the **same 404**: an unknown,
 malformed or reset token, a deleted account, a block either way, a pair who
-left each other, an id you have no relationship with.
+left each other, an id you have no relationship with. The one addition is
+`reasonCode: "NOT_A_REVEALED_MATCH"` on that 404 (`errorCode` stays
+`NOT_FOUND`), said only to someone in an open match with that person where one
+of you has not revealed yet — they already know they matched. A request made
+this way notifies with `data.via = "match"` (so the app can say "from your
+match"), and never names an event or room. The invite-link path is unchanged.
+`GET /profiles/:id` also carries `friend` (same shape as above) for somebody you
+may see, and never for yourself or a stranger.
 
 Opening a link, asking and accepting all need a finished profile (the
 participation gate, SCRUM-331). Ask, accept and block take a lock on the pair,

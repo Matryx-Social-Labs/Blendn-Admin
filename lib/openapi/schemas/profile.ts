@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PaginationMetaSchema, UserRefParamSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -205,6 +205,9 @@ export const ProfileResponseSchema = z
       .datetime()
       .optional()
       .describe("Absent through a room handle for somebody that room keeps anonymous."),
+    friend: FriendOfferSchema.optional().describe(
+      "Only on somebody else's profile you may see, never your own or a stranger's or a room-anonymous card."
+    ),
     profile: z.object({
       id: z.string().uuid(),
       phone: z.string().nullable(),

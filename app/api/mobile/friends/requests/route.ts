@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { participationRefusal } from "@/lib/event-access"
-import { INVITE_TOKEN, mayConnect, personCard, personSelect, requestFriend } from "@/lib/friends"
+import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, requestFriend } from "@/lib/friends"
 import { identityForRef } from "@/lib/identity"
 import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -57,8 +57,8 @@ export async function GET(request: NextRequest) {
 
 /*
  * Exactly one way in. A token is somebody's invite link; a user id is only
- * accepted for a person you can already see (a match, a conversation, someone
- * public in your room) — never an arbitrary id, or this would be a lookup.
+ * accepted for a match where both of you have revealed (`revealedMatch`) —
+ * never an arbitrary id, or this would be a lookup.
  */
 const createSchema = z.union([
   z.object({ token: z.string().regex(INVITE_TOKEN) }).strict(),
@@ -71,6 +71,9 @@ const createSchema = z.union([
  *
  * `{ state: "requested" }`, or `{ state: "friends" }` when they had already
  * asked you. Every way a stranger could be refused answers with the same 404.
+ * The one addition: a 404 carries `reasonCode` `NOT_A_REVEALED_MATCH` for
+ * somebody you are matched with who (or you) has not revealed yet. You know you
+ * matched, so it tells you nothing you could not see.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -91,6 +94,7 @@ export async function POST(request: NextRequest) {
     const notFound = () => notFoundResponse("Not found")
     let recipientId: string
     let connectable: boolean
+    let notYetRevealed = false
     if ("token" in parsed.data) {
       const invite = await db.friend_invites.findUnique({
         where: { token: parsed.data.token },
@@ -102,19 +106,23 @@ export async function POST(request: NextRequest) {
       if (!invite) return notFound()
       recipientId = invite.user_id
     } else {
-      // A room handle works here too (SCRUM-371); the identity gate refuses
-      // anyone the room keeps a stranger — in that room's terms, so a reveal
-      // at another event does not make this room's pseudonym askable.
+      // The decision is the match (`revealedMatch`, lib/friends.ts). A room
+      // handle still resolves through `identityForRef`, and a handle the room
+      // keeps anonymous is refused as unknown even for a revealed match: a
+      // 200 there would say which pseudonym in that room is them.
       const target = await identityForRef(me, parsed.data.userId)
       recipientId = target.userId
-      if (!target.identified) return notFound()
-      connectable = await mayConnect(me, recipientId)
+      const standing = await matchStanding(me, recipientId)
+      const nameable = !target.room || target.identified
+      connectable = nameable && standing === "revealed"
+      notYetRevealed = nameable && standing === "pending"
     }
 
     if (recipientId === me) return errorResponse("You can't add yourself")
+    if (notYetRevealed) return errorResponse("Not found", 404, undefined, "NOT_A_REVEALED_MATCH")
     if (!connectable) return notFound()
 
-    const state = await requestFriend(me, recipientId)
+    const state = await requestFriend(me, recipientId, "token" in parsed.data ? undefined : "match")
     // Their invite link brought me: the first link a person uses is the one
     // that counts toward its owner's Blendn+ referral month (lib/plus.ts).
     if ("token" in parsed.data) await recordReferral(me, recipientId)

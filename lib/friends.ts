@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { blockedEitherWay, conversationPair, pairIsClosed } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
-import { UNNAMED } from "@/lib/conversation-identity"
+import { UNNAMED, cameFromMatch } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 
 /**
@@ -15,7 +15,7 @@ import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
  * **Nobody can be looked up.** There is no search, and nothing in this module
  * takes a name, a phone number, an email or a handle. A request reaches
  * somebody only through their invite link — which they chose to hand out — or
- * a person the asker can already see under `maySeeIdentityFor`. Every refusal
+ * a match where both people have revealed (`revealedMatch`). Every refusal
  * a stranger could reach answers exactly like a link that never existed, and
  * costs the same work, so timing cannot tell them apart either.
  *
@@ -193,6 +193,70 @@ export async function mayConnect(askerId: string, otherId: string): Promise<bool
   return askerId !== otherId && other !== null && !blocked && !closed
 }
 
+/** What the match rule reads of a conversation. */
+export const matchSelect = {
+  user1_pseudonym: true,
+  user2_pseudonym: true,
+  user1_revealed: true,
+  user2_revealed: true,
+  origin_board_request_id: true,
+  closed_at: true,
+} as const
+
+type MatchRow = {
+  user1_pseudonym: string | null
+  user2_pseudonym: string | null
+  user1_revealed: boolean
+  user2_revealed: boolean
+  origin_board_request_id: string | null
+  closed_at: Date | null
+}
+
+/** An open conversation that came from a match: the pair that liked each other. */
+const isOpenMatch = (c: MatchRow) => c.closed_at === null && cameFromMatch(c)
+
+/**
+ * The conversation half of `revealedMatch`. Pure, so the conversation list can
+ * apply the same rule to rows it already holds without asking again.
+ */
+export const isRevealedMatch = (c: MatchRow) => isOpenMatch(c) && c.user1_revealed && c.user2_revealed
+
+/**
+ * Where a pair stands on the match rule, from one side's view:
+ *
+ * - `revealed`: an open match, both sides have shown their names, and nothing
+ *   (a block, a deleted account, an unmatch) stands between them.
+ * - `pending`: the same, but a side has not revealed yet.
+ * - `none`: anything else.
+ *
+ * **Always the same four queries**, whatever the answer, for the reason
+ * `mayConnect` gives.
+ */
+export async function matchStanding(askerId: string, otherId: string): Promise<"revealed" | "pending" | "none"> {
+  const [user1_id, user2_id] = conversationPair(askerId, otherId)
+  const [connectable, conversation] = await Promise.all([
+    mayConnect(askerId, otherId),
+    db.private_conversations.findUnique({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+      select: matchSelect,
+    }),
+  ])
+  if (!connectable || !conversation || !isOpenMatch(conversation)) return "none"
+  return isRevealedMatch(conversation) ? "revealed" : "pending"
+}
+
+/**
+ * May `me` add `other` as a friend because they matched and both revealed?
+ *
+ * The owner's rule (2026-10-22): "if users have matched and they have revealed
+ * themselves we can then give an option to add as friend." Nothing else lets a
+ * request go by user id — not a room-level reveal, not `friends_see_me_in_rooms`,
+ * not an accepted message request, which is not a match.
+ */
+export async function revealedMatch(me: string, other: string): Promise<boolean> {
+  return (await matchStanding(me, other)) === "revealed"
+}
+
 /**
  * Ask to be friends. Idempotent, and it cannot nag.
  *
@@ -206,7 +270,11 @@ export async function mayConnect(askerId: string, otherId: string): Promise<bool
  * Eligibility (`mayConnect`, and how the asker found this person) is the
  * caller's; this records the answer under the pair's lock.
  */
-export async function requestFriend(senderId: string, recipientId: string): Promise<"friends" | "requested"> {
+export async function requestFriend(
+  senderId: string,
+  recipientId: string,
+  via?: "match"
+): Promise<"friends" | "requested"> {
   const outcome = await db.$transaction(async (tx) => {
     await lockPair(tx, senderId, recipientId)
 
@@ -243,7 +311,7 @@ export async function requestFriend(senderId: string, recipientId: string): Prom
   })
 
   // After the commit: a push is not a database write and cannot be rolled back.
-  if ("requestId" in outcome && outcome.requestId) notifyFriendRequest(recipientId, outcome.requestId)
+  if ("requestId" in outcome && outcome.requestId) notifyFriendRequest(recipientId, outcome.requestId, via)
   if ("accepted" in outcome && outcome.accepted) notifyFriendAccepted(recipientId)
   return outcome.state
 }
@@ -369,12 +437,13 @@ export async function severFriendship(
  * Fire-and-forget like every other sender, but logged: a broken push pipeline
  * must not be invisible.
  */
-function notifyFriendRequest(recipientId: string, requestId: string): void {
+function notifyFriendRequest(recipientId: string, requestId: string, via?: "match"): void {
   sendPushNotification({
     userId: recipientId,
     title: "New friend request",
     body: "Someone wants to be friends. Open Blend'n to see who.",
-    data: { type: "friend_request", requestId },
+    // `via` lets the app say "from your match". Never an event or a room.
+    data: { type: "friend_request", requestId, ...(via && { via }) },
   }).catch((err: unknown) => logPushFailure("friend request", err))
 }
 
