@@ -5,7 +5,7 @@ import { db } from "@/lib/db"
 import type { Prisma } from "@prisma/client"
 import { openThread, quoteOf, replyToSelect } from "@/lib/dm-thread"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
+import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -190,7 +190,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
     const unfinished = await participationRefusal(authUser.userId)
-    if (unfinished) return unfinishedResponse(unfinished)
+    if (unfinished) return forbiddenResponse(unfinished)
 
     const body = await readJson(request)
     const parsed = sendMessageSchema.safeParse(body)

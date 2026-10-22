@@ -7,7 +7,7 @@ import { identityForRef } from "@/lib/identity"
 import { userIdFromRef } from "@/lib/room-handle"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
+import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { sendPushNotification } from "@/lib/push-notifications"
 import {
@@ -18,6 +18,7 @@ import {
   notFoundResponse,
   conflictResponse,
   serverErrorResponse,
+  forbiddenResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
     const unfinished = await participationRefusal(authUser.userId)
-    if (unfinished) return unfinishedResponse(unfinished)
+    if (unfinished) return forbiddenResponse(unfinished)
 
     const body = await readJson(request)
     const parsed = createRequestSchema.safeParse(body)
