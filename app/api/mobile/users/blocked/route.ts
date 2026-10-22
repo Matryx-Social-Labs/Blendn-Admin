@@ -4,9 +4,16 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { maySeeIdentityFor } from "@/lib/identity"
 import { blockRef } from "@/lib/room-handle"
-import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
+import { errorResponse, successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
+import { createdBefore, keysetPage, LEGACY_PAGE, LIST_PAGE, NEWEST_FIRST, parseListQuery, type ListPagination } from "@/lib/pagination"
 
-// GET /api/mobile/users/blocked — List users blocked by the current user
+/**
+ * GET /api/mobile/users/blocked — the people the caller has blocked, newest
+ * first, a page at a time (`?limit=` default 100, at most 100; `?cursor=` the
+ * last page's `pagination.nextCursor`) with `pagination.totalCount` the whole
+ * list. The identity gate and the "known as" lookup below run for the page, not
+ * for everybody ever blocked.
+ */
 export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request)
@@ -14,15 +21,26 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Authentication required")
     }
 
-    const blocks = await db.blocked_users.findMany({
-      where: { blocker_id: authUser.userId },
-      orderBy: { created_at: "desc" },
-      include: {
-        blocked: {
-          select: { id: true, name: true, image: true },
+    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE, LEGACY_PAGE)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit, after } = query
+
+    const mine = { blocker_id: authUser.userId }
+    const [totalCount, rows] = await Promise.all([
+      db.blocked_users.count({ where: mine }),
+      db.blocked_users.findMany({
+        where: after ? { AND: [mine, createdBefore(after)] } : mine,
+        orderBy: NEWEST_FIRST,
+        take: limit + 1,
+        include: {
+          blocked: {
+            select: { id: true, name: true, image: true },
+          },
         },
-      },
-    })
+      }),
+    ])
+    const page = keysetPage(rows, limit, (b) => ({ at: b.created_at, id: b.id }))
+    const blocks = page.items
 
     /*
      * Two endpoints, one pair of people, opposite answers.
@@ -113,7 +131,8 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return successResponse({ users })
+    const pagination: ListPagination = { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount }
+    return successResponse({ users, pagination })
   } catch (error) {
     logger.error("Get blocked users error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to fetch blocked users")

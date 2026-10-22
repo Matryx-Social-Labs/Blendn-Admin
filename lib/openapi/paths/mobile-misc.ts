@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -261,6 +261,12 @@ const VenueDetailSchema = z
           })
         )
         .describe("Its next public events, soonest first (id as tiebreak), at most 5: published, public, not ended, link not disputed by the venue, within your age; never its own live rooms."),
+      upcomingTotal: z.number().int().optional().describe("How many events `upcoming` is the first five of: every one coming, whatever you were sent."),
+      upcomingNextCursor: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("Send as `?cursor=` to `GET /venues/{venueId}/upcoming` for the rest. Null when `upcoming` is the whole list."),
     }),
     live: z.object({
       open: z.boolean().describe("Whether `POST .../live` would be accepted here now (the fence aside)."),
@@ -316,6 +322,45 @@ registry.registerPath({
   request: { params: z.object({ venueId: z.string().uuid() }) },
   responses: {
     200: { description: "The venue", content: { "application/json": { schema: wrap(VenueDetailSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/venues/{venueId}/upcoming",
+  tags: ["Mobile Venues"],
+  summary: "Every coming event at a venue, a page at a time",
+  description:
+    PARTICIPATION_GATE +
+    "Where \"See all\" goes: the venue page lists the first five with `upcomingTotal` and " +
+    "`upcomingNextCursor`. The same filter, order (soonest first) and age rule. `?limit=` (1-100, default 20), " +
+    "`?cursor=`; a cursor that is not ours is 400. 404 for an unknown, archived or deleted venue.",
+  security: bearerAuth,
+  request: { params: z.object({ venueId: z.string().uuid() }), query: ListQuerySchema },
+  responses: {
+    200: {
+      description: "A page of upcoming events",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              events: z.array(
+                z.object({
+                  id: z.string().uuid(),
+                  title: z.string(),
+                  slug: z.string(),
+                  coverImageUrl: z.string().nullable(),
+                  startTime: z.string().datetime(),
+                  endTime: z.string().datetime(),
+                })
+              ),
+              pagination: ListPaginationSchema,
+            })
+          ),
+        },
+      },
+    },
     ...standardErrors,
   },
 })
@@ -769,6 +814,8 @@ const NotificationSchema = z.object({
     "venue_offer",
     "event_changed",
     "report_actioned",
+    "event_cancelled",
+    "board_post_removed",
   ]),
   title: z.string(),
   body: z.string(),
@@ -1108,8 +1155,10 @@ registry.registerPath({
     "`blocked_id` is an opaque ref to the block (`bk_…`), not the person's account id: somebody " +
     "blocked by their board post or room handle was never shown an id, and this list must not be " +
     "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
-    "appear only where the identity rules allow.",
+    "appear only where the identity rules allow. Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, " +
+    "otherwise default 100, 1-100) with `pagination.totalCount` the whole list.",
   security: bearerAuth,
+  request: { query: ListQuerySchema },
   responses: {
     200: {
       description: "Blocked users",
@@ -1127,6 +1176,7 @@ registry.registerPath({
                   blocked_at: z.string().datetime(),
                 })
               ),
+              pagination: ListPaginationSchema,
             })
           ),
         },
@@ -1168,6 +1218,16 @@ const PlusStatusSchema = z
       .nullable()
       .describe("`grant`: the trial or a referral month. Manage a store subscription in that store."),
     expiresAt: z.string().datetime().nullable().describe("When the row that lasts longest ends; null never ends."),
+    state: z
+      .enum(["active", "cancelled", "grace", "hold", "paused", "expired", "refunded"])
+      .optional()
+      .describe(
+        "Where a store subscription or Night Pass stands, from the newest RevenueCat delivery about it. Omitted when not known (a grant, no purchase, a delivery that says nothing). `cancelled`: auto-renew is off and access runs to `expiresAt`. `grace`: a billing issue, still in the store's grace period. `hold`: Google's account hold. `refunded`: a store refund ended it. Present for someone with nothing live too (`expired`, `refunded`)."
+      ),
+    grant: z
+      .enum(["trial", "referral"])
+      .optional()
+      .describe("Which free month the live access is. Omitted for a store purchase and for nobody."),
   })
   .openapi("PlusStatus")
 

@@ -14,6 +14,29 @@ import { discloseBreakdown, suppressedLabel, type Disclosed } from "@/lib/disclo
  * A plain module cannot become one.
  */
 
+/**
+ * The refusals a voter can act on, by the sentence `castVote` throws, and the
+ * `reasonCode` the vote route sends with it (409 `CONFLICT`). One table, so the
+ * sentence the app shows and the code it branches on cannot drift apart.
+ */
+export const POLL_VOTE_REFUSALS = {
+  "This poll has closed": "POLL_CLOSED",
+  "The chatroom is not open": "ROOM_CLOSED",
+  "You are not in this chatroom": "NOT_IN_ROOM",
+  "That is not an option on this poll": "NOT_AN_OPTION",
+  [NOT_LIVE_MESSAGE]: "NOT_LIVE",
+} as const satisfies Record<string, string>
+
+export type PollVoteReason = (typeof POLL_VOTE_REFUSALS)[keyof typeof POLL_VOTE_REFUSALS]
+
+/** The reason for a refusal sentence, or null when it is not a voter's to act on. */
+export function pollVoteReason(message: string): PollVoteReason | null {
+  return (POLL_VOTE_REFUSALS as Record<string, PollVoteReason>)[message] ?? null
+}
+
+/** Why a poll's numbers are not shown, for a client that draws the two differently. */
+export type PollSuppressedReason = "hidden_until_close" | "few_votes"
+
 export interface PollOptionResult {
   id: string
   label: string
@@ -33,6 +56,13 @@ export interface PollResults {
   suppressed: boolean
   /** What to render in place of the numbers. Null when nothing is withheld. */
   suppressedLabel: string | null
+  /**
+   * Which kind of withholding `suppressedLabel` is: `hidden_until_close` (the
+   * poll is open and its results are not published; they appear when it
+   * closes) or `few_votes` (a count under the floor, or one that would give a
+   * hidden one away). Null when nothing is withheld.
+   */
+  suppressedReason: PollSuppressedReason | null
   /** Which option this reader chose, if any. */
   myVote: string | null
 }
@@ -145,6 +175,7 @@ export async function getPollResults(
         ? suppressedLabel("poll")
         : "Results appear when the poll closes"
       : null,
+    suppressedReason: disclosed.suppressed ? (reveal ? "few_votes" : "hidden_until_close") : null,
     myVote,
   }
 }

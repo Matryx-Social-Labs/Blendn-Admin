@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 
 import { serverErrorResponse, successResponse, unauthorizedResponse } from "@/lib/api-response"
-import { livePlus } from "@/lib/entitlements"
+import { livePlus, plusDetail } from "@/lib/entitlements"
 import { plusGatedForPerson } from "@/lib/plus"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -30,13 +30,20 @@ export async function GET(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("read", "me-plus", authUser.userId))
     if (limited) return limited
 
-    const [live, gated] = await Promise.all([livePlus(authUser.userId), plusGatedForPerson(authUser.userId)])
+    const [live, gated, detail] = await Promise.all([
+      livePlus(authUser.userId),
+      plusGatedForPerson(authUser.userId),
+      plusDetail(authUser.userId),
+    ])
     const res = await successResponse({
       active: live !== null,
       gated,
       product: live?.product ?? null,
       source: live?.source ?? null,
       expiresAt: live?.expiresAt?.toISOString() ?? null,
+      // Only when the data says so: `state` of a store subscription (from the
+      // RevenueCat deliveries), `grant` for a free month of ours. Never guessed.
+      ...detail,
     })
     res.headers.set("Cache-Control", "private, no-store")
     return res

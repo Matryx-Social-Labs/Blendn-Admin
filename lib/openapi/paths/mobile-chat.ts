@@ -325,6 +325,13 @@ const PollResultsSchema = z
     }),
     suppressed: z.boolean(),
     suppressedLabel: z.string().nullable(),
+    suppressedReason: z
+      .enum(["hidden_until_close", "few_votes"])
+      .nullable()
+      .optional()
+      .describe(
+        "Which withholding `suppressedLabel` is: `hidden_until_close` (open, results not published until it closes) or `few_votes` (a count under the floor, or one that would give a hidden one away). Null when nothing is withheld."
+      ),
     myVote: z.string().uuid().nullable().openapi({ description: "This reader's option, if any." }),
   })
   .openapi("PollResults")
@@ -376,8 +383,11 @@ registry.registerPath({
     "The response is the poll's full disclosed state, so the client renders what the server would",
     "send on a re-read rather than incrementing a count locally past the suppression floor.",
     "",
-    "**409** for anything the voter can act on: poll closed, chatroom closed, not a member of the",
-    "room, or an option that belongs to another poll.",
+    "**409** `CONFLICT` for anything the voter can act on, with the sentence in `error` and the reason in",
+    "`reasonCode`: `POLL_CLOSED` (\"This poll has closed\"), `ROOM_CLOSED` (\"The chatroom is not open\"),",
+    "`NOT_IN_ROOM` (\"You are not in this chatroom\"), `NOT_AN_OPTION` (\"That is not an option on this poll\"),",
+    "`NOT_LIVE` (a venue day's room, and the Go Live there has ended). **403** when the room itself refuses",
+    "the reader (a banned member).",
   ].join("\n"),
   security: bearerAuth,
   request: {
@@ -394,6 +404,7 @@ registry.registerPath({
     ...standardErrors,
     200: { description: "Updated poll", content: { "application/json": { schema: wrap(PollResultsSchema) } } },
     404: { description: "No such poll in this event" },
-    409: { description: "Poll closed, room closed, not a member, or unknown option" },
+    409: { description: "`reasonCode`: POLL_CLOSED, ROOM_CLOSED, NOT_IN_ROOM, NOT_AN_OPTION or NOT_LIVE" },
+    403: { description: "The room refuses the reader (banned)" },
   },
 })

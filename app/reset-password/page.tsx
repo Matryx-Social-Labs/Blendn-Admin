@@ -8,6 +8,8 @@ import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { OpenTheApp } from "@/components/open-the-app"
+import type { AppLinks, Audience } from "@/lib/app-links"
 import { checkPassword, MIN_PASSWORD_LENGTH } from "@/lib/password"
 
 /**
@@ -30,6 +32,9 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [linkDead, setLinkDead] = useState(false)
+  // Whose account the link is for. Known from the live-link check, and again from the reset itself.
+  const [audience, setAudience] = useState<Audience>("dashboard")
+  const [app, setApp] = useState<AppLinks | null>(null)
 
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("token")
@@ -42,6 +47,7 @@ export default function ResetPasswordPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((body) => {
         if (body?.valid === false) setLinkDead(true)
+        if (body?.audience) setAudience(body.audience)
       })
       .catch(() => {})
   }, [])
@@ -71,6 +77,13 @@ export default function ResetPasswordPage() {
         return
       }
       setDone(true)
+      if (body.audience === "attendee") {
+        // Their account is on the phone, and the dashboard would refuse them:
+        // no /login redirect, the app instead (SV15).
+        setAudience("attendee")
+        setApp(body.app ?? null)
+        return
+      }
       // Straight to sign-in rather than logging them in from here: proving they
       // can use the new password is the point of having set it.
       setTimeout(() => router.push("/login"), 2500)
@@ -81,12 +94,16 @@ export default function ResetPasswordPage() {
     }
   }
 
+  const toApp = done && audience === "attendee"
+
   return (
     <AuthFrame
       title={done ? "Password changed" : linkDead ? "This link no longer works" : "Set a new password"}
       sub={
         done
-          ? "Signing you back in…"
+          ? toApp
+            ? "Open Blend'n and sign in with your new password."
+            : "Signing you back in…"
           : linkDead
             ? "Reset links work once, and for an hour."
             : `At least ${MIN_PASSWORD_LENGTH} characters. Length beats symbols.`
@@ -97,9 +114,13 @@ export default function ResetPasswordPage() {
           <Callout tone="success" role="status">
             Any mobile app sessions on this account were signed out, in case someone else had them.
           </Callout>
-          <Button asChild>
-            <Link href="/login">Sign in</Link>
-          </Button>
+          {toApp ? (
+            <OpenTheApp app={app} />
+          ) : (
+            <Button asChild>
+              <Link href="/login">Sign in</Link>
+            </Button>
+          )}
         </>
       ) : linkDead ? (
         <>

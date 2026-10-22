@@ -8,6 +8,7 @@ import type {
 } from "@prisma/client"
 
 import { db } from "./db"
+import { plusGrantFrom, plusStateFrom, type PlusGrant, type PlusState } from "./plus-state"
 
 /**
  * Who may use what was paid for (plan v2 §9.2). The one module that reads or
@@ -616,4 +617,53 @@ export async function grantPlusOnce(
  */
 export function eraseUserEntitlements(userId: string) {
   return db.entitlements.deleteMany({ where: { subject_kind: "user", subject_id: userId } })
+}
+
+/**
+ * What `GET /me/plus` says beyond "active": where a store subscription stands
+ * and which of our grants a free month is. Described row: the live one that
+ * lasts longest, else the store purchase that ended last (so "expired" and
+ * "refunded" can be said to someone with nothing live). Everything is
+ * omitted-when-unknown: a grant row has no store state, a store row has no
+ * grant, and a purchase with no delivery on record has neither.
+ */
+export async function plusDetail(
+  userId: string,
+  now: Date = new Date()
+): Promise<{ state?: PlusState; grant?: PlusGrant }> {
+  const rows = await db.entitlements.findMany({
+    where: userPlus(userId),
+    orderBy: [{ expires_at: { sort: "desc", nulls: "first" } }],
+    take: 20,
+    select: { source: true, external_ref: true, starts_at: true, expires_at: true },
+  })
+  const isLive = (r: (typeof rows)[number]) => r.starts_at <= now && (r.expires_at === null || r.expires_at > now)
+  const row = rows.find(isLive) ?? rows.find((r) => r.source === "apple" || r.source === "google")
+  if (!row) return {}
+
+  const grant = isLive(row) ? plusGrantFrom(row.external_ref) : null
+  if (grant) return { grant }
+  if ((row.source !== "apple" && row.source !== "google") || !row.external_ref) return {}
+
+  // The newest delivery about this purchase: the webhook stores each processed
+  // event whole, and `original_transaction_id` (or `transaction_id` for a Night
+  // Pass) is the reference the row was made under. Indexed by the migration.
+  const [latest] = await db.$queryRaw<{ type: string; cancel_reason: string | null; grace_ms: string | null }[]>`
+    SELECT type,
+           payload->'event'->>'cancel_reason' AS cancel_reason,
+           payload->'event'->>'grace_period_expiration_at_ms' AS grace_ms
+      FROM payment_events
+     WHERE provider = 'revenuecat'
+       AND processed_at IS NOT NULL
+       AND (payload->'event'->>'original_transaction_id' = ${row.external_ref}
+            OR payload->'event'->>'transaction_id' = ${row.external_ref})
+     ORDER BY (payload->'event'->>'event_timestamp_ms')::bigint DESC, received_at DESC
+     LIMIT 1`
+  const state = plusStateFrom(
+    latest ? { type: latest.type, cancelReason: latest.cancel_reason, graceExpiresAtMs: latest.grace_ms ? Number(latest.grace_ms) : null } : null,
+    isLive(row),
+    row.source,
+    now
+  )
+  return state ? { state } : {}
 }

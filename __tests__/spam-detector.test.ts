@@ -30,6 +30,20 @@ describe("checkSpam", () => {
     expect(result!.action).toBe("hide")
   })
 
+  it("says how long until the burst window ends, in whole seconds, on a burst block only (SV13)", async () => {
+    for (let i = 0; i < 5; i++) await checkSpam(userId, chatGroupId, `Message ${i}`)
+    const burst = await checkSpam(userId, chatGroupId, "One more message")
+    expect(burst!.action).toBe("hide")
+    expect(Number.isInteger(burst!.retryAfter)).toBe(true)
+    expect(burst!.retryAfter).toBeGreaterThanOrEqual(1)
+    expect(burst!.retryAfter).toBeLessThanOrEqual(10)
+
+    // Links: waiting does not help, so there is nothing to wait for.
+    const links = await checkSpam("other-user", chatGroupId, "http://a.example http://b.example http://c.example http://d.example")
+    expect(links!.action).toBe("hide")
+    expect(links!.retryAfter).toBeUndefined()
+  })
+
   it("detects duplicate messages", async () => {
     await checkSpam(userId, chatGroupId, "Buy cheap products now!")
     const result = await checkSpam(userId, chatGroupId, "Buy cheap products now!")

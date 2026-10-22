@@ -523,8 +523,9 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     // Fix #35, now shared with the mobile PATCH route, which cancelled events
     // without cascading. See lib/event-cancellation.ts.
+    let toldInside: string[] = []
     if (isCancelling) {
-      await cancelEventCheckIns(resolvedParams.id)
+      toldInside = (await cancelEventCheckIns(resolvedParams.id)).inside
     }
 
     // Tell the people who were going.
@@ -535,7 +536,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     // the write above has already committed, so a push failure must not turn a
     // successful edit into a 500.
     if (isCancelling) {
-      await notifyEventCancelled(updatedEvent.id, updatedEvent.title)
+      await notifyEventCancelled(updatedEvent.id, updatedEvent.title, toldInside)
     } else {
       await notifyEventDetailsChanged(updatedEvent.id, updatedEvent.title, changes)
     }

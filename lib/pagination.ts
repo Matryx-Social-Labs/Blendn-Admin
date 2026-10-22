@@ -103,3 +103,134 @@ export function cursorPaginationMeta<T extends { id: string }>(
     },
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* Keyset cursors for lists that grow without bound                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Page sizes for the lists a person accumulates (SCRUM-760). A first page
+ * is sized so an installed client, which has no way to ask for a second one,
+ * still shows what a person has in practice: nobody has fifty live
+ * conversations, and the Friends list a phone draws is its first hundred.
+ */
+export const LIST_PAGE = {
+  /** `GET /conversations`: the inbox. */
+  CONVERSATIONS: 50,
+  /** `GET /friends`, `GET /users/blocked`, `GET /events/:id/board`. */
+  PEOPLE: 100,
+  /** Each of `GET /friends/requests`' two lists. */
+  REQUESTS: 50,
+  /** No page is ever larger than this, whatever `limit` asks for. */
+  MAX: 100,
+} as const
+
+/**
+ * Where a page ended: the last row's time (null for a row with none) and id.
+ * `createdAt` is the second time, for a list sorted on a nullable column whose
+ * empty rows are then ordered by when they were made (the inbox).
+ */
+export interface Keyset {
+  at: Date | null
+  id: string
+  createdAt?: Date
+}
+
+/** Opaque to the client: base64url of `{ t, id }` (and `c`). */
+export function encodeKeyset(at: Date | null, id: string, createdAt?: Date): string {
+  return Buffer.from(
+    JSON.stringify({ t: at ? at.toISOString() : null, id, ...(createdAt && { c: createdAt.toISOString() }) })
+  ).toString("base64url")
+}
+
+/**
+ * The cursor back, or `null` when it is not one of ours — the route answers 400
+ * rather than guessing, so a tampered cursor is never an unbounded read.
+ */
+export function decodeKeyset(raw: string): Keyset | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as { t?: unknown; id?: unknown; c?: unknown }
+    if (typeof parsed.id !== "string" || !parsed.id || parsed.id.length > 64) return null
+    const date = (v: unknown): Date | null | undefined =>
+      v === null ? null : typeof v === "string" && !Number.isNaN(new Date(v).getTime()) ? new Date(v) : undefined
+    const at = date(parsed.t)
+    const createdAt = parsed.c === undefined ? undefined : date(parsed.c)
+    if (at === undefined || createdAt === null || (parsed.c !== undefined && createdAt === undefined)) return null
+    return { at, id: parsed.id, ...(createdAt && { createdAt }) }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The rows after `k` in `created_at DESC, id DESC` order: older, or the same
+ * instant and a smaller id. Without the id half, two rows sharing a timestamp
+ * (a bulk insert, a seeded world) are skipped or repeated at a page edge.
+ */
+export function createdBefore(k: Keyset): {
+  OR: [{ created_at: { lt: Date } }, { created_at: Date; id: { lt: string } }]
+} {
+  const at = k.at ?? new Date(0)
+  return { OR: [{ created_at: { lt: at } }, { created_at: at, id: { lt: k.id } }] }
+}
+
+/** `created_at DESC, id DESC`, the order `createdBefore` continues. */
+export const NEWEST_FIRST = [{ created_at: "desc" as const }, { id: "desc" as const }]
+
+/**
+ * A page of `limit` from `limit + 1` rows read, and the cursor for the next.
+ * `cursorOf` names the row's keyset.
+ */
+export function keysetPage<T>(
+  rows: T[],
+  limit: number,
+  cursorOf: (row: T) => Keyset
+): { items: T[]; hasMore: boolean; nextCursor: string | null } {
+  const hasMore = rows.length > limit
+  const items = hasMore ? rows.slice(0, limit) : rows
+  const last = items[items.length - 1]
+  const k = hasMore && last ? cursorOf(last) : null
+  return { items, hasMore, nextCursor: k ? encodeKeyset(k.at, k.id, k.createdAt) : null }
+}
+
+/**
+ * What an installed build, which cannot page and sends neither `limit` nor
+ * `cursor`, is answered with: up to this many. It is the old behaviour in
+ * practice (nobody has more) without the unbounded read, and it sits above
+ * `LIST_PAGE.MAX` on purpose, so it is decided BEFORE the 1-100 clamp.
+ */
+export const LEGACY_PAGE = 200
+
+/**
+ * `?limit=&cursor=` for a list. A request with neither is a build that cannot
+ * page: it gets `legacyLimit` when the route has one (see `LEGACY_PAGE`).
+ * Anything that names a `limit` or a `cursor` is a client that pages, and gets
+ * `defaultLimit` unless it says otherwise, 1-100 (`LIST_PAGE.MAX`). The legacy
+ * case comes first, before the clamp, or 200 would be turned into 100.
+ * `"bad_cursor"` for a cursor that is not one of ours (the route answers 400);
+ * `after` is null on the first page.
+ */
+export function parseListQuery(
+  searchParams: URLSearchParams,
+  defaultLimit: number,
+  legacyLimit?: number
+): { limit: number; after: Keyset | null } | "bad_cursor" {
+  const raw = searchParams.get("cursor")
+  const asked = searchParams.get("limit")
+  const limit =
+    legacyLimit !== undefined && !raw && asked === null
+      ? legacyLimit
+      : boundedInt(asked, defaultLimit, 1, LIST_PAGE.MAX)
+  if (!raw) return { limit, after: null }
+  const after = decodeKeyset(raw)
+  return after ? { limit, after } : "bad_cursor"
+}
+
+/** The `pagination` block every cursor-paged list answers with. */
+export interface ListPagination {
+  limit: number
+  hasMore: boolean
+  nextCursor: string | null
+  /** The whole list, whatever page this is: the count a header says. */
+  totalCount: number
+}
