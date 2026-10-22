@@ -77,7 +77,7 @@ async function phoneIn(room: string) {
 async function person(label: string, withToken = true) {
   const id = await makeUser(testId(label))
   users.push(id)
-  if (withToken) await db.push_tokens.create({ data: { user_id: id, token: `ExponentPushToken[itest-${id}]`, platform: "ios" } })
+  if (withToken) await db.push_tokens.create({ data: { user_id: id, token: `ExponentPushToken[itest-${id}]`, platform: "ios", channel_set: 2 } })
   return id
 }
 
@@ -120,14 +120,14 @@ it("tells those inside once: one emit to the room, an event_cancelled push each,
     [
       `event_cancelled:ExponentPushToken[itest-${insideA}]`,
       `event_cancelled:ExponentPushToken[itest-${insideGoing}]`,
-      `event_update:ExponentPushToken[itest-${goingOnly}]`,
+      `event_changed:ExponentPushToken[itest-${goingOnly}]`,
     ].sort()
   )
   expect(sentTo.join()).not.toContain(outside)
 
   const bell = await db.notifications.findMany({ where: { user_id: { in: [insideA, insideGoing, goingOnly] } }, select: { user_id: true, kind: true } })
   expect(bell.filter((b) => b.user_id === insideGoing).map((b) => b.kind)).toEqual(["event_cancelled"])
-  expect(bell.filter((b) => b.user_id === goingOnly).map((b) => b.kind)).toEqual(["event_update"])
+  expect(bell.filter((b) => b.user_id === goingOnly).map((b) => b.kind)).toEqual(["event_changed"])
 })
 
 it("a second run over the cancelled event tells nobody again", async () => {
@@ -155,7 +155,7 @@ it("a room bigger than a page is read in pages and pushed in batches", async () 
   const ids = Array.from({ length: total }, (_, i) => testId(`ci-big${i}`))
   await db.user.createMany({ data: ids.map((id) => ({ id, email: `${id}@itest.invalid`, name: "Big", role: "attendee" as const })) })
   users.push(...ids)
-  await db.push_tokens.createMany({ data: ids.map((id) => ({ user_id: id, token: `ExponentPushToken[itest-${id}]`, platform: "ios" })) })
+  await db.push_tokens.createMany({ data: ids.map((id) => ({ user_id: id, token: `ExponentPushToken[itest-${id}]`, platform: "ios", channel_set: 2 })) })
   await db.event_check_ins.createMany({
     data: ids.map((user_id) => ({
       event_id: r.eventId,
@@ -177,3 +177,12 @@ it("a room bigger than a page is read in pages and pushed in batches", async () 
   expect(Math.max(...sent.mock.calls.map((c) => c[0].length))).toBeLessThanOrEqual(500)
   expect(sent.mock.calls.length).toBeGreaterThanOrEqual(Math.ceil(total / 500))
 }, 60_000)
+
+it("a build that predates the kind is sent event_update, which it opens on the event", async () => {
+  const r = await room()
+  const old = await person("ci-oldbuild")
+  await db.push_tokens.updateMany({ where: { user_id: old }, data: { channel_set: 1 } })
+  await putInRoom({ ...r, userId: old })
+  await cancelEventCheckIns(r.eventId)
+  expect(typesSent()).toEqual([`event_update:ExponentPushToken[itest-${old}]`])
+})

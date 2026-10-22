@@ -117,7 +117,7 @@ export const CHANNEL_SET_FLOW9 = 2
  * - `events`    a change, a cancellation, an announcement, a place on the waitlist
  * - `after-the-night`  "How was it?"
  * - `offers`    a venue's offer
- * - `default`   a report you filed was acted on
+ * - `default`   a report you filed was acted on, your board post was taken down
  */
 type Delivery = Pick<ExpoPushMessage, "channelId" | "threadId" | "collapseId" | "tag">
 
@@ -144,6 +144,8 @@ function deliveryForFlow9(data: NotificationData): Delivery {
       return { channelId: "crew" }
     case "event_update":
     case "event_changed":
+    // The room closed: replaces the update it supersedes, and only that is true.
+    case "event_cancelled":
       return replaced("events", data.eventId && `event:${data.eventId}`)
     case "announcement":
     case "waitlist_promoted":
@@ -161,11 +163,13 @@ function deliveryForFlow9(data: NotificationData): Delivery {
 
 /**
  * What a build that predates a kind is sent in its place. `event_changed` is an
- * `event_update` to it, which it opens on the event; every other new kind opens
+ * `event_update` to it, which it opens on the event, and so is `event_cancelled`; every other new kind opens
  * nothing there and is sent as itself.
  */
 function payloadFor(data: NotificationData | undefined, channelSet: number | null): NotificationData | undefined {
-  if (data?.type === "event_changed" && (channelSet ?? 0) < CHANNEL_SET_FLOW9) return { ...data, type: "event_update" }
+  if ((data?.type === "event_changed" || data?.type === "event_cancelled") && (channelSet ?? 0) < CHANNEL_SET_FLOW9) {
+    return { ...data, type: "event_update" }
+  }
   return data
 }
 
@@ -190,7 +194,7 @@ export function declaredChannelSet(headers: Headers): number | null {
  * updated reads it as `event_changed` from then on.
  */
 export function bellRowFor<T extends { kind: string; data?: unknown }>(row: T, channelSet: number | null): T {
-  if (row.kind !== "event_changed" || (channelSet ?? 0) >= CHANNEL_SET_FLOW9) return row
+  if ((row.kind !== "event_changed" && row.kind !== "event_cancelled") || (channelSet ?? 0) >= CHANNEL_SET_FLOW9) return row
   return { ...row, kind: "event_update", data: payloadFor(row.data as NotificationData, channelSet) }
 }
 

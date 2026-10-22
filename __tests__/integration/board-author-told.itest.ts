@@ -92,7 +92,8 @@ const newPost = async (authorId: string, body = "two seats from Indiranagar") =>
 /** The dedicated event; the bell's own `notification:new` rides the same room and is checked separately. */
 const removedEvents = () => emitted.filter((e) => e.event === "board:postRemoved")
 
-const pushes = () => sent.mock.calls.flatMap((c) => c[0].map((m) => `${m.data?.type}:${m.to}`))
+// Only this kind: a removal also tells the reporter their report was acted on (`report_actioned`), not this suite's subject.
+const pushes = () => sent.mock.calls.flatMap((c) => c[0].map((m) => `${m.data?.type}:${m.to}`)).filter((p) => p.startsWith("board_post_removed:"))
 
 describe("the automatic check takes a post down", () => {
   it("tells the author, with ids and no words", async () => {
@@ -120,7 +121,7 @@ describe("the automatic check takes a post down", () => {
     mockCheck.mockResolvedValue({ checked: true, result: { action: "allow" } })
     await hideBoardPostIfFlagged(postId, "x")
     expect(removedEvents()).toEqual([])
-    expect(sent).not.toHaveBeenCalled()
+    expect(pushes()).toEqual([])
   })
 
   it("says nothing about a post its author had already withdrawn", async () => {
@@ -130,7 +131,7 @@ describe("the automatic check takes a post down", () => {
     mockCheck.mockResolvedValue({ checked: true, result: { action: "hide" } })
     await hideBoardPostIfFlagged(postId, "x")
     expect(removedEvents()).toEqual([])
-    expect(sent).not.toHaveBeenCalled()
+    expect(pushes()).toEqual([])
   })
 })
 
@@ -161,7 +162,7 @@ describe("a moderator removes a post", () => {
     sent.mockClear()
     await resolveReport("message", second, "remove_message")
     expect(removedEvents()).toEqual([])
-    expect(sent).not.toHaveBeenCalled()
+    expect(pushes()).toEqual([])
   })
 
   it("does not tell an author who had withdrawn the post first", async () => {
@@ -171,7 +172,7 @@ describe("a moderator removes a post", () => {
     await db.board_posts.update({ where: { id: postId }, data: { deleted_at: new Date() } })
     await resolveReport("message", report, "remove_message")
     expect(removedEvents()).toEqual([])
-    expect(sent).not.toHaveBeenCalled()
+    expect(pushes()).toEqual([])
   })
 })
 
@@ -222,5 +223,5 @@ it("a withdrawal by the author is not told to the author", async () => {
   )
   expect(res.status).toBe(200)
   expect(removedEvents()).toEqual([])
-  expect(sent).not.toHaveBeenCalled()
+  expect(pushes()).toEqual([])
 })
