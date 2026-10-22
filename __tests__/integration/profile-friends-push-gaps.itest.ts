@@ -287,6 +287,20 @@ describe("friends: reasons that never say why somebody is out of reach", () => {
     expect(await body(blocked)).toEqual(expected)
   })
 
+  it("an invite whose owner blocked you answers exactly as one that never existed", async () => {
+    const me = await person("fr-inv-asker")
+    const owner = await person("fr-inv-owner")
+    const token = "B".repeat(22)
+    await db.friend_invites.create({ data: { user_id: owner, token } })
+    await db.blocked_users.create({ data: { blocker_id: owner, blocked_id: me } })
+
+    const blocked = await post(me, { token })
+    const unknown = await post(me, { token: "C".repeat(22) })
+    expect(blocked.status).toBe(404)
+    expect(await body(blocked)).toEqual(await body(unknown))
+    expect(await body(await post(me, { token }))).toMatchObject({ errorCode: "NOT_FOUND", reasonCode: "INVITE_UNAVAILABLE" })
+  })
+
   it("an invite that does not work answers one way: asked for, and opened", async () => {
     const me = await person("fr-invitee")
     const token = "A".repeat(22)

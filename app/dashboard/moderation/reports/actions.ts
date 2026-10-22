@@ -735,10 +735,11 @@ export async function resolveReport(
 
   /*
    * Tell the person who reported it, when it led to action. After the commit, and
-   * only for a report this call decided as resolved (a reinstate is not an
-   * outcome; a dismissal is "no action"). It never throws: the decision stands.
+   * only for a report this call decided as resolved (a dismissal is "no action",
+   * and a reinstatement is not an outcome). It never throws: the decision stands.
    */
-  if (reviewed.status === "resolved" && decision !== "reinstate") {
+  // A reinstatement's outcome is `reviewed`, so it never gets here.
+  if (reviewed.status === "resolved") {
     const reporterId =
       kind === "event" ? (report as { user_id: string }).user_id : (report as { reporter_id: string }).reporter_id
     await notifyReportActioned(reporterId).catch(() => false)

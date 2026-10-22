@@ -1987,6 +1987,36 @@
       "mutation": "M1543 the gate not asked of mobile requests. M1544 maintenance ignored by the gate. M1545 the version comparison flipped (an old build passes). M1546 a request with no version header refused. M1547 the gate applied to every path with /api/health in the matcher.",
       "observed": "M1543: 2 of 8 failing. M1544: 1 of 8 failing. M1545: 1 of 8 failing. M1546: 1 of 8 failing. M1547: 3 of 8 failing (health, dashboard, health-version). Each reverted; 8 of 8.",
       "date": "2026-10-22"
+    },
+    "push-channels.test.ts": {
+      "guards": "Flow 9: a build that does not say channelSet 2 is sent every kind on the channel it always got (a push naming a channel the install never created lands in Miscellaneous); a build that does gets each kind on one of people/crew/later/messages/rooms/events/offers/default.",
+      "mutation": "M1517 `if ((channelSet ?? 0) >= CHANNEL_SET_FLOW9) return deliveryForFlow9(data)` replaced by `if (true) return deliveryForFlow9(data)`.",
+      "observed": "2026-10-22: M1517: 13 of the 40 per-kind cases failing (every kind whose channel changed, 'a build before Flow 9 is sent what it always was'). Reverted; all green.",
+      "date": "2026-10-22"
+    },
+    "event-change.test.ts": {
+      "guards": "lib/event-change.ts: only a published event records a change (into published or cancelled); the first value of a field wins across edits; a field put back to where it started drops out and the columns clear.",
+      "mutation": "M1518 delete the `before.status !== \"published\"` early return. M1519 `if (moved.start_time && from.start_time === undefined)` -> `if (moved.start_time)` (last value wins). M1520 delete the `delete from.start_time` put-back line.",
+      "observed": "2026-10-22: M1518: 1 failing ('only a published event records one'). M1519: 1 failing ('keeps the first value across edits'). M1520: 1 failing (same case, the clears-when-put-back half). Each reverted; 13 of 13.",
+      "date": "2026-10-22"
+    },
+    "event-changed-scene.itest.ts": {
+      "guards": "Flow 3 on a real database: the people going get event_changed (the rest event_update); an event hidden by an organisation suspension says ORGANISER_SUSPENDED while a draft nobody published says nothing.",
+      "mutation": "M1521 `going.length > 0 ? notifyEventChanged(...) : null` -> `null` (event_changed never sent). M1522 `const suspended = event?.status === \"draft\" && ... pre_suspension_status !== null` -> `const suspended = true`.",
+      "observed": "2026-10-22: M1521: 2 failing (the dashboard time+venue move, the phone cancel). M1522: 1 failing ('an event hidden because its organisation was suspended says so; a draft nobody published does not'). Each reverted; 12 of 12.",
+      "date": "2026-10-22"
+    },
+    "profile-friends-push-gaps.itest.ts": {
+      "guards": "Flows 6 and 9 on a real database: the per-kind push switches stop their kind's push on the single and bulk paths and leave the bell; an older build is sent event_changed as event_update; photo_states lists a pulled photo only inside the 7-day notice window and only to its owner; badges are absent when show_badges is off or the viewer cannot see who the person is; every way a friend link or person is out of reach answers one body.",
+      "mutation": "M1523 `switchedOn` returns {} (`column && false`). M1524 `if (true) return deliveryForFlow9(data)` (every build gets the new channels). M1525 payloadFor never downgrades event_changed. M1526 the notice window dropped (`pulled_at: { gte: since }` removed). M1527 `p.show_badges !== false` dropped. M1528 `(isSelf || identified)` -> true for any viewer. M1529 the blocked-invite 404 says `reasonCode: \"BLOCKED\"` instead of INVITE_UNAVAILABLE.",
+      "observed": "2026-10-22: M1523: 2 failing (single and bulk). M1524: the channel case failing. M1525: 4 failing (the channel case, event_changed downgrade, and the two switch cases that read the same sent list). M1526: 2 failing. M1527: 1 failing. M1528: 1 failing. M1529: 1 failing, after the test was extended to reach the `connectable` branch (the first draft of the case went through `identityForRef` and survived it: that is why 'an invite whose owner blocked you' exists). Each reverted; 16 of 16.",
+      "date": "2026-10-22"
+    },
+    "report-actioned.itest.ts": {
+      "guards": "A report that led to action (status resolved) tells its reporter with report_actioned, naming nobody; a dismissal tells nobody; reinstating an account afterwards tells nobody.",
+      "mutation": "M1530 `if (reviewed.status === \"resolved\")` -> `if (decision !== \"reinstate\")` (a dismissal also sends). M1531 `decision !== \"reinstate\"` kept beside the status check, then removed as redundant: a reinstate's outcome is `reviewed`, so the clause was unreachable and M1531 (dropping it) survived by design.",
+      "observed": "2026-10-22: M1530: 1 failing ('a dismissal sends nothing'). M1531: survived, which is how the redundant clause was found and deleted. Reverted; 2 of 2.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [
