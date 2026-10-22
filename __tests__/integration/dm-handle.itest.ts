@@ -45,7 +45,7 @@ async function person(label: string, name: string): Promise<Person> {
   const id = await makeUser(label)
   users.push(id)
   await onboard(id)
-  await db.profiles.update({ where: { id }, data: { name, photos: [`https://img.invalid/${label}.jpg`] } })
+  await db.profiles.update({ where: { id }, data: { name, photos: [`https://img.invalid/${label}.jpg`], blur_photo: `https://img.invalid/${label}.blur.jpg` } })
   await db.user.update({ where: { id }, data: { name } })
   return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
 }
@@ -140,6 +140,11 @@ describe("a friend who is also an unrevealed match is a handle in the DM", () =>
     expect([mine.senderId, mine.sender.id]).toEqual([ana.id, ana.id])
     expect(JSON.stringify(t.body)).not.toContain(ben.id)
 
+    // A handle-scoped payload never carries the stored blur: one URL for every room, so it would link pseudonyms across them.
+    for (const wire of [JSON.stringify(list), JSON.stringify(d.body), JSON.stringify(t.body)]) {
+      expect(wire).not.toContain("blur")
+    }
+
     // And Ben, who Ana has revealed to, sees Ana's real id: she is a name to him.
     const bens = (await inbox(ben)).data.conversations.find((c: { id: string }) => c.id === id)
     expect(bens.otherUser.id).toBe(ana.id)
@@ -220,6 +225,7 @@ describe("the DM socket events carry the handle too", () => {
     expect(toAna.payload.message.sender.id).toBe(handleForAna)
     expect(toBen.payload.message.senderId).toBe(ben.id)
     expect(JSON.stringify(toAna.payload)).not.toContain(ben.id)
+    expect(JSON.stringify(emits)).not.toContain("blur")
     expect(toAna.rooms).not.toContain(`conversation:${id}`)
     expect(toBen.rooms).not.toContain(`user:${ana.id}`)
   })

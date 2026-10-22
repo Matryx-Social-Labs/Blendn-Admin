@@ -1484,8 +1484,43 @@ account id also carries a name, so the id beside a pseudonym was a join key.
 `private:message` is sent per recipient (their copy names the sender by the
 handle; the sender's devices get their own id); `private:typing` and
 `private:read` go to the other person alone while the sender is a pseudonym to
-them. A mutual like between two people who are already friends is not a match:
-the like is recorded and answers exactly as a like nobody returned.
+them. A mutual like between two people who already know each other — any
+conversation between them, a friendship, or a friend request waiting — is not a
+match: the like is recorded and answers exactly as a like nobody returned
+(`mutual: false`, no `room:match`), under the pair's lock. Opening one would
+hand back the old DM or link this event's pseudonym to the first one's. A
+conversation made with pseudonyms is pseudonymous on both sides: a side the room
+never named is `Attendee`, never null (null reads as real names). A handle
+carries no photo, ever: the stored blur is one URL for every room.
+
+Like the room handles, a conversation handle is keyed to the server secret:
+rotating `NEXTAUTH_SECRET` retires every one a client holds, and the next inbox
+fetch hands back fresh ones (the DM itself is addressed by `conversationId`,
+which does not change). Blocking by a handle severs the friendship with that
+person, as `POST /users/:id/block` always has.
+
+**A friend request between two people who are still pseudonyms is held.**
+`POST /friends/requests` still answers `{ state: "requested" }`, but when the
+pair's only conversation is a pseudonymous one (a match, a board post) not yet
+revealed on both sides, no push goes out, it is absent from the recipient's
+`incoming`, `friend.state` is `none` for the recipient, and accepting it is a
+`404`. When both have revealed it is released: it appears in `incoming` and the
+push goes out then (from the reveal route, or from a reveal in the room carrying
+into the DM); two people who had each asked become friends at that moment. An
+unmatch closes the pair as it always did. For such a pair that are already
+friends, `GET /friends/:id` has `conversationId: null` and `POST
+/friends/:id/conversation` answers `409` as for a closed pair (the app shows
+"The conversation didn't open. Try again."); they keep talking in the inbox.
+`friend_requests.held_at` (migration `20261022120000_friend_request_held`)
+records it.
+
+`GET /events/:id/peer-ratings` lists the people you matched with **at that
+event** (conversations born of a mutual like there), each by the id the inbox
+shows for them: a handle until they reveal, their id after. `POST` takes that
+ref, or a handle from before they revealed; a raw id for somebody still a
+pseudonym is `403`. `POST /board/requests/:id` (accept) between people who are
+friends or already have any conversation takes the seat and returns
+`conversationId: null`.
 
 `POST /message-requests` to somebody you matched with who has not revealed to
 you answers the same synthetic `201` it gives a stranger, never the `409`: the

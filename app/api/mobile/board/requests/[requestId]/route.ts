@@ -10,6 +10,7 @@ import {
   ConversationClosedError,
 } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { lockPair } from "@/lib/friends"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { notifyBoardRequestAccepted } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -267,12 +268,28 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           })
           if (seat.count === 0) throw new AcceptRefused("That offer is full")
         }
-        const opened = await openConversation(
-          boardRequest.from_user_id,
-          boardRequest.to_user_id,
-          { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId },
-          tx
-        )
+        /*
+         * Between people who are friends, or who already have any conversation,
+         * the accept opens nothing: the seat is taken and the answer carries no
+         * conversation. Handing back the existing one would tie the board's
+         * pseudonym to the name the friend DM or the real-name thread shows, and
+         * a new pseudonymous DM beside a friend's would do the same. They already
+         * have where to talk. Under the pair's lock, as a friend request is.
+         */
+        await lockPair(tx, boardRequest.from_user_id, boardRequest.to_user_id)
+        const [pairA, pairB] = conversationPair(boardRequest.from_user_id, boardRequest.to_user_id)
+        const [friends, existing] = await Promise.all([
+          tx.friendships.findUnique({ where: { user1_id_user2_id: { user1_id: pairA, user2_id: pairB } }, select: { id: true } }),
+          tx.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id: pairA, user2_id: pairB } }, select: { id: true } }),
+        ])
+        const opened = friends || existing
+          ? null
+          : await openConversation(
+              boardRequest.from_user_id,
+              boardRequest.to_user_id,
+              { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId },
+              tx
+            )
         // The post's room, once a second asker is in (CR-I16, SCRUM-535).
         await seatBoardRoom(tx, {
           id: boardRequest.post_id,
@@ -288,7 +305,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       throw error
     }
 
-    notifyBoardRequestAccepted(boardRequest.from_user_id, conversation.id).catch((error) =>
+    notifyBoardRequestAccepted(boardRequest.from_user_id, conversation?.id ?? null).catch((error) =>
       logger.warn("Board acceptance notification failed", {
         requestId,
         error: String(error),
@@ -298,7 +315,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       id: requestId,
       status: "accepted",
-      conversationId: conversation.id,
+      // Null when the pair are friends or already had a conversation: nothing was opened.
+      conversationId: conversation?.id ?? null,
     })
   } catch (error) {
     logger.error("Board request decision error", {

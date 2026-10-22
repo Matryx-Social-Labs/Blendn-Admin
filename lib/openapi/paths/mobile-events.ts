@@ -691,7 +691,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Who you can still rate for this event",
   description:
-    "Only people you connected with (a mutual like), and only once the event has ended. Empty is the common case.",
+    "Only people you matched with at this event (a conversation born of a mutual like there), and only once the event has ended. Each is the id the inbox shows for them: a conversation handle until they reveal to you, their id after. Empty is the common case.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {
@@ -706,7 +706,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Rate someone you met",
   description:
-    "Never visible to the person rated, and no endpoint returns it to them. A harassment report goes to moderation on its own and is never averaged into a score.",
+    "`userId` is the ref the list gave (a handle from before they revealed still works; a raw id for somebody still a pseudonym is 403). Never visible to the person rated, and no endpoint returns it to them. A harassment report goes to moderation on its own and is never averaged into a score.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

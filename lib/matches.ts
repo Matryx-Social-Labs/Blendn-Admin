@@ -1,5 +1,5 @@
-import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
-import { areFriends, friendIdsOf } from "@/lib/friends"
+import { ConversationClosedError, closedPairKeys, conversationPair, openConversation } from "@/lib/conversations"
+import { friendIdsOf, lockPair, releaseHeldRequests } from "@/lib/friends"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
@@ -772,15 +772,6 @@ export async function likeAtEvent(
   if (!back) return { mutual: false }
 
   /*
-   * Friends already have their DM, and a match between them would hand back
-   * that DM's id (the like's response, the `room:match` event), which says which
-   * card on the roster is the friend — past `friends_see_me_in_rooms`. So a
-   * mutual like between friends is no match at all: the like is recorded, and
-   * the answer is the one a like nobody returned gets.
-   */
-  if (await areFriends(likerId, likedId)) return { mutual: false }
-
-  /*
    * A closed pair can still reach here.
    *
    * `POST /matches/likes` refuses closed pairs before calling in, and closed
@@ -811,13 +802,42 @@ export async function likeAtEvent(
   ])
 
   try {
-    const conversation = await openConversation(likerId, likedId, {
-      eventId,
-      pseudonyms: Object.fromEntries(
-        pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"])
-      ),
-      revealed: revealedRows.map((r) => r.user_id),
+    /*
+     * Not a match when the pair already know each other — any conversation row,
+     * a friendship, or a friend request waiting. Opening one would hand back the
+     * existing DM (its id on the like's response and on `room:match` says which
+     * card is the friend, or which real-name thread this is), and a second
+     * pseudonymous DM would link this event's pseudonyms to the first's. They
+     * already have somewhere to talk. The like is recorded and the answer is
+     * that of a like nobody returned. Under the pair's lock, like every other
+     * writer of the pair's standing (`lockPair`), so a request or an accept
+     * cannot land between this check and the write.
+     */
+    const [user1_id, user2_id] = conversationPair(likerId, likedId)
+    const conversation = await db.$transaction(async (tx) => {
+      await lockPair(tx, likerId, likedId)
+      const [friends, existing, request] = await Promise.all([
+        tx.friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
+        tx.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
+        tx.friend_requests.findFirst({
+          where: { withdrawn_at: null, OR: [{ sender_id: likerId, recipient_id: likedId }, { sender_id: likedId, recipient_id: likerId }] },
+          select: { id: true },
+        }),
+      ])
+      if (friends || existing || request) return null
+      return openConversation(
+        likerId,
+        likedId,
+        {
+          eventId,
+          // A pseudonym this room never gave is "Attendee", never null: a null reads as real names.
+          pseudonyms: Object.fromEntries(pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"])),
+          revealed: revealedRows.map((r) => r.user_id),
+        },
+        tx
+      )
     })
+    if (!conversation) return { mutual: false }
     /*
      * Only the EARLIER liker gets the push.
      *
@@ -867,4 +887,8 @@ export async function revealConversationsFrom(eventId: string, userIds: readonly
       data: { user2_revealed: true },
     }),
   ])
+  // A friend request held for one of these pairs may be deliverable now. Never
+  // allowed to fail the reveal that caused it: a request this misses is still
+  // delivered by the next read.
+  await releaseHeldRequests(ids).catch(() => undefined)
 }

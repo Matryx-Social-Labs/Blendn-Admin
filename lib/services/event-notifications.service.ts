@@ -250,7 +250,7 @@ export const RATING_REQUEST_COPY = {
  *
  * ## What it says
  *
- * Two bodies, chosen per person. If you have somebody to rate — a mutual like
+ * Two bodies, chosen per person. If you have somebody to rate — a match made
  * at this event, the same rule as `ratablePeers` — it says so; otherwise it
  * asks about the night. A block either way removes that person from the count,
  * so nobody is prompted by someone they blocked. No names on either: a lock
@@ -308,10 +308,18 @@ export async function rateRequestAudience(
   const attendees = checkIns.map((c) => c.user_id)
   if (attendees.length === 0) return { withPeers: [], eventOnly: [] }
 
-  const [likes, blocks, rated] = await Promise.all([
-    db.event_likes.findMany({
-      where: { event_id: eventId, liker_id: { in: attendees } },
-      select: { liker_id: true, liked_id: true },
+  const [matches, blocks, rated] = await Promise.all([
+    // Who matched at this event: a conversation born of a mutual like here
+    // (`cameFromMatch`: a pseudonym snapshotted, not a board post's). The same
+    // rule as `ratablePeers`, so what the push promises is what the list holds.
+    db.private_conversations.findMany({
+      where: {
+        origin_event_id: eventId,
+        origin_board_request_id: null,
+        OR: [{ user1_pseudonym: { not: null } }, { user2_pseudonym: { not: null } }],
+        AND: [{ OR: [{ user1_id: { in: attendees } }, { user2_id: { in: attendees } }] }],
+      },
+      select: { user1_id: true, user2_id: true },
     }),
     db.blocked_users.findMany({
       where: { OR: [{ blocker_id: { in: attendees } }, { blocked_id: { in: attendees } }] },
@@ -325,12 +333,11 @@ export async function rateRequestAudience(
 
   const pair = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
   const blocked = new Set(blocks.map((b) => pair(b.blocker_id, b.blocked_id)))
-  const liked = new Set(likes.map((l) => `${l.liker_id}>${l.liked_id}`))
   const hasPeer = new Set<string>()
-  for (const l of likes) {
-    if (!liked.has(`${l.liked_id}>${l.liker_id}`)) continue
-    if (blocked.has(pair(l.liker_id, l.liked_id))) continue
-    hasPeer.add(l.liker_id)
+  for (const m of matches) {
+    if (blocked.has(pair(m.user1_id, m.user2_id))) continue
+    hasPeer.add(m.user1_id)
+    hasPeer.add(m.user2_id)
   }
   const ratedEvent = new Set(rated.map((r) => r.user_id))
 

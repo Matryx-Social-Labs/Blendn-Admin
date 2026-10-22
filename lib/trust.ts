@@ -1,4 +1,6 @@
 import { blockCounterparties } from "@/lib/conversations"
+import { cameFromMatch } from "@/lib/conversation-identity"
+import { idInConversation } from "@/lib/conversation-handle"
 import { db } from "@/lib/db"
 
 /**
@@ -146,9 +148,16 @@ export async function trustSignalsFor(
 /**
  * The people you may rate for an event, and have not yet.
  *
- * Only those you **connected** with — a mutual like, meaning both people opted
- * in. Rating anyone who merely shared a room is a review-bombing surface and a
- * way to punish someone for declining.
+ * Only those you **matched** with there — a conversation born of a mutual like
+ * at this event (`origin_event_id`, a match not a board post), meaning both
+ * people opted in. Rating anyone who merely shared a room is a review-bombing
+ * surface and a way to punish someone for declining.
+ *
+ * Each is named by the id the conversation shows you for them
+ * (`idInConversation`): a handle while they are still a pseudonym to you, their
+ * id once they revealed. A raw id here would be the join key that undoes the
+ * pseudonym (SCRUM-752). The inbox names the same person the same way, so the
+ * app can still join the two.
  *
  * Returns an empty list before the event ends: asked during the night, a rating
  * is leverage; asked afterwards, it is reflection.
@@ -163,21 +172,26 @@ export async function ratablePeers(
   eventId: string,
   raterId: string,
   now: Date = new Date()
-): Promise<string[]> {
+): Promise<{ ref: string; userId: string }[]> {
   const event = await db.events.findUnique({
     where: { id: eventId },
     select: { end_time: true },
   })
   if (!event || event.end_time > now) return []
 
-  const [mine, theirs, already, blocks] = await Promise.all([
-    db.event_likes.findMany({
-      where: { event_id: eventId, liker_id: raterId },
-      select: { liked_id: true },
-    }),
-    db.event_likes.findMany({
-      where: { event_id: eventId, liked_id: raterId },
-      select: { liker_id: true },
+  const [conversations, already, blocks] = await Promise.all([
+    db.private_conversations.findMany({
+      where: { origin_event_id: eventId, OR: [{ user1_id: raterId }, { user2_id: raterId }] },
+      select: {
+        id: true,
+        user1_id: true,
+        user2_id: true,
+        user1_pseudonym: true,
+        user2_pseudonym: true,
+        user1_revealed: true,
+        user2_revealed: true,
+        origin_board_request_id: true,
+      },
     }),
     db.peer_ratings.findMany({
       where: { event_id: eventId, rater_id: raterId },
@@ -186,11 +200,14 @@ export async function ratablePeers(
     blockCounterparties(raterId),
   ])
 
-  const likedBack = new Set(theirs.map((l) => l.liker_id))
   const rated = new Set(already.map((r) => r.rated_id))
   const blocked = new Set(blocks)
 
-  return mine
-    .map((l) => l.liked_id)
-    .filter((id) => likedBack.has(id) && !rated.has(id) && !blocked.has(id))
+  return conversations
+    .filter(cameFromMatch)
+    .map((c) => {
+      const userId = c.user1_id === raterId ? c.user2_id : c.user1_id
+      return { ref: idInConversation(c, raterId, userId), userId }
+    })
+    .filter((p) => !rated.has(p.userId) && !blocked.has(p.userId))
 }
