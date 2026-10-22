@@ -60,7 +60,7 @@ beforeAll(async () => {
   mockGetAuth.mockResolvedValue({ user: { id: host, role: "organizer" } })
 })
 
-const authed = (url: string, t = token, init: RequestInit = {}) =>
+const authed = (url: string, t = token, init: { method?: string; body?: string } = {}) =>
   new NextRequest(`http://localhost${url}`, { ...init, headers: { authorization: `Bearer ${t}`, "content-type": "application/json" } })
 
 const vote = (pollId: string, optionId: string, t = token) =>

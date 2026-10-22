@@ -1172,6 +1172,16 @@ const PlusStatusSchema = z
       .nullable()
       .describe("`grant`: the trial or a referral month. Manage a store subscription in that store."),
     expiresAt: z.string().datetime().nullable().describe("When the row that lasts longest ends; null never ends."),
+    state: z
+      .enum(["active", "cancelled", "grace", "hold", "paused", "expired", "refunded"])
+      .optional()
+      .describe(
+        "Where a store subscription or Night Pass stands, from the newest RevenueCat delivery about it. Omitted when not known (a grant, no purchase, a delivery that says nothing). `cancelled`: auto-renew is off and access runs to `expiresAt`. `grace`: a billing issue, still in the store's grace period. `hold`: Google's account hold. `refunded`: a store refund ended it. Present for someone with nothing live too (`expired`, `refunded`)."
+      ),
+    grant: z
+      .enum(["trial", "referral"])
+      .optional()
+      .describe("Which free month the live access is. Omitted for a store purchase and for nobody."),
   })
   .openapi("PlusStatus")
 

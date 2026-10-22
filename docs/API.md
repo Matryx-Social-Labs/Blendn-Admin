@@ -3445,6 +3445,20 @@ others there earn a month (each friend counts once; at most 3 a year).
 } }
 ```
 
+**`state` and `grant` are optional, and omitted when the data does not say.**
+`state` is where a store subscription or Night Pass stands, read from the newest
+RevenueCat delivery about that purchase and the clock: `active`; `cancelled`
+(auto-renew off, access runs to `expiresAt`); `grace` (a billing issue, inside
+the store's grace period); `hold` (Google's account hold: a billing issue with no
+grace period, not live); `paused`; `expired`; `refunded` (a store refund ended
+it). It is also sent when nothing is live (`active: false`, `state: "expired"` or
+`"refunded"`), for the latest store purchase. `grant` is `trial` or `referral`
+when the live access is one of our free months (our `plus-trial:` and
+`plus-referral:` rows); a grant has no `state`, and a store purchase has no
+`grant`. Neither is guessed: a purchase with no delivery on record, a delivery
+that says nothing (`TEST`, a transfer) and an account with no purchase send
+neither field.
+
 `gated` says whether Blendn+ is for sale to this person at all: gated in the
 city of their latest night (where they are checked in now counts as that). When it is false
 (a launch season) the app sells nothing and says Plus is free there; plans
