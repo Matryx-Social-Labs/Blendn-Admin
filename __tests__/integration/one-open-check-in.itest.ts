@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 process.env.MOBILE_JWT_SECRET = process.env.MOBILE_JWT_SECRET ?? "itest-mobile-secret-0123456789abcdefghij"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
-import { ONE_OPEN_CHECK_IN } from "@/lib/check-in-core"
+import { ONE_OPEN_CHECK_IN, openSeatSession } from "@/lib/check-in-core"
 import { checkOutOfOtherEvents } from "@/lib/checkout"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { violatedConstraint } from "@/lib/prisma-errors"
@@ -145,6 +145,32 @@ describe("one open check-in per person", () => {
     expect(switched).toMatchObject({ changed: true, reason: "switched_event", left: { eventId: a.id, name: "Winner" } })
     const session = await db.presence_sessions.findFirstOrThrow({ where: { event_id: a.id, user_id: who.id } })
     expect(session.departed_at!.getTime()).toBeGreaterThanOrEqual(session.arrived_at.getTime())
+  })
+
+  it("a session the winning door writes after the loser switched it out is closed, never left counting them inside", async () => {
+    const who = await person()
+    const a = await event("Winner's room")
+    const b = await event("Loser's room")
+    const at = new Date()
+    // The winner's row is written; its session (not awaited at the door) has not landed yet.
+    await db.event_check_ins.create({ data: { event_id: a.id, occurrence_id: a.occurrences[0], user_id: who.id, status: "checked_in", check_in_time: at } })
+    // The loser's switch closes the row and finds no session to close.
+    await checkOutOfOtherEvents(who.id, { eventId: b.id, occurrenceId: b.occurrences[0] }, at)
+    // Then the winner's session lands.
+    await openSeatSession({ eventId: a.id, occurrenceId: a.occurrences[0], userId: who.id, at })
+
+    expect(await db.presence_sessions.count({ where: { user_id: who.id, departed_at: null } })).toBe(0)
+    const s = await db.presence_sessions.findFirstOrThrow({ where: { event_id: a.id, user_id: who.id } })
+    expect(s).toMatchObject({ departed_source: "switch" })
+    expect(s.departed_at!.getTime()).toBeGreaterThanOrEqual(s.arrived_at.getTime())
+  })
+
+  it("a session beside a row still open stays open", async () => {
+    const who = await person()
+    const a = await event("Still here")
+    await db.event_check_ins.create({ data: { event_id: a.id, occurrence_id: a.occurrences[0], user_id: who.id, status: "checked_in", check_in_time: new Date() } })
+    await openSeatSession({ eventId: a.id, occurrenceId: a.occurrences[0], userId: who.id, at: new Date() })
+    expect(await db.presence_sessions.count({ where: { user_id: who.id, departed_at: null } })).toBe(1)
   })
 
   it("an earlier day of the same event closes when today's opens, as that day's end", async () => {

@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { roomBanRefusal } from "@/lib/room-ban"
 import { NextRequest } from "next/server"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
 import { ageFrom } from "@/lib/age"
@@ -92,6 +93,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * and the gate stays: a guest list is still a guest list.
      */
     // At a venue day, only while live: you see who is here while you can be seen (`inRoomWhere`).
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
+
     const attended = await db.event_check_ins.findFirst({
       where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
       select: { id: true },

@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server"
+import { roomBanRefusal } from "@/lib/room-ban"
+import { eventRoomBan } from "@/lib/room-kind"
 import { z } from "zod"
 
 import {
@@ -66,6 +68,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // just below). Anything else — a raw id, another room's handle, a forged
     // one — is nobody here and is answered as an unknown id: a raw-id like
     // would say whether that account is in this room (`roomMemberFromRef`).
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
     const likedId = roomMemberFromRef(eventId, parsed.data.userId, authUser.userId)
 
     if (likedId === authUser.userId) {
@@ -117,6 +122,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Not "they weren't here" — that would confirm who did and did not attend to
     // anyone probing user ids.
     if (!theirs || !likedId) return notFoundResponse("User not found")
+    // Banned from the room is not in it: the same answer, never which.
+    if (await eventRoomBan(eventId, likedId)) return notFoundResponse("User not found")
 
     if (await blockedEitherWay(authUser.userId, likedId)) {
       return notFoundResponse("User not found")

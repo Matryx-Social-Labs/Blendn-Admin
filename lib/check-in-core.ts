@@ -5,7 +5,7 @@ import { logger } from "@/lib/logger"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { ADULTS_ONLY, ageFrom, FINISH_ONBOARDING, isAdult, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
-import { openSession } from "@/lib/presence-sessions"
+import { closeSession, openSession, type ArrivalInput } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
 import { evaluateCheckIn, type Geofence } from "@/lib/geofence"
 import { ErrorCode, errorResponse } from "@/lib/api-response"
@@ -349,7 +349,7 @@ export async function seatAtTheDoor(input: SeatInput) {
    * must not refuse somebody standing at the door. The door is the product;
    * this is bookkeeping that runs beside it.
    */
-  openSession({
+  openSeatSession({
     eventId,
     occurrenceId,
     userId,
@@ -507,6 +507,33 @@ async function openCheckIn(
       all.push(...(await checkOutOfOtherEvents(userId, keep, now)))
     }
   }
+}
+
+/**
+ * The door's presence session, never left open behind a check-in that is no
+ * longer open (SCRUM-705).
+ *
+ * The session is written beside the check-in, not awaited. A door that lost
+ * the race to another switches out of this row; if that switch ran before
+ * this session landed, its `closeSession` found nothing to close, and the
+ * session written a moment later counted the person inside a room they had
+ * already left — until the occurrence ended and `closeStrandedSessions` got
+ * there. So after writing it, ask the row: still open, or already switched
+ * out? Either order closes it: the switch flips the row before it closes
+ * sessions, so it sees this session or this read sees its flip.
+ */
+export async function openSeatSession(input: ArrivalInput) {
+  const session = await openSession(input)
+  const row = await db.event_check_ins.findUnique({
+    where: { occurrence_id_user_id: { occurrence_id: input.occurrenceId, user_id: input.userId } },
+    select: { status: true, check_out_time: true },
+  })
+  if (row && row.status !== "checked_in") {
+    const arrived = input.at ?? session.arrived_at
+    const out = row.check_out_time && row.check_out_time > arrived ? row.check_out_time : arrived
+    await closeSession(input.occurrenceId, input.userId, "switch", out)
+  }
+  return session
 }
 
 /** The arrival on the room's live roster: run by `seatAtTheDoor`, not awaited. */

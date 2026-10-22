@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
+import { roomBanRefusal } from "@/lib/room-ban"
+import { eventRoomBan } from "@/lib/room-kind"
 import { z } from "zod"
 
 import {
@@ -70,6 +72,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * Resolved to the real id, so the pair window below is keyed on people:
      * a new room is a new handle, not a new window.
      */
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
     const toUserId = roomMemberFromRef(eventId, parsed.data.toUserId, authUser.userId)
     const fromUserId = authUser.userId
 
@@ -117,6 +122,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const notHere = () =>
       errorResponse("They're not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
     if (!theirs || !toUserId) return notHere()
+    // Banned from the room is not in it: the same answer, never which.
+    if (await eventRoomBan(eventId, toUserId)) return notHere()
     if (await blockedEitherWay(fromUserId, toUserId)) return notHere()
     if (await pairIsClosed(fromUserId, toUserId)) return notHere()
 

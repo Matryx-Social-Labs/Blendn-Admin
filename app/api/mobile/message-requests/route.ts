@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { refRoomBanRefusal } from "@/lib/room-ban"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { randomUUID } from "crypto"
@@ -69,6 +70,9 @@ export async function POST(request: NextRequest) {
     // echoes, so a handle never comes back as the real id behind it.
     const { recipientId: ref, message } = parsed.data
     const recipientId = userIdFromRef(ref)
+    // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
+    const banned = await refRoomBanRefusal(ref, authUser.userId)
+    if (banned) return banned
 
     // Cannot send request to yourself
     if (recipientId === authUser.userId) {

@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { refRoomBanRefusal } from "@/lib/room-ban"
 import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
 import { checkBlurPhoto, checkProfilePhoto, deleteReplacedBlur, moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
@@ -59,6 +60,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
+    const banned = await refRoomBanRefusal(ref, authUser.userId)
+    if (banned) return banned
 
     // Fetch user with profile
     const user = await db.user.findUnique({
