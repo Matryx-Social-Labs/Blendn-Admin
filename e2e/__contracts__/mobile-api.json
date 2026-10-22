@@ -193,7 +193,8 @@
       "success"
     ],
     "data": [
-      "conversations"
+      "conversations",
+      "pagination"
     ]
   },
   "/api/mobile/chat/groups": {
@@ -267,6 +268,7 @@
       "success"
     ],
     "data": [
+      "pagination",
       "users"
     ]
   },
@@ -373,6 +375,7 @@
       "dayCount",
       "dayNumber",
       "days",
+      "daysFrom",
       "description",
       "details",
       "distance",
@@ -599,6 +602,8 @@
         "longitude",
         "name",
         "upcoming",
+        "upcomingNextCursor",
+        "upcomingTotal",
         "venueType",
         "venueTypeLabel"
       ],
