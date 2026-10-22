@@ -68,9 +68,6 @@ const getProfile = async (viewer: string, subject: string) => {
   return { status: res.status, json: await res.json() }
 }
 
-const putProfile = (userId: string, body: object) =>
-  profileRoute.PUT(req(`/api/mobile/profiles/${userId}`, tokenOf(userId), "PUT", body), { params: Promise.resolve({ userId }) })
-
 beforeEach(() => {
   sentMessages.length = 0
 })
