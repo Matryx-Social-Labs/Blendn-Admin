@@ -51,7 +51,7 @@ it("closes the sessions of everyone inside, as ended, and the room is empty", as
   expect((await headcount({ occurrenceId: r.occurrenceId })).insideGuests).toBe(1)
   const before = Date.now()
 
-  expect(await cancelEventCheckIns(r.eventId)).toBe(1)
+  expect((await cancelEventCheckIns(r.eventId)).count).toBe(1)
 
   const s = await sessionOf(r.eventId, who)
   expect(s.departed_source).toBe("ended")

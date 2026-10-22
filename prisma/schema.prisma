@@ -1339,6 +1339,10 @@ enum notification_kind {
   event_changed
   /// A report you filed was acted on. Says that and nothing about whom.
   report_actioned
+  /// The event you were checked in to was cancelled: you are no longer checked
+  /// in (SV7). Sent once, to the people who were inside, in place of
+  /// `event_update`'s cancellation line.
+  event_cancelled
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.

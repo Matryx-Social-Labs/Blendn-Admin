@@ -768,6 +768,7 @@ const NotificationSchema = z.object({
     "venue_offer",
     "event_changed",
     "report_actioned",
+    "event_cancelled",
   ]),
   title: z.string(),
   body: z.string(),

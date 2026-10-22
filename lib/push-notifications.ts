@@ -14,7 +14,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "event_cancelled" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -76,6 +76,8 @@ export function deliveryFor(
       return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
     case "event_update":
     case "event_changed":
+    // Same key as the update it supersedes: the room closed, and only that is true.
+    case "event_cancelled":
       return replaced("events", data.eventId && `event:${data.eventId}`)
     // One per event, and a second could only ever say the same thing.
     case "rating_request":

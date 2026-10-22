@@ -122,6 +122,13 @@ export interface ServerToClientEvents {
     hereCount?: number
   }) => void
   /**
+   * The event was cancelled. Everyone checked in has been checked out (their
+   * check-in is `cancelled`, their presence closed `ended`); the room is empty.
+   * One emit to `event:{id}` and `event:room:{id}`, never one per person, and it
+   * carries nothing but the id.
+   */
+  "event:cancelled": (data: { eventId: string }) => void
+  /**
    * A mutual like, to each side's `user:{id}` room. `name` is the other person
    * as this recipient sees them — pseudonym unless they revealed. No photo.
    * `otherUserId` is their handle in this event: the same string the roster
@@ -1388,6 +1395,15 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
       hereCount,
     }))
   )
+}
+
+/**
+ * An event was cancelled: one emit to the rooms people inside are in, whether
+ * there are ten or five thousand (SV7). The push to the same people is
+ * `lib/event-cancellation.ts`'.
+ */
+export function emitEventCancelled(eventId: string): void {
+  currentIo()?.to([`event:${eventId}`, `event:room:${eventId}`]).emit("event:cancelled", { eventId })
 }
 
 /**

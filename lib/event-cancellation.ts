@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { logger } from "@/lib/logger"
 
 /**
  * Cancelling an event cancels the check-ins standing inside it.
@@ -29,9 +30,15 @@ import { db } from "@/lib/db"
  *
  * Idempotent: the `status` and `departed_at` filters mean a second call over an
  * already-cancelled event updates nothing, and a departure already recorded
- * keeps its own time and source.
+ * keeps its own time and source. It also finds nobody checked in, so nobody is
+ * told twice.
+ *
+ * Returns the cancelled count and `inside`, the people who were checked in and
+ * have been told (`tellInsideCancelled`), for `notifyEventCancelled` to skip.
  */
-export async function cancelEventCheckIns(eventId: string): Promise<number> {
+export async function cancelEventCheckIns(eventId: string): Promise<{ count: number; inside: string[] }> {
+  // Read BEFORE the cascade: afterwards nothing says who was inside.
+  const inside = await userIdsInside(eventId)
   const now = new Date()
   const [{ count }] = await db.$transaction([
     db.event_check_ins.updateMany({
@@ -55,8 +62,82 @@ export async function cancelEventCheckIns(eventId: string): Promise<number> {
        WHERE event_id = ${eventId}::uuid AND departed_at IS NULL
     `,
   ])
-  return count
+  await tellInsideCancelled(eventId, inside)
+  return { count, inside }
 }
+
+/** People per page when reading who is inside, and per push batch. A concert room is thousands. */
+export const CANCEL_PAGE = 1000
+export const CANCEL_PUSH_BATCH = 500
+
+/** Who is checked in to the event right now, a page at a time, never one unbounded read. */
+async function userIdsInside(eventId: string): Promise<string[]> {
+  const ids = new Set<string>()
+  let after: string | undefined
+  for (;;) {
+    const page = await db.event_check_ins.findMany({
+      where: { event_id: eventId, status: "checked_in" },
+      select: { id: true, user_id: true },
+      orderBy: { id: "asc" },
+      take: CANCEL_PAGE,
+      ...(after ? { cursor: { id: after }, skip: 1 } : {}),
+    })
+    for (const row of page) ids.add(row.user_id)
+    if (page.length < CANCEL_PAGE) return [...ids]
+    after = page[page.length - 1].id
+  }
+}
+
+/**
+ * Tell the people who were inside that it is off, and that they are no longer
+ * checked in (SV7). Their check-ins were just cancelled and nothing said so.
+ *
+ * ## Aggregate at concert scale
+ *
+ * One socket emit to the event's rooms (`event:cancelled`, `{ eventId }`), however many
+ * are inside, and the push in batches of `CANCEL_PUSH_BATCH`: each batch is one
+ * bell insert and one token read, and Expo's own chunking does the rest. No
+ * per-person emit.
+ *
+ * ## One push, not two
+ *
+ * This push is `event_cancelled`. `notifyEventCancelled` skips these people, so
+ * somebody who was inside AND going is told once, here.
+ *
+ * Never throws: the cancellation has committed and must not be undone by a
+ * failed push. Nothing is sent when nobody was inside, so a second run over an
+ * already-cancelled event (`inside` is empty) tells nobody twice.
+ */
+async function tellInsideCancelled(eventId: string, inside: readonly string[]): Promise<void> {
+  if (inside.length === 0) return
+  try {
+    /*
+     * Loaded here, not at the top: the pure helpers below (`isCancellingEvent`
+     * and the rest) are imported by tests and by code that has no use for
+     * socket.io and the mobile auth it pulls in (`jose` is ESM-only).
+     */
+    const [{ emitEventCancelled }, { sendBulkPushNotifications }] = await Promise.all([
+      import("@/lib/socket-server"),
+      import("@/lib/push-notifications"),
+    ])
+    emitEventCancelled(eventId)
+    const event = await db.events.findUnique({ where: { id: eventId }, select: { title: true } })
+    for (let i = 0; i < inside.length; i += CANCEL_PUSH_BATCH) {
+      await sendBulkPushNotifications({
+        userIds: inside.slice(i, i + CANCEL_PUSH_BATCH),
+        title: event?.title ?? "Event cancelled",
+        body: INSIDE_CANCELLED_BODY,
+        data: { type: "event_cancelled", eventId },
+      })
+    }
+    logger.info("Event cancellation told to those inside", { eventId, recipientCount: inside.length })
+  } catch (error) {
+    logger.error("Failed to tell those inside the event is cancelled", { eventId, error: String(error) })
+  }
+}
+
+/** What the push says to someone who was inside. No name but the event's own. */
+export const INSIDE_CANCELLED_BODY = "This event has been cancelled. You are no longer checked in."
 
 /**
  * Whether this write is the transition INTO cancelled.
