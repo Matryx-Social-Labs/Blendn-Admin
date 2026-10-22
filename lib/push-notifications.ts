@@ -96,7 +96,7 @@ export function deliveryFor(
 }
 
 /**
- * The channel set that also has `people`, `crew` and `later` (Flow 9), as an
+ * The channel set that also has `matches`, `crew` and `after-the-night` (Flow 9), as an
  * install says on `POST /notifications/token` (`channelSet`). A token without it
  * is a build that never created them, and a push naming one lands in
  * "Miscellaneous", so it keeps the mapping above exactly as it was.
@@ -108,12 +108,12 @@ export const CHANNEL_SET_FLOW9 = 2
  * settings, which are also the rows of Settings > Notifications. `default` only
  * for a kind that is none of them.
  *
- * - `messages`  a DM, a message request, a board ask
+ * - `messages`  a DM, a message request
  * - `rooms`     a reply in a room
- * - `people`    a match, a reveal, a friend request, a friend accepted
+ * - `matches`   a match, a reveal, a friend request, a friend accepted, a board ask
  * - `crew`      a crew invite, "We're here", a Blend
  * - `events`    a change, a cancellation, an announcement, a place on the waitlist
- * - `later`     "How was it?" (After the night)
+ * - `after-the-night`  "How was it?"
  * - `offers`    a venue's offer
  * - `default`   a report you filed was acted on
  */
@@ -125,8 +125,6 @@ function deliveryForFlow9(data: NotificationData): Delivery {
       return replaced("messages", data.conversationId && `dm:${data.conversationId}`)
     case "message_request":
     case "message_request_response":
-    case "board_request":
-    case "board_request_accepted":
       return { channelId: "messages" }
     case "group_message":
       return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
@@ -135,7 +133,9 @@ function deliveryForFlow9(data: NotificationData): Delivery {
     case "reveal":
     case "friend_request":
     case "friend_accepted":
-      return { channelId: "people" }
+    case "board_request":
+    case "board_request_accepted":
+      return { channelId: "matches" }
     case "crew_invite":
     case "crew_here":
     case "blend":
@@ -149,7 +149,7 @@ function deliveryForFlow9(data: NotificationData): Delivery {
         ? { channelId: "events", threadId: `event:${data.eventId}` }
         : { channelId: "events" }
     case "rating_request":
-      return replaced("later", data.eventId && `rate:${data.eventId}`)
+      return replaced("after-the-night", data.eventId && `rate:${data.eventId}`)
     case "venue_offer":
       return { channelId: "offers" }
     default:
@@ -256,24 +256,26 @@ const consentFor = (data?: NotificationData) =>
   data?.type === "venue_offer" ? { user: { profile: { is: { offer_push_consent_at: { not: null } } } } } : {}
 
 /**
- * The per-kind switches under the master (`profiles.push_people`, `push_crew`,
- * `push_later`; Flow 9 · 9.6). They stop the push only: the bell row is written
+ * The per-kind switches under the master (`profiles.push_matches`, `push_crew`,
+ * `push_night`; the `matches`, `crew` and `night` of `/me/notification-preferences`; Flow 9 · 9.6). They stop the push only: the bell row is written
  * before any of this runs. Excludes the explicit off for the same reason
  * `NOT_OPTED_OUT` does, so a person with no profile row keeps hearing.
  * Offers have their own consent (`consentFor`); a DM, a room reply, an event's
  * change and a report's outcome have no switch here — a room is muted, an event
  * is the point of the app, and a report's outcome is a safety message.
  */
-const SWITCH_FOR_KIND: Partial<Record<NotificationData["type"], "push_people" | "push_crew" | "push_later">> = {
-  match: "push_people",
-  reveal_request: "push_people",
-  reveal: "push_people",
-  friend_request: "push_people",
-  friend_accepted: "push_people",
+const SWITCH_FOR_KIND: Partial<Record<NotificationData["type"], "push_matches" | "push_crew" | "push_night">> = {
+  match: "push_matches",
+  reveal_request: "push_matches",
+  reveal: "push_matches",
+  friend_request: "push_matches",
+  friend_accepted: "push_matches",
+  board_request: "push_matches",
+  board_request_accepted: "push_matches",
   crew_invite: "push_crew",
   crew_here: "push_crew",
   blend: "push_crew",
-  rating_request: "push_later",
+  rating_request: "push_night",
 }
 
 const switchedOn = (data?: NotificationData) => {
@@ -420,7 +422,7 @@ async function recordNotification(
   title: string,
   body: string,
   data?: NotificationData
-): Promise<void> {
+): Promise<string | null> {
   /*
    * No `data.type` means no row, rather than a row under a guessed kind.
    *
@@ -430,12 +432,12 @@ async function recordNotification(
    */
   if (!data?.type) {
     logger.debug("Notification not recorded: no type on payload", { userId })
-    return
+    return null
   }
-  if (NOT_IN_THE_BELL.includes(data.type)) return
+  if (NOT_IN_THE_BELL.includes(data.type)) return null
 
   try {
-    await db.notifications.create({
+    const row = await db.notifications.create({
       data: {
         user_id: userId,
         kind: data.type as never,
@@ -443,19 +445,30 @@ async function recordNotification(
         body: storedBodyFor(data.type, body),
         data: data as object,
       },
+      select: { id: true },
     })
     announceToBell([userId], data.type)
+    return row.id
   } catch (error) {
     logger.warn("Failed to record notification", { userId, error: String(error) })
+    return null
   }
 }
+
+/**
+ * The push payload, with the bell row's id (`data.notificationId`) when one was
+ * written, so the app can open or mark that row from a banner. The stored `data`
+ * never holds it: the row is not born yet when its payload is built.
+ */
+const withRowId = (data: NotificationData | undefined, id: string | null | undefined): NotificationData | undefined =>
+  data && id ? { ...data, notificationId: id } : data
 
 export async function sendPushNotification(options: SendNotificationOptions): Promise<boolean> {
   const { userId, title, body, data, badge, sound = "default" } = options
 
   // First, and outside the try: the centre records what was *sent*, not what
   // was successfully delivered. See `recordNotification`.
-  await recordNotification(userId, title, body, data)
+  const notificationId = await recordNotification(userId, title, body, data)
 
   try {
     const pushTokens = await getUserPushTokens(userId, data)
@@ -482,7 +495,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
         sound,
         title,
         body,
-        data: payloadFor(data, channelSet) as Record<string, unknown>,
+        data: withRowId(payloadFor(data, channelSet), notificationId) as Record<string, unknown>,
         badge,
         priority: "high",
         ...deliveryFor(payloadFor(data, channelSet), channelSet),
@@ -551,9 +564,11 @@ export async function sendBulkPushNotifications(
    * same reason the single sender's is — a failed insert must not fail the
    * announcement.
    */
+  // Each recipient's own row id, for `data.notificationId` on their push.
+  const rowIds = new Map<string, string>()
   if (data?.type && !NOT_IN_THE_BELL.includes(data.type) && userIds.length > 0) {
     await db.notifications
-      .createMany({
+      .createManyAndReturn({
         data: userIds.map((userId) => ({
           user_id: userId,
           kind: data.type as never,
@@ -561,8 +576,12 @@ export async function sendBulkPushNotifications(
           body: storedBodyFor(data.type, body),
           data: data as object,
         })),
+        select: { id: true, user_id: true },
       })
-      .then(() => announceToBell(userIds, data.type))
+      .then((rows) => {
+        for (const r of rows) rowIds.set(r.user_id, r.id)
+        announceToBell(userIds, data.type)
+      })
       .catch((error) => {
         logger.warn("Failed to record bulk notifications", {
           count: userIds.length,
@@ -583,7 +602,7 @@ export async function sendBulkPushNotifications(
           sound,
           title,
           body,
-          data: { ...payload, userId } as Record<string, unknown>,
+          data: { ...withRowId(payload, rowIds.get(userId)), userId } as Record<string, unknown>,
           badge,
           priority: "high",
           ...deliveryFor(payload, channelSet),
@@ -886,7 +905,10 @@ export async function notifyEventUpdate(
   recipientIds: string[],
   eventName: string,
   updateMessage: string,
-  eventId: string
+  eventId: string,
+  /** What the update is about, for the bell row's tile (`data.reason`): omitted for a reminder. */
+  reason?: EventUpdateReason,
+  changed?: string
 ): Promise<{ sent: number; failed: number }> {
   return sendBulkPushNotifications({
     userIds: recipientIds,
@@ -895,8 +917,17 @@ export async function notifyEventUpdate(
     data: {
       type: "event_update",
       eventId,
+      ...(reason && { reason }),
+      ...(changed && { changed }),
     },
   })
+}
+
+/** `data.reason` on `event_update` and `event_changed`: the one that matters most when several moved. */
+export type EventUpdateReason = "cancelled" | "time" | "venue"
+
+export function reasonOf(changed: readonly string[]): EventUpdateReason | undefined {
+  return (["cancelled", "time", "venue"] as const).find((r) => changed.includes(r))
 }
 
 /**
@@ -929,10 +960,11 @@ export async function notifyEventChanged(
   eventId: string,
   changedFields: string
 ): Promise<{ sent: number; failed: number }> {
+  const reason = reasonOf(changedFields.split(","))
   return sendBulkPushNotifications({
     userIds: recipientIds,
     title: eventName,
     body: message,
-    data: { type: "event_changed", eventId, changed: changedFields },
+    data: { type: "event_changed", eventId, changed: changedFields, ...(reason && { reason }) },
   })
 }

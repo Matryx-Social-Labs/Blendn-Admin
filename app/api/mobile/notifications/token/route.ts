@@ -22,7 +22,7 @@ const pushTokenSchema = z.object({
   /**
    * Which Android channels this install created (`CHANNEL_SET_FLOW9` in
    * `lib/push-notifications.ts`). Omitted by every build before Flow 9, which
-   * stays on the channels it has; 2 also has `people`, `crew` and `later` and
+   * stays on the channels it has; 2 also has `matches`, `crew` and `after-the-night` and
    * knows the `event_changed` and `report_actioned` kinds.
    */
   channelSet: z.number().int().min(1).max(100).optional(),

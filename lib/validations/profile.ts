@@ -238,14 +238,6 @@ export const updateProfileSchema = z.object({
   // columns behind them meant every toggle read ON regardless of what anyone
   // chose.
   push_enabled: z.boolean().optional(),
-  /**
-   * Per-kind push switches under `push_enabled` (Flow 9 · 9.6): Matches and
-   * friends, Your crew, After the night. They stop the push, never the bell.
-   * Offers keep `GET/PUT /me/offers` (`pushes`), which is opt-in by App Store rule.
-   */
-  push_people: z.boolean().optional(),
-  push_crew: z.boolean().optional(),
-  push_later: z.boolean().optional(),
   show_online: z.boolean().optional(),
   read_receipts: z.boolean().optional(),
   share_location: z.boolean().optional(),

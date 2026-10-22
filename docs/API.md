@@ -510,7 +510,9 @@ has no writer yet): `days[].cancelled` reads it when something does.
 
 **The people who are going are told with `event_changed`** (a new
 `notification_kind`), `data: { type: "event_changed", eventId, changed }` where
-`changed` is the same words comma-joined (`"time,venue"`, `"cancelled"`). Going
+`changed` is the same words comma-joined (`"time,venue"`, `"cancelled"`), and
+`reason` is the one that matters most (`cancelled`, `time`, `venue`), the same
+`data.reason` an `event_update` carries (see Flow 9). Going
 means `rsvp_status = going`. Maybe, waitlisted and saved keep `event_update`, as
 before. A build that does not know the kind is sent `event_update` in its push
 (see the channel set below). The bell row is `event_changed` for everyone going.
@@ -549,20 +551,61 @@ events, so the id is gone and answers like any unknown id.
   off, for you and for anyone who can see who you are; **absent** when it is off,
   or for a viewer the profile is anonymous to. `regular_here` is never here: it
   is about the venue you both stand in.
-- **`push_people`, `push_crew`, `push_later`** (your own profile): the per-kind
-  push switches, `true` unless turned off. Written by `PUT /profiles/:userId`
-  as top-level booleans, like `push_enabled`.
+### Notifications: preferences, row details, badge (Flow 9)
+
+**`GET` / `PUT /me/notification-preferences`**: `{ matches, crew, night }`, all
+booleans, all `true` by default. `PUT` takes any non-empty subset (a missing key is
+left as it is; an unknown key or a non-boolean is a 400 `VALIDATION_FAILED`) and
+answers all three. The send path honours them, on the single and the bulk sender:
 
 | Switch | Stops the push of |
 |---|---|
-| `push_people` — Matches and friends | `match`, `reveal_request`, `reveal`, `friend_request`, `friend_accepted` |
-| `push_crew` — Your crew | `crew_invite`, `crew_here`, `blend` |
-| `push_later` — After the night | `rating_request` |
+| `matches`, Matches and friends | `match`, `reveal_request`, `reveal`, `friend_request`, `friend_accepted`, `board_request`, `board_request_accepted` |
+| `crew`, Your crew | `crew_invite`, `crew_here`, `blend` |
+| `night`, After the night | `rating_request` |
 
-They stop the **push only**; the bell row is written first, as for `push_enabled`.
-**Offers keep their own pair**, `GET/PUT /me/offers` (`enabled`, `pushes`), and are
-*opt-in* by App Store rule: `pushes` defaults off, not on. A DM, a room reply
-(muted per room), an event change and a report outcome have no switch here.
+They stop the **push only**; the bell row is written first, as for `push_enabled`
+(the master, which is still on top of these). **Offers keep their own pair**,
+`GET/PUT /me/offers` (`enabled`, `pushes`), and are *opt-in* by App Store rule:
+`pushes` defaults off. A DM, a message request, a room reply (muted per room), an
+event's change and a report's outcome have no switch here. Stored as
+`profiles.push_matches`, `push_crew`, `push_night`.
+
+**`GET /notifications`** items gain, all optional:
+
+- **`display`** `{ title?, context?, visual? }`, only where the reader may already
+  see the person or thing, resolved in one query per kind for the page:
+  - `friend_request` while it waits: `title` "{first name} wants to be friends",
+    `visual` `{ type: "photo", uri }`, the asker exactly as `GET /friends/requests`
+    shows them to the same person.
+  - `match`: `visual` `{ type: "creature", pseudonym }`, the other side's room
+    pseudonym. Never a name or a photo.
+  - `crew_invite`, `crew_here`: `visual` `{ type: "emblem", seed }`, the crew's
+    `emblem_seed`; `blend`: the Blend's id as the seed. No crew name (it is
+    user-typed text).
+  - `event_update`, `event_changed`, `announcement`, `waitlist_promoted`,
+    `rating_request`: `visual` `{ type: "event", cover, badge, cancelled }`
+    (`badge` `clock`, `map-pin` for a venue change, `megaphone`, `star`;
+    `cancelled` when the event is cancelled or the reason is).
+  - **Not sent:** `stack` (nothing aggregates rows yet) and `context` (the app
+    already writes "{event} · {when}"). A row the server cannot resolve (the request
+    is gone, the event deleted) carries no `display`: draw the kind's own tile.
+- **`open`**, for `friend_request`, `crew_invite`, `message_request` and
+  `board_request`: whether it is still the reader's to answer. `false` once it is
+  accepted, declined, dismissed, withdrawn or gone; absent on every other kind.
+- **`data.reason`** on `event_update` and `event_changed`: `cancelled`, `time` or
+  `venue`, the most important when several moved (`data.changed` has them all,
+  comma-joined). A reminder ("starts in an hour") carries none.
+
+The feed response gains **`badgeCount`**: `unreadCount` plus live conversations
+with something unread from the other person (a thread, not a message; a hidden
+message is never counted), the app icon's number.
+
+**`clearKeepsRequests` is not sent.** `DELETE /notifications` clears every row,
+waiting requests included, so the client's default (it clears them too) is right.
+
+The push payload carries **`data.notificationId`**, the id of that recipient's bell
+row, so a banner can open or mark it. The stored row's `data` does not hold it.
 
 ### Friends: reasons (Flow 6)
 
@@ -582,7 +625,7 @@ each other still answer the same body.
 ### Push: the channel, the token's `channelSet`, `report_actioned` (Flow 9)
 
 `POST /notifications/token` accepts an optional **`channelSet`** (integer). A build
-that creates Android channels `people`, `crew` and `later` sends `2` with its token
+that creates Android channels `matches`, `crew` and `after-the-night` sends `2` with its token
 (stored as `push_tokens.channel_set`). Every build before it sends none and is
 treated as the old set.
 
@@ -592,12 +635,12 @@ treated as the old set.
 
 | `channelId` | Kinds |
 |---|---|
-| `messages` | `private_message`, `message_request`, `message_request_response`, `board_request`, `board_request_accepted` |
+| `messages` | `private_message`, `message_request`, `message_request_response` |
 | `rooms` | `group_message` |
-| `people` | `match`, `reveal_request`, `reveal`, `friend_request`, `friend_accepted` |
+| `matches` | `match`, `reveal_request`, `reveal`, `friend_request`, `friend_accepted`, `board_request`, `board_request_accepted` |
 | `crew` | `crew_invite`, `crew_here`, `blend` |
 | `events` | `event_update`, `event_changed`, `announcement`, `waitlist_promoted` |
-| `later` | `rating_request` |
+| `after-the-night` | `rating_request` |
 | `offers` | `venue_offer` |
 | `default` | `report_actioned`, `event_checkin`, and a payload with no type |
 
@@ -2655,7 +2698,6 @@ one `event_update` notification saying so.
 | Field | Governs |
 |---|---|
 | `push_enabled` | Push notifications |
-| `push_people`, `push_crew`, `push_later` | The push of Matches and friends, Your crew, After the night (default **true**; see Flow 9 above) |
 | `show_online` | Whether others see you as active |
 | `read_receipts` | Whether DM reads are reported back |
 | `share_location` | Whether other attendees see your distance |
@@ -3103,7 +3145,7 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | GET | `/amenities` | The amenity vocabulary — what an event can say it offers |
 | GET | `/work-fields` | The eighteen coarse fields of work, as `{ slug, label }` |
 | GET | `/checkins/active` | Get user's active check-ins. Each carries `kind` (`venue_day` is a Go Live: label it by `event.venueName`), `venueId` (the venue a Go Live is at, to extend or go again; null at an event), `expiresAt` (a Go Live's end; null at an event) and `stay`. A Go Live past its end is never listed, swept or not |
-| POST | `/notifications/token` | Register push token. Optional `channelSet` (2: the build has the `people`, `crew` and `later` channels) |
+| POST | `/notifications/token` | Register push token. Optional `channelSet` (2: the build has the `matches`, `crew` and `after-the-night` channels) |
 | DELETE | `/notifications/token` | Remove push token |
 | GET | `/notifications` | The notifications centre, newest first |
 | POST | `/notifications/read` | Mark notifications read |

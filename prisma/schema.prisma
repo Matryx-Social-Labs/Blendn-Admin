@@ -359,17 +359,19 @@ model profiles {
   /// Default true because that is what the UI has been claiming, so nobody's
   /// apparent settings change on the day these start being honoured.
   push_enabled   Boolean  @default(true)
-  /// Per-kind push switches under the master `push_enabled` (Flow 9 · 9.6).
-  /// They stop the PUSH only; the bell still fills. Default true, as the master
-  /// is, so nobody's pushes change the day these start being honoured.
-  /// "Matches and friends": match, reveal_request, reveal, friend_request,
-  /// friend_accepted. Offers keep their own pair (`offers_from_places`,
-  /// `offer_push_consent_at`), which is opt-in by App Store rule.
-  push_people    Boolean  @default(true)
+  /// Per-kind push switches under the master `push_enabled` (Flow 9 · 9.6),
+  /// read and written by `/me/notification-preferences` as `matches`, `crew`,
+  /// `night`. They stop the PUSH only; the bell still fills. Default true, as
+  /// the master is, so nobody's pushes change the day these start being
+  /// honoured. "Matches and friends": match, reveal_request, reveal,
+  /// friend_request, friend_accepted, board_request, board_request_accepted.
+  /// Offers keep their own pair (`offers_from_places`, `offer_push_consent_at`),
+  /// which is opt-in by App Store rule.
+  push_matches   Boolean  @default(true)
   /// "Your crew": crew_invite, crew_here, blend.
   push_crew      Boolean  @default(true)
   /// "After the night": rating_request.
-  push_later     Boolean  @default(true)
+  push_night     Boolean  @default(true)
   /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
   /// default (the coordinator's default, flagged to the owner).
   offers_from_places Boolean @default(true)

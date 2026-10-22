@@ -10,7 +10,7 @@
 // point of that test.
 import { logger } from "../logger"
 import { db } from "../db"
-import { notifyEventChanged, notifyEventUpdate, sendBulkPushNotifications } from "../push-notifications"
+import { notifyEventChanged, notifyEventUpdate, reasonOf, sendBulkPushNotifications } from "../push-notifications"
 import type { rsvp_status } from "@prisma/client"
 import { realEventsWhere } from "../event-kind"
 
@@ -76,7 +76,7 @@ async function tellInterested(
   const { going, others } = await interestedAudience(eventId)
   await Promise.all([
     going.length > 0 ? notifyEventChanged(going, eventTitle, message, eventId, changed) : null,
-    others.length > 0 ? notifyEventUpdate(others, eventTitle, message, eventId) : null,
+    others.length > 0 ? notifyEventUpdate(others, eventTitle, message, eventId, reasonOf(changed.split(",")), changed) : null,
   ])
   return going.length + others.length
 }
