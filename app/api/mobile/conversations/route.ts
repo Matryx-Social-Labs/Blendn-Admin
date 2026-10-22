@@ -8,7 +8,7 @@ import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
-import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
+import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -18,6 +18,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
   conflictResponse,
+  forbiddenResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
 import { readJson } from "@/lib/api-input"
@@ -201,7 +202,7 @@ export async function POST(request: NextRequest) {
 
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
     const unfinished = await participationRefusal(authUser.userId)
-    if (unfinished) return unfinishedResponse(unfinished)
+    if (unfinished) return forbiddenResponse(unfinished)
 
     const body = await readJson(request)
     const parsed = createConversationSchema.safeParse(body)
