@@ -58,6 +58,21 @@ export async function rateLimit(
 }
 
 /**
+ * A refusal from `rateLimit`, with the reason in `reasonCode` as well as the
+ * `errorCode` and `retryAfter` it already carries — for the surfaces a client
+ * reads `reasonCode ?? errorCode` on (the friend invite landing). The status, the
+ * `errorCode`, `retryAfter` and every header are unchanged.
+ */
+export async function withReasonCode(limited: NextResponse, reasonCode: string): Promise<NextResponse> {
+  const body = (await limited.json()) as Record<string, unknown>
+  // The body is longer now: the length is the new response's to compute.
+  const headers = new Headers(limited.headers)
+  headers.delete("content-length")
+  headers.delete("content-type")
+  return NextResponse.json({ ...body, reasonCode }, { status: limited.status, headers })
+}
+
+/**
  * Create a rate limit configuration for batch endpoints
  */
 export function createBatchRateLimit(): RateLimitConfig {

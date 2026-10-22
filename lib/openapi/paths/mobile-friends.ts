@@ -12,6 +12,11 @@ import { PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap } from "@/
 const bearerAuth = [{ bearerAuth: [] }]
 const tags = ["Mobile Friends"]
 
+/** The invite landing's reasons, beside the errorCodes installed builds match on (SV10). */
+const REASONS =
+  "A refusal for an unfinished profile is 403 `FORBIDDEN` with `reasonCode` `PROFILE_INCOMPLETE`; a rate limit is 429 `RATE_LIMITED` " +
+  "with `reasonCode` `RATE_LIMITED`, `retryAfter` (seconds, also the `Retry-After` header). The `errorCode`s are unchanged: read `reasonCode ?? errorCode`. "
+
 const SAME_404 =
   "Every refusal a stranger could reach — unknown, malformed or reset token, deleted account, a block either way, " +
   "a pair who left each other, a user id you have no relationship with — answers with the same 404, so nothing here " +
@@ -172,6 +177,7 @@ registry.registerPath({
   summary: "Open an invite link",
   description:
     PARTICIPATION_GATE +
+    REASONS +
     SAME_404 +
     "Shows the link owner's name and photo — handing the link out is their consent — and where you stand with them.",
   security: bearerAuth,
@@ -237,6 +243,7 @@ registry.registerPath({
   summary: "Ask to be friends",
   description:
     PARTICIPATION_GATE +
+    REASONS +
     SAME_404 +
     "Exactly one of `token` (somebody's invite link) or `userId` (only for a match where you have BOTH revealed: an " +
     "open conversation that came from a mutual like, neither side closed or blocked. A room handle resolves too, but " +

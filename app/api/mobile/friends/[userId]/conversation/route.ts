@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { ConversationClosedError, blockedEitherWay, conversationPair, openConversation } from "@/lib/conversations"
-import { participationRefusal } from "@/lib/event-access"
+import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
 import { areFriends, holdingPair, matchSelect } from "@/lib/friends"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
 import { db } from "@/lib/db"
@@ -11,7 +11,6 @@ import {
   successResponse,
   unauthorizedResponse,
   notFoundResponse,
-  forbiddenResponse,
   conflictResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -35,7 +34,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (limited) return limited
 
     const unfinished = await participationRefusal(me)
-    if (unfinished) return forbiddenResponse(unfinished)
+    if (unfinished) return unfinishedResponse(unfinished)
 
     // As `GET /friends/:id`: a handle only for a friend you can recognise.
     const userId = await userIdFromRefIfIdentified(me, (await params).userId)

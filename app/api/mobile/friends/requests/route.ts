@@ -2,19 +2,19 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
-import { participationRefusal } from "@/lib/event-access"
+import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
 import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, requestFriend, withoutHeld } from "@/lib/friends"
 import { identityForRef } from "@/lib/identity"
 import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { rateLimit, userLimit, withReasonCode } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
   validationErrorResponse,
   errorResponse,
   notFoundResponse,
-  forbiddenResponse,
+  ErrorCode,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
@@ -87,11 +87,11 @@ export async function POST(request: NextRequest) {
     const me = authUser.userId
 
     const limited = await rateLimit(request, userLimit("write", "friend-request", me))
-    if (limited) return limited
+    if (limited) return withReasonCode(limited, ErrorCode.RATE_LIMITED)
 
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
     const unfinished = await participationRefusal(me)
-    if (unfinished) return forbiddenResponse(unfinished)
+    if (unfinished) return unfinishedResponse(unfinished)
 
     const parsed = createSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)

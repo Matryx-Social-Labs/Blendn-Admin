@@ -1730,6 +1730,14 @@ so two people asking each other at once become friends once, and an accept
 racing a block never leaves a blocked person on the list. Refusals cost the
 same work as a link that never existed, so timing tells a caller nothing either.
 
+**Why a send, an accept or an invite open was refused.** An unfinished profile
+is `403` `errorCode: "FORBIDDEN"` with `reasonCode: "PROFILE_INCOMPLETE"`; a
+rate limit is `429` `errorCode: "RATE_LIMITED"` with `reasonCode:
+"RATE_LIMITED"` and `retryAfter` (seconds; also the `Retry-After` header) —
+on `POST /friends/requests`, `POST /friends/requests/:id`, `GET
+/friends/invite/:token` (and the friend DM's profile gate). The `errorCode`s are
+unchanged; read `reasonCode ?? errorCode`.
+
 **"Not now" is never delivered.** `dismiss` hides the request from the
 recipient; the sender keeps seeing it in `outgoing`. Asking again neither
 notifies again nor un-dismisses. Two people who ask each other are friends at

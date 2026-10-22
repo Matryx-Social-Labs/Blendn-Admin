@@ -3,14 +3,14 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { acceptFriendRequest, dismissFriendRequest, withdrawFriendRequest } from "@/lib/friends"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { participationRefusal } from "@/lib/event-access"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
+import { rateLimit, userLimit, withReasonCode } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
   validationErrorResponse,
   notFoundResponse,
-  forbiddenResponse,
+  ErrorCode,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
     const limited = await rateLimit(request, userLimit("write", "friend-respond", authUser.userId))
-    if (limited) return limited
+    if (limited) return withReasonCode(limited, ErrorCode.RATE_LIMITED)
 
     const parsed = respondSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (parsed.data.action === "accept") {
       // Becoming friends is taking part, as asking is (SCRUM-331).
       const unfinished = await participationRefusal(authUser.userId)
-      if (unfinished) return forbiddenResponse(unfinished)
+      if (unfinished) return unfinishedResponse(unfinished)
       if (!(await acceptFriendRequest(requestId, authUser.userId))) return notFoundResponse("Not found")
       return successResponse({ state: "friends" })
     }

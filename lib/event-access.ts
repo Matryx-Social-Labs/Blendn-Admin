@@ -101,6 +101,13 @@ export async function participationRefusal(userId: string): Promise<string | nul
   return mayParticipate(profile) ? null : FINISH_ONBOARDING
 }
 
+/**
+ * `participationRefusal`'s sentence as a response: 403 `FORBIDDEN` (the
+ * `errorCode` installed builds match on) with `reasonCode` `PROFILE_INCOMPLETE`,
+ * the same pair the event and check-in routes send.
+ */
+export const unfinishedResponse = (message: string) => errorResponse(message, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
+
 /** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
   if (denial.kind === "age") {

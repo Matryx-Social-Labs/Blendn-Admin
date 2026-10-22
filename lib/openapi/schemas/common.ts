@@ -49,7 +49,7 @@ export const ErrorResponseSchema = z
       .describe(
         "Why, beside an `errorCode` that keeps the value installed builds match on: `ACCOUNT_SUSPENDED`, " +
           "`ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, " +
-          "`PROFILE_INCOMPLETE`, `NOT_A_REVEALED_MATCH` (404 on `POST /friends/requests`). Read `reasonCode ?? errorCode`."
+          "`PROFILE_INCOMPLETE`, `NOT_A_REVEALED_MATCH` (404 on `POST /friends/requests`), `RATE_LIMITED` (429 on the friend routes, with `retryAfter`). Read `reasonCode ?? errorCode`."
       ),
   })
   .openapi("ErrorResponse")
