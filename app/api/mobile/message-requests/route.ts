@@ -200,6 +200,12 @@ export async function POST(request: NextRequest) {
        */
       // In the terms of the room the ref came from: a reveal, like or DM
       // elsewhere does not make this room's pseudonym someone you know.
+      //
+      // Deliberate (SCRUM-752): somebody you matched with who has not revealed
+      // to you is not "identified" either, so this is the synthetic 201 for them
+      // too — never the 409. The 409 would say "a request or a DM already
+      // exists" about an id the match's pseudonym is hiding. They are already in
+      // your inbox, where the conversation is.
       if ((await identityForRef(authUser.userId, ref)).identified) return conflictResponse(refusal)
       return successResponse(
         {

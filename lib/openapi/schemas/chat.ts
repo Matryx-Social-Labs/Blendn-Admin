@@ -42,6 +42,11 @@ const ChatUserSchema = z.object({
   image: z.string().nullable(),
 })
 
+/** The other person of a direct conversation: their id until they reveal to you is a conversation handle (`rh_…`), yours is always your real id. */
+const DmUserSchema = ChatUserSchema.extend({
+  id: z.string().describe("A conversation-scoped handle until they reveal to you, then their account id. Accepted by block, report and `POST /conversations`."),
+})
+
 /** A message author in a room: yours real, anybody else's a room handle. */
 const RoomChatUserSchema = ChatUserSchema.extend({ id: RoomUserRefSchema })
 
@@ -303,7 +308,7 @@ export const ParticipantsResponseSchema = z
 export const ConversationSchema = z
   .object({
     id: z.string().uuid(),
-    otherUser: ChatUserSchema,
+    otherUser: DmUserSchema,
     fromMatch: z.boolean().describe("Opened from a mutual like rather than an accepted message request."),
     pseudonymous: z
       .boolean()
@@ -331,7 +336,7 @@ export const ConversationSchema = z
 export const ConversationDetailSchema = z
   .object({
     id: z.string().uuid(),
-    otherUser: ChatUserSchema,
+    otherUser: DmUserSchema,
     friend: FriendOfferSchema,
     createdAt: z.string().datetime(),
     lastMessageAt: z.string().datetime().nullable(),
@@ -341,7 +346,7 @@ export const ConversationDetailSchema = z
 export const CreateConversationResponseSchema = z
   .object({
     id: z.string().uuid(),
-    otherUser: ChatUserSchema,
+    otherUser: DmUserSchema,
     createdAt: z.string().datetime(),
     isNew: z.boolean(),
   })

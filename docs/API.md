@@ -1470,6 +1470,27 @@ identifies; their reveal does. A room-level reveal, a friend who turned on
 `friends_see_me_in_rooms` and a conversation that never was pseudonymous still
 identify as before.
 
+**The other person's id in a DM is a handle until they reveal.** In `GET
+/conversations`, `GET /conversations/:id`, `POST /conversations`, a message's
+`senderId` / `sender.id` and the `private:*` socket events, the other person of
+a match who has not revealed to you is an opaque `rh_…` handle scoped to that
+conversation (the same one on every one of those surfaces, so a sender still
+matches the other person). Your own id is always your real id. Once they reveal
+the real id comes back, everywhere at once. The handle is accepted by `POST
+/users/:id/block`, `POST /users/:id/report` and `POST /conversations`, and by no
+profile or friend route (they answer it as an id nobody has): it names a person
+only inside that DM. It exists because every other surface that carries an
+account id also carries a name, so the id beside a pseudonym was a join key.
+`private:message` is sent per recipient (their copy names the sender by the
+handle; the sender's devices get their own id); `private:typing` and
+`private:read` go to the other person alone while the sender is a pseudonym to
+them. A mutual like between two people who are already friends is not a match:
+the like is recorded and answers exactly as a like nobody returned.
+
+`POST /message-requests` to somebody you matched with who has not revealed to
+you answers the same synthetic `201` it gives a stranger, never the `409`: the
+409 would say a request or DM exists for an id the pseudonym is hiding.
+
 Each side moves independently — revealing is a standing offer, not a trade, so
 going first does not expose the other person and waiting is not a refusal. It is
 **not retractable**: nothing can unsee a name and a face, and there is no path

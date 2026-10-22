@@ -25,6 +25,7 @@ import { isReadForViewer } from "@/lib/read-receipts"
 import { notifyPrivateMessage } from "@/lib/push-notifications"
 import { discardSealedChatMedia, DM_PHOTOS_NOT_YET, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { areFriends } from "@/lib/friends"
+import { idInConversation } from "@/lib/conversation-ref"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
@@ -144,10 +145,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const formattedMessages = messages.map((msg) => ({
       id: msg.id,
       conversationId: msg.conversation_id,
-      senderId: msg.sender_id,
+      senderId: idInConversation(conversation, authUser.userId, msg.sender_id),
       // The pseudonym holds on every message, not just the header.
       sender: {
         ...msg.sender,
+        id: idInConversation(conversation, authUser.userId, msg.sender.id),
         name: displayNameInConversation(conversation, msg.sender.id, msg.sender.name),
         image: mayShowRealName(conversation, msg.sender.id) ? msg.sender.image : null,
       },
@@ -252,12 +254,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /** One shape for a new message and for a retry that finds its first write. */
-    const sentData = (m: SentMessage) => ({
+    const sentData = (m: SentMessage, viewerId: string = authUser.userId) => ({
       id: m.id,
       conversationId: m.conversation_id,
-      senderId: m.sender_id,
+      senderId: idInConversation(conversation, viewerId, m.sender_id),
       sender: {
         ...m.sender,
+        id: idInConversation(conversation, viewerId, m.sender.id),
         name: displayNameInConversation(conversation, m.sender.id, m.sender.name),
         image: mayShowRealName(conversation, m.sender.id) ? m.sender.image : null,
       },
@@ -404,6 +407,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Emit via Socket.io
     const messageData = sentData(message)
+    // The recipient's copy names the sender as the recipient may know them: a
+    // handle until they reveal. The sender's own is their real id, as everywhere.
+    const recipientData = sentData(message, recipientId)
 
     /*
      * Neither delivered nor announced.
@@ -414,7 +420,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * the message itself is the only record. It is stored, and it is not sent.
      */
     if (!hidden) {
-      emitPrivateMessage(conversationId, recipientId, messageData)
+      emitPrivateMessage(conversationId, recipientId, recipientData, messageData)
     }
 
     /*

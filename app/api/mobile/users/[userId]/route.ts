@@ -131,8 +131,9 @@ export async function GET(
      * pseudonyms into named faces. (They carry room handles now, SCRUM-371 —
      * this gate is what stops a handle being worth more than the room says.)
      *
-     * `identityForRef` is the gate: by raw id, matched, in a conversation, or
-     * they chose to be public in a room you were in; by a room handle, only
+     * `identityForRef` is the gate: by raw id, in a conversation that names
+     * them (a match counts once THEY have revealed to you: SCRUM-752), or they
+     * chose to be public in a room you were in; by a room handle, only
      * what that room shows (handled above). Co-presence alone is deliberately not
      * enough -- sharing a room is what lets you send a request, not consent to
      * be identified.

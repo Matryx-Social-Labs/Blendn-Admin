@@ -5,6 +5,7 @@ import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { friendOffersFor } from "@/lib/friend-offer"
+import { idInConversation } from "@/lib/conversation-ref"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -74,6 +75,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       id: conversation.id,
       otherUser: {
         ...otherUser,
+        id: idInConversation(conversation, authUser.userId, otherUser.id),
         name: displayNameInConversation(conversation, otherUser.id, otherUser.name),
         image: theyRevealed ? otherUser.image : null,
       },

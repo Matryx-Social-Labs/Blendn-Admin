@@ -17,8 +17,10 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard } from
  * A friend request by user id is allowed for exactly one relationship: an open
  * conversation that came from a match, both sides revealed. Every other
  * refusal answers byte-for-byte like an id nobody has; the single addition is
- * `reasonCode: NOT_A_REVEALED_MATCH` for a matched pair who have not both
- * revealed — they know they matched, so it tells them nothing new.
+ * `reasonCode: NOT_A_REVEALED_MATCH` for a matched pair where the other person
+ * has revealed to the asker but the asker has not revealed back — the asker
+ * already knows who they are, so it tells them nothing new. For a person still a
+ * pseudonym to the asker the 404 is plain.
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports */

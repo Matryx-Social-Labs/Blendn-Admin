@@ -71,9 +71,11 @@ const createSchema = z.union([
  *
  * `{ state: "requested" }`, or `{ state: "friends" }` when they had already
  * asked you. Every way a stranger could be refused answers with the same 404.
- * The one addition: a 404 carries `reasonCode` `NOT_A_REVEALED_MATCH` for
- * somebody you are matched with who (or you) has not revealed yet. You know you
- * matched, so it tells you nothing you could not see.
+ * The one addition: a 404 carries `reasonCode` `NOT_A_REVEALED_MATCH` when you
+ * are in an open match with that person, THEY have revealed to you, and you have
+ * not revealed back: you already know who they are, so it tells you nothing. For
+ * a person still a pseudonym to you (and for a room handle that keeps them
+ * anonymous) the 404 is plain — the code would say who the pseudonym is.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -110,6 +112,10 @@ export async function POST(request: NextRequest) {
       // handle still resolves through `identityForRef`, and a handle the room
       // keeps anonymous is refused as unknown even for a revealed match: a
       // 200 there would say which pseudonym in that room is them.
+      // A conversation's handle (what the inbox gives for a match until they
+      // reveal) is not resolved here: it is only ever somebody the asker cannot
+      // name yet, so the answer would be the plain 404 anyway, and it is, as an
+      // id nobody has.
       const target = await identityForRef(me, parsed.data.userId)
       recipientId = target.userId
       const { standing, askerSeesThem } = await matchStanding(me, recipientId)

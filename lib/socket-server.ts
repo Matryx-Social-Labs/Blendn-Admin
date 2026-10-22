@@ -4,7 +4,8 @@ import { Server, Socket, type RemoteSocket } from "socket.io"
 import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
-import { displayNameInConversation } from "./conversation-identity"
+import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
+import { idInConversation } from "./conversation-handle"
 import { keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
@@ -537,6 +538,18 @@ export async function emitChatTyping(
   }
 }
 
+/** What the DM events need of a conversation to decide how to name somebody. */
+const sidesSelect = {
+  user1_id: true,
+  user2_id: true,
+  user1_pseudonym: true,
+  user2_pseudonym: true,
+  user1_revealed: true,
+  user2_revealed: true,
+} as const
+
+const otherOf = (c: { user1_id: string; user2_id: string }, userId: string) => (c.user1_id === userId ? c.user2_id : c.user1_id)
+
 /**
  * Broadcast a typing indicator into a private conversation.
  *
@@ -584,12 +597,21 @@ export async function emitPrivateTyping(
     ])
     if (!conversation) return
 
-    socket.to(`conversation:${conversationId}`).emit("private:typing", {
+    const typer = socket.data.userId
+    const payload = {
       conversationId,
-      userId: socket.data.userId,
-      userName: displayNameInConversation(conversation, socket.data.userId, profile?.name),
+      userId: idInConversation({ ...conversation, id: conversationId }, otherOf(conversation, typer), typer),
+      userName: displayNameInConversation(conversation, typer, profile?.name),
       isTyping,
-    })
+    }
+    // Still a pseudonym to the other person: their copy names the typer by the
+    // conversation's handle, and goes to them alone, so the typer's own other
+    // devices never see a handle where they expect their id.
+    if (!mayShowRealName(conversation, typer)) {
+      socket.nsp.to(`user:${otherOf(conversation, typer)}`).emit("private:typing", payload)
+      return
+    }
+    socket.to(`conversation:${conversationId}`).emit("private:typing", payload)
   } catch (error) {
     logger.warn("Private typing indicator failed", {
       conversationId,
@@ -665,6 +687,15 @@ export async function emitPrivateRead(
       return
     }
 
+    const sides = await db.private_conversations.findUnique({ where: { id: conversationId }, select: sidesSelect })
+    if (sides && !mayShowRealName(sides, socket.data.userId)) {
+      socket.nsp.to(`user:${otherOf(sides, socket.data.userId)}`).emit("private:read", {
+        conversationId,
+        messageIds: ids,
+        readBy: idInConversation({ ...sides, id: conversationId }, otherOf(sides, socket.data.userId), socket.data.userId),
+      })
+      return
+    }
     socket.to(`conversation:${conversationId}`).emit("private:read", {
       conversationId,
       messageIds: ids,
@@ -747,14 +778,30 @@ export function emitReads(readerId: string, reads: ReadonlyArray<readonly [strin
   if (!io || toSend.length === 0) return
   db.profiles
     .findUnique({ where: { id: readerId }, select: { read_receipts: true } })
-    .then((reader) => {
+    .then(async (reader) => {
       if (reader?.read_receipts === false) return
+      const sides = new Map(
+        (
+          await db.private_conversations.findMany({
+            where: { id: { in: toSend.map(([id]) => id) } },
+            select: { id: true, ...sidesSelect },
+          })
+        ).map((c) => [c.id, c])
+      )
       for (const [conversationId, ids] of toSend) {
-        io.to(`conversation:${conversationId}`).emit("private:read", {
-          conversationId,
-          messageIds: ids.slice(0, READ_RECEIPT_BATCH),
-          readBy: readerId,
-        })
+        const messageIds = ids.slice(0, READ_RECEIPT_BATCH)
+        const c = sides.get(conversationId)
+        if (c && !mayShowRealName(c, readerId)) {
+          // A pseudonym to the other person: their copy names the reader by the
+          // conversation's handle and goes to them alone (see `emitPrivateTyping`).
+          io.to(`user:${otherOf(c, readerId)}`).emit("private:read", {
+            conversationId,
+            messageIds,
+            readBy: idInConversation(c, otherOf(c, readerId), readerId),
+          })
+          continue
+        }
+        io.to(`conversation:${conversationId}`).emit("private:read", { conversationId, messageIds, readBy: readerId })
       }
     })
     .catch((error: unknown) => {
@@ -1741,10 +1788,25 @@ export function emitPrivateMessage(
     mediaType: string | null
     isRead: boolean
     createdAt: Date
-  }
+  },
+  /**
+   * The same message as the sender's own devices read it, when it differs from
+   * the recipient's: the sender is a handle to the recipient until they reveal,
+   * and always their real id to themselves. Same object (the default) is one
+   * emit to three rooms, as before; different is one emit each, to the two
+   * `user:` rooms, since the conversation room holds both people.
+   */
+  senderCopy: typeof message = message
 ): void {
   const io = currentIo()
   if (!io) return
+  if (senderCopy.senderId !== message.senderId) {
+    void (message.mediaUrl ? readableUrl(message.mediaUrl) : Promise.resolve(null)).then((mediaUrl) => {
+      io.to(`user:${recipientId}`).emit("private:message", { conversationId, message: { ...message, mediaUrl } })
+      io.to(`user:${senderCopy.senderId}`).emit("private:message", { conversationId, message: { ...senderCopy, mediaUrl } })
+    })
+    return
+  }
 
   /*
    * One emit to three rooms: the conversation (whoever has the chat open), the

@@ -55,6 +55,11 @@ import type { chat_group_kind } from "@prisma/client"
  * from one room never resolves in another, of the same kind or across kinds,
  * and the refusal does not rest on two random uuids happening to differ.
  *
+ * A **direct conversation** is a room of its own kind (`dm`), scoped by the
+ * conversation's id: the other side of a pseudonymous match is named by it until
+ * they reveal (`lib/conversation-ref.ts`), so the inbox never sends the account
+ * id that every other surface — the friends list, a request, a crew — holds.
+ *
  * Only an event room's handle resolves outside its room (`resolveUserRef`, for
  * the profile, friends and block routes). A crew's, a Blend's or a board
  * post's handle names somebody only inside the room that minted them
@@ -73,11 +78,11 @@ const UUID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$
  * every installed client holds), or a room of another kind by its group id.
  * `roomScope` in lib/room-kind.ts says which, from the room's row.
  */
-export type RoomScope = string | { kind: Exclude<chat_group_kind, "event">; groupId: string }
+export type RoomScope = string | { kind: Exclude<chat_group_kind, "event"> | "dm"; groupId: string }
 
 /** After the id, for a room that is not an event's. Never the first byte of an account id (printable). */
-const KIND_BYTE: Record<Exclude<chat_group_kind, "event">, number> = { crew: 1, blend: 2, board_post: 3 }
-const KIND_OF_BYTE = new Map(Object.entries(KIND_BYTE).map(([kind, byte]) => [byte, kind as Exclude<chat_group_kind, "event">]))
+const KIND_BYTE: Record<Exclude<chat_group_kind, "event"> | "dm", number> = { crew: 1, blend: 2, board_post: 3, dm: 4 }
+const KIND_OF_BYTE = new Map(Object.entries(KIND_BYTE).map(([kind, byte]) => [byte, kind as keyof typeof KIND_BYTE]))
 
 function scopeBytes(scope: RoomScope): Buffer {
   const id = typeof scope === "string" ? scope : scope.groupId

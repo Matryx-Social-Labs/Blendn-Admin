@@ -8,6 +8,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { blockIdFromRef, openRoomHandle, userIdFromRef } from "@/lib/room-handle"
 import { ownerAdmits } from "@/lib/room-kind"
+import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { isUuid } from "@/lib/api-input"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -24,7 +25,7 @@ interface RouteParams {
 
 /**
  * Who a block names. A raw id or an event room's handle as `userIdFromRef`
- * reads them. A handle from a room that is not an event's — a Blend, a crew's
+ * reads them; a direct conversation's handle names the other person in it. A handle from a room that is not an event's — a Blend, a crew's
  * chat, a board post's room — names somebody only to a caller that room's
  * door lets in now: blocking somebody from inside a Blend is the one thing a
  * Blend handle may do outside the Blend, and only for the people in it. For
@@ -34,6 +35,8 @@ interface RouteParams {
 async function blockTargetFromRef(viewerId: string, ref: string): Promise<string> {
   const opened = openRoomHandle(ref)
   if (!opened || typeof opened.scope === "string") return userIdFromRef(ref)
+  // A conversation's handle: the other person of a DM you are in, whether or not they have revealed.
+  if (opened.scope.kind === "dm") return (await userIdFromDmRef(viewerId, ref)) ?? ref
   return (await ownerAdmits(opened.scope.groupId, [viewerId]))?.has(viewerId) ? opened.userId : ref
 }
 
