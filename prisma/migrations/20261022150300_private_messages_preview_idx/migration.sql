@@ -1,0 +1,15 @@
+-- The inbox shows each conversation's newest visible message
+-- (`latestVisibleMessages`, lib/inbox-preview.ts): one lookup per listed
+-- conversation, newest first. With this index each is a few index entries
+-- instead of a sort of the whole thread, however long it has run.
+--
+-- CONCURRENTLY, so building it does not block the DM writers, which means this
+-- file is ONE statement and has no BEGIN/COMMIT: CREATE INDEX CONCURRENTLY
+-- cannot run in a transaction (`__tests__/migration-tx.test.ts` allows exactly
+-- this shape). A failed build leaves an INVALID index of this name, which
+-- IF NOT EXISTS would then skip: if that happens, a NEW forward migration drops
+-- it and builds it again, never SQL by hand.
+--
+-- Rolling back: a new forward migration with
+--   DROP INDEX CONCURRENTLY IF EXISTS "private_messages_conversation_created_idx";
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "private_messages_conversation_created_idx" ON "private_messages" ("conversation_id", "created_at" DESC, "id" DESC);

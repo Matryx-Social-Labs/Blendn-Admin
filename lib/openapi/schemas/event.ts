@@ -264,11 +264,23 @@ export const EventDetailSchema = z
           startTime: z.string().datetime(),
           endTime: z.string().datetime(),
           cancelled: z.boolean().describe("A day called off without cancelling the run: draw it struck through."),
+          cancelledAt: z.string().datetime().nullable().optional().describe("When it was called off; null otherwise."),
         })
       )
       .optional()
-      .describe("Every day of the run, in order. One entry for a one-day event."),
-    dayCount: z.number().int().optional().describe("`days.length`."),
+      .describe(
+        "The days of the run, in order: every day for an ordinary event, at most 31 for a long one (the stretch starting two days before today's). One entry for a one-day event."
+      ),
+    dayCount: z
+      .number()
+      .int()
+      .optional()
+      .describe("How many days the whole run has. `days.length < dayCount` means more exist than were sent."),
+    daysFrom: z
+      .number()
+      .int()
+      .optional()
+      .describe("Which day of the run `days[0]` is, 1-based (1 unless the run was longer than the window)."),
     dayNumber: z
       .number()
       .int()

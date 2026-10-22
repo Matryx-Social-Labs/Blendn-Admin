@@ -13,6 +13,7 @@ const mockDb = {
   event_check_ins: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
   $executeRaw: jest.fn().mockResolvedValue(0),
   // The edit and its change record share a transaction (`updateEventTracked`): a callback, besides the array form.
+  // Also the cancel cascade's `UPDATE … RETURNING`: nobody was inside.
   $queryRaw: jest.fn().mockResolvedValue([]),
   $transaction: jest.fn((arg: unknown): Promise<unknown> => (typeof arg === "function" ? arg(jest.requireMock("@/lib/db").db) : Promise.all(arg as Promise<unknown>[]))),
 }

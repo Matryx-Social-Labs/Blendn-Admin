@@ -28,3 +28,12 @@ describe("a CONCURRENTLY migration is exactly one statement", () => {
     expect(statements[0]).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS "private_messages_unread_idx" ON "private_messages" \("conversation_id"\) WHERE "is_read" = false$/)
   })
 })
+
+describe("the inbox preview index", () => {
+  it("is a single CREATE INDEX CONCURRENTLY", () => {
+    const sql = readFileSync(join(DIR, "20261022150300_private_messages_preview_idx", "migration.sql"), "utf8")
+    const statements = sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
+    expect(statements).toHaveLength(1)
+    expect(statements[0]).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS "private_messages_conversation_created_idx" ON "private_messages" \("conversation_id", "created_at" DESC, "id" DESC\)$/)
+  })
+})

@@ -15,6 +15,8 @@ export interface ApiResponse<T = unknown> {
    * Read `reasonCode ?? errorCode`.
    */
   reasonCode?: string
+  /** Seconds to wait before trying again, on a 429 that knows (`RATE_LIMITED`, `SPAM_BLOCKED`) and on the 503 `MAINTENANCE`. */
+  retryAfter?: number
   errors?: Array<{ field: string; message: string }>
 }
 
@@ -186,6 +188,25 @@ export function errorResponse(
       ...(reasonCode && { reasonCode }),
     },
     { status }
+  )
+}
+
+/**
+ * A send refused as spam (429 `SPAM_BLOCKED`), with how long to wait when that
+ * is knowable: `retryAfter` seconds in the body and in `Retry-After`, as a
+ * `RATE_LIMITED` 429 carries it (SV13). A burst knows when its window ends; a
+ * message refused for its links does not, and waiting would not help, so it has
+ * no `retryAfter`. The sentence is the detector's own.
+ */
+export function spamBlockedResponse(message: string, retryAfter?: number): NextResponse<ApiResponse> {
+  return NextResponse.json(
+    {
+      success: false,
+      error: message,
+      errorCode: ErrorCode.SPAM_BLOCKED,
+      ...(retryAfter !== undefined && { retryAfter }),
+    },
+    { status: 429, ...(retryAfter !== undefined && { headers: { "Retry-After": String(retryAfter) } }) }
   )
 }
 

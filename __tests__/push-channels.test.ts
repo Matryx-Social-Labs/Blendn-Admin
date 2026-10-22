@@ -34,6 +34,9 @@ const LEGACY: Record<Kind, string> = {
   // New: filed with the event's other changes.
   event_changed: "events",
   report_actioned: "messages",
+  // SV7 and SV9.
+  event_cancelled: "events",
+  board_post_removed: "messages",
 }
 
 /** Flow 9: each kind on one of the channels people see in settings, or `default`. */
@@ -52,6 +55,7 @@ const FLOW9: Record<Kind, string> = {
   blend: "crew",
   rating_request: "after-the-night",
   report_actioned: "default",
+  board_post_removed: "default",
 }
 
 const data = (type: Kind): NotificationData => ({ type, eventId: "e1", conversationId: "c1", chatGroupId: "g1" })
@@ -120,6 +124,8 @@ const NEW_KINDS_BEFORE = {
   // Kinds that did not exist: filed with their nearest neighbour, and `messages` for the one with none.
   event_changed: BEFORE.event_update,
   report_actioned: { channelId: "messages" },
+  event_cancelled: BEFORE.event_update,
+  board_post_removed: { channelId: "messages" },
 } as const
 
 describe("a build that does not say channelSet is sent exactly what origin/dev sent", () => {

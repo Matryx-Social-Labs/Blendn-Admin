@@ -85,7 +85,8 @@ it("a cancel closes the live check-ins and tells the person going", async () => 
   expect((await db.events.findUniqueOrThrow({ where: { id } })).status).toBe("cancelled")
   expect(await db.event_check_ins.count({ where: { event_id: id, status: { in: ["pending", "checked_in"] } } })).toBe(0)
   const told = await db.notifications.findMany({ where: { user_id: guest }, select: { body: true } })
-  expect(told.map((n) => n.body)).toContain("This event has been cancelled")
+  // Inside AND going: told once, by the line that also says they are no longer checked in (SV7).
+  expect(told.map((n) => n.body)).toEqual(["This event has been cancelled. You are no longer checked in."])
 })
 
 it("a cancel through this door is a change like the others: changed_at set, the cancel named, the goer told with event_changed", async () => {

@@ -6,7 +6,7 @@ import { notFoundResponse, serverErrorResponse, successResponse, unauthorizedRes
 import { personAtTheDoor } from "@/lib/check-in-core"
 import { db } from "@/lib/db"
 import { dashboardUrl } from "@/lib/email"
-import { realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
+import { venueDaysWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { liveGuestIds, venueLiveBucket } from "@/lib/live-count"
@@ -14,12 +14,10 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { venueDayAt, venueDayBounds } from "@/lib/venue-day"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { venueHours } from "@/lib/venue-hours"
-import { eventTakingOver, goLiveArea, mayAttendWhere, undisputedLinkWhere } from "@/lib/venue-visibility"
+import { venueUpcoming } from "@/lib/venue-upcoming"
+import { eventTakingOver, goLiveArea } from "@/lib/venue-visibility"
 
 export const dynamic = "force-dynamic"
-
-/** How many of the venue's coming events the page lists. */
-const UPCOMING_LIMIT = 5
 
 interface RouteParams {
   params: Promise<{ venueId: string }>
@@ -40,8 +38,9 @@ interface RouteParams {
  *   caller's own window, so the app counts down from the server's `expiresAt`
  *   rather than from a tap, and opens the room by id.
  * - `venue.upcoming`: its next public events (age-filtered for you; a link its
- *   owner disputed, and the venue's own live rooms, are not events here), at most
- *   `UPCOMING_LIMIT`. `hours` / `description` / `amenities` are null / [] until given.
+ *   owner disputed, and the venue's own live rooms, are not events here), the first
+ *   `UPCOMING_LIMIT` (5) of them, with `upcomingTotal` for all and `upcomingNextCursor` to
+ *   page the rest through `GET /venues/:id/upcoming`. `hours` / `description` / `amenities` are null / [] until given.
  * - `tonight`: the next real event here before the venue's day resets.
  * - `claim`: the public claim page for an unclaimed venue, on the dashboard
  *   host (`/claim/venue/[venueId]`), as `GET /events/:id` offers an event's:
@@ -100,7 +99,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const viewerAge = ageFrom(person.profile)
     const dayEnd = venueDayBounds(venue.timezone, venue.day_reset_hour, now).end
 
-    const [takeover, tonight, mine, today, upcoming] = await Promise.all([
+    const [takeover, tonight, mine, today, upcomingPage] = await Promise.all([
       eventTakingOver(venueId, now, { viewerAge }),
       eventTakingOver(venueId, now, { viewerAge, leadMinutes: (dayEnd.getTime() - now.getTime()) / 60_000 }),
       db.event_check_ins.findFirst({
@@ -108,23 +107,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         select: { event_id: true, expires_at: true, stay: true, stay_until: true, kind: true },
       }),
       venueDayAt(venueId, now),
-      db.events.findMany({
-        where: {
-          venue_id: venueId,
-          deleted_at: null,
-          // Never the venue's own live rooms (F3): they are not events at it.
-          ...realEventsWhere,
-          // The Places card's filter (`GET /venues`), so the page and the card agree on what is coming.
-          status: "published",
-          visibility: "public",
-          end_time: { gte: now },
-          AND: [undisputedLinkWhere, ...(typeof viewerAge === "number" ? [mayAttendWhere(viewerAge)] : [])],
-        },
-        orderBy: [{ start_time: "asc" }, { id: "asc" }],
-        take: UPCOMING_LIMIT,
-        select: { id: true, title: true, slug: true, cover_image_url: true, start_time: true, end_time: true },
-      }),
+      venueUpcoming(venueId, now, typeof viewerAge === "number" ? viewerAge : null),
     ])
+    // No cursor was passed, so never `bad_cursor`.
+    const upcoming = upcomingPage as Exclude<typeof upcomingPage, "bad_cursor">
     const [room, tonightRow] = await Promise.all([
       mine ? db.chat_groups.findUnique({ where: { event_id: mine.event_id }, select: { id: true } }) : null,
       tonight
@@ -161,14 +147,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         hours: venueHours(venue.hours),
         description: venue.description,
         amenities: venue.amenity_links.map((l) => l.amenity.name),
-        upcoming: upcoming.map((e) => ({
-          id: e.id,
-          title: e.title,
-          slug: e.slug,
-          coverImageUrl: e.cover_image_url,
-          startTime: e.start_time,
-          endTime: e.end_time,
-        })),
+        upcoming: upcoming.events,
+        // All of them, and where the rest resume (`GET /venues/:id/upcoming?cursor=`). Null: the list is whole.
+        upcomingTotal: upcoming.total,
+        upcomingNextCursor: upcoming.nextCursor,
       },
       live: {
         open: closedReason === null,

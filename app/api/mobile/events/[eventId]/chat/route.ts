@@ -16,6 +16,7 @@ import {
   forbiddenResponse,
   serverErrorResponse,
   ErrorCode,
+  spamBlockedResponse,
 } from "@/lib/api-response"
 import {
   chatClosesAt,
@@ -345,6 +346,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         },
+        // A poll message's poll, for `pollId`. One join on the page, not a lookup each.
+        poll: { select: { id: true } },
         _count: {
           select: {
             replies: true,
@@ -448,6 +451,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           content: isHidden ? null : m.content,
           moderation_hidden: isHidden,
           metadata: isHidden ? null : m.metadata,
+          // The poll a `poll` message carries; absent on every other type.
+          ...(m.type === "poll" ? { pollId: isHidden ? null : (m.poll?.id ?? null) } : {}),
           isEdited: m.is_edited,
           isPinned: m.is_pinned,
           createdAt: m.created_at,
@@ -708,10 +713,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Spam check (sync — block before saving)
     const spamResult = await checkSpam(authUser.userId, chatGroup.id, content)
     if (spamResult && spamResult.action === "hide") {
-      return errorResponse(
+      return spamBlockedResponse(
         spamResult.reason || "Message blocked as spam. Please slow down.",
-        429,
-        ErrorCode.SPAM_BLOCKED
+        spamResult.retryAfter
       )
     }
 

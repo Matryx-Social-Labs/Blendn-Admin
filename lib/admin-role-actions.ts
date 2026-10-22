@@ -265,8 +265,8 @@ export async function updateEventStatus(eventId: string, status: event_status) {
   })
 
   if (isCancellingEvent(status, before.status)) {
-    await cancelEventCheckIns(eventId)
-    await notifyEventCancelled(eventId, before.title)
+    const { inside } = await cancelEventCheckIns(eventId)
+    await notifyEventCancelled(eventId, before.title, inside)
   }
 
   revalidatePath("/dashboard/organisers")

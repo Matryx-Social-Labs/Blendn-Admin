@@ -12,6 +12,7 @@ import {
 import { BOARD } from "./constants"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
+import { tellAuthorPostTakenDown } from "./board-takedown"
 import { closePostRooms } from "./room-close"
 import { blocksBetween } from "./crews/blocks"
 import { checkContactInfo } from "./moderation/contact-info"
@@ -316,7 +317,11 @@ export async function hideBoardPostIfFlagged(postId: string, body: string): Prom
     data: { deleted_at: new Date(), moderation_status: "hidden", updated_at: new Date() },
   })
   // Down, so its room is closed: out with anyone still in it (E3).
-  if (count > 0) await closePostRooms([postId])
+  if (count > 0) {
+    await closePostRooms([postId])
+    // And its author, who did not take it down themselves (SV9).
+    await tellAuthorPostTakenDown(postId)
+  }
 }
 
 /*
