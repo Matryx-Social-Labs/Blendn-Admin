@@ -5,6 +5,7 @@ import { z } from "zod"
 import { ALREADY_ASKED, BOARD_CLOSED, boardDenialMessage } from "@/lib/board"
 import { asTheAskerSees, boardWriteDenial, checkBoardText } from "@/lib/board-access"
 import { lockPair, pairIsLinked } from "@/lib/friends"
+import { knownToEachOther } from "@/lib/room-people"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
@@ -105,7 +106,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * decision, which is the one thing a block should not leak.
      */
     const blocked = await blockCounterparties(user.userId)
-    if (blocked.includes(post.author_id)) {
+    // A friend's post is not on your board, and an ask to it is answered as a taken-down
+    // post: the blocked author's answer (the owner's rule, D19).
+    if (blocked.includes(post.author_id) || (await knownToEachOther(user.userId, post.author_id))) {
       return notFoundResponse("That post is no longer on the board")
     }
 

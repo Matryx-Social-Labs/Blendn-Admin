@@ -1,4 +1,5 @@
 import { blockCounterparties } from "@/lib/conversations"
+import { notStrangersTo } from "@/lib/room-people"
 import { cameFromMatch } from "@/lib/conversation-identity"
 import { idInConversation } from "@/lib/conversation-handle"
 import { db } from "@/lib/db"
@@ -179,7 +180,7 @@ export async function ratablePeers(
   })
   if (!event || event.end_time > now) return []
 
-  const [conversations, already, blocks] = await Promise.all([
+  const [conversations, already, blocks, friends] = await Promise.all([
     db.private_conversations.findMany({
       where: { origin_event_id: eventId, OR: [{ user1_id: raterId }, { user2_id: raterId }] },
       select: {
@@ -198,6 +199,8 @@ export async function ratablePeers(
       select: { rated_id: true },
     }),
     blockCounterparties(raterId),
+    // Friends are never rated as strangers (legacy friend-to-friend matches would otherwise ask for it).
+    notStrangersTo(raterId),
   ])
 
   const rated = new Set(already.map((r) => r.rated_id))
@@ -209,5 +212,5 @@ export async function ratablePeers(
       const userId = c.user1_id === raterId ? c.user2_id : c.user1_id
       return { ref: idInConversation(c, raterId, userId), userId }
     })
-    .filter((p) => !rated.has(p.userId) && !blocked.has(p.userId))
+    .filter((p) => !rated.has(p.userId) && !blocked.has(p.userId) && !friends.has(p.userId))
 }

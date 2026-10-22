@@ -13,7 +13,7 @@ import { BOARD } from "./constants"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
 import { closePostRooms } from "./room-close"
-import { blocksBetween } from "./crews/blocks"
+import { strangersApartBetween } from "./room-people"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
@@ -472,7 +472,8 @@ export async function seatBoardRoom(
   })
   const people = [post.author_id, ...accepted.map((a) => a.from_user_id)]
   const [apart, existing] = await Promise.all([
-    blocksBetween(people, people, tx),
+    // Friends across the seats are kept apart too (the board room is pseudonymous).
+    strangersApartBetween(people, people, tx),
     tx.chat_groups.findUnique({
       where: { board_post_id: post.id },
       select: { id: true, members: { select: { user_id: true, anonymous_name: true } } },

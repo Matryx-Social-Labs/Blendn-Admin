@@ -308,7 +308,7 @@ export async function rateRequestAudience(
   const attendees = checkIns.map((c) => c.user_id)
   if (attendees.length === 0) return { withPeers: [], eventOnly: [] }
 
-  const [matches, blocks, rated] = await Promise.all([
+  const [matches, blocks, rated, friendships] = await Promise.all([
     // Who matched at this event: a conversation born of a mutual like here
     // (`cameFromMatch`: a pseudonym snapshotted, not a board post's). The same
     // rule as `ratablePeers`, so what the push promises is what the list holds.
@@ -329,10 +329,16 @@ export async function rateRequestAudience(
       where: { event_id: eventId, user_id: { in: attendees } },
       select: { user_id: true },
     }),
+    db.friendships.findMany({
+      where: { OR: [{ user1_id: { in: attendees } }, { user2_id: { in: attendees } }] },
+      select: { user1_id: true, user2_id: true },
+    }),
   ])
 
   const pair = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
   const blocked = new Set(blocks.map((b) => pair(b.blocker_id, b.blocked_id)))
+  // Friends are never rated as strangers: a friendship is kept apart like a block here.
+  for (const f of friendships) blocked.add(pair(f.user1_id, f.user2_id))
   const hasPeer = new Set<string>()
   for (const m of matches) {
     if (blocked.has(pair(m.user1_id, m.user2_id))) continue

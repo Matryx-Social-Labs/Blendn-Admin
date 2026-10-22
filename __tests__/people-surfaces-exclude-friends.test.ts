@@ -24,6 +24,13 @@ export const PEOPLE_SURFACES = [
   "app/api/mobile/events/[eventId]/matches/likes/route.ts",
   "app/api/mobile/events/[eventId]/waves/route.ts",
   "app/api/mobile/message-requests/route.ts",
+  // B3
+  "lib/crews/presence.ts",
+  "lib/crews/like.ts",
+  "app/api/mobile/events/[eventId]/board/route.ts",
+  "app/api/mobile/events/[eventId]/board/[postId]/requests/route.ts",
+  "lib/board-access.ts",
+  "lib/trust.ts",
 ]
 
 describe("every people surface in a room asks lib/room-people.ts", () => {

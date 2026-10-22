@@ -123,7 +123,8 @@ describe("one writer (CR-G03)", () => {
   it("asks the sides again for a block inside the transaction that writes the like (MUST)", () => {
     const like = SOURCES.find((s) => s.file === "lib/crews/like.ts")!.src
     const tx = like.slice(like.indexOf("db.$transaction(async (tx) =>"))
-    const recheck = tx.indexOf("blocksBetween(sides.a, sides.b, tx)")
+    // Blocks, closed pairs AND friendships (`strangersApartBetween`, lib/room-people.ts).
+    const recheck = tx.indexOf("strangersApartBetween(sides.a, sides.b, tx)")
     expect(recheck).toBeGreaterThan(0)
     expect(recheck).toBeLessThan(tx.indexOf("crew_likes.createMany("))
     // And both crews still standing and not hidden, under a share lock, so a

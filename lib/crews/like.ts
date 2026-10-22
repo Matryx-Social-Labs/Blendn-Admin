@@ -10,7 +10,8 @@ import { deliverToRoom } from "../room-delivery"
 import { leaveRoomSockets } from "../room-close"
 import { ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
-import { blocksBetween, blocksExclude } from "./blocks"
+import { blocksExclude } from "./blocks"
+import { strangersApartBetween } from "../room-people"
 import {
   crewEvent,
   crewMayMeetSolo,
@@ -149,7 +150,7 @@ export async function likeCrew(
     if (!mine || !mine.present.includes(likerId)) return MY_CREW_NOT_HERE
     // Two crews sharing somebody are not two sides.
     if (mine.members.some((id) => target.members.includes(id))) return NO_CREW
-    if (blocksExclude(mine.members, target.members, await blocksBetween(mine.members, target.members))) return NO_CREW
+    if (blocksExclude(mine.members, target.members, await strangersApartBetween(mine.members, target.members))) return NO_CREW
     const [a, b] = mine.id < target.id ? [mine.id, target.id] : [target.id, mine.id]
     const sides = { a: mine.members, b: target.members }
     const outcome = await like(here, likerId, { crewId: mine.id }, { crewId: target.id }, { a_crew_id: a, b_crew_id: b }, sides, mine.room, target.name)
@@ -159,7 +160,7 @@ export async function likeCrew(
   const me = await intentsAt(eventId, likerId)
   if (!me.openToCrews) return NOT_OPTED_IN
   if (!crewMayMeetSolo(target, target.members.length, me.intents)) return NO_CREW
-  if (blocksExclude([likerId], target.members, await blocksBetween([likerId], target.members))) return NO_CREW
+  if (blocksExclude([likerId], target.members, await strangersApartBetween([likerId], target.members))) return NO_CREW
   const sides = { a: target.members, b: [likerId] }
   const outcome = await like(here, likerId, { userId: likerId }, { crewId: target.id }, { a_crew_id: target.id, b_user_id: likerId }, sides, null, null)
   return outcome ?? NO_CREW
@@ -192,7 +193,7 @@ export async function likePersonAsCrew(
     intentsAt(eventId, personId),
   ])
   if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return { ...NOTHING_TOLD }
-  if (blocksExclude(mine.members, [personId], await blocksBetween(mine.members, [personId]))) return { ...NOTHING_TOLD }
+  if (blocksExclude(mine.members, [personId], await strangersApartBetween(mine.members, [personId]))) return { ...NOTHING_TOLD }
 
   /*
    * No line in the crew chat for a like of a person. A line only for a like
@@ -244,7 +245,7 @@ async function like(
   const pairKey = `${pair.a_crew_id}:${pair.b_crew_id ?? pair.b_user_id}`
   const result = await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`blend:${here.occurrenceId}:${pairKey}`}, 0))`
-    if ((await blocksBetween(sides.a, sides.b, tx)).size > 0) return null
+    if ((await strangersApartBetween(sides.a, sides.b, tx)).size > 0) return null
     // Both crews still standing and not hidden — read under a share lock, so a
     // dissolve or a moderator's hide in flight finishes first and this sees it
     // (their close pass would otherwise miss the Blend this is about to make).

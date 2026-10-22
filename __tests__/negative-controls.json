@@ -2005,6 +2005,12 @@
       "mutation": "H1 the opt-in dropped from the query. H2 show_online dropped. H3 the staff filter dropped. H4 the holdingPair filter dropped. H5 the checked-in gate removed. H6 the limit clamp raised. H7 the recent order ignores the DM. H8 the cursor comparison made >=. H9 the listable test removed from notifyFriendsHere. H10 the profile PUT signals when hidden both before and after.",
       "observed": "H1: 1 failing. H2: 1 failing. H3: 1 failing. H4: 1 failing. H5: 1 failing. H6: 1 failing. H7: 1 failing. H8: 1 failing. H9: 1 failing. H10: 1 failing. Each reverted; 11 of 11.",
       "date": "2026-10-22"
+    },
+    "friends-in-crews-board.itest.ts": {
+      "guards": "B3 (crews, Blends, board, ratings; owner's rule 2026-10-22): a friendship across the two sides of a crew hides the crew, answers a like as a block does and writes nothing, and makes no Blend (again under the Blend's lock); a friend's board post is absent and an ask to it is the taken-down 404 of a blocked author; two accepted askers who are friends are not seated together; friends are not listed for rating and not counted in the rating push.",
+      "mutation": "K1 strangersApartBetween replaced by a blocks-only read in the crew listing. K2 the in-lock re-check of the Blend removed. K3 the friend exclusion removed from the board list. K4 from the board ask. K5 the seating check removed. K6 friends not excluded from ratablePeers. K7 not excluded from the rating push audience. K8 (EQUIVALENT) the pre-check removed from likeCrew: the listing hides the crew and the in-lock re-check still refuses, so the answer is unchanged (defence in depth).",
+      "observed": "K1: 1 failing. K2: 1 failing. K3: 1 failing. K4: 1 failing. K5: 1 failing. K6: 1 failing. K7: 1 failing. K8: 7 of 7 green, as expected. Each reverted; 7 of 7.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [
