@@ -49,6 +49,7 @@ export async function presentMembersAt(occurrenceId: string, crewIds?: readonly 
         deletedAt: null,
         event_check_ins: { some: hereNowAt(occurrenceId) },
         // A member a host banned from this room is no crew member here (review H2).
+        // any-kind: the room is this occurrence's, an event's or a venue day's alike — a crew can be here at either (§6).
         ...notHostBannedFrom({ event: { occurrences: { some: { id: occurrenceId } } } }),
       },
     },
