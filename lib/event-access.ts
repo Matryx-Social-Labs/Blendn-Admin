@@ -69,23 +69,7 @@ export async function attendeeEventAccess(
    * its room's own routes check being live (`liveInVenueDay`, `inRoomWhere`).
    */
   if (!event || event.status === "draft" || event.kind === "venue_day") {
-    // A draft that was published until its organisation was suspended says so; a draft nobody announced does not.
-    const suspended = event?.status === "draft" && event.kind !== "venue_day" && event.pre_suspension_status !== null
-    if (!suspended) return { kind: "not_found" }
-    /*
-     * Said only to people who have a stake in it: somebody who said they were
-     * going (or maybe, or is waitlisted — anything but `not_going`), and the
-     * organisation that runs it. A stranger, and somebody who declined, get the
-     * plain 404 a hidden event gives: for a private event the reason would also
-     * tell a stranger holding the id that it exists. (`canJoinEvent` cannot be
-     * the question: it answers no for any draft, and this is one.)
-     *
-     * The organisation is read from its members directly. `actorFor` leaves a
-     * suspended organisation's memberships out, which is the point of suspending
-     * it, and so cannot tell us whose event this was.
-     */
-    if (!(await hasStakeInSuspendedEvent(userId, eventId, event.organizer_id, event.organizer_org_id))) return { kind: "not_found" }
-    return { kind: "not_found", reason: ErrorCode.ORGANISER_SUSPENDED }
+    return { kind: "not_found", ...(await suspensionReasonFor(userId, eventId, event)) }
   }
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
     return { kind: "not_found" }
@@ -105,6 +89,53 @@ export async function attendeeEventAccess(
   if (age == null && intent === "view") return null
   const message = minAgeRefusal(age, event.min_age)
   return message ? { kind: "age", message, unknownAge: age == null } : null
+}
+
+type SuspensionCandidate = { status: string; kind: string; pre_suspension_status: string | null; organizer_id: string; organizer_org_id: string | null }
+
+/**
+ * `{ reason: ORGANISER_SUSPENDED }` for an event that was live and is hidden
+ * because its organisation was suspended, said to the people who have a stake
+ * in it; `{}` for everyone else and for every other reason an event is not there.
+ *
+ * A draft that was published until its organisation was suspended says so; a
+ * draft nobody announced does not. Said only to somebody who said they were
+ * going (or maybe, or is waitlisted — anything but `not_going`), and the
+ * organisation that runs it. A stranger, and somebody who declined, get the
+ * plain 404 a hidden event gives: for a private event the reason would also
+ * tell a stranger holding the id that it exists. (`canJoinEvent` cannot be the
+ * question: it answers no for any draft, and this is one.)
+ *
+ * The organisation is read from its members directly. `actorFor` leaves a
+ * suspended organisation's memberships out, which is the point of suspending
+ * it, and so cannot tell us whose event this was.
+ *
+ * `event` is the row the caller already has, or `undefined` to have it read: the
+ * routes that refuse a hidden event for their own reasons (the door, the guest
+ * list, the chat, the crews) ask here, on the refusal path only, so every one
+ * of them gives the app the same `reasonCode` the event's own page does.
+ */
+export async function suspensionReasonFor(
+  userId: string,
+  eventId: string,
+  event?: SuspensionCandidate | null
+): Promise<{ reason?: typeof ErrorCode.ORGANISER_SUSPENDED }> {
+  const row =
+    event !== undefined
+      ? event
+      : await db.events.findUnique({
+          where: { id: eventId, deleted_at: null },
+          select: { status: true, kind: true, pre_suspension_status: true, organizer_id: true, organizer_org_id: true },
+        })
+  const suspended = row?.status === "draft" && row.kind !== "venue_day" && row.pre_suspension_status !== null
+  if (!row || !suspended) return {}
+  return (await hasStakeInSuspendedEvent(userId, eventId, row.organizer_id, row.organizer_org_id)) ? { reason: ErrorCode.ORGANISER_SUSPENDED } : {}
+}
+
+/** The 404 a route gives for an event that is not there for this person, `reasonCode` included when there is one. */
+export async function eventNotFoundResponse(userId: string, eventId: string, message = "Event not found") {
+  const { reason } = await suspensionReasonFor(userId, eventId)
+  return reason ? errorResponse(message, 404, ErrorCode.NOT_FOUND, reason) : notFoundResponse(message)
 }
 
 async function hasStakeInSuspendedEvent(userId: string, eventId: string, organizerId: string, orgId: string | null): Promise<boolean> {

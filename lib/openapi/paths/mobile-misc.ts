@@ -811,9 +811,17 @@ registry.registerPath({
   tags: ["Mobile Notifications"],
   summary: "List the caller's notifications, newest first",
   description:
-    "Cursor-paginated because the list grows at the head — offset pages would repeat rows as new ones arrive. Returns only the caller's own; `user_id` comes from the token and is never a parameter. `unreadCount` ships with the feed so the bell needs one request rather than two.",
+    "Cursor-paginated because the list grows at the head — offset pages would repeat rows as new ones arrive. Returns only the caller's own; `user_id` comes from the token and is never a parameter. `unreadCount` ships with the feed so the bell needs one request rather than two. A build that knows `event_changed` says so with `X-Channel-Set: 2` (the number it posts with its push token); without it, or with a value below 2, an `event_changed` row is served as `kind` and `data.type` `event_update` so the tap opens the event, and the stored row is untouched. At most 13 statements per request however long the page.",
   security: bearerAuth,
   request: {
+    headers: z.object({
+      "X-Channel-Set": z.coerce
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("The channel set this build has (`2` for Flow 9 and its kinds). Absent on every build before it."),
+    }),
     query: z.object({
       cursor: z.string().uuid().optional(),
       limit: z.coerce.number().int().min(1).max(100).optional(),

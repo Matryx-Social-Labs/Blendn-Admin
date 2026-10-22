@@ -9,7 +9,7 @@ import {
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
+import { bellRowFor, declaredChannelSet, NOT_IN_THE_BELL } from "@/lib/push-notifications"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { decorateNotifications, type RowDecoration } from "@/lib/notification-display"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
@@ -119,8 +119,9 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
+    const channelSet = declaredChannelSet(request.headers)
     return successResponse({
-      notifications: items.map((n) => ({
+      notifications: items.map((row) => bellRowFor(row, channelSet)).map((n) => ({
         id: n.id,
         kind: n.kind,
         title: n.title,

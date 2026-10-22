@@ -247,7 +247,7 @@ HTTP 503   Retry-After: 300
 non-number or non-positive value is the default). Unset: off. `/api/health`
 (Railway's healthcheck), the dashboard and the socket handshake are never
 affected; they do not pass through the mobile gate. Both gates are in
-`middleware.ts` through `lib/mobile-gate.ts`, and `X-App-Version` is in
+`middleware.ts` through `lib/mobile-gate.ts`, and `X-App-Version` and `X-Channel-Set` are in
 `Access-Control-Allow-Headers`.
 
 **At the door.** Two refusals a person can fix now say so in `reasonCode`, with
@@ -515,7 +515,11 @@ has no writer yet): `days[].cancelled` reads it when something does.
 `data.reason` an `event_update` carries (see Flow 9). Going
 means `rsvp_status = going`. Maybe, waitlisted and saved keep `event_update`, as
 before. A build that does not know the kind is sent `event_update` in its push
-(see the channel set below). The bell row is `event_changed` for everyone going.
+(see the channel set below), and reads the bell row as `event_update` too: the
+stored row is `event_changed` for everyone going, and `GET /notifications` serves
+it in the old kind and shape (`kind` and `data.type` `event_update`, the rest of
+`data` unchanged) unless the request declares `X-Channel-Set: 2` or later (see
+**Reading the bell as an older build** below).
 
 **Why an event link is refused**, `reasonCode` beside the unchanged
 `errorCode` and sentence:
@@ -527,7 +531,18 @@ before. A build that does not know the kind is sent `event_update` in its push
 | Taking part with an unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
 | The event was live and its organisation was suspended, and you are going (or maybe, or waitlisted) or are of the organisation | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
 | The same event, and you are a stranger or said `not_going` (public or private alike) | 404 | `NOT_FOUND` | none |
+| The same event, on the door (`POST /events/:id/checkin`) and you have a stake in it | 400 | none | `ORGANISER_SUSPENDED` |
+| The same event, on `GET /events/:id/checkins`, `/crews`, `/chat` (and `POST /chat` with no room yet) | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
+| The same event, on `POST /events/:id/chat` into a room that already exists | 403 | `FORBIDDEN` | `ORGANISER_SUSPENDED` |
 | A draft nobody published, a private event you are not on, a deleted one | 404 | `NOT_FOUND` | none |
+
+`ORGANISER_SUSPENDED` is the same on every route that refuses such an event, the
+event's own page, RSVP, save, board, room preview, the door, the guest list, the crews and the
+chat (`lib/event-access.ts`, `suspensionReasonFor`), and it is said to the same
+people (a stake: going, maybe or waitlisted, or the organisation) and nobody else.
+`errorCode` and the status are what each route always answered; read
+`reasonCode ?? errorCode`. It is a stable code: the sentence beside it is ours to
+change.
 
 Viewing an age-restricted event with no age on file still opens (OAuth accounts
 start without one), so `AGE_UNKNOWN` comes from the routes that take part.
@@ -601,6 +616,27 @@ event's change and a report's outcome have no switch here. Stored as
 - **`data.reason`** on `event_update` and `event_changed`: `cancelled`, `time` or
   `venue`, the most important when several moved (`data.changed` has them all,
   comma-joined). A reminder ("starts in an hour") carries none.
+
+**Reading the bell as an older build.** A build that does not know `event_changed`
+has no tap for it, so the feed is served to it the way its push is (`channelSet`
+above). A build that knows the kind declares it on the request, **`X-Channel-Set: 2`**
+(the same number it posts with its push token; send it on every request, as
+`X-App-Version`). With no header, or a value below 2 or that is not a whole number,
+`GET /notifications` serves every `event_changed` row as `kind: "event_update"` with
+`data.type: "event_update"`; `eventId`, `reason` and `changed` are untouched, and so
+is the tile (`clock`). With `2` or later it is served as `event_changed`. Nothing is
+rewritten in the database, so a phone that updates reads its old rows as
+`event_changed` from then on. Every other kind reads the same either way.
+
+**What one poll costs.** The feed, its decoration and both counts are at most 13
+statements however long the page: the page, one read per kind present (friend
+requests with their senders in two more, crew invites and memberships, message and
+board requests, matches, events, crews), and two counts. Nothing runs per row.
+`unreadCount` is served by `notifications (user_id, read_at)`, and `badgeCount`'s
+unread conversations by the partial index `private_messages_unread_idx`, probed once
+per conversation of the reader's (`__tests__/integration/bell-cost.itest.ts` counts
+the statements and reads the plan; a 50-row page took a median of 8 ms against a local
+database).
 
 The feed response gains **`badgeCount`**: `unreadCount` plus live conversations
 with something unread from the other person (a thread, not a message; a hidden

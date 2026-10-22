@@ -167,6 +167,31 @@ function payloadFor(data: NotificationData | undefined, channelSet: number | nul
   return data
 }
 
+/**
+ * The header a build puts on every request to say which channel set it has
+ * (`CHANNEL_SET_FLOW9`), the same number it posts with its push token. An
+ * installed build sends none.
+ */
+export const CHANNEL_SET_HEADER = "x-channel-set"
+
+/** The declared channel set, or `null` for no header or anything that is not a whole number above zero. */
+export function declaredChannelSet(headers: Headers): number | null {
+  const declared = Number(headers.get(CHANNEL_SET_HEADER))
+  return Number.isInteger(declared) && declared > 0 ? declared : null
+}
+
+/**
+ * A stored bell row as the reading build can open it (SCRUM-739). The push is
+ * downgraded per device (`payloadFor`), and the row must be too, or a build
+ * that does not know `event_changed` shows a row whose tap does nothing. Read
+ * time, never write time: the row stays what happened, and a phone that has
+ * updated reads it as `event_changed` from then on.
+ */
+export function bellRowFor<T extends { kind: string; data?: unknown }>(row: T, channelSet: number | null): T {
+  if (row.kind !== "event_changed" || (channelSet ?? 0) >= CHANNEL_SET_FLOW9) return row
+  return { ...row, kind: "event_update", data: payloadFor(row.data as NotificationData, channelSet) }
+}
+
 function replaced(
   channelId: string,
   key: string | undefined

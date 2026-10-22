@@ -65,11 +65,15 @@ interface Row {
   display: { title?: string; visual?: Record<string, unknown> }
 }
 
-const items = async (viewer: string) => {
-  const res = await feed.GET(req("/api/mobile/notifications", tokenOf(viewer)))
+/** What a build that knows `event_changed` declares on every request; an installed build declares nothing. */
+const NEW_BUILD = { "x-channel-set": "2" }
+
+const items = async (viewer: string, headers: Record<string, string> = {}) => {
+  const res = await feed.GET(req("/api/mobile/notifications", tokenOf(viewer), "GET", undefined, headers))
   return { status: res.status, data: (await res.json()).data as { notifications: Row[]; unreadCount: number; badgeCount: number } }
 }
-const rowOf = async (viewer: string, kind: string) => (await items(viewer)).data.notifications.find((n) => n.kind === kind)!
+const rowOf = async (viewer: string, kind: string, headers: Record<string, string> = {}) =>
+  (await items(viewer, headers)).data.notifications.find((n) => n.kind === kind)!
 
 beforeEach(() => {
   sentMessages.length = 0
@@ -187,7 +191,7 @@ describe("event rows", () => {
     const eventId = await makeEvent(host)
     events.push(eventId)
     await notifyEventChanged([me], "Night", "Event updated", eventId, "venue,time")
-    expect((await rowOf(me, "event_changed")).data).toMatchObject({ reason: "time", changed: "venue,time" })
+    expect((await rowOf(me, "event_changed", NEW_BUILD)).data).toMatchObject({ reason: "time", changed: "venue,time" })
 
     await notifyEventUpdate([me], "Night", "Starts in an hour", eventId)
     const reminder = (await items(me)).data.notifications.find((n) => n.kind === "event_update")!
@@ -376,13 +380,61 @@ describe("emblems and tiles for the other kinds", () => {
     await notify(me, "event_update", { eventId: deleted })
     await notify(me, "event_changed", { eventId: randomUUID() })
 
-    const rows = (await items(me)).data.notifications
+    const rows = (await items(me, NEW_BUILD)).data.notifications
     const visualOf = (kind: string, eventId?: string) => rows.find((n) => n.kind === kind && (!eventId || (n.data as { eventId: string }).eventId === eventId))
     expect(visualOf("waitlist_promoted")!.display.visual).toMatchObject({ type: "event", badge: "star", cancelled: false })
     expect(visualOf("announcement")!.display.visual).toMatchObject({ type: "event", badge: "megaphone" })
     expect(visualOf("rating_request")!.display.visual).toMatchObject({ type: "event", badge: "star" })
     expect(visualOf("event_update", deleted)).not.toHaveProperty("display")
     expect(visualOf("event_changed")).not.toHaveProperty("display")
+  })
+})
+
+describe("an event_changed row, for a build that does not know the kind (SCRUM-739)", () => {
+  async function goerTold(label: string) {
+    const host = await person(`${label}-host`)
+    const me = await person(`${label}-me`)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    await notifyEventChanged([me], "Night", "Event updated: venue, start time", eventId, "venue,time")
+    return { me, eventId }
+  }
+
+  it("a build that declares nothing gets the row as event_update, the shape the push downgrade sends, so a tap opens the event", async () => {
+    const { me, eventId } = await goerTold("nf-old")
+    const { data } = await items(me)
+    expect(data.notifications).toHaveLength(1)
+    expect(data.notifications[0]).toMatchObject({ kind: "event_update", title: "Night", body: "Event updated: venue, start time", readAt: null })
+    expect(data.notifications[0].data).toEqual({ type: "event_update", eventId, reason: "time", changed: "venue,time" })
+    // Same tile as the new kind has; the reader loses nothing but the kind's name.
+    expect(data.notifications[0].display.visual).toMatchObject({ type: "event", badge: "clock" })
+    expect(data.unreadCount).toBe(1)
+  })
+
+  it("a channel set before Flow 9, or one that is not a number, is an old build too", async () => {
+    const { me } = await goerTold("nf-old2")
+    for (const declared of ["1", "0", "-3", "two", "", "2.5"]) {
+      expect((await rowOf(me, "event_update", { "x-channel-set": declared })).data).toMatchObject({ type: "event_update" })
+    }
+  })
+
+  it("a build that declares channelSet 2 or later gets event_changed, untouched; the stored row is never rewritten", async () => {
+    const { me, eventId } = await goerTold("nf-new")
+    for (const declared of ["2", "3"]) {
+      const row = await rowOf(me, "event_changed", { "x-channel-set": declared })
+      expect(row.data).toEqual({ type: "event_changed", eventId, reason: "time", changed: "venue,time" })
+    }
+    expect((await db.notifications.findFirstOrThrow({ where: { user_id: me } })).kind).toBe("event_changed")
+  })
+
+  it("only that kind is touched: every other kind reads the same with or without the declaration", async () => {
+    const me = await person("nf-same")
+    const eventId = randomUUID()
+    await notify(me, "event_update", { eventId })
+    await notify(me, "announcement", { eventId })
+    await notify(me, "report_actioned", {})
+    const strip = (r: Row[]) => r.map(({ id, kind, data }) => ({ id, kind, data }))
+    expect(strip((await items(me)).data.notifications)).toEqual(strip((await items(me, NEW_BUILD)).data.notifications))
   })
 })
 

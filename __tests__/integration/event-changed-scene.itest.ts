@@ -454,6 +454,77 @@ describe("GET /events/:id — why a link is refused", () => {
   })
 })
 
+describe("every route that refuses a suspended organiser's event says why (SCRUM-749)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const crewsRoute = require("@/app/api/mobile/events/[eventId]/crews/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/route")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const boardRoute = require("@/app/api/mobile/events/[eventId]/board/route") as typeof import("@/app/api/mobile/events/[eventId]/board/route")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const previewRoute = require("@/app/api/mobile/events/[eventId]/room-preview/route") as typeof import("@/app/api/mobile/events/[eventId]/room-preview/route")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const favoriteRoute = require("@/app/api/mobile/events/[eventId]/favorite/route") as typeof import("@/app/api/mobile/events/[eventId]/favorite/route")
+
+  const at = (eventId: string, path: string, who: string, method = "GET", body?: unknown) =>
+    req(`/api/mobile/events/${eventId}${path}`, tokenOf(who), method, body)
+  const COORDS = { latitude: 12.97, longitude: 77.59 }
+  const doors: Record<string, (eventId: string, who: string) => Promise<Response>> = {
+    "GET /events/:id": (id, who) => routes.event.GET(at(id, "", who), eventParams(id)),
+    "POST /rsvp": (id, who) => rsvpRoute.POST(at(id, "/rsvp", who, "POST", { status: "going" }), eventParams(id)),
+    "POST /favorite": (id, who) => favoriteRoute.POST(at(id, "/favorite", who, "POST"), eventParams(id)),
+    "GET /board": (id, who) => boardRoute.GET(at(id, "/board", who), eventParams(id)),
+    "GET /room-preview": (id, who) => previewRoute.GET(at(id, "/room-preview", who), eventParams(id)),
+    "POST /checkin": (id, who) => routes.checkin.POST(at(id, "/checkin", who, "POST", COORDS), eventParams(id)),
+    "GET /checkins": (id, who) => routes.roster.GET(at(id, "/checkins", who), eventParams(id)),
+    "GET /crews": (id, who) => crewsRoute.GET(at(id, "/crews", who), eventParams(id)),
+    "GET /chat": (id, who) => routes.eventChat.GET(at(id, "/chat", who), eventParams(id)),
+    "POST /chat": (id, who) => routes.eventChat.POST(at(id, "/chat", who, "POST", { content: "hello" }), eventParams(id)),
+  }
+
+  const NOT_FOUND = [404, "NOT_FOUND"]
+  const UNCHANGED: Record<string, unknown[]> = {
+    "POST /checkin": [400, undefined],
+  }
+  for (const name of Object.keys(doors)) UNCHANGED[name] ??= NOT_FOUND
+
+  it.each(Object.keys(doors))("%s: reasonCode ORGANISER_SUSPENDED for somebody with a stake, none for a stranger or a draft nobody published", async (name) => {
+    const door = doors[name]
+    const suspended = await event({ status: "draft", preSuspension: "published" })
+    const unpublished = await event({ status: "draft" })
+    const label = name.replace(/\W+/g, "")
+    const goer = await person(`scn-749-goer-${label}`)
+    const stranger = await person(`scn-749-stranger-${label}`)
+    const unpublishedGoer = await person(`scn-749-ug-${label}`)
+    await db.event_rsvps.create({ data: { event_id: suspended, user_id: goer, status: "going" } })
+    await db.event_rsvps.create({ data: { event_id: unpublished, user_id: unpublishedGoer, status: "going" } })
+
+    const told = await door(suspended, goer)
+    const toldBody = await told.json()
+    expect(toldBody.success).toBe(false)
+    expect(toldBody.reasonCode).toBe("ORGANISER_SUSPENDED")
+    // The status and errorCode it always had stay: an installed build reads those, and the door's bare 400 never had one.
+    expect([told.status, toldBody.errorCode]).toEqual(UNCHANGED[name])
+
+    const strangerBody = await (await door(suspended, stranger)).json()
+    expect(strangerBody.success).toBe(false)
+    expect(strangerBody).not.toHaveProperty("reasonCode")
+
+    const draftBody = await (await door(unpublished, unpublishedGoer)).json()
+    expect(draftBody).not.toHaveProperty("reasonCode")
+  })
+
+  it("the same refusal with a chat room that already exists, and for the organisation's own staff", async () => {
+    const suspended = await event({ status: "draft", preSuspension: "published" })
+    await db.chat_groups.create({ data: { event_id: suspended, name: "Room", status: "active", member_count: 0 } })
+    const staff = await person("scn-749-staff")
+    await db.organisation_members.create({ data: { org_id: orgs[0], user_id: staff, role: "staff" } })
+    // The read says not found; the send, into a room that exists, says the chat is closed.
+    for (const [name, status, errorCode] of [["GET /chat", 404, "NOT_FOUND"], ["POST /chat", 403, "FORBIDDEN"]] as const) {
+      const res = await doors[name](suspended, staff)
+      expect([res.status, await res.json()]).toEqual([status, expect.objectContaining({ errorCode, reasonCode: "ORGANISER_SUSPENDED" })])
+    }
+  })
+})
+
 describe("the whole key set of GET /events/:id", () => {
   // origin/dev's detail, before this branch: every key an installed build may read.
   const OLD_KEYS = [
