@@ -129,6 +129,8 @@ export const ErrorCode = {
   REQUEST_UNAVAILABLE: "REQUEST_UNAVAILABLE",
   /** A friend request to yourself. A bare 400; `errorCode` stays absent. */
   CANNOT_ADD_SELF: "CANNOT_ADD_SELF",
+  /** A page cursor that is not a card from this list (another room's, forged, or an id): start from the top. */
+  INVALID_CURSOR: "INVALID_CURSOR",
 } as const
 
 /**

@@ -9,6 +9,7 @@ import { normaliseSponsorName } from "../lib/sponsor-name"
 import { ensureOrgBrand, ensurePendingBrandClaim, findBrandByName } from "./seed-brand"
 import { seedMatrixMarkers, seedTaxonomy } from "./seed-admin-world"
 import { describeLive, describeRefresh, refreshSeededEvent } from "./seed-occurrences"
+import { leaveOtherRooms } from "./seed-one-room"
 import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS, upsertOrg } from "./test-accounts"
 import { realEventsWhere } from "../lib/event-kind"
@@ -874,6 +875,7 @@ async function main() {
     if (!slot) return 0
     let n = 0
     for (const userId of userIds) {
+      if (status === "checked_in") await leaveOtherRooms(db, userId, slot.occurrence.id, slot.event.start_time)
       await db.event_check_ins.upsert({
         where: {
           occurrence_id_user_id: { occurrence_id: slot.occurrence.id, user_id: userId },

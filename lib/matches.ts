@@ -15,6 +15,7 @@ import type { Gender } from "@/lib/dating"
 import { ageFrom } from "@/lib/age"
 import { MIN_ROOM_FOR_WORK_FIELD, workFieldLabel } from "@/lib/work-fields"
 import { roomHandle } from "@/lib/room-handle"
+import { notHostBannedFrom } from "@/lib/room-kind"
 import { visibleInRoom } from "@/lib/identity"
 import { IPL_PARENT_SLUG } from "@/lib/about-you"
 import {
@@ -223,6 +224,8 @@ export async function matchesForEvent(
         // the same reason and it would be strange to offer the bar manager as a
         // match.
         kind: "attendee",
+        // Nor a member a host banned from the room (M3, `notHostBannedFrom`).
+        user: notHostBannedFrom({ event_id: eventId }),
       },
       select: {
         user_id: true,

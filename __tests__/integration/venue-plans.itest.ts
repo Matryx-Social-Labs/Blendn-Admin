@@ -163,7 +163,8 @@ async function night(venueId: string, at: Date, people: string[]) {
   })
   const occ = await db.event_occurrences.findFirstOrThrow({ where: { event_id: id } })
   for (const user_id of people) {
-    await db.event_check_ins.create({ data: { event_id: id, occurrence_id: occ.id, user_id, status: "checked_in", check_in_time: at } })
+    // A past night is over, and one person is open in one room at most (SCRUM-705).
+    await db.event_check_ins.create({ data: { event_id: id, occurrence_id: occ.id, user_id, status: "checked_out", check_in_time: at } })
   }
   return id
 }

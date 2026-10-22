@@ -12,6 +12,7 @@ import {
 import { isRefusal, refusalResponse } from "@/lib/crews/crews"
 import { crewHere } from "@/lib/crews/presence"
 import { logger } from "@/lib/logger"
+import { roomBanRefusal } from "@/lib/room-ban"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
@@ -37,6 +38,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!isUuid(crewId)) return notFoundResponse("Crew not found")
     const parsed = hereSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(parsed.data.eventId, authUser.userId)
+    if (banned) return banned
 
     const result = await crewHere(authUser.userId, crewId, parsed.data.eventId)
     if (isRefusal(result)) return refusalResponse(result)

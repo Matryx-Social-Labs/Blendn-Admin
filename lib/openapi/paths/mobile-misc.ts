@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -18,7 +18,7 @@ import {
 } from "@/lib/openapi/schemas/profile"
 import { MessageResponseSchema } from "@/lib/openapi/schemas/auth"
 import { MutedRoomsResponseSchema } from "@/lib/openapi/schemas/chat"
-import { CheckinRequestSchema } from "@/lib/openapi/schemas/event"
+import { CheckinRequestSchema, LeftRoomSchema } from "@/lib/openapi/schemas/event"
 import { LIVE_COUNT_BUCKETS, type LiveCountBucket } from "@/lib/disclosure"
 
 /** The live-count buckets, from the one list the routes bucket with — never typed out twice. */
@@ -388,6 +388,7 @@ const GoLiveResponseSchema = z
     checkIn: z.object({ id: z.string().uuid(), status: z.string(), checkInTime: z.string().datetime() }),
     revealSuggestion: z.boolean(),
     intentNeeded: z.boolean(),
+    left: z.array(LeftRoomSchema).describe("The rooms this took you out of: \"You left {name}.\" Empty when extending."),
   })
   .openapi("GoLiveResponse")
 
@@ -557,7 +558,7 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}",
   tags: ["Mobile Users"],
   summary: "Get user public profile",
-  description:
+  description: ROOM_BAN_GATE +
     "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
@@ -627,7 +628,7 @@ registry.registerPath({
   path: "/api/mobile/message-requests",
   tags: ["Mobile Message Requests"],
   summary: "Send message request",
-  description:
+  description: ROOM_BAN_GATE +
     PARTICIPATION_GATE +
     "Both of you must have attended the same event. 409 if a request is pending or accepted in either direction, if you already sent one that was declined — a rejection is not an invitation to try again — or if you already have a conversation; the person who declined may ask you. **Those 409s are said only when `identityVisible` would be true for the recipient** (SCRUM-371): to anyone else they answer 201 with this same shape and a fresh id, write nothing and notify nobody, so a room handle cannot be probed for a friend DM or an earlier request. `recipientId` may be a room handle and is echoed as sent. The response names the recipient by that ref only: their name and photo are what accepting discloses, not asking.",
   security: bearerAuth,
@@ -1007,6 +1008,65 @@ registry.registerPath({
 })
 
 // === Active Checkins ===
+
+const PlaceInsideSchema = z
+  .object({
+    kind: z.enum(["event", "venue"]),
+    eventId: z.string().uuid().nullable().describe("The event; always null for a venue, whose door is Go Live by `venueId`."),
+    venueId: z.string().uuid().nullable().describe("A venue's id (Go Live); null for an event."),
+    name: z.string(),
+    venueName: z.string().nullable(),
+    startTime: z.string().datetime().nullable().describe("The event's day; null for a venue."),
+    endTime: z.string().datetime().nullable(),
+    going: z.boolean().describe("Your RSVP is `going`."),
+    saved: z.boolean(),
+    checkedIn: z.boolean().describe("You are checked in here now: at an event by its id, at a venue by the venue your live day is at."),
+  })
+  .openapi("PlaceInside")
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/checkins/inside",
+  tags: ["Mobile Checkins"],
+  summary: "Which places am I inside",
+  description:
+    "Every place whose door would admit you at this position, judged as the doors judge (SCRUM-704): the event's " +
+    "own fence or a venue's Go Live area, the accuracy allowance, the event's day (cancelled days and not-yet-open " +
+    "ones are out), onboarding, the age rule, a private event's guest list, and a venue a linked event has taken " +
+    "over (the event is listed instead). Light the disc and dock the pass from this alone. In the order the pass " +
+    "docks: an event you are going to or saved; events before venues; the event whose day started first; the " +
+    "nearest. At most 10, with `total`. No distance is returned: a venue's area is shown to nobody.\n\n" +
+    "`current` is the room you are in now (or null), so with a place that is not `checkedIn` the pass can say " +
+    "\"Checking in here takes you out of {current.name}.\" before the hold (SCRUM-635). A fix worse than 150 m " +
+    "places you nowhere (`places: []`), as the doors refuse it. POST so the position never sits in a logged URL. " +
+    "Rate limited per user (20 a minute).",
+  security: bearerAuth,
+  request: { body: { content: { "application/json": { schema: CheckinRequestSchema } } } },
+  responses: {
+    200: {
+      description: "Places inside",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              places: z.array(PlaceInsideSchema),
+              total: z.number().int(),
+              current: z
+                .object({
+                  eventId: z.string().uuid(),
+                  kind: z.enum(["event", "venue_day"]),
+                  venueId: z.string().uuid().nullable(),
+                  name: z.string(),
+                })
+                .nullable(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
 
 registry.registerPath({
   method: "get",

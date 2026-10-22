@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { roomBanRefusal } from "@/lib/room-ban"
 import { z } from "zod"
 
 import {
@@ -91,6 +92,9 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const rememberIntent = parsed.data.rememberIntent ?? remember ?? false
     const rememberReveal = parsed.data.rememberReveal ?? remember ?? false
 
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
     const checkIn = await db.event_check_ins.findFirst({
       where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
       select: { id: true, occurrence: { select: { end_time: true } } },

@@ -22,6 +22,8 @@ const mockDb = {
   // friends who let friends recognise them in rooms. Empty unless a case sets it.
   private_conversations: { findMany: jest.fn() },
   friendships: { findMany: jest.fn() },
+  // `eventRoomBan`: nobody here is banned from the room unless a case says so.
+  chat_group_members: { findFirst: jest.fn().mockResolvedValue(null) },
   ended_friendships: { findMany: jest.fn(async () => []) },
 }
 
@@ -121,7 +123,11 @@ describe("GET /events/:id/checkins — who counts as present", () => {
       // The one profile predicate that belongs here: "Show online status" off
       // is counted and not listed (SCRUM-141) — and a missing profile row is
       // not "off", so the NULL case is spelled out.
-      user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] },
+      user: {
+        OR: [{ profile: { is: null } }, { profile: { show_online: true } }],
+        // And never a member a host banned from this room (review M3, `notHostBannedFrom`).
+        chat_group_memberships: { none: { status: "banned", banned_by: { not: null }, chat_group: { event_id: EVENT } } },
+      },
     })
     expect(JSON.stringify(where)).not.toMatch(/onboarded|photos/)
   })

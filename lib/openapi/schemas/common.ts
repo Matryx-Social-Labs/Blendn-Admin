@@ -178,6 +178,11 @@ registry.register("DeviceInfo", DeviceInfoSchema)
  * The participation gate (SCRUM-331), for every endpoint that asks it:
  * RSVP, favourite, board, check-in, and starting or sending a DM.
  */
+/** Every event-scoped people read and write refuses a member a host banned from the room, as the chat does. */
+export const ROOM_BAN_GATE =
+  "403 `USER_BANNED` (\"The organiser has removed you from this room.\") when a host banned the caller from the " +
+  "event's room — the chat's own answer; for a route taking a room handle, the room that handle came from. "
+
 export const PARTICIPATION_GATE =
   "403 \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
   "profile has neither finished onboarding nor an adult age on file (SCRUM-331) — `errorCode` stays " +

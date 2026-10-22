@@ -174,6 +174,11 @@ describe("crew ↔ crew: any present member likes for the crew; mutual is one Bl
     // Crew Five is at the other event too; of Crew Two only a1 is, so Crew Two is not "here" there.
     for (const p of [w.a[0], w.b[0], w.b[1]]) await arrive(other.eventId, other.occurrenceId, p)
     expect((await api.likeCrew(w.a[0], other.eventId, w.B.crewId, w.A.crewId)).status).toBe(403)
+    // Back in the first room: arriving at the other event moved them (one open check-in per person, SCRUM-705).
+    for (const p of [w.a[0], w.b[0], w.b[1]]) {
+      await db.event_check_ins.updateMany({ where: { event_id: other.eventId, user_id: p.id }, data: { status: "checked_out", check_out_time: new Date() } })
+      await db.event_check_ins.updateMany({ where: { event_id: w.eventId, user_id: p.id }, data: { status: "checked_in", check_out_time: null } })
+    }
     // A crew with one member here is no crew here.
     await db.event_check_ins.updateMany({ where: { event_id: w.eventId, user_id: w.b[1].id }, data: { status: "checked_out", check_out_time: new Date() } })
     expect((await api.likeCrew(w.a[0], w.eventId, w.B.crewId, w.A.crewId)).status).toBe(404)

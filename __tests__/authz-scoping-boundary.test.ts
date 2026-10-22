@@ -153,6 +153,7 @@ describe("authorization is not hand-rolled outside lib/rbac.ts", () => {
 const VENUE_IN_READS_ALLOWED = new Map([
   ["lib/live-count.ts", "who is live at the venues on an attendee's list or venue page, kept as a bucket; nothing per person reaches anyone, nothing reaches an owner"],
   ["lib/venue-plan.ts", "a venue's purchases (`billing_checkouts.venue_id`, step 17), not its events"],
+  ["lib/places-inside.ts", "today's Go Live day at the venues around one attendee, for their own disc (SCRUM-704); nothing per person, nothing to an owner"],
 ])
 
 const VENUE_RULES: Array<{ name: string; pattern: RegExp; why: string; allowed?: Map<string, string> }> = [
@@ -197,6 +198,7 @@ const VENUE_ID_READS_ALLOWED = new Map([
   ["lib/offer-actions.ts", "a venue's offers this week and the passes on screen at its door (`venue_offers`, `venue_offer_sends`), not events; regulars' nights come through lib/regulars.ts, clamped to the claim"],
   ["lib/offers/person.ts", "the caller's own pass tonight at a venue (`venue_offer_sends`), not events"],
   ["lib/offers/venue.ts", "a venue's offers this week (`venue_offers`), not events; regulars' nights come through lib/regulars.ts, clamped to the claim"],
+  ["lib/places-inside.ts", "today's Go Live day at the venues around one attendee, for their own disc (SCRUM-704); nothing per person, nothing to an owner"],
 ])
 
 describe("a venue owner's view starts at the claim", () => {

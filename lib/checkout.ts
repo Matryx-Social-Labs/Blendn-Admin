@@ -170,30 +170,84 @@ export async function performCheckout(
   return { changed: true, eventId: checkIn.event_id, userId: checkIn.user_id }
 }
 
+/** A room a switch took somebody out of, named for the "You left {A}." toast (SCRUM-635). */
+export interface LeftRoom {
+  eventId: string
+  /** `venue_day` is a venue's live room; `name` is then the venue's. */
+  kind: "event" | "venue_day"
+  name: string
+}
+
+export interface SwitchResult extends CheckoutResult {
+  reason: CheckoutReason
+  /** Set only when the reason is `switched_event`: an expiry or an earlier day was not left by this check-in. */
+  left: LeftRoom | null
+}
+
 /**
- * Close whatever event this person is currently inside, other than `exceptEventId`.
+ * Close every open check-in this person has except the one being opened.
  *
- * You cannot be in two rooms. Called by check-in before it opens a new one.
+ * You cannot be in two rooms (SCRUM-705): the database holds one open row per
+ * person (`event_check_ins_one_open_per_user`), and check-in calls this before
+ * it writes the new one. Each row closes for what actually ended it:
+ *
+ * - **another room** — `switched_event`, the switch, and the only one returned
+ *   with `left` so the app can say "You left {A}." rather than switching
+ *   silently (SCRUM-635);
+ * - **a Go Live already over** — `expired` at its own end: the sweeper had
+ *   not got to it yet (D-4);
+ * - **an earlier day of the same event** — `occurrence_ended`. That day is
+ *   over (the door resolved today's), and it is the same room, so the chat is
+ *   not cut. This was skipped (`event_id: { not }`), which left day 1 open
+ *   beside day 2 until the sweeper came.
  */
 export async function checkOutOfOtherEvents(
   userId: string,
-  exceptEventId: string,
+  keep: { eventId: string; occurrenceId: string },
   now: Date = new Date()
-): Promise<CheckoutResult[]> {
+): Promise<SwitchResult[]> {
   const others = await db.event_check_ins.findMany({
-    where: { user_id: userId, status: "checked_in", event_id: { not: exceptEventId } },
-    select: { id: true, expires_at: true },
+    where: { user_id: userId, status: "checked_in", occurrence_id: { not: keep.occurrenceId } },
+    select: {
+      id: true,
+      event_id: true,
+      check_in_time: true,
+      expires_at: true,
+      occurrence: { select: { end_time: true } },
+      event: { select: { kind: true, title: true, venue_name: true, venue: { select: { name: true } } } },
+    },
   })
 
-  const results: CheckoutResult[] = []
+  const results: SwitchResult[] = []
   for (const row of others) {
-    // A Go Live that already ran out ended then, not now, and not by a switch:
-    // the sweeper had not got to it yet (D-4).
-    const result =
-      row.expires_at && row.expires_at <= now
-        ? await performCheckout(row.id, "expired", row.expires_at)
-        : await performCheckout(row.id, "switched_event", now)
-    if (result) results.push(result)
+    const reason: CheckoutReason =
+      row.expires_at && row.expires_at <= now ? "expired" : row.event_id === keep.eventId ? "occurrence_ended" : "switched_event"
+    /*
+     * When it ended: a Go Live at its window's end; an earlier day at that
+     * day's end, not at today's door (review L5) — it ended then, and a stay
+     * running into the next day is one nobody had; a switch now.
+     *
+     * Never before they arrived. A door that lost the race to another door
+     * (`openCheckIn`) switches out of a row opened a moment AFTER its own
+     * `now`, and a departure stamped before the arrival is refused by
+     * `presence_sessions_departure_after_arrival` — a 500 at the door, found
+     * by the race test.
+     */
+    const ended =
+      reason === "expired" && row.expires_at
+        ? row.expires_at
+        : reason === "occurrence_ended" && row.occurrence.end_time < now
+          ? row.occurrence.end_time
+          : now
+    const at = row.check_in_time && row.check_in_time > ended ? row.check_in_time : ended
+    const result = await performCheckout(row.id, reason, at)
+    if (!result) continue
+    const { kind } = row.event
+    const left =
+      reason === "switched_event" && result.changed
+        ? { eventId: row.event_id, kind, name: kind === "venue_day" ? row.event.venue?.name ?? row.event.venue_name ?? "the venue" : row.event.title }
+        : null
+    results.push({ ...result, reason, left })
   }
   return results
 }

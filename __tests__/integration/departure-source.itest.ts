@@ -45,7 +45,7 @@ it("records checking in somewhere else as a switch", async () => {
   const elsewhere = await makeEvent(a.host)
   events.push(elsewhere)
 
-  const [result] = await checkOutOfOtherEvents(a.who, elsewhere)
+  const [result] = await checkOutOfOtherEvents(a.who, { eventId: elsewhere, occurrenceId: await occurrenceOf(elsewhere) })
   expect(result).toMatchObject({ changed: true, eventId: a.eventId })
   expect(await sourceOf(a.eventId, a.who)).toBe("switch")
 })

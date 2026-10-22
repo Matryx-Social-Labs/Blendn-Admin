@@ -224,6 +224,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       },
       revealSuggestion: seat.revealSuggestion,
       intentNeeded: seat.intentNeeded,
+      // The rooms this took them out of, for "You left {A}." (SCRUM-635).
+      left: seat.left,
     })
   } catch (error) {
     logger.error("Go live error", { error: error instanceof Error ? error.message : String(error) })

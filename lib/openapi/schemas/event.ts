@@ -403,6 +403,20 @@ export const EventListResponseSchema = z
   })
   .openapi("EventListResponse")
 
+/**
+ * A room a check-in took you out of (SCRUM-635): you are in one room at a
+ * time, and the switch is never silent. The app toasts "You left {name}."
+ * Only a switch is listed — not a Go Live that had already run out, nor an
+ * earlier day of the same event.
+ */
+export const LeftRoomSchema = z
+  .object({
+    eventId: z.string().uuid(),
+    kind: z.enum(["event", "venue_day"]).describe("`venue_day`: a venue's live room, and `name` is the venue's."),
+    name: z.string(),
+  })
+  .openapi("LeftRoom")
+
 export const CheckinResponseSchema = z
   .object({
     checkIn: z.object({
@@ -428,6 +442,7 @@ export const CheckinResponseSchema = z
      * every later door.
      */
     intentNeeded: z.boolean(),
+    left: z.array(LeftRoomSchema),
     message: z.string(),
   })
   .openapi("CheckinResponse")
