@@ -162,12 +162,12 @@ describe("the per-kind push switches", () => {
     const token = tokenOf(me)
     const first = await prefs(token)
     expect(first.status).toBe(200)
-    expect((await first.json()).data).toEqual({ matches: true, crew: true, night: true })
+    expect((await first.json()).data).toEqual({ matches: true, crew: true, night: true, mutedRooms: 0 })
 
     const put = await prefs(token, "PUT", { crew: false })
     expect(put.status).toBe(200)
     expect((await put.json()).data).toEqual({ matches: true, crew: false, night: true })
-    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: false, night: true })
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: false, night: true, mutedRooms: 0 })
 
     // A second subset leaves the first alone.
     expect((await (await prefs(token, "PUT", { night: false })).json()).data).toEqual({ matches: true, crew: false, night: false })
@@ -180,7 +180,7 @@ describe("the per-kind push switches", () => {
     users.push(id)
     const token = tokenOf(id)
     expect(await db.profiles.count({ where: { id } })).toBe(0)
-    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: true, night: true })
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: true, night: true, mutedRooms: 0 })
     expect(await db.profiles.count({ where: { id } })).toBe(0) // reading does not make one
 
     const put = await prefs(token, "PUT", { crew: false })
@@ -188,7 +188,7 @@ describe("the per-kind push switches", () => {
     expect((await put.json()).data).toEqual({ matches: true, crew: false, night: true })
     const row = await db.profiles.findUniqueOrThrow({ where: { id } })
     expect([row.push_matches, row.push_crew, row.push_night]).toEqual([true, false, true])
-    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: false, night: true })
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: false, night: true, mutedRooms: 0 })
   })
 
   it("refuses an empty body, a non-boolean and a key it does not know, and changes nothing", async () => {
@@ -199,7 +199,7 @@ describe("the per-kind push switches", () => {
       expect(res.status).toBe(400)
       expect((await res.json()).errorCode).toBe("VALIDATION_FAILED")
     }
-    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: true, night: true })
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: true, night: true, mutedRooms: 0 })
     expect((await prefsRoute.GET(new NextRequest("http://localhost/api/mobile/me/notification-preferences"))).status).toBe(401)
   })
 

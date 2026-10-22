@@ -8,6 +8,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 
 import { Prisma } from "@prisma/client"
+import { NextRequest } from "next/server"
 import { mutedNowSql } from "@/lib/room-mute"
 import { MUTED_ROOMS_COUNT_CAP, mutedRoomCount, mutedRoomPage } from "@/lib/muted-rooms"
 import { api, call, cleanupCrewWorld, crewOf, liveEvent, person, arrive, type Person } from "./crew-world"
@@ -263,7 +264,7 @@ describe("GET /me/muted-rooms: paging", () => {
   })
 
   it("answers 401 without a token", async () => {
-    const res = await muted.GET(new (require("next/server").NextRequest)("http://localhost/api/mobile/me/muted-rooms"))
+    const res = await muted.GET(new NextRequest("http://localhost/api/mobile/me/muted-rooms"))
     expect(res.status).toBe(401)
   })
 })
