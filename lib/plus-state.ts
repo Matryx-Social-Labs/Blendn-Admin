@@ -27,7 +27,7 @@ const REFUND_REASONS = new Set(["CUSTOMER_SUPPORT", "DEVELOPER_INITIATED"])
  *   CANCELLATION, any other            cancelled (auto-renew is off; access runs to expiresAt)
  *   BILLING_ISSUE, grace still ahead   grace
  *   BILLING_ISSUE, none, Google, not live   hold (Google's account hold carries no grace period)
- *   SUBSCRIPTION_PAUSED                paused
+ *   SUBSCRIPTION_PAUSED                paused (a scheduled pause: access runs to `expiresAt`, so `live` can be true)
  *   EXPIRATION                         expired
  *   a purchase, renewal, uncancel or refund reversal   active if live, else expired
  *   anything else                      null: not said

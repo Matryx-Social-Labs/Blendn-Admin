@@ -1154,8 +1154,8 @@ registry.registerPath({
     "`blocked_id` is an opaque ref to the block (`bk_…`), not the person's account id: somebody " +
     "blocked by their board post or room handle was never shown an id, and this list must not be " +
     "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
-    "appear only where the identity rules allow. Newest first, a page at a time (`?limit=` default 100, at most 100; " +
-    "`?cursor=`) with `pagination.totalCount` the whole list.",
+    "appear only where the identity rules allow. Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, " +
+    "otherwise default 100, 1-100) with `pagination.totalCount` the whole list.",
   security: bearerAuth,
   request: { query: ListQuerySchema },
   responses: {

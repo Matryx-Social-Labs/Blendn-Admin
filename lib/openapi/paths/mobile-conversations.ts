@@ -19,9 +19,10 @@ registry.registerPath({
   summary: "List conversations",
   description:
     "Direct message conversations with last message and unread count, newest first, a page at a time: " +
-    "`?limit=` (default 50, at most 100) and `?cursor=`. With no parameters the first 50 come back with " +
-    "`pagination.nextCursor` and `pagination.totalCount`; an older client that ignores `pagination` shows its " +
-    "50 most recent. A conversation with nothing said yet leads, then the rest by last message.",
+    "`?limit=` and `?cursor=`: without `limit` or `cursor` (installed builds, which cannot page) up to 200; " +
+    "otherwise default 50, 1-100. `pagination.nextCursor` and `pagination.totalCount` say what is left. A " +
+    "conversation with nothing said yet leads, then the rest by last message; `lastMessage` is the newest " +
+    "message the thread would show.",
   security: bearerAuth,
   request: { query: ListQuerySchema },
   responses: {

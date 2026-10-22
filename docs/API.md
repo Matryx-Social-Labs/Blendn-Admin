@@ -1451,13 +1451,23 @@ Every list a person accumulates is a **cursor page with a total**, so a person
 with thousands of friends or a busy inbox never costs a full read, and the app
 never needs to hold the whole list:
 
-| Route | Default page | Rows |
-|---|---|---|
-| `GET /conversations` | 50 | `conversations` |
-| `GET /friends` | 100 | `friends` (and `count`, the whole list) |
-| `GET /friends/requests` | 50 each | `incoming`, `outgoing` |
-| `GET /users/blocked` | 100 | `users` |
-| `GET /events/:eventId/board` | 100 | `posts` (it was cut at 100 with no way to the rest) |
+| Route | Page size for a client that pages (default; 1-100) | Without `limit` or `cursor` (installed builds) | Rows |
+|---|---|---|---|
+| `GET /conversations` | 50 | up to 200 | `conversations` |
+| `GET /friends` | 100 | up to 200 | `friends` (and `count`, the whole list) |
+| `GET /friends/requests` | 50 each | up to 200 each | `incoming`, `outgoing` |
+| `GET /users/blocked` | 100 | up to 200 | `users` |
+| `GET /events/:eventId/board` | 100 | 100 (the same) | `posts` (it was cut at 100 with no way to the rest) |
+
+**A request with neither `limit` nor `cursor` is a build that cannot page**, and
+gets up to **200** (`LEGACY_PAGE`), which is what it always got in practice
+without an unbounded read. Anything that names a `limit` or a `cursor` is a
+client that pages: it gets the default in the table unless it says otherwise,
+1-100. So a new client **must send `limit` on its first page**, or it is given
+the 200 and a `pagination.limit` of 200; a cursor with no `limit` is the
+default. `pagination.limit` always says what this page was sized to, and
+`hasMore` / `nextCursor` say whether 200 was enough. The board has no legacy
+page.
 
 `?limit=` (1-100) and `?cursor=` (the previous page's `pagination.nextCursor`,
 opaque). The answer carries `pagination: { limit, hasMore, nextCursor,
@@ -1467,11 +1477,10 @@ totalCount }`; `totalCount` is the whole list whatever page this is, and
 outgoing }`, each as above; ask for one alone with `?list=incoming` (or
 `outgoing`) plus `cursor`, and only that array comes back (a cursor without
 `list` is 400). The order is newest first and total: rows sharing an instant
-(a bulk insert) are neither repeated nor lost at a page edge. The first page is
-sized so a client that ignores `pagination` (every installed build) shows what a
-person has in practice: the inbox's 50 most recent conversations, the first
-hundred friends, with `count` still the true number. In the inbox a conversation
-with nothing said yet leads, as before. All of it is additive.
+(a bulk insert) are neither repeated nor lost at a page edge. In the inbox a
+conversation with nothing said yet leads, as before, and each row's
+`lastMessage` is the newest message the thread would show (a hidden or
+moderated one never previews). All of it is additive.
 
 ### GET /conversations
 Each conversation carries **`fromMatch`** — it opened from a mutual like rather
@@ -3473,7 +3482,7 @@ others there earn a month (each friend counts once; at most 3 a year).
 RevenueCat delivery about that purchase and the clock: `active`; `cancelled`
 (auto-renew off, access runs to `expiresAt`); `grace` (a billing issue, inside
 the store's grace period); `hold` (Google's account hold: a billing issue with no
-grace period, not live); `paused`; `expired`; `refunded` (a store refund ended
+grace period, not live); `paused` (a scheduled pause: the store has paused the subscription from the next renewal, and access runs to `expiresAt` — `active` can still be `true`); `expired`; `refunded` (a store refund ended
 it). It is also sent when nothing is live (`active: false`, `state: "expired"` or
 `"refunded"`), for the latest store purchase. `grant` is `trial` or `referral`
 when the live access is one of our free months (our `plus-trial:` and

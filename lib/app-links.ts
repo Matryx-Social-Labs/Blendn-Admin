@@ -1,4 +1,5 @@
 import type { user_role } from "@prisma/client"
+import { storeListings } from "@/lib/env"
 import { canAccessDashboard } from "@/lib/rbac"
 
 /** The app's own scheme: opens Blend'n on a phone that has it. */
@@ -28,9 +29,10 @@ export const audienceOf = (role: user_role): Audience => (canAccessDashboard(rol
  */
 export function appLinksFor(audience: Audience): AppLinks | null {
   if (audience !== "attendee") return null
+  const listed = storeListings()
   return {
     deepLink: APP_DEEP_LINK,
-    appStoreUrl: process.env.APP_STORE_LISTED?.trim() === "true" ? APP_STORE_URL : null,
-    playStoreUrl: process.env.PLAY_LISTED?.trim() === "true" ? PLAY_STORE_URL : null,
+    appStoreUrl: listed.appStore ? APP_STORE_URL : null,
+    playStoreUrl: listed.play ? PLAY_STORE_URL : null,
   }
 }

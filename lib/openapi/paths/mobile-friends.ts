@@ -46,7 +46,7 @@ registry.registerPath({
   tags,
   summary: "List my friends",
   description:
-    "Newest first, a page at a time (`?limit=` default 100, at most 100; `?cursor=`), with the count the Me tab shows: " +
+    "Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, otherwise default 100, 1-100), with the count the Me tab shows: " +
     "`count` and `pagination.totalCount` are the whole list, not the page. Real names and photos: both people said yes. " +
     "A blocked person is left out of the query, so a page is full.",
   security: bearerAuth,
@@ -222,7 +222,7 @@ registry.registerPath({
   summary: "Friend requests, both ways",
   description:
     "`incoming` leaves out what you answered \"Not now\". `outgoing` never says whether the other person did: " +
-    "a decline that reaches the asker is a rejection. Newest first, `?limit=` of each (default 50, at most 100), " +
+    "a decline that reaches the asker is a rejection. Newest first, `?limit=` of each (without `limit` or `cursor`: up to 200; otherwise default 50, 1-100), " +
     "with `pagination.incoming` and `pagination.outgoing`. To page one list, ask for it alone: " +
     "`?list=incoming&cursor=…` answers only that array (a cursor without `list` is 400).",
   security: bearerAuth,

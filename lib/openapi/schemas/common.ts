@@ -85,7 +85,13 @@ export const ListPaginationSchema = z
 
 /** `?limit=&cursor=` on a list paged by cursor. */
 export const ListQuerySchema = z.object({
-  limit: z.number().int().optional().describe("A page's size, 1-100. Each list has its own default."),
+  limit: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "A page's size, 1-100; each list has its own default. A request with neither `limit` nor `cursor` (an installed build, which cannot page) is answered up to 200 on the inbox, friends, friend requests and blocked lists; the board is 100 either way. A new client sends `limit` on its first page."
+    ),
   cursor: z.string().optional().describe("The previous page's `pagination.nextCursor`. A cursor that is not ours is 400."),
 })
 

@@ -128,6 +128,13 @@ describe("eventDays", () => {
     const of = (occurrences: ReturnType<typeof run>) => eventDays({ start_time: occurrences[0].start_time, end_time: occurrences[occurrences.length - 1].end_time, occurrences }, NOW)
 
     it("an ordinary run is whole", () => {
+      const out = of(run(101).slice(95)) // the last six days of a run: all of them, from day 1
+      expect(out.days).toHaveLength(6)
+      expect(out.dayCount).toBe(6)
+      expect(out.daysFrom).toBe(1)
+    })
+
+    it("a run of 101 days is a window of 31, with the whole count", () => {
       const out = of(run(101))
       expect(out.days).toHaveLength(31)
       expect(out.dayCount).toBe(101)
