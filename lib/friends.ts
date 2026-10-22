@@ -240,8 +240,6 @@ type MatchFacts = {
   closed_at: Date | null
 }
 
-type MatchRow = MatchFacts & { user1_id: string; user2_id: string }
-
 /** An open conversation that came from a match: the pair that liked each other. */
 const isOpenMatch = (c: MatchFacts) => c.closed_at === null && cameFromMatch(c)
 
