@@ -194,16 +194,33 @@ export function keysetPage<T>(
 }
 
 /**
- * `?limit=&cursor=` for a list, held to `LIST_PAGE.MAX`. `"bad_cursor"` for a
- * cursor that is not one of ours (the route answers 400); `after` is null on
- * the first page.
+ * What an installed build, which cannot page and sends neither `limit` nor
+ * `cursor`, is answered with: up to this many. It is the old behaviour in
+ * practice (nobody has more) without the unbounded read, and it sits above
+ * `LIST_PAGE.MAX` on purpose, so it is decided BEFORE the 1-100 clamp.
+ */
+export const LEGACY_PAGE = 200
+
+/**
+ * `?limit=&cursor=` for a list. A request with neither is a build that cannot
+ * page: it gets `legacyLimit` when the route has one (see `LEGACY_PAGE`).
+ * Anything that names a `limit` or a `cursor` is a client that pages, and gets
+ * `defaultLimit` unless it says otherwise, 1-100 (`LIST_PAGE.MAX`). The legacy
+ * case comes first, before the clamp, or 200 would be turned into 100.
+ * `"bad_cursor"` for a cursor that is not one of ours (the route answers 400);
+ * `after` is null on the first page.
  */
 export function parseListQuery(
   searchParams: URLSearchParams,
-  defaultLimit: number
+  defaultLimit: number,
+  legacyLimit?: number
 ): { limit: number; after: Keyset | null } | "bad_cursor" {
-  const limit = boundedInt(searchParams.get("limit"), defaultLimit, 1, LIST_PAGE.MAX)
   const raw = searchParams.get("cursor")
+  const asked = searchParams.get("limit")
+  const limit =
+    legacyLimit !== undefined && !raw && asked === null
+      ? legacyLimit
+      : boundedInt(asked, defaultLimit, 1, LIST_PAGE.MAX)
   if (!raw) return { limit, after: null }
   const after = decodeKeyset(raw)
   return after ? { limit, after } : "bad_cursor"

@@ -1,4 +1,4 @@
-import { createdBefore, decodeKeyset, encodeKeyset, keysetPage, parseListQuery } from "@/lib/pagination"
+import { createdBefore, decodeKeyset, encodeKeyset, keysetPage, LEGACY_PAGE, parseListQuery } from "@/lib/pagination"
 
 describe("keyset cursors", () => {
   const at = new Date("2026-10-22T10:00:00.000Z")
@@ -39,11 +39,31 @@ describe("keyset cursors", () => {
   })
 
   it("reads limit and cursor from a query string, held to 1-100", () => {
-    expect(parseListQuery(new URLSearchParams(), 50)).toEqual({ limit: 50, after: null })
     expect(parseListQuery(new URLSearchParams("limit=1000"), 50)).toMatchObject({ limit: 100 })
     expect(parseListQuery(new URLSearchParams("limit=0"), 50)).toMatchObject({ limit: 1 })
     expect(parseListQuery(new URLSearchParams("limit=abc"), 50)).toMatchObject({ limit: 50 })
+    expect(parseListQuery(new URLSearchParams(), 50)).toEqual({ limit: 50, after: null })
     expect(parseListQuery(new URLSearchParams(`cursor=${encodeKeyset(at, "a")}`), 50)).toEqual({ limit: 50, after: { at, id: "a" } })
     expect(parseListQuery(new URLSearchParams("cursor=garbage"), 50)).toBe("bad_cursor")
+  })
+
+  describe("the legacy page: a build that cannot page", () => {
+    it("with neither limit nor cursor is answered up to the legacy limit, before the 1-100 clamp", () => {
+      expect(parseListQuery(new URLSearchParams(), 50, LEGACY_PAGE)).toEqual({ limit: 200, after: null })
+      expect(LEGACY_PAGE).toBe(200)
+    })
+    it("a limit means a client that pages: held to 1-100", () => {
+      expect(parseListQuery(new URLSearchParams("limit=1000"), 50, LEGACY_PAGE)).toMatchObject({ limit: 100 })
+      expect(parseListQuery(new URLSearchParams("limit=0"), 50, LEGACY_PAGE)).toMatchObject({ limit: 1 })
+      expect(parseListQuery(new URLSearchParams("limit=abc"), 50, LEGACY_PAGE)).toMatchObject({ limit: 50 })
+      expect(parseListQuery(new URLSearchParams("limit=20"), 50, LEGACY_PAGE)).toMatchObject({ limit: 20 })
+    })
+    it("a cursor with no limit is a client that pages: the default, never 200", () => {
+      expect(parseListQuery(new URLSearchParams(`cursor=${encodeKeyset(at, "a")}`), 50, LEGACY_PAGE)).toEqual({ limit: 50, after: { at, id: "a" } })
+      expect(parseListQuery(new URLSearchParams("cursor=garbage"), 50, LEGACY_PAGE)).toBe("bad_cursor")
+    })
+    it("a route with no legacy limit is unchanged", () => {
+      expect(parseListQuery(new URLSearchParams(), 100)).toEqual({ limit: 100, after: null })
+    })
   })
 })

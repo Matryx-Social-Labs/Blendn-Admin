@@ -22,7 +22,7 @@ import {
 } from "@/lib/api-response"
 import { z } from "zod"
 import { readJson } from "@/lib/api-input"
-import { keysetPage, LIST_PAGE, parseListQuery, type Keyset, type ListPagination } from "@/lib/pagination"
+import { keysetPage, LEGACY_PAGE, LIST_PAGE, parseListQuery, type Keyset, type ListPagination } from "@/lib/pagination"
 
 const createConversationSchema = z.object({
   otherUserId: z.string().min(1, "Other user ID is required"),
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.CONVERSATIONS)
+    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.CONVERSATIONS, LEGACY_PAGE)
     if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
     const { limit, after } = query
 

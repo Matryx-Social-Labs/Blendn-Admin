@@ -17,7 +17,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
-import { createdBefore, keysetPage, LIST_PAGE, NEWEST_FIRST, parseListQuery, type ListPagination } from "@/lib/pagination"
+import { createdBefore, keysetPage, LEGACY_PAGE, LIST_PAGE, NEWEST_FIRST, parseListQuery, type ListPagination } from "@/lib/pagination"
 
 /**
  * GET /api/mobile/friends/requests — waiting for me, and waiting on others,
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     const list = params.get("list")
     if (list !== null && list !== "incoming" && list !== "outgoing") return errorResponse("Invalid list", 400)
     if (params.get("cursor") && !list) return errorResponse("A cursor needs ?list=incoming or ?list=outgoing", 400)
-    const query = parseListQuery(params, LIST_PAGE.REQUESTS)
+    const query = parseListQuery(params, LIST_PAGE.REQUESTS, LEGACY_PAGE)
     if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
     const { limit, after } = query
 

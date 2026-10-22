@@ -8,6 +8,7 @@ import { errorResponse, successResponse, unauthorizedResponse, serverErrorRespon
 import {
   createdBefore,
   keysetPage,
+  LEGACY_PAGE,
   LIST_PAGE,
   NEWEST_FIRST,
   parseListQuery,
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
     const me = authUser.userId
 
-    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE)
+    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE, LEGACY_PAGE)
     if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
     const { limit, after } = query
 

@@ -106,12 +106,19 @@ describe("the inbox", () => {
     return { items: data.conversations, pagination: data.pagination }
   }
 
-  it("with no parameters answers the first 50, a cursor and the whole count", async () => {
+  it("with neither limit nor cursor (an installed build) answers up to 200: all 125, in order, nothing more to fetch", async () => {
     const { items, pagination } = await read({})
-    expect(items).toHaveLength(50)
-    expect(pagination).toMatchObject({ limit: 50, hasMore: true, totalCount: TOTAL })
-    expect(pagination.nextCursor).toEqual(expect.any(String))
-    expect(items.map((c) => c.id)).toEqual(expected.slice(0, 50))
+    expect(items.map((c) => c.id)).toEqual(expected)
+    expect(pagination).toEqual({ limit: 200, hasMore: false, nextCursor: null, totalCount: TOTAL })
+  })
+
+  it("a client that pages and names no limit gets the default 50, with a cursor and the whole count", async () => {
+    const first = await read({ limit: "50" })
+    const { items, pagination } = await read({ cursor: first.pagination.nextCursor! })
+    expect(first.items).toHaveLength(50)
+    expect(first.pagination).toMatchObject({ limit: 50, hasMore: true, totalCount: TOTAL })
+    expect(items.map((c) => c.id)).toEqual(expected.slice(50, 100))
+    expect(pagination.limit).toBe(50)
   })
 
   it("walks to the end in order with no row repeated or lost, empty conversations leading", async () => {
@@ -161,10 +168,15 @@ describe("friends", () => {
     return { items: data.friends, pagination: data.pagination }
   }
 
-  it("first page is 100, count and totalCount are the whole list", async () => {
+  it("with neither limit nor cursor answers up to 200 of 230, and says there is more; count and totalCount are the whole list", async () => {
     const { items, pagination } = await read({})
+    expect(items).toHaveLength(200)
+    expect(pagination).toMatchObject({ limit: 200, hasMore: true, totalCount: TOTAL })
+  })
+  it("a client that pages and names no limit gets the default 100", async () => {
+    const { items, pagination } = await read({ cursor: (await read({ limit: "100" })).pagination.nextCursor! })
     expect(items).toHaveLength(100)
-    expect(pagination).toMatchObject({ limit: 100, hasMore: true, totalCount: TOTAL })
+    expect(pagination.limit).toBe(100)
   })
   it("walks the whole list through 100 rows sharing one timestamp", async () => {
     const { seen, pages } = await walk(read, 37)
@@ -203,12 +215,23 @@ describe("friend requests", () => {
     return { status: res.status, body: (await res.json()) as { data: { incoming?: { id: string }[]; outgoing?: { id: string }[]; pagination: Record<string, Page<unknown>["pagination"]> } } }
   }
 
-  it("with no parameters answers 50 of each and each list's total", async () => {
+  it("with neither limit nor cursor answers up to 200 of each: all of them, and each list's total", async () => {
     const { body } = await ask({})
+    expect(body.data.incoming).toHaveLength(IN)
+    expect(body.data.outgoing).toHaveLength(OUT)
+    expect(body.data.pagination.incoming).toEqual({ limit: 200, hasMore: false, nextCursor: null, totalCount: IN })
+    expect(body.data.pagination.outgoing).toEqual({ limit: 200, hasMore: false, nextCursor: null, totalCount: OUT })
+  })
+
+  it("a client that pages gets 50 of each by default", async () => {
+    const { body } = await ask({ limit: "50" })
     expect(body.data.incoming).toHaveLength(50)
     expect(body.data.outgoing).toHaveLength(50)
-    expect(body.data.pagination.incoming).toMatchObject({ hasMore: true, totalCount: IN })
-    expect(body.data.pagination.outgoing).toMatchObject({ hasMore: true, totalCount: OUT })
+    expect(body.data.pagination.incoming).toMatchObject({ limit: 50, hasMore: true, totalCount: IN })
+    const cursor = body.data.pagination.incoming.nextCursor!
+    const next = await ask({ list: "incoming", cursor })
+    expect(next.body.data.incoming).toHaveLength(IN - 50)
+    expect(next.body.data.pagination.incoming.limit).toBe(50)
   })
 
   it.each([["incoming", IN], ["outgoing", OUT]] as const)("walks %s alone to its end", async (list, total) => {
@@ -244,8 +267,11 @@ describe("blocked people", () => {
     const { data } = (await res.json()) as { data: { users: { blocked_id: string; blocked_at: string }[]; pagination: Page<unknown>["pagination"] } }
     return { items: data.users, pagination: data.pagination }
   }
-  it("first page 100 of 140, then the rest; every ref once", async () => {
-    const first = await read({})
+  it("with neither limit nor cursor answers all 140 (up to 200); a paging client's first page is 100; every ref once", async () => {
+    const legacy = await read({})
+    expect(legacy.items).toHaveLength(TOTAL)
+    expect(legacy.pagination).toEqual({ limit: 200, hasMore: false, nextCursor: null, totalCount: TOTAL })
+    const first = await read({ limit: "100" })
     expect(first.items).toHaveLength(100)
     expect(first.pagination).toMatchObject({ hasMore: true, totalCount: TOTAL })
     const { seen } = await walk(read, 45)
@@ -284,7 +310,7 @@ describe("the board", () => {
     const { data } = (await res.json()) as { data: { posts: { id: string }[]; pagination: Page<unknown>["pagination"] } }
     return { items: data.posts, pagination: data.pagination }
   }
-  it("is no longer cut at 100: the first page says there is more, and the cursor reaches it", async () => {
+  it("is no longer cut at 100: the board stays at 100 for everybody, says there is more, and the cursor reaches it", async () => {
     const first = await read({})
     expect(first.items).toHaveLength(100)
     expect(first.pagination).toMatchObject({ hasMore: true, totalCount: TOTAL })

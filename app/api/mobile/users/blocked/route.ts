@@ -5,7 +5,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { maySeeIdentityFor } from "@/lib/identity"
 import { blockRef } from "@/lib/room-handle"
 import { errorResponse, successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
-import { createdBefore, keysetPage, LIST_PAGE, NEWEST_FIRST, parseListQuery, type ListPagination } from "@/lib/pagination"
+import { createdBefore, keysetPage, LEGACY_PAGE, LIST_PAGE, NEWEST_FIRST, parseListQuery, type ListPagination } from "@/lib/pagination"
 
 /**
  * GET /api/mobile/users/blocked — the people the caller has blocked, newest
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Authentication required")
     }
 
-    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE)
+    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE, LEGACY_PAGE)
     if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
     const { limit, after } = query
 
