@@ -22,12 +22,25 @@ import {
 } from "@/lib/api-response"
 import { z } from "zod"
 import { readJson } from "@/lib/api-input"
+import { keysetPage, LIST_PAGE, parseListQuery, type Keyset, type ListPagination } from "@/lib/pagination"
 
 const createConversationSchema = z.object({
   otherUserId: z.string().min(1, "Other user ID is required"),
 })
 
-// GET /api/mobile/conversations - List user's conversations
+/**
+ * The rows after a cursor in the inbox's order (`last_message_at` newest first,
+ * empty conversations leading, then `created_at`, then `id`).
+ */
+function afterInInbox(k: Keyset) {
+  const createdAt = k.createdAt ?? new Date(0)
+  const tied = { OR: [{ created_at: { lt: createdAt } }, { created_at: createdAt, id: { lt: k.id } }] }
+  return k.at
+    ? { OR: [{ last_message_at: { lt: k.at } }, { last_message_at: k.at, ...tied }] }
+    : { OR: [{ last_message_at: null, ...tied }, { last_message_at: { not: null } }] }
+}
+
+// GET /api/mobile/conversations - List user's conversations, a page at a time
 export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request)
@@ -35,17 +48,25 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    const conversations = await db.private_conversations.findMany({
-      where: {
-        // Live only. A closed conversation is gone for BOTH people -- a
-        // one-sided hide would leave the other person messaging into a thread
-        // you have left, which is a harassment vector rather than a courtesy.
-        closed_at: null,
-        OR: [
-          { user1_id: authUser.userId },
-          { user2_id: authUser.userId },
-        ],
-      },
+    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.CONVERSATIONS)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit, after } = query
+
+    const mine = {
+      // Live only. A closed conversation is gone for BOTH people -- a
+      // one-sided hide would leave the other person messaging into a thread
+      // you have left, which is a harassment vector rather than a courtesy.
+      closed_at: null,
+      OR: [
+        { user1_id: authUser.userId },
+        { user2_id: authUser.userId },
+      ],
+    }
+
+    const [totalCount, rows] = await Promise.all([
+      db.private_conversations.count({ where: mine }),
+      db.private_conversations.findMany({
+      where: after ? { AND: [mine, afterInInbox(after)] } : mine,
       include: {
         /*
          * `profile.read_receipts` rides along because the list reports
@@ -101,10 +122,17 @@ export async function GET(request: NextRequest) {
           },
         },
       },
-      orderBy: {
-        last_message_at: "desc",
-      },
-    })
+      // Newest first, as it always was: a conversation with nothing said yet
+      // leads (`nulls: "first"` is what `desc` meant here), then the rest by
+      // their last message. `created_at` and `id` make the order total, so a
+      // cursor can stand on it.
+      orderBy: [{ last_message_at: { sort: "desc", nulls: "first" } }, { created_at: "desc" }, { id: "desc" }],
+      take: limit + 1,
+    }),
+    ])
+    const page = keysetPage(rows, limit, (c) => ({ at: c.last_message_at, id: c.id, createdAt: c.created_at }))
+    const conversations = page.items
+    const pagination: ListPagination = { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount }
 
     // Format conversations for the mobile app
     const formattedConversations = conversations.map((conv) => {
@@ -182,7 +210,7 @@ export async function GET(request: NextRequest) {
       logger.warn("Inbox delivery mark failed", { error: error instanceof Error ? error.message : String(error) })
     )
 
-    return successResponse({ conversations: formattedConversations })
+    return successResponse({ conversations: formattedConversations, pagination })
   } catch (error) {
     logger.error("List conversations error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to list conversations")

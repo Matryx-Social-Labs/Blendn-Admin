@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -1109,8 +1109,10 @@ registry.registerPath({
     "`blocked_id` is an opaque ref to the block (`bk_…`), not the person's account id: somebody " +
     "blocked by their board post or room handle was never shown an id, and this list must not be " +
     "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
-    "appear only where the identity rules allow.",
+    "appear only where the identity rules allow. Newest first, a page at a time (`?limit=` default 100, at most 100; " +
+    "`?cursor=`) with `pagination.totalCount` the whole list.",
   security: bearerAuth,
+  request: { query: ListQuerySchema },
   responses: {
     200: {
       description: "Blocked users",
@@ -1128,6 +1130,7 @@ registry.registerPath({
                   blocked_at: z.string().datetime(),
                 })
               ),
+              pagination: ListPaginationSchema,
             })
           ),
         },

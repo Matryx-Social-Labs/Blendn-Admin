@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   CreateConversationRequestSchema,
   SendDMRequestSchema,
@@ -17,8 +17,13 @@ registry.registerPath({
   path: "/api/mobile/conversations",
   tags: ["Mobile Conversations"],
   summary: "List conversations",
-  description: "List all direct message conversations with last message and unread count.",
+  description:
+    "Direct message conversations with last message and unread count, newest first, a page at a time: " +
+    "`?limit=` (default 50, at most 100) and `?cursor=`. With no parameters the first 50 come back with " +
+    "`pagination.nextCursor` and `pagination.totalCount`; an older client that ignores `pagination` shows its " +
+    "50 most recent. A conversation with nothing said yet leads, then the rest by last message.",
   security: bearerAuth,
+  request: { query: ListQuerySchema },
   responses: {
     // `data.conversations`, matching every other list endpoint. It was a bare
     // array; two exceptions to a rule is a rule nobody follows, and a bare
@@ -27,7 +32,7 @@ registry.registerPath({
       description: "Conversations",
       content: {
         "application/json": {
-          schema: wrap(z.object({ conversations: z.array(ConversationSchema) })),
+          schema: wrap(z.object({ conversations: z.array(ConversationSchema), pagination: ListPaginationSchema })),
         },
       },
     },

@@ -69,6 +69,26 @@ export const RateLimitErrorSchema = z
   .openapi("RateLimitErrorResponse")
 
 // Offset-based pagination meta
+/**
+ * The `pagination` block of a list paged by cursor (`lib/pagination.ts`
+ * `ListPagination`): the inbox, friends, friend requests, blocked people and
+ * the board. `totalCount` is the whole list, whatever page this is.
+ */
+export const ListPaginationSchema = z
+  .object({
+    limit: z.number().int(),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable().describe("Send as `?cursor=` for the next page. Opaque. Null on the last page."),
+    totalCount: z.number().int().describe("How many there are in all, not on this page."),
+  })
+  .openapi("ListPagination")
+
+/** `?limit=&cursor=` on a list paged by cursor. */
+export const ListQuerySchema = z.object({
+  limit: z.number().int().optional().describe("A page's size, 1-100. Each list has its own default."),
+  cursor: z.string().optional().describe("The previous page's `pagination.nextCursor`. A cursor that is not ours is 400."),
+})
+
 export const PaginationMetaSchema = z
   .object({
     page: z.number().int(),

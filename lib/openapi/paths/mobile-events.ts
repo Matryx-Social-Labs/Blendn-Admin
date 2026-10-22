@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -54,10 +54,10 @@ registry.registerPath({
     "\"The board closes when the doors open — the room is open instead\". Posts " +
     "by anybody blocked either way are left out.",
   security: bearerAuth,
-  request: { params: z.object({ eventId: z.string() }) },
+  request: { params: z.object({ eventId: z.string() }), query: ListQuerySchema },
   responses: {
     200: {
-      description: "Live posts, newest first",
+      description: "Live posts, newest first, a page at a time (`?limit=` default 100, at most 100; `?cursor=`)",
       content: {
         "application/json": {
           schema: wrap(
@@ -74,6 +74,7 @@ registry.registerPath({
                   requestCount: z.number(),
                 })
               ),
+              pagination: ListPaginationSchema,
               takenDown: z
                 .array(
                   z.object({

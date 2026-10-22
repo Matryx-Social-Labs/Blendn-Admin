@@ -1422,6 +1422,34 @@ answer `201` with the created-request shape and a fresh id, write nothing and
 notify nobody. The 409s are unchanged for everyone else — the app can read the
 same facts from `GET /users/:userId`'s `connection`.
 
+### Lists are paged (SCRUM-760)
+
+Every list a person accumulates is a **cursor page with a total**, so a person
+with thousands of friends or a busy inbox never costs a full read, and the app
+never needs to hold the whole list:
+
+| Route | Default page | Rows |
+|---|---|---|
+| `GET /conversations` | 50 | `conversations` |
+| `GET /friends` | 100 | `friends` (and `count`, the whole list) |
+| `GET /friends/requests` | 50 each | `incoming`, `outgoing` |
+| `GET /users/blocked` | 100 | `users` |
+| `GET /events/:eventId/board` | 100 | `posts` (it was cut at 100 with no way to the rest) |
+
+`?limit=` (1-100) and `?cursor=` (the previous page's `pagination.nextCursor`,
+opaque). The answer carries `pagination: { limit, hasMore, nextCursor,
+totalCount }`; `totalCount` is the whole list whatever page this is, and
+`nextCursor` is null on the last. A cursor that is not one of ours is `400`.
+`GET /friends/requests` has two lists, so its `pagination` is `{ incoming,
+outgoing }`, each as above; ask for one alone with `?list=incoming` (or
+`outgoing`) plus `cursor`, and only that array comes back (a cursor without
+`list` is 400). The order is newest first and total: rows sharing an instant
+(a bulk insert) are neither repeated nor lost at a page edge. The first page is
+sized so a client that ignores `pagination` (every installed build) shows what a
+person has in practice: the inbox's 50 most recent conversations, the first
+hundred friends, with `count` still the true number. In the inbox a conversation
+with nothing said yet leads, as before. All of it is additive.
+
 ### GET /conversations
 Each conversation carries **`fromMatch`** — it opened from a mutual like rather
 than from an accepted message request.
@@ -1572,7 +1600,7 @@ does not offer Delist.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/conversations` | List conversations |
+| GET | `/conversations` | List conversations, newest first, a page at a time: 50, `pagination.nextCursor`, `pagination.totalCount`; see *Lists are paged* |
 | POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
@@ -1824,7 +1852,7 @@ which request ids are real.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/friends` | My friends, newest first, and `count` |
+| GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`; see *Lists are paged* |
 | GET | `/friends/:userId` | A friend's profile (404 for anyone else) |
 | DELETE | `/friends/:userId` | Unfriend — silent, leaves any DM alone |
 | POST | `/friends/:userId/conversation` | Open (or find) a DM with a friend → `{ conversationId }` |
@@ -1832,7 +1860,7 @@ which request ids are real.
 | POST | `/friends/invite` | Reset it — the old link stops working |
 | GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
 | GET | `/friends/invite/:token/preview` | **No auth.** Signed-out invite screen → `{ name, photoUrl }` — first name only. Per-IP limit (20/min). Same 404 |
-| GET | `/friends/requests` | `{ incoming, outgoing }` |
+| GET | `/friends/requests` | `{ incoming, outgoing, pagination }` — 50 of each; `?list=incoming\|outgoing&cursor=` pages one alone |
 | POST | `/friends/requests` | Ask: `{ token }` or `{ userId }` → `{ state: "requested" \| "friends" }` |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
 | DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
