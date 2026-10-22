@@ -42,9 +42,20 @@ describe("crew invites do not outlive a block or an unfriend", () => {
     WRITES_BLOCK.test(readFileSync(file, "utf8"))
   )
 
-  it("finds the block writers at all", () => {
-    // Guards the guard: a scan that matched nothing would pass vacuously.
-    expect(writers.length).toBeGreaterThanOrEqual(3)
+  it("finds the block writer at all, and it is one: lib/block-pair.ts", () => {
+    // Guards the guard: a scan that matched nothing would pass vacuously. Every
+    // door (the block route, a DM's leave, a message request's block, the
+    // board's block) writes the block through `blockPairIn`.
+    expect(writers.map((f) => relative(ROOT, f))).toEqual(["lib/block-pair.ts"])
+    const doors = sources(join(ROOT, "app")).concat(sources(join(ROOT, "lib")))
+      .filter((f) => /blockPairIn\(/.test(readFileSync(f, "utf8")) && !f.endsWith("block-pair.ts"))
+      .map((f) => relative(ROOT, f))
+      .sort()
+    expect(doors).toEqual([
+      "app/api/mobile/message-requests/[requestId]/respond/route.ts",
+      "app/api/mobile/users/[userId]/block/route.ts",
+      "lib/leave-conversation.ts",
+    ])
   })
 
   it("has every writer of blocked_users withdraw the pair's crew invites", () => {
@@ -58,26 +69,27 @@ describe("crew invites do not outlive a block or an unfriend", () => {
     // An unmatch and a leave close through `leaveConversationIn` (lib/leave-conversation.ts);
     // the block route closes inline.
     const closers = sources(join(ROOT, "app"))
-      .filter((file) => /closeConversation\(|closed_reason:|leaveConversationIn\(/.test(readFileSync(file, "utf8")))
+      .filter((file) => /closeConversation\(|closed_reason:|leaveConversationIn\(|blockPairIn\(/.test(readFileSync(file, "utf8")))
       .filter((file) => !file.endsWith(join("account", "route.ts")))
     expect(closers.map((f) => relative(ROOT, f)).sort()).toEqual([
       "app/api/mobile/conversations/[conversationId]/leave/route.ts",
       "app/api/mobile/conversations/[conversationId]/route.ts",
+      "app/api/mobile/message-requests/[requestId]/respond/route.ts",
       "app/api/mobile/users/[userId]/block/route.ts",
     ])
     const missing = closers
       .filter((file) => {
         const src = readFileSync(file, "utf8")
         // The helper withdraws the invites for its two callers; the block route does its own.
-        const withdraws = WITHDRAWS.test(src) || /leaveConversationIn\(/.test(src)
+        const withdraws = WITHDRAWS.test(src) || /leaveConversationIn\(|blockPairIn\(/.test(src)
         return !withdraws || !/evictBlockedFromBlends\(/.test(src)
       })
       .map((f) => relative(ROOT, f))
     expect(missing).toEqual([])
     // And the helper itself withdraws them, whichever way the pair leaves.
     const helper = readFileSync(join(ROOT, "lib/leave-conversation.ts"), "utf8")
-    expect(helper).toMatch(/severFriendship\(/)
     expect(helper).toMatch(/dropCrewInvitesBetween\(/)
+    expect(readFileSync(join(ROOT, "lib/block-pair.ts"), "utf8")).toMatch(/severFriendship\(/)
   })
 
   it("has both unfriend paths withdraw them too", () => {

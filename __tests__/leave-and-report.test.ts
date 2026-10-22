@@ -40,11 +40,12 @@ describe("leaving and reporting happen together or not at all", () => {
     expect(tx).toMatch(/tx\.(message_reports|user_reports)\.create/)
     const helper = read(HELPER)
     expect(helper).toContain("closeConversation(conversationId, userId, action, tx)")
-    expect(helper).toContain("tx.blocked_users.upsert")
+    expect(helper).toContain("blockPairIn(tx")
+    expect(read("lib/block-pair.ts")).toContain("tx.blocked_users.upsert")
     // The pair's lock first, and the friendship severed on a block.
     expect(helper.indexOf("lockPair(tx")).toBeGreaterThan(-1)
     expect(helper.indexOf("lockPair(tx")).toBeLessThan(helper.indexOf("closeConversation("))
-    expect(helper).toContain("severFriendship(userId, otherId, tx)")
+    expect(read("lib/block-pair.ts")).toContain("severFriendship(blockerId, blockedId, tx)")
   })
 
   it("evicts the socket room OUTSIDE the transaction", () => {
@@ -85,9 +86,9 @@ describe("leaving and reporting happen together or not at all", () => {
   })
 
   it("cancels pending requests both ways when blocking", () => {
-    const helper = read(HELPER)
-    expect(helper).toMatch(/sender_id: otherId, recipient_id: userId/)
-    expect(helper).toMatch(/sender_id: userId, recipient_id: otherId/)
+    const helper = read("lib/block-pair.ts")
+    expect(helper).toMatch(/sender_id: blockedId, recipient_id: blockerId/)
+    expect(helper).toMatch(/sender_id: blockerId, recipient_id: blockedId/)
   })
 
   it("makes the report optional", () => {

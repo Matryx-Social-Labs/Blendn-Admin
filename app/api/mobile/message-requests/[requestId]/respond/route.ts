@@ -18,7 +18,8 @@ import {
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
-import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
+import { blockPairIn } from "@/lib/block-pair"
+import { closeConversationRoom } from "@/lib/socket-server"
 
 interface RouteParams {
   params: Promise<{ requestId: string }>
@@ -153,20 +154,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * Idempotent: blocking someone who is already blocked is not an error.
      */
     if (action === "block") {
-      await db.$transaction(async (tx) => {
-        await tx.blocked_users.upsert({
-          where: {
-            blocker_id_blocked_id: {
-              blocker_id: authUser.userId,
-              blocked_id: messageRequest.sender_id,
-            },
-          },
-          create: { blocker_id: authUser.userId, blocked_id: messageRequest.sender_id },
-          update: {},
-        })
-        // And any crew invite between them (C5), with the block.
-        await dropCrewInvitesBetween(tx, authUser.userId, messageRequest.sender_id)
-      })
+      // The same block as every other door (lib/block-pair.ts): the row, the
+      // friendship and every friend request, crew invites, and the conversation.
+      const closedId = await db.$transaction((tx) => blockPairIn(tx, authUser.userId, messageRequest.sender_id))
+      if (closedId) closeConversationRoom(closedId)
       // Out of any Blend room that now refuses them; the Blend goes on for the rest (D-9).
       await evictBlockedFromBlends(authUser.userId, messageRequest.sender_id)
     }

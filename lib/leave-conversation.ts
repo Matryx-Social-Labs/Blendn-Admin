@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client"
 import { closeConversation } from "@/lib/conversations"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
-import { eitherWay, lockPair, severFriendship } from "@/lib/friends"
+import { blockPairIn } from "@/lib/block-pair"
+import { eitherWay, lockPair } from "@/lib/friends"
 
 /**
  * One person leaves a conversation: an unmatch, or a block. The app's only door
@@ -33,26 +34,10 @@ export async function leaveConversationIn(
   // conversation never releases anything, so nothing may appear to the recipient.
   await tx.friend_requests.deleteMany({ where: { ...eitherWay(userId, otherId), held_at: { not: null } } })
 
+  // A block is the shared helper's: the block row, requests, the friendship,
+  // and the conversation (already closed above, so it finds nothing to close).
   if (action === "block") {
-    await tx.blocked_users.upsert({
-      where: { blocker_id_blocked_id: { blocker_id: userId, blocked_id: otherId } },
-      create: { blocker_id: userId, blocked_id: otherId },
-      update: {},
-    })
-    // Both directions: a request either of them left pending must not survive
-    // to be accepted into a conversation between blocked people.
-    await tx.message_requests.updateMany({
-      where: {
-        status: "pending",
-        OR: [
-          { sender_id: otherId, recipient_id: userId },
-          { sender_id: userId, recipient_id: otherId },
-        ],
-      },
-      data: { status: "blocked" },
-    })
-    // The friendship, any friend request, and any crew invite between them.
-    await severFriendship(userId, otherId, tx)
+    await blockPairIn(tx, userId, otherId)
     return
   }
   // Leaving is permanent either way, so a crew invite between them goes too

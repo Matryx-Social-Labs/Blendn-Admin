@@ -107,17 +107,15 @@ describe("one writer (CR-G03)", () => {
     // The control: the writers this was written against are still found. A
     // conversation's leave-and-block writes inside `leaveConversationIn`, so
     // its two callers are the ones that evict.
-    expect(writers.map((w) => w.file).sort()).toEqual([
-      "app/api/mobile/message-requests/[requestId]/respond/route.ts",
-      "app/api/mobile/users/[userId]/block/route.ts",
-      "lib/leave-conversation.ts",
-    ])
+    expect(writers.map((w) => w.file)).toEqual(["lib/block-pair.ts"])
+    const doors = SOURCES.filter((s) => /\bblockPairIn\(/.test(s.src) && s.file !== "lib/block-pair.ts")
     const callersOfLeave = SOURCES.filter((s) => /\bleaveConversationIn\(/.test(s.src) && s.file !== "lib/leave-conversation.ts")
     expect(callersOfLeave.map((c) => c.file).sort()).toEqual([
       "app/api/mobile/conversations/[conversationId]/leave/route.ts",
       "app/api/mobile/conversations/[conversationId]/route.ts",
     ])
-    const evicting = [...writers.filter((w) => w.file !== "lib/leave-conversation.ts"), ...callersOfLeave]
+    // The doors that block through the helper, the leave route among them (through `leaveConversationIn`), all evict.
+    const evicting = [...doors.filter((d) => d.file !== "lib/leave-conversation.ts"), ...callersOfLeave]
     const silent = evicting.filter((w) => !/\bevictBlockedFromBlends\(/.test(w.src)).map((w) => w.file)
     expect(silent).toEqual([])
   })

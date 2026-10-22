@@ -35,6 +35,7 @@ const revealRoute = require("@/app/api/mobile/conversations/[conversationId]/rev
 const leaveRoute = require("@/app/api/mobile/conversations/[conversationId]/leave/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/leave/route")
 const likesRoute = require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route")
 const ratings = require("@/app/api/mobile/events/[eventId]/peer-ratings/route") as typeof import("@/app/api/mobile/events/[eventId]/peer-ratings/route")
+const respondRoute = require("@/app/api/mobile/message-requests/[requestId]/respond/route") as typeof import("@/app/api/mobile/message-requests/[requestId]/respond/route")
 const blockedList = require("@/app/api/mobile/users/blocked/route") as typeof import("@/app/api/mobile/users/blocked/route")
 const userCard = require("@/app/api/mobile/users/[userId]/route") as typeof import("@/app/api/mobile/users/[userId]/route")
 const inboxRoute = require("@/app/api/mobile/conversations/route") as typeof import("@/app/api/mobile/conversations/route")
@@ -509,5 +510,61 @@ describe("the backfills and the blocked list never fall back to a real name (M2)
     const names = (res.body.data.users as { blocked_user_name: string | null }[]).map((u) => u.blocked_user_name)
     expect(names).toEqual(["Attendee"])
     expect(JSON.stringify(res.body)).not.toContain("Realname")
+  })
+})
+
+describe("a release never crosses a block or a deleted account (security review)", () => {
+  async function heldPair(label: string) {
+    const [ana, ben] = [await person(`${label}-a`, "Ana"), await person(`${label}-b`, "Ben")]
+    const id = await pseudonymousPair(ana, ben)
+    await ask(ben, { token: await linkOf(ana) })
+    return { ana, ben, id }
+  }
+  const bothReveal = (id: string) => db.private_conversations.update({ where: { id }, data: { user1_revealed: true, user2_revealed: true } })
+
+  it.each([
+    ["blocked by the recipient", async (ana: Person, ben: Person) => void (await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: ben.id } }))],
+    ["blocked by the sender", async (ana: Person, ben: Person) => void (await db.blocked_users.create({ data: { blocker_id: ben.id, blocked_id: ana.id } }))],
+    ["the sender's account deleted", async (_ana: Person, ben: Person) => void (await db.user.update({ where: { id: ben.id }, data: { deletedAt: new Date() } }))],
+    ["the recipient's account deleted", async (ana: Person) => void (await db.user.update({ where: { id: ana.id }, data: { deletedAt: new Date() } }))],
+  ])("a held request stays held and makes no friendship when %s, then both reveal", async (name, spoil) => {
+    const { ana, ben, id } = await heldPair(`fh-sec-${name.replace(/[^a-z]/g, "")}`)
+    await spoil(ana, ben)
+    await bothReveal(id)
+    await releaseHeldRequests([ana.id, ben.id])
+    expect((await db.friend_requests.findFirstOrThrow({ where: { sender_id: ben.id, recipient_id: ana.id } })).held_at).not.toBeNull()
+    expect(await friendshipCount(ana)).toBe(0)
+    expect(await pushes(ana.id, 200)).toEqual([])
+  })
+
+  it("two held requests each way make no friendship across a block either", async () => {
+    const { ana, ben, id } = await heldPair("fh-sec-mutual")
+    await ask(ana, { token: await linkOf(ben) })
+    await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: ben.id } })
+    await bothReveal(id)
+    await releaseHeldRequests([ana.id, ben.id])
+    expect(await friendshipCount(ana)).toBe(0)
+  })
+
+  it("blocking from a message request ends the friend requests, the friendship and the conversation, as every other door does", async () => {
+    const [ana, ben, cam] = [await person("fh-mr-a", "Ana"), await person("fh-mr-b", "Ben"), await person("fh-mr-c", "Cam")]
+    const id = await pseudonymousPair(ana, ben)
+    await ask(ben, { token: await linkOf(ana) }) // held
+    await friendsRow(ana, cam)
+    const [c1, c2] = conversationPair(ana.id, cam.id)
+    const camDm = await db.private_conversations.create({ data: { user1_id: c1, user2_id: c2 } })
+    for (const [sender, other] of [[ben, id], [cam, camDm.id]] as const) {
+      const request = await db.message_requests.create({ data: { sender_id: sender.id, recipient_id: ana.id, message: "hi", status: "pending" } })
+      const res = await call(respondRoute.POST as Handler, `/api/mobile/message-requests/${request.id}/respond`, ana, {
+        method: "POST",
+        body: { action: "block" },
+        params: { requestId: request.id },
+      })
+      expect(res.status).toBe(200)
+      expect((await db.private_conversations.findUniqueOrThrow({ where: { id: other } })).closed_at).not.toBeNull()
+    }
+    expect(await db.friend_requests.count({ where: { OR: [{ sender_id: ben.id }, { recipient_id: ben.id }] } })).toBe(0)
+    expect(await friendshipCount(cam)).toBe(0)
+    expect(await db.blocked_users.count({ where: { blocker_id: ana.id, blocked_id: { in: [ben.id, cam.id] } } })).toBe(2)
   })
 })

@@ -5,9 +5,9 @@
  * liked back. Pinned by the order and the count of the queries, not by timing.
  */
 const log: string[] = []
-const record = <T,>(name: string, result: T) => jest.fn(async () => (log.push(name), result))
+const record = <T,>(name: string, result: T): jest.Mock => jest.fn(async () => (log.push(name), result))
 
-const mockDb = {
+const mockDb: Record<string, unknown> & { $transaction: jest.Mock; event_likes: Record<string, jest.Mock>; friendships: Record<string, jest.Mock>; private_conversations: Record<string, jest.Mock>; friend_requests: Record<string, jest.Mock> } = {
   event_likes: { upsert: record("event_likes.upsert", {}), findUnique: record<unknown>("event_likes.findUnique", null) },
   friendships: { findUnique: record<unknown>("friendships.findUnique", null) },
   private_conversations: { findUnique: record<unknown>("private_conversations.findUnique", null) },

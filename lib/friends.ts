@@ -253,6 +253,39 @@ export async function mayConnect(askerId: string, otherId: string): Promise<bool
   return (await readPair(db, askerId, otherId)).connectable
 }
 
+/**
+ * `readPair(...).connectable` for many pairs at once, in three queries: both
+ * accounts alive, no block either way, the pair's conversation (if any) not
+ * closed. The batched form of the same rule, so a release of held requests
+ * cannot disagree with the single-pair paths (`requestFriend`, `befriendIn`).
+ * Returns the keys (`a|b`, the canonical pair order) of the pairs that may still
+ * be connected.
+ */
+export async function connectablePairs(client: PairReader, pairs: readonly (readonly [string, string])[]): Promise<Set<string>> {
+  if (pairs.length === 0) return new Set()
+  const people = [...new Set(pairs.flat())]
+  const [dead, blocks, conversations] = await Promise.all([
+    client.user.findMany({ where: { id: { in: people }, deletedAt: { not: null } }, select: { id: true } }),
+    client.blocked_users.findMany({
+      where: { OR: pairs.map(([a, b]) => ({ OR: [{ blocker_id: a, blocked_id: b }, { blocker_id: b, blocked_id: a }] })) },
+      select: { blocker_id: true, blocked_id: true },
+    }),
+    client.private_conversations.findMany({
+      where: { closed_at: { not: null }, OR: pairs.map(([user1_id, user2_id]) => ({ user1_id, user2_id })) },
+      select: { user1_id: true, user2_id: true },
+    }),
+  ])
+  const gone = new Set(dead.map((u) => u.id))
+  const blocked = new Set(blocks.map((b) => conversationPair(b.blocker_id, b.blocked_id).join("|")))
+  const closed = new Set(conversations.map((c) => `${c.user1_id}|${c.user2_id}`))
+  return new Set(
+    pairs
+      .map(([a, b]) => conversationPair(a, b))
+      .filter(([a, b]) => !gone.has(a) && !gone.has(b) && !blocked.has(`${a}|${b}`) && !closed.has(`${a}|${b}`))
+      .map((p) => p.join("|"))
+  )
+}
+
 /** What the match rule reads of a conversation. */
 export const matchSelect = {
   user1_id: true,
@@ -519,7 +552,10 @@ export async function releaseHeldRequests(userIds: readonly string[]): Promise<v
       select: matchSelect,
     })
     const open = new Set(conversations.filter(heldMayShow).map((c) => `${c.user1_id}|${c.user2_id}`))
-    const releasable = pairs.filter(([a, b]) => open.has(`${a}|${b}`))
+    // Open and both revealed AND still connectable: a block or a deleted account
+    // since the request was held keeps it held (and unreleased) for good.
+    const alive = await connectablePairs(tx, pairs)
+    const releasable = pairs.filter(([a, b]) => open.has(`${a}|${b}`) && alive.has(`${a}|${b}`))
     if (releasable.length === 0) return { requests: [], friends: [] as [string, string][] }
 
     const candidates = await tx.friend_requests.findMany({
