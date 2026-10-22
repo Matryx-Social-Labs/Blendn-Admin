@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { participationRefusal } from "@/lib/event-access"
-import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, requestFriend } from "@/lib/friends"
+import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, requestFriend, withoutHeld } from "@/lib/friends"
 import { identityForRef } from "@/lib/identity"
 import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     const [incoming, outgoing] = await Promise.all([
       db.friend_requests.findMany({
         where: { recipient_id: me, dismissed_at: null, withdrawn_at: null, sender: { deletedAt: null } },
-        select: { id: true, created_at: true, sender: { select: personSelect } },
+        select: { id: true, created_at: true, sender_id: true, recipient_id: true, held_at: true, sender: { select: personSelect } },
         orderBy: { created_at: "desc" },
       }),
       db.friend_requests.findMany({
@@ -45,8 +45,11 @@ export async function GET(request: NextRequest) {
       }),
     ])
 
+    // A request held for a pseudonymous match is not delivered yet.
+    const visibleIncoming = await withoutHeld(incoming)
+
     return successResponse({
-      incoming: incoming.map((r) => ({ id: r.id, person: personCard(r.sender), createdAt: r.created_at })),
+      incoming: visibleIncoming.map((r) => ({ id: r.id, person: personCard(r.sender), createdAt: r.created_at })),
       outgoing: outgoing.map((r) => ({ id: r.id, person: personCard(r.recipient), createdAt: r.created_at })),
     })
   } catch (error) {

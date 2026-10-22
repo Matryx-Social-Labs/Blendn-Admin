@@ -4,6 +4,7 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { notifyReveal, notifyRevealRequest } from "@/lib/push-notifications"
+import { releaseHeldRequests } from "@/lib/friends"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -163,6 +164,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
     notifyReveal(themId, conversationId).catch(() => {})
+    // Both sides have shown themselves now: a friend request held for this pair is delivered.
+    const bothRevealed = isUser1 ? conversation.user2_revealed : conversation.user1_revealed
+    if (bothRevealed) {
+      await releaseHeldRequests([authUser.userId, themId]).catch((error) =>
+        logger.warn("Releasing held friend requests failed", { error: error instanceof Error ? error.message : String(error) })
+      )
+    }
 
     return successResponse({
       revealed: true,

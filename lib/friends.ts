@@ -161,12 +161,17 @@ export async function friendState(viewerId: string, otherId: string): Promise<Fr
     areFriends(viewerId, otherId),
     db.friend_requests.findMany({
       where: { ...eitherWay(viewerId, otherId), withdrawn_at: null },
-      select: { sender_id: true },
+      select: { sender_id: true, held_at: true },
     }),
   ])
   if (friends) return "friends"
   if (requests.some((r) => r.sender_id === viewerId)) return "requested"
-  if (requests.length > 0) return "incoming"
+  // Theirs, held: the recipient is not told yet, so it is no request to them.
+  const [user1_id, user2_id] = conversationPair(viewerId, otherId)
+  const heldNow = requests.some((r) => r.held_at !== null)
+    ? holdingPair(await db.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: matchSelect }))
+    : false
+  if (requests.some((r) => r.held_at === null || !heldNow)) return "incoming"
   return "none"
 }
 
@@ -244,6 +249,18 @@ type MatchFacts = {
 const isOpenMatch = (c: MatchFacts) => c.closed_at === null && cameFromMatch(c)
 
 /**
+ * A pair whose conversation is a pseudonymous one (a match, a board post) that
+ * is still open and not revealed on both sides.
+ *
+ * Friendship would name each to the other on every friend surface, and the DM
+ * the friends list offers is that conversation — still "Heron". So a request
+ * between such a pair is held (`friend_requests.held_at`), and a friend card
+ * offers no DM for it.
+ */
+export const holdingPair = (c: MatchFacts | null | undefined): boolean =>
+  !!c && c.closed_at === null && (c.user1_pseudonym !== null || c.user2_pseudonym !== null) && !(c.user1_revealed && c.user2_revealed)
+
+/**
  * The conversation half of `revealedMatch`. Pure, so the conversation list can
  * apply the same rule to rows it already holds without asking again.
  */
@@ -319,6 +336,10 @@ export async function requestFriend(
       return { state: "refused" as const }
     }
 
+    // A pair still pseudonymous to each other is not befriended yet: the
+    // request is recorded and held, and delivered once both have revealed.
+    const holding = holdingPair(conversation)
+
     const [friends, theirs, mine] = await Promise.all([
       tx.friendships.findUnique({ where: pairWhere(senderId, recipientId), select: { id: true } }),
       tx.friend_requests.findUnique({
@@ -327,12 +348,12 @@ export async function requestFriend(
       }),
       tx.friend_requests.findUnique({
         where: { sender_id_recipient_id: { sender_id: senderId, recipient_id: recipientId } },
-        select: { id: true, withdrawn_at: true },
+        select: { id: true, withdrawn_at: true, held_at: true },
       }),
     ])
     if (friends) return { state: "friends" as const }
 
-    if (theirs && !theirs.withdrawn_at) {
+    if (theirs && !theirs.withdrawn_at && !holding) {
       const made = await befriendIn(tx, senderId, recipientId)
       return made ? { state: "friends" as const, accepted: true } : { state: "requested" as const }
     }
@@ -341,14 +362,16 @@ export async function requestFriend(
       if (mine.withdrawn_at) {
         await tx.friend_requests.update({ where: { id: mine.id }, data: { withdrawn_at: null } })
       }
+      // Held once, and the reveal that releases it is what delivers it
+      // (`releaseHeldRequests`); here it is simply still waiting.
       return { state: "requested" as const }
     }
 
     const created = await tx.friend_requests.create({
-      data: { sender_id: senderId, recipient_id: recipientId },
+      data: { sender_id: senderId, recipient_id: recipientId, ...(holding && { held_at: new Date() }) },
       select: { id: true },
     })
-    return { state: "requested" as const, requestId: created.id }
+    return holding ? { state: "requested" as const } : { state: "requested" as const, requestId: created.id }
   })
 
   // After the commit: a push is not a database write and cannot be rolled back.
@@ -367,7 +390,10 @@ async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): P
   // The whole eligibility question, not only a block: an unmatch, a deleted
   // account or a block that landed after the accept's first check. Both an
   // accept and the auto-accept of a request that was waiting come through here.
-  const { connectable } = await readPair(tx, a, b)
+  const { connectable, conversation } = await readPair(tx, a, b)
+  // Still pseudonymous to each other: nothing is made, and nothing is cleared,
+  // so the request waits for the reveal (`releaseHeldRequests`).
+  if (connectable && holdingPair(conversation)) return false
   if (connectable) {
     const [user1_id, user2_id] = conversationPair(a, b)
     await tx.friendships.upsert({
@@ -407,6 +433,60 @@ export async function acceptFriendRequest(requestId: string, recipientId: string
   })
   if (made) notifyFriendAccepted(request.sender_id)
   return made
+}
+
+/**
+ * Requests held for a pair of people, released now that they may be: both have
+ * revealed (or the conversation is no longer a pseudonymous one). Delivered at
+ * that moment — the push goes out from here, not at the next read — and two
+ * people who had each asked are made friends.
+ *
+ * Called by the two writers of a reveal (`POST /conversations/:id/reveal`, and a
+ * reveal in a room carrying into its DMs). A request this misses is still
+ * delivered by reads (`withoutHeld`, `friendState`), only without the push.
+ */
+export async function releaseHeldRequests(userIds: readonly string[]): Promise<void> {
+  if (userIds.length === 0) return
+  const held = await db.friend_requests.findMany({
+    where: { held_at: { not: null }, withdrawn_at: null, OR: [{ sender_id: { in: [...userIds] } }, { recipient_id: { in: [...userIds] } }] },
+    select: { sender_id: true, recipient_id: true },
+  })
+  const pairs = new Map(held.map((r) => [conversationPair(r.sender_id, r.recipient_id).join("|"), conversationPair(r.sender_id, r.recipient_id)]))
+  for (const [a, b] of pairs.values()) {
+    const outcome = await db.$transaction(async (tx) => {
+      await lockPair(tx, a, b)
+      const { connectable, conversation } = await readPair(tx, a, b)
+      if (!connectable || holdingPair(conversation)) return null
+      const rows = await tx.friend_requests.findMany({
+        where: { ...eitherWay(a, b), held_at: { not: null }, withdrawn_at: null },
+        select: { id: true, sender_id: true, recipient_id: true, dismissed_at: true },
+      })
+      if (rows.length === 0) return null
+      if (rows.length > 1) return (await befriendIn(tx, a, b)) ? { friends: true as const } : null
+      await tx.friend_requests.update({ where: { id: rows[0].id }, data: { held_at: null } })
+      return { friends: false as const, row: rows[0] }
+    })
+    if (!outcome) continue
+    if (outcome.friends) {
+      notifyFriendAccepted(a)
+      notifyFriendAccepted(b)
+    } else if (!outcome.row.dismissed_at) {
+      notifyFriendRequest(outcome.row.recipient_id, outcome.row.id)
+    }
+  }
+}
+
+/** Requests as the recipient sees them: those still held leave the list. */
+export async function withoutHeld<T extends { sender_id: string; recipient_id: string; held_at: Date | null }>(rows: T[]): Promise<T[]> {
+  const held = rows.filter((r) => r.held_at !== null)
+  if (held.length === 0) return rows
+  const pairs = held.map((r) => conversationPair(r.sender_id, r.recipient_id))
+  const conversations = await db.private_conversations.findMany({
+    where: { OR: pairs.map(([user1_id, user2_id]) => ({ user1_id, user2_id })) },
+    select: matchSelect,
+  })
+  const holding = new Set(conversations.filter((c) => holdingPair(c)).map((c) => `${c.user1_id}|${c.user2_id}`))
+  return rows.filter((r) => r.held_at === null || !holding.has(conversationPair(r.sender_id, r.recipient_id).join("|")))
 }
 
 /**

@@ -3374,6 +3374,12 @@ model friend_requests {
   /// re-notify or undo a "Not now": withdraw-and-ask was a way to push the
   /// same person over and over.
   withdrawn_at DateTime? @db.Timestamptz(6)
+  /// Waiting for a pseudonymous match to be revealed on both sides (lib/friends.ts
+  /// `holdingPair`). Recorded and told "requested" to the asker, but not
+  /// delivered: no push, hidden from the recipient, not acceptable. Cleared when
+  /// both reveal, which is also when the push goes out. Null for every request
+  /// that was never held.
+  held_at      DateTime? @db.Timestamptz(6)
   created_at   DateTime  @default(now()) @db.Timestamptz(6)
 
   sender    User @relation("FriendRequestSender", fields: [sender_id], references: [id], onDelete: Cascade)

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 import { mayShowRealName } from "@/lib/conversation-identity"
-import { friendState, isRevealedMatch, revealedMatch, type FriendState } from "@/lib/friends"
+import { friendState, holdingPair, isRevealedMatch, revealedMatch, type FriendState } from "@/lib/friends"
 
 /**
  * What a DM or a profile tells the app about adding this person as a friend.
@@ -51,7 +51,7 @@ export async function friendOffersFor(viewerId: string, conversations: Conversat
           { recipient_id: viewerId, sender_id: { in: ids } },
         ],
       },
-      select: { sender_id: true, recipient_id: true },
+      select: { sender_id: true, recipient_id: true, held_at: true },
     }),
     db.blocked_users.findMany({
       where: {
@@ -66,7 +66,8 @@ export async function friendOffersFor(viewerId: string, conversations: Conversat
   ])
   const friends = new Set(friendships.flatMap((f) => [f.user1_id, f.user2_id]))
   const asked = new Set(requests.filter((r) => r.sender_id === viewerId).map((r) => r.recipient_id))
-  const askedMe = new Set(requests.filter((r) => r.recipient_id === viewerId).map((r) => r.sender_id))
+  // Whether each request to the viewer is held: a held one is not theirs to see yet.
+  const askedMe = new Map(requests.filter((r) => r.recipient_id === viewerId).map((r) => [r.sender_id, r.held_at !== null]))
   const blocked = new Set(blocks.flatMap((b) => [b.blocker_id, b.blocked_id]))
   const alive = new Set(live.map((u) => u.id))
 
@@ -74,7 +75,7 @@ export async function friendOffersFor(viewerId: string, conversations: Conversat
     conversations.map((c) => {
       const other = others.get(c.id)!
       if (!mayShowRealName(c, other)) return [c.id, NOTHING]
-      const state: FriendOffer["state"] = friends.has(other) ? "friends" : asked.has(other) ? "requested" : askedMe.has(other) ? "incoming" : "none"
+      const state: FriendOffer["state"] = friends.has(other) ? "friends" : asked.has(other) ? "requested" : askedMe.has(other) && !(askedMe.get(other) && holdingPair(c)) ? "incoming" : "none"
       const canAdd = addable(state) && isRevealedMatch(c) && alive.has(other) && !blocked.has(other)
       return [c.id, { state, canAdd }]
     })
