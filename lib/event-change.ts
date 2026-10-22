@@ -1,6 +1,5 @@
 import { Prisma, type event_status } from "@prisma/client"
 import { db } from "@/lib/db"
-import { logger } from "@/lib/logger"
 
 /**
  * "Changed while you're going" (Flow 3 · 3.1): when the time, the venue or the
@@ -9,7 +8,7 @@ import { logger } from "@/lib/logger"
  *
  * Stored as `events.changed_at` and `events.changed_from`, written by the three
  * doors that can move these (the dashboard PATCH, the mobile PATCH and the
- * admin status dropdown) through `recordEventChange`. Which fields changed is
+ * admin status dropdown) through `updateEventTracked`. Which fields changed is
  * derived on read from `changed_from` and the row (`changedFieldsOf`), never
  * stored, so a time moved and put back reads as no change at all.
  */
@@ -154,31 +153,34 @@ export function changeForResponse(
 }
 
 /**
- * Record an edit's change. Called straight after the write that made it; never
- * throws, because the edit has committed and a failed bookkeeping write must not
- * turn it into a 500.
+ * `db.events.update`, plus the change record, in one transaction under a row
+ * lock (`SELECT … FOR UPDATE`), and the row it returns carries the written
+ * `changed_at` and `changed_from`.
  *
- * ponytail: read-modify-write on the row the caller loaded before its update, so
- * two edits landing within the same few milliseconds can each start from the same
- * `changed_from`, and the later one wins. A transaction with the update closes it
- * if it is ever seen.
+ * Every door that can move a published event's time, venue or status goes
+ * through this. The record is a read-modify-write of `changed_from` (the first
+ * value of a field wins), so reading it before the lock, as the first version
+ * did, let two simultaneous edits both start from the same `changed_from` and
+ * the later one drop the earlier's. The lock makes the second edit wait, read
+ * what the first wrote, and add to it. Because the record is part of the edit's
+ * transaction, an edit and its record stand or fall together.
  */
-export async function recordEventChange(
-  eventId: string,
-  before: TrackedEvent & { changed_from: unknown },
-  after: TrackedEvent
-): Promise<void> {
-  try {
-    const next = nextChange(before.changed_from, before, after)
-    if (!next) return
-    await db.events.update({
+export async function updateEventTracked(args: Prisma.eventsUpdateArgs) {
+  const eventId = args.where.id
+  if (!eventId) throw new Error("updateEventTracked needs the event's id")
+  return db.$transaction(async (tx) => {
+    // any-kind: the lock is on one row by id, whatever its kind; this guards a write, it selects nothing for a list.
+    await tx.$queryRaw`SELECT id FROM events WHERE id = ${eventId}::uuid FOR UPDATE`
+    const before = await tx.events.findUniqueOrThrow({
       where: { id: eventId },
-      data: {
-        changed_at: next.changed_at,
-        changed_from: next.changed_from ?? Prisma.DbNull,
-      },
+      select: { start_time: true, end_time: true, venue_name: true, address: true, status: true, changed_from: true },
     })
-  } catch (error) {
-    logger.error("Failed to record an event change", { eventId, error: error instanceof Error ? error.message : String(error) })
-  }
+    const updated = await tx.events.update(args)
+    const next = nextChange(before.changed_from, before, updated)
+    if (!next) return updated
+    return tx.events.update({
+      where: { id: eventId },
+      data: { changed_at: next.changed_at, changed_from: next.changed_from ?? Prisma.DbNull },
+    })
+  })
 }

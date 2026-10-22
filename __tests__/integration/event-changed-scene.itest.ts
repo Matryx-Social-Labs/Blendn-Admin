@@ -30,6 +30,7 @@ jest.mock("expo-server-sdk", () => {
 
 import { NextRequest } from "next/server"
 import { signAccessToken } from "@/lib/mobile-auth"
+import { updateEventTracked } from "@/lib/event-change"
 import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 import { eventParams, req, routes, yearsAgo } from "./go-live-world"
 
@@ -60,6 +61,7 @@ async function event(opts: {
   status?: "published" | "draft" | "cancelled"
   minAge?: number
   preSuspension?: "published"
+  visibility?: "public" | "private"
   days?: Array<{ startsInH: number; endsInH: number; cancelled?: boolean }>
   orgId?: string
 } = {}) {
@@ -75,7 +77,7 @@ async function event(opts: {
       end_time: last,
       timezone: "UTC",
       status: opts.status ?? "published",
-      visibility: "public",
+      visibility: opts.visibility ?? "public",
       organizer_id: host,
       organizer_org_id: opts.orgId ?? orgs[0],
       venue_name: "The Old Room",
@@ -264,6 +266,53 @@ describe("GET /events/:id — what changed", () => {
   })
 })
 
+describe("recording a change under concurrent edits", () => {
+  it("four edits at once, one field each: every one survives in changed_from, and each edit lands", async () => {
+    const id = await event()
+    const original = await db.events.findUniqueOrThrow({ where: { id } })
+    const edits = [
+      { start_time: new Date(original.start_time.getTime() + HOUR) },
+      { end_time: new Date(original.end_time.getTime() + HOUR) },
+      { venue_name: "Elsewhere" },
+      { address: "2 Other Rd" },
+    ]
+    await Promise.all(edits.map((data) => updateEventTracked({ where: { id }, data })))
+
+    const row = await db.events.findUniqueOrThrow({ where: { id } })
+    expect(row.changed_from).toEqual({
+      start_time: original.start_time.toISOString(),
+      end_time: original.end_time.toISOString(),
+      venue_name: "The Old Room",
+      address: "1 Church St",
+    })
+    expect(row.changed_at).not.toBeNull()
+    expect(row.venue_name).toBe("Elsewhere")
+    expect(row.address).toBe("2 Other Rd")
+    expect(row.start_time.getTime()).toBe(original.start_time.getTime() + HOUR)
+  })
+
+  it("the dashboard PATCH answers with the change it wrote, not the row as it was before", async () => {
+    const id = await event()
+    const before = await db.events.findUniqueOrThrow({ where: { id } })
+    const res = await dashboardEvent.PATCH(
+      new Request(`http://localhost/api/events/${id}`, { method: "PATCH", body: JSON.stringify({ venue_name: "Round the corner" }) }),
+      { params: Promise.resolve({ id }) }
+    )
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.changed_at).not.toBeNull()
+    expect(body.changed_from).toEqual({ venue_name: before.venue_name })
+  })
+
+  it("an edit and its record stand or fall together: a failing edit leaves no change behind", async () => {
+    const id = await event()
+    await expect(updateEventTracked({ where: { id }, data: { venue_name: "x", start_time: "not a date" as never } })).rejects.toThrow()
+    const row = await db.events.findUniqueOrThrow({ where: { id } })
+    expect(row.venue_name).toBe("The Old Room")
+    expect(row.changed_at).toBeNull()
+  })
+})
+
 describe("GET /events/:id — the days of a run", () => {
   it("lists every day, a cancelled one marked, and says which day today is", async () => {
     const viewer = await person("scn-v5")
@@ -333,6 +382,15 @@ describe("GET /events/:id — why a link is refused", () => {
     const a = await read(viewer, suspended)
     expect(a.status).toBe(404)
     expect(a.json).toMatchObject({ errorCode: "NOT_FOUND", reasonCode: "ORGANISER_SUSPENDED", error: "Event not found" })
+
+    const priv = await event({ status: "draft", preSuspension: "published", visibility: "private" })
+    // A private event of a suspended organisation is a plain 404 to a stranger: the reason would say it exists.
+    const c = await read(viewer, priv)
+    expect(c.status).toBe(404)
+    expect(c.json).toEqual({ success: false, error: "Event not found", errorCode: "NOT_FOUND" })
+    // And to somebody who was on its list, the reason it went dark.
+    await db.event_rsvps.create({ data: { event_id: priv, user_id: viewer, status: "going" } })
+    expect((await read(viewer, priv)).json).toMatchObject({ errorCode: "NOT_FOUND", reasonCode: "ORGANISER_SUSPENDED" })
 
     const b = await read(viewer, draft)
     expect(b.status).toBe(404)

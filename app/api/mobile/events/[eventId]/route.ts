@@ -21,7 +21,7 @@ import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { getOccupancy } from "@/lib/occupancy"
 import { dayOccurrencesSelect, eventDays, eventSession } from "@/lib/occurrences"
-import { changeForResponse, recordEventChange } from "@/lib/event-change"
+import { changeForResponse, updateEventTracked } from "@/lib/event-change"
 import {
   successResponse,
   errorResponse,
@@ -424,11 +424,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         latitude: true,
         longitude: true,
         geofence: true,
-        // What `recordEventChange` reads the edit against (`start_time` is in the permission select).
-        end_time: true,
-        venue_name: true,
-        address: true,
-        changed_from: true,
         ...eventPermissionSelect,
       },
     })
@@ -493,7 +488,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return errorResponse(UNCANCEL_REFUSAL, 400)
     }
 
-    const updated = await db.events.update({
+    // The edit and its change record in one transaction (lib/event-change.ts), for "changed while you're going".
+    const updated = await updateEventTracked({
       where: { id: eventId },
       data: {
         ...(title !== undefined && { title }),
@@ -514,9 +510,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       resourceId: updated.id,
       details: { title: updated.title, from: event.status, to: updated.status, via: "mobile" },
     })
-
-    // When it changed and what it was, for "changed while you're going" (lib/event-change.ts).
-    await recordEventChange(eventId, event, updated)
 
     /*
      * The same cascade the dashboard route runs (Fix #35). Cancelling here used

@@ -100,9 +100,11 @@ describe("GET /profiles/:id — photo_states", () => {
     expect(profile.photos).toEqual([live])
     expect(profile.push_enabled).toBe(true)
     // What is new.
+    // A pulled photo's URL is never sent back: a CDN that still held it would keep showing it.
+    expect(JSON.stringify(profile.photo_states)).not.toContain(gone)
     expect(profile.photo_states).toEqual([
       { url: live, pulled: false, pulled_at: null, was_main: false },
-      { url: gone, pulled: true, pulled_at: expect.any(String), was_main: true },
+      { url: null, pulled: true, pulled_at: expect.any(String), was_main: true },
     ])
   })
 

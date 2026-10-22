@@ -542,6 +542,54 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
   }
 }
 
+/** Rows per insert: one statement for an announcement to a full event, bounded for a very large audience. */
+export const BELL_INSERT_CHUNK = 5000
+
+/**
+ * One bell row per recipient, in chunks of `BELL_INSERT_CHUNK`, returning each
+ * recipient's row id.
+ *
+ * A chunk that fails is logged and skipped; the chunks that succeeded keep their
+ * rows (and their ids, so those recipients' pushes still carry
+ * `notificationId`). One bad chunk must not take every bell row with it, and the
+ * send does not wait on or fail with the bell: same rule as the single sender.
+ */
+async function recordBulk(
+  userIds: readonly string[],
+  title: string,
+  body: string,
+  payload: NotificationData
+): Promise<Map<string, string>> {
+  const rowIds = new Map<string, string>()
+  const recorded: string[] = []
+  for (let i = 0; i < userIds.length; i += BELL_INSERT_CHUNK) {
+    const chunk = userIds.slice(i, i + BELL_INSERT_CHUNK)
+    try {
+      const rows = await db.notifications.createManyAndReturn({
+        data: chunk.map((userId) => ({
+          user_id: userId,
+          kind: payload.type as never,
+          title,
+          body: storedBodyFor(payload.type, body),
+          data: payload as object,
+        })),
+        select: { id: true, user_id: true },
+      })
+      for (const r of rows) rowIds.set(r.user_id, r.id)
+      recorded.push(...chunk)
+    } catch (error) {
+      logger.warn("Failed to record a chunk of bulk notifications", {
+        chunkStart: i,
+        chunkSize: chunk.length,
+        total: userIds.length,
+        error: String(error),
+      })
+    }
+  }
+  if (recorded.length > 0) announceToBell(recorded, payload.type)
+  return rowIds
+}
+
 /**
  * Send push notifications to multiple users
  */
@@ -565,30 +613,10 @@ export async function sendBulkPushNotifications(
    * announcement.
    */
   // Each recipient's own row id, for `data.notificationId` on their push.
-  const rowIds = new Map<string, string>()
-  if (data?.type && !NOT_IN_THE_BELL.includes(data.type) && userIds.length > 0) {
-    await db.notifications
-      .createManyAndReturn({
-        data: userIds.map((userId) => ({
-          user_id: userId,
-          kind: data.type as never,
-          title,
-          body: storedBodyFor(data.type, body),
-          data: data as object,
-        })),
-        select: { id: true, user_id: true },
-      })
-      .then((rows) => {
-        for (const r of rows) rowIds.set(r.user_id, r.id)
-        announceToBell(userIds, data.type)
-      })
-      .catch((error) => {
-        logger.warn("Failed to record bulk notifications", {
-          count: userIds.length,
-          error: String(error),
-        })
-      })
-  }
+  const rowIds =
+    data?.type && !NOT_IN_THE_BELL.includes(data.type) && userIds.length > 0
+      ? await recordBulk(userIds, title, body, data)
+      : new Map<string, string>()
 
   const tokenMap = await getBulkUserPushTokens(userIds, data)
   const messages: ExpoPushMessage[] = []
