@@ -1755,9 +1755,9 @@
       "date": "2026-10-10"
     },
     "migration-tx.test.ts": {
-      "guards": "Step 17 (db H1): every migration from 20261009120000 on begins with BEGIN and ends with COMMIT, because `prisma migrate deploy` sends a file statement by statement; a lone `ALTER TYPE … ADD VALUE` is exempt.",
-      "mutation": "M942 BEGIN removed from 20261009120000_venue_floors.",
-      "observed": "M942: 1 of 1 failing (venue_floors begins and commits). Restored.",
+      "guards": "Step 17 (db H1): every migration from 20261009120000 on begins with BEGIN and ends with COMMIT, because `prisma migrate deploy` sends a file statement by statement; a lone `ALTER TYPE … ADD VALUE` is exempt. A file that is one CREATE INDEX CONCURRENTLY is exempt (Postgres refuses it in a transaction), and the unread-message index migration is pinned to exactly that one statement.",
+      "mutation": "M942 BEGIN removed from 20261009120000_venue_floors. M1553 a BEGIN; put before the CREATE INDEX CONCURRENTLY in 20261022100200_private_messages_unread_idx.",
+      "observed": "M942: 1 of 1 failing (venue_floors begins and commits). Restored. 2026-10-22 review: M1553: 2 failing ('begins and commits', 'is a single CREATE INDEX CONCURRENTLY'). Reverted; 24 of 24.",
       "date": "2026-10-10"
     },
     "venue-plans.itest.ts": {
@@ -1971,15 +1971,15 @@
       "date": "2026-10-22"
     },
     "event-changed-scene.itest.ts": {
-      "guards": "Flow 3 on a real database: the people going get event_changed (the rest event_update); an event hidden by an organisation suspension says ORGANISER_SUSPENDED while a draft nobody published says nothing.",
-      "mutation": "M1521 `going.length > 0 ? notifyEventChanged(...) : null` -> `null` (event_changed never sent). M1522 `const suspended = event?.status === \"draft\" && ... pre_suspension_status !== null` -> `const suspended = true`.",
-      "observed": "2026-10-22: M1521: 2 failing (the dashboard time+venue move, the phone cancel). M1522: 1 failing ('an event hidden because its organisation was suspended says so; a draft nobody published does not'). Each reverted; 12 of 12.",
+      "guards": "Flow 3 on a real database: the people going get event_changed (the rest event_update); an event hidden by an organisation suspension says ORGANISER_SUSPENDED while a draft nobody published says nothing. Review items: the edit and its change record share one transaction (updateEventTracked) and the response carries the written changed_*; the ORGANISER_SUSPENDED reason is not said of a private event to somebody not on its list.",
+      "mutation": "M1521 `going.length > 0 ? notifyEventChanged(...) : null` -> `null` (event_changed never sent). M1522 `const suspended = event?.status === \"draft\" && ... pre_suspension_status !== null` -> `const suspended = true`. M1546 return the pre-record row from updateEventTracked. M1547 drop the private-event RSVP check. M1551 read the change against the already-edited row. M1552 the edit made outside the transaction. M1545 the SELECT … FOR UPDATE removed.",
+      "observed": "2026-10-22: M1521: 2 failing (the dashboard time+venue move, the phone cancel). M1522: 1 failing ('an event hidden because its organisation was suspended says so; a draft nobody published does not'). Each reverted; 12 of 12. 2026-10-22 review: M1546: 1 failing (the dashboard PATCH answers with the change it wrote). M1547: 1 failing (private suspended event). M1551: 5 failing. M1552: 6 failing. M1545: SURVIVED three runs even with a 50 ms gap between begin and read, and that is the finding, not a miss: the read and the stale snapshot are consistent with each other and the UPDATE takes the row lock itself, so a concurrent edit recomputes the same union; the explicit lock is kept as defence and is not claimed as covered.",
       "date": "2026-10-22"
     },
     "profile-friends-push-gaps.itest.ts": {
       "guards": "Flows 6 and 9 on a real database: the per-kind push switches stop their kind's push on the single and bulk paths and leave the bell; an older build is sent event_changed as event_update; photo_states lists a pulled photo only inside the 7-day notice window and only to its owner; badges are absent when show_badges is off or the viewer cannot see who the person is; every way a friend link or person is out of reach answers one body.",
-      "mutation": "M1523 `switchedOn` returns {} (`column && false`). M1524 `if (true) return deliveryForFlow9(data)` (every build gets the new channels). M1525 payloadFor never downgrades event_changed. M1526 the notice window dropped (`pulled_at: { gte: since }` removed). M1527 `p.show_badges !== false` dropped. M1528 `(isSelf || identified)` -> true for any viewer. M1529 the blocked-invite 404 says `reasonCode: \"BLOCKED\"` instead of INVITE_UNAVAILABLE. M1532 `board_request: \"push_matches\"` removed from the switch map. M1538 `.strict()` dropped from the preferences PUT schema.",
-      "observed": "2026-10-22: M1523: 2 failing (single and bulk). M1524: the channel case failing. M1525: 4 failing (the channel case, event_changed downgrade, and the two switch cases that read the same sent list). M1526: 2 failing. M1527: 1 failing. M1528: 1 failing. M1529: 1 failing, after the test was extended to reach the `connectable` branch (the first draft of the case went through `identityForRef` and survived it: that is why 'an invite whose owner blocked you' exists). Each reverted; 16 of 16. 2026-10-22 (preferences endpoint): M1532: 1 failing ('matches off stops every kind it covers, the board\\'s included'). M1538: 1 failing (a key it does not know). Reverted; 18 of 18.",
+      "mutation": "M1523 `switchedOn` returns {} (`column && false`). M1524 `if (true) return deliveryForFlow9(data)` (every build gets the new channels). M1525 payloadFor never downgrades event_changed. M1526 the notice window dropped (`pulled_at: { gte: since }` removed). M1527 `p.show_badges !== false` dropped. M1528 `(isSelf || identified)` -> true for any viewer. M1529 the blocked-invite 404 says `reasonCode: \"BLOCKED\"` instead of INVITE_UNAVAILABLE. M1532 `board_request: \"push_matches\"` removed from the switch map. M1538 `.strict()` dropped from the preferences PUT schema. M1548 a pulled photo's url sent back (`url: r.url`).",
+      "observed": "2026-10-22: M1523: 2 failing (single and bulk). M1524: the channel case failing. M1525: 4 failing (the channel case, event_changed downgrade, and the two switch cases that read the same sent list). M1526: 2 failing. M1527: 1 failing. M1528: 1 failing. M1529: 1 failing, after the test was extended to reach the `connectable` branch (the first draft of the case went through `identityForRef` and survived it: that is why 'an invite whose owner blocked you' exists). Each reverted; 16 of 16. 2026-10-22 (preferences endpoint): M1532: 1 failing ('matches off stops every kind it covers, the board\\'s included'). M1538: 1 failing (a key it does not know). Reverted; 18 of 18. 2026-10-22 review: M1548: 1 failing (photo_states).",
       "date": "2026-10-22"
     },
     "report-actioned.itest.ts": {
@@ -1992,6 +1992,12 @@
       "guards": "Flow 9 on a real database: a friend request's row names and shows the asker only while the request waits (open flips false once dismissed or not the reader's); a match row shows the OTHER side's pseudonym; the badge counts conversations with a visible unread message, not hidden ones; data.reason picks cancelled over time over venue; every bulk push carries that recipient's own notificationId.",
       "mutation": "M1533 delete `dismissed_at: null` from the friend-request lookup. M1534 the match row reads the viewer's own pseudonym. M1535 drop VISIBLE_DM from the badge's unread-conversation count. M1536 reverse the reason priority. M1537 the bulk push built without the row id.",
       "observed": "2026-10-22: M1533: 1 failing ('name and show the asker while the request waits'). M1534: 1 failing. M1535: 1 failing ('badgeCount'). M1536: 1 failing ('the reason is the one that matters most'). M1537: 2 failing (the event push and the bulk-ids case). Each reverted; 8 of 8.",
+      "date": "2026-10-22"
+    },
+    "bulk-bell-chunks.test.ts": {
+      "guards": "lib/push-notifications.ts recordBulk: the bulk bell insert is 5,000 rows to a statement; a chunk that fails is logged and skipped while the others keep their rows, their pushes keep notificationId, and only the recorded recipients are announced to the bell.",
+      "mutation": "M1549 BELL_INSERT_CHUNK = 1e9 (one statement for everyone). M1550 a failing chunk rethrows.",
+      "observed": "2026-10-22: M1549: 4 of 4 failing (the first version of the test built its audience from the constant it checks and hung on 1e9 rows: the limit is now written out in the test). M1550: 2 failing (the failing-chunk case, the announce case). Each reverted; 4 of 4.",
       "date": "2026-10-22"
     }
   },
