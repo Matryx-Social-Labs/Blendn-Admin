@@ -16,7 +16,7 @@ import {
   errorResponse,
 } from "@/lib/api-response"
 import { isUuid, readOptionalJson } from "@/lib/api-input"
-import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
+import { leaveConversationIn } from "@/lib/leave-conversation"
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>
@@ -125,37 +125,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     await db.$transaction(async (tx) => {
-      // Idempotent, and scoped by `closed_at: null` so a retry never rewrites
-      // who left or when.
-      await tx.private_conversations.updateMany({
-        where: { id: conversationId, closed_at: null },
-        data: { closed_at: new Date(), closed_by: authUser.userId, closed_reason: action },
-      })
-
-      if (action === "block") {
-        await tx.blocked_users.upsert({
-          where: {
-            blocker_id_blocked_id: { blocker_id: authUser.userId, blocked_id: otherId },
-          },
-          create: { blocker_id: authUser.userId, blocked_id: otherId },
-          update: {},
-        })
-        // Both directions: a request either of them left pending must not
-        // survive to be accepted into a conversation between blocked people.
-        await tx.message_requests.updateMany({
-          where: {
-            status: "pending",
-            OR: [
-              { sender_id: otherId, recipient_id: authUser.userId },
-              { sender_id: authUser.userId, recipient_id: otherId },
-            ],
-          },
-          data: { status: "blocked" },
-        })
-      }
-      // Leaving is permanent either way, so a crew invite between them goes
-      // too (C5/C6): a closed pair is kept apart on every crew surface.
-      await dropCrewInvitesBetween(tx, authUser.userId, otherId)
+      await leaveConversationIn(tx, { conversationId, userId: authUser.userId, otherId, action })
 
       if (report) {
         if (report.messageId) {

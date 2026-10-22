@@ -23,6 +23,8 @@ import { join } from "path"
 const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8")
 
 const LEAVE = "app/api/mobile/conversations/[conversationId]/leave/route.ts"
+// The close and the block live in one helper both doors share (HIGH-2, 2026-10-22).
+const HELPER = "lib/leave-conversation.ts"
 const REPORT = "app/api/mobile/messages/[messageId]/report/route.ts"
 
 describe("leaving and reporting happen together or not at all", () => {
@@ -31,11 +33,18 @@ describe("leaving and reporting happen together or not at all", () => {
   it("wraps the close, the block and the report in one transaction", () => {
     expect(src).toContain("db.$transaction")
 
-    // All three writes inside it, on the transaction client rather than `db`.
+    // All three writes inside it, on the transaction client rather than `db`:
+    // the close and the block through the shared helper, the report here.
     const tx = src.slice(src.indexOf("db.$transaction"))
-    expect(tx).toContain("tx.private_conversations.updateMany")
-    expect(tx).toContain("tx.blocked_users.upsert")
+    expect(tx).toContain("leaveConversationIn(tx")
     expect(tx).toMatch(/tx\.(message_reports|user_reports)\.create/)
+    const helper = read(HELPER)
+    expect(helper).toContain("closeConversation(conversationId, userId, action, tx)")
+    expect(helper).toContain("tx.blocked_users.upsert")
+    // The pair's lock first, and the friendship severed on a block.
+    expect(helper.indexOf("lockPair(tx")).toBeGreaterThan(-1)
+    expect(helper.indexOf("lockPair(tx")).toBeLessThan(helper.indexOf("closeConversation("))
+    expect(helper).toContain("severFriendship(userId, otherId, tx)")
   })
 
   it("evicts the socket room OUTSIDE the transaction", () => {
@@ -53,7 +62,7 @@ describe("leaving and reporting happen together or not at all", () => {
 
   it("keeps the close idempotent under the transaction", () => {
     // Scoped by `closed_at: null`, so a retry never rewrites who left or when.
-    expect(src).toMatch(/where: \{ id: conversationId, closed_at: null \}/)
+    expect(read("lib/conversations.ts")).toMatch(/where: \{ id: conversationId, closed_at: null \}/)
   })
 
   it("reports the person when no message is named", () => {
@@ -76,8 +85,9 @@ describe("leaving and reporting happen together or not at all", () => {
   })
 
   it("cancels pending requests both ways when blocking", () => {
-    expect(src).toMatch(/sender_id: otherId, recipient_id: authUser\.userId/)
-    expect(src).toMatch(/sender_id: authUser\.userId, recipient_id: otherId/)
+    const helper = read(HELPER)
+    expect(helper).toMatch(/sender_id: otherId, recipient_id: userId/)
+    expect(helper).toMatch(/sender_id: userId, recipient_id: otherId/)
   })
 
   it("makes the report optional", () => {

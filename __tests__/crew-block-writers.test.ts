@@ -55,8 +55,10 @@ describe("crew invites do not outlive a block or an unfriend", () => {
   it("has every route that closes a conversation withdraw them and take the pair out of their Blends (C6)", () => {
     // A closed conversation keeps two people apart like a block. The erasure
     // closes every conversation of a person who leaves every crew anyway.
+    // An unmatch and a leave close through `leaveConversationIn` (lib/leave-conversation.ts);
+    // the block route closes inline.
     const closers = sources(join(ROOT, "app"))
-      .filter((file) => /closeConversation\(|closed_reason:/.test(readFileSync(file, "utf8")))
+      .filter((file) => /closeConversation\(|closed_reason:|leaveConversationIn\(/.test(readFileSync(file, "utf8")))
       .filter((file) => !file.endsWith(join("account", "route.ts")))
     expect(closers.map((f) => relative(ROOT, f)).sort()).toEqual([
       "app/api/mobile/conversations/[conversationId]/leave/route.ts",
@@ -66,10 +68,16 @@ describe("crew invites do not outlive a block or an unfriend", () => {
     const missing = closers
       .filter((file) => {
         const src = readFileSync(file, "utf8")
-        return !WITHDRAWS.test(src) || !/evictBlockedFromBlends\(/.test(src)
+        // The helper withdraws the invites for its two callers; the block route does its own.
+        const withdraws = WITHDRAWS.test(src) || /leaveConversationIn\(/.test(src)
+        return !withdraws || !/evictBlockedFromBlends\(/.test(src)
       })
       .map((f) => relative(ROOT, f))
     expect(missing).toEqual([])
+    // And the helper itself withdraws them, whichever way the pair leaves.
+    const helper = readFileSync(join(ROOT, "lib/leave-conversation.ts"), "utf8")
+    expect(helper).toMatch(/severFriendship\(/)
+    expect(helper).toMatch(/dropCrewInvitesBetween\(/)
   })
 
   it("has both unfriend paths withdraw them too", () => {

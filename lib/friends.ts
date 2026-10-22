@@ -359,20 +359,16 @@ export async function requestFriend(
 
 /**
  * Write the friendship and clear every request between the pair, inside the
- * caller's locked transaction — after checking, under that lock, that neither
- * has blocked the other. False (and the requests cleared) if one has.
+ * caller's locked transaction — after checking, under that lock, that the pair
+ * can still be connected (`readPair`: alive, not blocked, not closed). False
+ * (and the requests cleared) if not.
  */
 async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): Promise<boolean> {
-  const blocked = await tx.blocked_users.findFirst({
-    where: {
-      OR: [
-        { blocker_id: a, blocked_id: b },
-        { blocker_id: b, blocked_id: a },
-      ],
-    },
-    select: { id: true },
-  })
-  if (!blocked) {
+  // The whole eligibility question, not only a block: an unmatch, a deleted
+  // account or a block that landed after the accept's first check. Both an
+  // accept and the auto-accept of a request that was waiting come through here.
+  const { connectable } = await readPair(tx, a, b)
+  if (connectable) {
     const [user1_id, user2_id] = conversationPair(a, b)
     await tx.friendships.upsert({
       where: { user1_id_user2_id: { user1_id, user2_id } },
@@ -381,7 +377,7 @@ async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): P
     })
   }
   await tx.friend_requests.deleteMany({ where: eitherWay(a, b) })
-  return !blocked
+  return connectable
 }
 
 /**

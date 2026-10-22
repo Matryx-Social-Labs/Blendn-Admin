@@ -27,6 +27,8 @@ const requests = require("@/app/api/mobile/friends/requests/route") as typeof im
 const requestById = require("@/app/api/mobile/friends/requests/[requestId]/route") as typeof import("@/app/api/mobile/friends/requests/[requestId]/route")
 const conversations = require("@/app/api/mobile/conversations/route") as typeof import("@/app/api/mobile/conversations/route")
 const conversation = require("@/app/api/mobile/conversations/[conversationId]/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/route")
+const leaveRoute = require("@/app/api/mobile/conversations/[conversationId]/leave/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/leave/route")
+const blockRoute = require("@/app/api/mobile/users/[userId]/block/route") as typeof import("@/app/api/mobile/users/[userId]/block/route")
 const profile = require("@/app/api/mobile/profiles/[userId]/route") as typeof import("@/app/api/mobile/profiles/[userId]/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -322,12 +324,23 @@ describe("the friend offer on conversations and profiles", () => {
   })
 })
 
+/** Resolves once a query is queued behind an advisory lock that somebody else holds. */
+async function untilQueuedOnTheLock() {
+  for (let i = 0; i < 100; i++) {
+    const [{ n }] = await db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`
+    if (Number(n) > 0) return
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  throw new Error("nothing ever queued on the pair's lock: the operation does not take it")
+}
+
 /**
- * Hold the pair's lock from here — the lock an unmatch or a block takes — so a
- * request that has already passed its first check is stopped at the write, do
- * `whileHeld` (what the other person does in that moment), then let it go.
+ * Hold the pair's lock — the one an unmatch, a block, a request and an accept
+ * all take — start `operation`, wait until it is really queued behind it (read
+ * from `pg_locks`, not a guess at a delay, so the work after the lock is what
+ * runs), do `whileHeld` (what the other person did in that moment), release.
  */
-async function raceTheLock(a: Person, b: Person, request: () => Promise<{ status: number; body: any }>, whileHeld: () => Promise<unknown>) { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function raceTheLock<T>(a: Person, b: Person, operation: () => Promise<T>, whileHeld: () => Promise<unknown> = async () => {}): Promise<T> {
   let release!: () => void
   const held = new Promise<void>((r) => (release = r))
   let locked!: () => void
@@ -341,18 +354,27 @@ async function raceTheLock(a: Person, b: Person, request: () => Promise<{ status
     { timeout: 20_000 }
   )
   await lockTaken
-  let settled = false
-  const pending = request().then((res) => ((settled = true), res))
-  // Long enough for the request to pass its first check and queue on the lock.
-  await new Promise((r) => setTimeout(r, 600))
-  expect(settled).toBe(false)
-  await whileHeld()
-  release()
-  await holder
+  const pending = operation()
+  try {
+    await untilQueuedOnTheLock()
+    await whileHeld()
+  } finally {
+    release()
+    await holder
+  }
   return pending
 }
 
-describe("a request racing an unmatch or a block", () => {
+const leave = (as: Person, conversationId: string, body: unknown = {}) =>
+  call(leaveRoute.POST as Handler, `/api/mobile/conversations/${conversationId}/leave`, as, {
+    method: "POST",
+    body,
+    params: { conversationId },
+  })
+const unblock = (as: Person, userId: string) =>
+  call(blockRoute.DELETE as Handler, `/api/mobile/users/${userId}/block`, as, { method: "DELETE", params: { userId } })
+
+describe("a request or an accept racing an unmatch or a block", () => {
   it("is refused when the conversation closes after the first check, and writes nothing", async () => {
     const [ana, ben] = [await person("far-rc-a", "Ana"), await person("far-rc-b", "Ben")]
     const id = await converse(ana, ben)
@@ -379,33 +401,76 @@ describe("a request racing an unmatch or a block", () => {
     expect(await db.friend_requests.count({ where: { sender_id: ana.id } })).toBe(0)
   })
 
-  it("an unmatch takes the pair's lock, so it cannot land between a request's check and its write", async () => {
-    const [ana, ben] = [await person("far-ru-a", "Ana"), await person("far-ru-b", "Ben")]
+  it("an accept is refused when the pair is unmatched or blocked after its first check", async () => {
+    const [ana, ben, cam] = [await person("far-ra-a", "Ana"), await person("far-ra-b", "Ben"), await person("far-ra-c", "Cam")]
+    const token = (await call(invite.GET as Handler, "/api/mobile/friends/invite", ana)).body.data.token as string
     const id = await converse(ana, ben)
-    let release!: () => void
-    const held = new Promise<void>((r) => (release = r))
-    let locked!: () => void
-    const lockTaken = new Promise<void>((r) => (locked = r))
-    const holder = db.$transaction(
-      async (tx) => {
-        await lockPair(tx, ana.id, ben.id)
-        locked()
-        await held
-      },
-      { timeout: 20_000 }
+    await ask(ben, { token })
+    await ask(cam, { token })
+    const requestOf = async (from: Person) => {
+      const row = await db.friend_requests.findFirstOrThrow({ where: { sender_id: from.id, recipient_id: ana.id } })
+      return row.id
+    }
+
+    const [fromBen, fromCam] = [await requestOf(ben), await requestOf(cam)]
+    const unmatched = await raceTheLock(ana, ben, () => accept(ana, fromBen), () =>
+      db.private_conversations.update({ where: { id }, data: { closed_at: new Date(), closed_reason: "unmatch" } })
     )
-    await lockTaken
-    let settled = false
-    const unmatch = call(conversation.DELETE as Handler, `/api/mobile/conversations/${id}`, ana, {
-      method: "DELETE",
-      params: { conversationId: id },
-    }).then((r) => ((settled = true), r))
-    await new Promise((r) => setTimeout(r, 600))
-    expect(settled).toBe(false)
-    release()
-    await holder
-    expect((await unmatch).status).toBe(200)
+    const blocked = await raceTheLock(ana, cam, () => accept(ana, fromCam), () =>
+      db.blocked_users.create({ data: { blocker_id: cam.id, blocked_id: ana.id } })
+    )
+    expect([unmatched.status, blocked.status]).toEqual([404, 404])
+    expect(await db.friendships.count({ where: { OR: [{ user1_id: ana.id }, { user2_id: ana.id }] } })).toBe(0)
+  })
+
+  it.each([
+    ["DELETE /conversations/:id", "delete"],
+    ["POST /conversations/:id/leave", "leave"],
+  ])("%s takes the pair's lock, so it cannot land between a request's check and its write", async (_name, door) => {
+    const [ana, ben] = [await person(`far-ru-a-${door}`, "Ana"), await person(`far-ru-b-${door}`, "Ben")]
+    const id = await converse(ana, ben)
+    const res = await raceTheLock(ana, ben, () =>
+      door === "leave"
+        ? leave(ana, id)
+        : call(conversation.DELETE as Handler, `/api/mobile/conversations/${id}`, ana, { method: "DELETE", params: { conversationId: id } })
+    )
+    expect(res.status).toBe(200)
     expect((await db.private_conversations.findUniqueOrThrow({ where: { id } })).closed_at).not.toBeNull()
+  })
+
+  it("a request that raced /leave is refused, and nothing is written", async () => {
+    const [ana, ben] = [await person("far-rl-a", "Ana"), await person("far-rl-b", "Ben")]
+    const id = await converse(ana, ben)
+    // Ben's request is stopped at the lock; Ana leaves from the DM in the same moment.
+    const res = await raceTheLock(ben, ana, () => ask(ben, { userId: ana.id }), async () => {
+      await db.private_conversations.update({ where: { id }, data: { closed_at: new Date(), closed_reason: "unmatch" } })
+    })
+    expect(res.status).toBe(404)
+    expect(await db.friend_requests.count({ where: { sender_id: ben.id } })).toBe(0)
+  })
+})
+
+describe("leaving from the DM", () => {
+  it("a block ends the friendship and stays ended after an unblock; an unmatch leaves it", async () => {
+    const [ana, ben, cam] = [await person("far-lv-a", "Ana"), await person("far-lv-b", "Ben"), await person("far-lv-c", "Cam")]
+    const [withBen, withCam] = [await converse(ana, ben), await converse(ana, cam)]
+    await ask(ben, { token: (await call(invite.GET as Handler, "/api/mobile/friends/invite", ana)).body.data.token })
+    await ask(cam, { token: (await call(invite.GET as Handler, "/api/mobile/friends/invite", ana)).body.data.token })
+    for (const from of [ben, cam]) {
+      const row = await db.friend_requests.findFirstOrThrow({ where: { sender_id: from.id, recipient_id: ana.id } })
+      expect((await accept(ana, row.id)).status).toBe(200)
+    }
+    const friends = (p: Person) => db.friendships.count({ where: { OR: [{ user1_id: p.id }, { user2_id: p.id }] } })
+    expect(await friends(ben)).toBe(1)
+
+    expect((await leave(ana, withCam, { action: "unmatch" })).status).toBe(200)
+    expect(await friends(cam)).toBe(1)
+
+    expect((await leave(ana, withBen, { action: "block" })).status).toBe(200)
+    expect(await friends(ben)).toBe(0)
+    expect(await db.blocked_users.count({ where: { blocker_id: ana.id, blocked_id: ben.id } })).toBe(1)
+    await unblock(ana, ben.id)
+    expect(await friends(ben)).toBe(0)
   })
 })
 
