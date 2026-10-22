@@ -101,8 +101,37 @@ describe("the event door refuses, and records why", () => {
     expect(res.status).toBe(status)
     const json = await res.json()
     if (code) expect(json.errorCode).toBe(code)
+    // None of these is the person's to fix: no Flow 15 reasonCode on any of them (a known age under the line included).
+    expect(json).not.toHaveProperty("reasonCode")
     if (reason) expect(await refusals(eventId, p.id)).toEqual([reason])
     expect(await db.event_check_ins.count({ where: { event_id: eventId, user_id: p.id } })).toBe(0)
+  })
+})
+
+describe("the event door says which refusal the person can fix (Flow 15)", () => {
+  it("keeps AGE_RESTRICTED and adds reasonCode AGE_UNKNOWN when no age is on file, sentence unchanged", async () => {
+    const eventId = await event({ minAge: 18 })
+    const p = await person("door", { age: null })
+    const res = await checkIn(p.token, eventId)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      errorCode: "AGE_RESTRICTED",
+      reasonCode: "AGE_UNKNOWN",
+      error: "This event is 18+. Add your age to your profile to check in.",
+    })
+  })
+
+  it("keeps FORBIDDEN and adds reasonCode PROFILE_INCOMPLETE before onboarding, sentence unchanged", async () => {
+    const eventId = await event({})
+    const p = await person("door", { age: null })
+    await db.profiles.update({ where: { id: p.id }, data: { onboarded: false } })
+    const res = await checkIn(p.token, eventId)
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({
+      errorCode: "FORBIDDEN",
+      reasonCode: "PROFILE_INCOMPLETE",
+      error: "Finish setting up your profile first. Blend'n is for people 18 and over.",
+    })
   })
 })
 

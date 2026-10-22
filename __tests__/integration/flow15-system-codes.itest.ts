@@ -1,0 +1,909 @@
+/*
+ * Flow 15: the server says exactly why (account codes, session-end reasons,
+ * signInMethod, socket handshake codes), asserted on the real route handlers
+ * against real rows.
+ *
+ * Two promises are held at once. The new `errorCode` is on every refusal a
+ * client has to tell apart — and the sentence beside it is the one installed
+ * builds already match on, word for word, because those builds never read the
+ * code. So every case here checks both.
+ */
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+// The dashboard actions (changePassword, revokeMobileSessions) act for whoever the test says is signed in.
+let actingUser: { id: string; role: "attendee" } | null = null
+jest.mock("@/lib/current-user", () => ({ currentUser: async () => actingUser }))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+// Only the two identity-provider checks are replaced; everything after them is real.
+// And `storeRefreshToken` can be held, by a test that interleaves the refresh with another writer.
+let beforeStore: (() => Promise<void>) | null = null
+// Between the refresh's first look at the token and its locked transaction.
+let beforeLock: (() => Promise<void>) | null = null
+jest.mock("@/lib/mobile-auth", () => {
+  const actual = jest.requireActual("@/lib/mobile-auth")
+  return {
+    ...actual,
+    verifyGoogleIdToken: jest.fn(),
+    verifyAppleIdToken: jest.fn(),
+    hashRefreshToken: async (...args: Parameters<typeof actual.hashRefreshToken>) => {
+      await beforeLock?.()
+      return actual.hashRefreshToken(...args)
+    },
+    storeRefreshToken: async (...args: Parameters<typeof actual.storeRefreshToken>) => {
+      await beforeStore?.()
+      return actual.storeRefreshToken(...args)
+    },
+  }
+})
+
+import bcrypt from "bcryptjs"
+import { createServer } from "http"
+import type { AddressInfo } from "net"
+import { NextRequest } from "next/server"
+import { io as connect } from "socket.io-client"
+
+import jwt from "jsonwebtoken"
+
+import { POST as resetPassword } from "@/app/api/auth/reset-password/route"
+import {
+  signAccessToken,
+  signRefreshToken,
+  storeRefreshToken,
+  STAFF_MESSAGE,
+  SUSPENDED_MESSAGE,
+  verifyAppleIdToken,
+  verifyGoogleIdToken,
+} from "@/lib/mobile-auth"
+import { changePassword, revokeMobileSessions } from "@/lib/account-actions"
+import { issuePasswordResetLink } from "@/lib/password-reset"
+import { resetMemoryStore } from "@/lib/rate-limit-store"
+import { cleanupExpiredTokens, REVOKED_REASON_CODE } from "@/lib/mobile-auth"
+import { endPhoneSessions } from "@/lib/session-end"
+import { initSocketServer } from "@/lib/socket-server"
+import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
+
+import { closeDb, db, makeUser, testId } from "./helpers"
+
+/* eslint-disable @typescript-eslint/no-require-imports */
+const signinRoute = require("@/app/api/mobile/auth/signin/route") as typeof import("@/app/api/mobile/auth/signin/route")
+const googleRoute = require("@/app/api/mobile/auth/google/route") as typeof import("@/app/api/mobile/auth/google/route")
+const appleRoute = require("@/app/api/mobile/auth/apple/route") as typeof import("@/app/api/mobile/auth/apple/route")
+const refreshRoute = require("@/app/api/mobile/auth/refresh/route") as typeof import("@/app/api/mobile/auth/refresh/route")
+const sessionRoute = require("@/app/api/mobile/auth/session/route") as typeof import("@/app/api/mobile/auth/session/route")
+const signoutRoute = require("@/app/api/mobile/auth/signout/route") as typeof import("@/app/api/mobile/auth/signout/route")
+/* eslint-enable @typescript-eslint/no-require-imports */
+
+const PASSWORD = "orchard-lantern-quiet-42"
+const DELETED_SENTENCE = "Account not found"
+const users: string[] = []
+
+const httpServer = createServer()
+const io = initSocketServer(httpServer)
+const sockets: ReturnType<typeof connect>[] = []
+
+beforeAll(async () => {
+  await new Promise<void>((resolve) => httpServer.listen(0, resolve))
+})
+
+afterAll(async () => {
+  for (const socket of sockets) socket.close()
+  stopSponsoredScheduler()
+  globalThis.__blendnSocketIo = null
+  await new Promise<void>((resolve) => io.close(() => resolve()))
+  await db.user_oauth_accounts.deleteMany({ where: { user_id: { in: users } } })
+  await db.password_reset_tokens.deleteMany({ where: { user_id: { in: users } } })
+  await db.mobile_refresh_tokens.deleteMany({ where: { user_id: { in: users } } })
+  await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
+  await db.user.deleteMany({ where: { id: { in: users } } })
+  await closeDb()
+})
+
+let ipCounter = 0
+beforeEach(() => resetMemoryStore())
+const nextIp = () => `10.15.${Math.floor(++ipCounter / 250)}.${(ipCounter % 250) + 1}`
+
+const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  new NextRequest(`http://localhost${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-real-ip": nextIp(), ...headers },
+    body: JSON.stringify(body),
+  })
+const get = (path: string, accessToken: string) =>
+  new NextRequest(`http://localhost${path}`, { headers: { authorization: `Bearer ${accessToken}` } })
+
+/**
+ * Waits until Postgres itself says a backend is blocked on a row lock in a
+ * statement containing `fragment` -- not a sleep that hopes it got there.
+ */
+async function waitForLockWait(fragment: string, timeoutMs = 8_000) {
+  const until = Date.now() + timeoutMs
+  while (Date.now() < until) {
+    const [{ n }] = await db.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()
+        AND query LIKE ${`%${fragment}%`}`
+    if (n > 0) return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error(`no backend waited on a lock in a statement containing ${fragment}`)
+}
+
+type AccountState = "suspended" | "staff" | "deleted"
+
+/** An account in the given state, with a password, and an OAuth link for each provider. */
+async function account(label: string, state: AccountState | "ok" = "ok") {
+  const id = await makeUser(testId(label))
+  users.push(id)
+  const googleId = testId("g")
+  const appleId = testId("a")
+  const user = await db.user.update({
+    where: { id },
+    data: {
+      password: await bcrypt.hash(PASSWORD, 4),
+      role: state === "staff" ? "organizer" : "attendee",
+      suspended_at: state === "suspended" ? new Date() : null,
+      deletedAt: state === "deleted" ? new Date() : null,
+      oauth_accounts: {
+        create: [
+          { provider: "google", provider_id: googleId },
+          { provider: "apple", provider_id: appleId },
+        ],
+      },
+    },
+    select: { email: true },
+  })
+  return { id, email: user.email, googleId, appleId }
+}
+
+/**
+ * `getAuthenticatedUser` turns away an account deleted or suspended in the last
+ * twenty minutes at once, with a bare 401 (lib/account-blocklist.ts), from a set
+ * it re-reads every 30 s. Which of these tests meets a re-read is a matter of
+ * timing, and the 403 under test is what a session gets once that window has
+ * passed — so the set is marked as just read, and the account's own row speaks.
+ */
+function blocklistJustRead() {
+  const shared = globalThis as typeof globalThis & { __blendnBlocklist?: { fetchedAt: number } }
+  if (shared.__blendnBlocklist) shared.__blendnBlocklist.fetchedAt = Date.now()
+}
+
+/*
+ * `errorCode` stays `FORBIDDEN` on these: installed builds show the sentence on
+ * exactly that pair (socialSignInMessage), and the reason is `reasonCode`.
+ */
+const THE_REFUSALS = [
+  ["suspended", 403, "ACCOUNT_SUSPENDED", SUSPENDED_MESSAGE],
+  ["staff", 403, "ACCOUNT_STAFF", STAFF_MESSAGE],
+] as const
+
+describe("account codes: errorCode and sentence stay, the reason is added beside them", () => {
+  describe.each(THE_REFUSALS)("%s", (state, status, code, sentence) => {
+    it("sign-in", async () => {
+      const a = await account(`sg-${state}`, state)
+      const res = await signinRoute.POST(post("/api/mobile/auth/signin", { email: a.email, password: PASSWORD }))
+      expect(res.status).toBe(status)
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
+    })
+
+    it("Google", async () => {
+      const a = await account(`go-${state}`, state)
+      jest.mocked(verifyGoogleIdToken).mockResolvedValue({ sub: a.googleId, email: a.email } as never)
+      const res = await googleRoute.POST(post("/api/mobile/auth/google", { idToken: "t" }))
+      expect(res.status).toBe(status)
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
+    })
+
+    it("Apple", async () => {
+      const a = await account(`ap-${state}`, state)
+      jest.mocked(verifyAppleIdToken).mockResolvedValue({ sub: a.appleId, email: a.email } as never)
+      const res = await appleRoute.POST(post("/api/mobile/auth/apple", { identityToken: "t" }))
+      expect(res.status).toBe(status)
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
+    })
+
+    it("refresh, for a token that is still live", async () => {
+      const a = await account(`rf-${state}`, state)
+      const token = signRefreshToken(a.id, a.email)
+      await storeRefreshToken(a.id, token)
+      const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+      expect(res.status).toBe(status)
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
+    })
+
+    it("session", async () => {
+      const a = await account(`se-${state}`, state)
+      blocklistJustRead()
+      const res = await sessionRoute.GET(get("/api/mobile/auth/session", signAccessToken(a.id, a.email)))
+      expect(res.status).toBe(status)
+      expect(await res.json()).toEqual({ success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: code })
+    })
+  })
+
+  it("refresh tells a session the suspension ended why, with the same sentence", async () => {
+    const a = await account("rf-susp-revoked")
+    const token = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, token)
+    const at = new Date()
+    await db.mobile_refresh_tokens.updateMany({ where: { user_id: a.id }, data: { revoked_at: at } })
+    await db.user.update({ where: { id: a.id }, data: { suspended_at: new Date(at.getTime() - 1000) } })
+    const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ success: false, error: SUSPENDED_MESSAGE, errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" })
+  })
+
+  describe("deleted", () => {
+    it("Google: 401 ACCOUNT_DELETED, 'Account not found'", async () => {
+      const a = await account("go-deleted", "deleted")
+      jest.mocked(verifyGoogleIdToken).mockResolvedValue({ sub: a.googleId, email: a.email } as never)
+      const res = await googleRoute.POST(post("/api/mobile/auth/google", { idToken: "t" }))
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ success: false, error: DELETED_SENTENCE, errorCode: "ACCOUNT_DELETED", reasonCode: "ACCOUNT_DELETED" })
+    })
+
+    it("Apple: 401 ACCOUNT_DELETED, 'Account not found'", async () => {
+      const a = await account("ap-deleted", "deleted")
+      jest.mocked(verifyAppleIdToken).mockResolvedValue({ sub: a.appleId, email: a.email } as never)
+      const res = await appleRoute.POST(post("/api/mobile/auth/apple", { identityToken: "t" }))
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ success: false, error: DELETED_SENTENCE, errorCode: "ACCOUNT_DELETED", reasonCode: "ACCOUNT_DELETED" })
+    })
+
+    it("refresh: a signed token of a deleted account is ACCOUNT_DELETED, with the generic sentence", async () => {
+      // Erasure hard-deletes the refresh-token rows, so the token has no row left to find.
+      const a = await account("rf-deleted", "deleted")
+      const res = await refreshRoute.POST(
+        post("/api/mobile/auth/refresh", { refreshToken: signRefreshToken(a.id, a.email) })
+      )
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({
+        success: false,
+        error: "Invalid or expired refresh token",
+        errorCode: "ACCOUNT_DELETED",
+        reasonCode: "ACCOUNT_DELETED",
+      })
+    })
+
+    it("refresh: a live token whose account is then deleted is ACCOUNT_DELETED, with 'User not found'", async () => {
+      const a = await account("rf-deleted-live")
+      const token = signRefreshToken(a.id, a.email)
+      await storeRefreshToken(a.id, token)
+      await db.user.update({ where: { id: a.id }, data: { deletedAt: new Date() } })
+      const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({
+        success: false,
+        error: "User not found",
+        errorCode: "ACCOUNT_DELETED",
+        reasonCode: "ACCOUNT_DELETED",
+      })
+    })
+
+    it("refresh: a row that still exists says nothing about deletion (no 30-day oracle on a revoked token)", async () => {
+      const a = await account("rf-deleted-row", "deleted")
+      const token = signRefreshToken(a.id, a.email)
+      await storeRefreshToken(a.id, token)
+      await db.mobile_refresh_tokens.updateMany({ where: { user_id: a.id }, data: { revoked_at: new Date(Date.now() - 3_600_000) } })
+      const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+      expect(res.status).toBe(401)
+      const body = await res.json()
+      expect(body.errorCode).toBe("UNAUTHORIZED")
+      expect(body).not.toHaveProperty("reasonCode")
+    })
+
+    it("refresh: a forged token learns nothing", async () => {
+      const a = await account("rf-forged", "deleted")
+      const forged = `${signRefreshToken(a.id, a.email)}x`
+      const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: forged }))
+      expect(res.status).toBe(401)
+      expect((await res.json()).errorCode).toBe("UNAUTHORIZED")
+    })
+
+    it("session: the 404 stays NOT_FOUND, with ACCOUNT_DELETED as its reasonCode", async () => {
+      const a = await account("se-deleted", "deleted")
+      blocklistJustRead()
+      const res = await sessionRoute.GET(get("/api/mobile/auth/session", signAccessToken(a.id, a.email)))
+      expect(res.status).toBe(404)
+      expect(await res.json()).toEqual({ success: false, error: "User not found", errorCode: "NOT_FOUND", reasonCode: "ACCOUNT_DELETED" })
+    })
+
+    it("sign-in with a password still never confirms the account existed", async () => {
+      const a = await account("sg-deleted", "deleted")
+      const res = await signinRoute.POST(post("/api/mobile/auth/signin", { email: a.email, password: PASSWORD }))
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ success: false, error: "Invalid email or password", errorCode: "UNAUTHORIZED" })
+    })
+  })
+})
+
+describe("session-end reasons, read back from the refresh", () => {
+  const refresh = (token: string) => refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+
+  async function phones(label: string, count = 2) {
+    const a = await account(label)
+    const tokens: string[] = []
+    for (let i = 0; i < count; i++) {
+      const token = signRefreshToken(a.id, a.email)
+      await storeRefreshToken(a.id, token)
+      tokens.push(token)
+    }
+    return { ...a, tokens }
+  }
+
+  it("sign-out-everywhere (the route's revoke-all branch) stores the reason and the refresh says SESSION_REVOKED_ELSEWHERE", async () => {
+    const a = await phones("so-all")
+    const res = await signoutRoute.POST(post("/api/mobile/auth/signout", {}, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` }))
+    expect(res.status).toBe(200)
+
+    const rows = await db.mobile_refresh_tokens.findMany({ where: { user_id: a.id } })
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r) => r.revoked_at && r.revoked_reason === "signout_all")).toBe(true)
+    expect((await db.user.findUniqueOrThrow({ where: { id: a.id } })).mobile_sessions_revoked_at).not.toBeNull()
+
+    for (const token of a.tokens) {
+      const refused = await refresh(token)
+      expect(refused.status).toBe(401)
+      expect(await refused.json()).toEqual({
+        success: false,
+        error: "Invalid or expired refresh token",
+        errorCode: "SESSION_REVOKED_ELSEWHERE",
+        reasonCode: "SESSION_REVOKED_ELSEWHERE",
+      })
+    }
+  })
+
+  it("a password reset stores the reason and the refresh says PASSWORD_RESET", async () => {
+    const a = await phones("pw-reset")
+    const link = await issuePasswordResetLink(a.id, 3_600_000)
+    const res = await resetPassword(
+      post("/api/auth/reset-password", { token: new URL(link).searchParams.get("token"), password: "Copper-Meadow-Lighthouse-47" })
+    )
+    expect(res.status).toBe(200)
+
+    const rows = await db.mobile_refresh_tokens.findMany({ where: { user_id: a.id } })
+    expect(rows.every((r) => r.revoked_reason === "password_reset")).toBe(true)
+    const refused = await refresh(a.tokens[0])
+    expect(refused.status).toBe(401)
+    expect(await refused.json()).toMatchObject({ errorCode: "PASSWORD_RESET", reasonCode: "PASSWORD_RESET" })
+  })
+
+  it("signing out one device sets no reason: its refresh is the plain 401", async () => {
+    const a = await phones("so-one")
+    const res = await signoutRoute.POST(
+      post("/api/mobile/auth/signout", { refreshToken: a.tokens[0] }, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` })
+    )
+    expect(res.status).toBe(200)
+    const row = await db.mobile_refresh_tokens.findFirstOrThrow({ where: { user_id: a.id, revoked_at: { not: null } } })
+    expect(row.revoked_reason).toBeNull()
+    const refused = await refresh(a.tokens[0])
+    expect(refused.status).toBe(401)
+    const body = await refused.json()
+    expect(body.errorCode).toBe("UNAUTHORIZED")
+    expect(body).not.toHaveProperty("reasonCode")
+    // And the other phone is untouched.
+    expect((await refresh(a.tokens[1])).status).toBe(200)
+  })
+
+  it("a replay of a token a sign-out-everywhere ended, long after, is told why and does not end the sessions opened since", async () => {
+    const a = await phones("so-replay", 1)
+    await signoutRoute.POST(post("/api/mobile/auth/signout", {}, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` }))
+    // The person signs in again; the old phone retries its old token an hour later.
+    const fresh = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, fresh)
+    await db.mobile_refresh_tokens.updateMany({
+      where: { user_id: a.id, revoked_at: { not: null } },
+      data: { revoked_at: new Date(Date.now() - 60 * 60 * 1000) },
+    })
+
+    const refused = await refresh(a.tokens[0])
+    expect((await refused.json()).errorCode).toBe("SESSION_REVOKED_ELSEWHERE")
+    // Read as theft, as it used to be, this would have revoked `fresh`.
+    expect((await refresh(fresh)).status).toBe(200)
+  })
+
+  it("a token that was never ours learns no reason", async () => {
+    const a = await phones("so-forged", 1)
+    await signoutRoute.POST(post("/api/mobile/auth/signout", {}, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` }))
+    const res = await refresh(`${a.tokens[0]}x`)
+    expect(res.status).toBe(401)
+    expect((await res.json()).errorCode).toBe("UNAUTHORIZED")
+  })
+})
+
+describe("a refused refresh token tells a stranger nothing (no oracle)", () => {
+  const refresh = (token: unknown) => refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+  const secret = () => process.env.MOBILE_JWT_SECRET!
+  const plain = async (res: Response) => {
+    expect(res.status).toBe(401)
+    const body = await res.json()
+    expect(body.errorCode).toBe("UNAUTHORIZED")
+    expect(body).not.toHaveProperty("reasonCode")
+  }
+
+  /** A real session ended by sign-out-everywhere: the row exists, revoked, with its reason. */
+  async function endedSession(label: string) {
+    const a = await account(label)
+    const id = crypto.randomUUID()
+    await db.mobile_refresh_tokens.create({
+      data: {
+        id,
+        user_id: a.id,
+        token_hash: testId("hash"),
+        expires_at: new Date(Date.now() + 86_400_000),
+        revoked_at: new Date(),
+        revoked_reason: "signout_all",
+      },
+    })
+    return { ...a, jti: id }
+  }
+  const sign = (claims: object, key = secret(), options: jwt.SignOptions = {}) => jwt.sign(claims, key, options)
+
+  it("(control) the holder of the real token is told", async () => {
+    const a = await endedSession("oracle-control")
+    const res = await refresh(sign({ userId: a.id, email: a.email, type: "refresh", jti: a.jti }, secret(), { expiresIn: "1h" }))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ errorCode: "SESSION_REVOKED_ELSEWHERE", reasonCode: "SESSION_REVOKED_ELSEWHERE" })
+  })
+
+  it("(a) an expired token, right key, real jti, a row that carries a reason", async () => {
+    const a = await endedSession("oracle-expired")
+    await plain(await refresh(sign({ userId: a.id, email: a.email, type: "refresh", jti: a.jti, exp: Math.floor(Date.now() / 1000) - 60 })))
+  })
+
+  it("(b) an expired token of a deleted account, with no row", async () => {
+    const a = await account("oracle-deleted-expired", "deleted")
+    await plain(
+      await refresh(sign({ userId: a.id, email: a.email, type: "refresh", jti: crypto.randomUUID(), exp: Math.floor(Date.now() / 1000) - 60 }))
+    )
+  })
+
+  it("(c) a token signed with the wrong key, carrying a real reason row's jti", async () => {
+    const a = await endedSession("oracle-wrong-key")
+    await plain(
+      await refresh(sign({ userId: a.id, email: a.email, type: "refresh", jti: a.jti }, "not-the-secret-not-the-secret-0000", { expiresIn: "1h" }))
+    )
+    // And the same wrong key for a deleted account, with no row.
+    const gone = await account("oracle-wrong-key-deleted", "deleted")
+    await plain(
+      await refresh(sign({ userId: gone.id, email: gone.email, type: "refresh", jti: crypto.randomUUID() }, "not-the-secret-not-the-secret-0000", { expiresIn: "1h" }))
+    )
+  })
+
+  it("(d) an access token posted as the refresh token", async () => {
+    const a = await endedSession("oracle-access")
+    await plain(await refresh(signAccessToken(a.id, a.email)))
+    const gone = await account("oracle-access-deleted", "deleted")
+    await plain(await refresh(signAccessToken(gone.id, gone.email)))
+  })
+
+  it("(e) a token naming user B with user A's reason-row jti", async () => {
+    const a = await endedSession("oracle-owner")
+    const b = await account("oracle-other")
+    await plain(await refresh(sign({ userId: b.id, email: b.email, type: "refresh", jti: a.jti }, secret(), { expiresIn: "1h" })))
+  })
+})
+
+describe("every writer of a reason, through its own entry point", () => {
+  const refresh = (token: string) => refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+
+  /** Three rows: live, revoked earlier but unexpired, revoked earlier and expired. */
+  async function threeRows(label: string) {
+    const a = await account(label)
+    const earlier = new Date(Date.now() - 600_000)
+    const live = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, live)
+    const rotatedOut = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, rotatedOut)
+    await db.mobile_refresh_tokens.update({ where: { id: (jwt.decode(rotatedOut) as { jti: string }).jti }, data: { revoked_at: earlier } })
+    const expired = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, expired)
+    await db.mobile_refresh_tokens.update({
+      where: { id: (jwt.decode(expired) as { jti: string }).jti },
+      data: { revoked_at: earlier, expires_at: new Date(Date.now() - 60_000) },
+    })
+    const row = (token: string) => db.mobile_refresh_tokens.findUniqueOrThrow({ where: { id: (jwt.decode(token) as { jti: string }).jti } })
+    return { ...a, live, rotatedOut, expired, row, earlier }
+  }
+
+  async function writes(how: "password_reset" | "signout_all", label: string) {
+    const a = await threeRows(label)
+    actingUser = { id: a.id, role: "attendee" }
+    if (how === "password_reset") {
+      expect(await changePassword(PASSWORD, "Turquoise-Lantern-Harbour-91")).toMatchObject({ ok: true, revokedSessions: 1 })
+    } else {
+      expect(await revokeMobileSessions()).toBe(1)
+    }
+    actingUser = null
+    const stamp = (await db.user.findUniqueOrThrow({ where: { id: a.id } })).mobile_sessions_revoked_at!
+    // The live row ends now, with the reason.
+    expect(await a.row(a.live)).toMatchObject({ revoked_reason: how, revoked_at: stamp })
+    // A row revoked earlier and not expired gets the reason but keeps the moment it was revoked.
+    const rotated = await a.row(a.rotatedOut)
+    expect(rotated.revoked_reason).toBe(how)
+    expect(rotated.revoked_at!.getTime()).toBe(a.earlier.getTime())
+    // One that has already expired is left alone.
+    expect((await a.row(a.expired)).revoked_reason).toBeNull()
+    return a
+  }
+
+  afterEach(() => {
+    actingUser = null
+  })
+
+  it("changePassword writes password_reset, and the refresh says PASSWORD_RESET", async () => {
+    const a = await writes("password_reset", "wr-change")
+    const res = await refresh(a.live)
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ errorCode: "PASSWORD_RESET", reasonCode: "PASSWORD_RESET" })
+  })
+
+  it("revokeMobileSessions writes signout_all, and the refresh says SESSION_REVOKED_ELSEWHERE", async () => {
+    const a = await writes("signout_all", "wr-revoke")
+    const res = await refresh(a.live)
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ errorCode: "SESSION_REVOKED_ELSEWHERE", reasonCode: "SESSION_REVOKED_ELSEWHERE" })
+  })
+
+  it("every reason a writer can store has a code the refresh can say", () => {
+    expect(Object.keys(REVOKED_REASON_CODE).sort()).toEqual(["password_reset", "signout_all"])
+  })
+})
+
+describe("the sweeper keeps the reason until the token expires", () => {
+  it("deletes an old revoked row that has no reason, and keeps one that has", async () => {
+    const a = await account("sweep")
+    const hourAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000)
+    const row = (revokedHoursAgo: number | null, reason: string | null, expiresInHours = 24) => ({
+      id: crypto.randomUUID(),
+      user_id: a.id,
+      token_hash: testId("hash"),
+      expires_at: new Date(Date.now() + expiresInHours * 3_600_000),
+      revoked_at: revokedHoursAgo === null ? null : hourAgo(revokedHoursAgo),
+      revoked_reason: reason,
+    })
+    const swept = row(2, null)
+    const keptForReason = row(2, "signout_all")
+    const keptLive = row(null, null)
+    const keptRecent = row(0.1, null)
+    const expired = row(null, "password_reset", -1)
+    await db.mobile_refresh_tokens.createMany({ data: [swept, keptForReason, keptLive, keptRecent, expired] })
+
+    await cleanupExpiredTokens()
+
+    const left = new Set((await db.mobile_refresh_tokens.findMany({ where: { user_id: a.id } })).map((r) => r.id))
+    expect(left.has(swept.id)).toBe(false)
+    expect(left.has(expired.id)).toBe(false)
+    expect([keptForReason.id, keptLive.id, keptRecent.id].every((id) => left.has(id))).toBe(true)
+  })
+
+  it("end to end: a phone back after the sweep is still told why", async () => {
+    const a = await account("sweep-e2e")
+    const token = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, token)
+    await db.mobile_refresh_tokens.updateMany({
+      where: { user_id: a.id },
+      data: { revoked_at: new Date(Date.now() - 2 * 3_600_000), revoked_reason: "signout_all" },
+    })
+
+    await cleanupExpiredTokens()
+
+    const res = await refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ errorCode: "SESSION_REVOKED_ELSEWHERE", reasonCode: "SESSION_REVOKED_ELSEWHERE" })
+  })
+})
+
+describe("refresh against sign-out-everywhere, interleaved: no session survives", () => {
+  const refresh = (token: string) => refreshRoute.POST(post("/api/mobile/auth/refresh", { refreshToken: token }))
+  const settled = (promise: Promise<unknown>, ms: number) =>
+    Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms))])
+
+  async function onePhone(label: string) {
+    const a = await account(label)
+    // Issued a second ago, so the stamp sign-out reads is after its `iat` whatever the clock's grain.
+    const old = jwt.sign({ userId: a.id, email: a.email, type: "refresh", jti: crypto.randomUUID() }, process.env.MOBILE_JWT_SECRET!, {
+      expiresIn: "30d",
+      noTimestamp: true,
+    })
+    const aged = jwt.sign({ ...(jwt.decode(old) as object), iat: Math.floor(Date.now() / 1000) - 5 }, process.env.MOBILE_JWT_SECRET!)
+    await storeRefreshToken(a.id, aged)
+    return { ...a, old: aged }
+  }
+
+  const live = (userId: string) => db.mobile_refresh_tokens.count({ where: { user_id: userId, revoked_at: null } })
+
+  afterEach(() => {
+    beforeStore = null
+    beforeLock = null
+  })
+
+  it("a refresh that holds the user row first: sign-out waits, then revokes the token the refresh just stored", async () => {
+    const a = await onePhone("race-refresh-first")
+    let inTransaction!: () => void
+    const reached = new Promise<void>((resolve) => (inTransaction = resolve))
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    beforeStore = async () => {
+      inTransaction()
+      await held
+    }
+
+    const refreshing = refresh(a.old)
+    await reached
+    beforeStore = null
+
+    const signingOut = signoutRoute.POST(post("/api/mobile/auth/signout", {}, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` }))
+    // It cannot finish while the refresh holds the row: Postgres shows it waiting on the lock.
+    await waitForLockWait("FOR NO KEY UPDATE")
+    expect(await settled(signingOut, 50)).toBe(false)
+
+    release()
+    const refreshed = await refreshing
+    expect((await signingOut).status).toBe(200)
+
+    // The refresh won the lock, so it succeeded; its new session is exactly what sign-out then ended.
+    expect(refreshed.status).toBe(200)
+    const { accessToken, refreshToken } = (await refreshed.json()).data
+    expect(await live(a.id)).toBe(0)
+    const stamp = (await db.user.findUniqueOrThrow({ where: { id: a.id } })).mobile_sessions_revoked_at!
+    expect((jwt.decode(accessToken) as { iat: number }).iat * 1000).toBeLessThanOrEqual(stamp.getTime())
+    const again = await refresh(refreshToken)
+    expect(again.status).toBe(401)
+    expect((await again.json()).errorCode).toBe("SESSION_REVOKED_ELSEWHERE")
+    // And the access token that refresh handed out is refused by the API, not only by the arithmetic.
+    expect((await sessionRoute.GET(get("/api/mobile/auth/session", accessToken))).status).toBe(401)
+  })
+
+  it("a sign-out that holds the user row first: the refresh waits, sees the stamp, stores nothing", async () => {
+    const a = await onePhone("race-signout-first")
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    let ended!: () => void
+    const endedLock = new Promise<void>((resolve) => (ended = resolve))
+    const signingOut = db.$transaction(async (tx) => {
+      await endPhoneSessions(tx, a.id, "signout_all")
+      ended()
+      await held
+    })
+    await endedLock
+
+    const refreshing = refresh(a.old)
+    await waitForLockWait("FOR SHARE")
+    expect(await settled(refreshing, 50)).toBe(false)
+
+    release()
+    await signingOut
+    const res = await refreshing
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ errorCode: "SESSION_REVOKED_ELSEWHERE", reasonCode: "SESSION_REVOKED_ELSEWHERE" })
+    expect(await live(a.id)).toBe(0)
+    expect(await db.mobile_refresh_tokens.count({ where: { user_id: a.id } })).toBe(1)
+  })
+
+  /** A phone whose token T has been rotated to S by a real refresh, so T is revoked, reason-less, and inside the reuse grace. */
+  async function rotated(label: string) {
+    const a = await onePhone(label)
+    const first = await refresh(a.old)
+    expect(first.status).toBe(200)
+    return { ...a, successor: (await first.json()).data.refreshToken as string }
+  }
+
+  const endings = [
+    ["sign-out-everywhere", "SESSION_REVOKED_ELSEWHERE"],
+    ["a password reset", "PASSWORD_RESET"],
+  ] as const
+  async function end(how: (typeof endings)[number][0], a: { id: string; email: string }) {
+    if (how === "sign-out-everywhere") {
+      const res = await signoutRoute.POST(post("/api/mobile/auth/signout", {}, { authorization: `Bearer ${signAccessToken(a.id, a.email)}` }))
+      expect(res.status).toBe(200)
+      return
+    }
+    const link = await issuePasswordResetLink(a.id, 3_600_000)
+    const res = await resetPassword(
+      post("/api/auth/reset-password", { token: new URL(link).searchParams.get("token"), password: "Copper-Meadow-Lighthouse-47" })
+    )
+    expect(res.status).toBe(200)
+  }
+
+  describe.each(endings)("a token rotated out a moment ago, replayed after %s", (how, code) => {
+    it("is refused, says why, and mints no live session", async () => {
+      const a = await rotated(`replay-${how}`)
+      await end(how, a)
+      const replay = await refresh(a.old)
+      expect(replay.status).toBe(401)
+      expect(await replay.json()).toMatchObject({ errorCode: code, reasonCode: code })
+      expect(await live(a.id)).toBe(0)
+      // And the successor, which was live when it ended, is refused with the same reason.
+      expect((await (await refresh(a.successor)).json()).errorCode).toBe(code)
+    })
+
+    it("is refused when the end lands between its first check and its transaction", async () => {
+      const a = await rotated(`replay-race-${how}`)
+      let paused!: () => void
+      const atTheLock = new Promise<void>((resolve) => (paused = resolve))
+      let go!: () => void
+      const held = new Promise<void>((resolve) => (go = resolve))
+      beforeLock = async () => {
+        paused()
+        await held
+      }
+      const replaying = refresh(a.old)
+      await atTheLock
+      beforeLock = null
+      // The grace path has already accepted the replay and retired the successor: nothing is live to revoke.
+      await end(how, a)
+      go()
+      const replay = await replaying
+      expect(replay.status).toBe(401)
+      expect(await live(a.id)).toBe(0)
+    })
+  })
+
+  it("is refused by the stamp alone, for a row no ending ever marked (before this reason existed)", async () => {
+    const a = await rotated("replay-stamp-only")
+    let paused!: () => void
+    const atTheLock = new Promise<void>((resolve) => (paused = resolve))
+    let go!: () => void
+    const held = new Promise<void>((resolve) => (go = resolve))
+    beforeLock = async () => {
+      paused()
+      await held
+    }
+    const replaying = refresh(a.old)
+    await atTheLock
+    beforeLock = null
+    // Only the stamp, as a sign-out from before `revoked_reason` left it: the rows carry no reason.
+    await db.user.update({ where: { id: a.id }, data: { mobile_sessions_revoked_at: new Date() } })
+    go()
+    const replay = await replaying
+    expect(replay.status).toBe(401)
+    expect(await live(a.id)).toBe(0)
+  })
+
+  it.each([
+    ["suspension", { suspended_at: new Date() }, 403, { errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" }],
+    ["deletion", { deletedAt: new Date() }, 401, { errorCode: "ACCOUNT_DELETED", reasonCode: "ACCOUNT_DELETED" }],
+  ] as const)("a %s that holds the user row first: the refresh waits, then refuses, and stores nothing", async (_what, change, status, body) => {
+    const a = await onePhone(`race-${_what}`)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    let locked!: () => void
+    const hasLock = new Promise<void>((resolve) => (locked = resolve))
+    const changing = db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: a.id }, data: { ...change } })
+      locked()
+      await held
+    })
+    await hasLock
+
+    // The refresh's first look (outside the transaction) still sees a live account; the lock is what it waits on.
+    const refreshing = refresh(a.old)
+    await waitForLockWait("FOR SHARE")
+    expect(await settled(refreshing, 50)).toBe(false)
+
+    release()
+    await changing
+    const res = await refreshing
+    expect(res.status).toBe(status)
+    expect(await res.json()).toMatchObject(body)
+    expect(await db.mobile_refresh_tokens.count({ where: { user_id: a.id } })).toBe(1)
+    expect(await live(a.id)).toBe(1) // the old token, untouched: nothing was rotated
+  })
+
+  it("a refresh after sign-out, with a token issued since, still works", async () => {
+    const a = await onePhone("race-after")
+    await db.$transaction((tx) => endPhoneSessions(tx, a.id, "signout_all"))
+    await new Promise((r) => setTimeout(r, 1100))
+    const fresh = signRefreshToken(a.id, a.email)
+    await storeRefreshToken(a.id, fresh)
+    expect((await refresh(fresh)).status).toBe(200)
+  })
+})
+
+describe("signInMethod on /auth/session", () => {
+  const method = async (a: { id: string; email: string }) => {
+    const res = await sessionRoute.GET(get("/api/mobile/auth/session", signAccessToken(a.id, a.email)))
+    expect(res.status).toBe(200)
+    return (await res.json()).data.signInMethod
+  }
+
+  async function bare(label: string, providers: string[], password: boolean) {
+    const id = await makeUser(testId(label))
+    users.push(id)
+    const user = await db.user.update({
+      where: { id },
+      data: { password: password ? await bcrypt.hash(PASSWORD, 4) : null },
+      select: { email: true },
+    })
+    // Oldest first, so the last one listed is the most recently linked.
+    for (const provider of providers) {
+      await db.user_oauth_accounts.create({ data: { user_id: id, provider, provider_id: testId(provider), created_at: new Date(Date.now() + providers.indexOf(provider) * 1000) } })
+    }
+    return { id, email: user.email }
+  }
+
+  it("is 'password' for an account with a password", async () => {
+    expect(await method(await bare("sm-pw", [], true))).toBe("password")
+  })
+  it("is 'google' for a Google-only account", async () => {
+    expect(await method(await bare("sm-g", ["google"], false))).toBe("google")
+  })
+  it("is 'apple' for an Apple-only account", async () => {
+    expect(await method(await bare("sm-a", ["apple"], false))).toBe("apple")
+  })
+  it("is the most recently linked provider when there are two and no password", async () => {
+    expect(await method(await bare("sm-ga", ["google", "apple"], false))).toBe("apple")
+  })
+  it("is 'password' when an account has a password and a provider (it is the one with a password to change)", async () => {
+    expect(await method(await bare("sm-both", ["google"], true))).toBe("password")
+  })
+})
+
+describe("socket handshake codes", () => {
+  async function handshake(userId: string, email: string) {
+    const { port } = httpServer.address() as AddressInfo
+    const socket = connect(`http://localhost:${port}`, {
+      auth: { token: signAccessToken(userId, email) },
+      transports: ["websocket"],
+      reconnection: false,
+    })
+    sockets.push(socket)
+    return new Promise<{ connected: true } | { message: string; data?: { code?: string } }>((resolve) => {
+      socket.on("connect", () => resolve({ connected: true }))
+      socket.on("connect_error", (error) => resolve({ message: error.message, data: (error as Error & { data?: { code?: string } }).data }))
+    })
+  }
+
+  it.each([
+    ["suspended", "ACCOUNT_SUSPENDED"],
+    ["staff", "ACCOUNT_STAFF"],
+    ["deleted", "ACCOUNT_DELETED"],
+  ] as const)("a %s account is refused with data.code %s and the message it always had", async (state, code) => {
+    const a = await account(`sk-${state}`, state)
+    expect(await handshake(a.id, a.email)).toEqual({ message: "Authentication required", data: { code } })
+  })
+
+  it("a live account connects", async () => {
+    const a = await account("sk-ok")
+    expect(await handshake(a.id, a.email)).toEqual({ connected: true })
+  })
+
+  it("a phone signed out everywhere is refused, with no account code (it is the session's to name, not the socket's)", async () => {
+    const a = await account("sk-signedout")
+    const token = signAccessToken(a.id, a.email)
+    await db.user.update({ where: { id: a.id }, data: { mobile_sessions_revoked_at: new Date(Date.now() + 1000) } })
+    const { port } = httpServer.address() as AddressInfo
+    const socket = connect(`http://localhost:${port}`, { auth: { token }, transports: ["websocket"], reconnection: false })
+    sockets.push(socket)
+    const error = await new Promise<Error & { data?: unknown }>((resolve) => socket.on("connect_error", resolve))
+    expect(error.message).toBe("Authentication required")
+    expect(error.data).toBeUndefined()
+  })
+})
+
+describe("the migration, on a database built by `migrate deploy`", () => {
+  it("adds mobile_refresh_tokens.revoked_reason as nullable text, with no default", async () => {
+    const rows = await db.$queryRaw<{ data_type: string; is_nullable: string; column_default: string | null }[]>`
+      SELECT data_type, is_nullable, column_default FROM information_schema.columns
+      WHERE table_name = 'mobile_refresh_tokens' AND column_name = 'revoked_reason'`
+    expect(rows).toEqual([{ data_type: "text", is_nullable: "YES", column_default: null }])
+  })
+
+  it("leaves the CHECK validated, not NOT VALID (the migration validates it after adding it)", async () => {
+    const rows = await db.$queryRaw<{ convalidated: boolean }[]>`
+      SELECT convalidated FROM pg_constraint WHERE conname = 'mobile_refresh_tokens_revoked_reason_known'`
+    expect(rows).toEqual([{ convalidated: true }])
+  })
+
+  it("refuses a reason the refresh cannot say, by the CHECK db push would not have made", async () => {
+    const a = await account("check")
+    const insert = (reason: string | null) =>
+      db.mobile_refresh_tokens.create({
+        data: { user_id: a.id, token_hash: testId("hash"), expires_at: new Date(Date.now() + 3_600_000), revoked_at: new Date(), revoked_reason: reason },
+      })
+    for (const bad of ["bogus", "", "SIGNOUT_ALL", "signout_all "]) {
+      await expect(insert(bad)).rejects.toThrow(/mobile_refresh_tokens_revoked_reason_known/)
+    }
+    // Every reason the refresh can say is one the database accepts.
+    for (const reason of Object.keys(REVOKED_REASON_CODE)) await expect(insert(reason)).resolves.toBeDefined()
+    await expect(insert(null)).resolves.toBeDefined()
+  })
+})

@@ -19,6 +19,13 @@ import { namesInRoom, recognisedInRoomBy } from "./identity"
 import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
 
+/** `error.data.code` on a refused handshake, by the account's state. */
+const SOCKET_REFUSAL_CODE = {
+  deleted: "ACCOUNT_DELETED",
+  suspended: "ACCOUNT_SUSPENDED",
+  staff: "ACCOUNT_STAFF",
+} as const
+
 /*
  * The Socket.io instance lives on `globalThis`, not in this module.
  *
@@ -854,8 +861,11 @@ export function initSocketServer(httpServer: HttpServer): Server {
           where: { id: decoded.userId },
           select: { deletedAt: true, suspended_at: true, role: true, mobile_sessions_revoked_at: true },
         })
-        if (accountBlockReason(account)) {
-          return next(new Error("Authentication required"))
+        const blocked = accountBlockReason(account)
+        if (blocked) {
+          // The reason rides on `data.code` so the phone can say why (Flow 15);
+          // the message is the one it always was.
+          return next(Object.assign(new Error("Authentication required"), { data: { code: SOCKET_REFUSAL_CODE[blocked] } }))
         }
         // A token from before the phones were signed out (SCRUM-603): the
         // eviction closed its socket, and this keeps it from reconnecting.

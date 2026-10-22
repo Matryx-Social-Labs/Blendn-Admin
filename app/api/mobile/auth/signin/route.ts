@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { accountRefusal } from "@/lib/account-refusal"
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
 import { profileForSelfResponse } from "@/lib/self-profile"
@@ -8,14 +9,11 @@ import {
   signAccessToken,
   signRefreshToken,
   storeRefreshToken,
-  STAFF_MESSAGE,
-  SUSPENDED_MESSAGE,
 } from "@/lib/mobile-auth"
 import {
   successResponse,
   validationErrorResponse,
   unauthorizedResponse,
-  forbiddenResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { signinSchema } from "@/lib/validations/auth"
@@ -94,8 +92,7 @@ export async function POST(request: NextRequest) {
      * file.
      */
     const blocked = accountBlockReason(user)
-    if (blocked === "suspended") return forbiddenResponse(SUSPENDED_MESSAGE)
-    if (blocked === "staff") return forbiddenResponse(STAFF_MESSAGE)
+    if (blocked === "suspended" || blocked === "staff") return accountRefusal(blocked)
     if (blocked) return unauthorizedResponse("Invalid email or password")
 
     // Generate tokens

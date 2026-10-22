@@ -77,6 +77,17 @@ const envSchema = z.object({
   GEOCODE_UPSTREAM: z.string().url().optional(),
   /** Overpass interpreter URL for /api/footprint. Unset in production (main + mirror); CI's e2e stubs it. */
   FOOTPRINT_UPSTREAM: z.string().url().optional(),
+  /**
+   * The oldest app build the mobile API still serves ("1.4.0"). A request whose
+   * `X-App-Version` is a plain version below it is refused with a 426
+   * `UPDATE_REQUIRED`; a missing, `unknown` or unparsable header never is.
+   * Unset: no minimum. Read by `middleware.ts` (Edge) through lib/mobile-gate.ts.
+   */
+  MOBILE_MIN_APP_VERSION: z.string().optional(),
+  /** `1` or `true`: every `/api/mobile` request is a 503 `MAINTENANCE`. Unset: off. `/api/health` and the dashboard are never affected. */
+  MAINTENANCE_MODE: z.string().optional(),
+  /** The `Retry-After` of that 503, in seconds (default 300, at most 3600). */
+  MAINTENANCE_RETRY_AFTER_SECONDS: z.string().optional(),
   DASHBOARD_HOST: z.string().optional(),
   API_HOST: z.string().optional(),
   /**

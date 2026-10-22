@@ -44,6 +44,12 @@ describe("errorResponse", () => {
     expect(body.success).toBe(false)
   })
 
+  it("adds reasonCode beside an errorCode that stays what it was, and omits it otherwise", async () => {
+    const withReason = await errorResponse("x", 403, ErrorCode.FORBIDDEN, ErrorCode.ACCOUNT_SUSPENDED).json()
+    expect(withReason).toEqual({ success: false, error: "x", errorCode: "FORBIDDEN", reasonCode: "ACCOUNT_SUSPENDED" })
+    expect(await errorResponse("x", 403).json()).not.toHaveProperty("reasonCode")
+  })
+
   // SCRUM-324: the envelope promises an errorCode on every error; a bare
   // status left it off (the Google and Apple sign-in 401s among them).
   it.each([

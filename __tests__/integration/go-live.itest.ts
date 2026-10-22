@@ -243,16 +243,19 @@ describe("POST /venues/:id/live", () => {
   })
 
   it.each([
-    ["not onboarded, no age", { age: null, onboarded: false }],
-    ["onboarded, no age on file", { age: null, onboarded: true }],
-    ["onboarded at 17, from before the 18+ ruling", { age: 17, onboarded: true }],
-  ])("refuses somebody %s (strictly 18+, known age)", async (_label, opts) => {
+    ["not onboarded, no age", { age: null, onboarded: false }, "FORBIDDEN", "PROFILE_INCOMPLETE"],
+    ["onboarded, no age on file", { age: null, onboarded: true }, "AGE_RESTRICTED", "AGE_UNKNOWN"],
+    ["onboarded at 17, from before the 18+ ruling", { age: 17, onboarded: true }, "AGE_RESTRICTED", undefined],
+  ])("refuses somebody %s (strictly 18+, known age)", async (_label, opts, code, reason) => {
     const v = await venue()
     const p = await person("glage", { age: opts.age })
     if (!opts.onboarded) await db.profiles.update({ where: { id: p.id }, data: { onboarded: false } })
     const { status, json } = await goLive(p.token, v)
     expect(status).toBe(403)
-    expect(json.errorCode).toBe(opts.onboarded ? "AGE_RESTRICTED" : "FORBIDDEN")
+    // `errorCode` is what installed builds match on and never changes; the two a
+    // person can fix say so in `reasonCode` (Flow 15), and a known age under 18 has none.
+    expect(json.errorCode).toBe(code)
+    expect(json.reasonCode).toBe(reason)
     expect(await db.event_check_ins.count({ where: { user_id: p.id } })).toBe(0)
     expect((await venueDetail(p.token, v)).status).toBe(403)
   })
