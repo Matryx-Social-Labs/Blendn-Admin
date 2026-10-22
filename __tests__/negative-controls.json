@@ -1989,7 +1989,7 @@
       "date": "2026-10-22"
     },
     "push-channels.test.ts": {
-      "guards": "Flow 9: a build that does not say channelSet 2 is sent every kind on the channel it always got (a push naming a channel the install never created lands in Miscellaneous); a build that does gets each kind on one of people/crew/later/messages/rooms/events/offers/default.",
+      "guards": "Flow 9: a build that does not say channelSet 2 is sent every kind on the channel it always got (a push naming a channel the install never created lands in Miscellaneous); a build that does gets each kind on one of matches/crew/after-the-night/messages/rooms/events/offers/default.",
       "mutation": "M1517 `if ((channelSet ?? 0) >= CHANNEL_SET_FLOW9) return deliveryForFlow9(data)` replaced by `if (true) return deliveryForFlow9(data)`.",
       "observed": "2026-10-22: M1517: 13 of the 40 per-kind cases failing (every kind whose channel changed, 'a build before Flow 9 is sent what it always was'). Reverted; all green.",
       "date": "2026-10-22"
@@ -2008,14 +2008,20 @@
     },
     "profile-friends-push-gaps.itest.ts": {
       "guards": "Flows 6 and 9 on a real database: the per-kind push switches stop their kind's push on the single and bulk paths and leave the bell; an older build is sent event_changed as event_update; photo_states lists a pulled photo only inside the 7-day notice window and only to its owner; badges are absent when show_badges is off or the viewer cannot see who the person is; every way a friend link or person is out of reach answers one body.",
-      "mutation": "M1523 `switchedOn` returns {} (`column && false`). M1524 `if (true) return deliveryForFlow9(data)` (every build gets the new channels). M1525 payloadFor never downgrades event_changed. M1526 the notice window dropped (`pulled_at: { gte: since }` removed). M1527 `p.show_badges !== false` dropped. M1528 `(isSelf || identified)` -> true for any viewer. M1529 the blocked-invite 404 says `reasonCode: \"BLOCKED\"` instead of INVITE_UNAVAILABLE.",
-      "observed": "2026-10-22: M1523: 2 failing (single and bulk). M1524: the channel case failing. M1525: 4 failing (the channel case, event_changed downgrade, and the two switch cases that read the same sent list). M1526: 2 failing. M1527: 1 failing. M1528: 1 failing. M1529: 1 failing, after the test was extended to reach the `connectable` branch (the first draft of the case went through `identityForRef` and survived it: that is why 'an invite whose owner blocked you' exists). Each reverted; 16 of 16.",
+      "mutation": "M1523 `switchedOn` returns {} (`column && false`). M1524 `if (true) return deliveryForFlow9(data)` (every build gets the new channels). M1525 payloadFor never downgrades event_changed. M1526 the notice window dropped (`pulled_at: { gte: since }` removed). M1527 `p.show_badges !== false` dropped. M1528 `(isSelf || identified)` -> true for any viewer. M1529 the blocked-invite 404 says `reasonCode: \"BLOCKED\"` instead of INVITE_UNAVAILABLE. M1532 `board_request: \"push_matches\"` removed from the switch map. M1538 `.strict()` dropped from the preferences PUT schema.",
+      "observed": "2026-10-22: M1523: 2 failing (single and bulk). M1524: the channel case failing. M1525: 4 failing (the channel case, event_changed downgrade, and the two switch cases that read the same sent list). M1526: 2 failing. M1527: 1 failing. M1528: 1 failing. M1529: 1 failing, after the test was extended to reach the `connectable` branch (the first draft of the case went through `identityForRef` and survived it: that is why 'an invite whose owner blocked you' exists). Each reverted; 16 of 16. 2026-10-22 (preferences endpoint): M1532: 1 failing ('matches off stops every kind it covers, the board\\'s included'). M1538: 1 failing (a key it does not know). Reverted; 18 of 18.",
       "date": "2026-10-22"
     },
     "report-actioned.itest.ts": {
       "guards": "A report that led to action (status resolved) tells its reporter with report_actioned, naming nobody; a dismissal tells nobody; reinstating an account afterwards tells nobody.",
       "mutation": "M1530 `if (reviewed.status === \"resolved\")` -> `if (decision !== \"reinstate\")` (a dismissal also sends). M1531 `decision !== \"reinstate\"` kept beside the status check, then removed as redundant: a reinstate's outcome is `reviewed`, so the clause was unreachable and M1531 (dropping it) survived by design.",
       "observed": "2026-10-22: M1530: 1 failing ('a dismissal sends nothing'). M1531: survived, which is how the redundant clause was found and deleted. Reverted; 2 of 2.",
+      "date": "2026-10-22"
+    },
+    "notification-feed-details.itest.ts": {
+      "guards": "Flow 9 on a real database: a friend request's row names and shows the asker only while the request waits (open flips false once dismissed or not the reader's); a match row shows the OTHER side's pseudonym; the badge counts conversations with a visible unread message, not hidden ones; data.reason picks cancelled over time over venue; every bulk push carries that recipient's own notificationId.",
+      "mutation": "M1533 delete `dismissed_at: null` from the friend-request lookup. M1534 the match row reads the viewer's own pseudonym. M1535 drop VISIBLE_DM from the badge's unread-conversation count. M1536 reverse the reason priority. M1537 the bulk push built without the row id.",
+      "observed": "2026-10-22: M1533: 1 failing ('name and show the asker while the request waits'). M1534: 1 failing. M1535: 1 failing ('badgeCount'). M1536: 1 failing ('the reason is the one that matters most'). M1537: 2 failing (the event push and the bulk-ids case). Each reverted; 8 of 8.",
       "date": "2026-10-22"
     }
   },
