@@ -44,7 +44,8 @@
         "timezone",
         "title",
         "venue",
-        "venueName"
+        "venueName",
+        "visibility"
       ],
       "pagination": [
         "hasMore",
@@ -358,6 +359,7 @@
     "data": [
       "address",
       "amenities",
+      "area",
       "categories",
       "changedAt",
       "changedFields",
