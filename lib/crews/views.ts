@@ -133,7 +133,7 @@ export const INVITES_READ_CAP = 200
  * starts). `totalCount` is the invites an accept would take, the list's own
  * rule, so the number is never above what paging would show.
  */
-export async function crewsOf(userId: string, invitesQuery: { limit: number; after: Keyset | null }) {
+export async function crewsOf(userId: string, invitesQuery: { limit: number; after: (Keyset & { at: Date }) | null }) {
   const [crews, invites] = await Promise.all([
     db.crews.findMany({
       where: { dissolved_at: null, members: { some: { user_id: userId } } },
@@ -215,8 +215,8 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
 }
 
 /** After `k` in `created_at DESC, id DESC` order, the same cut `createdBefore` makes in SQL. */
-const isAfter = (row: { created_at: Date; id: string }, k: Keyset) => {
-  const at = (k.at ?? new Date(0)).getTime()
+const isAfter = (row: { created_at: Date; id: string }, k: Keyset & { at: Date }) => {
+  const at = k.at.getTime()
   return row.created_at.getTime() < at || (row.created_at.getTime() === at && row.id < k.id)
 }
 

@@ -157,6 +157,12 @@ describe("GET /me/rsvps and /users/:id/favorites: cursor beside page", () => {
     }
   })
 
+  it("favorites: no params is a build that cannot page, and is answered up to 200", async () => {
+    const r = await body(await get(favoritesRoute, `/api/mobile/users/${me.id}/favorites`, me, { params: Promise.resolve({ userId: me.id }) }))
+    expect(r.json.data.pagination.limit).toBe(200)
+    expect(r.json.data.events).toHaveLength(6)
+  })
+
   it("favorites: the same walk, newest saved first, nothing repeated or lost", async () => {
     const ctx = { params: Promise.resolve({ userId: me.id }) }
     const all = await body(await get(favoritesRoute, `/api/mobile/users/${me.id}/favorites?limit=100`, me, ctx))
@@ -373,6 +379,43 @@ describe("GET /crews: invites, capped and paged", () => {
     expect(seen).toEqual(ids)
     expect(sizes).toEqual([2, 2, 1])
     expect((await pageOf("?cursor=garbage")).status).toBe(400)
+    // A well-formed cursor with no time is not one of ours either.
+    const noTime = Buffer.from(JSON.stringify({ t: null, id: "00000000-0000-4000-8000-000000000000" })).toString("base64url")
+    expect((await pageOf(`?cursor=${noTime}`)).status).toBe(400)
+  })
+
+  it("201 open invites: the read is capped at 200, and the last page says it is the last", async () => {
+    const lots = await person("gp_cr_lots")
+    const owner = await person("gp_cr_lotsowner")
+    const [user1_id, user2_id] = conversationPair(owner.id, lots.id)
+    await db.friendships.create({ data: { user1_id, user2_id } })
+    const crews = await Promise.all(
+      Array.from({ length: 201 }, (_, i) =>
+        db.crews.create({ data: { name: `Lots ${i}`, emblem_seed: `l${i}`, created_by: owner.id } })
+      )
+    )
+    crewIds.push(...crews.map((c) => c.id))
+    await db.crew_members.createMany({
+      data: crews.map((c) => ({ crew_id: c.id, user_id: owner.id, role: "owner" as const, consented_reveal_at: new Date() })),
+    })
+    const base = Date.now() - 5 * HOUR
+    await db.crew_invites.createMany({
+      data: crews.map((c, i) => ({ crew_id: c.id, invited_user_id: lots.id, invited_by: owner.id, created_at: new Date(base + i * 1000) })),
+    })
+    const seen: string[] = []
+    let last: { hasMore: boolean; totalCount: number } | null = null
+    let cursor: string | null = null
+    for (let i = 0; i < 10; i++) {
+      const r = await body(await get(crewsRoute, `/api/mobile/crews?limit=100${cursor ? `&cursor=${cursor}` : ""}`, lots))
+      seen.push(...r.json.data.invites.map((x: { crewId: string }) => x.crewId))
+      last = r.json.data.invitesPagination
+      expect(last!.totalCount).toBeLessThanOrEqual(200)
+      cursor = r.json.data.invitesPagination.nextCursor
+      if (!cursor) break
+    }
+    expect(seen).toHaveLength(200)
+    expect(new Set(seen).size).toBe(200)
+    expect(last).toMatchObject({ hasMore: false, totalCount: 200 })
   })
 })
 

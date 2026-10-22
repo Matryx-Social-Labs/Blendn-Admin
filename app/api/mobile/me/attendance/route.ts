@@ -100,6 +100,8 @@ export async function GET(request: NextRequest) {
             venue_id: true,
             // What kind of place a visit was, from the row already being read.
             venue: { select: { venue_type: true } },
+            // Your own rating of the night, if any: `GET /events/:id/rating`'s `ratedAt`, from the same read.
+            ratings: { where: { user_id: authUser.userId }, select: { updated_at: true }, take: 1 },
           },
         })
       : []
@@ -110,13 +112,6 @@ export async function GET(request: NextRequest) {
       events.filter((e) => e.kind === "venue_day").map((e) => e.id)
     )
 
-    // Whether you rated each night: one grouped read for the page, `GET /events/:id/rating`'s `ratedAt`.
-    const rated = await db.event_ratings.findMany({
-      where: { user_id: authUser.userId, event_id: { in: events.filter((e) => e.kind === "event").map((e) => e.id) } },
-      select: { event_id: true, updated_at: true },
-    })
-    const ratedAt = new Map(rated.map((r) => [r.event_id, r.updated_at]))
-
     // Back into attendance order. `findMany` returns rows in whatever order
     // Postgres likes, and the useful order is the one the query above chose.
     const byId = new Map(events.map((e) => [e.id, e]))
@@ -124,7 +119,7 @@ export async function GET(request: NextRequest) {
       .map((a) => {
         const event = byId.get(a.event_id)
         if (!event) return null
-        const { venue_id, venue, ...shown } = event
+        const { venue_id, venue, ratings, ...shown } = event
         const visit = event.kind === "venue_day"
         // Only a visit to a place carries these; an event's own row says null.
         return {
@@ -134,7 +129,7 @@ export async function GET(request: NextRequest) {
           venue_id: visit ? venue_id : null,
           venue_type: visit ? (venue?.venue_type ?? null) : null,
           // A place is not a night you rate, so a visit says null.
-          ratedAt: ratedAt.get(event.id) ?? null,
+          ratedAt: event.kind === "event" ? (ratings[0]?.updated_at ?? null) : null,
         }
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)

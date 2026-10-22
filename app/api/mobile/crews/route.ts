@@ -21,8 +21,10 @@ export async function GET(request: NextRequest) {
     if (limited) return limited
     // The invites page: `?limit=` (default 50) and `?cursor=`; neither is an installed build, answered with up to 200.
     const invites = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.REQUESTS, LEGACY_PAGE)
-    if (invites === "bad_cursor") return errorResponse("Invalid cursor", 400)
-    return successResponse(await crewsOf(authUser.userId, invites))
+    // A cursor with no time is not one of ours (invites are ordered by when they were made).
+    if (invites === "bad_cursor" || (invites.after && !invites.after.at)) return errorResponse("Invalid cursor", 400)
+    const { limit, after } = invites
+    return successResponse(await crewsOf(authUser.userId, { limit, after: after?.at ? { ...after, at: after.at } : null }))
   } catch (error) {
     logger.error("List crews error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to load crews")

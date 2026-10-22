@@ -29,8 +29,6 @@ const ALLOWED = new Set([
   "lib/reports.ts",
   // Selects who rated (user_id), to leave them out of the "rate the night" push.
   "lib/services/event-notifications.service.ts",
-  // The caller's OWN ratings of the nights on their page, event_id and updated_at only (`ratedAt`): never a score, never anyone else's.
-  "app/api/mobile/me/attendance/route.ts",
 ])
 
 const READS_SCORES = [
