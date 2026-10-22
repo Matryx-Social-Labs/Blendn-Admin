@@ -54,7 +54,7 @@ counts**, and a ticket does not close until it produces its artefact — see §8
 | 5 | Measure it | §3's snippet | Numbers: contrast, overflow, `h1` count, DOM size. |
 | 6 | Gates | §2 | All six green. |
 | 7 | Specialists | §4 | Launched in the background, in parallel with the work. Findings triaged: fix what this change caused, file the rest. |
-| 8 | **Drive the journey** | §8 | Maestro flow + run for the client, a driven journey for the dashboard, **and the database row read back**. |
+| 8 | **Drive the journey** | §8 | Appium drive for the client, a driven journey for the dashboard, **and the database row read back**. |
 
 Steps 1–3 keep their numbers in `DESIGN-CHAIN.md`, so a reference to "step 2"
 means the same thing in both documents.
@@ -62,7 +62,7 @@ means the same thing in both documents.
 ### Say it out loud before saying it is done
 
 ```
-8 · Driven:     <maestro flow + result, iOS>  |  <same flow, Android>  |  <dashboard journey driven>
+8 · Driven:     <appium drive + result, iOS>  |  <same drive, Android>  |  <dashboard journey driven>
     Read back:  <the SELECT, and what it returned>
     Or:         not driven — <the specific reason>, and the ticket stays open
 ```
@@ -361,24 +361,34 @@ Telling *mine* from *already there* is the cheap move: remove the newest
 component and reload. `/dashboard/events/new` reports a hydration mismatch that
 survives that test, so it is the two Leaflet maps, not the change on top of them.
 
-**Maestro MCP — the Expo client.** The dashboard is half the product; a journey
-that ends at a check-in has to be driven on a phone.
+**Appium MCP — the Expo client** (since 2026-10-20; Maestro is the fallback).
+The dashboard is half the product; a journey that ends at a check-in has to be
+driven on a phone.
 
 ```
-list_devices    → ALWAYS first; every other local call needs its device_id
-inspect_screen  → the view hierarchy, before targeting anything
-run             → one full flow as inline YAML, not a string of single commands
+appium server   → `curl -s localhost:4723/status`; if nothing answers, start `appium` in the background
+select_device   → then appium_session_management action=create (bundle com.matryxsociallabs.blendn)
+appium_get_page_source → the hierarchy, before targeting anything; accessibility id over xpath
+appium_gesture  → taps, swipes; action=scroll_to_element for anything off-screen
+appium_screenshot / appium_session_management action=delete when done
 ```
+
+**One simulator or emulator on the whole Mac, across every session and agent.**
+Before booting anything, `npm run -s qa lock sim <tag>` — it refuses while
+another session holds it, and below 30% free memory (`memory_pressure`). Boot
+with `xcrun simctl boot <full udid>` (never `open -a Simulator`), shut it down
+and `npm run -s qa unlock sim` when you are done. **iOS first, shut it, then
+Android** under the same lock.
 
 **Both platforms, every time — iOS AND Android.** One simulator is not the
 client. The product ships to both stores and has had Android-only defects, so
 a journey driven only on the iPhone simulator is half-driven: run the same
-flow on an Android emulator (`list_devices` shows both; boot one with
-`emulator -avd …` if none is up) and read the row back from each. If Android
+flow on an Android emulator (after the iOS simulator is shut; boot it with
+`emulator -avd … -no-window` under the `sim` lock) and read the row back from each. If Android
 cannot be run, the §8 line says so — `Driven: iOS only — <reason>` — and the
 ticket stays open.
 
-Three facts that have each cost a run: the bundle id is
+Maestro facts, for when Appium is down: the bundle id is
 **`com.matryxsociallabs.blendn`** (not `com.blendn.app`), Maestro **text
 selectors are full-string regex** — `"Check in"` does not match "Check in now"
 — and if the MCP answers *"Device became unreachable"* on every call, its
@@ -403,9 +413,9 @@ without rerunning it.
 
 | Question | Tool |
 |---|---|
-| Does it look right at 375/768/1440? | `browse` |
+| Does it look right at 375/768/1440? | Playwright MCP (`browse` as fallback) |
 | Why is it slow / what did it fetch / is this error mine? | Chrome DevTools MCP |
-| Does the journey work on a phone? | Maestro MCP |
+| Does the journey work on a phone? | Appium MCP (Maestro as fallback) |
 | Will this journey still work next month? | Playwright in `e2e/` |
 | Is the number on the screen the right number? | integration test against real Postgres |
 
@@ -494,23 +504,32 @@ Every one passed `tsc`, the unit suite, the integration suite and a screenshot.
 
 ### What it is, per surface
 
-**Client (`blendn/ashgabat`) — Maestro MCP.**
+**Client (`blendn/ashgabat`) — Appium MCP** (Maestro below is the fallback).
 
 ```
-list_devices     → ALWAYS first; every other local call needs its device_id
-inspect_screen   → the view hierarchy, before targeting anything
-run              → one full flow as inline YAML, not a string of single commands
+appium server   → `curl -s localhost:4723/status`; if nothing answers, start `appium` in the background
+select_device   → then appium_session_management action=create (bundle com.matryxsociallabs.blendn)
+appium_get_page_source → the hierarchy, before targeting anything; accessibility id over xpath
+appium_gesture  → taps, swipes; action=scroll_to_element for anything off-screen
+appium_screenshot / appium_session_management action=delete when done
 ```
+
+**One simulator or emulator on the whole Mac, across every session and agent.**
+Before booting anything, `npm run -s qa lock sim <tag>` — it refuses while
+another session holds it, and below 30% free memory (`memory_pressure`). Boot
+with `xcrun simctl boot <full udid>` (never `open -a Simulator`), shut it down
+and `npm run -s qa unlock sim` when you are done. **iOS first, shut it, then
+Android** under the same lock.
 
 **Both platforms, every time — iOS AND Android.** One simulator is not the
 client. The product ships to both stores and has had Android-only defects, so
 a journey driven only on the iPhone simulator is half-driven: run the same
-flow on an Android emulator (`list_devices` shows both; boot one with
-`emulator -avd …` if none is up) and read the row back from each. If Android
+flow on an Android emulator (after the iOS simulator is shut; boot it with
+`emulator -avd … -no-window` under the `sim` lock) and read the row back from each. If Android
 cannot be run, the §8 line says so — `Driven: iOS only — <reason>` — and the
 ticket stays open.
 
-Three facts that have each cost a run: the bundle id is
+Maestro facts, for when Appium is down: the bundle id is
 **`com.matryxsociallabs.blendn`** (not `com.blendn.app`), Maestro **text
 selectors are full-string regex** — `"Check in"` does not match "Check in now"
 — and if the MCP answers *"Device became unreachable"* on every call, its

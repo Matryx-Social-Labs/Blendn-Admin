@@ -1,5 +1,5 @@
 import type { Socket } from "socket.io-client"
-import { apiRefusal, logProbe, probeArgs, secondsLeft, STAGING_API } from "../scripts/qa"
+import { apiRefusal, logProbe, memoryRefusal, probeArgs, secondsLeft, STAGING_API } from "../scripts/qa"
 
 /*
  * The testing programme's tool (docs/agents/TEST-PLAN.md) signs in, reads and
@@ -86,4 +86,21 @@ it("prints the socket's own disconnect, so an eviction is not silence (SCRUM-305
   logProbe(socket, (...a) => lines.push(a), "someone@blendn.app", "group-1")
   handlers.get("disconnect")?.("io server disconnect")
   expect(lines).toContainEqual(["disconnect", "io server disconnect"])
+})
+
+/*
+ * One simulator or emulator per Mac (16 GB): a second one, or one booted into
+ * a swapping host, has frozen the machine. `qa lock sim` refuses below the floor.
+ */
+describe("the simulator lock's memory floor", () => {
+  const report = (pct: number) => `The system has 17179869184 (1048576 pages with a page size of 16384).\n\nSystem-wide memory free percentage: ${pct}%\n`
+
+  it("allows a boot with the floor free, refuses one below it", () => {
+    expect(memoryRefusal(report(30))).toBeNull()
+    expect(memoryRefusal(report(29))).toMatch(/29% free.*30%/)
+  })
+
+  it("refuses when memory_pressure's output cannot be read, rather than booting blind", () => {
+    expect(memoryRefusal("")).toMatch(/could not read/)
+  })
 })

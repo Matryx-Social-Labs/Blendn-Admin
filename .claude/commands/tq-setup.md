@@ -38,7 +38,9 @@ Then run `npm run -s qa bootstrap` — it must print `staging DB reachable`.
 ## 3 · Claude Code: MCP servers
 
 - **atlassian** — `claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2`, then authorise in an interactive session (`/mcp`). Test: read SCRUM-208.
-- **maestro** — `claude mcp add maestro -- maestro mcp`. Test: `list_devices`.
+- **appium-mcp** — `claude mcp add -s user appium-mcp -- npx -y appium-mcp@latest`, plus an `appium` 3.x server with the xcuitest and uiautomator2 drivers. Test: `select_device`.
+- **playwright** — `claude mcp add -s user playwright -- npx @playwright/mcp@latest`. Test: `browser_navigate` to the staging dashboard.
+- **maestro** (fallback) — `claude mcp add maestro -- maestro mcp`. Test: `list_devices`.
 
 ## 4 · Claude Code: skills and agents the programme uses
 
@@ -46,7 +48,8 @@ Confirm each is available in this session's skill/agent list; list the missing o
 
 | Surface / step | Skill or agent |
 |---|---|
-| Dashboard driving | gstack **browse** (`~/.claude/skills/gstack/browse/dist/browse`; install gstack and run its `./setup` if absent) |
+| Dashboard driving | the **Playwright MCP**; gstack **browse** as fallback (`~/.claude/skills/gstack/browse/dist/browse`) |
+| Device driving | the **Appium MCP**; Maestro as fallback |
 | Root cause of a finding | gstack **investigate** |
 | Dashboard design gate (before editing a screen) | **ecc:dashboard-builder**, **ecc:frontend-design-direction**, **design-html** |
 | Review before merge | **ecc:pr-test-analyzer** (every PR), **ecc:security-reviewer** (auth, authz, user data), **ecc:database-reviewer** (schema, queries), **ecc:react-reviewer** (UI) |
