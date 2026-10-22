@@ -13,8 +13,8 @@ import { bellRowFor } from "@/lib/push-notifications"
  */
 const KINDS = [...(/enum notification_kind \{([^}]*)\}/.exec(readFileSync(join(__dirname, "..", "prisma", "schema.prisma"), "utf8"))?.[1] ?? "").matchAll(/^\s*([a-z_]+)\s*$/gm)].map((m) => m[1])
 
-// Rewritten for a build before Flow 9. `event_cancelled` joins this list when it exists (#724); until then it is not a kind.
-const DOWNGRADED = ["event_changed"]
+// The kinds a build before Flow 9 does not know, rewritten to `event_update` for it (#724 added event_cancelled).
+const DOWNGRADED = ["event_changed", "event_cancelled"]
 
 describe("bellRowFor(row, null)", () => {
   it("reads the kinds from the schema", () => {
@@ -26,8 +26,8 @@ describe("bellRowFor(row, null)", () => {
     expect(bellRowFor(row, null)).toBe(row)
   })
 
-  it("rewrites event_changed for a build that does not declare Flow 9, and only then", () => {
-    const row = { id: "r", kind: "event_changed", data: { type: "event_changed", eventId: "e1", reason: "time" } }
+  it.each(DOWNGRADED)("rewrites %s for a build that does not declare Flow 9, and only then", (kind) => {
+    const row = { id: "r", kind, data: { type: kind, eventId: "e1", reason: "time" } }
     expect(bellRowFor(row, null)).not.toBe(row)
     expect(bellRowFor(row, null)).toMatchObject({ kind: "event_update", data: { type: "event_update", eventId: "e1" } })
     expect(bellRowFor(row, 2)).toBe(row)

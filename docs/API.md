@@ -1258,7 +1258,7 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
              "latitude": 12.97, "longitude": 77.64,
              "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
              "floors": null, "claimed": false,
-             "capacity": 300, "dayResetHour": 6,
+             "capacity": 300, "dayResetHour": 6, "timezone": "Asia/Kolkata",
              "hours": [{ "day": 5, "open": "17:00", "close": "01:00" }],
              "description": null, "amenities": ["Live Music", "Outdoor Seating"],
              "upcoming": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
@@ -1283,7 +1283,7 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
 | `live.stayUntil` | The furthest "stay" can carry your window (four hours from the first stay today); null until you chose stay |
 | `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given |
 | `venue.description`, `venue.amenities` | Free text about the place (null) and amenity names from the shared vocabulary (`[]`) until given |
-| `venue.capacity`, `venue.dayResetHour` | The venue's capacity (null if unknown) and the local hour its day starts |
+| `venue.capacity`, `venue.dayResetHour`, `venue.timezone` | The venue's capacity (null if unknown), the local hour its day starts (0-23) and the IANA timezone (`Asia/Kolkata`, `UTC`) that hour is in. Read the two together: the phone derives neither from a time such as `dayEndsAt`, which is wrong across timezones |
 | `venue.upcoming` | Its next public events, at most 5, soonest first: the Places card's filter (published, public, not ended, link not disputed by the venue, within your age) — never its own live rooms |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
 | `claim` | `{ url }` for an unclaimed venue: the public claim page (`/claim/venue/:venueId`) on the dashboard host, built for the environment the app talks to — open it as given. Null once claimed. As `claim` on `GET /events/:eventId` |

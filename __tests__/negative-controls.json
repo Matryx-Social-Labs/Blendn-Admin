@@ -2062,9 +2062,9 @@
       "date": "2026-10-22"
     },
     "bell-row-for.test.ts": {
-      "guards": "bellRowFor(row, null) hands back the SAME object for every notification_kind in the schema except event_changed, which is rewritten to event_update only for a build that does not declare Flow 9 (#722 review).",
+      "guards": "bellRowFor(row, null) hands back the SAME object for every notification_kind in the schema except event_changed and event_cancelled, which are rewritten to event_update only for a build that does not declare Flow 9 (#722 review).",
       "mutation": "M1629 the early `return row` replaced by `return { ...row }` (a copy for every kind).",
-      "observed": "M1629: 22 failing of 23 (every kind's identity check, and the event_changed case's `bellRowFor(row, 2)`). Reverted; 23 of 23.",
+      "observed": "M1629: every kind's identity check, and the rewrite cases' `bellRowFor(row, 2)`, failing. Reverted; all passing.",
       "date": "2026-10-22"
     },
     "profile-badges.itest.ts": {

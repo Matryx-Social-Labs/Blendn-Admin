@@ -244,6 +244,7 @@ const VenueDetailSchema = z
       claimed: z.boolean().describe("False: the app may offer \"Own this place? Claim it\"."),
       capacity: z.number().int().nullable().describe("Null when unknown."),
       dayResetHour: z.number().int().min(0).max(23).describe("The local hour (venue timezone) its day starts."),
+      timezone: z.string().describe("The venue's IANA timezone (`Area/Location`, or `UTC`) its day and `hours` are read in. Read this with `dayResetHour`; never derive either from a time on the phone."),
       hours: z
         .array(z.object({ day: z.number().int().min(0).max(6), open: z.string(), close: z.string() }))
         .nullable()
