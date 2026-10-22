@@ -1987,6 +1987,12 @@
       "mutation": "M1543 the gate not asked of mobile requests. M1544 maintenance ignored by the gate. M1545 the version comparison flipped (an old build passes). M1546 a request with no version header refused. M1547 the gate applied to every path with /api/health in the matcher.",
       "observed": "M1543: 2 of 8 failing. M1544: 1 of 8 failing. M1545: 1 of 8 failing. M1546: 1 of 8 failing. M1547: 3 of 8 failing (health, dashboard, health-version). Each reverted; 8 of 8.",
       "date": "2026-10-22"
+    },
+    "integration/push-token-register.itest.ts": {
+      "guards": "SCRUM-668: registering a push token moves it to the caller (unique on token): the first account no longer holds it, its pushes reach nothing (with a positive control), the same account registering twice keeps one row with a newer time, twelve concurrent registrations by two accounts settle on one holder with no 500, the platform follows the device, an account keeps its three most recent tokens per platform, and an account's sign-out DELETE removes only its own row. Review round: only an Expo push token is registered (400 otherwise: junk, empty brackets, padded, over-long), both Expo spellings accepted; a move between accounts is logged with the old and new account and the platform and never the token; one caller may take over at most MAX_TOKEN_MOVES_PER_HOUR tokens an hour (429, the token stays with its holder), re-registering one's own token or a new one is never counted; the prune is one statement scoped to the registering account, so another account's row (or one just moved) survives.",
+      "mutation": "M1548 `user_id` dropped from the upsert's update (the token stays with its first account). M1549 the platform not followed on a re-register. M1550 the per-platform prune dropped. M1551 DELETE not scoped to the caller (it would remove another account's row). M1552 any string accepted as a token. M1553 a move not logged. M1554 the move limit dropped. M1555 every register counts as a move. M1556 the prune not scoped to the registering account. M1557 the token written to the log line.",
+      "observed": "M1548: 3 of 7 failing (the move, the push, the race). M1549: 1 of 7. M1550: 1 of 7. M1551: 1 of 7. M1552: 6 of 19 failing. M1553: 1 of 19. M1554: 1 of 19. M1555: 2 of 19. M1556: 3 of 19. M1557: 1 of 19. Each reverted; 19 of 19.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [

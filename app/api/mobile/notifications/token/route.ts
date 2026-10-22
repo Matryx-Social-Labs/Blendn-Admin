@@ -4,9 +4,11 @@ import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
+import { registerPushToken } from "@/lib/push-token"
 import {
   successResponse,
   errorResponse,
+  ErrorCode,
   unauthorizedResponse,
   validationErrorResponse,
   serverErrorResponse,
@@ -41,51 +43,24 @@ export async function POST(request: NextRequest) {
 
     const { token, platform } = validation.data
 
-    // Upsert the push token
-    // If the same user+token combination exists, update it
-    // If not, create a new one
-    const now = new Date()
-
-    await db.push_tokens.upsert({
-      where: {
-        user_id_token: {
-          user_id: user.userId,
-          token: token,
-        },
-      },
-      update: {
-        platform,
-        updated_at: now,
-      },
-      create: {
-        user_id: user.userId,
-        token,
-        platform,
-        created_at: now,
-        updated_at: now,
-      },
-    })
-
-    // Clean up old tokens for this user on this platform
-    // Keep only the most recent 3 tokens per platform to handle multiple devices
-    const userTokens = await db.push_tokens.findMany({
-      where: {
-        user_id: user.userId,
-        platform,
-      },
-      orderBy: {
-        updated_at: "desc",
-      },
-    })
-
-    if (userTokens.length > 3) {
-      const tokensToDelete = userTokens.slice(3).map((t) => t.id)
-      await db.push_tokens.deleteMany({
-        where: {
-          id: { in: tokensToDelete },
-        },
-      })
+    // One device, one account: a token moves to whoever registers it (lib/push-token.ts).
+    const registered = await registerPushToken(user.userId, token, platform)
+    if (!registered.ok) {
+      return registered.reason === "not_a_token"
+        ? errorResponse("Not a valid push token", 400, ErrorCode.VALIDATION_FAILED)
+        : errorResponse("Too many devices switched accounts. Try again later.", 429, ErrorCode.RATE_LIMITED)
     }
+
+    // Keep only this account's three most recent tokens per platform (multiple devices). One statement,
+    // and only this account's rows: a row another account just took over is not ours to prune.
+    await db.$executeRaw`
+      DELETE FROM push_tokens
+       WHERE user_id = ${user.userId} AND platform = ${platform}
+         AND id NOT IN (
+           SELECT id FROM push_tokens
+            WHERE user_id = ${user.userId} AND platform = ${platform}
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 3)`
 
     return successResponse({
       message: "Push token registered successfully",

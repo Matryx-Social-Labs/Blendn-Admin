@@ -663,8 +663,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "user_oauth_accounts_provider_provider_id_key"
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "push_tokens_user_id_idx" ON "push_tokens"("user_id");
 
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "push_tokens_user_id_token_key" ON "push_tokens"("user_id", "token");
+-- push_tokens is unique on (token) alone, created by 20261022140000_push_token_unique_on_token (SCRUM-668).
 
 -- CreateIndex
 CREATE INDEX IF NOT EXISTS "private_conversations_user1_id_idx" ON "private_conversations"("user1_id");

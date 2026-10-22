@@ -1260,7 +1260,11 @@ model push_tokens {
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@unique([user_id, token])
+  /// One device, one account (SCRUM-668): registering a token moves it. This was
+  /// unique on (user_id, token), so a second account on the same phone left the
+  /// first account's row behind and the first account's pushes rang the second
+  /// person's phone.
+  @@unique([token])
   @@index([user_id])
 }
 
