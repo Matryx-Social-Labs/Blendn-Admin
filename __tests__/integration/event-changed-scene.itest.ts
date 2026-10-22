@@ -534,11 +534,13 @@ describe("the whole key set of GET /events/:id", () => {
     "startTime", "state", "stats", "status", "timezone", "title", "userStatus", "venueName", "visibility",
   ]
   const NEW_KEYS = ["changedAt", "changedFields", "changedFrom", "dayCount", "dayNumber", "days", "daysFrom"]
+  // Added after this scene, by Flow 16 (the share pages): the confirmed venue's area, else the city.
+  const LATER_KEYS = ["area"]
 
   it("is the old set and exactly the new ones (the six of Flow 3, and `daysFrom`), nothing renamed or dropped", async () => {
     const viewer = await person("scn-keys")
     const { json } = await read(viewer, await event())
-    expect(Object.keys(json.data).sort()).toEqual([...OLD_KEYS, ...NEW_KEYS].sort())
+    expect(Object.keys(json.data).sort()).toEqual([...OLD_KEYS, ...NEW_KEYS, ...LATER_KEYS].sort())
   })
 })
 

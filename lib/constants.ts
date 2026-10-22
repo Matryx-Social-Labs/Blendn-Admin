@@ -10,6 +10,7 @@ export const RATE_LIMIT_WINDOW = {
   DASHBOARD_SIGNIN: 15 * 60 * 1000, // 15 minutes
   ORGANISER_BROADCAST: 60 * 1000, // 1 minute
   PRIVATE_MESSAGE: 60 * 1000, // 1 minute
+  SHARE_PUBLIC: 60 * 1000, // 1 minute
 } as const
 
 export const RATE_LIMIT_MAX_REQUESTS = {
@@ -22,6 +23,8 @@ export const RATE_LIMIT_MAX_REQUESTS = {
   // Announcements and sponsored messages broadcast to every attendee.
   ORGANISER_BROADCAST: 10,
   PRIVATE_MESSAGE: 30,
+  // Per client network, on the public share read the landing pages call (Flow 16).
+  SHARE_PUBLIC: 120,
 } as const
 
 // ── Caching ───────────────────────────────────────────

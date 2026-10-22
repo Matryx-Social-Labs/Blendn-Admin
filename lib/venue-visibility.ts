@@ -4,7 +4,8 @@ import type { Prisma } from "@prisma/client"
 
 import { db } from "./db"
 import { realEventsWhere } from "./event-kind"
-import { distanceToGeofence, eventCentre, validateGeofence, type Geofence } from "./geofence"
+import { distanceToGeofence, eventCentre, fenceCentre, validateGeofence, type Geofence } from "./geofence"
+import { getBoundingBox, haversineDistanceMeters } from "./geo"
 import { logger } from "./logger"
 
 /**
@@ -114,6 +115,38 @@ export function atTheVenue(
   return distanceToGeofence(centre, area.fence) <= area.fence.buffer
 }
 
+/** Slack on the box below: the box is a rectangle in degrees, the area a circle in metres. */
+const AT_VENUE_BOX_SLACK = 1.1
+
+/**
+ * `atTheVenue` as a query, for a reader that must not read every event linked
+ * to a venue to find the ones at it (anyone can link any venue, so a flood of
+ * far-off links would otherwise crowd the real ones out of a bounded read).
+ *
+ * A confirmed link, or the event's pin inside the box around the venue's area
+ * and buffer. The box is a PRE-filter, never the answer: it is a little wider
+ * than the area, and the event's own outline can centre a few metres off its
+ * pin, so callers still apply `atTheVenue` to what it returns. A venue with no
+ * area of its own is reached by a confirmed link only, as in `atTheVenue`.
+ */
+export function atTheVenueWhere(venueGeofence: unknown): Prisma.eventsWhereInput {
+  const confirmed = { venue_link_status: "confirmed" as const }
+  const area = validateGeofence(venueGeofence)
+  const centre = area.ok ? fenceCentre(area.fence) : null
+  if (!area.ok || !centre) return confirmed
+  const reachM =
+    area.fence.type === "circle"
+      ? area.fence.radius
+      : Math.max(...area.fence.ring.map(([lat, lng]) => haversineDistanceMeters(centre.lat, centre.lng, lat, lng)))
+  const box = getBoundingBox(centre.lat, centre.lng, ((reachM + area.fence.buffer) * AT_VENUE_BOX_SLACK) / 1000)
+  return {
+    OR: [
+      confirmed,
+      { latitude: { gte: box.minLat, lte: box.maxLat }, longitude: { gte: box.minLon, lte: box.maxLon } },
+    ],
+  }
+}
+
 /** What `atTheVenue` needs from an event row. */
 export const takeoverSelect = {
   id: true,
@@ -199,6 +232,19 @@ export function eventVenue(event: {
   const v = event.venue
   if (!v || v.deleted_at || v.status !== "active" || event.venue_link_status === "disputed") return null
   return atTheVenue(event, v.geofence) ? { id: v.id, name: v.name } : null
+}
+
+/**
+ * The neighbourhood a share page or the event screen names, "Koramangala"
+ * (Flow 16): the area of the venue the event is confirmed at (`eventVenue`'s
+ * own test), else the event's city. The venue's name is not part of this; an
+ * unlisted event shows this and nothing finer. Null when neither is known.
+ */
+export function eventArea(
+  event: Parameters<typeof eventVenue>[0] & { venue: { area: string | null } | null },
+  city: string | null | undefined
+): string | null {
+  return (eventVenue(event) ? event.venue?.area?.trim() : null) || city?.trim() || null
 }
 
 /** What `eventVenue` needs from an event row (the card's select already has its point). */

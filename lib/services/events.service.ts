@@ -29,6 +29,8 @@ export const eventListSelect = {
   latitude: true,
   longitude: true,
   status: true,
+  // So a card can say "unlisted" (Flow 16): the feed itself only ever lists public.
+  visibility: true,
   // Capacity and the door, so a card can say how full a night is and what the
   // door expects. Neither identifies anybody; both are the organiser's own.
   max_capacity: true,
@@ -191,6 +193,7 @@ async function transformEvent(
     latitude: event.latitude,
     longitude: event.longitude,
     status: event.status,
+    visibility: event.visibility,
     /*
      * Capacity, so a card can say how full an event is.
      *
