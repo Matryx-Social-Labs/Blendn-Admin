@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-response"
 import { CREW } from "@/lib/constants"
 import { crewsAtEvent } from "@/lib/crews/presence"
+import { eventNotFoundResponse } from "@/lib/event-access"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { boundedInt } from "@/lib/pagination"
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       limit: boundedInt(query.get("limit"), CREW.CARDS_DEFAULT, 1, CREW.CARDS_MAX),
       offset: boundedInt(query.get("offset"), 0, 0, 10_000),
     })
-    if (result === null) return notFoundResponse("Event not found")
+    if (result === null) return eventNotFoundResponse(authUser.userId, eventId)
     if (result === "not_here") {
       return errorResponse("Check in to see the crews here.", 403, ErrorCode.NOT_CHECKED_IN)
     }

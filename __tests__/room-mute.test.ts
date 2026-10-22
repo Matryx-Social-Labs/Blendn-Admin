@@ -22,7 +22,7 @@ jest.mock("@/lib/db", () => ({
     push_tokens: { findMany: (...a: unknown[]) => tokens(...a) },
     notifications: {
       create: (...a: unknown[]) => created(...a),
-      createMany: (...a: unknown[]) => createdMany(...a),
+      createManyAndReturn: (...a: unknown[]) => createdMany(...a),
     },
     chat_messages: { findUnique: (...a: unknown[]) => parentOf(...a) },
     chat_group_members: {
@@ -76,7 +76,7 @@ beforeEach(() => {
     return ids.map((user_id) => ({ user_id, token: `ExponentPushToken[${user_id}]` }))
   })
   created.mockResolvedValue({})
-  createdMany.mockResolvedValue({ count: 0 })
+  createdMany.mockResolvedValue([])
   blocks.mockResolvedValue([])
   parentOf.mockResolvedValue({ user_id: "author" })
 })

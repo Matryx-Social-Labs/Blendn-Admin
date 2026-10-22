@@ -281,6 +281,25 @@ export const ProfileResponseSchema = z
         .describe("Your own profile: when languages, home state, sign or work field last changed. A change after you check in is not used for that room's lines."),
       suggested_sun_sign: z.string().nullable().optional(),
       sign: z.string().nullable().optional().describe("Their sign as a label, \"Leo ♌\" — others' profiles, when identified."),
+      badges: z
+        .array(z.object({ kind: z.enum(["shows_up", "nights_out"]), label: z.string() }))
+        .optional()
+        .describe(
+          "What check-ins earned: \"5+ nights this month\" and, if they turned it on, \"Shows up\". Derived on read. Present (possibly empty) when `show_badges` is not off, for you and for anybody who can see who they are; absent otherwise. \"Regular here\" is never here: it belongs to a card in that venue's room."
+        ),
+      photo_states: z
+        .array(
+          z.object({
+            url: z.string().nullable().describe("Null for a pulled photo: its object is withdrawn and a CDN may still hold the old URL."),
+            pulled: z.boolean().describe("Moderation took this photo down. Its object is withdrawn: draw a tile that says so, not the image."),
+            pulled_at: z.string().datetime().nullable(),
+            was_main: z.boolean().describe("It was the main photo, so the next one is now."),
+          })
+        )
+        .optional()
+        .describe(
+          "Your own profile only. `photos` in order with `pulled: false`, then the photos moderation pulled in the last 7 days, newest first, with `pulled: true` (a pulled photo is gone from `photos`)."
+        ),
     }).nullable().describe(
       "Your own profile: every column but `date_of_birth`, with `age` derived. Anybody else's is a subset: " +
         "`id, age, onboarded, location, interests, work_field, expertise`, plus `bio, occupation, education, photos` " +
@@ -309,6 +328,12 @@ export const UserPublicProfileSchema = z
     friend: FriendOfferSchema.optional().describe(
       "Only on somebody else you may see (`identityVisible`), under the same rule as `GET /profiles/{userId}`; never your own or a card a room keeps anonymous."
     ),
+    badges: z
+      .array(z.object({ kind: z.enum(["shows_up", "nights_out"]), label: z.string() }))
+      .optional()
+      .describe(
+        "What check-ins earned, on the flat card: the same badges, under the same rule, as `profile.badges` on `GET /profiles/{userId}` — present (possibly empty) when the person has not turned `show_badges` off and you may see who they are (`identityVisible`); absent otherwise."
+      ),
     image: z.string().nullable().optional(),
     photos: z.array(z.string()).optional(),
     age: z.number().nullable(),
@@ -461,6 +486,14 @@ export const NotificationTokenRequestSchema = z
   .object({
     token: z.string(),
     platform: z.enum(["ios", "android"]),
+    channelSet: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "Which Android channels this install created. Omit it (every build before Flow 9) and the push keeps the channel and payload it always had; 2 also has `matches`, `crew` and `after-the-night` and knows the `event_changed` and `report_actioned` kinds."
+      ),
   })
   .openapi("NotificationTokenRequest")
 

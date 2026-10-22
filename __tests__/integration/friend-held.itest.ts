@@ -456,6 +456,21 @@ describe("friend on GET /users/:id (same rule as /profiles/:id)", () => {
     expect((await card(ana, stranger.id)).body.data).not.toHaveProperty("friend")
   })
 
+  it("carries badges under the profile's rule: present when they show them and you may see them, absent when they turned them off or you may not", async () => {
+    const [ana, ben, stranger] = [await person("fh-ub-a", "Ana"), await person("fh-ub-b", "Ben"), await person("fh-ub-s", "Sam")]
+    await pseudonymousPair(ana, ben, { revealed: { a: true, b: true } })
+    expect((await card(ana, ben.id)).body.data.badges).toEqual([])
+    await db.profiles.update({ where: { id: ben.id }, data: { show_badges: false } })
+    expect((await card(ana, ben.id)).body.data).not.toHaveProperty("badges")
+    await db.profiles.update({ where: { id: ben.id }, data: { show_badges: true } })
+    // A stranger the viewer may not see: no badges.
+    expect((await card(ana, stranger.id)).body.data).not.toHaveProperty("badges")
+    // And it is the same list `GET /profiles/:id` gives.
+    const profileRoute = await import("@/app/api/mobile/profiles/[userId]/route")
+    const viaProfile = await call(profileRoute.GET as Handler, `/api/mobile/profiles/${ben.id}`, ana, { params: { userId: ben.id } })
+    expect(viaProfile.body.data.profile.badges).toEqual((await card(ana, ben.id)).body.data.badges)
+  })
+
   it("is absent while the other person is a pseudonym to you", async () => {
     const [ana, ben] = [await person("fh-ud-a", "Ana"), await person("fh-ud-b", "Ben")]
     await pseudonymousPair(ana, ben)

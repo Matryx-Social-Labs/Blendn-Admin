@@ -1,6 +1,5 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { closeConversation, conversationPair } from "@/lib/conversations"
 import { blockPairIn } from "@/lib/block-pair"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { db } from "@/lib/db"
@@ -83,8 +82,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * Every statement is idempotent, so a retry after a partial network failure
      * converges rather than compounding.
      */
-    const [user1_id, user2_id] = conversationPair(authUser.userId, targetId)
-
     const closedConversationId = await db.$transaction(async (tx) => {
       // The block itself, whichever door: the lock, the row, the requests, the
       // friendship, and the conversation (lib/block-pair.ts).

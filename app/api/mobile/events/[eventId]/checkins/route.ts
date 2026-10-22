@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
 import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
+import { eventNotFoundResponse } from "@/lib/event-access"
 import { inRoomWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
@@ -13,7 +14,6 @@ import { notStrangersTo } from "@/lib/room-people"
 import {
   successResponse,
   unauthorizedResponse,
-  notFoundResponse,
   forbiddenResponse,
   serverErrorResponse,
   errorResponse,
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // A draft has no room — including one hidden by its organiser's
     // suspension (SCRUM-8), which is the case this actually answers.
     if (!event || event.status === "draft") {
-      return notFoundResponse("Event not found")
+      return eventNotFoundResponse(authUser.userId, eventId)
     }
 
     /*

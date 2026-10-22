@@ -13,7 +13,6 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
   errorResponse,
-  notFoundResponse,
   ErrorCode,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -96,7 +95,8 @@ export async function POST(request: NextRequest) {
     const parsed = createSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 
-    const notFound = () => notFoundResponse("Not found")
+    // `errorCode` stays NOT_FOUND; the reason names what was asked for, never why it is out of reach.
+    const gone = (reason: string) => errorResponse("Not found", 404, ErrorCode.NOT_FOUND, reason)
     let recipientId: string
     let connectable: boolean
     let notYetRevealed = false
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       // Same work either way — see the invite route — so timing cannot tell a
       // reset link from a refusal.
       connectable = await mayConnect(me, invite?.user_id ?? me)
-      if (!invite) return notFound()
+      if (!invite) return gone(ErrorCode.INVITE_UNAVAILABLE)
       recipientId = invite.user_id
     } else {
       // The decision is the match (`revealedMatch`, lib/friends.ts). A room
@@ -130,13 +130,14 @@ export async function POST(request: NextRequest) {
       notYetRevealed = nameable && standing === "pending" && askerSeesThem
     }
 
-    if (recipientId === me) return errorResponse("You can't add yourself")
-    if (notYetRevealed) return errorResponse("Not found", 404, undefined, "NOT_A_REVEALED_MATCH")
-    if (!connectable) return notFound()
+    if (recipientId === me) return errorResponse("You can't add yourself", 400, undefined, ErrorCode.CANNOT_ADD_SELF)
+    // The one 404 that says why: a match that is not revealed on both sides (`NOT_A_REVEALED_MATCH`).
+    if (notYetRevealed) return errorResponse("Not found", 404, ErrorCode.NOT_FOUND, "NOT_A_REVEALED_MATCH")
+    if (!connectable) return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)
 
     const state = await requestFriend(me, recipientId, "token" in parsed.data ? undefined : "match")
     // An unmatch or a block landed between the check above and the pair's lock.
-    if (state === "refused") return notFound()
+    if (state === "refused") return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)
     // Their invite link brought me: the first link a person uses is the one
     // that counts toward its owner's Blendn+ referral month (lib/plus.ts).
     if ("token" in parsed.data) await recordReferral(me, recipientId)

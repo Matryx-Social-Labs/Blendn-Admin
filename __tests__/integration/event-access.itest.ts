@@ -139,7 +139,8 @@ async function everyRoute(eventId: string, token: string, postId?: string) {
 const allAge = (withRequest: boolean) =>
   Object.fromEntries(
     ["get", "rsvp", "favorite", "interest", "interested", "boardGet", "boardPost", ...(withRequest ? ["boardRequest"] : [])]
-      .map((k) => [k, "403 AGE_RESTRICTED"])
+      // A known age below the line now says so in reasonCode too, so the app reads one place (Flow 3).
+      .map((k) => [k, "403 AGE_RESTRICTED/AGE_RESTRICTED"])
   )
 const allNotFound = (withRequest: boolean) =>
   Object.fromEntries(

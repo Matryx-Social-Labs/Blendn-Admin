@@ -15,7 +15,7 @@ const mockDb = {
   ended_friendships: { findMany: jest.fn(async () => []) },
   blocked_users: { findMany: jest.fn() },
   event_ratings: { findMany: jest.fn() },
-  notifications: { createMany: jest.fn() },
+  notifications: { createManyAndReturn: jest.fn() },
   push_tokens: { findMany: jest.fn() },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
@@ -60,7 +60,7 @@ function world() {
   ])
   mockDb.blocked_users.findMany.mockResolvedValue([{ blocker_id: "C", blocked_id: "D" }])
   mockDb.event_ratings.findMany.mockResolvedValue([])
-  mockDb.notifications.createMany.mockResolvedValue({ count: 0 })
+  mockDb.notifications.createManyAndReturn.mockResolvedValue([])
   // The token query carries the push_enabled rule (NOT_OPTED_OUT); emulate the
   // database answering it: F turned notifications off, so F has no row back.
   mockDb.push_tokens.findMany.mockImplementation(async (args: { where: { user_id: { in: string[] } } }) =>
@@ -122,7 +122,7 @@ describe("sendRatingRequests", () => {
 
   it("still writes everyone a bell row, as every other kind does", async () => {
     await sendRatingRequests(NOW)
-    const rows = mockDb.notifications.createMany.mock.calls.flatMap(([a]) => a.data)
+    const rows = mockDb.notifications.createManyAndReturn.mock.calls.flatMap(([a]) => a.data)
     expect(rows.map((r: { user_id: string }) => r.user_id).sort()).toEqual(["A", "B", "C", "D", "E", "F"])
     for (const r of rows) expect(r.kind).toBe("rating_request")
   })
@@ -142,7 +142,7 @@ describe("sendRatingRequests", () => {
     mockDb.events.updateMany.mockResolvedValue({ count: 0 })
     expect(await sendRatingRequests(NOW)).toBe(0)
     expect(sent).toHaveLength(0)
-    expect(mockDb.notifications.createMany).not.toHaveBeenCalled()
+    expect(mockDb.notifications.createManyAndReturn).not.toHaveBeenCalled()
   })
 
   it("only selects events that ended within the lookback and were never asked", async () => {

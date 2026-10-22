@@ -655,14 +655,15 @@ export async function matchesForEvent(
  * the people who turned it on, and only past, uncancelled events they said
  * they were going to.
  */
-async function badgeFactsFor(
-  eventId: string,
+export async function badgeFactsFor(
+  eventId: string | null,
   candidateIds: readonly string[],
   showsUpOptIns: readonly string[]
 ) {
   const day = 24 * 60 * 60 * 1000
   const now = Date.now()
-  const event = await db.events.findUnique({ where: { id: eventId }, select: { venue_id: true } })
+  // No event, as on a profile, is no venue: no "Regular here", which is about the room you are in.
+  const event = eventId ? await db.events.findUnique({ where: { id: eventId }, select: { venue_id: true } }) : null
   const venueId = event?.venue_id ?? null
   const [nights, rsvps] = await Promise.all([
     candidateIds.length

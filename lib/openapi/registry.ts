@@ -40,7 +40,8 @@ export function generateOpenApiDocument() {
         "Bad input is a 4xx, never a 500: a path id or cursor that cannot be a row, or a body that is not JSON, answers 400 (see docs/API.md). " +
         "Every `/api/mobile` request can also be refused before its route runs: 426 `UPDATE_REQUIRED` when `X-App-Version` " +
         "is a plain version below the server's minimum (never when the header is absent, `unknown` or unparsable), and " +
-        "503 `MAINTENANCE` with `retryAfter` and a `Retry-After` header during planned downtime.",
+        "503 `MAINTENANCE` with `retryAfter` and a `Retry-After` header during planned downtime. " +
+        "A build also says which Android channel set it has with `X-Channel-Set` (`2` for Flow 9); `GET /notifications` serves a build without it the old kinds.",
     },
     servers: [{ url: "/" }],
     tags: [

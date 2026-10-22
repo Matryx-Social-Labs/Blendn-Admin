@@ -11,7 +11,8 @@ export interface ApiResponse<T = unknown> {
    * Why, for a client that knows how to read it, beside an `errorCode` that
    * stays exactly what installed builds already match on (Flow 15):
    * `ACCOUNT_*`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`,
-   * `PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`.
+   * `PROFILE_INCOMPLETE`, and on events and friends the codes beside them.
+   * Read `reasonCode ?? errorCode`.
    */
   reasonCode?: string
   errors?: Array<{ field: string; message: string }>
@@ -108,6 +109,24 @@ export const ErrorCode = {
   AGE_UNKNOWN: "AGE_UNKNOWN",
   /** Onboarding is unfinished, and no adult age on file stands in for it. */
   PROFILE_INCOMPLETE: "PROFILE_INCOMPLETE",
+  /**
+   * An event that was live and is now hidden because its organisation was
+   * suspended. `reasonCode` on the event's 404, whose `errorCode` stays
+   * `NOT_FOUND`. A draft nobody ever published carries none: that is just not
+   * found.
+   */
+  ORGANISER_SUSPENDED: "ORGANISER_SUSPENDED",
+  /**
+   * Friends (Flow 6). Not told apart on purpose: an unknown, reset or deleted
+   * link, a block either way and a pair who left each other all answer the same
+   * 404, so these name the thing asked for and never the reason it is out of
+   * reach. `errorCode` stays `NOT_FOUND`.
+   */
+  INVITE_UNAVAILABLE: "INVITE_UNAVAILABLE",
+  PERSON_UNAVAILABLE: "PERSON_UNAVAILABLE",
+  REQUEST_UNAVAILABLE: "REQUEST_UNAVAILABLE",
+  /** A friend request to yourself. A bare 400; `errorCode` stays absent. */
+  CANNOT_ADD_SELF: "CANNOT_ADD_SELF",
 } as const
 
 /**

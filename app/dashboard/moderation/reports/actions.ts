@@ -12,6 +12,7 @@ import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
 import { closePostRooms, closeRoomSockets } from "@/lib/room-close"
 import { closeCrewBlendsLocked, dissolveCrewLocked } from "@/lib/crews/sweep"
 import { blockAccountNow } from "@/lib/account-blocklist"
+import { notifyReportActioned } from "@/lib/push-notifications"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 
 /**
@@ -513,12 +514,12 @@ export async function resolveReport(
     kind === "user"
       ? await db.user_reports.findUnique({
           where: { id: reportId },
-          select: { id: true, status: true, reported_id: true },
+          select: { id: true, status: true, reported_id: true, reporter_id: true },
         })
       : kind === "event"
         ? await db.event_reports.findUnique({
             where: { id: reportId },
-            select: { id: true, status: true, event_id: true, chat_group_id: true },
+            select: { id: true, status: true, event_id: true, chat_group_id: true, user_id: true },
           })
         : await db.message_reports.findUnique({
             where: { id: reportId },
@@ -731,6 +732,18 @@ export async function resolveReport(
   }
   // A dissolved crew's chat, a closed Blend: out with anyone still in it.
   for (const id of crewRoomIds) closeRoomSockets(id)
+
+  /*
+   * Tell the person who reported it, when it led to action. After the commit, and
+   * only for a report this call decided as resolved (a dismissal is "no action",
+   * and a reinstatement is not an outcome). It never throws: the decision stands.
+   */
+  // A reinstatement's outcome is `reviewed`, so it never gets here.
+  if (reviewed.status === "resolved") {
+    const reporterId =
+      kind === "event" ? (report as { user_id: string }).user_id : (report as { reporter_id: string }).reporter_id
+    await notifyReportActioned(reporterId).catch(() => false)
+  }
 
   // After the commit, never inside it: see SUSPENSION_WRITE_CHANNELS.
   if (decision === "suspend" && subjectId) {

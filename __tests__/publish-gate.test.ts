@@ -5,13 +5,16 @@ const mockDb = {
     findUnique: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
   },
   user: { findUnique: jest.fn() },
   // Cancelling cascades to live check-ins (Fix #35) and their presence sessions
   // (SCRUM-490), in one transaction: the other tables these routes touch.
   event_check_ins: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
   $executeRaw: jest.fn().mockResolvedValue(0),
-  $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+  // The edit and its change record share a transaction (`updateEventTracked`): a callback, besides the array form.
+  $queryRaw: jest.fn().mockResolvedValue([]),
+  $transaction: jest.fn((arg: unknown): Promise<unknown> => (typeof arg === "function" ? arg(jest.requireMock("@/lib/db").db) : Promise.all(arg as Promise<unknown>[]))),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
@@ -122,6 +125,7 @@ beforeEach(() => {
     start_time: new Date("2026-09-01T18:00:00.000Z"),
   })
   mockDb.events.update.mockResolvedValue(storedEvent({ status: "published" }))
+  mockDb.events.findUniqueOrThrow.mockResolvedValue(storedEvent())
 })
 
 describe("POST /api/events cannot create an event that is born unpublishable", () => {

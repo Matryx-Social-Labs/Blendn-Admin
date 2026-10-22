@@ -20,7 +20,9 @@ const REASONS =
 const SAME_404 =
   "Every refusal a stranger could reach — unknown, malformed or reset token, deleted account, a block either way, " +
   "a pair who left each other, a user id you have no relationship with — answers with the same 404, so nothing here " +
-  "tells anyone whether a person uses the app. "
+  "tells anyone whether a person uses the app. The same body carries `reasonCode` — `PERSON_UNAVAILABLE` (asking by `userId`), " +
+  "`INVITE_UNAVAILABLE` (a link) or `REQUEST_UNAVAILABLE` (answering a request) — which names what was asked for, never why it is out of reach. " +
+  "`errorCode` stays `NOT_FOUND`. "
 
 const PersonSchema = z
   .object({
@@ -248,11 +250,11 @@ registry.registerPath({
     "Exactly one of `token` (somebody's invite link) or `userId` (only for a match where you have BOTH revealed: an " +
     "open conversation that came from a mutual like, neither side closed or blocked. A room handle resolves too, but " +
     "a handle its room keeps anonymous is refused as unknown). Idempotent and cannot nag: asking again neither notifies again " +
-    "nor un-dismisses. `friends` when they had already asked you. Between two people still pseudonyms to each other (an open match or board DM not revealed on both sides) the request is HELD: still `requested`, but no push, not in the recipient's list, not acceptable, until both reveal, when it is released and delivered.  400 for your own link. " +
+    "nor un-dismisses. `friends` when they had already asked you. Between two people still pseudonyms to each other (an open match or board DM not revealed on both sides) the request is HELD: still `requested`, but no push, not in the recipient's list, not acceptable, until both reveal, when it is released and delivered.  400 for yourself, `reasonCode` `CANNOT_ADD_SELF`. " +
     "A request made by `userId` notifies with `data.via` = `match`, never an event or room. " +
     "One 404 differs: it carries `reasonCode` `NOT_A_REVEALED_MATCH` when you are in an open match with that person, " +
     "they have already revealed to you, and you have not revealed back (you know who they are). While they are still a " +
-    "pseudonym to you, and for every other refusal, the 404 is byte-identical to an unknown id.",
+    "pseudonym to you, and for every other refusal, the 404 is byte-identical to an unknown id (`reasonCode` `PERSON_UNAVAILABLE`).",
   security: bearerAuth,
   request: {
     body: {

@@ -10,7 +10,7 @@
 // point of that test.
 import { logger } from "../logger"
 import { db } from "../db"
-import { notifyEventUpdate, sendBulkPushNotifications } from "../push-notifications"
+import { notifyEventChanged, notifyEventUpdate, reasonOf, sendBulkPushNotifications } from "../push-notifications"
 import type { rsvp_status } from "@prisma/client"
 import { realEventsWhere } from "../event-kind"
 
@@ -35,10 +35,21 @@ import { realEventsWhere } from "../event-kind"
 const COMMITTED: rsvp_status[] = ["going", "maybe", "waitlisted"]
 
 async function interestedUserIds(eventId: string): Promise<string[]> {
+  const { going, others } = await interestedAudience(eventId)
+  return [...going, ...others]
+}
+
+/**
+ * The same audience, split: the people who said they are going, and everyone
+ * else who asked to hear (maybe, waitlisted, saved it). The first are told with
+ * `event_changed` (Flow 3 · 3.1 — "changed while you're going"); the rest keep
+ * the `event_update` they always got.
+ */
+async function interestedAudience(eventId: string): Promise<{ going: string[]; others: string[] }> {
   const [rsvps, favourites] = await Promise.all([
     db.event_rsvps.findMany({
       where: { event_id: eventId, status: { in: COMMITTED } },
-      select: { user_id: true },
+      select: { user_id: true, status: true },
     }),
     db.event_favorites.findMany({
       where: { event_id: eventId },
@@ -46,7 +57,38 @@ async function interestedUserIds(eventId: string): Promise<string[]> {
     }),
   ])
 
-  return [...new Set([...rsvps, ...favourites].map((r) => r.user_id))]
+  const going = new Set(rsvps.filter((r) => r.status === "going").map((r) => r.user_id))
+  const others = new Set([...rsvps, ...favourites].map((r) => r.user_id).filter((id) => !going.has(id)))
+  return { going: [...going], others: [...others] }
+}
+
+/**
+ * One message to everyone interested: `event_changed` to those going, with what
+ * moved (`changed`: `time`, `venue`, `cancelled`, comma-joined, the same words
+ * the event's `changedFields` uses), and `event_update` to the rest.
+ */
+async function tellInterested(
+  eventId: string,
+  eventTitle: string,
+  message: string,
+  changed: string
+): Promise<number> {
+  const { going, others } = await interestedAudience(eventId)
+  await Promise.all([
+    going.length > 0 ? notifyEventChanged(going, eventTitle, message, eventId, changed) : null,
+    others.length > 0 ? notifyEventUpdate(others, eventTitle, message, eventId, reasonOf(changed.split(",")), changed) : null,
+  ])
+  return going.length + others.length
+}
+
+/** The push body's labels ("start time", "venue") as the app's field words. */
+export function changedFieldsFromLabels(changes: readonly string[]): string[] {
+  const fields = new Set<string>()
+  for (const label of changes) {
+    if (label === "start time" || label === "end time") fields.add("time")
+    else if (label === "venue" || label === "address") fields.add("venue")
+  }
+  return [...fields]
 }
 
 /**
@@ -63,14 +105,16 @@ export async function notifyEventDetailsChanged(
   try {
     if (changes.length === 0) return
 
-    const userIds = await interestedUserIds(eventId)
-    if (userIds.length === 0) return
-
     const changeText = changes.join(", ")
     const message = `Event updated: ${changeText}`
 
-    await notifyEventUpdate(userIds, eventTitle, message, eventId)
-    logger.info("Event update notification sent", { eventId, recipientCount: userIds.length })
+    const recipientCount = await tellInterested(
+      eventId,
+      eventTitle,
+      message,
+      changedFieldsFromLabels(changes).join(",")
+    )
+    if (recipientCount > 0) logger.info("Event update notification sent", { eventId, recipientCount })
   } catch (error) {
     logger.error("Failed to send event update notification", { eventId, error: String(error) })
   }
@@ -193,16 +237,8 @@ export async function notifyEventCancelled(
   eventTitle: string
 ): Promise<void> {
   try {
-    const userIds = await interestedUserIds(eventId)
-    if (userIds.length === 0) return
-
-    await notifyEventUpdate(
-      userIds,
-      eventTitle,
-      "This event has been cancelled",
-      eventId
-    )
-    logger.info("Event cancellation notification sent", { eventId, recipientCount: userIds.length })
+    const recipientCount = await tellInterested(eventId, eventTitle, "This event has been cancelled", "cancelled")
+    if (recipientCount > 0) logger.info("Event cancellation notification sent", { eventId, recipientCount })
   } catch (error) {
     logger.error("Failed to send cancellation notification", { eventId, error: String(error) })
   }

@@ -37,6 +37,12 @@ jest.mock("@/lib/location", () => ({
 // The friend offer is covered in friend-after-reveal.itest.ts; this file is about ages.
 jest.mock("@/lib/friend-offer", () => ({ friendOfferFor: jest.fn().mockResolvedValue({ state: "none", canAdd: false }) }))
 jest.mock("@/lib/conversations", () => ({ blockedEitherWay: jest.fn().mockResolvedValue(false) }))
+// The badges and the owner's photo states are read through their own queries; this file is about the age and orientation gates.
+jest.mock("@/lib/profile-badges", () => ({ profileBadges: jest.fn().mockResolvedValue([]) }))
+jest.mock("@/lib/photo-checks", () => ({
+  ...jest.requireActual("@/lib/photo-checks"),
+  photoStatesFor: jest.fn().mockResolvedValue([]),
+}))
 // Tier B is written by `writeTierB`, in its own locked transaction (step 10 review): a seam here.
 const mockWriteTierB = jest.fn().mockResolvedValue("written")
 jest.mock("@/lib/tier-b", () => ({

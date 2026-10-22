@@ -9,7 +9,9 @@ import {
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
+import { bellRowFor, declaredChannelSet, NOT_IN_THE_BELL } from "@/lib/push-notifications"
+import { VISIBLE_DM } from "@/lib/dm-moderation"
+import { decorateNotifications, type RowDecoration } from "@/lib/notification-display"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
@@ -85,12 +87,41 @@ export async function GET(request: NextRequest) {
      * second request on the one call it already makes when the sheet opens.
      * `@@index([user_id, read_at])` exists for this count.
      */
-    const unreadCount = await db.notifications.count({
-      where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
-    })
+    const [unreadCount, unreadConversations, decorations] = await Promise.all([
+      db.notifications.count({
+        where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
+      }),
+      /*
+       * The app-icon badge's other half: live conversations with something
+       * unread from the other person. A thread, not a message — the same unit
+       * the Banter list marks — and a hidden message is never delivered, so it
+       * is never counted (`VISIBLE_DM`).
+       */
+      db.private_conversations.count({
+        where: {
+          closed_at: null,
+          OR: [{ user1_id: user.userId }, { user2_id: user.userId }],
+          messages: { some: { is_read: false, sender_id: { not: user.userId }, ...VISIBLE_DM } },
+        },
+      }),
+      /*
+       * Decoration is a bonus on a row, never a reason for the bell to fail: it
+       * reads six other tables, and a failure in any of them (or in a row's odd
+       * payload) must leave the feed as it was before it existed, with the old
+       * fields and no `display`. Logged, so it is not silent.
+       */
+      decorateNotifications(
+        user.userId,
+        items.map((n) => ({ id: n.id, kind: n.kind, payload: n.data }))
+      ).catch((error: unknown) => {
+        logger.error("Failed to decorate notifications", { error: error instanceof Error ? error.message : String(error) })
+        return new Map<string, RowDecoration>()
+      }),
+    ])
 
+    const channelSet = declaredChannelSet(request.headers)
     return successResponse({
-      notifications: items.map((n) => ({
+      notifications: items.map((row) => bellRowFor(row, channelSet)).map((n) => ({
         id: n.id,
         kind: n.kind,
         title: n.title,
@@ -100,8 +131,12 @@ export async function GET(request: NextRequest) {
         data: n.data,
         readAt: n.read_at,
         createdAt: n.created_at,
+        // What the row can say for the reader beyond the push's nameless words (lib/notification-display.ts).
+        ...decorations.get(n.id),
       })),
       unreadCount,
+      // The app icon's number: unseen bell rows plus conversations with something unread.
+      badgeCount: unreadCount + unreadConversations,
       pagination: meta,
     })
   } catch (error) {

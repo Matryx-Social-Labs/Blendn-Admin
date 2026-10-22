@@ -431,13 +431,13 @@ export async function storeRow(
   tx: Tx,
   source: StoreSource,
   externalRef: string
-): Promise<{ product: PlusProduct; startsAt: Date; subjectId: string; windowTransactionId: string | null } | null> {
+): Promise<{ product: PlusProduct; startsAt: Date; expiresAt: Date | null; subjectId: string; windowTransactionId: string | null } | null> {
   const row = await tx.entitlements.findUnique({
     where: { source_external_ref: { source, external_ref: externalRef } },
-    select: { product: true, starts_at: true, subject_id: true, window_transaction_id: true },
+    select: { product: true, starts_at: true, expires_at: true, subject_id: true, window_transaction_id: true },
   })
   return row
-    ? { product: row.product as PlusProduct, startsAt: row.starts_at, subjectId: row.subject_id, windowTransactionId: row.window_transaction_id }
+    ? { product: row.product as PlusProduct, startsAt: row.starts_at, expiresAt: row.expires_at, subjectId: row.subject_id, windowTransactionId: row.window_transaction_id }
     : null
 }
 

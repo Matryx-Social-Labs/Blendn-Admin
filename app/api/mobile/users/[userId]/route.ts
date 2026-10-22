@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { friendOfferFor } from "@/lib/friend-offer"
+import { profileBadges } from "@/lib/profile-badges"
 import { identityForRef } from "@/lib/identity"
 import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
@@ -73,6 +74,8 @@ export async function GET(
             home_state: true,
             sun_sign: true,
             sign_system: true,
+            show_badges: true,
+            shows_up_badge: true,
           },
         },
         user_interests: {
@@ -235,6 +238,12 @@ export async function GET(
       // The same offer, under the same rule, as `GET /profiles/:id`: only for
       // somebody else you may see, so the app needs no second read.
       ...(identified && !isOwnProfile && { friend: await friendOfferFor(authUser.userId, userId) }),
+      // Badges, under the rule `GET /profiles/:id` applies: the person shows them
+      // (`show_badges`, on unless turned off) and the viewer may see who they are.
+      // Earned from check-ins and derived here, never stored (lib/profile-badges.ts).
+      ...(identified && user.profile && user.profile.show_badges !== false
+        ? { badges: await profileBadges(userId, user.profile.shows_up_badge) }
+        : {}),
     }
 
     return successResponse(publicProfile)
