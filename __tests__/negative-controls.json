@@ -222,7 +222,7 @@
     },
     "deleted-event-room-is-closed.itest.ts": {
       "guards": "after an event is soft-deleted its room refuses a post on both send routes, a reaction and a changed vote, writing nothing, and leaves the member's conversation list; each door is shown open before the delete (SCRUM-303)",
-      "mutation": "M1: `eventHidesRoom` in lib/chat-window.ts reduced to `event.status === \"draft\"`. M2: the `event: { deleted_at: null, status: { not: \"draft\" } }` filter removed from both queries in app/api/mobile/chat/groups/route.ts.",
+      "mutation": "M1: `eventHidesRoom` in lib/chat-window.ts reduced to `event.status === \"draft\"`. M2: the `event: { deleted_at: null, status: { not: \"draft\" } }` filter removed from EVENT_ROOM_WHERE in lib/chat-group-rows.ts (both of the chat list's event queries read it; moved there from app/api/mobile/chat/groups/route.ts on 2026-10-22, re-run: 1 failing of 4).",
       "observed": "M1: 3 failing of 4 (post 201, reaction 200, vote written). M2: 1 failing of 4 (the room stays listed).",
       "date": "2026-09-25"
     },
@@ -1097,7 +1097,7 @@
     },
     "integration/muted-still-listed.itest.ts": {
       "guards": "GET /chat/groups lists a muted membership (membership.status = muted) and a locked room (status = locked) and leaves banned, left and archived out (SCRUM-178)",
-      "mutation": "In app/api/mobile/chat/groups/route.ts, put back `status: \"active\"` for the membership filter.",
+      "mutation": "In app/api/mobile/chat/groups/route.ts, put back `status: \"active\"` for the membership filter (the `listed` where; LISTED_MEMBER_STATUSES in lib/chat-group-rows.ts since 2026-10-22, re-run: 1 failing).",
       "observed": "1 failing: the muted room is missing from the list (expected 'muted', received undefined).",
       "date": "2026-09-21"
     },
@@ -2041,6 +2041,30 @@
       "guards": "Nothing writes an event's start_time, end_time, venue_name, address or status except through updateEventTracked (lib/event-change.ts): a ratchet over events.update/updateMany and raw UPDATE events in app/ and lib/, with a named allowance (org suspension, venue unlink) that must still be needed, and a self-test of the scanner.",
       "mutation": "M1559 updateEventStatus's `updateEventTracked` replaced by a bare `db.events.update` writing status.",
       "observed": "M1559: 2 failing ('no file outside lib/event-change.ts writes them' naming lib/admin-role-actions.ts, and 'the converted doors really go through it'). Reverted; 7 of 7. The first run of the ratchet also found a real writer nobody had listed (venue unlink writes venue_name), now allowed with its reason.",
+      "date": "2026-10-22"
+    },
+    "muted-rooms.itest.ts": {
+      "guards": "GET /me/muted-rooms and the `mutedRooms` count: a muted room is listed as exactly its chat-list row, newest mute first; a lapsed, false or unreadable mute, a ban, a leave, an archived room and a draft event are not; a crew's or Blend's room follows its owner's door (dissolved, removed, suspended, a block across, closed); keyset paging breaks ties on the room id to the microsecond, walks past unlisted candidates in later batches and answers a cursor when it may look no further; a cursor it did not give is a 400; the count agrees with the list and stops at the cap; the partial index exists, is valid, is used by the muted read, and is one CONCURRENTLY statement.",
+      "mutation": "M1610 the lapsed-mute time test replaced by `true` (mutedNowSql). M1611 ties ordered by room id DESC. M1612 the owner's door skipped (openRooms dropped in listedAmong). M1613 the count's cap raised by 1000. M1614 the candidate query's `status IN ('active','muted')` removed. M1615 the walk stops after one batch. M1616 the cursor's tie comparison `>` made `>=`. M1617 the draft-event filter removed from EVENT_ROOM_WHERE. M1618 the `= 'true'` predicate relaxed to `IS NOT NULL` (the index no longer applies). M1619 the cursor's canonical-spelling check removed.",
+      "observed": "M1610: 1 failing (the lapsed mute listed). M1611: 1 (tie order). M1612: 3 (crew dissolved, removed/suspended, Blend block). M1613: 1 (the cap). M1614: 1 (banned and left listed). M1615: 1 (the walk). M1616: 3 (tie, cursor, walk: a row repeated). M1617: 1 (a draft event's room listed). M1618: 2 (a non-muted row listed; the index not used). M1619: 1 (a respelt cursor accepted). Each reverted; 15 of 15.",
+      "date": "2026-10-22"
+    },
+    "push-badge.test.ts": {
+      "guards": "A single push carries the badge the feed serves and a bulk push counts everybody with a device in ONE call and gives each message its own person's number; a caller's own badge wins and counts nothing; a count that fails is a push without a badge, never a push not sent (SCRUM-740).",
+      "mutation": "M1620 the bulk message's `badge: options.badge ?? badges.get(userId)` reduced to `badge: options.badge`. M1627 the single sender's count removed. M1628 a failed count rethrown instead of swallowed.",
+      "observed": "M1620: 1 failing (the bulk numbers). M1627: 6 failing across this file and push-badge.itest.ts (the single numbers). M1628: 2 failing (the single and the bulk failure cases). Each reverted; 7 of 7.",
+      "date": "2026-10-22"
+    },
+    "push-badge.itest.ts": {
+      "guards": "Against Postgres, through the real senders: a push's badge is the count GET /notifications serves (bell rows unread, plus live unread threads; not read rows, a hidden, own or closed thread), a bulk push gives each recipient their own number in the same statements for 3 recipients as for 40 (one grouped read of the bell, one of the threads), and the unread count stops at 1000 on the feed, the mark-read answer and the push (SCRUM-740).",
+      "mutation": "M1620b bulk badge removed. M1621 `sender_id <> uid` removed from the thread count. M1622 the hidden-message test removed. M1623 the bell share's Math.min removed. M1624 the count asked once per recipient. M1625 `take: UNREAD_CAP` removed from GET /notifications. M1626 the same from POST /notifications/read. M1627 the single sender's count removed.",
+      "observed": "M1620b: 2 failing. M1621: 1 (an own message counted). M1622: 1 (a hidden message counted). M1623: 1 (the cap). M1624: 1 (statement count differs between 3 and 40). M1625: 1. M1626: 1. M1627: 6. Each reverted; 9 of 9.",
+      "date": "2026-10-22"
+    },
+    "bell-row-for.test.ts": {
+      "guards": "bellRowFor(row, null) hands back the SAME object for every notification_kind in the schema except event_changed, which is rewritten to event_update only for a build that does not declare Flow 9 (#722 review).",
+      "mutation": "M1629 the early `return row` replaced by `return { ...row }` (a copy for every kind).",
+      "observed": "M1629: 22 failing of 23 (every kind's identity check, and the event_changed case's `bellRowFor(row, 2)`). Reverted; 23 of 23.",
       "date": "2026-10-22"
     },
     "profile-badges.itest.ts": {
