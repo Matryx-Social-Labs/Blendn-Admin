@@ -306,7 +306,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       photos: sentPhotos, blur_photo: sentBlur,
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
-      push_enabled, push_people, push_crew, push_later, show_online, read_receipts, share_location, friends_see_me_in_rooms,
+      push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
       languages, home_state, sun_sign, sign_system, shows_up_badge, show_badges,
     } = parsed.data
     const signRefusal = signPairRefusal(parsed.data)
@@ -743,9 +743,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         // what the settings screen has always claimed, so nobody's apparent
         // settings change on the day these start being honoured.
         ...(push_enabled !== undefined && { push_enabled }),
-        ...(push_people !== undefined && { push_people }),
-        ...(push_crew !== undefined && { push_crew }),
-        ...(push_later !== undefined && { push_later }),
         ...(show_online !== undefined && { show_online }),
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),
@@ -804,9 +801,6 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         // Also when only the FIELD moved -- see `prunedExpertise` above.
         ...(prunedExpertise !== undefined && { expertise: prunedExpertise }),
         ...(push_enabled !== undefined && { push_enabled }),
-        ...(push_people !== undefined && { push_people }),
-        ...(push_crew !== undefined && { push_crew }),
-        ...(push_later !== undefined && { push_later }),
         ...(show_online !== undefined && { show_online }),
         ...(read_receipts !== undefined && { read_receipts }),
         ...(share_location !== undefined && { share_location }),

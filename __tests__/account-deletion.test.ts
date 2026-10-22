@@ -358,9 +358,9 @@ describe("no field on the profile survives deletion unnoticed", () => {
     // behave, not who the person was. Their defaults are already harmless and
     // nothing reads them for a deleted account.
     push_enabled: "a setting, not an attribute of the person",
-    push_people: "a setting, not an attribute of the person (Flow 9)",
+    push_matches: "a setting, not an attribute of the person (Flow 9)",
     push_crew: "a setting, not an attribute of the person (Flow 9)",
-    push_later: "a setting, not an attribute of the person (Flow 9)",
+    push_night: "a setting, not an attribute of the person (Flow 9)",
     offers_from_places: "a setting, not an attribute of the person (step 12)",
     offer_push_consent_at: "a setting and when it was given, not an attribute of the person (SCRUM-628)",
     show_online: "a setting, not an attribute of the person",

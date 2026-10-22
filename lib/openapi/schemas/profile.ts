@@ -151,10 +151,6 @@ export const UpdateProfileRequestSchema = z
     // Top level, snake_case, no `preferences` wrapper and no camelCase alias.
     // The app was sending twelve variants of these four and matching none.
     push_enabled: z.boolean().optional(),
-    // Per-kind push switches under push_enabled (Flow 9). They stop the push, never the bell.
-    push_people: z.boolean().optional().describe("Matches and friends: a match, a reveal, a friend request, a friend accepted."),
-    push_crew: z.boolean().optional().describe("Your crew: an invite, \"We're here\", a Blend."),
-    push_later: z.boolean().optional().describe("After the night: \"How was it?\"."),
     show_online: z.boolean().optional(),
     read_receipts: z.boolean().optional(),
     share_location: z.boolean().optional(),
@@ -256,9 +252,6 @@ export const ProfileResponseSchema = z
       // looking for `shareReadReceipts` and falling back to `true`, so every
       // switch showed ON whatever the user had chosen.
       push_enabled: z.boolean(),
-      push_people: z.boolean().optional().describe("Own profile only. Default true."),
-      push_crew: z.boolean().optional().describe("Own profile only. Default true."),
-      push_later: z.boolean().optional().describe("Own profile only. Default true."),
       show_online: z.boolean(),
       read_receipts: z.boolean(),
       share_location: z.boolean(),
@@ -487,7 +480,7 @@ export const NotificationTokenRequestSchema = z
       .min(1)
       .optional()
       .describe(
-        "Which Android channels this install created. Omit it (every build before Flow 9) and the push keeps the channel and payload it always had; 2 also has `people`, `crew` and `later` and knows the `event_changed` and `report_actioned` kinds."
+        "Which Android channels this install created. Omit it (every build before Flow 9) and the push keeps the channel and payload it always had; 2 also has `matches`, `crew` and `after-the-night` and knows the `event_changed` and `report_actioned` kinds."
       ),
   })
   .openapi("NotificationTokenRequest")

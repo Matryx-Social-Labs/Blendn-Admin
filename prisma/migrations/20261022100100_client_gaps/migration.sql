@@ -18,9 +18,9 @@ ALTER TABLE "photo_checks" ADD COLUMN IF NOT EXISTS "pulled_was_main" BOOLEAN;
 
 -- Per-kind push switches under the master `push_enabled`. Default on, as the
 -- master is.
-ALTER TABLE "profiles" ADD COLUMN IF NOT EXISTS "push_people" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "profiles" ADD COLUMN IF NOT EXISTS "push_matches" BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE "profiles" ADD COLUMN IF NOT EXISTS "push_crew" BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE "profiles" ADD COLUMN IF NOT EXISTS "push_later" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "profiles" ADD COLUMN IF NOT EXISTS "push_night" BOOLEAN NOT NULL DEFAULT true;
 
 -- Which Android channel set the install created; null is every build before it.
 ALTER TABLE "push_tokens" ADD COLUMN IF NOT EXISTS "channel_set" SMALLINT;

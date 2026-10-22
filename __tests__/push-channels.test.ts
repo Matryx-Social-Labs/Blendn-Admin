@@ -40,15 +40,17 @@ const LEGACY: Record<Kind, string> = {
 const FLOW9: Record<Kind, string> = {
   ...LEGACY,
   event_checkin: "default",
-  match: "people",
-  reveal_request: "people",
-  reveal: "people",
-  friend_request: "people",
-  friend_accepted: "people",
+  match: "matches",
+  reveal_request: "matches",
+  reveal: "matches",
+  friend_request: "matches",
+  friend_accepted: "matches",
+  board_request: "matches",
+  board_request_accepted: "matches",
   crew_invite: "crew",
   crew_here: "crew",
   blend: "crew",
-  rating_request: "later",
+  rating_request: "after-the-night",
   report_actioned: "default",
 }
 
@@ -74,11 +76,13 @@ describe("the Android channel of every kind", () => {
     expect(deliveryFor(data("private_message"), CHANNEL_SET_FLOW9)).toMatchObject({ collapseId: "dm:c1", tag: "dm:c1" })
     expect(deliveryFor(data("event_changed"), CHANNEL_SET_FLOW9)).toMatchObject({ collapseId: "event:e1" })
     expect(deliveryFor(data("event_changed"))).toEqual(deliveryFor(data("event_update")))
-    expect(deliveryFor(data("rating_request"), CHANNEL_SET_FLOW9)).toMatchObject({ channelId: "later", collapseId: "rate:e1" })
+    expect(deliveryFor(data("rating_request"), CHANNEL_SET_FLOW9)).toMatchObject({ channelId: "after-the-night", collapseId: "rate:e1" })
   })
 
-  it("the four channels a Flow 9 build adds are the only new names", () => {
+  it("the three channels a Flow 9 build adds are the only new names, and offers stays", () => {
     const named = new Set(Object.values(FLOW9))
-    expect([...named].sort()).toEqual(["crew", "default", "events", "later", "messages", "offers", "people", "rooms"])
+    expect([...named].sort()).toEqual(["after-the-night", "crew", "default", "events", "matches", "messages", "offers", "rooms"])
+    expect(FLOW9.venue_offer).toBe("offers")
+    expect(deliveryFor(data("venue_offer"), CHANNEL_SET_FLOW9).channelId).toBe("offers")
   })
 })

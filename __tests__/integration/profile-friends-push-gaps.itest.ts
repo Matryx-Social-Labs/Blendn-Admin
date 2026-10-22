@@ -35,6 +35,7 @@ import { req } from "./go-live-world"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const profileRoute = require("@/app/api/mobile/profiles/[userId]/route") as typeof import("@/app/api/mobile/profiles/[userId]/route")
+const prefsRoute = require("@/app/api/mobile/me/notification-preferences/route") as typeof import("@/app/api/mobile/me/notification-preferences/route")
 const requestsRoute = require("@/app/api/mobile/friends/requests/route") as typeof import("@/app/api/mobile/friends/requests/route")
 const requestRoute = require("@/app/api/mobile/friends/requests/[requestId]/route") as typeof import("@/app/api/mobile/friends/requests/[requestId]/route")
 const inviteRoute = require("@/app/api/mobile/friends/invite/[token]/route") as typeof import("@/app/api/mobile/friends/invite/[token]/route")
@@ -154,23 +155,43 @@ describe("GET /profiles/:id — badges", () => {
 })
 
 describe("the per-kind push switches", () => {
-  it("default on, read back on the owner's profile, written by the profile PUT", async () => {
-    const me = await person("pf-sw")
-    const before = (await getProfile(me, me)).json.data.profile
-    expect([before.push_people, before.push_crew, before.push_later]).toEqual([true, true, true])
+  const prefs = (token: string, method: "GET" | "PUT" = "GET", body?: unknown) =>
+    prefsRoute[method](req("/api/mobile/me/notification-preferences", token, method, body))
 
-    const res = await putProfile(me, { push_crew: false })
-    expect(res.status).toBe(200)
-    const after = (await getProfile(me, me)).json.data.profile
-    expect([after.push_people, after.push_crew, after.push_later]).toEqual([true, false, true])
-    // Nothing else moved.
-    expect(after.push_enabled).toBe(true)
+  it("GET answers all three on by default; PUT takes any subset and answers all three", async () => {
+    const me = await person("pf-sw")
+    const token = tokenOf(me)
+    const first = await prefs(token)
+    expect(first.status).toBe(200)
+    expect((await first.json()).data).toEqual({ matches: true, crew: true, night: true })
+
+    const put = await prefs(token, "PUT", { crew: false })
+    expect(put.status).toBe(200)
+    expect((await put.json()).data).toEqual({ matches: true, crew: false, night: true })
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: false, night: true })
+
+    // A second subset leaves the first alone.
+    expect((await (await prefs(token, "PUT", { night: false })).json()).data).toEqual({ matches: true, crew: false, night: false })
+    // Nothing else on the profile moved.
+    expect((await getProfile(me, me)).json.data.profile.push_enabled).toBe(true)
+  })
+
+  it("refuses an empty body, a non-boolean and a key it does not know, and changes nothing", async () => {
+    const me = await person("pf-sw-bad")
+    const token = tokenOf(me)
+    for (const bad of [{}, { crew: "no" }, { crew: null }, { crews: false }, { crew: false, extra: 1 }]) {
+      const res = await prefs(token, "PUT", bad)
+      expect(res.status).toBe(400)
+      expect((await res.json()).errorCode).toBe("VALIDATION_FAILED")
+    }
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: true, night: true })
+    expect((await prefsRoute.GET(new NextRequest("http://localhost/api/mobile/me/notification-preferences"))).status).toBe(401)
   })
 
   it("a switch stops its kind's push and nothing else; the bell still fills", async () => {
     const me = await person("pf-gate")
     await withToken(me)
-    await db.profiles.update({ where: { id: me }, data: { push_crew: false, push_later: false } })
+    await db.profiles.update({ where: { id: me }, data: { push_crew: false, push_night: false } })
 
     const send = (type: string, extra: Record<string, string> = {}) =>
       sendPushNotification({ userId: me, title: "t", body: "b", data: { type: type as never, ...extra } })
@@ -181,7 +202,7 @@ describe("the per-kind push switches", () => {
     expect(await send("rating_request", { eventId: "e1" })).toBe(false)
     expect(sentMessages).toHaveLength(0)
 
-    // People and everything with no switch still go.
+    // Matches and everything with no switch still go.
     expect(await send("friend_request")).toBe(true)
     expect(await send("match", { conversationId: "c1" })).toBe(true)
     expect(await send("event_update", { eventId: "e1" })).toBe(true)
@@ -191,6 +212,21 @@ describe("the per-kind push switches", () => {
     expect(rows.map((r) => r.kind).sort()).toEqual(
       ["blend", "crew_here", "crew_invite", "event_update", "friend_request", "match", "rating_request"].sort()
     )
+  })
+
+  it("matches off stops every kind it covers, the board's included, and nothing outside it", async () => {
+    const me = await person("pf-gate-matches")
+    await withToken(me)
+    await db.profiles.update({ where: { id: me }, data: { push_matches: false } })
+    const send = (type: string) => sendPushNotification({ userId: me, title: "t", body: "b", data: { type: type as never } })
+
+    for (const type of ["friend_request", "friend_accepted", "match", "reveal", "reveal_request", "board_request", "board_request_accepted"]) {
+      expect(await send(type)).toBe(false)
+    }
+    // Not in matches: a message request, a crew kind, an event, a report's outcome.
+    for (const type of ["message_request", "crew_here", "event_update", "report_actioned"]) {
+      expect(await send(type)).toBe(true)
+    }
   })
 
   it("a person with no profile row keeps hearing: the switch excludes the explicit off, it does not require an on", async () => {
@@ -205,7 +241,7 @@ describe("the per-kind push switches", () => {
     const loud = await person("pf-bulk-on")
     await withToken(quiet)
     await withToken(loud)
-    await db.profiles.update({ where: { id: quiet }, data: { push_later: false } })
+    await db.profiles.update({ where: { id: quiet }, data: { push_night: false } })
     const { sendBulkPushNotifications } = await import("@/lib/push-notifications")
     await sendBulkPushNotifications({ userIds: [quiet, loud], title: "t", body: "b", data: { type: "rating_request", eventId: "e1" } })
     expect(sentMessages.map((m) => m.to)).toEqual([`ExponentPushToken[${loud}]`])
@@ -236,7 +272,7 @@ describe("the channel a push is filed under", () => {
     }
 
     const channelOf = (user: string, type: string) => sentMessages.find((m) => m.to === `ExponentPushToken[${user}]` && m.data.type === type)?.channelId
-    expect(kinds.map(([type]) => channelOf(fresh, type))).toEqual(["people", "crew", "later", "offers", "default", "messages", "events"])
+    expect(kinds.map(([type]) => channelOf(fresh, type))).toEqual(["matches", "crew", "after-the-night", "offers", "default", "messages", "events"])
     // Before Flow 9: every kind the default case caught was `messages`, and rating rode `events`.
     expect(kinds.map(([type]) => channelOf(old, type))).toEqual(["messages", "messages", "events", "offers", "messages", "messages", "events"])
   })

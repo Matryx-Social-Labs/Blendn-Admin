@@ -10,6 +10,8 @@ import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
+import { VISIBLE_DM } from "@/lib/dm-moderation"
+import { decorateNotifications } from "@/lib/notification-display"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
@@ -85,9 +87,25 @@ export async function GET(request: NextRequest) {
      * second request on the one call it already makes when the sheet opens.
      * `@@index([user_id, read_at])` exists for this count.
      */
-    const unreadCount = await db.notifications.count({
-      where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
-    })
+    const [unreadCount, unreadConversations, decorations] = await Promise.all([
+      db.notifications.count({
+        where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
+      }),
+      /*
+       * The app-icon badge's other half: live conversations with something
+       * unread from the other person. A thread, not a message — the same unit
+       * the Banter list marks — and a hidden message is never delivered, so it
+       * is never counted (`VISIBLE_DM`).
+       */
+      db.private_conversations.count({
+        where: {
+          closed_at: null,
+          OR: [{ user1_id: user.userId }, { user2_id: user.userId }],
+          messages: { some: { is_read: false, sender_id: { not: user.userId }, ...VISIBLE_DM } },
+        },
+      }),
+      decorateNotifications(user.userId, items),
+    ])
 
     return successResponse({
       notifications: items.map((n) => ({
@@ -100,8 +118,12 @@ export async function GET(request: NextRequest) {
         data: n.data,
         readAt: n.read_at,
         createdAt: n.created_at,
+        // What the row can say for the reader beyond the push's nameless words (lib/notification-display.ts).
+        ...decorations.get(n.id),
       })),
       unreadCount,
+      // The app icon's number: unseen bell rows plus conversations with something unread.
+      badgeCount: unreadCount + unreadConversations,
       pagination: meta,
     })
   } catch (error) {

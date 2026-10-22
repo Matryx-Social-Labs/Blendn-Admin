@@ -670,13 +670,51 @@ registry.registerPath({
   tags: ["Mobile Notifications"],
   summary: "Register push notification token",
   description:
-    "`channelSet: 2` says this build has the Android channels `people`, `crew` and `later`; a push to it is filed under one channel per kind, and `event_changed` is sent as itself. Without it the push is exactly what it always was (`event_changed` goes as `event_update`).",
+    "`channelSet: 2` says this build has the Android channels `matches`, `crew` and `after-the-night`; a push to it is filed under one channel per kind, and `event_changed` is sent as itself. Without it the push is exactly what it always was (`event_changed` goes as `event_update`).",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: NotificationTokenRequestSchema } } },
   },
   responses: {
     200: { description: "Token registered", content: { "application/json": { schema: wrap(MessageResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+const NotificationPreferencesSchema = z
+  .object({
+    matches: z.boolean().describe("Matches and friends: match, reveal and its request, friend request and accepted, board ask and its answer."),
+    crew: z.boolean().describe("Your crew: invite, \"We're here\", a Blend."),
+    night: z.boolean().describe("After the night: \"How was it?\"."),
+  })
+  .openapi("NotificationPreferences")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/notification-preferences",
+  tags: ["Mobile Notifications"],
+  summary: "Which kinds of push you want",
+  description:
+    "All three default to true. They stop the push only; the bell still fills. Offers keep `GET/PUT /me/offers`.",
+  security: bearerAuth,
+  responses: {
+    200: { description: "The switches", content: { "application/json": { schema: wrap(NotificationPreferencesSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "put",
+  path: "/api/mobile/me/notification-preferences",
+  tags: ["Mobile Notifications"],
+  summary: "Change which kinds of push you want",
+  description: "Any non-empty subset of real booleans; a missing one is left as it is; an unknown key is a 400. Answers all three.",
+  security: bearerAuth,
+  request: {
+    body: { content: { "application/json": { schema: NotificationPreferencesSchema.partial().strict() } } },
+  },
+  responses: {
+    200: { description: "The switches now", content: { "application/json": { schema: wrap(NotificationPreferencesSchema) } } },
     ...standardErrors,
   },
 })
@@ -737,6 +775,34 @@ const NotificationSchema = z.object({
   data: z.record(z.string(), z.unknown()).nullable(),
   readAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
+  display: z
+    .object({
+      title: z.string().optional(),
+      context: z.string().optional(),
+      visual: z
+        .discriminatedUnion("type", [
+          z.object({ type: z.literal("photo"), uri: z.string() }),
+          z.object({ type: z.literal("creature"), pseudonym: z.string() }),
+          z.object({ type: z.literal("emblem"), seed: z.string() }),
+          z.object({
+            type: z.literal("event"),
+            cover: z.string().nullable(),
+            badge: z.enum(["clock", "map-pin", "megaphone", "star"]),
+            cancelled: z.boolean(),
+          }),
+        ])
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "What the row can say for the reader beyond the push's nameless words, only where they may already see it: a friend request's asker (name and photo) while it waits; a match's room pseudonym; a crew's emblem seed; an event's cover. Absent when it cannot be resolved: draw the kind's own tile. `stack` is not sent."
+    ),
+  open: z
+    .boolean()
+    .optional()
+    .describe(
+      "Sent for `friend_request`, `crew_invite`, `message_request` and `board_request`: whether it is still the reader's to answer. false once accepted, declined, dismissed, withdrawn, or gone."
+    ),
 })
 
 registry.registerPath({
@@ -763,6 +829,10 @@ registry.registerPath({
             z.object({
               notifications: z.array(NotificationSchema),
               unreadCount: z.number().int(),
+              badgeCount: z
+                .number()
+                .int()
+                .describe("The app icon's number: `unreadCount` plus live conversations with something unread from the other person (a thread, not a message)."),
               pagination: z.object({
                 limit: z.number().int(),
                 hasMore: z.boolean(),
@@ -783,7 +853,7 @@ registry.registerPath({
   tags: ["Mobile Notifications"],
   summary: "Clear the caller's notifications",
   description:
-    "Deletes rather than marks read — a 'clear all' that leaves every row in place is a lie the retention query trips over.",
+    "Deletes rather than marks read — a 'clear all' that leaves every row in place is a lie the retention query trips over. It clears every row, waiting requests included, so the feed never sends `clearKeepsRequests`.",
   security: bearerAuth,
   responses: {
     200: {
