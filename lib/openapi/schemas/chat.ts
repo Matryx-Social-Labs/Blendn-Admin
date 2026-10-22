@@ -229,6 +229,19 @@ export const ChatGroupListResponseSchema = z
   })
   .openapi("ChatGroupListResponse")
 
+/** The rooms you silenced (`GET /me/muted-rooms`): chat-list rows of all three kinds, paged by a cursor. */
+export const MutedRoomsResponseSchema = z
+  .object({
+    rooms: z
+      .array(z.union([ChatGroupSchema, ChatRoomListItemSchema]))
+      .describe(
+        "Each row is exactly a `GET /chat/groups` row (`groups` rows for `kind: event`, `rooms` rows for `crew` and `blend`), built by the same code, newest mute first. Only a room that list would show: live, through its owner's door."
+      ),
+    nextCursor: z.string().nullable().describe("Pass as `cursor` for the next page; null on the last."),
+    pagination: z.object({ limit: z.number().int(), hasMore: z.boolean() }),
+  })
+  .openapi("MutedRoomsResponse")
+
 /**
  * The stored `chat_messages` row, snake_case, with its includes — not the
  * camelCase `ChatMessage` that `GET /events/{eventId}/chat` builds.

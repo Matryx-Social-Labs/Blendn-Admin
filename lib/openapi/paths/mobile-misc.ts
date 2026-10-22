@@ -17,6 +17,7 @@ import {
   ActiveCheckinSchema,
 } from "@/lib/openapi/schemas/profile"
 import { MessageResponseSchema } from "@/lib/openapi/schemas/auth"
+import { MutedRoomsResponseSchema } from "@/lib/openapi/schemas/chat"
 import { CheckinRequestSchema } from "@/lib/openapi/schemas/event"
 import { LIVE_COUNT_BUCKETS, type LiveCountBucket } from "@/lib/disclosure"
 
@@ -691,14 +692,29 @@ const NotificationPreferencesSchema = z
 
 registry.registerPath({
   method: "get",
+  path: "/api/mobile/me/muted-rooms",
+  tags: ["Mobile Notifications"],
+  summary: "The rooms you silenced",
+  description:
+    "Settings › Notifications › Muted rooms, newest mute first. Each row is a `GET /chat/groups` row (`kind` is `event`, `crew` or `blend`; `mute` says until when), built by the same code. Listed: a mute in force now (not lapsed) in a room that list would show: live, through its owner's door (a dissolved crew, a closed Blend, a Blend across a block, a ban or a leave are not). Keyset-paged on the mute's time then the room id; `limit` 1-100 (default 50), and a `cursor` an earlier answer did not give is a 400. A page may be shorter than `limit` with a `nextCursor` when many rooms in a row are not listed. Rate-limited as a read.",
+  security: bearerAuth,
+  request: { query: z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), cursor: z.string().optional() }) },
+  responses: {
+    200: { description: "A page of muted rooms", content: { "application/json": { schema: wrap(MutedRoomsResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
   path: "/api/mobile/me/notification-preferences",
   tags: ["Mobile Notifications"],
   summary: "Which kinds of push you want",
   description:
-    "All three default to true. They stop the push only; the bell still fills. Offers keep `GET/PUT /me/offers`.",
+    "All three default to true. They stop the push only; the bell still fills. Offers keep `GET/PUT /me/offers`. The GET also says `mutedRooms`: how many rooms you have silenced, the ones `GET /me/muted-rooms` lists, counted up to 1000 (show \"999+\" at 1000). PUT does not send it.",
   security: bearerAuth,
   responses: {
-    200: { description: "The switches", content: { "application/json": { schema: wrap(NotificationPreferencesSchema) } } },
+    200: { description: "The switches", content: { "application/json": { schema: wrap(NotificationPreferencesSchema.extend({ mutedRooms: z.number().int().min(0).max(1000) })) } } },
     ...standardErrors,
   },
 })
@@ -836,11 +852,11 @@ registry.registerPath({
           schema: wrap(
             z.object({
               notifications: z.array(NotificationSchema),
-              unreadCount: z.number().int(),
+              unreadCount: z.number().int().max(1000).describe("Capped at 1000: at 1000 there may be more (show \"999+\")."),
               badgeCount: z
                 .number()
                 .int()
-                .describe("The app icon's number: `unreadCount` plus live conversations with something unread from the other person (a thread, not a message)."),
+                .describe("The app icon's number: `unreadCount` (so capped at 1000) plus live conversations with something unread from the other person (a thread, not a message). Every push carries this same number as its `badge`."),
               pagination: z.object({
                 limit: z.number().int(),
                 hasMore: z.boolean(),
@@ -894,7 +910,7 @@ registry.registerPath({
       description: "Marked",
       content: {
         "application/json": {
-          schema: wrap(z.object({ marked: z.number().int(), unreadCount: z.number().int() })),
+          schema: wrap(z.object({ marked: z.number().int(), unreadCount: z.number().int().max(1000).describe("Capped at 1000, as on the feed.") })),
         },
       },
     },

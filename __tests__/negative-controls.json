@@ -2039,8 +2039,8 @@
     },
     "event-change-writers.test.ts": {
       "guards": "Nothing writes an event's start_time, end_time, venue_name, address or status except through updateEventTracked (lib/event-change.ts): a ratchet over events.update/updateMany and raw UPDATE events in app/ and lib/, with a named allowance (org suspension, venue unlink) that must still be needed, and a self-test of the scanner.",
-      "mutation": "M1600 updateEventStatus's `updateEventTracked` replaced by a bare `db.events.update` writing status.",
-      "observed": "M1600: 2 failing ('no file outside lib/event-change.ts writes them' naming lib/admin-role-actions.ts, and 'the converted doors really go through it'). Reverted; 7 of 7. The first run of the ratchet also found a real writer nobody had listed (venue unlink writes venue_name), now allowed with its reason.",
+      "mutation": "M1559 updateEventStatus's `updateEventTracked` replaced by a bare `db.events.update` writing status.",
+      "observed": "M1559: 2 failing ('no file outside lib/event-change.ts writes them' naming lib/admin-role-actions.ts, and 'the converted doors really go through it'). Reverted; 7 of 7. The first run of the ratchet also found a real writer nobody had listed (venue unlink writes venue_name), now allowed with its reason.",
       "date": "2026-10-22"
     },
     "profile-badges.itest.ts": {

@@ -1,0 +1,17 @@
+-- "Which rooms did I silence?" (`GET /me/muted-rooms`, and the `mutedRooms`
+-- count on `GET /me/notification-preferences`). A mute is the JSON key
+-- `notification_preferences->>'muted'` (lib/room-mute.ts), and almost no member
+-- row has one, so a partial index over only the muted rows is tiny and starts
+-- the read at them instead of at every room the person is in. The queries
+-- write this predicate word for word (`mutedNowSql`), or the planner cannot use it.
+--
+-- CONCURRENTLY, so building it does not block the chat writers, which means this
+-- file is ONE statement and has no BEGIN/COMMIT: CREATE INDEX CONCURRENTLY
+-- cannot run in a transaction (`__tests__/migration-tx.test.ts` allows exactly
+-- this shape). A failed build leaves an INVALID index of this name, which
+-- IF NOT EXISTS would then skip: if that happens, a NEW forward migration drops
+-- it and builds it again, never SQL by hand.
+--
+-- Rolling back: a new forward migration with
+--   DROP INDEX CONCURRENTLY IF EXISTS "chat_group_members_muted_idx";
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "chat_group_members_muted_idx" ON "chat_group_members" ("user_id") WHERE (notification_preferences->>'muted') = 'true';

@@ -5,6 +5,7 @@ import { readJson } from "@/lib/api-input"
 import { serverErrorResponse, successResponse, unauthorizedResponse, validationErrorResponse } from "@/lib/api-response"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
+import { mutedRoomCount } from "@/lib/muted-rooms"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
@@ -23,6 +24,9 @@ export const dynamic = "force-dynamic"
  * first (`recordNotification`). Offers have their own pair at `/me/offers`
  * (opt-in by App Store rule), and a DM, a room reply, an event's change and a
  * report's outcome have no switch here.
+ *
+ * GET also says **`mutedRooms`**: how many rooms you have silenced, the ones
+ * `GET /me/muted-rooms` lists, counted up to 1000 (the app shows "999+").
  *
  * PUT takes any non-empty subset of real booleans and answers all three. A
  * key it does not know is refused, so a typo changes nothing.
@@ -50,7 +54,11 @@ export async function GET(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("read", "me-notification-preferences", authUser.userId))
     if (limited) return limited
 
-    const res = await successResponse(shape(await db.profiles.findUnique({ where: { id: authUser.userId }, select })))
+    const [profile, mutedRooms] = await Promise.all([
+      db.profiles.findUnique({ where: { id: authUser.userId }, select }),
+      mutedRoomCount(authUser.userId),
+    ])
+    const res = await successResponse({ ...shape(profile), mutedRooms })
     res.headers.set("Cache-Control", "private, no-store")
     return res
   } catch (error) {

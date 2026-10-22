@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 
 /**
  * A person silencing a room for themselves.
@@ -79,3 +79,23 @@ export function withoutMute(
   delete rest.muted_until
   return rest as Prisma.InputJsonObject
 }
+
+/**
+ * `roomMuteState(…).muted` as SQL, for a query on `chat_group_members m`.
+ *
+ * The first condition is the partial index's own predicate
+ * (`chat_group_members_muted_idx`), written the way the index is. The rest is
+ * the time: no `muted_until` (or one that is not a string) is for ever, a
+ * time in the past is lapsed, and a string that is not an ISO time reads as
+ * lapsed, as `roomMuteState` reads it. The CASE is what keeps the cast from
+ * running on a string that is not a time.
+ */
+export const mutedNowSql = (now: Date) => Prisma.sql`(
+  (m.notification_preferences->>'muted') = 'true'
+  AND CASE
+    WHEN jsonb_typeof(m.notification_preferences->'muted_until') IS DISTINCT FROM 'string' THEN true
+    WHEN (m.notification_preferences->>'muted_until') ~ '^\\d{4}-\\d{2}-\\d{2}T[0-9:.]+(Z|[+-]\\d{2}:\\d{2})$'
+      THEN (m.notification_preferences->>'muted_until')::timestamptz > ${now}::timestamptz
+    ELSE false
+  END
+)`
