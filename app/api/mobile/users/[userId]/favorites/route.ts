@@ -9,9 +9,11 @@ import {
   successResponse,
   unauthorizedResponse,
   forbiddenResponse,
+  errorResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { boundedInt, paginationMeta } from "@/lib/pagination"
+import { createdBefore, keysetPage, NEWEST_FIRST, pagedPagination, parsePageOrCursor } from "@/lib/pagination"
+import { isUuid } from "@/lib/api-input"
 import { realEventsWhere } from "@/lib/event-kind"
 import { changeSummaryForResponse } from "@/lib/event-change"
 
@@ -46,8 +48,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Parse query parameters
     const searchParams = request.nextUrl.searchParams
-    const page = boundedInt(searchParams.get("page"), 1, 1, Number.MAX_SAFE_INTEGER)
-    const limit = boundedInt(searchParams.get("limit"), 20, 1, 100)
+    // `page`/`limit` as ever, or `cursor` (keyset on saved-at, then id); none of them is a build that cannot page.
+    const query = parsePageOrCursor(searchParams, isUuid)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit } = query
     // Fix #20: 'upcoming' (default) shows only future events; 'past' shows completed ones
     const timeFilter = searchParams.get("timeFilter") || "upcoming"
     const userLat = searchParams.get("lat")
@@ -88,10 +92,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
 
     // Fetch favorites with event details
-    const favorites = await db.event_favorites.findMany({
+    const rows = await db.event_favorites.findMany({
       where: {
         user_id: userId,
         event: eventWhereClause,
+        ...(query.mode === "cursor" && createdBefore({ at: query.after.at, id: query.after.id })),
       },
       include: {
         event: {
@@ -128,10 +133,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           },
         },
       },
-      orderBy: { created_at: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
+      orderBy: NEWEST_FIRST,
+      skip: query.mode === "page" ? (query.page - 1) * limit : 0,
+      take: limit + 1,
     })
+    const paged = keysetPage(rows, limit, (f) => ({ at: f.created_at, id: f.id }))
+    const favorites = paged.items
 
     /*
      * `checkInCount` was `_count.check_ins` filtered to `checked_in`: rows on a
@@ -198,7 +205,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       events,
       timeFilter,
-      pagination: paginationMeta(page, limit, totalCount),
+      pagination: pagedPagination(query, totalCount, paged),
     })
   } catch (error) {
     logger.error("Get favorites error", { error: error instanceof Error ? error.message : String(error) })

@@ -234,3 +234,53 @@ export interface ListPagination {
   /** The whole list, whatever page this is: the count a header says. */
   totalCount: number
 }
+
+/* -------------------------------------------------------------------------- */
+/* Page numbers AND a keyset cursor, for the lists installed builds page by    */
+/* -------------------------------------------------------------------------- */
+
+/** How a list is being read: the old way (`page`) or by keyset (`cursor`). */
+export type PagedQuery =
+  | { mode: "page"; page: number; limit: number }
+  | { mode: "cursor"; limit: number; after: { at: Date; id: string } }
+
+/**
+ * `?page=&limit=` as it always was, plus `?cursor=` (the last page's
+ * `pagination.nextCursor`). A `cursor` wins and pages by keyset; otherwise
+ * `page` and `limit` mean what they meant, and a request with none of the three
+ * is a build that cannot page and gets `LEGACY_PAGE`, as in `parseListQuery`.
+ * `"bad_cursor"` for a cursor that is not one of ours or does not name a uuid
+ * row (the routes answer 400): these lists key on uuids, and Postgres would
+ * make anything else a 500.
+ */
+export function parsePageOrCursor(
+  searchParams: URLSearchParams,
+  uuid: (value: string) => boolean,
+  defaultLimit: number = PAGINATION.DEFAULT_LIMIT
+): PagedQuery | "bad_cursor" {
+  const raw = searchParams.get("cursor")
+  const asked = searchParams.get("limit")
+  const page = searchParams.get("page")
+  if (raw) {
+    const after = decodeKeyset(raw)
+    if (!after || !after.at || !uuid(after.id)) return "bad_cursor"
+    return { mode: "cursor", limit: boundedInt(asked, defaultLimit, 1, LIST_PAGE.MAX), after: { at: after.at, id: after.id } }
+  }
+  const limit = asked === null && page === null ? LEGACY_PAGE : boundedInt(asked, defaultLimit, 1, LIST_PAGE.MAX)
+  return { mode: "page", page: boundedInt(page, PAGINATION.DEFAULT_PAGE, 1, Number.MAX_SAFE_INTEGER), limit }
+}
+
+/**
+ * The `pagination` block for a `parsePageOrCursor` list: the old page block
+ * plus `nextCursor` on the page route, and the cursor lists' block
+ * (`ListPagination`) on a cursor one. `totalCount` is the whole list either way.
+ */
+export function pagedPagination(
+  query: PagedQuery,
+  totalCount: number,
+  page: { hasMore: boolean; nextCursor: string | null }
+) {
+  return query.mode === "page"
+    ? { ...paginationMeta(query.page, query.limit, totalCount), nextCursor: page.nextCursor }
+    : { limit: query.limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount }
+}
