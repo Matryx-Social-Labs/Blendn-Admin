@@ -161,6 +161,19 @@ describe("GET /events/:id/people — a member the room banned", () => {
     expect((await deck(n.id, me.token)).status).toBe(200)
   })
 
+  it("counts only a host's ban: a suspended-then-reinstated person is listed and may look (M2)", async () => {
+    const n = await night()
+    const me = await person()
+    const back = await person()
+    await wasThere(n, me)
+    await wasThere(n, back)
+    // What a suspension leaves behind once lifted: banned, by nobody.
+    await db.chat_group_members.updateMany({ where: { chat_group_id: n.roomId, user_id: back.id }, data: { status: "banned", banned_by: null } })
+
+    expect(((await people(n.id, me.token)).json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, back))
+    expect((await people(n.id, back.token)).status).toBe(200)
+  })
+
   it("lets in somebody who checked in and never joined the room: attendance is the door", async () => {
     const n = await night()
     const me = await person()
