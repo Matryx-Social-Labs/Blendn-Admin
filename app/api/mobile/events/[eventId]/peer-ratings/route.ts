@@ -3,8 +3,8 @@ import { roomBanRefusal } from "@/lib/room-ban"
 import { z } from "zod"
 
 import {
+  ErrorCode,
   errorResponse,
-  forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
   successResponse,
@@ -113,7 +113,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const viaHandle = await userIdFromDmRef(authUser.userId, ratedId)
     const target = peers.find((p) => p.ref === ratedId) ?? (viaHandle ? peers.find((p) => p.userId === viaHandle) : undefined)
     if (!target) {
-      return forbiddenResponse("You can only rate someone you connected with, after the event")
+      /*
+       * Why, for the app: before the event ends nobody is ratable (`ratablePeers`
+       * says so first), after it the person is not one you connected with (or
+       * you rated them, or a block). `errorCode` stays `FORBIDDEN`.
+       */
+      const ended = await db.events.findUnique({ where: { id: eventId }, select: { end_time: true } })
+      const reason = ended && ended.end_time > new Date() ? "NOT_ENDED" : "NOT_CONNECTED"
+      return errorResponse("You can only rate someone you connected with, after the event", 403, ErrorCode.FORBIDDEN, reason)
     }
 
     await db.peer_ratings.create({

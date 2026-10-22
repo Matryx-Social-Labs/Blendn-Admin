@@ -1,11 +1,13 @@
 import { NextRequest } from "next/server"
 
 import { attendedEventIds, distinctEventsAttended } from "@/lib/attendee-counts"
-import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
+import { errorResponse, successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
+import { stayMinutesByEvent } from "@/lib/presence-sessions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
+import { keysetPage, pagedPagination, paginationSkip, parsePageOrCursor, type PagedQuery } from "@/lib/pagination"
+import { isUuid } from "@/lib/api-input"
 import { lockedNights } from "@/lib/plus"
 
 export const dynamic = "force-dynamic"
@@ -56,21 +58,25 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Authentication required")
     }
 
-    const { searchParams } = new URL(request.url)
-    const { page, limit } = parsePagination(
-      searchParams.get("page") ?? undefined,
-      searchParams.get("limit") ?? undefined
-    )
+    const query = parsePageOrCursor(new URL(request.url).searchParams, isUuid)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit } = query
 
-    const skip = paginationSkip(page, limit)
-    const [pageRows, totalCount] = await Promise.all([
-      attendedEventIds(authUser.userId, { limit, skip }),
-      // Places included: the list below includes them (D-6).
-      distinctEventsAttended(authUser.userId, { places: true }),
-    ])
+    const skip = query.mode === "page" ? paginationSkip(query.page, limit) : 0
+    const totalCount = await distinctEventsAttended(authUser.userId, { places: true })
     const lockedCount = await lockedNights(authUser.userId, totalCount)
     const visible = totalCount - lockedCount
-    const attended = pageRows.slice(0, Math.max(0, visible - skip))
+    // Where Plus gates, `visible` is the free few: read just those and page them here, the cursor included.
+    const read =
+      lockedCount > 0
+        ? afterThePosition(await attendedEventIds(authUser.userId, { limit: visible, skip: 0 }), query)
+        : await attendedEventIds(authUser.userId, {
+            limit: limit + 1,
+            skip,
+            ...(query.mode === "cursor" && { after: query.after }),
+          })
+    const paged = keysetPage(read, limit, (r) => ({ at: r.first_seen, id: r.event_id }))
+    const attended = paged.items
 
     // Deleted events are already out of both queries (SCRUM-432). This filter
     // only covers one deleted between the two reads.
@@ -91,9 +97,20 @@ export async function GET(request: NextRequest) {
             end_time: true,
             venue_name: true,
             city: true,
+            venue_id: true,
+            // What kind of place a visit was, from the row already being read.
+            venue: { select: { venue_type: true } },
+            // Your own rating of the night, if any: `GET /events/:id/rating`'s `ratedAt`, from the same read.
+            ratings: { where: { user_id: authUser.userId }, select: { updated_at: true }, take: 1 },
           },
         })
       : []
+
+    // A visit's length, for the venue days on this page only: one grouped read, never one per row.
+    const stays = await stayMinutesByEvent(
+      authUser.userId,
+      events.filter((e) => e.kind === "venue_day").map((e) => e.id)
+    )
 
     // Back into attendance order. `findMany` returns rows in whatever order
     // Postgres likes, and the useful order is the one the query above chose.
@@ -101,13 +118,25 @@ export async function GET(request: NextRequest) {
     const rows = attended
       .map((a) => {
         const event = byId.get(a.event_id)
-        return event ? { ...event, attendedAt: a.first_seen } : null
+        if (!event) return null
+        const { venue_id, venue, ratings, ...shown } = event
+        const visit = event.kind === "venue_day"
+        // Only a visit to a place carries these; an event's own row says null.
+        return {
+          ...shown,
+          attendedAt: a.first_seen,
+          stay_minutes: visit ? (stays.get(event.id) ?? null) : null,
+          venue_id: visit ? venue_id : null,
+          venue_type: visit ? (venue?.venue_type ?? null) : null,
+          // A place is not a night you rate, so a visit says null.
+          ratedAt: event.kind === "event" ? (ratings[0]?.updated_at ?? null) : null,
+        }
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)
 
     return successResponse({
       events: rows,
-      pagination: paginationMeta(page, limit, visible),
+      pagination: pagedPagination(query, visible, paged),
       lockedCount,
     })
   } catch (error) {
@@ -116,4 +145,20 @@ export async function GET(request: NextRequest) {
     })
     return serverErrorResponse("Failed to load your attendance")
   }
+}
+
+/**
+ * `rows` (newest first) as the page `query` asks for, plus the one row past it
+ * that tells `keysetPage` there is more: the same cut the SQL makes, for the
+ * few nights a person without Plus can see.
+ */
+function afterThePosition(rows: Array<{ event_id: string; first_seen: Date }>, query: PagedQuery) {
+  const rest =
+    query.mode === "cursor"
+      ? rows.filter(
+          (r) =>
+            r.first_seen < query.after.at || (r.first_seen.getTime() === query.after.at.getTime() && r.event_id < query.after.id)
+        )
+      : rows.slice(paginationSkip(query.page, query.limit))
+  return rest.slice(0, query.limit + 1)
 }

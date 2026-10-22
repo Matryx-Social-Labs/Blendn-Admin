@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 
 /*
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
@@ -111,9 +111,19 @@ registry.registerPath({
   path: "/api/mobile/crews",
   tags,
   summary: "My crews, and invites waiting for me",
+  description:
+    "`invites` are the newest 200 open invites an accept would take, a page at a time: `?limit=` (default 50, 1-100) and `?cursor=` " +
+    "(`invitesPagination.nextCursor`), newest first with the invite id breaking ties; neither is an installed build, answered with up to 200. " +
+    "`invitesPagination.totalCount` is the invites in that cap. `crews` is not paged.",
   security: bearerAuth,
+  request: { query: ListQuerySchema },
   responses: {
-    200: { description: "Crews", ...json(wrap(z.object({ crews: z.array(CrewSchema), invites: z.array(CrewInviteSchema) }))) },
+    200: {
+      description: "Crews",
+      ...json(
+        wrap(z.object({ crews: z.array(CrewSchema), invites: z.array(CrewInviteSchema), invitesPagination: ListPaginationSchema }))
+      ),
+    },
     ...standardErrors,
   },
 })

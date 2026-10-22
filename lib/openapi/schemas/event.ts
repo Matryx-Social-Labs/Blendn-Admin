@@ -222,6 +222,20 @@ export const EventSummarySchema = z
   })
   .openapi("EventSummary")
 
+/** `changedAt`/`changedFields` as `GET /events/:id`, `GET /me/rsvps` and `GET /users/:id/favorites` send them. */
+export const ChangedAtSchema = z
+  .string()
+  .datetime()
+  .nullable()
+  .optional()
+  .describe(
+    "When the time, the venue or the status last moved under people who had heard of the event (\"changed while you're going\"). Null for an event that has not changed, and again when every change was put back."
+  )
+export const ChangedFieldsSchema = z
+  .array(z.enum(["time", "venue", "cancelled"]))
+  .optional()
+  .describe("What moved, in that order; empty when nothing did. Derived on read.")
+
 export const EventDetailSchema = z
   .object({
     id: z.string().uuid(),
@@ -233,18 +247,8 @@ export const EventDetailSchema = z
     startTime: z.string().datetime(),
     endTime: z.string().datetime(),
     session: EventSessionSchema,
-    changedAt: z
-      .string()
-      .datetime()
-      .nullable()
-      .optional()
-      .describe(
-        "When the time, the venue or the status last moved under people who had heard of the event (\"changed while you're going\"). Null for an event that has not changed, and again when every change was put back."
-      ),
-    changedFields: z
-      .array(z.enum(["time", "venue", "cancelled"]))
-      .optional()
-      .describe("What moved, in that order; empty when nothing did. Derived on read."),
+    changedAt: ChangedAtSchema,
+    changedFields: ChangedFieldsSchema,
     changedFrom: z
       .object({
         startTime: z.string().datetime().optional(),

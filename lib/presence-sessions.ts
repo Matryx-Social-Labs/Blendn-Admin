@@ -464,3 +464,35 @@ export async function headcount(
   }
 }
 
+
+/**
+ * How long each of these events one person was present for, in whole minutes:
+ * the sum of their presence sessions' lengths, one grouped read for the page.
+ *
+ * Sessions rather than the check-in row, because the check-in is one row per
+ * person per occurrence and going live again the same day overwrites its
+ * arrival, where the sessions keep every stretch. A session still open counts
+ * to its last heartbeat (`departed_at` is null only until something closes it,
+ * and silence is what a stalled sweeper looks like). An event with no session
+ * is absent from the map: unknown, not zero.
+ *
+ * The caller's own rows only, by the `user_id` it is given, and staff time is
+ * not a stay.
+ */
+export async function stayMinutesByEvent(
+  userId: string,
+  eventIds: readonly string[]
+): Promise<Map<string, number>> {
+  if (eventIds.length === 0) return new Map()
+  const rows = await db.$queryRaw<{ event_id: string; seconds: number }[]>`
+    SELECT event_id,
+           SUM(EXTRACT(EPOCH FROM (COALESCE(departed_at, last_seen_at) - arrived_at)))::float8 AS seconds
+    FROM presence_sessions
+    WHERE user_id = ${userId}
+      AND kind = 'attendee'
+      AND event_id IN (${Prisma.join(eventIds)})
+      AND COALESCE(departed_at, last_seen_at) IS NOT NULL
+    GROUP BY event_id
+  `
+  return new Map(rows.map((r) => [r.event_id, Math.max(0, Math.round(r.seconds / 60))]))
+}

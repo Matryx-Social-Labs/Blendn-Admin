@@ -1,15 +1,17 @@
 import { NextRequest } from "next/server"
 
 import { readJson } from "@/lib/api-input"
-import { serverErrorResponse, successResponse, unauthorizedResponse, validationErrorResponse } from "@/lib/api-response"
+import { errorResponse, serverErrorResponse, successResponse, unauthorizedResponse, validationErrorResponse } from "@/lib/api-response"
 import { createCrew, createCrewSchema, isRefusal, refusalResponse } from "@/lib/crews/crews"
 import { crewsOf } from "@/lib/crews/views"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { LEGACY_PAGE, LIST_PAGE, parseListQuery } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
 /**
- * GET /api/mobile/crews — my crews, and the crew invites waiting for me.
+ * GET /api/mobile/crews — my crews, and the crew invites waiting for me: the
+ * newest 200, a page at a time (`?limit=&cursor=`, `invitesPagination`).
  */
 export async function GET(request: NextRequest) {
   try {
@@ -17,7 +19,12 @@ export async function GET(request: NextRequest) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
     const limited = await rateLimit(request, userLimit("read", "crews-list", authUser.userId))
     if (limited) return limited
-    return successResponse(await crewsOf(authUser.userId))
+    // The invites page: `?limit=` (default 50) and `?cursor=`; neither is an installed build, answered with up to 200.
+    const invites = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.REQUESTS, LEGACY_PAGE)
+    // A cursor with no time is not one of ours (invites are ordered by when they were made).
+    if (invites === "bad_cursor" || (invites.after && !invites.after.at)) return errorResponse("Invalid cursor", 400)
+    const { limit, after } = invites
+    return successResponse(await crewsOf(authUser.userId, { limit, after: after?.at ? { ...after, at: after.at } : null }))
   } catch (error) {
     logger.error("List crews error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to load crews")

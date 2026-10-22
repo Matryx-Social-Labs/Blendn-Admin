@@ -63,7 +63,42 @@ function decode(cursor: string): [string, string] | null {
 }
 
 /** Case-insensitive prefix of any word of the name. */
-const matches = (name: string, q: string) => name.toLocaleLowerCase().split(/\s+/).some((word) => word.startsWith(q))
+export const matches = (name: string, q: string) => name.toLocaleLowerCase().split(/\s+/).some((word) => word.startsWith(q))
+
+/**
+ * `matches`, as a `where` on a user, for a list read from the database
+ * (`GET /friends?q=`): the name a friend card shows (`personCard`) is the
+ * profile's when it has one and the account's when it does not, and a word of it
+ * starts with `q`. A space between words, where `matches` splits on any
+ * whitespace: a name with a tab in it is the one difference, and the database
+ * side can only be narrower, never wider.
+ */
+export function friendNameWhere(query: string) {
+  // Prisma passes `%` and `_` through to LIKE as wildcards; they are letters here.
+  const q = query.replace(/[\\%_]/g, "\\$&")
+  const word = <F extends "name">(field: F) => [
+    { [field]: { startsWith: q, mode: "insensitive" as const } },
+    { [field]: { contains: ` ${q}`, mode: "insensitive" as const } },
+  ]
+  return {
+    OR: [
+      { profile: { is: { OR: word("name") } } },
+      {
+        AND: [
+          { OR: word("name") },
+          { OR: [{ profile: { is: null } }, { profile: { is: { OR: [{ name: null }, { name: "" }] } } }] },
+        ],
+      },
+    ],
+  }
+}
+
+/** The `?q=` of a list of friends: trimmed, `undefined` when empty, `"too_long"` past the limit the Room's search has. */
+export function parseFriendQuery(raw: string | null): string | undefined | "too_long" {
+  const q = raw?.trim().toLocaleLowerCase()
+  if (!q) return undefined
+  return q.length > FRIENDS_HERE_MAX_QUERY ? "too_long" : q
+}
 
 export class BadCursor extends Error {}
 

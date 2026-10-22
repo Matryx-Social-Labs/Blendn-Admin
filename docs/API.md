@@ -413,9 +413,16 @@ GET /api/mobile/me/attendance?page=1&limit=20
     { "id": "…", "kind": "event", "slug": "…", "title": "Design Week",
       "cover_image_url": null, "start_time": "…", "end_time": "…",
       "venue_name": "The Humming Tree", "city": "Bengaluru",
-      "attendedAt": "2026-08-14T18:04:00.000Z" }
+      "attendedAt": "2026-08-14T18:04:00.000Z",
+      "stay_minutes": null, "venue_id": null, "venue_type": null,
+      "ratedAt": "2026-08-15T09:30:00.000Z" },
+    { "id": "…", "kind": "venue_day", "slug": "…", "title": "Venue day · …",
+      "cover_image_url": null, "start_time": "…", "end_time": "…",
+      "venue_name": "Third Wave Coffee", "city": "Bengaluru",
+      "attendedAt": "2026-09-28T16:20:00.000Z",
+      "stay_minutes": 95, "venue_id": "…", "venue_type": "cafe", "ratedAt": null }
   ],
-  "pagination": { "page": 1, "limit": 20, "totalCount": 7, "totalPages": 1, "hasMore": false }
+  "pagination": { "page": 1, "limit": 20, "totalCount": 7, "totalPages": 1, "hasMore": false, "nextCursor": null }
 } }
 ```
 
@@ -452,6 +459,21 @@ so every page is full and `totalCount` is the number of events listed
 show them labelled as a place, by `venue_name`. A venue day's `title` is
 bookkeeping ("Venue day · … · date") and is not for display.
 
+**A visit says how long and where** (additive). Every row carries `stay_minutes`
+and `venue_id`; both are `null` on an `event`. On a `venue_day`: `venue_id` is
+the place's id (for its page), and `stay_minutes` is the length of your presence
+there, in whole minutes — your presence sessions that day summed (going live
+again the same day adds a stretch, never overwrites one), a session still open
+counted to its last heartbeat. `null` when there is no session to measure, which
+is unknown, not zero. Yours alone, like the rest of the route; one grouped read
+serves the page, whatever its size.
+
+**`venue_type`** is a visit's kind of place (`cafe`, `pub_bar`, … or null when the
+venue has none; null on an `event`). **`ratedAt`** is when *you* last rated that
+night, as `GET /events/:eventId/rating`'s `ratedAt`, so the list can say "Rate"
+or "Rated": null if you have not, and always null for a place. One grouped read
+for the page, never one per row.
+
 ### GET /me/rsvps
 
 The events you said you are going to — what the app's **Going** tab lists above
@@ -471,9 +493,10 @@ GET /api/mobile/me/rsvps?page=1&limit=20
       "status": "published", "visibility": "public",
       "venueName": "…", "address": "…", "city": "Bengaluru",
       "latitude": 12.97, "longitude": 77.59,
-      "rsvpStatus": "waitlisted", "rsvpAt": "2026-09-20T10:12:00.000Z" }
+      "rsvpStatus": "waitlisted", "rsvpAt": "2026-09-20T10:12:00.000Z",
+      "changedAt": null, "changedFields": [] }
   ],
-  "pagination": { "page": 1, "limit": 20, "totalCount": 3, "totalPages": 1, "hasMore": false }
+  "pagination": { "page": 1, "limit": 20, "totalCount": 3, "totalPages": 1, "hasMore": false, "nextCursor": null }
 } }
 ```
 
@@ -484,6 +507,13 @@ GET /api/mobile/me/rsvps?page=1&limit=20
 - **`visibility`** is `public`, `unlisted` or `private`, so a card can say an
   event is unlisted (Flow 16). `GET /users/:userId/favorites` and `GET /events`
   carry it too; `GET /events` only lists public events.
+- **`changedAt` and `changedFields`** are `GET /events/:eventId`'s, from the same
+  helper (`changeForResponse`): when the time, venue or status last moved, and
+  which (`time`, `venue`, `cancelled`, in that order). `null` and `[]` for an
+  event that has not changed, and again when every change was put back. No
+  `changedFrom` on a row; open the event for what it was. `GET
+  /users/:userId/favorites` carries the same two on each event. Read from the
+  rows already selected, so no query is added per row.
 - **Upcoming only, soonest first.** An event is listed until its `endTime`.
   Cancelled events stay, with `status: "cancelled"`; drafts and deleted events
   do not appear.
@@ -774,12 +804,12 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
 | GET | `/events/:eventId/interested-users` | `{ interestedCount, users: [], pagination }` — a count. `users` is always empty: who favourited an event is not disclosed |
 | GET | `/events/:eventId/rating` | Your own rating → `{ rating: 1..5 \| null, review, ratedAt }`; null when you have not rated. Nobody else's is ever returned. 404 `NOT_FOUND` for an unknown or deleted event |
-| POST | `/events/:eventId/rating` | Rate an event — stars 1–5, optional review; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it. Answers `eventStats: { ratingCount }` and no average, and the event's `stats` carry none either: an attendee who can poll an average reads each new score from its change (SCRUM-437) |
+| POST | `/events/:eventId/rating` | Rate an event — stars 1–5, optional review; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it. A refusal is `403 FORBIDDEN` with `reasonCode` `NOT_ATTENDED` (no check-in) or `NOT_ENDED` (still running). Answers `eventStats: { ratingCount }` and no average, and the event's `stats` carry none either: an attendee who can poll an average reads each new score from its change (SCRUM-437) |
 | POST | `/events/:eventId/rsvp` | RSVP — waitlists when full |
 | POST | `/events/:eventId/announce` | Send announcement |
 | GET | `/events/:eventId/chat` | Get event chat group |
 | GET | `/events/:eventId/peer-ratings` | Who you can still rate |
-| POST | `/events/:eventId/peer-ratings` | Rate someone you met |
+| POST | `/events/:eventId/peer-ratings` | Rate someone you met. A refusal is `403 FORBIDDEN` with `reasonCode` `NOT_ENDED` (the night is still running) or `NOT_CONNECTED` (not someone you connected with, already rated, or blocked) |
 | GET | `/events/:eventId/matches` | Who else was in the room, ranked. 403 `USER_BANNED` for a member a host removed from the room (the chat's answer) |
 | POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
 | PUT | `/events/:eventId/matches/preferences` | Your intent and reveal, for this event |
@@ -1641,6 +1671,7 @@ never needs to hold the whole list:
 | `GET /friends/requests` | 50 each | up to 200 each | `incoming`, `outgoing` |
 | `GET /users/blocked` | 100 | up to 200 | `users` |
 | `GET /events/:eventId/board` | 100 | 100 (the same) | `posts` (it was cut at 100 with no way to the rest) |
+| `GET /crews` | 50 | up to 200 | `invites` (of the newest 200 open ones), with `invitesPagination` |
 
 **A request with neither `limit` nor `cursor` is a build that cannot page**, and
 gets up to **200** (`LEGACY_PAGE`), which is what it always got in practice
@@ -1664,6 +1695,35 @@ outgoing }`, each as above; ask for one alone with `?list=incoming` (or
 conversation with nothing said yet leads, as before, and each row's
 `lastMessage` is the newest message the thread would show (a hidden or
 moderated one never previews). All of it is additive.
+
+**`GET /friends?q=`** keeps the friends a word of whose name starts with `q`,
+case-insensitively (1-40 characters, trimmed; longer is `400`; blank is no
+filter). It is `GET /events/:eventId/friends-here`'s rule over the name a friend
+card shows (the profile's, else the account's), and it combines with `limit` and
+`cursor`: `count` and `pagination.totalCount` are then the filtered total. `%`
+and `_` are letters, not wildcards. Friends only, as ever: this searches your
+own list, and nobody else can be looked up.
+
+**`GET /crews` pages its invites**: `invites` are the newest 200 open invites an
+accept would take, a page at a time (`?limit=`, default 50; `?cursor=`, from
+`invitesPagination.nextCursor`), newest first with the invite id breaking ties.
+`invitesPagination` is `{ limit, hasMore, nextCursor, totalCount }`, and
+`totalCount` is the invites in that cap, the ones listed, so the number never
+exceeds what paging shows. An installed build, with neither `limit` nor `cursor`,
+gets up to 200 as before. `crews` is not paged.
+
+**The Going lists page by page number or by cursor** (`GET /me/rsvps`,
+`GET /users/:userId/favorites`, `GET /me/attendance`). `?page=` and `?limit=` mean
+what they always did (a response with `page` is the old block, `totalPages` and
+all) and now also carry `nextCursor`; `?cursor=` (the previous
+`pagination.nextCursor`, opaque) pages by keyset instead, answering
+`pagination: { limit, hasMore, nextCursor, totalCount }`. The order is total, so
+a page edge neither repeats nor loses a row that shares an instant: RSVPs by
+start time then RSVP id, saves newest first then id, nights newest first then
+event id. A cursor that is not ours, or does not name a row id, is `400`. With
+none of `page`, `limit` and `cursor` (an installed build), up to 200. Where
+Blendn+ gates `/me/attendance`, the cursor pages the free nights and stops at
+them (`lockedCount`, `totalCount` as before).
 
 ### GET /conversations
 Each conversation carries **`fromMatch`** — it opened from a mutual like rather
@@ -2208,7 +2268,7 @@ already is: counted in the headcount, listed nowhere.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`; see *Lists are paged* |
+| GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`, `?q=` (a word-prefix search of their names; `count` is then the filtered total); see *Lists are paged* |
 | GET | `/friends/:userId` | A friend's profile (404 for anyone else) |
 | DELETE | `/friends/:userId` | Unfriend — silent, leaves any DM alone |
 | POST | `/friends/:userId/conversation` | Open (or find) a DM with a friend → `{ conversationId }` |
@@ -2302,7 +2362,7 @@ at an event. `lib/crews/`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/crews` | My crews `{ crews, invites }` — open invites waiting for me that an accept would take, by the inviting friend's first name |
+| GET | `/crews` | My crews `{ crews, invites, invitesPagination }` — open invites waiting for me that an accept would take, by the inviting friend's first name, a page at a time (`?limit=`, `?cursor=`; see *Lists are paged*) |
 | POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous? }` → 201 `{ crewId, chatGroupId, invited }` |
 | GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
 | PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
@@ -3232,7 +3292,7 @@ be seen.
 | GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
 | GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their board post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow |
-| GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
+| GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps` |
 | GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |
