@@ -45,9 +45,17 @@ async function person(label: string, photo?: string) {
   return id
 }
 
+interface Row {
+  id: string
+  kind: string
+  data: Record<string, unknown> | null
+  open?: boolean
+  display: { title?: string; visual?: Record<string, unknown> }
+}
+
 const items = async (viewer: string) => {
   const res = await feed.GET(req("/api/mobile/notifications", tokenOf(viewer)))
-  return { status: res.status, data: (await res.json()).data as { notifications: Array<Record<string, any>>; unreadCount: number; badgeCount: number } }
+  return { status: res.status, data: (await res.json()).data as { notifications: Row[]; unreadCount: number; badgeCount: number } }
 }
 const rowOf = async (viewer: string, kind: string) => (await items(viewer)).data.notifications.find((n) => n.kind === kind)!
 

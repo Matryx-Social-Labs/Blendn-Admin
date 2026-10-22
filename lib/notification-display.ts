@@ -41,7 +41,7 @@ export interface RowDecoration {
 interface Row {
   id: string
   kind: string
-  data: unknown
+  payload: unknown
 }
 
 const EVENT_KINDS: Record<string, EventBadge> = {
@@ -55,14 +55,14 @@ const EVENT_KINDS: Record<string, EventBadge> = {
 const asRecord = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 
-const idOf = (data: unknown, key: string): string | null => {
-  const v = asRecord(data)[key]
+const idOf = (payload: unknown, key: string): string | null => {
+  const v = asRecord(payload)[key]
   return typeof v === "string" && v.length > 0 ? v : null
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const uuidOf = (data: unknown, key: string) => {
-  const v = idOf(data, key)
+const uuidOf = (payload: unknown, key: string) => {
+  const v = idOf(payload, key)
   return v && UUID.test(v) ? v : null
 }
 
@@ -87,7 +87,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
     friendRows.length
       ? db.friend_requests.findMany({
           where: {
-            id: { in: unique(friendRows.map((r) => uuidOf(r.data, "requestId"))) },
+            id: { in: unique(friendRows.map((r) => uuidOf(r.payload, "requestId"))) },
             recipient_id: viewerId,
             dismissed_at: null,
             withdrawn_at: null,
@@ -100,7 +100,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       ? db.crew_invites.findMany({
           where: {
             invited_user_id: viewerId,
-            crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.data, "crewId"))) },
+            crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) },
             declined_at: null,
             removed_at: null,
           },
@@ -109,47 +109,48 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       : [],
     crewInviteRows.length
       ? db.crew_members.findMany({
-          where: { user_id: viewerId, crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.data, "crewId"))) } },
+          where: { user_id: viewerId, crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) } },
           select: { crew_id: true },
         })
       : [],
     messageRequestRows.length
       ? db.message_requests.findMany({
-          where: { id: { in: unique(messageRequestRows.map((r) => uuidOf(r.data, "requestId"))) }, recipient_id: viewerId, status: "pending" },
+          where: { id: { in: unique(messageRequestRows.map((r) => uuidOf(r.payload, "requestId"))) }, recipient_id: viewerId, status: "pending" },
           select: { id: true },
         })
       : [],
     boardRows.length
       ? db.board_requests.findMany({
-          where: { id: { in: unique(boardRows.map((r) => uuidOf(r.data, "requestId"))) }, to_user_id: viewerId, status: "pending" },
+          where: { id: { in: unique(boardRows.map((r) => uuidOf(r.payload, "requestId"))) }, to_user_id: viewerId, status: "pending" },
           select: { id: true },
         })
       : [],
     matchRows.length
       ? db.private_conversations.findMany({
           where: {
-            id: { in: unique(matchRows.map((r) => uuidOf(r.data, "conversationId"))) },
+            id: { in: unique(matchRows.map((r) => uuidOf(r.payload, "conversationId"))) },
             OR: [{ user1_id: viewerId }, { user2_id: viewerId }],
           },
           select: { id: true, user1_id: true, user1_pseudonym: true, user2_pseudonym: true },
         })
       : [],
     eventRows.length
+      // any-kind: a bell row names the event it was sent for, and a venue day's push is one the reader already got.
       ? db.events.findMany({
-          where: { id: { in: unique(eventRows.map((r) => uuidOf(r.data, "eventId"))) }, deleted_at: null },
+          where: { id: { in: unique(eventRows.map((r) => uuidOf(r.payload, "eventId"))) }, deleted_at: null },
           select: { id: true, cover_image_url: true, status: true },
         })
       : [],
     // The seed the crew's own screens draw its emblem from, so the bell draws the same one.
     crewRows.length
-      ? db.crews.findMany({ where: { id: { in: unique(crewRows.map((r) => uuidOf(r.data, "crewId"))) } }, select: { id: true, emblem_seed: true } })
+      ? db.crews.findMany({ where: { id: { in: unique(crewRows.map((r) => uuidOf(r.payload, "crewId"))) } }, select: { id: true, emblem_seed: true } })
       : [],
   ])
   const emblemOf = new Map(crews.map((c) => [c.id, c.emblem_seed]))
 
   const requestOf = new Map(friendRequests.map((r) => [r.id, r]))
   for (const row of friendRows) {
-    const request = requestOf.get(uuidOf(row.data, "requestId") ?? "")
+    const request = requestOf.get(uuidOf(row.payload, "requestId") ?? "")
     if (!request) {
       // Accepted (the row is deleted), dismissed, withdrawn or gone: nothing left to answer.
       set(row.id, { open: false })
@@ -168,7 +169,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
   const invited = new Set(invites.map((i) => i.crew_id))
   const joined = new Set(memberships.map((m) => m.crew_id))
   for (const row of crewInviteRows) {
-    const crewId = uuidOf(row.data, "crewId")
+    const crewId = uuidOf(row.payload, "crewId")
     set(row.id, {
       open: crewId !== null && invited.has(crewId) && !joined.has(crewId),
       ...(crewId && emblemOf.has(crewId) && { display: { visual: { type: "emblem", seed: emblemOf.get(crewId)! } } }),
@@ -176,18 +177,18 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
   }
   for (const row of rows.filter((r) => r.kind === "crew_here" || r.kind === "blend")) {
     // A Blend has no emblem of its own: its id is a stable seed.
-    const seed = row.kind === "blend" ? uuidOf(row.data, "blendId") : emblemOf.get(uuidOf(row.data, "crewId") ?? "")
+    const seed = row.kind === "blend" ? uuidOf(row.payload, "blendId") : emblemOf.get(uuidOf(row.payload, "crewId") ?? "")
     if (seed) set(row.id, { display: { visual: { type: "emblem", seed } } })
   }
 
   const pendingMessage = new Set(messageRequests.map((m) => m.id))
-  for (const row of messageRequestRows) set(row.id, { open: pendingMessage.has(uuidOf(row.data, "requestId") ?? "") })
+  for (const row of messageRequestRows) set(row.id, { open: pendingMessage.has(uuidOf(row.payload, "requestId") ?? "") })
   const pendingBoard = new Set(boardRequests.map((m) => m.id))
-  for (const row of boardRows) set(row.id, { open: pendingBoard.has(uuidOf(row.data, "requestId") ?? "") })
+  for (const row of boardRows) set(row.id, { open: pendingBoard.has(uuidOf(row.payload, "requestId") ?? "") })
 
   const conversationOf = new Map(conversations.map((c) => [c.id, c]))
   for (const row of matchRows) {
-    const c = conversationOf.get(uuidOf(row.data, "conversationId") ?? "")
+    const c = conversationOf.get(uuidOf(row.payload, "conversationId") ?? "")
     // The other side's pseudonym. Null is a conversation that did not come from a match: no creature to draw.
     const pseudonym = c && (c.user1_id === viewerId ? c.user2_pseudonym : c.user1_pseudonym)
     if (pseudonym) set(row.id, { display: { visual: { type: "creature", pseudonym } } })
@@ -195,9 +196,9 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
 
   const eventOf = new Map(events.map((e) => [e.id, e]))
   for (const row of eventRows) {
-    const event = eventOf.get(uuidOf(row.data, "eventId") ?? "")
+    const event = eventOf.get(uuidOf(row.payload, "eventId") ?? "")
     if (!event) continue
-    const reason = idOf(row.data, "reason")
+    const reason = idOf(row.payload, "reason")
     const badge = reason === "venue" ? "map-pin" : EVENT_KINDS[row.kind]
     set(row.id, {
       display: {

@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
           messages: { some: { is_read: false, sender_id: { not: user.userId }, ...VISIBLE_DM } },
         },
       }),
-      decorateNotifications(user.userId, items),
+      decorateNotifications(user.userId, items.map((n) => ({ id: n.id, kind: n.kind, payload: n.data }))),
     ])
 
     return successResponse({
