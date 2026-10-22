@@ -182,13 +182,15 @@ describe("POST /friends/requests { userId }", () => {
       expect(res.status).toBe(404)
       // Ben revealed to Ana, so she knows who he is; if he has not, the code would say who a pseudonym is.
       if (seesBen) expect(res.body.reasonCode).toBe("NOT_A_REVEALED_MATCH")
+      // The 404 of an unknown id carries `PERSON_UNAVAILABLE` (Flow 15); this one swaps it for the match reason.
       const { reasonCode: _reason, ...rest } = res.body
-      expect(rest).toEqual(unknown)
+      const { reasonCode: _unknownReason, ...unknownRest } = unknown
+      expect(rest).toEqual(unknownRest)
       if (!seesBen) expect(res.body).toEqual(unknown)
       expect(await db.friend_requests.count({ where: { sender_id: ana.id } })).toBe(0)
       // The same from Ben's side: he sees Ana only if she revealed.
       const back = await ask(ben, { userId: ana.id })
-      expect(back.body.reasonCode).toBe(revealed.a ? "NOT_A_REVEALED_MATCH" : undefined)
+      expect(back.body.reasonCode).toBe(revealed.a ? "NOT_A_REVEALED_MATCH" : "PERSON_UNAVAILABLE")
     }
   })
 
@@ -219,7 +221,7 @@ describe("POST /friends/requests { userId }", () => {
     await converse(ana, ben, match)
     const unknown = await ask(ana, { userId: "no-such-user" })
     expect(await ask(ana, { userId: ben.id })).toEqual(unknown)
-    expect(unknown.body.reasonCode).toBeUndefined()
+    expect(unknown.body.reasonCode).toBe("PERSON_UNAVAILABLE")
   })
 
   it("refuses a pending-reveal pair exactly as unknown once closed, blocked either way, or deleted", async () => {
@@ -399,7 +401,8 @@ describe("a request or an accept racing an unmatch or a block", () => {
     )
     const unknown = await ask(ana, { userId: "no-such-user" })
     expect(viaMatch).toEqual(unknown)
-    expect(viaLink).toEqual(unknown)
+    // The link path's own unknown: an invite that never existed (reason `INVITE_UNAVAILABLE`).
+    expect(viaLink).toEqual(await ask(ana, { token: "A".repeat(22) }))
     expect(await db.friend_requests.count({ where: { sender_id: ana.id } })).toBe(0)
   })
 
@@ -541,8 +544,8 @@ describe("a mutual like between friends", () => {
     expect(emits.filter(([event]) => event === "room:match")).toEqual([])
     expect(JSON.stringify(emits)).not.toContain("conversationId")
     expect(await db.private_conversations.count({ where: { OR: [{ user1_id: ana.id, user2_id: ben.id }, { user1_id: ben.id, user2_id: ana.id }] } })).toBe(0)
-    // The like itself is recorded.
-    expect(await db.event_likes.count({ where: { event_id: eventId, liker_id: ana.id, liked_id: ben.id } })).toBe(1)
+    // Between friends no like is written at all (the owner's rule: friends are never strangers).
+    expect(await db.event_likes.count({ where: { event_id: eventId, liker_id: ana.id, liked_id: ben.id } })).toBe(0)
   })
 })
 

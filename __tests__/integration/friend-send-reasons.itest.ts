@@ -83,7 +83,8 @@ describe("an unfinished profile says PROFILE_INCOMPLETE, and keeps its errorCode
     const ana = await person("fsr-finished")
     const res = await send(ana)
     expect(res.status).toBe(404) // an invite that does not exist
-    expect(res.body).not.toHaveProperty("reasonCode")
+    // Its own reason, never the profile one.
+    expect(res.body.reasonCode).toBe("INVITE_UNAVAILABLE")
   })
 })
 

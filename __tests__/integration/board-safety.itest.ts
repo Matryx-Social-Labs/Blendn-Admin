@@ -936,7 +936,9 @@ describe("an ask between people who already have a link is silent (H1/H4)", () =
     if (kind === "dismissed request") await db.friend_requests.create({ data: { sender_id: a.id, recipient_id: b.id, dismissed_at: new Date() } })
   }
 
-  it.each(["friends", "conversation", "closed conversation", "withdrawn request", "dismissed request"] as Link[])(
+  // Friends are not in this list: a friend's post is not on the board at all and an ask to it is the
+  // taken-down 404 (`friends-in-crews-board.itest.ts`), decided earlier than the silent decline.
+  it.each(["conversation", "closed conversation", "withdrawn request", "dismissed request"] as Link[])(
     "records an ask between people with %s as silently declined: pending to the asker, nothing to the author",
     async (kind) => {
       const author = await person(`lk-author-${kind.replace(/ /g, "")}`)
