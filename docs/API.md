@@ -270,8 +270,15 @@ Mobile clients call the shared web endpoints; there is no `/api/mobile` twin.
 | Method | Endpoint | Description | Rate Limit |
 |--------|----------|-------------|------------|
 | POST | `/api/auth/forgot-password` | Request a reset link | 5/15min per IP, 3/hr per address |
-| POST | `/api/auth/reset-password` | Set a new password with the token | 10/15min |
-| GET | `/api/auth/reset-password?token=` | Does the link still work? `{ valid }`, consumes nothing; one answer for used, expired, tampered or erased (SCRUM-461) | 30/15min |
+| POST | `/api/auth/reset-password` | Set a new password with the token. Answers `{ ok, audience, app }`: `audience` is `attendee` or `dashboard`; `app` is `{ deepLink, appStoreUrl, playStoreUrl }` for an attendee (the store URLs are null until `APP_STORE_LISTED` / `PLAY_LISTED` is `true`), null otherwise | 10/15min |
+| GET | `/api/auth/reset-password?token=` | Does the link still work? `{ valid }`, plus `audience` (`attendee` or `dashboard`) on a live link only; consumes nothing; one answer for used, expired, tampered or erased (SCRUM-461) | 30/15min |
+
+**The reset page's "done" depends on whose account it was (SV15).** An attendee's
+account lives on the phone and the dashboard refuses it, so `/reset-password`
+shows "Open Blend'n" (`blendn://`, with the App Store and Google Play listings
+as the fallback once those are public) and does **not** send them to `/login`.
+Every dashboard role (`app_admin`, `organizer`, `venue_owner`, `sponsor`) keeps
+the sign-in link and the redirect.
 
 `forgot-password` always responds `{ ok: true }` with the same message whether or
 not the address exists. The emailed link opens the **web** reset page in the
