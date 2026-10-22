@@ -39,7 +39,10 @@ Do **one unit** per run, completely. Then stop and report — the developer runs
 4. Lane: if the unit uses attendees, take a free lane — post
    `LANE <A|B|C> → <tag>` on SCRUM-208 unless the latest comment for that lane
    is a claim by someone else without a `LANE … released`.
-5. Lock the device(s) you'll drive: `npm run -s qa lock <device> <tag>`.
+5. Lock the simulator before booting one: `npm run -s qa lock sim <tag>` — one
+   simulator or emulator on the whole Mac, across sessions; it also refuses
+   below 30% free memory. A held lock means drive the API/dashboard parts now
+   and the device part later, never a second simulator.
 
 ## 3 · Drive it
 
@@ -48,8 +51,8 @@ Use the tool each surface needs:
 
 | Surface | How |
 |---|---|
-| iOS / Android app | Maestro MCP (`list_devices` → `inspect_screen` → `run`), or the Maestro CLI with the journeys in `blendn/.maestro/`. Credentials only via `-e`. After typing, the keyboard's bottom-right key (`keyboard-done` subflow). iOS first, then shut it and do Android. |
-| Dashboard | gstack **browse**, signed in as the role the unit names. |
+| iOS / Android app | Appium MCP (`select_device` → `appium_session_management` create → `appium_get_page_source` → `appium_gesture`); start `appium` if nothing answers on 4723. Maestro (MCP or CLI, `blendn/.maestro/`) is the fallback. Credentials only from env, never typed into a logged tool argument. iOS first, then shut it and do Android, under the one `sim` lock. |
+| Dashboard | Playwright MCP (`browser_navigate` → `browser_snapshot` → act), signed in as the role the unit names; gstack **browse** as fallback. |
 | Mobile API | `curl` with `$(npm run -s qa token <email>)` — never sign in by hand (5 per IP per 15 min, successes count). |
 | Sockets | `npm run -s qa probe <chatGroupId> <email> [s] [post-as <email> <text>]`. |
 | Background jobs | arrange the rows, wait a tick, `railway logs --environment staging --service Blendn-Admin`. |
@@ -81,7 +84,7 @@ Then decide, and say which you chose:
 - Couldn't finish → `RELEASED <tag> — resume at step N — state: …`, back to
   **To Do**, remove the label.
 - Put back anything you changed on shared fixtures (memberships, bans,
-  suspensions), `npm run -s qa unlock <device>`, and release the lane on
+  suspensions), shut the simulator down and `npm run -s qa unlock sim`, and release the lane on
   SCRUM-208 (`LANE <x> released`) if you're stopping.
 
 ## 6 · Report
