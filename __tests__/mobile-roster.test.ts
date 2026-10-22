@@ -122,7 +122,11 @@ describe("GET /events/:id/checkins — who counts as present", () => {
       // The one profile predicate that belongs here: "Show online status" off
       // is counted and not listed (SCRUM-141) — and a missing profile row is
       // not "off", so the NULL case is spelled out.
-      user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] },
+      user: {
+        OR: [{ profile: { is: null } }, { profile: { show_online: true } }],
+        // And never a member a host banned from this room (review M3, `notHostBannedFrom`).
+        chat_group_memberships: { none: { status: "banned", banned_by: { not: null }, chat_group: { event_id: EVENT } } },
+      },
     })
     expect(JSON.stringify(where)).not.toMatch(/onboarded|photos/)
   })
