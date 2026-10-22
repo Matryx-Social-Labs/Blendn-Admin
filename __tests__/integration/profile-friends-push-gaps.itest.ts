@@ -175,6 +175,22 @@ describe("the per-kind push switches", () => {
     expect((await getProfile(me, me)).json.data.profile.push_enabled).toBe(true)
   })
 
+  it("a person with no profile row reads the defaults, and a PUT creates the row (the upsert's create path)", async () => {
+    const id = await makeUser(testId("pf-sw-noprofile"))
+    users.push(id)
+    const token = tokenOf(id)
+    expect(await db.profiles.count({ where: { id } })).toBe(0)
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: true, night: true })
+    expect(await db.profiles.count({ where: { id } })).toBe(0) // reading does not make one
+
+    const put = await prefs(token, "PUT", { crew: false })
+    expect(put.status).toBe(200)
+    expect((await put.json()).data).toEqual({ matches: true, crew: false, night: true })
+    const row = await db.profiles.findUniqueOrThrow({ where: { id } })
+    expect([row.push_matches, row.push_crew, row.push_night]).toEqual([true, false, true])
+    expect((await (await prefs(token)).json()).data).toEqual({ matches: true, crew: false, night: true })
+  })
+
   it("refuses an empty body, a non-boolean and a key it does not know, and changes nothing", async () => {
     const me = await person("pf-sw-bad")
     const token = tokenOf(me)

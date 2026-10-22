@@ -31,8 +31,10 @@ jest.mock("expo-server-sdk", () => {
   return { Expo }
 })
 
+import { randomUUID } from "crypto"
 import { resolveReport } from "@/app/dashboard/moderation/reports/actions"
-import { cleanup, closeDb, db, makeUser, testId } from "./helpers"
+import * as push from "@/lib/push-notifications"
+import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 const users: string[] = []
 let admin = ""
@@ -47,13 +49,18 @@ beforeEach(() => {
   sentMessages.length = 0
 })
 
+const events: string[] = []
+
 afterAll(async () => {
+  await db.event_reports.deleteMany({ where: { user_id: { in: users } } })
+  await db.message_reports.deleteMany({ where: { reporter_id: { in: users } } })
+  await db.private_messages.deleteMany({ where: { sender_id: { in: users } } })
   await db.audit_logs.deleteMany({ where: { user_id: admin } })
   await db.user_reports.deleteMany({ where: { reporter_id: { in: users } } })
   await db.notifications.deleteMany({ where: { user_id: { in: users } } })
   await db.push_tokens.deleteMany({ where: { user_id: { in: users } } })
   await db.mobile_refresh_tokens.deleteMany({ where: { user_id: { in: users } } })
-  await cleanup(users, [])
+  await cleanup(users, events)
   await closeDb()
 })
 
@@ -96,4 +103,62 @@ it("a dismissal sends nothing, and neither does reinstating the account afterwar
   // The one line from the suspend, none from the reinstate.
   expect(await db.notifications.count({ where: { user_id: upheld.reporter } })).toBe(1)
   expect(sentMessages).toHaveLength(0)
+})
+
+describe("the other report kinds tell the person who filed them", () => {
+  it("a message report, upheld: the reporter is told, and the author who was suspended is not", async () => {
+    const reporter = await makeUser(testId("ra_m_reporter"))
+    const author = await makeUser(testId("ra_m_author"))
+    users.push(reporter, author)
+    const [user1_id, user2_id] = [reporter, author].sort()
+    const convo = await db.private_conversations.create({ data: { user1_id, user2_id } })
+    const message = await db.private_messages.create({ data: { conversation_id: convo.id, sender_id: author, message_text: "rude" } })
+    const report = await db.message_reports.create({ data: { reporter_id: reporter, message_id: message.id, message_type: "private", reason: "harassment" } })
+
+    await resolveReport("message", report.id, "suspend")
+
+    expect((await db.notifications.findMany({ where: { user_id: reporter } })).map((n) => n.kind)).toEqual(["report_actioned"])
+    expect(await db.notifications.count({ where: { user_id: author } })).toBe(0)
+    expect((await db.user.findUniqueOrThrow({ where: { id: author } })).suspended_at).not.toBeNull()
+    await db.private_messages.deleteMany({ where: { conversation_id: convo.id } })
+    await db.private_conversations.delete({ where: { id: convo.id } })
+  })
+
+  it("an event report, delisted: the person who filed it is told (event reports keep them in user_id, not reporter_id)", async () => {
+    const host = await makeUser(testId("ra_e_host"))
+    const reporter = await makeUser(testId("ra_e_reporter"))
+    users.push(host, reporter)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const report = await db.event_reports.create({ data: { event_id: eventId, user_id: reporter, reason: "spam" } })
+
+    await resolveReport("event", report.id, "delist")
+
+    expect((await db.notifications.findMany({ where: { user_id: reporter } })).map((n) => n.kind)).toEqual(["report_actioned"])
+    expect(await db.notifications.count({ where: { user_id: host } })).toBe(0)
+    expect((await db.events.findUniqueOrThrow({ where: { id: eventId } })).visibility).toBe("unlisted")
+  })
+
+  it("a message report that is dismissed tells nobody", async () => {
+    const reporter = await makeUser(testId("ra_d_reporter"))
+    users.push(reporter)
+    const report = await db.message_reports.create({ data: { reporter_id: reporter, message_id: randomUUID(), message_type: "private", reason: "spam" } })
+    await resolveReport("message", report.id, "dismiss")
+    expect(await db.notifications.count({ where: { user_id: reporter } })).toBe(0)
+  })
+})
+
+describe("a push that fails cannot fail the decision", () => {
+  it("when telling the reporter throws, the report is still resolved, the account suspended, the audit row written", async () => {
+    const { reporter, reported, report } = await filed()
+    const spy = jest.spyOn(push, "notifyReportActioned").mockRejectedValueOnce(new Error("push pipeline down"))
+
+    await expect(resolveReport("user", report.id, "suspend")).resolves.toBeUndefined()
+
+    expect(spy).toHaveBeenCalledWith(reporter)
+    spy.mockRestore()
+    expect((await db.user_reports.findUniqueOrThrow({ where: { id: report.id } })).status).toBe("resolved")
+    expect((await db.user.findUniqueOrThrow({ where: { id: reported } })).suspended_at).not.toBeNull()
+    expect(await db.audit_logs.count({ where: { resource_id: report.id, action: "report.suspend" } })).toBe(1)
+  })
 })
