@@ -261,6 +261,12 @@ const VenueDetailSchema = z
           })
         )
         .describe("Its next public events, soonest first (id as tiebreak), at most 5: published, public, not ended, link not disputed by the venue, within your age; never its own live rooms."),
+      upcomingTotal: z.number().int().optional().describe("How many events `upcoming` is the first five of: every one coming, whatever you were sent."),
+      upcomingNextCursor: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("Send as `?cursor=` to `GET /venues/{venueId}/upcoming` for the rest. Null when `upcoming` is the whole list."),
     }),
     live: z.object({
       open: z.boolean().describe("Whether `POST .../live` would be accepted here now (the fence aside)."),
@@ -316,6 +322,45 @@ registry.registerPath({
   request: { params: z.object({ venueId: z.string().uuid() }) },
   responses: {
     200: { description: "The venue", content: { "application/json": { schema: wrap(VenueDetailSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/venues/{venueId}/upcoming",
+  tags: ["Mobile Venues"],
+  summary: "Every coming event at a venue, a page at a time",
+  description:
+    PARTICIPATION_GATE +
+    "Where \"See all\" goes: the venue page lists the first five with `upcomingTotal` and " +
+    "`upcomingNextCursor`. The same filter, order (soonest first) and age rule. `?limit=` (1-100, default 20), " +
+    "`?cursor=`; a cursor that is not ours is 400. 404 for an unknown, archived or deleted venue.",
+  security: bearerAuth,
+  request: { params: z.object({ venueId: z.string().uuid() }), query: ListQuerySchema },
+  responses: {
+    200: {
+      description: "A page of upcoming events",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              events: z.array(
+                z.object({
+                  id: z.string().uuid(),
+                  title: z.string(),
+                  slug: z.string(),
+                  coverImageUrl: z.string().nullable(),
+                  startTime: z.string().datetime(),
+                  endTime: z.string().datetime(),
+                })
+              ),
+              pagination: ListPaginationSchema,
+            })
+          ),
+        },
+      },
+    },
     ...standardErrors,
   },
 })

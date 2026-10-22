@@ -1222,7 +1222,8 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
              "hours": [{ "day": 5, "open": "17:00", "close": "01:00" }],
              "description": null, "amenities": ["Live Music", "Outdoor Seating"],
              "upcoming": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
-                            "startTime": "…", "endTime": "…" }] },
+                            "startTime": "…", "endTime": "…" }],
+             "upcomingTotal": 12, "upcomingNextCursor": "eyJ0Ijoi…" },
   "live": { "open": true, "closedReason": null, "eventId": null,
             "liveNow": "quiet",
             "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false, "stayUntil": null,
@@ -1252,6 +1253,28 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
 live. People are the venue day's roster and grid
 (`GET /events/:venueDayId/checkins`, `/matches`), which only somebody live
 there may read — you see people only while you can be seen.
+
+
+**`upcoming` is the first five; `upcomingTotal` is all of them** (every event
+coming at the venue, whatever the page holds) and `upcomingNextCursor` resumes the
+rest (null when `upcoming` is whole). Both are additive, so an installed client
+that lists five is unchanged.
+
+### GET /venues/:venueId/upcoming
+
+"See all" for the venue page: every coming event, soonest first, a page at a
+time. The same filter and age rule as `upcoming` (published, public, not ended,
+link not disputed, within your age; never a venue's own live rooms), the same
+gates and 404 as `GET /venues/:venueId`.
+
+```json
+{ "success": true, "data": {
+  "events": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
+               "startTime": "…", "endTime": "…" }],
+  "pagination": { "limit": 20, "hasMore": true, "nextCursor": "eyJ0Ijoi…", "totalCount": 12 } } }
+```
+
+`?limit=` 1-100 (default 20), `?cursor=` the previous `nextCursor` (not ours: 400).
 
 ### POST /venues/:venueId/live
 
