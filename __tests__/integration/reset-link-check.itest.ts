@@ -66,7 +66,7 @@ it("says a fresh link works, and leaves it unused", async () => {
   users.push(user)
   const raw = await tokenFor(user)
 
-  expect(await check(raw)).toEqual({ status: 200, body: { valid: true } })
+  expect(await check(raw)).toEqual({ status: 200, body: { valid: true, audience: "attendee" } })
   const row = await db.password_reset_tokens.findUniqueOrThrow({ where: { token_hash: hashInviteToken(raw) } })
   expect(row.used_at).toBeNull()
 })

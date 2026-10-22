@@ -9,6 +9,7 @@ import { hashInviteToken } from "@/lib/org-invites"
 import { checkPassword } from "@/lib/password"
 import { dashboardSessionsEnded, endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { readJson } from "@/lib/api-input"
+import { appLinksFor, audienceOf } from "@/lib/app-links"
 
 /**
  * Consume a reset token and set a new password.
@@ -40,7 +41,7 @@ async function usableResetToken(token: string) {
       token_hash: true,
       used_at: true,
       expires_at: true,
-      user: { select: { id: true, email: true, deletedAt: true } },
+      user: { select: { id: true, email: true, deletedAt: true, role: true } },
     },
   })
   if (!row || row.used_at || row.expires_at.getTime() <= Date.now() || row.user.deletedAt) return null
@@ -62,7 +63,13 @@ export async function GET(req: NextRequest) {
   if (limited) return limited
 
   const token = req.nextUrl.searchParams.get("token")
-  return NextResponse.json({ valid: !!token && (await usableResetToken(token)) !== null })
+  const row = token ? await usableResetToken(token) : null
+  /*
+   * `audience` rides a live link only (SV15): somebody holding the link is the
+   * account's own owner, and a dead link still answers just `valid: false`. It
+   * tells the page which "done" to draw — the phone app's, or the dashboard's.
+   */
+  return NextResponse.json({ valid: row !== null, ...(row && { audience: audienceOf(row.user.role) }) })
 }
 
 export async function POST(req: NextRequest) {
@@ -126,7 +133,9 @@ export async function POST(req: NextRequest) {
       ipAddress: getRequestIp(req),
     })
 
-    return NextResponse.json({ ok: true })
+    // An attendee's account lives on the phone: say so, and where to open it (SV15).
+    const audience = audienceOf(row.user.role)
+    return NextResponse.json({ ok: true, audience, app: appLinksFor(audience) })
   } catch (err) {
     if (err instanceof Error && err.message === "ALREADY_USED") {
       return NextResponse.json(

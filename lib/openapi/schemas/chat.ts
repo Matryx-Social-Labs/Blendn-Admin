@@ -69,6 +69,12 @@ export const ChatMessageSchema = z
     content: z.string().nullable().openapi({ description: "Message text. Null when moderation_hidden is true." }),
     moderation_hidden: z.boolean().optional().openapi({ description: "True if this message was hidden by moderation. Content will be null. Only returned to the message sender." }),
     metadata: z.unknown().nullable(),
+    pollId: z
+      .string()
+      .uuid()
+      .nullable()
+      .optional()
+      .describe("On a `poll` message only (absent on every other type; null when the message was hidden): the poll to read and vote on at `/events/{eventId}/polls/{pollId}`."),
     isEdited: z.boolean(),
     isPinned: z.boolean(),
     createdAt: z.string().datetime(),
@@ -265,6 +271,12 @@ export const GroupChatMessageSchema = z
     deleted_by: RoomUserRefSchema.nullable(),
     moderation_status: z.string().nullable().describe("`clean`, `flagged` or `hidden`; null when never examined."),
     moderation_hidden: z.boolean(),
+    pollId: z
+      .string()
+      .uuid()
+      .nullable()
+      .optional()
+      .describe("On a `poll` message only (absent on every other type; null when the message was hidden): the poll to read and vote on."),
     user: RoomChatUserSchema,
     reactions: z.array(ReactionSchema),
     parent_message: z

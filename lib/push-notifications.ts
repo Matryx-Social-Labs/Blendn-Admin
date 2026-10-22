@@ -15,7 +15,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "event_cancelled" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned" | "board_post_removed"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -77,6 +77,8 @@ export function deliveryFor(
       return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
     case "event_update":
     case "event_changed":
+    // Same key as the update it supersedes: the room closed, and only that is true.
+    case "event_cancelled":
       return replaced("events", data.eventId && `event:${data.eventId}`)
     // One per event, and a second could only ever say the same thing.
     case "rating_request":
@@ -116,7 +118,7 @@ export const CHANNEL_SET_FLOW9 = 2
  * - `events`    a change, a cancellation, an announcement, a place on the waitlist
  * - `after-the-night`  "How was it?"
  * - `offers`    a venue's offer
- * - `default`   a report you filed was acted on
+ * - `default`   a report you filed was acted on, your board post was taken down
  */
 type Delivery = Pick<ExpoPushMessage, "channelId" | "threadId" | "collapseId" | "tag">
 
@@ -143,6 +145,8 @@ function deliveryForFlow9(data: NotificationData): Delivery {
       return { channelId: "crew" }
     case "event_update":
     case "event_changed":
+    // The room closed: replaces the update it supersedes, and only that is true.
+    case "event_cancelled":
       return replaced("events", data.eventId && `event:${data.eventId}`)
     case "announcement":
     case "waitlist_promoted":
@@ -160,11 +164,13 @@ function deliveryForFlow9(data: NotificationData): Delivery {
 
 /**
  * What a build that predates a kind is sent in its place. `event_changed` is an
- * `event_update` to it, which it opens on the event; every other new kind opens
+ * `event_update` to it, which it opens on the event, and so is `event_cancelled`; every other new kind opens
  * nothing there and is sent as itself.
  */
 function payloadFor(data: NotificationData | undefined, channelSet: number | null): NotificationData | undefined {
-  if (data?.type === "event_changed" && (channelSet ?? 0) < CHANNEL_SET_FLOW9) return { ...data, type: "event_update" }
+  if ((data?.type === "event_changed" || data?.type === "event_cancelled") && (channelSet ?? 0) < CHANNEL_SET_FLOW9) {
+    return { ...data, type: "event_update" }
+  }
   return data
 }
 
@@ -189,7 +195,7 @@ export function declaredChannelSet(headers: Headers): number | null {
  * updated reads it as `event_changed` from then on.
  */
 export function bellRowFor<T extends { kind: string; data?: unknown }>(row: T, channelSet: number | null): T {
-  if (row.kind !== "event_changed" || (channelSet ?? 0) >= CHANNEL_SET_FLOW9) return row
+  if ((row.kind !== "event_changed" && row.kind !== "event_cancelled") || (channelSet ?? 0) >= CHANNEL_SET_FLOW9) return row
   return { ...row, kind: "event_update", data: payloadFor(row.data as NotificationData, channelSet) }
 }
 
@@ -826,6 +832,27 @@ export async function notifyBoardRequest(
     title: "Someone answered your post",
     body: "Open the board to see who is asking.",
     data: { type: "board_request", eventId, requestId },
+  })
+}
+
+/**
+ * A moderator, or the automatic check, took your board post down (SV9).
+ *
+ * Says that, and nothing of what the post said or why: the board is anonymous
+ * and a lock screen is not an authenticated surface, so the push carries no
+ * words of the post (`notifyBoardRequest` follows the same rule). The app
+ * shows the rest on open, from `GET /events/:eventId/board`'s `takenDown`.
+ */
+export async function notifyBoardPostRemoved(
+  authorId: string,
+  eventId: string,
+  postId: string
+): Promise<boolean> {
+  return sendPushNotification({
+    userId: authorId,
+    title: "Your board post was taken down",
+    body: "It didn't meet the board's rules. Open the board to see where things stand.",
+    data: { type: "board_post_removed", eventId, postId },
   })
 }
 

@@ -10,7 +10,7 @@ import { rateLimit, createUserRateLimit } from "@/lib/rate-limit"
 import {
   successResponse,
   errorResponse,
-  ErrorCode,
+  spamBlockedResponse,
   validationErrorResponse,
   unauthorizedResponse,
   forbiddenResponse,
@@ -340,7 +340,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       text,
     })
     if (screen.verdict === "refuse") {
-      return errorResponse(screen.reason, 429, ErrorCode.SPAM_BLOCKED)
+      return spamBlockedResponse(screen.reason, screen.retryAfter)
     }
     const hidden = screen.verdict === "hide"
 

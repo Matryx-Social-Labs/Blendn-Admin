@@ -270,8 +270,15 @@ Mobile clients call the shared web endpoints; there is no `/api/mobile` twin.
 | Method | Endpoint | Description | Rate Limit |
 |--------|----------|-------------|------------|
 | POST | `/api/auth/forgot-password` | Request a reset link | 5/15min per IP, 3/hr per address |
-| POST | `/api/auth/reset-password` | Set a new password with the token | 10/15min |
-| GET | `/api/auth/reset-password?token=` | Does the link still work? `{ valid }`, consumes nothing; one answer for used, expired, tampered or erased (SCRUM-461) | 30/15min |
+| POST | `/api/auth/reset-password` | Set a new password with the token. Answers `{ ok, audience, app }`: `audience` is `attendee` or `dashboard`; `app` is `{ deepLink, appStoreUrl, playStoreUrl }` for an attendee (the store URLs are null until `APP_STORE_LISTED` / `PLAY_LISTED` is `true`), null otherwise | 10/15min |
+| GET | `/api/auth/reset-password?token=` | Does the link still work? `{ valid }`, plus `audience` (`attendee` or `dashboard`) on a live link only; consumes nothing; one answer for used, expired, tampered or erased (SCRUM-461) | 30/15min |
+
+**The reset page's "done" depends on whose account it was (SV15).** An attendee's
+account lives on the phone and the dashboard refuses it, so `/reset-password`
+shows "Open Blend'n" (`blendn://`, with the App Store and Google Play listings
+as the fallback once those are public) and does **not** send them to `/login`.
+Every dashboard role (`app_admin`, `organizer`, `venue_owner`, `sponsor`) keeps
+the sign-in link and the redirect.
 
 `forgot-password` always responds `{ ok: true }` with the same message whether or
 not the address exists. The emailed link opens the **web** reset page in the
@@ -493,8 +500,9 @@ that does not know it.
 | `changedAt` | ISO string \| `null` | When the time, the venue or the status last moved under people who had heard of the event. `null` for an event that has not changed (almost all), and again when every change was put back |
 | `changedFields` | `("time" \| "venue" \| "cancelled")[]` | What moved, in that order. `[]` when nothing did. Derived on read, so a time moved and put back is no change |
 | `changedFrom` | `{ startTime?, endTime?, venueName?, address? } \| null` | What those were **before the first change still standing**, for the struck-through old time. Only fields that still differ appear; a cancel names none. The live values stay in `startTime`, `endTime`, `venueName` |
-| `days` | `{ date, startTime, endTime, cancelled }[]` | Every day of the run, in order (`date` is the local `YYYY-MM-DD`). One entry for a one-day event. A day called off is `cancelled: true`: draw it struck through |
-| `dayCount` | number | `days.length` |
+| `days` | `{ date, startTime, endTime, cancelled, cancelledAt }[]` | The days of the run, in order, at most 31 (`date` is the local `YYYY-MM-DD`). One entry for a one-day event. A day called off is `cancelled: true`: draw it struck through |
+| `dayCount` | number | How many days the whole run has; `days.length < dayCount` means more exist than were sent |
+| `daysFrom` | number | Which day of the run `days[0]` is, 1-based (1 unless the run is longer than the window) |
 | `dayNumber` | number \| `null` | The 1-based position of `session`'s day: "Day 2 of 3". `null` when every day is cancelled |
 
 `session`, `startTime`, `endTime` and the rest are exactly what they were.
@@ -1007,6 +1015,14 @@ single-day event it equals `startTime`/`endTime`. Computed by `eventSession` in
 `lib/occurrences.ts`. The rating route's "once it has ended" uses the same
 window.
 
+**`days` is bounded** (the table above): at most 31 entries. Every day of an
+ordinary event; for a longer run the stretch starting two days before today's
+(`session`'s), so `dayCount`, the whole run, can exceed `days.length`, and
+`daysFrom` says which day of the run `days[0]` is (the same "Day 3" the check-in
+refusal below names). Each day also carries `cancelledAt` (when it was called
+off, else null) beside `cancelled`. `daysFrom` and `cancelledAt` are additive.
+Computed by `eventDays` in `lib/occurrences.ts`.
+
 **A check-in refused on the clock names the day** on a multi-day event:
 `Day 3 starts Tue, Sep 29, 12:45 AM.` (`EVENT_NOT_STARTED`), `Day 2 has been
 cancelled. Day 3 starts …` (`EVENT_NOT_STARTED`), or `Day 3 of 3 has been
@@ -1246,7 +1262,8 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
              "hours": [{ "day": 5, "open": "17:00", "close": "01:00" }],
              "description": null, "amenities": ["Live Music", "Outdoor Seating"],
              "upcoming": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
-                            "startTime": "…", "endTime": "…" }] },
+                            "startTime": "…", "endTime": "…" }],
+             "upcomingTotal": 12, "upcomingNextCursor": "eyJ0Ijoi…" },
   "live": { "open": true, "closedReason": null, "eventId": null,
             "liveNow": "quiet",
             "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false, "stayUntil": null,
@@ -1276,6 +1293,28 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
 live. People are the venue day's roster and grid
 (`GET /events/:venueDayId/checkins`, `/matches`), which only somebody live
 there may read — you see people only while you can be seen.
+
+
+**`upcoming` is the first five; `upcomingTotal` is all of them** (every event
+coming at the venue, whatever the page holds) and `upcomingNextCursor` resumes the
+rest (null when `upcoming` is whole). Both are additive, so an installed client
+that lists five is unchanged.
+
+### GET /venues/:venueId/upcoming
+
+"See all" for the venue page: every coming event, soonest first, a page at a
+time. The same filter and age rule as `upcoming` (published, public, not ended,
+link not disputed, within your age; never a venue's own live rooms), the same
+gates and 404 as `GET /venues/:venueId`.
+
+```json
+{ "success": true, "data": {
+  "events": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
+               "startTime": "…", "endTime": "…" }],
+  "pagination": { "limit": 20, "hasMore": true, "nextCursor": "eyJ0Ijoi…", "totalCount": 12 } } }
+```
+
+`?limit=` 1-100 (default 20), `?cursor=` the previous `nextCursor` (not ours: 400).
 
 ### POST /venues/:venueId/live
 
@@ -1446,6 +1485,43 @@ answer `201` with the created-request shape and a fresh id, write nothing and
 notify nobody. The 409s are unchanged for everyone else — the app can read the
 same facts from `GET /users/:userId`'s `connection`.
 
+### Lists are paged (SCRUM-760)
+
+Every list a person accumulates is a **cursor page with a total**, so a person
+with thousands of friends or a busy inbox never costs a full read, and the app
+never needs to hold the whole list:
+
+| Route | Page size for a client that pages (default; 1-100) | Without `limit` or `cursor` (installed builds) | Rows |
+|---|---|---|---|
+| `GET /conversations` | 50 | up to 200 | `conversations` |
+| `GET /friends` | 100 | up to 200 | `friends` (and `count`, the whole list) |
+| `GET /friends/requests` | 50 each | up to 200 each | `incoming`, `outgoing` |
+| `GET /users/blocked` | 100 | up to 200 | `users` |
+| `GET /events/:eventId/board` | 100 | 100 (the same) | `posts` (it was cut at 100 with no way to the rest) |
+
+**A request with neither `limit` nor `cursor` is a build that cannot page**, and
+gets up to **200** (`LEGACY_PAGE`), which is what it always got in practice
+without an unbounded read. Anything that names a `limit` or a `cursor` is a
+client that pages: it gets the default in the table unless it says otherwise,
+1-100. So a new client **must send `limit` on its first page**, or it is given
+the 200 and a `pagination.limit` of 200; a cursor with no `limit` is the
+default. `pagination.limit` always says what this page was sized to, and
+`hasMore` / `nextCursor` say whether 200 was enough. The board has no legacy
+page.
+
+`?limit=` (1-100) and `?cursor=` (the previous page's `pagination.nextCursor`,
+opaque). The answer carries `pagination: { limit, hasMore, nextCursor,
+totalCount }`; `totalCount` is the whole list whatever page this is, and
+`nextCursor` is null on the last. A cursor that is not one of ours is `400`.
+`GET /friends/requests` has two lists, so its `pagination` is `{ incoming,
+outgoing }`, each as above; ask for one alone with `?list=incoming` (or
+`outgoing`) plus `cursor`, and only that array comes back (a cursor without
+`list` is 400). The order is newest first and total: rows sharing an instant
+(a bulk insert) are neither repeated nor lost at a page edge. In the inbox a
+conversation with nothing said yet leads, as before, and each row's
+`lastMessage` is the newest message the thread would show (a hidden or
+moderated one never previews). All of it is additive.
+
 ### GET /conversations
 Each conversation carries **`fromMatch`** — it opened from a mutual like rather
 than from an accepted message request.
@@ -1534,6 +1610,13 @@ If OpenAI times out (>1s), message is broadcast and moderation falls back to asy
 
 **Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `NOT_LIVE` (403, a venue's room after your Go Live ended), `SPAM_BLOCKED` (429)
 
+**`SPAM_BLOCKED` says when to try again** (SV13): a send refused for a burst (5 in
+10 seconds) carries `retryAfter`, whole seconds until that window ends, in the
+body and in `Retry-After`, as a `RATE_LIMITED` 429 does. A message refused for
+too many links has none: sending it again would not pass. The same on the event
+chat and DM sends (`docs/API.md`, *Direct messages*). `errorCode` is unchanged;
+`retryAfter` is optional and an older client ignores it.
+
 **Rate limit:** 30 sends a minute per person, across this route and `POST /events/:eventId/chat` together, whichever token or device they send from → `429 RATE_LIMITED` (SCRUM-439).
 
 ### Event Chat: POST /events/:eventId/chat
@@ -1589,7 +1672,7 @@ does not offer Delist.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/conversations` | List conversations |
+| GET | `/conversations` | List conversations, newest first, a page at a time: 50, `pagination.nextCursor`, `pagination.totalCount`; see *Lists are paged* |
 | POST | `/conversations` | Open a conversation — **requires an accepted request**; a closed pair gets 409 "This conversation was closed and cannot be reopened", as the respond route answers (SCRUM-300) |
 | GET | `/conversations/:id` | Get conversation |
 | GET | `/conversations/:id/messages` | Get messages |
@@ -1841,7 +1924,7 @@ which request ids are real.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/friends` | My friends, newest first, and `count` |
+| GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`; see *Lists are paged* |
 | GET | `/friends/:userId` | A friend's profile (404 for anyone else) |
 | DELETE | `/friends/:userId` | Unfriend — silent, leaves any DM alone |
 | POST | `/friends/:userId/conversation` | Open (or find) a DM with a friend → `{ conversationId }` |
@@ -1849,7 +1932,7 @@ which request ids are real.
 | POST | `/friends/invite` | Reset it — the old link stops working |
 | GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
 | GET | `/friends/invite/:token/preview` | **No auth.** Signed-out invite screen → `{ name, photoUrl }` — first name only. Per-IP limit (20/min). Same 404 |
-| GET | `/friends/requests` | `{ incoming, outgoing }` |
+| GET | `/friends/requests` | `{ incoming, outgoing, pagination }` — 50 of each; `?list=incoming\|outgoing&cursor=` pages one alone |
 | POST | `/friends/requests` | Ask: `{ token }` or `{ userId }` → `{ state: "requested" \| "friends" }` |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
 | DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
@@ -2490,6 +2573,24 @@ the room. The question doubles as the message `content`, which means a client
 that does not yet know the `poll` type still renders something meaningful rather
 than an empty bubble.
 
+**A `poll` message carries `pollId`** in `GET /chat/groups/:id/messages`,
+`GET /events/:eventId/chat` and the `chat:message` socket payload (`message.pollId`):
+the id to read and vote on above. It is absent on every other type, and `null`
+on a poll message that moderation hid. An older client ignores it.
+
+**Every vote refusal is a 409 `CONFLICT` with its reason in `reasonCode`**, the
+sentence in `error` unchanged: `POLL_CLOSED` ("This poll has closed"),
+`ROOM_CLOSED` ("The chatroom is not open"), `NOT_IN_ROOM` ("You are not in this
+chatroom"), `NOT_AN_OPTION` ("That is not an option on this poll"), `NOT_LIVE`
+(a venue day's room, after Go Live ended). A banned member reading the results
+back is a 403 with the room's ban sentence.
+
+**Why a result is hidden**: beside `suppressed` and `suppressedLabel`, a poll's
+results carry `suppressedReason` (`hidden_until_close`: open, results not published until it
+closes, label "Results appear when the poll closes"; `few_votes`: a count under
+the floor or one that would give a hidden one away; null when nothing is
+withheld), so the app can draw the two differently. Optional and additive.
+
 **Who may read or vote is the room.** The poll must belong to the event in the
 URL, and its message must not be deleted: otherwise `404 Poll not found`, as it
 is for a draft event. The read then applies the room's own read rule
@@ -2958,6 +3059,18 @@ and it is gated on presence rather than intent — a board that stayed open woul
 be a second room with a weaker gate running beside the real one, and a readable
 one would be a list of who came alone, open during the night.
 
+**A taken-down post is told to its author** (SV9). When a moderator removes a
+post, or the automatic check takes one down, its author gets a
+`board_post_removed` push ("Your board post was taken down", no words of the
+post), a bell row of that kind (`data: { type, eventId, postId }`), and
+`board:postRemoved` `{ eventId, postId }` on their own `user:` room (see
+`docs/SOCKET_EVENTS.md`). Only when that action is what took the post down: their
+own withdrawal tells nobody, and a post already withdrawn that a moderator then
+marks removed tells nobody either. `GET /events/:eventId/board` carries
+`takenDown`: `[{ id, kind, body, createdAt, takenDownAt }]`, the caller's own
+removed or hidden posts (at most 20, newest first, never anybody else's), so the
+app can show the state. Additive and optional.
+
 **Blocks apply both ways.** A post by somebody who blocked you, or whom you
 blocked, is not on your board; asking on one is refused exactly as asking on a
 post that is gone; and an ask from somebody blocked either way is left out of
@@ -3296,6 +3409,7 @@ them any more. Rows written before that are hidden, and retention removes them.
 | A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes. `data: { type: "group_message", chatGroupId, senderId, kind }` — `kind` is the room's: `event` (a venue day's room too), `crew` (with `crewId`), `blend` (with `blendId`) or `board_post`; open the tap as that room | `room:{chatGroupId}`, replaced in place |
 | A check-in | **Nobody** — the live roster carries arrivals | — |
 | An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going (`event_changed`: time, place, cancel), and maybe, waitlisted and saved (`event_update`) | `event:{eventId}`, replaced in place: only the latest state is true |
+| An event you are checked in to is cancelled (SV7) | Everyone who was checked in at that moment, once, in batches of 500: `data: { type: "event_cancelled", eventId }`, "This event has been cancelled. You are no longer checked in." Their check-in is already cancelled and their presence closed. They are not sent the going/saved line above as well, so somebody inside and going hears it once. A build that has not declared channel set 2 is sent `event_update` instead (it opens the event), push and bell row alike, as for `event_changed` | `event:{eventId}` on `events`, replaced in place; one bell row of kind `event_cancelled` |
 | An organiser announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, board, message request | The person it is about, immediately | One each |
 | A crew invite | The friend invited (`crew_invite`, `crewId`), naming nobody | One each |
@@ -3402,6 +3516,20 @@ others there earn a month (each friend counts once; at most 3 a year).
   "expiresAt": "2026-11-10T09:00:00.000Z"
 } }
 ```
+
+**`state` and `grant` are optional, and omitted when the data does not say.**
+`state` is where a store subscription or Night Pass stands, read from the newest
+RevenueCat delivery about that purchase and the clock: `active`; `cancelled`
+(auto-renew off, access runs to `expiresAt`); `grace` (a billing issue, inside
+the store's grace period); `hold` (Google's account hold: a billing issue with no
+grace period, not live); `paused` (a scheduled pause: the store has paused the subscription from the next renewal, and access runs to `expiresAt` — `active` can still be `true`); `expired`; `refunded` (a store refund ended
+it). It is also sent when nothing is live (`active: false`, `state: "expired"` or
+`"refunded"`), for the latest store purchase. `grant` is `trial` or `referral`
+when the live access is one of our free months (our `plus-trial:` and
+`plus-referral:` rows); a grant has no `state`, and a store purchase has no
+`grant`. Neither is guessed: a purchase with no delivery on record, a delivery
+that says nothing (`TEST`, a transfer) and an account with no purchase send
+neither field.
 
 `gated` says whether Blendn+ is for sale to this person at all: gated in the
 city of their latest night (where they are checked in now counts as that). When it is false

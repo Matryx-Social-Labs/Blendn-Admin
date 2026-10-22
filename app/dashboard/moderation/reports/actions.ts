@@ -9,6 +9,7 @@ import { ALREADY_DECIDED, decisionFrom, refuseUnlessDecided } from "@/lib/decisi
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
+import { tellAuthorPostTakenDown } from "@/lib/board-takedown"
 import { closePostRooms, closeRoomSockets } from "@/lib/room-close"
 import { closeCrewBlendsLocked, dissolveCrewLocked } from "@/lib/crews/sweep"
 import { blockAccountNow } from "@/lib/account-blocklist"
@@ -585,6 +586,9 @@ export async function resolveReport(
   // Whether a removal took anything down — false when the post was already
   // removed (a second report on it, or a second click), so the audit row says so.
   let removed: boolean | null = null
+  // Whether this removal is what took a board post off the board, as opposed to
+  // a post its author had already withdrawn: only then is the author told (SV9).
+  let tookPostDown = false
   // A dissolved crew's room and its Blends' rooms, or a hidden crew's Blends, for their sockets after the commit.
   let crewRoomIds: string[] = []
 
@@ -640,7 +644,8 @@ export async function resolveReport(
         where: { id: postId, OR: [{ moderation_status: null }, { moderation_status: { not: "removed" } }] },
         data: { moderation_status: "removed", updated_at: now },
       })
-      await tx.board_posts.updateMany({ where: { id: postId, deleted_at: null }, data: { deleted_at: now } })
+      const down = await tx.board_posts.updateMany({ where: { id: postId, deleted_at: null }, data: { deleted_at: now } })
+      tookPostDown = down.count > 0
       removed = marked.count > 0
     } else if (decision === "remove_message") {
       await tx.chat_messages.update({
@@ -730,6 +735,8 @@ export async function resolveReport(
   if (decision === "remove_message" && subject.boardPost) {
     void closePostRooms([(report as { message_id: string }).message_id])
   }
+  // Told to its author, the one who did not take it down (SV9).
+  if (tookPostDown) await tellAuthorPostTakenDown((report as { message_id: string }).message_id)
   // A dissolved crew's chat, a closed Blend: out with anyone still in it.
   for (const id of crewRoomIds) closeRoomSockets(id)
 

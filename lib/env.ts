@@ -386,3 +386,15 @@ export function dashboardHost(): string | null {
   const host = process.env.DASHBOARD_HOST?.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
   return host ? host : null
 }
+
+/**
+ * Whether the app's store listings are public yet (`APP_STORE_LISTED`,
+ * `PLAY_LISTED`; the landing page's own names). A store link before its listing
+ * is public is a dead end, so nothing offers one until the flag says `true`.
+ */
+export function storeListings(): { appStore: boolean; play: boolean } {
+  return {
+    appStore: process.env.APP_STORE_LISTED?.trim() === "true",
+    play: process.env.PLAY_LISTED?.trim() === "true",
+  }
+}
