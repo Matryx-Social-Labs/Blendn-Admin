@@ -1,4 +1,4 @@
-import { firstName, UNNAMED } from "./conversation-identity"
+import { firstName, mayShowRealName, UNNAMED } from "./conversation-identity"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
 import { resolveUserRef } from "./room-handle"
@@ -40,11 +40,16 @@ import { resolveUserRef } from "./room-handle"
  * You see someone's real identity when one of these is true, and not otherwise:
  *
  * - **It is you.**
- * - **You matched.** A mutual like at a shared event. This is the documented
- *   exchange: "if two people both like each other, a conversation opens and
- *   identity is exchanged".
+ * - **You matched, and they revealed to you.** A mutual like at a shared event
+ *   opens a conversation where each side keeps the room's pseudonym until they
+ *   choose to show their name (`mayShowRealName`, lib/conversation-identity.ts).
+ *   This line used to say "identity is exchanged" at the like, which was true
+ *   until the reveal model (#201) and left the unscoped gate behind it: the
+ *   inbox sends the raw id beside the pseudonym, so one profile read skipped the
+ *   reveal. The like alone no longer identifies; their reveal does.
  * - **You are in a conversation.** An accepted message request already required
- *   co-presence and consent from the other side.
+ *   co-presence and consent from the other side. One that came from a match or
+ *   a board post is a match for this purpose: it identifies once they reveal.
  * - **They chose to be public in a room you were in.** `event_check_ins.revealed`
  *   is someone opting out of the pseudonym for that event, so it would be
  *   strange to keep hiding them from the people who were there.
@@ -127,7 +132,16 @@ export async function maySeeIdentityFor(
           { user2_id: viewerId, user1_id: { in: others } },
         ],
       },
-      select: { user1_id: true, user2_id: true, closed_at: true, origin_friendship: true },
+      select: {
+        user1_id: true,
+        user2_id: true,
+        closed_at: true,
+        origin_friendship: true,
+        user1_pseudonym: true,
+        user2_pseudonym: true,
+        user1_revealed: true,
+        user2_revealed: true,
+      },
     }),
 
     /*
@@ -196,6 +210,9 @@ export async function maySeeIdentityFor(
 
   const open = new Set<string>()
   const closed = new Set<string>()
+  // Matched and still a pseudonym to the viewer: neither the conversation nor
+  // the like that opened it identifies them. Only their reveal does.
+  const unrevealed = new Set<string>()
   for (const c of conversations) {
     const other = c.user1_id === viewerId ? c.user2_id : c.user1_id
     if (c.closed_at !== null) closed.add(other)
@@ -206,7 +223,7 @@ export async function maySeeIdentityFor(
      * — undoing `friends_see_me_in_rooms` for anyone who ever said hello.
      * Closed still counts as closed above: leaving beats everything.
      */
-    else if (!c.origin_friendship) open.add(other)
+    else if (!c.origin_friendship) (mayShowRealName(c, other) ? open : unrevealed).add(other)
   }
   const friendVisible = new Set(
     friendsOptedIn.map((f) => (f.user1_id === viewerId ? f.user2_id : f.user1_id))
@@ -230,7 +247,8 @@ export async function maySeeIdentityFor(
    */
   for (const id of others) {
     if (blocked.has(id) || closed.has(id)) continue
-    if (mutual.has(id) || open.has(id) || revealedTo.has(id) || friendVisible.has(id)) visible.add(id)
+    const matched = mutual.has(id) && !unrevealed.has(id)
+    if (matched || open.has(id) || revealedTo.has(id) || friendVisible.has(id)) visible.add(id)
   }
   return visible
 }

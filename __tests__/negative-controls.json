@@ -1963,6 +1963,12 @@
       "mutation": "M1 `&& c.user2_revealed` dropped from isRevealedMatch. M3 `!connectable ||` dropped from matchStanding. M4 `cameFromMatch(c)` dropped from isOpenMatch. M5 `nameable &&` dropped from the route's connectable (a hidden room handle). M6 the `mayShowRealName` guard dropped from friendOffersFor. M7 `identified &&` dropped from the profile's friend. M8 `via` set on the token path. M9 canAdd forced true for any addable state. M10 reasonCode given on every non-revealed standing. M2 `c.closed_at === null` dropped from isOpenMatch is an EQUIVALENT mutant: mayConnect (pairIsClosed) and the inbox query refuse a closed pair first, so it is defence in depth and no test can tell.",
       "observed": "M1: 2 failing (incomplete-reveal reasonCode, offer until both revealed). M3: 1 failing (blocked/deleted/closed refuse as unknown). M4: 3 failing (message-request refusal, friends.itest user-id gate, offer). M5: 1 failing (room-scoped-identity handle test). M6: 1 failing (pseudonym gets no friend state). M7: 1 failing (profile friend only for a visible person). M8: 1 failing (token path carries no via). M9: 1 failing (offer). M10: 4 failing. M2: 51 of 51 still green, as expected. Each reverted; 51 of 51.",
       "date": "2026-10-22"
+    },
+    "unrevealed-match-identity.itest.ts": {
+      "guards": "SCRUM-752: the unscoped (raw id) identity gate in lib/identity.ts honours the reveal for a match-born conversation. The like and the open conversation identify someone only once THEY have revealed to the viewer (mayShowRealName); a room-level reveal, an opted-in friend and a never-pseudonymous conversation still do. GET /profiles/:id and GET /users/:id answer an unrevealed match exactly as a stranger, and the profile's `friend` appears only for a person the viewer may see.",
+      "mutation": "MA `&& !unrevealed.has(id)` dropped from the mutual-like branch. MB the open-conversation branch put back to `open.add(other)` for every conversation. MC `identified &&` dropped from the profile route's friend offer.",
+      "observed": "MA: 1 failing (a mutual like must not identify). MB: 4 failing (stranger-shaped profile, mutual like, friend state, names-only-after-reveal). MC: 2 failing (stranger-shaped profile, a pseudonym that is your friend shows no friend state). Each reverted; 5 of 5.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [
