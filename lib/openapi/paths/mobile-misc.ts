@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -511,7 +511,7 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}",
   tags: ["Mobile Users"],
   summary: "Get user public profile",
-  description:
+  description: ROOM_BAN_GATE +
     "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
@@ -580,7 +580,7 @@ registry.registerPath({
   path: "/api/mobile/message-requests",
   tags: ["Mobile Message Requests"],
   summary: "Send message request",
-  description:
+  description: ROOM_BAN_GATE +
     PARTICIPATION_GATE +
     "Both of you must have attended the same event. 409 if a request is pending or accepted in either direction, if you already sent one that was declined — a rejection is not an invitation to try again — or if you already have a conversation; the person who declined may ask you. **Those 409s are said only when `identityVisible` would be true for the recipient** (SCRUM-371): to anyone else they answer 201 with this same shape and a fresh id, write nothing and notify nobody, so a room handle cannot be probed for a friend DM or an earlier request. `recipientId` may be a room handle and is echoed as sent. The response names the recipient by that ref only: their name and photo are what accepting discloses, not asking.",
   security: bearerAuth,

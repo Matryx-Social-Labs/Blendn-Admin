@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -629,6 +629,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/checkins",
   tags: ["Mobile Events"],
   summary: "List event attendees",
+  description: ROOM_BAN_GATE,
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -647,7 +648,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/matches",
   tags: ["Mobile Events"],
   summary: "Who else was in the room, ranked",
-  description:
+  description: ROOM_BAN_GATE +
     "Only for people who checked in — 403 otherwise. Pseudonymous unless someone revealed themselves for this event. No score is exposed.",
   security: bearerAuth,
   request: {
@@ -666,7 +667,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/matches/likes",
   tags: ["Mobile Events"],
   summary: "Like someone from this event",
-  description:
+  description: ROOM_BAN_GATE +
     "A mutual like opens a conversation. The response never reveals whether the other person liked you first.\n\n" +
     "`userId` must be the handle this event's deck or roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as an unknown person — 404 `User not found` — because a raw-id like would say whether that account is in this room. Your own id is 400." +
     "\n\nWith `asCrewId` it is a **crew → person** like, on your crew's behalf (step 8): your crew must be here (two of you checked in; 403 otherwise) with " +
@@ -707,7 +708,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/waves",
   tags: ["Mobile Events"],
   summary: "Wave at someone in the room",
-  description:
+  description: ROOM_BAN_GATE +
     "Ephemeral: emits `room:wave` to the recipient and stores nothing. Both people must be checked in now.\n\n" +
     "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`) and starts no window: a raw id asked who is here, and the per-pair window then told which handle it was. Your own id is 400.\n\n" +
     "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, or a block either way; deliberately indistinguishable), `WAVE_TOO_SOON` (429, one per pair per 10 minutes, with `retryAfter`)",
@@ -728,6 +729,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/matches/preferences",
   tags: ["Mobile Events"],
   summary: "Set your intent and reveal for this event",
+  description: ROOM_BAN_GATE,
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -746,7 +748,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/peer-ratings",
   tags: ["Mobile Events"],
   summary: "Who you can still rate for this event",
-  description:
+  description: ROOM_BAN_GATE +
     "Only people you connected with (a mutual like), and only once the event has ended. Empty is the common case.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
@@ -761,7 +763,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/peer-ratings",
   tags: ["Mobile Events"],
   summary: "Rate someone you met",
-  description:
+  description: ROOM_BAN_GATE +
     "Never visible to the person rated, and no endpoint returns it to them. A harassment report goes to moderation on its own and is never averaged into a score.",
   security: bearerAuth,
   request: {

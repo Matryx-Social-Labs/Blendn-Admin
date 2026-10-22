@@ -873,6 +873,24 @@ revealed?: boolean, remember?: boolean }`. Per event, because both change —
 someone open to dating on a Friday is often only there for the talk on Tuesday.
 `remember` also writes the profile default.
 
+### A member a host banned from the room
+
+A ban closes the room's people, not only its chat. To a member a host banned
+from an event's room, every one of these answers as the chat does — 403
+`USER_BANNED`, "The organiser has removed you from this room." — and opens
+again when the ban is lifted:
+
+`GET /events/:eventId/checkins`, `/matches`, `/people`, `/crews`,
+`/peer-ratings`; `POST /events/:eventId/peer-ratings`, `/waves`,
+`/matches/likes`; `PUT /events/:eventId/matches/preferences`; and, given one of
+that room's handles, `GET /users/:handle`, `/profiles/:handle`,
+`/profiles/:handle/interests` and `POST /message-requests`. A raw id carries no
+room and is not asked about.
+
+To everybody else a banned member is not in the room: a wave answers 403
+`RECIPIENT_NOT_HERE` and a like 404 "User not found", the answers for anybody
+not here — never which.
+
 ### GET /events/:eventId/people — people from tonight
 
 The Recap's "People from tonight" row and its deck (Flow 4 · 4.5): who checked
