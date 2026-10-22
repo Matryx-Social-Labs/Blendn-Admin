@@ -287,7 +287,7 @@ export const ProfileResponseSchema = z
       photo_states: z
         .array(
           z.object({
-            url: z.string(),
+            url: z.string().nullable().describe("Null for a pulled photo: its object is withdrawn and a CDN may still hold the old URL."),
             pulled: z.boolean().describe("Moderation took this photo down. Its object is withdrawn: draw a tile that says so, not the image."),
             pulled_at: z.string().datetime().nullable(),
             was_main: z.boolean().describe("It was the main photo, so the next one is now."),

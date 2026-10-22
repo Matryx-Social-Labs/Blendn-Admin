@@ -535,7 +535,7 @@ board, friends, DMs, message requests), not only the door.
 **There is no "organiser removed" reason**: deleting an account deletes its
 events, so the id is gone and answers like any unknown id.
 
-### Profiles: photos pulled, badges, notification switches (Flow 6, 9)
+### Profiles: photos pulled and badges (Flow 6)
 
 `GET /profiles/:userId` adds, inside `profile`:
 
@@ -543,14 +543,18 @@ events, so the id is gone and answers like any unknown id.
   First `photos`, in order, each `pulled: false`; then the photos moderation
   pulled in the last 7 days, newest first, `pulled: true`, with `was_main` saying it
   was the main one ("your next photo is your main photo now"). A pulled photo is
-  gone from `photos` (the profile `PUT` drops it) and its object is withdrawn:
-  draw a tile that says so, never the URL. Stored as `photo_checks.pulled_at` and
+  gone from `photos` (the profile `PUT` drops it) and its object is withdrawn, so
+  its **`url` is `null`**: a CDN that still held the old URL would keep serving the
+  image. Draw a tile that says so. Stored as `photo_checks.pulled_at` and
   `pulled_was_main`; a pull from before this shipped is never listed.
 - **`badges`**: `{ kind: "nights_out" | "shows_up", label }[]`, derived from check-ins by
   the rule a match card uses. Present (possibly `[]`) when `show_badges` is not
   off, for you and for anyone who can see who you are; **absent** when it is off,
-  or for a viewer the profile is anonymous to. `regular_here` is never here: it
-  is about the venue you both stand in.
+  or for a viewer the profile is anonymous to. **With `show_badges` off the key is
+  absent for the owner too**: the switch hides your badges from you as well as from
+  everyone else, so Edit profile shows the switch and no badges while it is off.
+  `regular_here` is never here: it is about the venue you both stand in.
+
 ### Notifications: preferences, row details, badge (Flow 9)
 
 **`GET` / `PUT /me/notification-preferences`**: `{ matches, crew, night }`, all

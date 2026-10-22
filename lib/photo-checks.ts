@@ -66,7 +66,8 @@ export const PULLED_NOTICE_DAYS = 7
 
 /** One slot of the owner's photos: a photo that is up, or one moderation took down. */
 export interface PhotoState {
-  url: string
+  /** Null for a pulled photo: its object is withdrawn from the public bucket, and a CDN that still holds the URL would keep showing it. */
+  url: string | null
   pulled: boolean
   /** When it was pulled; null for a photo that is up. */
   pulled_at: string | null
@@ -94,9 +95,10 @@ export async function photoStatesFor(userId: string, photos: readonly string[]):
   return [
     ...photos.map((url) => ({ url, pulled: false, pulled_at: null, was_main: false })),
     ...rows
+      // Held back from the list while the object is somehow still on the profile (a save that raced the pull).
       .filter((r) => !up.has(r.url))
       .map((r) => ({
-        url: r.url,
+        url: null,
         pulled: true,
         pulled_at: r.pulled_at?.toISOString() ?? null,
         was_main: r.pulled_was_main ?? false,

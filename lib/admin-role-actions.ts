@@ -17,7 +17,7 @@ import {
   UNCANCEL_REFUSAL,
 } from "@/lib/event-cancellation"
 import { canPublish } from "@/lib/geofence-input"
-import { recordEventChange } from "@/lib/event-change"
+import { updateEventTracked } from "@/lib/event-change"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import type { user_role, event_status } from "@prisma/client"
 import { realEventsWhere } from "./event-kind"
@@ -234,19 +234,7 @@ export async function updateEventStatus(eventId: string, status: event_status) {
 
   const before = await db.events.findUnique({
     where: { id: eventId },
-    select: {
-      status: true,
-      title: true,
-      latitude: true,
-      longitude: true,
-      geofence: true,
-      // What `recordEventChange` reads the edit against.
-      start_time: true,
-      end_time: true,
-      venue_name: true,
-      address: true,
-      changed_from: true,
-    },
+    select: { status: true, title: true, latitude: true, longitude: true, geofence: true },
   })
   if (!before) throw new Refusal("Event not found")
 
@@ -262,11 +250,10 @@ export async function updateEventStatus(eventId: string, status: event_status) {
     if (!gate.ok) throw new Refusal(gate.reason ?? "This event cannot be published yet")
   }
 
-  const updated = await db.events.update({
+  await updateEventTracked({
     where: { id: eventId },
     data: { status },
   })
-  await recordEventChange(eventId, before, updated)
 
   // A fourth door onto the same transitions, audited like the others (SCRUM-89).
   auditLog({

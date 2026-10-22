@@ -1639,6 +1639,10 @@ model private_messages {
   @@index([reply_to_id])
   /// "Still undelivered in this conversation" — the inbox marks these delivered.
   @@index([conversation_id, delivered_at])
+  // DRIFT, on purpose: `private_messages_unread_idx` is a partial index
+  // ON (conversation_id) WHERE is_read = false (migration 20261022100200), which
+  // Prisma 7's schema language cannot express. The badge count on GET
+  // /notifications reads it. `migrate dev` will want to drop it: don't let it.
   @@unique([sender_id, client_id])
 }
 
