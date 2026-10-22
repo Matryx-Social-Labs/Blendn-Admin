@@ -13,6 +13,7 @@ import type { Socket } from "socket.io-client"
  *   npm run -s qa world                  what is live, soon, and who holds a device
  *   npm run -s qa probe <chatGroupId> <email> [seconds] [post-as <email> <text>]
  *   npm run -s qa lock <device> <tag>    npm run -s qa unlock <device>
+ *   npm run -s qa lock sim <tag>         before booting ANY simulator/emulator
  *
  * Scratch lives in ~/.blendn-qa, not /tmp: macOS purges /tmp, and on
  * 2026-09-23 it took the query helper and the Resend key with it mid-run.
@@ -251,7 +252,32 @@ async function world() {
 
 /* ------------------------------------------------------------------- locks */
 
+/**
+ * Every simulator and emulator on this Mac shares the one `sim` lock: two at
+ * once, or one booted into a swapping host, has frozen the 16 GB machine.
+ */
+const SIM_LOCK = "sim"
+const MIN_FREE_MEMORY_PCT = 30
+
+/** Why a simulator must not boot now, given `memory_pressure`'s output, or null. */
+export function memoryRefusal(report: string): string | null {
+  const free = /memory free percentage: (\d+)%/.exec(report)
+  if (!free) return "could not read memory_pressure — not booting blind"
+  const pct = Number(free[1])
+  return pct < MIN_FREE_MEMORY_PCT ? `${pct}% free, below the ${MIN_FREE_MEMORY_PCT}% floor — close something first` : null
+}
+
 function lock(device: string, tag: string) {
+  if (device === SIM_LOCK) {
+    let report = ""
+    try {
+      report = execFileSync("memory_pressure", [], { encoding: "utf8" })
+    } catch {
+      // memoryRefusal says so
+    }
+    const refusal = memoryRefusal(report)
+    if (refusal) throw new Error(refusal)
+  }
   const file = join(scratch("locks"), device.replace(/[^\w.-]/g, "_"))
   mkdirSync(scratch("locks"), { recursive: true })
   if (existsSync(file)) {

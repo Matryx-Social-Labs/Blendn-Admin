@@ -214,15 +214,18 @@ no-org control), so a rotation on Railway reaches all of them on the next deploy
 3. `npm run -s qa bootstrap`: staging DB URL into `~/.blendn-qa/pgurl` (600).
    Scratch lives there, not in `/tmp`, which macOS purges.
 4. `npm run -s qa world`.
-5. Claim a unit (§2). Lock the device you'll drive:
-   `npm run -s qa lock ios-<udid> <tag>` / `npm run -s qa lock android-emulator-5554 <tag>`.
-   **One device per session; iOS first, then shut it and do Android** (host load).
+5. Claim a unit (§2). Before booting a simulator or emulator:
+   `npm run -s qa lock sim <tag>`. **One device on the whole Mac, across every
+   session and agent; iOS first, then shut it and do Android** (16 GB host). The
+   lock also refuses below 30% free memory. `qa unlock sim` when it is shut.
 
 **During**
 - Follow the unit's charter: the happy path **and** the refusal path.
-- Client: Maestro (MCP, or the CLI when the MCP is down) with the flows in
-  `blendn/.maestro/`. After typing, tap the keyboard's bottom-right key.
-- Dashboard: gstack `browse`, signed in as the role the unit names.
+- Client: the Appium MCP (start `appium` if 4723 is down); Maestro (MCP or CLI,
+  flows in `blendn/.maestro/`) is the fallback. After typing, tap the
+  keyboard's bottom-right key.
+- Dashboard: the Playwright MCP, signed in as the role the unit names; gstack
+  `browse` is the fallback.
 - API: curl with `$(npm run -s qa token <email>)`.
 - Sockets: `npm run -s qa probe <chatGroupId> <email> [seconds] [post-as <email> <text>]`.
 - Read every row back: `npm run -s qa sq "SELECT …"` (read-only by construction:
@@ -276,7 +279,7 @@ remember it. In Claude Code, from this repo:
 
 | Command | When |
 |---|---|
-| `/tq-setup <initials>` | Once per machine. Checks the repos, CLIs, the Railway login and `SEED_PASSWORD`, the atlassian and maestro MCP servers, and the skills and agents the programme uses (gstack, ECC); lists what's missing. |
+| `/tq-setup <initials>` | Once per machine. Checks the repos, CLIs, the Railway login and `SEED_PASSWORD`, the atlassian, appium-mcp and playwright MCP servers, and the skills and agents the programme uses (gstack, ECC); lists what's missing. |
 | `/tq-next <tag> [SCRUM-key] [lane]` | Again and again. One unit per run: sync, pick (TQ-V first), claim, drive every surface, read back, file findings, close or release, report. |
 | `/tq-fix <SCRUM-key> <tag>` | For a finding worth fixing now. Root cause, failing test first, mutation + register, specialist reviews, PR, merge, staging, then drive the fix where it was found. |
 
