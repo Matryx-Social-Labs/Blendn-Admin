@@ -5,6 +5,7 @@ import { NextRequest } from "next/server"
 import { ConversationClosedError, blockedEitherWay, mayConverse, openConversation } from "@/lib/conversations"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
+import { latestVisibleMessages } from "@/lib/inbox-preview"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
@@ -22,12 +23,25 @@ import {
 } from "@/lib/api-response"
 import { z } from "zod"
 import { readJson } from "@/lib/api-input"
+import { keysetPage, LEGACY_PAGE, LIST_PAGE, parseListQuery, type Keyset, type ListPagination } from "@/lib/pagination"
 
 const createConversationSchema = z.object({
   otherUserId: z.string().min(1, "Other user ID is required"),
 })
 
-// GET /api/mobile/conversations - List user's conversations
+/**
+ * The rows after a cursor in the inbox's order (`last_message_at` newest first,
+ * empty conversations leading, then `created_at`, then `id`).
+ */
+function afterInInbox(k: Keyset) {
+  const createdAt = k.createdAt ?? new Date(0)
+  const tied = { OR: [{ created_at: { lt: createdAt } }, { created_at: createdAt, id: { lt: k.id } }] }
+  return k.at
+    ? { OR: [{ last_message_at: { lt: k.at } }, { last_message_at: k.at, ...tied }] }
+    : { OR: [{ last_message_at: null, ...tied }, { last_message_at: { not: null } }] }
+}
+
+// GET /api/mobile/conversations - List user's conversations, a page at a time
 export async function GET(request: NextRequest) {
   try {
     const authUser = await getAuthenticatedUser(request)
@@ -35,17 +49,25 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    const conversations = await db.private_conversations.findMany({
-      where: {
-        // Live only. A closed conversation is gone for BOTH people -- a
-        // one-sided hide would leave the other person messaging into a thread
-        // you have left, which is a harassment vector rather than a courtesy.
-        closed_at: null,
-        OR: [
-          { user1_id: authUser.userId },
-          { user2_id: authUser.userId },
-        ],
-      },
+    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.CONVERSATIONS, LEGACY_PAGE)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit, after } = query
+
+    const mine = {
+      // Live only. A closed conversation is gone for BOTH people -- a
+      // one-sided hide would leave the other person messaging into a thread
+      // you have left, which is a harassment vector rather than a courtesy.
+      closed_at: null,
+      OR: [
+        { user1_id: authUser.userId },
+        { user2_id: authUser.userId },
+      ],
+    }
+
+    const [totalCount, rows] = await Promise.all([
+      db.private_conversations.count({ where: mine }),
+      db.private_conversations.findMany({
+      where: after ? { AND: [mine, afterInInbox(after)] } : mine,
       include: {
         /*
          * `profile.read_receipts` rides along because the list reports
@@ -69,20 +91,6 @@ export async function GET(request: NextRequest) {
             profile: { select: { read_receipts: true } },
           },
         },
-        messages: {
-          // The preview. A hidden message here would put words on the inbox row
-          // that the thread refuses to show.
-          where: VISIBLE_DM,
-          orderBy: { created_at: "desc" },
-          take: 1,
-          select: {
-            id: true,
-            message_text: true,
-            sender_id: true,
-            created_at: true,
-            is_read: true,
-          },
-        },
         _count: {
           select: {
             messages: {
@@ -101,15 +109,24 @@ export async function GET(request: NextRequest) {
           },
         },
       },
-      orderBy: {
-        last_message_at: "desc",
-      },
-    })
+      // Newest first, as it always was: a conversation with nothing said yet
+      // leads (`nulls: "first"` is what `desc` meant here), then the rest by
+      // their last message. `created_at` and `id` make the order total, so a
+      // cursor can stand on it.
+      orderBy: [{ last_message_at: { sort: "desc", nulls: "first" } }, { created_at: "desc" }, { id: "desc" }],
+      take: limit + 1,
+    }),
+    ])
+    const page = keysetPage(rows, limit, (c) => ({ at: c.last_message_at, id: c.id, createdAt: c.created_at }))
+    const conversations = page.items
+    // The preview of each, in one query (`latestVisibleMessages`).
+    const previews = await latestVisibleMessages(conversations.map((c) => c.id))
+    const pagination: ListPagination = { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount }
 
     // Format conversations for the mobile app
     const formattedConversations = conversations.map((conv) => {
       const otherUser = conv.user1_id === authUser.userId ? conv.user2 : conv.user1
-      const lastMessage = conv.messages[0] || null
+      const lastMessage = previews.get(conv.id) ?? null
 
       /*
        * The other person's name and photo, gated on their reveal state.
@@ -182,7 +199,7 @@ export async function GET(request: NextRequest) {
       logger.warn("Inbox delivery mark failed", { error: error instanceof Error ? error.message : String(error) })
     )
 
-    return successResponse({ conversations: formattedConversations })
+    return successResponse({ conversations: formattedConversations, pagination })
   } catch (error) {
     logger.error("List conversations error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to list conversations")

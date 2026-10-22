@@ -122,6 +122,19 @@ export interface ServerToClientEvents {
     hereCount?: number
   }) => void
   /**
+   * Your board post was taken down by a moderator or the automatic check (SV9).
+   * To your own `user:{id}` room only; ids, nothing of the post's words. A
+   * `board_post_removed` push and bell row go with it.
+   */
+  "board:postRemoved": (data: { eventId: string; postId: string }) => void
+  /**
+   * The event was cancelled. Everyone checked in has been checked out (their
+   * check-in is `cancelled`, their presence closed `ended`); the room is empty.
+   * One emit to `event:{id}` and `event:room:{id}`, never one per person, and it
+   * carries nothing but the id.
+   */
+  "event:cancelled": (data: { eventId: string }) => void
+  /**
    * A mutual like, to each side's `user:{id}` room. `name` is the other person
    * as this recipient sees them — pseudonym unless they revealed. No photo.
    * `otherUserId` is their handle in this event: the same string the roster
@@ -161,6 +174,8 @@ export interface ServerToClientEvents {
        * from "Sponsored" and the client drew it as a peer's bubble (K3.4).
        */
       kind?: "sponsored"
+      /** On a `poll` message: the poll to read and vote on (`/events/:eventId/polls/:pollId`). */
+      pollId?: string
       userId: string
       userName: string
       userImage?: string
@@ -1391,6 +1406,15 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
 }
 
 /**
+ * An event was cancelled: one emit to the rooms people inside are in, whether
+ * there are ten or five thousand (SV7). The push to the same people is
+ * `lib/event-cancellation.ts`'.
+ */
+export function emitEventCancelled(eventId: string): void {
+  currentIo()?.to([`event:${eventId}`, `event:room:${eventId}`]).emit("event:cancelled", { eventId })
+}
+
+/**
  * A mutual like, told to both people while they are still in the room.
  *
  * `POST /matches/likes` answers the person who tapped; the earlier liker gets a
@@ -1551,6 +1575,7 @@ export function emitChatMessage(
     content: string
     type: string
     kind?: "sponsored"
+    pollId?: string
     userId: string
     userName: string
     userImage?: string

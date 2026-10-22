@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { logger } from "@/lib/logger"
 
 /**
  * Cancelling an event cancels the check-ins standing inside it.
@@ -29,18 +30,37 @@ import { db } from "@/lib/db"
  *
  * Idempotent: the `status` and `departed_at` filters mean a second call over an
  * already-cancelled event updates nothing, and a departure already recorded
- * keeps its own time and source.
+ * keeps its own time and source. It also finds nobody checked in, so nobody is
+ * told twice.
+ *
+ * Returns the cancelled count and `inside`, the people who were checked in and
+ * have been told (`tellInsideCancelled`), for `notifyEventCancelled` to skip.
  */
-export async function cancelEventCheckIns(eventId: string): Promise<number> {
+export async function cancelEventCheckIns(eventId: string): Promise<{ count: number; inside: string[] }> {
   const now = new Date()
-  const [{ count }] = await db.$transaction([
-    db.event_check_ins.updateMany({
-      where: {
-        event_id: eventId,
-        status: { in: ["pending", "checked_in"] },
-      },
-      data: { status: "cancelled", updated_at: now },
-    }),
+  /*
+   * Who was inside is read BY the update that cancels them: `UPDATE … RETURNING`
+   * hands back exactly the rows this statement changed, with their status as it
+   * was. A read before the cascade could name somebody a concurrent cancel then
+   * cancelled first, and both would tell them. `FOR UPDATE` in the CTE makes the
+   * second of two simultaneous cancels wait for the first and then match nothing,
+   * so each person is returned by one of them, once. Unbounded by design: the
+   * rows must all change, and a uuid per person is all this holds.
+   */
+  const [cancelled] = await db.$transaction([
+    db.$queryRaw<{ user_id: string; was: string }[]>`
+      WITH standing AS (
+        SELECT id, user_id, status::text AS was
+          FROM event_check_ins
+         WHERE event_id = ${eventId}::uuid AND status IN ('pending', 'checked_in')
+           FOR UPDATE
+      )
+      UPDATE event_check_ins c
+         SET status = 'cancelled', updated_at = ${now}
+        FROM standing s
+       WHERE c.id = s.id
+      RETURNING s.user_id AS user_id, s.was AS was
+    `,
     /*
      * GREATEST, not `now`: `departed_at >= arrived_at` is a CHECK, and an
      * arrival can be later than this clock (another instance's, a check-in
@@ -55,8 +75,64 @@ export async function cancelEventCheckIns(eventId: string): Promise<number> {
        WHERE event_id = ${eventId}::uuid AND departed_at IS NULL
     `,
   ])
-  return count
+  const inside = [...new Set(cancelled.filter((r) => r.was === "checked_in").map((r) => r.user_id))]
+  await tellInsideCancelled(eventId, inside)
+  return { count: cancelled.length, inside }
 }
+
+/** People per push batch. A concert room is thousands. */
+export const CANCEL_PUSH_BATCH = 500
+
+/**
+ * Tell the people who were inside that it is off, and that they are no longer
+ * checked in (SV7). Their check-ins were just cancelled and nothing said so.
+ *
+ * ## Aggregate at concert scale
+ *
+ * One socket emit to the event's rooms (`event:cancelled`, `{ eventId }`), however many
+ * are inside, and the push in batches of `CANCEL_PUSH_BATCH`: each batch is one
+ * bell insert and one token read, and Expo's own chunking does the rest. No
+ * per-person emit.
+ *
+ * ## One push, not two
+ *
+ * This push is `event_cancelled`. `notifyEventCancelled` skips these people, so
+ * somebody who was inside AND going is told once, here.
+ *
+ * Never throws: the cancellation has committed and must not be undone by a
+ * failed push. Nothing is sent when nobody was inside, so a second run over an
+ * already-cancelled event (`inside` is empty) tells nobody twice.
+ */
+async function tellInsideCancelled(eventId: string, inside: readonly string[]): Promise<void> {
+  if (inside.length === 0) return
+  try {
+    /*
+     * Loaded here, not at the top: the pure helpers below (`isCancellingEvent`
+     * and the rest) are imported by tests and by code that has no use for
+     * socket.io and the mobile auth it pulls in (`jose` is ESM-only).
+     */
+    const [{ emitEventCancelled }, { sendBulkPushNotifications }] = await Promise.all([
+      import("@/lib/socket-server"),
+      import("@/lib/push-notifications"),
+    ])
+    emitEventCancelled(eventId)
+    const event = await db.events.findUnique({ where: { id: eventId }, select: { title: true } })
+    for (let i = 0; i < inside.length; i += CANCEL_PUSH_BATCH) {
+      await sendBulkPushNotifications({
+        userIds: inside.slice(i, i + CANCEL_PUSH_BATCH),
+        title: event?.title ?? "Event cancelled",
+        body: INSIDE_CANCELLED_BODY,
+        data: { type: "event_cancelled", eventId },
+      })
+    }
+    logger.info("Event cancellation told to those inside", { eventId, recipientCount: inside.length })
+  } catch (error) {
+    logger.error("Failed to tell those inside the event is cancelled", { eventId, error: String(error) })
+  }
+}
+
+/** What the push says to someone who was inside. No name but the event's own. */
+export const INSIDE_CANCELLED_BODY = "This event has been cancelled. You are no longer checked in."
 
 /**
  * Whether this write is the transition INTO cancelled.
