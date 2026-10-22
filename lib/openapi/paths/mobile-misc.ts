@@ -572,7 +572,7 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}/favorites",
   tags: ["Mobile Users"],
   summary: "Get user's favorite events",
-  description: "Each event carries `visibility` (`public`, `unlisted` or `private`), so a saved card can say an event is unlisted.",
+  description: "Each event carries `visibility` (`public`, `unlisted` or `private`), so a saved card can say an event is unlisted, and `changedAt`/`changedFields` (`GET /events/:id`'s), so it can say \"New time\".",
   security: bearerAuth,
   request: {
     params: z.object({ userId: z.string().uuid() }),

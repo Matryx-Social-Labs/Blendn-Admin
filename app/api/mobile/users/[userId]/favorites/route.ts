@@ -13,6 +13,7 @@ import {
 } from "@/lib/api-response"
 import { boundedInt, paginationMeta } from "@/lib/pagination"
 import { realEventsWhere } from "@/lib/event-kind"
+import { changeSummaryForResponse } from "@/lib/event-change"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -179,6 +180,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         country: event.country,
         latitude: event.latitude,
         longitude: event.longitude,
+        // The event read's `changedAt`/`changedFields`; the include above already holds the columns.
+        ...changeSummaryForResponse(event),
         isFeatured: event.is_featured,
         organizer: event.organizer,
         categories: event.categories.map((c) => c.category),

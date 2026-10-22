@@ -413,7 +413,13 @@ GET /api/mobile/me/attendance?page=1&limit=20
     { "id": "…", "kind": "event", "slug": "…", "title": "Design Week",
       "cover_image_url": null, "start_time": "…", "end_time": "…",
       "venue_name": "The Humming Tree", "city": "Bengaluru",
-      "attendedAt": "2026-08-14T18:04:00.000Z" }
+      "attendedAt": "2026-08-14T18:04:00.000Z",
+      "stay_minutes": null, "venue_id": null },
+    { "id": "…", "kind": "venue_day", "slug": "…", "title": "Venue day · …",
+      "cover_image_url": null, "start_time": "…", "end_time": "…",
+      "venue_name": "Third Wave Coffee", "city": "Bengaluru",
+      "attendedAt": "2026-09-28T16:20:00.000Z",
+      "stay_minutes": 95, "venue_id": "…" }
   ],
   "pagination": { "page": 1, "limit": 20, "totalCount": 7, "totalPages": 1, "hasMore": false }
 } }
@@ -452,6 +458,15 @@ so every page is full and `totalCount` is the number of events listed
 show them labelled as a place, by `venue_name`. A venue day's `title` is
 bookkeeping ("Venue day · … · date") and is not for display.
 
+**A visit says how long and where** (additive). Every row carries `stay_minutes`
+and `venue_id`; both are `null` on an `event`. On a `venue_day`: `venue_id` is
+the place's id (for its page), and `stay_minutes` is the length of your presence
+there, in whole minutes — your presence sessions that day summed (going live
+again the same day adds a stretch, never overwrites one), a session still open
+counted to its last heartbeat. `null` when there is no session to measure, which
+is unknown, not zero. Yours alone, like the rest of the route; one grouped read
+serves the page, whatever its size.
+
 ### GET /me/rsvps
 
 The events you said you are going to — what the app's **Going** tab lists above
@@ -471,7 +486,8 @@ GET /api/mobile/me/rsvps?page=1&limit=20
       "status": "published", "visibility": "public",
       "venueName": "…", "address": "…", "city": "Bengaluru",
       "latitude": 12.97, "longitude": 77.59,
-      "rsvpStatus": "waitlisted", "rsvpAt": "2026-09-20T10:12:00.000Z" }
+      "rsvpStatus": "waitlisted", "rsvpAt": "2026-09-20T10:12:00.000Z",
+      "changedAt": null, "changedFields": [] }
   ],
   "pagination": { "page": 1, "limit": 20, "totalCount": 3, "totalPages": 1, "hasMore": false }
 } }
@@ -484,6 +500,13 @@ GET /api/mobile/me/rsvps?page=1&limit=20
 - **`visibility`** is `public`, `unlisted` or `private`, so a card can say an
   event is unlisted (Flow 16). `GET /users/:userId/favorites` and `GET /events`
   carry it too; `GET /events` only lists public events.
+- **`changedAt` and `changedFields`** are `GET /events/:eventId`'s, from the same
+  helper (`changeForResponse`): when the time, venue or status last moved, and
+  which (`time`, `venue`, `cancelled`, in that order). `null` and `[]` for an
+  event that has not changed, and again when every change was put back. No
+  `changedFrom` on a row; open the event for what it was. `GET
+  /users/:userId/favorites` carries the same two on each event. Read from the
+  rows already selected, so no query is added per row.
 - **Upcoming only, soonest first.** An event is listed until its `endTime`.
   Cancelled events stay, with `status: "cancelled"`; drafts and deleted events
   do not appear.
@@ -3110,7 +3133,7 @@ be seen.
 | GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
 | GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their board post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow |
-| GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176) |
+| GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps` |
 | GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |

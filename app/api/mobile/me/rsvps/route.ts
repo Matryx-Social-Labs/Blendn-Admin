@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
 import { realEventsWhere } from "@/lib/event-kind"
+import { changeSelect, changeSummaryForResponse } from "@/lib/event-change"
 
 export const dynamic = "force-dynamic"
 
@@ -85,6 +86,7 @@ export async function GET(request: NextRequest) {
               city: true,
               latitude: true,
               longitude: true,
+              ...changeSelect,
               media: { orderBy: { order: "asc" }, take: 1 },
             },
           },
@@ -114,6 +116,8 @@ export async function GET(request: NextRequest) {
       city: event.city,
       latitude: event.latitude,
       longitude: event.longitude,
+      // What moved under you while you were going: the event read's values, from the same helper.
+      ...changeSummaryForResponse(event),
       rsvpStatus: status,
       rsvpAt: created_at,
     }))

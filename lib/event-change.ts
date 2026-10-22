@@ -152,6 +152,21 @@ export function changeForResponse(
   }
 }
 
+/** The columns `changeForResponse` reads: spread into a list route's `select` so no row costs a query of its own. */
+export const changeSelect = { changed_at: true, changed_from: true } as const
+
+/**
+ * The two fields a list row carries (`/me/rsvps`, `/users/:id/favorites`): the
+ * values `GET /events/:id` sends, from the same `changeForResponse`, without
+ * `changedFrom`, which a row has no room to strike through.
+ */
+export function changeSummaryForResponse(
+  row: TrackedEvent & { changed_at: Date | null; changed_from: unknown }
+): { changedAt: Date | null; changedFields: ChangedField[] } {
+  const { changedAt, changedFields } = changeForResponse(row)
+  return { changedAt, changedFields }
+}
+
 /**
  * `db.events.update`, plus the change record, in one transaction under a row
  * lock (`SELECT … FOR UPDATE`), and the row it returns carries the written

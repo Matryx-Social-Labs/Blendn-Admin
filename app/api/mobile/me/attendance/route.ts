@@ -4,6 +4,7 @@ import { attendedEventIds, distinctEventsAttended } from "@/lib/attendee-counts"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
+import { stayMinutesByEvent } from "@/lib/presence-sessions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
 import { lockedNights } from "@/lib/plus"
@@ -91,9 +92,16 @@ export async function GET(request: NextRequest) {
             end_time: true,
             venue_name: true,
             city: true,
+            venue_id: true,
           },
         })
       : []
+
+    // A visit's length, for the venue days on this page only: one grouped read, never one per row.
+    const stays = await stayMinutesByEvent(
+      authUser.userId,
+      events.filter((e) => e.kind === "venue_day").map((e) => e.id)
+    )
 
     // Back into attendance order. `findMany` returns rows in whatever order
     // Postgres likes, and the useful order is the one the query above chose.
@@ -101,7 +109,16 @@ export async function GET(request: NextRequest) {
     const rows = attended
       .map((a) => {
         const event = byId.get(a.event_id)
-        return event ? { ...event, attendedAt: a.first_seen } : null
+        if (!event) return null
+        const { venue_id, ...shown } = event
+        const visit = event.kind === "venue_day"
+        // Only a visit to a place carries these; an event's own row says null.
+        return {
+          ...shown,
+          attendedAt: a.first_seen,
+          stay_minutes: visit ? (stays.get(event.id) ?? null) : null,
+          venue_id: visit ? venue_id : null,
+        }
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)
 
