@@ -72,9 +72,12 @@ const eventParams = (eventId: string) => ({ params: Promise.resolve({ eventId })
 const SENTENCE = "Finish setting up your profile first. Blend'n is for people 18 and over."
 /**
  * The same 403 and sentence on every route. `errorCode` is FORBIDDEN on all of
- * them; Flow 15's `reasonCode` PROFILE_INCOMPLETE is on the event doors and the
- * friend routes (`profile-friends-push-gaps.itest.ts`); `messaging: true` is the DM and message-request
- * routes, which carry none.
+ * them. Flow 15's `reasonCode: PROFILE_INCOMPLETE` rides on the event doors and on
+ * every FRIENDS route, including `POST /friends/:id/conversation` (the friend to DM
+ * route is a friends route; pinned in `profile-friends-push-gaps.itest.ts`).
+ * `messaging: true` is the three routes that are not: `POST /conversations`,
+ * `POST /message-requests` and `POST /conversations/:id/messages`, which carry none
+ * and are left that way on purpose.
  */
 async function refused(res: Response, { messaging = false } = {}) {
   expect(res.status).toBe(403)
