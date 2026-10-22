@@ -63,6 +63,7 @@ export function generateOpenApiDocument() {
       { name: "Dashboard Sponsored Messages", description: "Recurring sponsored messages in chat" },
       { name: "Dashboard Uploads", description: "Admin file uploads" },
       { name: "Cron", description: "Scheduled tasks (internal)" },
+      { name: "Public share", description: "Unauthenticated reads for the landing site's event and venue pages (server to server)" },
       { name: "System", description: "Health check" },
     ],
   })

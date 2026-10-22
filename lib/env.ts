@@ -138,6 +138,20 @@ const envSchema = z.object({
   /** Railway's name for the environment; "production" is the only one where a live key belongs. */
   RAILWAY_ENVIRONMENT_NAME: z.string().optional(),
 
+  /**
+   * The secret the landing site's server sends as `x-share-proxy` on its calls
+   * to `/api/public/share/*` (Flow 16). Holding it earns one thing: the
+   * `x-share-client` address the landing forwards is believed, so a share page's
+   * rate limit counts the visitor, not Vercel's egress. Unset or short: nobody
+   * is believed and every caller is limited by its own address. 32 or more.
+   *
+   * UNSET is fine. SET but empty or shorter than 32 is not: `validateEnv` fails
+   * on it, and `server.ts` runs that before binding in production, so the
+   * container does not start. (`shareProxySecret()` below would treat a short
+   * value as unset, but boot never gets that far.)
+   */
+  SHARE_PROXY_SECRET: z.string().min(32, "SHARE_PROXY_SECRET must be at least 32 characters").optional(),
+
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.string().default("3000"),
@@ -351,6 +365,12 @@ export function plusGatedEverywhere(): boolean {
 /** Is Blendn+ gated anywhere at all? False in a launch season everywhere, so a gate can skip its queries. */
 export function plusGatedAnywhere(): boolean {
   return gatingEntries().size > 0
+}
+
+/** The share proxy's shared secret, or null when no caller is trusted to name its client (unset or too short to be ours). */
+export function shareProxySecret(): string | null {
+  const secret = process.env.SHARE_PROXY_SECRET?.trim()
+  return secret && secret.length >= 32 ? secret : null
 }
 
 /** RevenueCat's secret API key, or null when the server's own RevenueCat calls are off. */

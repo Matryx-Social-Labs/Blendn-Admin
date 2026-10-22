@@ -293,6 +293,10 @@ export const EventDetailSchema = z
     venueName: z.string().nullable(),
     address: z.string().nullable(),
     city: z.string().nullable(),
+    area: z.string().nullable().openapi({
+      description:
+        "The area: the area of the venue the event is confirmed at (the same test as the list's `venue`), else the city. Null when neither is known. What an unlisted event's public page shows in place of a venue.",
+    }),
     state: z.string().nullable(),
     country: z.string().nullable(),
     postalCode: z.string().nullable(),
@@ -390,7 +394,7 @@ export const EventListResponseSchema = z
     events: z.array(
       z.unknown().openapi({
         description:
-          "Transformed event objects. Each carries `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named. Counts: `checkInCount` (came: everybody who checked in, left or not; `currentCapacity` is the same number), `hereCount` (here now: checked in and not checked out, guests only — the Room's count; use this for 'here now'), `favoriteCount`, `ratingCount`, and `goingCount` — RSVPs with status `going` only (not `waitlisted`, `maybe` or `not_going`), the same number as the detail's `stats.rsvpCount`. `featured`: `{ kind: \"editorial\" | \"promoted\", rank: number, by: string | null }` or null. `kind` `editorial` is Blendn's own pick (`by: \"blendn\"`, drawn without a label); `promoted` is a paid placement and must be labelled \"Promoted\" (nothing sells one yet, so none is returned; handle it anyway). `rank` is 1-based in the day's rotation among the featured events in this response (for `featured=true`, the whole section); it is not start-time order. `isFeatured` is the same fact as `featured !== null`, kept for older builds. Build a section with `featured=true`, not by filtering a page.",
+          "Transformed event objects. Each carries `visibility` (`public`, `unlisted` or `private`; discovery lists only public, so a card there is always public) and `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named. Counts: `checkInCount` (came: everybody who checked in, left or not; `currentCapacity` is the same number), `hereCount` (here now: checked in and not checked out, guests only — the Room's count; use this for 'here now'), `favoriteCount`, `ratingCount`, and `goingCount` — RSVPs with status `going` only (not `waitlisted`, `maybe` or `not_going`), the same number as the detail's `stats.rsvpCount`. `featured`: `{ kind: \"editorial\" | \"promoted\", rank: number, by: string | null }` or null. `kind` `editorial` is Blendn's own pick (`by: \"blendn\"`, drawn without a label); `promoted` is a paid placement and must be labelled \"Promoted\" (nothing sells one yet, so none is returned; handle it anyway). `rank` is 1-based in the day's rotation among the featured events in this response (for `featured=true`, the whole section); it is not start-time order. `isFeatured` is the same fact as `featured !== null`, kept for older builds. Build a section with `featured=true`, not by filtering a page.",
       })
     ),
     pagination: PaginationMetaSchema,
