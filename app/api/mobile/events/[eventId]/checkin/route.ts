@@ -2,6 +2,7 @@ import { closedDoorMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
+import { suspensionReasonFor } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { resolveFence } from "@/lib/geofence"
@@ -89,7 +90,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Check if event is published
     if (event.status !== "published") {
-      return errorResponse("Cannot check in to an unpublished event")
+      // Said to people with a stake in it, like the event's own page: a suspended organisation's event is not "unpublished" to them.
+      const { reason } = await suspensionReasonFor(authUser.userId, eventId, event)
+      return errorResponse("Cannot check in to an unpublished event", 400, undefined, reason)
     }
 
     /*

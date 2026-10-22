@@ -17,6 +17,7 @@ import {
   UNCANCEL_REFUSAL,
 } from "@/lib/event-cancellation"
 import { canPublish } from "@/lib/geofence-input"
+import { updateEventTracked } from "@/lib/event-change"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import type { user_role, event_status } from "@prisma/client"
 import { realEventsWhere } from "./event-kind"
@@ -249,7 +250,7 @@ export async function updateEventStatus(eventId: string, status: event_status) {
     if (!gate.ok) throw new Refusal(gate.reason ?? "This event cannot be published yet")
   }
 
-  await db.events.update({
+  await updateEventTracked({
     where: { id: eventId },
     data: { status },
   })

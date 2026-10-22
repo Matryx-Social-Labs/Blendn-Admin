@@ -2,7 +2,8 @@ import { logger } from "@/lib/logger"
 import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
 import { checkBlurPhoto, checkProfilePhoto, deleteReplacedBlur, moderateBlurPhoto, moderateProfilePhoto } from "@/lib/photos"
-import { pulledPhotos, recordPhotoCheck } from "@/lib/photo-checks"
+import { photoStatesFor, pulledPhotos, recordPhotoCheck } from "@/lib/photo-checks"
+import { profileBadges } from "@/lib/profile-badges"
 import {
   ADULTS_ONLY,
   ageFrom,
@@ -227,6 +228,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       suggested_sun_sign: westernSignFor(p?.date_of_birth),
     }
 
+    /*
+     * Badges, when the person shows them (`show_badges`, on unless turned off) and
+     * to whoever may see who they are: the owner, or an identified viewer. Earned
+     * from check-ins and derived here, never stored (lib/profile-badges.ts).
+     */
+    const badges = p && p.show_badges !== false && (isSelf || identified) ? await profileBadges(userId, p.shows_up_badge) : null
+    // The owner's photos with the verdict on each: the ones up, then the ones moderation just pulled.
+    const photoStates = isSelf && p ? await photoStatesFor(userId, p.photos) : null
+
     return successResponse({
       id: isSelf ? user.id : ref,
       email: isSelf ? user.email : undefined,
@@ -248,6 +258,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
              */
             ...(isSelf ? selfProfileFields : publicProfileFields),
             location: normalizedLocation,
+            ...(badges && { badges }),
+            ...(photoStates && { photo_states: photoStates }),
           }
         : null,
       interests: user.user_interests.map((ui) => ({

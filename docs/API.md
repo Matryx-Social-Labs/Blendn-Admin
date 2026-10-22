@@ -247,7 +247,7 @@ HTTP 503   Retry-After: 300
 non-number or non-positive value is the default). Unset: off. `/api/health`
 (Railway's healthcheck), the dashboard and the socket handshake are never
 affected; they do not pass through the mobile gate. Both gates are in
-`middleware.ts` through `lib/mobile-gate.ts`, and `X-App-Version` is in
+`middleware.ts` through `lib/mobile-gate.ts`, and `X-App-Version` and `X-Channel-Set` are in
 `Access-Control-Allow-Headers`.
 
 **At the door.** Two refusals a person can fix now say so in `reasonCode`, with
@@ -477,12 +477,227 @@ GET /api/mobile/me/rsvps?page=1&limit=20
   Cancelled events stay, with `status: "cancelled"`; drafts and deleted events
   do not appear.
 
+## The rebuilt screens' server gaps (Flows 3, 6, 9)
+
+**Everything here is added, nothing renamed.** An `errorCode` that existed keeps
+its value and its sentence; the reason goes in `reasonCode` beside it
+(`reasonCode ?? errorCode`). Every new response field is optional for a client
+that does not know it.
+
+### The event: what changed, the days, and why a link is refused (Flow 3)
+
+`GET /events/:eventId` adds:
+
+| Field | Shape | Meaning |
+|---|---|---|
+| `changedAt` | ISO string \| `null` | When the time, the venue or the status last moved under people who had heard of the event. `null` for an event that has not changed (almost all), and again when every change was put back |
+| `changedFields` | `("time" \| "venue" \| "cancelled")[]` | What moved, in that order. `[]` when nothing did. Derived on read, so a time moved and put back is no change |
+| `changedFrom` | `{ startTime?, endTime?, venueName?, address? } \| null` | What those were **before the first change still standing**, for the struck-through old time. Only fields that still differ appear; a cancel names none. The live values stay in `startTime`, `endTime`, `venueName` |
+| `days` | `{ date, startTime, endTime, cancelled }[]` | Every day of the run, in order (`date` is the local `YYYY-MM-DD`). One entry for a one-day event. A day called off is `cancelled: true`: draw it struck through |
+| `dayCount` | number | `days.length` |
+| `dayNumber` | number \| `null` | The 1-based position of `session`'s day: "Day 2 of 3". `null` when every day is cancelled |
+
+`session`, `startTime`, `endTime` and the rest are exactly what they were.
+
+A change is recorded (`events.changed_at`, `events.changed_from`) by the three
+doors that can move one: the dashboard `PATCH /api/events/:id` (time and venue
+live only there), the mobile `PATCH /events/:eventId` (title, description,
+status: so only a cancel) and the admin status dropdown. Only a **published**
+event records one, into published or cancelled; a draft has nobody going. The
+first value of a field wins, so a time moved twice is struck from what people
+were first told. No door writes a cancelled *day* (`event_occurrences.cancelled_at`
+has no writer yet): `days[].cancelled` reads it when something does.
+
+**The people who are going are told with `event_changed`** (a new
+`notification_kind`), `data: { type: "event_changed", eventId, changed }` where
+`changed` is the same words comma-joined (`"time,venue"`, `"cancelled"`), and
+`reason` is the one that matters most (`cancelled`, `time`, `venue`), the same
+`data.reason` an `event_update` carries (see Flow 9). Going
+means `rsvp_status = going`. Maybe, waitlisted and saved keep `event_update`, as
+before. A build that does not know the kind is sent `event_update` in its push
+(see the channel set below), and reads the bell row as `event_update` too: the
+stored row is `event_changed` for everyone going, and `GET /notifications` serves
+it in the old kind and shape (`kind` and `data.type` `event_update`, the rest of
+`data` unchanged) unless the request declares `X-Channel-Set: 2` or later (see
+**Reading the bell as an older build** below).
+
+**Why an event link is refused**, `reasonCode` beside the unchanged
+`errorCode` and sentence:
+
+| When | Status | `errorCode` | `reasonCode` |
+|---|---|---|---|
+| Event is age-restricted and the viewer's known age is below it | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
+| Taking part (RSVP, save, board, check-in) in one with no age on file | 403 | `AGE_RESTRICTED` | `AGE_UNKNOWN` |
+| Taking part with an unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| The event was live and its organisation was suspended, and you are going (or maybe, or waitlisted) or are of the organisation | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
+| The same event, and you are a stranger or said `not_going` (public or private alike) | 404 | `NOT_FOUND` | none |
+| The same event, on the door (`POST /events/:id/checkin`) and you have a stake in it | 400 | none | `ORGANISER_SUSPENDED` |
+| The same event, on `GET /events/:id/checkins`, `/crews`, `/chat` (and `POST /chat` with no room yet) | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
+| The same event, on `POST /events/:id/chat` into a room that already exists | 403 | `FORBIDDEN` | `ORGANISER_SUSPENDED` |
+| A draft nobody published, a private event you are not on, a deleted one | 404 | `NOT_FOUND` | none |
+
+`ORGANISER_SUSPENDED` is the same on every route that refuses such an event, the
+event's own page, RSVP, save, board, room preview, the door, the guest list, the crews and the
+chat (`lib/event-access.ts`, `suspensionReasonFor`), and it is said to the same
+people (a stake: going, maybe or waitlisted, or the organisation) and nobody else.
+`errorCode` and the status are what each route always answered; read
+`reasonCode ?? errorCode`. It is a stable code: the sentence beside it is ours to
+change.
+
+Viewing an age-restricted event with no age on file still opens (OAuth accounts
+start without one), so `AGE_UNKNOWN` comes from the routes that take part.
+`PROFILE_INCOMPLETE` now rides on **every** participation refusal (RSVP, save,
+board, friends, DMs, message requests), not only the door.
+**There is no "organiser removed" reason**: deleting an account deletes its
+events, so the id is gone and answers like any unknown id.
+
+### Profiles: photos pulled and badges (Flow 6)
+
+`GET /profiles/:userId` adds, inside `profile`:
+
+- **`photo_states`** (your own profile only): `{ url, pulled, pulled_at, was_main }[]`.
+  First `photos`, in order, each `pulled: false`; then the photos moderation
+  pulled in the last 7 days, newest first, `pulled: true`, with `was_main` saying it
+  was the main one ("your next photo is your main photo now"). A pulled photo is
+  gone from `photos` (the profile `PUT` drops it) and its object is withdrawn, so
+  its **`url` is `null`**: a CDN that still held the old URL would keep serving the
+  image. Draw a tile that says so. Stored as `photo_checks.pulled_at` and
+  `pulled_was_main`; a pull from before this shipped is never listed.
+- **`badges`**: `{ kind: "nights_out" | "shows_up", label }[]`, derived from check-ins by
+  the rule a match card uses. Present (possibly `[]`) when `show_badges` is not
+  off, for you and for anyone who can see who you are; **absent** when it is off,
+  or for a viewer the profile is anonymous to. **With `show_badges` off the key is
+  absent for the owner too**: the switch hides your badges from you as well as from
+  everyone else, so Edit profile shows the switch and no badges while it is off.
+  `regular_here` is never here: it is about the venue you both stand in.
+
+### Notifications: preferences, row details, badge (Flow 9)
+
+**`GET` / `PUT /me/notification-preferences`**: `{ matches, crew, night }`, all
+booleans, all `true` by default. `PUT` takes any non-empty subset (a missing key is
+left as it is; an unknown key or a non-boolean is a 400 `VALIDATION_FAILED`) and
+answers all three. The send path honours them, on the single and the bulk sender:
+
+| Switch | Stops the push of |
+|---|---|
+| `matches`, Matches and friends | `match`, `reveal_request`, `reveal`, `friend_request`, `friend_accepted`, `board_request`, `board_request_accepted` |
+| `crew`, Your crew | `crew_invite`, `crew_here`, `blend` |
+| `night`, After the night | `rating_request` |
+
+They stop the **push only**; the bell row is written first, as for `push_enabled`
+(the master, which is still on top of these). **Offers keep their own pair**,
+`GET/PUT /me/offers` (`enabled`, `pushes`), and are *opt-in* by App Store rule:
+`pushes` defaults off. A DM, a message request, a room reply (muted per room), an
+event's change and a report's outcome have no switch here. Stored as
+`profiles.push_matches`, `push_crew`, `push_night`.
+
+**`GET /notifications`** items gain, all optional:
+
+- **`display`** `{ title?, context?, visual? }`, only where the reader may already
+  see the person or thing, resolved in one query per kind for the page:
+  - `friend_request` while it waits: `title` "{first name} wants to be friends",
+    `visual` `{ type: "photo", uri }`, the asker exactly as `GET /friends/requests`
+    shows them to the same person.
+  - `match`: `visual` `{ type: "creature", pseudonym }`, the other side's room
+    pseudonym. Never a name or a photo.
+  - `crew_invite`, `crew_here`: `visual` `{ type: "emblem", seed }`, the crew's
+    `emblem_seed`; `blend`: the Blend's id as the seed. No crew name (it is
+    user-typed text).
+  - `event_update`, `event_changed`, `announcement`, `waitlist_promoted`,
+    `rating_request`: `visual` `{ type: "event", cover, badge, cancelled }`
+    (`badge` `clock`, `map-pin` for a venue change, `megaphone`, `star`;
+    `cancelled` when the event is cancelled or the reason is).
+  - **Not sent:** `stack` (nothing aggregates rows yet) and `context` (the app
+    already writes "{event} · {when}"). A row the server cannot resolve (the request
+    is gone, the event deleted) carries no `display`: draw the kind's own tile.
+- **`open`**, for `friend_request`, `crew_invite`, `message_request` and
+  `board_request`: whether it is still the reader's to answer. `false` once it is
+  accepted, declined, dismissed, withdrawn or gone; absent on every other kind.
+- **`data.reason`** on `event_update` and `event_changed`: `cancelled`, `time` or
+  `venue`, the most important when several moved (`data.changed` has them all,
+  comma-joined). A reminder ("starts in an hour") carries none.
+
+**Reading the bell as an older build.** A build that does not know `event_changed`
+has no tap for it, so the feed is served to it the way its push is (`channelSet`
+above). A build that knows the kind declares it on the request, **`X-Channel-Set: 2`**
+(the same number it posts with its push token; send it on every request, as
+`X-App-Version`). With no header, or a value below 2 or that is not a whole number,
+`GET /notifications` serves every `event_changed` row as `kind: "event_update"` with
+`data.type: "event_update"`; `eventId`, `reason` and `changed` are untouched, and so
+is the tile (`clock`). With `2` or later it is served as `event_changed`. Nothing is
+rewritten in the database, so a phone that updates reads its old rows as
+`event_changed` from then on. Every other kind reads the same either way.
+
+**What one poll costs.** The feed, its decoration and both counts are at most 13
+statements however long the page: the page, one read per kind present (friend
+requests with their senders in two more, crew invites and memberships, message and
+board requests, matches, events, crews), and two counts. Nothing runs per row.
+`unreadCount` is served by `notifications (user_id, read_at)`, and `badgeCount`'s
+unread conversations by the partial index `private_messages_unread_idx`
+(`__tests__/integration/bell-cost.itest.ts` counts
+the statements and reads the plan; a 50-row page took a median of 8 ms against a local
+database).
+
+The feed response gains **`badgeCount`**: `unreadCount` plus live conversations
+with something unread from the other person (a thread, not a message; a hidden
+message is never counted), the app icon's number.
+
+**`clearKeepsRequests` is not sent.** `DELETE /notifications` clears every row,
+waiting requests included, so the client's default (it clears them too) is right.
+
+The push payload carries **`data.notificationId`**, the id of that recipient's bell
+row, so a banner can open or mark it. The stored row's `data` does not hold it.
+
+### Friends: reasons (Flow 6)
+
+`reasonCode` beside the unchanged `errorCode`. **None says why somebody is out of
+reach**: an unknown, reset or deleted link, a block either way and a pair who left
+each other still answer the same body.
+
+| Where | Status | `errorCode` | `reasonCode` |
+|---|---|---|---|
+| Any friends or DM route, unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| `POST /friends/requests` `{ userId }`, out of reach | 404 | `NOT_FOUND` | `PERSON_UNAVAILABLE` |
+| `POST /friends/requests` `{ token }`, link does not work | 404 | `NOT_FOUND` | `INVITE_UNAVAILABLE` |
+| `POST /friends/requests` to yourself | 400 | none | `CANNOT_ADD_SELF` |
+| `GET /friends/invite/:token` and `/preview`, every way a link fails | 404 | `NOT_FOUND` | `INVITE_UNAVAILABLE` |
+| `POST /friends/requests/:id`, gone, withdrawn, malformed or not yours | 404 | `NOT_FOUND` | `REQUEST_UNAVAILABLE` |
+
+### Push: the channel, the token's `channelSet`, `report_actioned` (Flow 9)
+
+`POST /notifications/token` accepts an optional **`channelSet`** (integer). A build
+that creates Android channels `matches`, `crew` and `after-the-night` sends `2` with its token
+(stored as `push_tokens.channel_set`). Every build before it sends none and is
+treated as the old set.
+
+- **No `channelSet`** (every build in the field): the channel and the payload are
+  exactly what they were. `event_changed` is sent as `event_update`.
+- **`channelSet: 2`**: each kind goes on one channel (`channelId` in the push):
+
+| `channelId` | Kinds |
+|---|---|
+| `messages` | `private_message`, `message_request`, `message_request_response` |
+| `rooms` | `group_message` |
+| `matches` | `match`, `reveal_request`, `reveal`, `friend_request`, `friend_accepted`, `board_request`, `board_request_accepted` |
+| `crew` | `crew_invite`, `crew_here`, `blend` |
+| `events` | `event_update`, `event_changed`, `announcement`, `waitlist_promoted` |
+| `after-the-night` | `rating_request` |
+| `offers` | `venue_offer` |
+| `default` | `report_actioned`, `event_checkin`, and a payload with no type |
+
+**`report_actioned`** (a new `notification_kind`) tells the person who filed a
+report that it led to action: `title` "We acted on your report", `body` "Thanks for
+telling us. We took action on it.", `data: { type: "report_actioned" }`. Sent when
+a moderator's decision is *resolved* (a message or post removed, an account
+suspended, a listing delisted, a crew hidden or dissolved); **not** for a dismissal
+or a reinstatement. It names no one and no thing, and it has no switch.
+
 ## Events
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
-| GET | `/events/:eventId` | Get event details. Also carries `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case, the row as selected — or null. `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform |
+| GET | `/events/:eventId` | Get event details. Also carries `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case, the row as selected — or null. `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
 | POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`) |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
@@ -2971,7 +3186,7 @@ not exist yet; see `docs/MODERATION_RESPONSE.md`.
 | GET | `/amenities` | The amenity vocabulary — what an event can say it offers |
 | GET | `/work-fields` | The eighteen coarse fields of work, as `{ slug, label }` |
 | GET | `/checkins/active` | Get user's active check-ins. Each carries `kind` (`venue_day` is a Go Live: label it by `event.venueName`), `venueId` (the venue a Go Live is at, to extend or go again; null at an event), `expiresAt` (a Go Live's end; null at an event) and `stay`. A Go Live past its end is never listed, swept or not |
-| POST | `/notifications/token` | Register push token |
+| POST | `/notifications/token` | Register push token. Optional `channelSet` (2: the build has the `matches`, `crew` and `after-the-night` channels) |
 | DELETE | `/notifications/token` | Remove push token |
 | GET | `/notifications` | The notifications centre, newest first |
 | POST | `/notifications/read` | Mark notifications read |
@@ -3040,7 +3255,7 @@ them any more. Rows written before that are hidden, and retention removes them.
 | A room message | **Nobody** | — |
 | A reply to your room message | Its author, if still in the room and not in a block with the sender; at most once per room every 3 minutes. `data: { type: "group_message", chatGroupId, senderId, kind }` — `kind` is the room's: `event` (a venue day's room too), `crew` (with `crewId`), `blend` (with `blendId`) or `board_post`; open the tap as that room | `room:{chatGroupId}`, replaced in place |
 | A check-in | **Nobody** — the live roster carries arrivals | — |
-| An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going, maybe, waitlisted and saved | `event:{eventId}`, replaced in place: only the latest state is true |
+| An event you RSVP'd to or saved changes time or place, is cancelled, or starts in an hour | Going (`event_changed`: time, place, cancel), and maybe, waitlisted and saved (`event_update`) | `event:{eventId}`, replaced in place: only the latest state is true |
 | An organiser announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, board, message request | The person it is about, immediately | One each |
 | A crew invite | The friend invited (`crew_invite`, `crewId`), naming nobody | One each |

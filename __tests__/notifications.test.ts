@@ -111,7 +111,7 @@ describe("the row is written even when no push goes out", () => {
      * exactly what somebody opens the bell to find.
      */
     const src = SENDER()
-    const record = src.indexOf("Failed to record bulk notifications")
+    const record = src.indexOf("Failed to record a chunk of bulk notifications")
     const lookup = src.indexOf("const tokenMap = await getBulkUserPushTokens(userIds, data)")
     expect(record).toBeGreaterThan(-1)
     expect(record).toBeLessThan(lookup)

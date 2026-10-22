@@ -44,7 +44,7 @@ export const hostNotSuspended = {
  * board read is the beginning of being there.
  */
 export type EventAccessDenial =
-  | { kind: "not_found" }
+  | { kind: "not_found"; reason?: typeof ErrorCode.ORGANISER_SUSPENDED }
   | { kind: "age"; message: string; unknownAge: boolean }
   | { kind: "unfinished"; message: string }
 
@@ -60,7 +60,7 @@ export async function attendeeEventAccess(
 ): Promise<EventAccessDenial | null> {
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { status: true, visibility: true, min_age: true, kind: true },
+    select: { status: true, visibility: true, min_age: true, kind: true, pre_suspension_status: true, organizer_id: true, organizer_org_id: true },
   })
   /*
    * A venue day is not an event anybody opens, RSVPs to, saves or reads the
@@ -68,7 +68,9 @@ export async function attendeeEventAccess(
    * every rule below. Its one door is Go Live (`POST /venues/:id/live`), and
    * its room's own routes check being live (`liveInVenueDay`, `inRoomWhere`).
    */
-  if (!event || event.status === "draft" || event.kind === "venue_day") return { kind: "not_found" }
+  if (!event || event.status === "draft" || event.kind === "venue_day") {
+    return { kind: "not_found", ...(await suspensionReasonFor(userId, eventId, event)) }
+  }
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
     return { kind: "not_found" }
   }
@@ -89,6 +91,62 @@ export async function attendeeEventAccess(
   return message ? { kind: "age", message, unknownAge: age == null } : null
 }
 
+type SuspensionCandidate = { status: string; kind: string; pre_suspension_status: string | null; organizer_id: string; organizer_org_id: string | null }
+
+/**
+ * `{ reason: ORGANISER_SUSPENDED }` for an event that was live and is hidden
+ * because its organisation was suspended, said to the people who have a stake
+ * in it; `{}` for everyone else and for every other reason an event is not there.
+ *
+ * A draft that was published until its organisation was suspended says so; a
+ * draft nobody announced does not. Said only to somebody who said they were
+ * going (or maybe, or is waitlisted — anything but `not_going`), and the
+ * organisation that runs it. A stranger, and somebody who declined, get the
+ * plain 404 a hidden event gives: for a private event the reason would also
+ * tell a stranger holding the id that it exists. (`canJoinEvent` cannot be the
+ * question: it answers no for any draft, and this is one.)
+ *
+ * The organisation is read from its members directly. `actorFor` leaves a
+ * suspended organisation's memberships out, which is the point of suspending
+ * it, and so cannot tell us whose event this was.
+ *
+ * `event` is the row the caller already has, or `undefined` to have it read: the
+ * routes that refuse a hidden event for their own reasons (the door, the guest
+ * list, the chat, the crews) ask here, on the refusal path only, so every one
+ * of them gives the app the same `reasonCode` the event's own page does.
+ */
+export async function suspensionReasonFor(
+  userId: string,
+  eventId: string,
+  event?: SuspensionCandidate | null
+): Promise<{ reason?: typeof ErrorCode.ORGANISER_SUSPENDED }> {
+  const row =
+    event !== undefined
+      ? event
+      : await db.events.findUnique({
+          where: { id: eventId, deleted_at: null },
+          select: { status: true, kind: true, pre_suspension_status: true, organizer_id: true, organizer_org_id: true },
+        })
+  const suspended = row?.status === "draft" && row.kind !== "venue_day" && row.pre_suspension_status !== null
+  if (!row || !suspended) return {}
+  return (await hasStakeInSuspendedEvent(userId, eventId, row.organizer_id, row.organizer_org_id)) ? { reason: ErrorCode.ORGANISER_SUSPENDED } : {}
+}
+
+/** The 404 a route gives for an event that is not there for this person, `reasonCode` included when there is one. */
+export async function eventNotFoundResponse(userId: string, eventId: string, message = "Event not found") {
+  const { reason } = await suspensionReasonFor(userId, eventId)
+  return reason ? errorResponse(message, 404, ErrorCode.NOT_FOUND, reason) : notFoundResponse(message)
+}
+
+async function hasStakeInSuspendedEvent(userId: string, eventId: string, organizerId: string, orgId: string | null): Promise<boolean> {
+  if (organizerId === userId) return true
+  const [rsvp, member] = await Promise.all([
+    db.event_rsvps.findFirst({ where: { event_id: eventId, user_id: userId, status: { not: "not_going" } }, select: { id: true } }),
+    orgId ? db.organisation_members.findFirst({ where: { org_id: orgId, user_id: userId }, select: { user_id: true } }) : null,
+  ])
+  return rsvp !== null || member !== null
+}
+
 /**
  * The same rule for the surfaces that are not about one event — starting a
  * conversation, a message request, a DM (SCRUM-331). The sentence, or `null`.
@@ -101,11 +159,24 @@ export async function participationRefusal(userId: string): Promise<string | nul
   return mayParticipate(profile) ? null : FINISH_ONBOARDING
 }
 
+/**
+ * The 403 for `participationRefusal`'s sentence: `FORBIDDEN` and the words as
+ * they always were, and `reasonCode: PROFILE_INCOMPLETE` beside them (Flow 15).
+ */
+export const unfinishedResponse = (sentence: string) =>
+  errorResponse(sentence, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
+
 /** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
   if (denial.kind === "age") {
-    return errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED, denial.unknownAge ? ErrorCode.AGE_UNKNOWN : undefined)
+    return errorResponse(
+      denial.message,
+      403,
+      ErrorCode.AGE_RESTRICTED,
+      // Too young is the code it always was, said in the new field too, so the app reads one place.
+      denial.unknownAge ? ErrorCode.AGE_UNKNOWN : ErrorCode.AGE_RESTRICTED
+    )
   }
-  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
-  return notFoundResponse("Event not found")
+  if (denial.kind === "unfinished") return unfinishedResponse(denial.message)
+  return denial.reason ? errorResponse("Event not found", 404, ErrorCode.NOT_FOUND, denial.reason) : notFoundResponse("Event not found")
 }

@@ -157,10 +157,56 @@ export function eventSession(
   return { startTime: current.start_time, endTime: current.end_time }
 }
 
+/** One day of a run, as the app draws the day strip. */
+export interface EventDay {
+  /** The local calendar day, `YYYY-MM-DD`. */
+  date: string
+  startTime: Date
+  endTime: Date
+  /** Called off without cancelling the run: drawn struck through. */
+  cancelled: boolean
+}
+
+/**
+ * The days of a run and where today is in it (Flow 3 · 3.2: "Day 2 of 3", the
+ * day strip). `dayNumber` is the 1-based position of `eventSession`'s day, null
+ * when every day is cancelled, and an event with no occurrences rows (legacy) is
+ * one day, today's.
+ */
+export function eventDays(
+  event: {
+    start_time: Date
+    end_time: Date
+    occurrences?: readonly { occurs_on: Date; start_time: Date; end_time: Date; cancelled_at: Date | null }[]
+  },
+  now: Date = new Date()
+): { days: EventDay[]; dayCount: number; dayNumber: number | null } {
+  const rows = [...(event.occurrences ?? [])].sort((a, b) => a.start_time.getTime() - b.start_time.getTime())
+  if (rows.length === 0) {
+    const day = { date: event.start_time.toISOString().slice(0, 10), startTime: event.start_time, endTime: event.end_time, cancelled: false }
+    return { days: [day], dayCount: 1, dayNumber: 1 }
+  }
+  const days = rows.map((r) => ({
+    date: r.occurs_on.toISOString().slice(0, 10),
+    startTime: r.start_time,
+    endTime: r.end_time,
+    cancelled: r.cancelled_at !== null,
+  }))
+  const current = eventSession(event, now)
+  const index = current ? rows.findIndex((r) => r.start_time.getTime() === current.startTime.getTime()) : -1
+  return { days, dayCount: days.length, dayNumber: index >= 0 ? index + 1 : null }
+}
+
 /** The occurrence columns `eventSession` reads, for a Prisma `select`. */
 export const sessionOccurrencesSelect = {
   select: { start_time: true, end_time: true, cancelled_at: true },
   orderBy: { start_time: "asc" as const },
+}
+
+/** `sessionOccurrencesSelect` plus the local day, for the one reader that draws the days (`eventDays`). */
+export const dayOccurrencesSelect = {
+  select: { ...sessionOccurrencesSelect.select, occurs_on: true },
+  orderBy: sessionOccurrencesSelect.orderBy,
 }
 
 /**

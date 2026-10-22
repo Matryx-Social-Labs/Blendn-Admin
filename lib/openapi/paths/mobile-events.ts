@@ -257,7 +257,11 @@ registry.registerPath({
   summary: "Get event details",
   description:
     "Drafts and private events you are not on the list for answer 404. An 18+ event answers " +
-    "403 `AGE_RESTRICTED` for a viewer below the line (see lib/event-access.ts).",
+    "403 `AGE_RESTRICTED` for a viewer below the line (see lib/event-access.ts), and `reasonCode` says which refusal it is: " +
+    "`AGE_RESTRICTED` (a known age below the line), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
+    "organisation was suspended a 404 `NOT_FOUND` with `reasonCode` `ORGANISER_SUSPENDED`, which every route that refuses such an event " +
+    "says the same way to the same people (RSVP, save, board, room preview, the door, the guest list, crews, chat). " +
+    "Also carries `changedAt`/`changedFields`/`changedFrom` (changed while you are going) and `days`/`dayCount`/`dayNumber` (a multi-day run).",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

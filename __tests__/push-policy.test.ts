@@ -32,7 +32,7 @@ jest.mock("@/lib/db", () => ({
     push_tokens: { findMany: (...a: unknown[]) => tokens(...a) },
     notifications: {
       create: (...a: unknown[]) => created(...a),
-      createMany: (...a: unknown[]) => createdMany(...a),
+      createManyAndReturn: (...a: unknown[]) => createdMany(...a),
     },
     chat_messages: { findUnique: (...a: unknown[]) => parentOf(...a) },
     chat_group_members: { findUnique: (...a: unknown[]) => membershipOf(...a) },
@@ -96,6 +96,25 @@ beforeEach(() => {
   blocks.mockResolvedValue([])
   parentOf.mockResolvedValue({ user_id: "author" })
   membershipOf.mockResolvedValue({ status: "active", ...eventRoom })
+})
+
+describe("the push carries its bell row's id", () => {
+  const send = () => sendPushNotification({ userId: "r", title: "t", body: "b", data: { type: "friend_request", requestId: "q" } })
+
+  it("the single sender puts the row's id on the payload, and the stored row's data stays without it", async () => {
+    created.mockResolvedValue({ id: "row1" })
+    await send()
+    expect(mockSent).toHaveLength(1)
+    expect((mockSent[0].data as Record<string, string>).notificationId).toBe("row1")
+    expect((created.mock.calls[0][0] as { data: { data: object } }).data.data).not.toHaveProperty("notificationId")
+  })
+
+  it("when the row could not be written the push still goes, without an id", async () => {
+    created.mockRejectedValue(new Error("busy"))
+    await expect(send()).resolves.toBe(true)
+    expect(mockSent).toHaveLength(1)
+    expect(mockSent[0].data).toEqual({ type: "friend_request", requestId: "q" })
+  })
 })
 
 describe("where each kind lands", () => {
@@ -290,7 +309,7 @@ describe("a bell row reaches an open app at once", () => {
   })
 
   it("tells everyone an announcement reached, in one broadcast", async () => {
-    createdMany.mockResolvedValue({ count: 2 })
+    createdMany.mockResolvedValue([])
     await sendBulkPushNotifications({
       userIds: ["a", "b"],
       title: "t",

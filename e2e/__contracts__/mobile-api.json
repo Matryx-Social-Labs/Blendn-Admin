@@ -243,6 +243,7 @@
       "success"
     ],
     "data": [
+      "badgeCount",
       "notifications",
       "pagination",
       "unreadCount"
@@ -358,6 +359,9 @@
       "address",
       "amenities",
       "categories",
+      "changedAt",
+      "changedFields",
+      "changedFrom",
       "chatGroup",
       "checkInRadius",
       "city",
@@ -366,6 +370,9 @@
       "coverImageUrl",
       "createdAt",
       "currentCapacity",
+      "dayCount",
+      "dayNumber",
+      "days",
       "description",
       "details",
       "distance",
@@ -518,6 +525,7 @@
     "nested": {
       "profile": [
         "age",
+        "badges",
         "bio",
         "blur_photo",
         "created_at",
@@ -541,8 +549,12 @@
         "onboarded",
         "orientations",
         "phone",
+        "photo_states",
         "photos",
+        "push_crew",
         "push_enabled",
+        "push_matches",
+        "push_night",
         "read_receipts",
         "reveal_by_default",
         "share_location",
