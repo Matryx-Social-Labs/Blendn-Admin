@@ -11,7 +11,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { NOT_IN_THE_BELL } from "@/lib/push-notifications"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
-import { decorateNotifications } from "@/lib/notification-display"
+import { decorateNotifications, type RowDecoration } from "@/lib/notification-display"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
@@ -104,7 +104,19 @@ export async function GET(request: NextRequest) {
           messages: { some: { is_read: false, sender_id: { not: user.userId }, ...VISIBLE_DM } },
         },
       }),
-      decorateNotifications(user.userId, items.map((n) => ({ id: n.id, kind: n.kind, payload: n.data }))),
+      /*
+       * Decoration is a bonus on a row, never a reason for the bell to fail: it
+       * reads six other tables, and a failure in any of them (or in a row's odd
+       * payload) must leave the feed as it was before it existed, with the old
+       * fields and no `display`. Logged, so it is not silent.
+       */
+      decorateNotifications(
+        user.userId,
+        items.map((n) => ({ id: n.id, kind: n.kind, payload: n.data }))
+      ).catch((error: unknown) => {
+        logger.error("Failed to decorate notifications", { error: error instanceof Error ? error.message : String(error) })
+        return new Map<string, RowDecoration>()
+      }),
     ])
 
     return successResponse({

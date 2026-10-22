@@ -25,6 +25,18 @@ jest.mock("expo-server-sdk", () => {
   return { Expo }
 })
 
+// Decoration can be made to fail, to prove the bell does not go with it.
+const mockDecoration = { fail: false }
+jest.mock("@/lib/notification-display", () => {
+  const actual = jest.requireActual("@/lib/notification-display")
+  return {
+    ...actual,
+    decorateNotifications: (...a: unknown[]) =>
+      mockDecoration.fail ? Promise.reject(new Error("decoration exploded")) : actual.decorateNotifications(...a),
+  }
+})
+
+import { randomUUID } from "crypto"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { notifyEventChanged, notifyEventUpdate, sendBulkPushNotifications, sendPushNotification } from "@/lib/push-notifications"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
@@ -61,9 +73,14 @@ const rowOf = async (viewer: string, kind: string) => (await items(viewer)).data
 
 beforeEach(() => {
   sentMessages.length = 0
+  mockDecoration.fail = false
 })
 
 afterAll(async () => {
+  await db.board_requests.deleteMany({ where: { event_id: { in: events } } })
+  await db.board_posts.deleteMany({ where: { event_id: { in: events } } })
+  await db.message_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
+  await db.crew_members.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crew_invites.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crews.deleteMany({ where: { id: { in: crews } } })
   await db.notifications.deleteMany({ where: { user_id: { in: users } } })
@@ -221,5 +238,178 @@ describe("badgeCount", () => {
     expect((await items(me)).data.badgeCount).toBe(2)
     await db.private_messages.deleteMany({ where: { conversation_id: one.id } })
     await db.private_conversations.delete({ where: { id: one.id } })
+  })
+})
+
+const notify = (userId: string, type: string, extra: Record<string, string>) =>
+  sendPushNotification({ userId, title: "t", body: "b", data: { type: type as never, ...extra } })
+
+describe("decoration is a bonus, never a reason for the bell to fail", () => {
+  it("with decoration throwing, the feed is a 200 with every old field and no display, and says so in the log", async () => {
+    const asker = await person("nf-fail-asker", "https://cdn.test/profile/f/1.jpg")
+    const me = await person("nf-fail-me")
+    const request = await db.friend_requests.create({ data: { sender_id: asker, recipient_id: me } })
+    await notify(me, "friend_request", { requestId: request.id })
+    const log = jest.spyOn(console, "error").mockImplementation(() => undefined)
+
+    mockDecoration.fail = true
+    const { status, data } = await items(me)
+    mockDecoration.fail = false
+    const withIt = await rowOf(me, "friend_request")
+
+    expect(status).toBe(200)
+    expect(data.notifications).toHaveLength(1)
+    expect(data.notifications[0]).toMatchObject({ kind: "friend_request", title: "t", body: "b", readAt: null })
+    expect(data.notifications[0].data).toEqual({ type: "friend_request", requestId: request.id })
+    expect(data.notifications[0]).not.toHaveProperty("display")
+    expect(data.notifications[0]).not.toHaveProperty("open")
+    expect(data).toMatchObject({ unreadCount: 1, badgeCount: 1 })
+    expect(log.mock.calls.flat().join(" ")).toContain("Failed to decorate notifications")
+    log.mockRestore()
+    // And the same feed, decorated, once it works again: the failure was not remembered.
+    expect(withIt.open).toBe(true)
+  })
+})
+
+describe("open: what is still the reader's to answer", () => {
+  it("friend_request: withdrawn, or from someone since deleted, is not open and shows nothing", async () => {
+    const me = await person("nf-op-me")
+    const withdrawer = await person("nf-op-w", "https://cdn.test/profile/w/1.jpg")
+    const gone = await person("nf-op-gone", "https://cdn.test/profile/g/1.jpg")
+    const live = await person("nf-op-live")
+    const rows = {
+      withdrawn: await db.friend_requests.create({ data: { sender_id: withdrawer, recipient_id: me, withdrawn_at: new Date() } }),
+      gone: await db.friend_requests.create({ data: { sender_id: gone, recipient_id: me } }),
+      live: await db.friend_requests.create({ data: { sender_id: live, recipient_id: me } }),
+    }
+    await db.user.update({ where: { id: gone }, data: { deletedAt: new Date() } })
+    for (const r of Object.values(rows)) await notify(me, "friend_request", { requestId: r.id })
+
+    const byRequest = new Map((await items(me)).data.notifications.map((n) => [(n.data as { requestId: string }).requestId, n]))
+    for (const key of ["withdrawn", "gone"] as const) {
+      const n = byRequest.get(rows[key].id)!
+      expect(n.open).toBe(false)
+      expect(n).not.toHaveProperty("display")
+      expect(JSON.stringify(n)).not.toContain("cdn.test")
+    }
+    expect(byRequest.get(rows.live.id)!.open).toBe(true)
+  })
+
+  it("message_request: open while pending, closed once answered", async () => {
+    const me = await person("nf-mr-me")
+    const them = await person("nf-mr-them")
+    const request = await db.message_requests.create({ data: { sender_id: them, recipient_id: me, message: "hello there" } })
+    await notify(me, "message_request", { requestId: request.id })
+    expect((await rowOf(me, "message_request")).open).toBe(true)
+    await db.message_requests.update({ where: { id: request.id }, data: { status: "accepted" } })
+    expect((await rowOf(me, "message_request")).open).toBe(false)
+    // Somebody else's request id is not the reader's to answer.
+    const stranger = await person("nf-mr-stranger")
+    await notify(stranger, "message_request", { requestId: request.id })
+    expect((await rowOf(stranger, "message_request")).open).toBe(false)
+  })
+
+  it("board_request: open while pending, closed once decided or withdrawn", async () => {
+    const me = await person("nf-br-me")
+    const them = await person("nf-br-them")
+    const eventId = await makeEvent(me)
+    events.push(eventId)
+    const post = await db.board_posts.create({ data: { event_id: eventId, author_id: me, kind: "seeking", body: "a plus one" } })
+    const request = await db.board_requests.create({ data: { event_id: eventId, post_id: post.id, from_user_id: them, to_user_id: me } })
+    await notify(me, "board_request", { eventId, requestId: request.id })
+    expect((await rowOf(me, "board_request")).open).toBe(true)
+    for (const status of ["accepted", "declined", "withdrawn"] as const) {
+      await db.board_requests.update({ where: { id: request.id }, data: { status, decided_at: new Date() } })
+      expect((await rowOf(me, "board_request")).open).toBe(false)
+    }
+  })
+
+  it("crew_invite: closed when the reader has already joined, or has declined", async () => {
+    const owner = await person("nf-ci-owner")
+    const me = await person("nf-ci-me")
+    const crew = await db.crews.create({ data: { name: "Joined", created_by: owner, emblem_seed: "seed-joined" } })
+    crews.push(crew.id)
+    const invite = await db.crew_invites.create({ data: { crew_id: crew.id, invited_user_id: me, invited_by: owner } })
+    await notify(me, "crew_invite", { crewId: crew.id })
+    expect((await rowOf(me, "crew_invite")).open).toBe(true)
+
+    await db.crew_members.create({ data: { crew_id: crew.id, user_id: me, consented_reveal_at: new Date() } })
+    const joined = await rowOf(me, "crew_invite")
+    expect(joined.open).toBe(false)
+    // Still the crew's emblem: closing the question does not lose the picture.
+    expect(joined.display).toEqual({ visual: { type: "emblem", seed: "seed-joined" } })
+
+    await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: crew.id, user_id: me } } })
+    await db.crew_invites.update({ where: { id: invite.id }, data: { removed_at: new Date() } })
+    expect((await rowOf(me, "crew_invite")).open).toBe(false)
+  })
+})
+
+describe("emblems and tiles for the other kinds", () => {
+  it("crew_here draws the crew's emblem seed; blend draws its own id; neither carries text", async () => {
+    const owner = await person("nf-em-owner")
+    const me = await person("nf-em-me")
+    const crew = await db.crews.create({ data: { name: "Secret Name", created_by: owner, emblem_seed: "seed-here" } })
+    crews.push(crew.id)
+    const blendId = randomUUID()
+    await notify(me, "crew_here", { crewId: crew.id, chatGroupId: randomUUID() })
+    await notify(me, "blend", { blendId, chatGroupId: randomUUID() })
+
+    const here = await rowOf(me, "crew_here")
+    const blend = await rowOf(me, "blend")
+    expect(here.display).toEqual({ visual: { type: "emblem", seed: "seed-here" } })
+    expect(blend.display).toEqual({ visual: { type: "emblem", seed: blendId } })
+    expect(JSON.stringify([here, blend])).not.toContain("Secret Name")
+    expect(here).not.toHaveProperty("open")
+  })
+
+  it("each event kind has its own badge; a deleted or unknown event has no display at all", async () => {
+    const host = await person("nf-ev-host")
+    const me = await person("nf-ev-me")
+    const live = await makeEvent(host)
+    const deleted = await makeEvent(host, { deleted_at: new Date() })
+    events.push(live, deleted)
+
+    await notify(me, "waitlist_promoted", { eventId: live })
+    await notify(me, "announcement", { eventId: live })
+    await notify(me, "rating_request", { eventId: live })
+    await notify(me, "event_update", { eventId: deleted })
+    await notify(me, "event_changed", { eventId: randomUUID() })
+
+    const rows = (await items(me)).data.notifications
+    const visualOf = (kind: string, eventId?: string) => rows.find((n) => n.kind === kind && (!eventId || (n.data as { eventId: string }).eventId === eventId))
+    expect(visualOf("waitlist_promoted")!.display.visual).toMatchObject({ type: "event", badge: "star", cancelled: false })
+    expect(visualOf("announcement")!.display.visual).toMatchObject({ type: "event", badge: "megaphone" })
+    expect(visualOf("rating_request")!.display.visual).toMatchObject({ type: "event", badge: "star" })
+    expect(visualOf("event_update", deleted)).not.toHaveProperty("display")
+    expect(visualOf("event_changed")).not.toHaveProperty("display")
+  })
+})
+
+describe("badgeCount does not count what is not the reader's to read", () => {
+  it("not a message the reader sent, not a closed conversation, not another thread's other side", async () => {
+    const me = await person("nf-bc-me")
+    const a = await person("nf-bc-a")
+    const b = await person("nf-bc-b")
+    const c = await person("nf-bc-c")
+    const thread = async (other: string, closed = false) => {
+      const [user1_id, user2_id] = [me, other].sort()
+      return db.private_conversations.create({ data: { user1_id, user2_id, ...(closed && { closed_at: new Date() }) } })
+    }
+    const mine = await thread(a) // the only unread message in it is one I sent
+    const closed = await thread(b, true) // unread, but the conversation is gone for both
+    const live = await thread(c) // the one that counts
+    await db.private_messages.create({ data: { conversation_id: mine.id, sender_id: me, message_text: "did you get it" } })
+    await db.private_messages.create({ data: { conversation_id: closed.id, sender_id: b, message_text: "hello?" } })
+    await db.private_messages.create({ data: { conversation_id: live.id, sender_id: c, message_text: "hi" } })
+    // A thread between two other people, with an unread message, is nobody's but theirs.
+    const [u1, u2] = [a, b].sort()
+    const theirs = await db.private_conversations.create({ data: { user1_id: u1, user2_id: u2 } })
+    await db.private_messages.create({ data: { conversation_id: theirs.id, sender_id: a, message_text: "psst" } })
+
+    expect((await items(me)).data.badgeCount).toBe(1)
+
+    await db.private_messages.deleteMany({ where: { conversation_id: { in: [mine.id, closed.id, live.id, theirs.id] } } })
+    await db.private_conversations.deleteMany({ where: { id: { in: [mine.id, closed.id, live.id, theirs.id] } } })
   })
 })
