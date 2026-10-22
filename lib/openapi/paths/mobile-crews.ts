@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 
 /*
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
@@ -304,7 +304,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/crews",
   tags,
   summary: "Crews here now",
-  description:
+  description: ROOM_BAN_GATE +
     "For somebody checked in here now (403 `NOT_CHECKED_IN` otherwise). A crew is here when two or more of its active members are checked in " +
     "at this occurrence — derived, never stored. Never your own crews (those are `myCrews`), never a hidden crew, never a crew with any member " +
     "kept apart (a block or a closed conversation, either way) from you or any member of your crews here. Without a crew of your own here " +

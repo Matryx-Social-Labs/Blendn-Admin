@@ -8,7 +8,7 @@ import { conversationPair } from "@/lib/conversations"
 import { lockPair, revealedMatch } from "@/lib/friends"
 import { roomHandle } from "@/lib/room-handle"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard } from "./helpers"
+import { cleanup, closeDb, db, leaveOtherRooms, makeEvent, makeUser, occurrenceOf, onboard } from "./helpers"
 
 /**
  * "If users have matched and they have revealed themselves we can then give an
@@ -119,6 +119,8 @@ async function attendTogether(a: Person, b: Person) {
   events.push(eventId)
   const occurrence_id = await occurrenceOf(eventId)
   for (const p of [a, b]) {
+    // One open check-in per person (SCRUM-705): seated here, out of any other room.
+    await leaveOtherRooms(p.id, occurrence_id)
     await db.event_check_ins.create({
       data: { user_id: p.id, event_id: eventId, occurrence_id, check_in_time: new Date(), status: "checked_in" },
     })
@@ -499,6 +501,8 @@ describe("a mutual like between friends", () => {
     events.push(eventId)
     const occurrence_id = await occurrenceOf(eventId)
     for (const p of people) {
+      // One open check-in per person (SCRUM-705): seated here, out of any other room.
+      await leaveOtherRooms(p.id, occurrence_id)
       await db.event_check_ins.create({
         data: { user_id: p.id, event_id: eventId, occurrence_id, check_in_time: new Date(), status: "checked_in" },
       })

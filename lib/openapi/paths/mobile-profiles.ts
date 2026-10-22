@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors, PageOrCursorQuerySchema, PagedPaginationSchema, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { standardErrors, PageOrCursorQuerySchema, PagedPaginationSchema, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   UpdateProfileRequestSchema,
   InterestCategoryIdsSchema,
@@ -15,7 +15,7 @@ registry.registerPath({
   path: "/api/mobile/profiles/{userId}",
   tags: ["Mobile Profiles"],
   summary: "Get user profile",
-  description:
+  description: ROOM_BAN_GATE +
     "`userId` may be a room handle (SCRUM-371). `id` and `profile.id` echo it as sent — `profiles.id` is the user id, so both are echoed — except on your own profile. A handle is answered in its room's terms: for somebody that room keeps anonymous the response is only `{ id, name, profile: { id, age, onboarded, location } }`, with `name` their pseudonym there. Your own profile carries `email` and the whole `profile` row but `date_of_birth`; anybody else's carries the subset `profile` describes.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
@@ -60,7 +60,7 @@ registry.registerPath({
   path: "/api/mobile/profiles/{userId}/interests",
   tags: ["Mobile Profiles"],
   summary: "Get user interests",
-  description:
+  description: ROOM_BAN_GATE +
     "A block, either way, answers **404** — the same as the profile itself (SCRUM-299). `userId` may be a room handle (SCRUM-371); through a handle for somebody that room keeps anonymous the list is empty — the room card shows shared interests only, and the whole list is the same in every room.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },

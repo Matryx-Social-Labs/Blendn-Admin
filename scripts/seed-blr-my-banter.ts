@@ -5,6 +5,7 @@ import { openSession } from "../lib/presence-sessions"
 import { environmentRefusal } from "./test-accounts"
 import { CROWD_DOMAIN } from "./seed-blr-crowd"
 import { realEventsWhere } from "../lib/event-kind"
+import { leaveOtherRooms } from "./seed-one-room"
 
 /**
  * Puts one real account into the Bengaluru scenario world, so the Banter tab —
@@ -211,6 +212,7 @@ async function main() {
   const liveOcc = await db.event_occurrences.findFirst({ where: { event_id: live.id, start_time: { lte: new Date(NOW + 90 * MIN) }, end_time: { gte: new Date(NOW) } } })
   if (!liveOcc) throw new Error(`${LIVE} has no live occurrence — re-run seed-blr-scenarios.ts --apply to put the clock back`)
   const checkedInAt = ago(70)
+  await leaveOtherRooms(db, me.id, liveOcc.id, checkedInAt)
   await db.event_check_ins.create({
     data: { event_id: live.id, occurrence_id: liveOcc.id, user_id: me.id, kind: "attendee", status: "checked_in", check_in_time: checkedInAt, latitude: live.latitude, longitude: live.longitude, device_info: { platform: "ios", source: "seed-blr-my-banter" }, last_seen_at: new Date() },
   })

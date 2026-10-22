@@ -52,8 +52,11 @@ describe("crew cards: what a crew holds, ranked with size balance (MV-I07)", () 
     const tenDaysAgo = new Date(Date.now() - 10 * 24 * 3600_000)
     await db.crew_members.updateMany({ where: { crew_id: small.crewId }, data: { joined_at: new Date(tenDaysAgo.getTime() - 3600_000) } })
     const past = await liveEvent(host.id)
-    for (const p of s) await putInRoom({ eventId: past.eventId, occurrenceId: past.occurrenceId, userId: p.id, at: tenDaysAgo })
-    await db.event_check_ins.updateMany({ where: { event_id: past.eventId }, data: { status: "checked_out", check_out_time: tenDaysAgo } })
+    // Written closed: a night ten days ago is history, and seating them there would
+    // move them out of tonight's room (one open check-in per person, SCRUM-705).
+    await db.event_check_ins.createMany({
+      data: s.map((p) => ({ event_id: past.eventId, occurrence_id: past.occurrenceId, user_id: p.id, status: "checked_out" as const, check_in_time: tenDaysAgo, check_out_time: tenDaysAgo })),
+    })
 
     const res = await api.atEvent(me, eventId)
     expect(res.status).toBe(200)

@@ -31,6 +31,8 @@ export const PEOPLE_SURFACES = [
   "app/api/mobile/events/[eventId]/board/[postId]/requests/route.ts",
   "lib/board-access.ts",
   "lib/trust.ts",
+  // The night's people (SV6, #728).
+  "lib/night-people.ts",
 ]
 
 describe("every people surface in a room asks lib/room-people.ts", () => {

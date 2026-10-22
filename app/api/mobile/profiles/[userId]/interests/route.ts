@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { refRoomBanRefusal } from "@/lib/room-ban"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { blockedEitherWay } from "@/lib/conversations"
@@ -35,6 +36,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
+    const banned = await refRoomBanRefusal(ref, authUser.userId)
+    if (banned) return banned
 
     // The same answer as the profile and the card: a block, either way, and
     // this person does not exist to you (SCRUM-299). This read never asked, so

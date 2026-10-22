@@ -12,6 +12,7 @@ import {
 import { isRefusal, refusalResponse } from "@/lib/crews/crews"
 import { likeCrew } from "@/lib/crews/like"
 import { logger } from "@/lib/logger"
+import { roomBanRefusal } from "@/lib/room-ban"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 
@@ -36,6 +37,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const { eventId, crewId } = await params
     if (!isUuid(eventId) || !isUuid(crewId)) return notFoundResponse("Crew not found")
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
     const parsed = likeSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 

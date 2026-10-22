@@ -59,7 +59,7 @@ async function event(orgId: string, start: Date, hours = 3, title = testId("ev")
 
 async function attend(e: { id: string; occ: string; start: Date }, who: string[], opts: { stay?: number[]; arriveAt?: number[] } = {}) {
   for (let i = 0; i < who.length; i++) {
-    await db.event_check_ins.create({ data: { event_id: e.id, occurrence_id: e.occ, user_id: who[i], status: "checked_in", check_in_time: e.start } })
+    await db.event_check_ins.create({ data: { event_id: e.id, occurrence_id: e.occ, user_id: who[i], status: "checked_out", check_in_time: e.start } })
     if (opts.stay) {
       const arrived = new Date(e.start.getTime() + (opts.arriveAt?.[i] ?? 0) * MIN)
       await db.presence_sessions.create({

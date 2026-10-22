@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { refRoomBanRefusal } from "@/lib/room-ban"
 import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -35,6 +36,9 @@ export async function GET(
      * back as the id it stands for.
      */
     const { userId: ref } = await params
+    // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
+    const banned = await refRoomBanRefusal(ref, authUser.userId)
+    if (banned) return banned
     /*
      * Who the ref names, and whether the viewer may see who that is. A room
      * handle is answered in its own room's terms — see `IdentityScope` for the

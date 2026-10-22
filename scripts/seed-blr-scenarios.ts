@@ -9,6 +9,7 @@ import { environmentRefusal, TEST_ORG_NAMES } from "./test-accounts"
 import { CROWD_CHAT, CROWD_REVIEWS, CROWD_SIZE, ensureCrowd } from "./seed-blr-crowd"
 import PHOTOS from "./seed-blr-photos.json"
 import { realEventsWhere } from "../lib/event-kind"
+import { leaveOtherRooms } from "./seed-one-room"
 
 /**
  * Bengaluru, rebuilt so every state an event can be in is on the phone at once.
@@ -1157,18 +1158,24 @@ const EVENTS: EventSpec[] = [
   },
 ]
 
-/** The crowd on each event — sized to the scenario and within capacity. */
+/**
+ * The crowd on each event — sized to the scenario and within capacity.
+ *
+ * `inside` across every live room shares the one crowd: a person is open in
+ * one room at most (SCRUM-705), so the live rooms' `inside` together must fit
+ * in CROWD_SIZE (48 portraits) — checked below, before anything is written.
+ */
 const CROWD: Record<string, NonNullable<Social["crowd"]>> = {
   "blr-sunday-jazz-brunch": { going: 34, interested: 12 },
   "blr-founders-breakfast": { going: 14, interested: 8 },
   "blr-standup-tonight": { going: 28, interested: 12 },
   "blr-coffee-cupping": { going: 8, interested: 5, chat: 2 },
   "blr-community-yoga": { going: 18, interested: 10 },
-  "blr-evening-ragas": { going: 20, interested: 6, inside: 9, chat: 2 },
-  "blr-ai-in-production-meetup": { going: 40, interested: 8, inside: 30, chat: 6 },
-  "blr-craft-beer-flight": { going: 22, inside: 18, chat: 3 },
-  "blr-premier-league-screening": { going: 30, inside: 25, chat: 4 },
-  "blr-design-festival": { going: 30, interested: 10, inside: 20, chat: 3 },
+  "blr-evening-ragas": { going: 20, interested: 6, inside: 6, chat: 2 },
+  "blr-ai-in-production-meetup": { going: 40, interested: 8, inside: 14, chat: 6 },
+  "blr-craft-beer-flight": { going: 22, inside: 9, chat: 3 },
+  "blr-premier-league-screening": { going: 30, inside: 10, chat: 4 },
+  "blr-design-festival": { going: 30, interested: 10, inside: 9, chat: 3 },
   "blr-board-game-night": { going: 30, attended: 24, rated: 12, chat: 4 },
   "blr-nandi-sunrise-ride": { going: 16, attended: 14, rated: 8, chat: 2 },
   "blr-sunday-soul-sante": { going: 30, attended: 28, rated: 10 },
@@ -1181,6 +1188,11 @@ const CROWD: Record<string, NonNullable<Social["crowd"]>> = {
   "blr-rooftop-sundowner": { going: 20, interested: 18 },
   "blr-cubbon-10k-run-club": { going: 15, interested: 6 },
   "blr-beta-testers-mixer": { going: 10 },
+}
+
+const INSIDE_DEMAND = Object.values(CROWD).reduce((n, c) => n + (c.inside ?? 0), 0)
+if (INSIDE_DEMAND > CROWD_SIZE) {
+  throw new Error(`The live rooms ask for ${INSIDE_DEMAND} crowd people inside, and the crowd is ${CROWD_SIZE}: one open room each (SCRUM-705)`)
 }
 for (const e of EVENTS) {
   const c = CROWD[e.slug]
@@ -1552,6 +1564,9 @@ function detailsOf(spec: EventSpec) {
  * make a card say something. Only these events' rows for the seeded people are
  * replaced; a tester's own account is left alone.
  */
+/** Crowd people already inside a live room this run: each live room gets its own (`seedSocial`). */
+const SEATED_INSIDE = new Set<string>()
+
 async function seedSocial(
   eventId: string,
   spec: EventSpec,
@@ -1575,7 +1590,15 @@ async function seedSocial(
   const crowdGoing = take(0, c.going)
   const crowdWaitlisted = take(crowdGoing.length, c.waitlisted)
   const crowdInterested = take(crowdGoing.length + crowdWaitlisted.length, c.interested)
-  const crowdInside = crowdGoing.slice(0, c.inside ?? 0)
+  /*
+   * Inside: this live room's own slice. One person is open in one room at most
+   * (SCRUM-705), so the same crowd faces inside two live rooms would be moved
+   * to the last one and empty the earlier room's `inside: N`. Going people
+   * nobody has seated yet first, then anybody else in the rotation.
+   */
+  const unseated = (ids: string[]) => ids.filter((id) => !SEATED_INSIDE.has(id))
+  const crowdInside = [...unseated(crowdGoing), ...unseated(rotated.filter((id) => !crowdGoing.includes(id)))].slice(0, c.inside ?? 0)
+  for (const id of crowdInside) SEATED_INSIDE.add(id)
   const crowdAttended = crowdGoing.slice(0, c.attended ?? 0)
   const crowdRated = crowdAttended.slice(0, c.rated ?? 0)
 
@@ -1619,6 +1642,7 @@ async function seedSocial(
     const at = new Date(Math.min(arrive(i).getTime(), NOW.getTime() - 2 * MIN))
     const occ = occurrences.find((o) => NOW >= new Date(o.start_time.getTime() - 90 * MIN) && NOW <= o.end_time) ?? occurrenceAt(at)
     const checkInAt = at < occ.start_time ? occ.start_time : at
+    await leaveOtherRooms(db, user_id, occ.id, checkInAt)
     await db.event_check_ins.create({
       data: {
         event_id: eventId,

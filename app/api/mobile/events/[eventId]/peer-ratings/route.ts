@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { roomBanRefusal } from "@/lib/room-ban"
 import { z } from "zod"
 
 import {
@@ -54,6 +55,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
     if (await isVenueDay(eventId)) return notFoundResponse("Event not found")
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
 
     return successResponse({ userIds: (await ratablePeers(eventId, authUser.userId)).map((p) => p.ref) })
   } catch (error) {
@@ -84,6 +88,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const limited = await rateLimit(request, userLimit("write", "peer-rating", authUser.userId))
     if (limited) return limited
     if (await isVenueDay(eventId)) return notFoundResponse("Event not found")
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
 
     const parsed = ratingSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)

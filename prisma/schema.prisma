@@ -860,6 +860,10 @@ model event_check_ins {
   /// check-in route's upsert overwrote Monday's timestamp with Tuesday's.
   /// "Who came on Wednesday" had no answer.
   @@unique([occurrence_id, user_id])
+  /// And one OPEN check-in per person, across every room (SCRUM-705):
+  /// `event_check_ins_one_open_per_user`, a partial unique index on `user_id`
+  /// `WHERE status = 'checked_in'`. Migration SQL only — this file cannot say
+  /// `WHERE` — and lib/check-in-core.ts recovers a lost race by its name.
   @@index([event_id, status])
   @@index([event_id, kind])
   /// The 5-second live-ops tick asks two questions this serves: how many

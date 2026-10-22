@@ -182,7 +182,9 @@ migration SQL and therefore in every deployed environment:
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
 venue per local day — `lib/venue-day.ts` recovers a lost race by that name),
-`event_check_ins_expires_at_idx`, `crew_members_one_owner` (one owner per
+`event_check_ins_expires_at_idx`, `event_check_ins_one_open_per_user` (one
+open check-in per person — `lib/check-in-core.ts` recovers a lost race by that
+name), `crew_members_one_owner` (one owner per
 crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
 `venues_one_per_source_record` (a seeded venue's dataset record, once), the
 system user `blendn-system` that owns
