@@ -144,6 +144,11 @@ const envSchema = z.object({
    * `x-share-client` address the landing forwards is believed, so a share page's
    * rate limit counts the visitor, not Vercel's egress. Unset or short: nobody
    * is believed and every caller is limited by its own address. 32 or more.
+   *
+   * UNSET is fine. SET but empty or shorter than 32 is not: `validateEnv` fails
+   * on it, and `server.ts` runs that before binding in production, so the
+   * container does not start. (`shareProxySecret()` below would treat a short
+   * value as unset, but boot never gets that far.)
    */
   SHARE_PROXY_SECRET: z.string().min(32, "SHARE_PROXY_SECRET must be at least 32 characters").optional(),
 

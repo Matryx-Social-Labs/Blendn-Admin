@@ -13,7 +13,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { publicBucketHosts } from "@/lib/tigris"
 import { venueTypeLabel } from "@/lib/venue-types"
-import { eventArea, eventVenue } from "@/lib/venue-visibility"
+import { atTheVenue, eventArea, eventVenue, takeoverSelect } from "@/lib/venue-visibility"
 import { upcomingEventsWhere } from "@/lib/venue-listing"
 
 /**
@@ -138,6 +138,8 @@ export function publicCoverUrl(raw: string | null | undefined, hosts: readonly s
     return null
   }
   if (url.protocol !== "https:" || url.username || url.password || url.port) return null
+  // An encoded slash or backslash is a path separator to some servers and a character to others.
+  if (/%2f|%5c/i.test(url.pathname)) return null
   if (!hosts.includes(url.hostname)) return null
   // `new URL` has already resolved `..` and `%2e%2e`, so a prefix test is the whole check.
   if (!url.pathname.startsWith(PUBLIC_COVER_FOLDER) || url.pathname.length === PUBLIC_COVER_FOLDER.length) return null
@@ -189,7 +191,8 @@ export function shareEventBody(
       place: unlisted
         ? { venue: null, name: null, address: null, area: eventArea(row, row.city) }
         : { venue, name: row.venue_name, address: row.address, area: eventArea(row, row.city) },
-      coverUrl: publicCoverUrl(row.cover_image_url),
+      // Never for an unlisted event: the key is chosen by the uploader and can carry any text (a venue's name).
+      coverUrl: unlisted ? null : publicCoverUrl(row.cover_image_url),
       venueUpcoming: unlisted
         ? []
         : venueUpcoming.map((e) => ({ id: e.id, title: e.title, startsAt: e.start_time, endsAt: e.end_time, timezone: e.timezone })),
@@ -199,21 +202,35 @@ export function shareEventBody(
 
 const upcomingSelect = { id: true, title: true, start_time: true, end_time: true, timezone: true } as const
 
-/** The next public events at a venue, for a page that names it. Never an unlisted, private, draft or suspended host's. */
-function upcomingAt(venueId: string, now: Date, take: number, exceptEventId?: string) {
-  return db.events.findMany({
+/** A host who is a person, and neither suspended nor gone. The org half is `hostNotSuspended`. */
+const hostPersonActive = { organizer: { suspended_at: null, deletedAt: null } }
+
+/** How many candidates are read per event shown, because `atTheVenue` is judged in code and drops some. */
+const AT_VENUE_OVERFETCH = 4
+
+/**
+ * The next public events at a venue, for a page that names it. Never an
+ * unlisted, private, draft or suspended host's, and only events actually AT
+ * the venue (`atTheVenue`: a confirmed link, or the event's own area at the
+ * venue): any organiser can link any venue, and a stranger's event elsewhere
+ * must not appear on its page.
+ */
+async function upcomingAt(venueId: string, venueGeofence: unknown, now: Date, take: number, exceptEventId?: string) {
+  const candidates = await db.events.findMany({
     where: {
       AND: [
         upcomingEventsWhere(null, now),
         hostNotSuspended,
+        hostPersonActive,
         { venue_id: venueId, ...(exceptEventId ? { id: { not: exceptEventId } } : {}) },
       ],
       ...realEventsWhere,
     },
     orderBy: [{ start_time: "asc" }, { id: "asc" }],
-    take,
-    select: upcomingSelect,
+    take: take * AT_VENUE_OVERFETCH,
+    select: { ...upcomingSelect, ...takeoverSelect },
   })
+  return candidates.filter((e) => atTheVenue(e, venueGeofence)).slice(0, take)
 }
 
 /** Null is "unavailable", whatever the reason. A throw is a failed read and is the caller's 503. */
@@ -226,7 +243,7 @@ export async function readShareEvent(eventId: string, now: Date = new Date()) {
       ...realEventsWhere,
       status: { in: ["published", "cancelled", "completed"] },
       visibility: { in: ["public", "unlisted"] },
-      AND: [hostNotSuspended],
+      AND: [hostNotSuspended, hostPersonActive],
     },
     select: {
       id: true,
@@ -253,7 +270,7 @@ export async function readShareEvent(eventId: string, now: Date = new Date()) {
 
   // Only a venue the event is confirmed at, and only for a public event: an unlisted page names no place.
   const venue = row.visibility === "public" ? eventVenue(row) : null
-  const upcoming = venue ? await upcomingAt(venue.id, now, EVENT_VENUE_UPCOMING, row.id) : []
+  const upcoming = venue ? await upcomingAt(venue.id, row.venue?.geofence, now, EVENT_VENUE_UPCOMING, row.id) : []
   return shareEventBody(row, upcoming, now)
 }
 
@@ -262,10 +279,10 @@ export async function readShareVenue(venueId: string, now: Date = new Date()) {
   if (!isUuid(venueId)) return null
   const venue = await db.venues.findFirst({
     where: { id: venueId, deleted_at: null, status: "active" },
-    select: { id: true, name: true, venue_type: true, area: true, address: true, city: true, owner_org_id: true, open_on_blendn: true },
+    select: { id: true, name: true, venue_type: true, area: true, address: true, city: true, owner_org_id: true, open_on_blendn: true, geofence: true },
   })
   if (!venue) return null
-  const upcoming = await upcomingAt(venue.id, now, VENUE_UPCOMING)
+  const upcoming = await upcomingAt(venue.id, venue.geofence, now, VENUE_UPCOMING)
   // Claimed, and its owner turned Open on Blendn off (`openOnBlendnWhere`'s other half).
   const takenOffBlendn = venue.owner_org_id !== null && !venue.open_on_blendn
   return {

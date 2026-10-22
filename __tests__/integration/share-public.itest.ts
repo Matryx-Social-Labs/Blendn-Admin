@@ -25,9 +25,12 @@ const venueRoute = require("@/app/api/public/share/venues/[venueId]/route") as t
 const HOUR = 3_600_000
 const AREA = "Indiranagar"
 const VENUE_NAME = `Toit${Math.random().toString(36).slice(2, 8)}`
+const VENUE_FENCE = { type: "circle", lat: 12.97, lng: 77.64, radius: 100, buffer: 50 }
 const UNKNOWN = "5b2c1d3e-0000-4000-8000-00000000dead"
 
 let user: string
+let suspendedHost: string
+let goneHost: string
 let suspendedOrg: string
 let venue: string
 let archivedVenue: string
@@ -84,9 +87,13 @@ async function makeShareEvent(label: string, data: Record<string, unknown> = {})
 
 beforeAll(async () => {
   user = await makeUser("share_org", "organizer")
+  suspendedHost = await makeUser("share_susp", "organizer")
+  goneHost = await makeUser("share_gone", "organizer")
+  await db.user.update({ where: { id: suspendedHost }, data: { suspended_at: new Date(), suspension_reason: "itest" } })
+  await db.user.update({ where: { id: goneHost }, data: { deletedAt: new Date() } })
   suspendedOrg = (await db.organisations.create({ data: { display_name: "Suspended Co", status: "suspended" } })).id
   claimOrg = (await db.organisations.create({ data: { display_name: "Claim Co", status: "verified" } })).id
-  venue = (await db.venues.create({ data: { name: VENUE_NAME, area: AREA, area_slug: "indiranagar", city: "Bengaluru", venue_type: "pub_bar" } })).id
+  venue = (await db.venues.create({ data: { name: VENUE_NAME, area: AREA, area_slug: "indiranagar", city: "Bengaluru", venue_type: "pub_bar", geofence: VENUE_FENCE } })).id
   archivedVenue = (await db.venues.create({ data: { name: "Archived", status: "archived" } })).id
   optedOutVenue = (await db.venues.create({ data: { name: "Opted Out", owner_org_id: claimOrg, claimed_at: new Date(), open_on_blendn: false } })).id
 
@@ -99,12 +106,22 @@ beforeAll(async () => {
   await makeShareEvent("suspended", { organizer_org_id: suspendedOrg })
   await makeShareEvent("cancelled", { status: "cancelled" })
   await makeShareEvent("completed", { status: "completed", start_time: new Date(Date.now() - 6 * HOUR), end_time: new Date(Date.now() - 4 * HOUR) })
+  // Linked to the venue by somebody else, but located elsewhere: not at the venue.
+  await makeShareEvent("elsewhere", { venue_link_status: "auto_linked", latitude: 13.5, longitude: 77.0, title: "Elsewhere" })
+  // The same unconfirmed link, located at the venue: at the venue (the positive control).
+  await makeShareEvent("nearby", { venue_link_status: "auto_linked", latitude: 12.97, longitude: 77.64, start_time: new Date(Date.now() + 10 * HOUR), end_time: new Date(Date.now() + 12 * HOUR) })
+  // A suspended person's, and a deleted account's, still-published events.
+  await makeShareEvent("suspendedHost", { organizer_id: suspendedHost })
+  await makeShareEvent("goneHost", { organizer_id: goneHost })
+  // An unlisted event whose cover key carries the venue's name (the uploader chooses the key).
+  await makeShareEvent("unlistedCover", { visibility: "unlisted", cover_image_url: `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev/events/u1/${VENUE_NAME}-cover.jpg` })
   await makeShareEvent("day", { kind: "venue_day", visibility: "unlisted", organizer_id: "blendn-system" })
 })
 
 afterAll(async () => {
   await db.events.deleteMany({ where: { id: { in: Object.values(events) } } })
   await db.venues.deleteMany({ where: { id: { in: [venue, archivedVenue, optedOutVenue].filter(Boolean) } } })
+  await db.user.deleteMany({ where: { id: { in: [suspendedHost, goneHost].filter(Boolean) } } })
   await db.organisations.deleteMany({ where: { id: { in: [suspendedOrg, claimOrg].filter(Boolean) } } })
   await cleanup([user], [])
   await closeDb()
@@ -112,7 +129,7 @@ afterAll(async () => {
 
 describe("GET /api/public/share/events/:eventId", () => {
   it("answers every unreadable id with the same status, body and headers", async () => {
-    const unreadable = ["private", "draft", "deleted", "suspended", "day"].map((l) => events[l])
+    const unreadable = ["private", "draft", "deleted", "suspended", "suspendedHost", "goneHost", "day"].map((l) => events[l])
     const answers = await Promise.all([...unreadable, UNKNOWN, "not-a-uuid", "../../etc/passwd"].map(async (id) => snapshot(await readEvent(id))))
     for (const answer of answers) {
       expect(answer.status).toBe(404)
@@ -142,13 +159,13 @@ describe("GET /api/public/share/events/:eventId", () => {
       place: { venue: { id: venue, name: VENUE_NAME }, name: VENUE_NAME, area: AREA },
       coverUrl: null,
     })
-    expect(event.venueUpcoming.map((e: { id: string }) => e.id)).toEqual([events.public2])
+    expect(event.venueUpcoming.map((e: { id: string }) => e.id)).toEqual([events.public2, events.nearby])
   })
 
   it("never lists an unlisted, private or draft event as another event at the venue", async () => {
     const { event } = await (await readEvent(events.public)).json()
     const ids = event.venueUpcoming.map((e: { id: string }) => e.id)
-    for (const label of ["unlisted", "private", "draft", "deleted", "suspended", "day"]) expect(ids).not.toContain(events[label])
+    for (const label of ["unlisted", "private", "draft", "deleted", "suspended", "suspendedHost", "goneHost", "elsewhere", "day"]) expect(ids).not.toContain(events[label])
   })
 
   it("reads an unlisted event as area only, never the venue, address or description, and not indexable", async () => {
@@ -162,6 +179,12 @@ describe("GET /api/public/share/events/:eventId", () => {
     expect(event.indexable).toBe(false)
     expect(event.place).toEqual({ venue: null, name: null, address: null, area: AREA })
     expect(event.venueUpcoming).toEqual([])
+  })
+
+  it("never carries an unlisted event's cover, whose key can say the venue's name", async () => {
+    const text = await (await readEvent(events.unlistedCover)).text()
+    expect(text).not.toContain(VENUE_NAME)
+    expect(JSON.parse(text).event.coverUrl).toBeNull()
   })
 
   it("says cancelled and ended, and keeps an ended public event indexable", async () => {
@@ -189,8 +212,8 @@ describe("GET /api/public/share/venues/:venueId", () => {
     const { venue: body } = await res.json()
     expect(body).toMatchObject({ id: venue, name: VENUE_NAME, typeLabel: "Pub or bar", area: AREA, indexable: true })
     const ids = body.upcoming.map((e: { id: string }) => e.id)
-    expect(ids).toEqual(expect.arrayContaining([events.public, events.public2]))
-    for (const label of ["unlisted", "private", "draft", "deleted", "suspended", "cancelled", "completed", "day"]) {
+    expect(ids).toEqual(expect.arrayContaining([events.public, events.public2, events.nearby]))
+    for (const label of ["unlisted", "private", "draft", "deleted", "suspended", "suspendedHost", "goneHost", "elsewhere", "cancelled", "completed", "day"]) {
       expect(ids).not.toContain(events[label])
     }
   })

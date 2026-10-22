@@ -54,6 +54,9 @@ describe("publicCoverUrl", () => {
     ["a traversal out of events/", "https://blendn-media.fly.storage.tigris.dev/events/../profile/u1/c.jpg"],
     ["an encoded traversal", "https://blendn-media.fly.storage.tigris.dev/events/%2e%2e/profile/u1/c.jpg"],
     ["the folder itself", "https://blendn-media.fly.storage.tigris.dev/events/"],
+    ["an encoded slash", "https://blendn-media.fly.storage.tigris.dev/events%2F..%2Fprofile/u1/c.jpg"],
+    ["an encoded backslash", "https://blendn-media.fly.storage.tigris.dev/events/u1%5C..%5Cc.jpg"],
+    ["a lower-case encoded slash", "https://blendn-media.fly.storage.tigris.dev/events/u1%2fc.jpg"],
     ["a link-local address", "https://169.254.169.254/events/u1/c.jpg"],
   ])("drops %s", (_label, raw) => {
     expect(publicCoverUrl(raw, HOSTS)).toBeNull()
@@ -117,6 +120,7 @@ describe("shareEventBody", () => {
     expect(body.event.description).toBeNull()
     expect(body.event.place).toEqual({ venue: null, name: null, address: null, area: "Indiranagar" })
     expect(body.event.venueUpcoming).toEqual([])
+    expect(body.event.coverUrl).toBeNull()
   })
 
   it("falls back to the city when no venue is confirmed", () => {
