@@ -1009,3 +1009,39 @@ describe("an ask between people who already have a link is silent (H1/H4)", () =
     }
   )
 })
+
+describe("a silenced ask changes nothing the author can see (security review)", () => {
+  const countOf = async (viewer: Person, postId: string, at = eventId) => {
+    const res = await boardOf(viewer, at)
+    return ((await res.json()) as { data: { posts: { id: string; requestCount: number }[] } }).data.posts.find((p) => p.id === postId)!.requestCount
+  }
+
+  it("leaves the post's requestCount, the author's lists and their bell alone, for the author and for everyone browsing; the asker still counts their own", async () => {
+    const author = await person("sv-author")
+    const linked = await person("sv-linked")
+    const stranger = await person("sv-stranger")
+    const browser = await person("sv-browser")
+    const [user1_id, user2_id] = conversations.conversationPair(author.id, linked.id)
+    await db.private_conversations.create({ data: { user1_id, user2_id } })
+    const postId = await offer(author, 3)
+
+    const before = [await countOf(author, postId), await countOf(browser, postId), await countOf(stranger, postId)]
+    expect(before).toEqual([0, 0, 0])
+
+    // The linked pair's ask: silenced. The author's count, a browser's and a stranger's do not move.
+    const silenced = await askedId(linked, postId)
+    expect((await db.board_requests.findUniqueOrThrow({ where: { id: silenced } })).silenced_at).not.toBeNull()
+    expect([await countOf(author, postId), await countOf(browser, postId), await countOf(stranger, postId)]).toEqual([0, 0, 0])
+    // The asker's own count includes their ask, as an ordinary asker's does: no tell the other way.
+    expect(await countOf(linked, postId)).toBe(1)
+    const lists = await list(author)
+    expect(lists.incoming.map((r) => r.id)).not.toContain(silenced)
+    expect(await db.notifications.count({ where: { user_id: author.id, kind: "board_request" } })).toBe(0)
+
+    // An ordinary ask moves every count by one, for everyone.
+    const real = await askedId(stranger, postId)
+    expect([await countOf(author, postId), await countOf(browser, postId), await countOf(stranger, postId)]).toEqual([1, 1, 1])
+    expect(await countOf(linked, postId)).toBe(2)
+    expect((await list(author)).incoming.map((r) => r.id)).toEqual([real])
+  })
+})

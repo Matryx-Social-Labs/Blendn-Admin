@@ -2102,6 +2102,12 @@
       "mutation": "M1560 the route passes `true` for the shows-up opt-in. M1561 profileBadges loads the shows-up facts for everyone. M1574 `showsUpOptIn: true` in badgeFactsFor.",
       "observed": "2026-10-22: M1560: 2 failing. M1561: 2 failing (the facts list is also what marks the opt-in, so loading it for everyone shows the badge). M1574: SURVIVED, and is equivalent: with the opt-in off the RSVP facts are never loaded, so the badge cannot be earned whatever the flag says; the two layers gate together. Reverted; 3 of 3.",
       "date": "2026-10-22"
+    },
+    "board-request-visibility.test.ts": {
+      "guards": "Security review 2026-10-22 (oracle): a silenced board ask (board_requests.silenced_at) never moves a count or list the author or anyone browsing can see. The board list's requestCount counts unsilenced asks plus the viewer's OWN (so the asker's count includes their ask, as an ordinary asker's does: no tell the other way); the author's requests lists and the report/counterpart reads spread the one shared VISIBLE_TO_AUTHOR; a source-shape guard fails the build when an author-facing reader of board_requests does not.",
+      "mutation": "V1 the board list's count back to a bare `requests: true` (caught by both the guard and the itest). V2 the viewer's own asks dropped from visibleBoardRequests. V3 VISIBLE_TO_AUTHOR emptied.",
+      "observed": "V1: 1 failing in board-request-visibility and 1 in board-safety. V2: 1 failing (the asker's own count). V3: 5 failing (the author's lists and the silent-ask cases). Each reverted; 3 of 3 and 49 of 49.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [

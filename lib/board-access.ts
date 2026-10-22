@@ -120,6 +120,24 @@ export function outstandingAsk(now: Date = new Date(), blocked: readonly string[
   }
 }
 
+/**
+ * An ask the pair's link silenced at ask time (`board_requests.silenced_at`) does
+ * not exist for its author: no list, no count, no badge, no push. This is the one
+ * `where` every author-facing read of `board_requests` spreads, so a new reader
+ * cannot forget it (`board-request-visibility.test.ts` pins that they all do).
+ */
+export const VISIBLE_TO_AUTHOR = { silenced_at: null } as const
+
+/**
+ * The asks a viewer may be told about when only a COUNT is shown (a post's
+ * `requestCount`, shown to everybody browsing): the unsilenced ones, plus the
+ * viewer's OWN asks, silenced or not. Without the first a silenced ask moves the
+ * author's (and everyone's) count with nothing to show for it, naming a linked
+ * pair; without the second the asker's own count would stay put after they asked,
+ * which is the same oracle read from the other side.
+ */
+export const visibleBoardRequests = (viewerId: string) => ({ OR: [VISIBLE_TO_AUTHOR, { from_user_id: viewerId }] })
+
 /** The row as its asker may see it. Only ever applied to the asker's own rows. */
 export function asTheAskerSees<
   T extends { status: board_request_status; decided_at: Date | null; asker_withdrawn_at: Date | null },
@@ -352,7 +370,7 @@ export async function boardPostAuthorFor(
   const { rsvp, favourited } = await entitlementFor(eventId, viewerId)
   if (rsvp !== null || favourited) return post.author_id
   const asked = await db.board_requests.findFirst({
-    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId, silenced_at: null }] },
+    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId, ...VISIBLE_TO_AUTHOR }] },
     select: { id: true },
   })
   return asked ? post.author_id : null

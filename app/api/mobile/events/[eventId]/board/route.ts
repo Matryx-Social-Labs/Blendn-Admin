@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { BOARD_CLOSED, boardDenialMessage, mayReadBoard } from "@/lib/board"
-import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged } from "@/lib/board-access"
+import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged, visibleBoardRequests } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
 import { notStrangersTo } from "@/lib/room-people"
@@ -86,7 +86,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         spaces_left: true,
         created_at: true,
         author_id: true,
-        _count: { select: { requests: true } },
+        // Not the silenced ones, except your own: see `visibleBoardRequests`.
+        _count: { select: { requests: { where: visibleBoardRequests(user.userId) } } },
       },
     })
 
