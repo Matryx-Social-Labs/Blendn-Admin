@@ -1462,6 +1462,14 @@ card showed**. Real name and photos appear only when that side reveals.
 | `POST /conversations/:id/reveal` | Your side becomes visible to them |
 | `POST /conversations/:id/reveal` with `{ "ask": true }` | Ask them to reveal |
 
+Until they reveal, the other person is a stranger on every raw-id surface too
+(SCRUM-752): `GET /profiles/:id` and `GET /users/:id` answer their `otherUser.id`
+exactly as they answer anyone you may not see — `name: "Attendee"`, the blurred
+photo, no bio or photos — and carry no `friend`. A mutual like alone no longer
+identifies; their reveal does. A room-level reveal, a friend who turned on
+`friends_see_me_in_rooms` and a conversation that never was pseudonymous still
+identify as before.
+
 Each side moves independently — revealing is a standing offer, not a trade, so
 going first does not expose the other person and waiting is not a refusal. It is
 **not retractable**: nothing can unsee a name and a face, and there is no path
@@ -1626,12 +1634,18 @@ Every refusal a stranger could reach answers with the **same 404**: an unknown,
 malformed or reset token, a deleted account, a block either way, a pair who
 left each other, an id you have no relationship with. The one addition is
 `reasonCode: "NOT_A_REVEALED_MATCH"` on that 404 (`errorCode` stays
-`NOT_FOUND`), said only to someone in an open match with that person where one
-of you has not revealed yet — they already know they matched. A request made
+`NOT_FOUND`), said only to someone in an open match with that person who has
+**already revealed to them** and where you have not revealed back — they know who
+it is. Where the other person is still a pseudonym to you, the 404 is plain: the
+code would say who the pseudonym is, to anyone holding an id or a handle for them. A request made
 this way notifies with `data.via = "match"` (so the app can say "from your
 match"), and never names an event or room. The invite-link path is unchanged.
 `GET /profiles/:id` also carries `friend` (same shape as above) for somebody you
 may see, and never for yourself or a stranger.
+
+A pair whose conversation began as an accepted message request or a board post
+is never on this path: only a conversation born of a mutual like counts, however
+well they know each other. They can still become friends by invite link.
 
 Opening a link, asking and accepting all need a finished profile (the
 participation gate, SCRUM-331). Ask, accept and block take a lock on the pair,
