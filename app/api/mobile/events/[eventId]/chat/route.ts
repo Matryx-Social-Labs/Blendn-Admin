@@ -16,6 +16,7 @@ import {
   forbiddenResponse,
   serverErrorResponse,
   ErrorCode,
+  spamBlockedResponse,
 } from "@/lib/api-response"
 import {
   chatClosesAt,
@@ -712,10 +713,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // Spam check (sync — block before saving)
     const spamResult = await checkSpam(authUser.userId, chatGroup.id, content)
     if (spamResult && spamResult.action === "hide") {
-      return errorResponse(
+      return spamBlockedResponse(
         spamResult.reason || "Message blocked as spam. Please slow down.",
-        429,
-        ErrorCode.SPAM_BLOCKED
+        spamResult.retryAfter
       )
     }
 

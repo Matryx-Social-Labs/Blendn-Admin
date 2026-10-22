@@ -36,7 +36,7 @@ export type DirectMessageScreen =
   /** Send it. `status` is recorded on the row when something was noticed. */
   | { verdict: "allow"; status: string | null }
   /** Refuse, and say why — a flood is worth telling somebody about. */
-  | { verdict: "refuse"; reason: string; code: "spam" }
+  | { verdict: "refuse"; reason: string; code: "spam"; retryAfter?: number }
   /**
    * Store it hidden and tell the sender it was hidden.
    *
@@ -70,6 +70,7 @@ export async function screenDirectMessage(input: {
       verdict: "refuse",
       reason: spam.reason || "You are sending messages too quickly.",
       code: "spam",
+      retryAfter: spam.retryAfter,
     }
   }
 

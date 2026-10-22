@@ -21,6 +21,7 @@ import {
   validationErrorResponse,
   serverErrorResponse,
   ErrorCode,
+  spamBlockedResponse,
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
@@ -423,10 +424,9 @@ export async function POST(
     // Spam check (sync — block before saving)
     const spamResult = await checkSpam(user.userId, chatGroupId, content)
     if (spamResult && spamResult.action === "hide") {
-      return errorResponse(
+      return spamBlockedResponse(
         spamResult.reason || "Message blocked as spam. Please slow down.",
-        429,
-        ErrorCode.SPAM_BLOCKED
+        spamResult.retryAfter
       )
     }
 

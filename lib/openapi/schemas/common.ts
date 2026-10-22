@@ -33,6 +33,14 @@ export const ErrorResponseSchema = z
           "`REQUEST_UNAVAILABLE` (one reason for every way something is out of reach), `CANNOT_ADD_SELF`. " +
           "Read `reasonCode ?? errorCode`."
       ),
+    retryAfter: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Seconds to wait before trying again (also the `Retry-After` header), on a 429 `RATE_LIMITED`, on a 429 `SPAM_BLOCKED` for a burst " +
+          "(absent when waiting would not help, as for too many links), and on the 503 `MAINTENANCE`."
+      ),
   })
   .openapi("ErrorResponse")
 

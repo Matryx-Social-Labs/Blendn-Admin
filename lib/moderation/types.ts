@@ -7,6 +7,8 @@ export interface ModerationResult {
   confidence: number
   matched?: string[] // for keyword filter
   reason?: string // for spam detector
+  /** Seconds until the burst window ends and a send can go through. Burst blocks only (SV13). */
+  retryAfter?: number
 }
 
 export interface OpenAIModerationCategory {
