@@ -1,7 +1,15 @@
-import { changeForResponse, changedFieldsOf, nextChange, parseChangedFrom, type TrackedEvent } from "@/lib/event-change"
+import { changeForResponse, changedFieldsOf, nextChange, parseChangedFrom, updateEventTracked, type TrackedEvent } from "@/lib/event-change"
 import { eventDays } from "@/lib/occurrences"
 
-jest.mock("@/lib/db", () => ({ db: {} }))
+const mockTx = {
+  $queryRaw: jest.fn(),
+  events: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
+}
+// Outside the transaction: anything the code does here is NOT part of the edit and would survive a rollback.
+const mockDirect = { events: { update: jest.fn() }, $transaction: jest.fn(async (fn: (t: typeof mockTx) => unknown) => fn(mockTx)) }
+jest.mock("@/lib/db", () => ({ get db() { return mockDirect } }))
+const tx = mockTx
+const direct = mockDirect
 
 const H = 3_600_000
 const T0 = new Date("2031-03-01T18:00:00Z")
@@ -117,5 +125,46 @@ describe("eventDays", () => {
     expect(eventDays({ start_time: over[0].start_time, end_time: over[1].end_time, occurrences: over }, NOW).dayNumber).toBe(2)
     const none = [slot(1, 5, 8, true)]
     expect(eventDays({ start_time: none[0].start_time, end_time: none[0].end_time, occurrences: none }, NOW).dayNumber).toBeNull()
+  })
+})
+
+describe("updateEventTracked: the edit and its record are one unit", () => {
+  const stored = { start_time: T0, end_time: new Date(T0.getTime() + 3 * H), venue_name: "Old", address: null, status: "published", changed_from: null }
+
+  beforeEach(() => {
+    for (const m of [tx.$queryRaw, tx.events.findUniqueOrThrow, tx.events.update, direct.events.update, direct.$transaction]) m.mockClear()
+    tx.events.findUniqueOrThrow.mockResolvedValue(stored)
+  })
+
+  it("rejects when the record write fails, and writes nothing outside the transaction (so nothing survives the rollback)", async () => {
+    const edited = { ...stored, venue_name: "New" }
+    tx.events.update.mockResolvedValueOnce(edited).mockRejectedValueOnce(new Error("could not serialize access"))
+
+    await expect(updateEventTracked({ where: { id: "e1" }, data: { venue_name: "New" } })).rejects.toThrow("could not serialize access")
+
+    // Both writes went through the transaction's client, in order: the edit, then the record.
+    expect(tx.events.update).toHaveBeenCalledTimes(2)
+    expect(tx.events.update.mock.calls[0][0]).toEqual({ where: { id: "e1" }, data: { venue_name: "New" } })
+    expect(tx.events.update.mock.calls[1][0].data).toHaveProperty("changed_from", { venue_name: "Old" })
+    expect(direct.events.update).not.toHaveBeenCalled()
+    expect(direct.$transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it("locks the row before it reads it", async () => {
+    tx.events.update.mockResolvedValue({ ...stored })
+    await updateEventTracked({ where: { id: "e1" }, data: { title: "same" } })
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.events.findUniqueOrThrow.mock.invocationCallOrder[0])
+    expect(tx.$queryRaw.mock.calls[0][0].join("")).toContain("FOR UPDATE")
+  })
+
+  it("an edit that moves nothing worth telling writes the edit once and no record", async () => {
+    tx.events.update.mockResolvedValue({ ...stored })
+    await updateEventTracked({ where: { id: "e1" }, data: { title: "same" } })
+    expect(tx.events.update).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses a where with no id rather than lock nothing", async () => {
+    await expect(updateEventTracked({ where: { slug: "x" }, data: {} })).rejects.toThrow("needs the event's id")
+    expect(direct.$transaction).not.toHaveBeenCalled()
   })
 })

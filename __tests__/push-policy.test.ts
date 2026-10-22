@@ -98,6 +98,25 @@ beforeEach(() => {
   membershipOf.mockResolvedValue({ status: "active", ...eventRoom })
 })
 
+describe("the push carries its bell row's id", () => {
+  const send = () => sendPushNotification({ userId: "r", title: "t", body: "b", data: { type: "friend_request", requestId: "q" } })
+
+  it("the single sender puts the row's id on the payload, and the stored row's data stays without it", async () => {
+    created.mockResolvedValue({ id: "row1" })
+    await send()
+    expect(mockSent).toHaveLength(1)
+    expect((mockSent[0].data as Record<string, string>).notificationId).toBe("row1")
+    expect((created.mock.calls[0][0] as { data: { data: object } }).data.data).not.toHaveProperty("notificationId")
+  })
+
+  it("when the row could not be written the push still goes, without an id", async () => {
+    created.mockRejectedValue(new Error("busy"))
+    await expect(send()).resolves.toBe(true)
+    expect(mockSent).toHaveLength(1)
+    expect(mockSent[0].data).toEqual({ type: "friend_request", requestId: "q" })
+  })
+})
+
 describe("where each kind lands", () => {
   /*
    * The app created one Android channel, `default`, at the highest importance,
