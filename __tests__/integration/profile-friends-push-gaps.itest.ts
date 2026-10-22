@@ -376,3 +376,95 @@ describe("friends: reasons that never say why somebody is out of reach", () => {
     expect(await body(res)).toMatchObject({ errorCode: "FORBIDDEN", reasonCode: "PROFILE_INCOMPLETE" })
   })
 })
+
+/*
+ * The no-oracle rule, whole: an unknown thing and every way a real one can be out
+ * of reach answer with the SAME body. A single difference would be a way to ask
+ * "does this person use Blend'n", "did they block me" or "did we part".
+ */
+describe("friends: out of reach is one answer, whatever the reason", () => {
+  const OUT_OF_REACH = ["unknown", "blocked me", "I blocked them", "deleted", "closed"] as const
+  type Why = (typeof OUT_OF_REACH)[number]
+  const conversationRoute = require("@/app/api/mobile/friends/[userId]/conversation/route") as typeof import("@/app/api/mobile/friends/[userId]/conversation/route") // eslint-disable-line @typescript-eslint/no-require-imports
+
+  /** A real owner of an invite link, out of reach `me` in the way asked; or no owner at all. */
+  async function inviteFor(why: Why, me: string): Promise<string> {
+    if (why === "unknown") return randomToken()
+    const owner = await person(`nr-owner-${why.replace(/\W/g, "")}`)
+    const token = randomToken()
+    await db.friend_invites.create({ data: { user_id: owner, token } })
+    if (why === "blocked me") await db.blocked_users.create({ data: { blocker_id: owner, blocked_id: me } })
+    if (why === "I blocked them") await db.blocked_users.create({ data: { blocker_id: me, blocked_id: owner } })
+    if (why === "deleted") await db.user.update({ where: { id: owner }, data: { deletedAt: new Date() } })
+    if (why === "closed") {
+      const [user1_id, user2_id] = [me, owner].sort()
+      await db.private_conversations.create({ data: { user1_id, user2_id, closed_at: new Date() } })
+    }
+    return token
+  }
+  const randomToken = () => Buffer.from(Array.from({ length: 16 }, () => Math.floor(Math.random() * 256))).toString("base64url")
+
+  const askWith = (me: string, body: object) => requestsRoute.POST(req("/api/mobile/friends/requests", tokenOf(me), "POST", body))
+  const open = (me: string, token: string) =>
+    inviteRoute.GET(req(`/api/mobile/friends/invite/${token}`, tokenOf(me)), { params: Promise.resolve({ token }) })
+  const preview = (me: string | null, token: string) =>
+    previewRoute.GET(
+      me ? req(`/api/mobile/friends/invite/${token}/preview`, tokenOf(me)) : new NextRequest(`http://localhost/api/mobile/friends/invite/${token}/preview`),
+      { params: Promise.resolve({ token }) }
+    )
+  const answer = async (res: Response) => ({ status: res.status, body: await res.json() })
+
+  it.each(OUT_OF_REACH)("asking by link, owner: %s, is the answer an unknown link gets", async (why) => {
+    const me = await person("nr-asker")
+    const reference = await answer(await askWith(me, { token: randomToken() }))
+    expect(reference).toEqual({ status: 404, body: { success: false, error: "Not found", errorCode: "NOT_FOUND", reasonCode: "INVITE_UNAVAILABLE" } })
+    expect(await answer(await askWith(me, { token: await inviteFor(why, me) }))).toEqual(reference)
+  })
+
+  it.each(OUT_OF_REACH)("opening a link, owner: %s, is the answer an unknown link gets", async (why) => {
+    const me = await person("nr-opener")
+    const reference = await answer(await open(me, randomToken()))
+    expect(reference.status).toBe(404)
+    expect(await answer(await open(me, await inviteFor(why, me)))).toEqual(reference)
+  })
+
+  it.each(OUT_OF_REACH)("the signed-out preview, and the same with a signed-in viewer, for owner: %s", async (why) => {
+    const me = await person("nr-previewer")
+    const token = await inviteFor(why, me)
+    const unknownSignedOut = await answer(await preview(null, randomToken()))
+    const unknownSignedIn = await answer(await preview(me, randomToken()))
+    expect(unknownSignedOut.status).toBe(404)
+    expect(unknownSignedIn).toEqual(unknownSignedOut)
+    // Signed out, a block or a closed conversation is not knowable and the link may still resolve; a deleted owner is not.
+    if (why === "deleted" || why === "unknown") expect(await answer(await preview(null, token))).toEqual(unknownSignedOut)
+    // Signed in, the viewer's own relationship applies: the same 404.
+    expect(await answer(await preview(me, token))).toEqual(unknownSignedOut)
+  })
+
+  it.each(OUT_OF_REACH)("asking by id, person: %s, is the answer an unknown id gets", async (why) => {
+    const me = await person("nr-by-id")
+    const target = why === "unknown" ? "cuid-that-is-nobody" : await person(`nr-target-${why.replace(/\W/g, "")}`)
+    if (why === "blocked me") await db.blocked_users.create({ data: { blocker_id: target, blocked_id: me } })
+    if (why === "I blocked them") await db.blocked_users.create({ data: { blocker_id: me, blocked_id: target } })
+    if (why === "deleted") await db.user.update({ where: { id: target }, data: { deletedAt: new Date() } })
+    if (why === "closed") {
+      const [user1_id, user2_id] = [me, target].sort()
+      await db.private_conversations.create({ data: { user1_id, user2_id, closed_at: new Date() } })
+    }
+    const reference = await answer(await askWith(me, { userId: "cuid-that-is-nobody" }))
+    expect(reference).toEqual({ status: 404, body: { success: false, error: "Not found", errorCode: "NOT_FOUND", reasonCode: "PERSON_UNAVAILABLE" } })
+    expect(await answer(await askWith(me, { userId: target }))).toEqual(reference)
+  })
+
+  it("an unfinished profile is told so on the friend's conversation route and on opening a link, FORBIDDEN beside PROFILE_INCOMPLETE", async () => {
+    const unfinished = await person("nr-unfinished", { onboarded: false })
+    const sentence = "Finish setting up your profile first. Blend'n is for people 18 and over."
+    const expected = { status: 403, body: { success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: "PROFILE_INCOMPLETE" } }
+
+    const convo = await answer(
+      await conversationRoute.POST(req("/api/mobile/friends/someone/conversation", tokenOf(unfinished), "POST", {}), { params: Promise.resolve({ userId: "someone" }) })
+    )
+    expect(convo).toEqual(expected)
+    expect(await answer(await open(unfinished, randomToken()))).toEqual(expected)
+  })
+})
