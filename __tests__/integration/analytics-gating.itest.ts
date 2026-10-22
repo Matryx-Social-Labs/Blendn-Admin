@@ -71,7 +71,7 @@ async function event(label: string, start: Date, hours = 3) {
 async function attend(e: { id: string; occurrenceId: string; start: Date }, people: string[], stayMinutes?: number) {
   for (const user_id of people) {
     await db.event_check_ins.create({
-      data: { event_id: e.id, occurrence_id: e.occurrenceId, user_id, status: "checked_in", check_in_time: e.start },
+      data: { event_id: e.id, occurrence_id: e.occurrenceId, user_id, status: "checked_out", check_in_time: e.start },
     })
     if (stayMinutes !== undefined) {
       await db.presence_sessions.create({

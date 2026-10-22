@@ -164,6 +164,22 @@ export async function occurrenceOf(eventId: string): Promise<string> {
 }
 
 /**
+ * One open check-in per person (SCRUM-705): a fixture that seats somebody in
+ * a room moves them out of any other first, as the door does — never
+ * departing before they arrived.
+ */
+export async function leaveOtherRooms(userId: string, occurrenceId: string, at: Date = new Date()) {
+  await db.$executeRaw`
+    UPDATE event_check_ins
+       SET status = 'checked_out', check_out_time = GREATEST(check_in_time, ${at}::timestamptz)
+     WHERE user_id = ${userId} AND status = 'checked_in' AND occurrence_id <> ${occurrenceId}::uuid`
+  await db.$executeRaw`
+    UPDATE presence_sessions
+       SET departed_at = GREATEST(arrived_at, ${at}::timestamptz), departed_source = 'switch'
+     WHERE user_id = ${userId} AND departed_at IS NULL AND occurrence_id <> ${occurrenceId}::uuid`
+}
+
+/**
  * Put somebody in the room, through both writers.
  *
  * Production writes both while `event_check_ins` and `presence_sessions`
@@ -188,6 +204,8 @@ export async function putInRoom(opts: {
   const at = opts.at ?? new Date()
   const lastSeen = opts.lastSeen ?? new Date()
   const kind = opts.kind ?? "attendee"
+
+  await leaveOtherRooms(opts.userId, opts.occurrenceId, at)
 
   await db.event_check_ins.create({
     data: {

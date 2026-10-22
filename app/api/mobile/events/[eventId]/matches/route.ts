@@ -12,6 +12,7 @@ import { matchesForEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
+import { roomBanRefusal } from "@/lib/room-ban"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -37,6 +38,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
     const limit = boundedInt(request.nextUrl.searchParams.get("limit"), 50, 1, 100)
+
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
 
     const matches = await matchesForEvent(eventId, authUser.userId, limit)
     if (matches === null) {

@@ -82,7 +82,10 @@ beforeEach(() => {
   inside(ME, THEM)
   mockBlocked.mockResolvedValue(false)
   mockClosed.mockResolvedValue(false)
-  mockDb.chat_group_members.findFirst.mockResolvedValue({ anonymous_name: "Cosmic Panda" })
+  // The sender's pseudonym; and `eventRoomBan` (a `status: "banned"` read) finds no ban.
+  mockDb.chat_group_members.findFirst.mockImplementation(async (args: { where?: { status?: string } }) =>
+    args?.where?.status === "banned" ? null : { anonymous_name: "Cosmic Panda" }
+  )
   mockDb.event_match_preferences.findMany.mockResolvedValue([])
   mockDb.user.findUnique.mockResolvedValue({ name: "Arjun Rao" })
   mockDb.blocked_users.findMany.mockResolvedValue([])

@@ -236,6 +236,20 @@ Go Live. Reasons: `manual` → `user`, `switched_event` → `switch`, `left_area
 and `occurrence_ended` → `sweeper`, `expired` → `expired`, `event_started` →
 `ended`.
 
+**One open check-in per person** (SCRUM-705), in the database: the partial
+unique index `event_check_ins_one_open_per_user` (`WHERE status =
+'checked_in'`), venue days included. Before it, the switch
+(`checkOutOfOtherEvents`) and the new row were two statements with nothing
+beneath them, so two doors at once could both stay open. Now the door that
+loses that race gets the index's refusal, switches out of the winner's room
+and writes again (`openCheckIn`, by the index's name, as `venueDayFor` does) —
+the later door wins. The switch closes every other open row for what ended it:
+another room is `switched_event`, a Go Live already over is `expired` at its
+own end, and an earlier day of the same event is `occurrence_ended` (it used to
+be skipped and stayed open beside today's). Only the switch is returned to the
+door, as `left`, so the app says "You left {A}." (SCRUM-635). Where you could
+check in is `POST /checkins/inside` (`lib/places-inside.ts`, SCRUM-704).
+
 Relative imports throughout — reachable from `server.ts`, and `build:server`
 compiles with plain `tsc`, which emits the `@/` alias verbatim into the
 `require()`.

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 
+import { roomBanRefusal } from "@/lib/room-ban"
 import { isUuid } from "@/lib/api-input"
 import {
   ErrorCode,
@@ -37,6 +38,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { eventId } = await params
     if (!isUuid(eventId)) return notFoundResponse("Event not found")
+    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
     const query = request.nextUrl.searchParams
     const result = await crewsAtEvent(eventId, authUser.userId, {
       limit: boundedInt(query.get("limit"), CREW.CARDS_DEFAULT, 1, CREW.CARDS_MAX),
