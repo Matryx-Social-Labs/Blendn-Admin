@@ -122,6 +122,12 @@ export interface ServerToClientEvents {
     hereCount?: number
   }) => void
   /**
+   * Your board post was taken down by a moderator or the automatic check (SV9).
+   * To your own `user:{id}` room only; ids, nothing of the post's words. A
+   * `board_post_removed` push and bell row go with it.
+   */
+  "board:postRemoved": (data: { eventId: string; postId: string }) => void
+  /**
    * The event was cancelled. Everyone checked in has been checked out (their
    * check-in is `cancelled`, their presence closed `ended`); the room is empty.
    * One emit to `event:{id}` and `event:room:{id}`, never one per person, and it

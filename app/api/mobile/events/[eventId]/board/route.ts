@@ -37,6 +37,9 @@ interface RouteParams {
  * the product where identity is handed over before anybody consented to it.
  */
 
+/** How many of an author's own taken-down posts the board read lists. */
+const TAKEN_DOWN_SHOWN = 20
+
 // GET /api/mobile/events/[eventId]/board
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
@@ -93,7 +96,26 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       posts.map((p) => p.author_id)
     )
 
+    /*
+     * Your own posts a moderator or the automatic check took down, so the app
+     * can say so (SV9). Yours only, newest first, a few: the author is the one
+     * person the board tells, and a withdrawal by the author is not here.
+     */
+    const takenDown = await db.board_posts.findMany({
+      where: { event_id: eventId, author_id: user.userId, deleted_at: { not: null }, moderation_status: { in: ["removed", "hidden"] } },
+      orderBy: { deleted_at: "desc" },
+      take: TAKEN_DOWN_SHOWN,
+      select: { id: true, kind: true, body: true, created_at: true, deleted_at: true },
+    })
+
     return successResponse({
+      takenDown: takenDown.map((p) => ({
+        id: p.id,
+        kind: p.kind,
+        body: p.body,
+        createdAt: p.created_at,
+        takenDownAt: p.deleted_at,
+      })),
       posts: posts.map((p) => ({
         id: p.id,
         kind: p.kind,

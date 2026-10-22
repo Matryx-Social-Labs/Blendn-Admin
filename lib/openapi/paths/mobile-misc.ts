@@ -769,6 +769,7 @@ const NotificationSchema = z.object({
     "event_changed",
     "report_actioned",
     "event_cancelled",
+    "board_post_removed",
   ]),
   title: z.string(),
   body: z.string(),

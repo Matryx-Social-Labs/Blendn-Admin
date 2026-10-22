@@ -14,7 +14,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "event_cancelled" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "event_cancelled" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned" | "board_post_removed"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -809,6 +809,27 @@ export async function notifyBoardRequest(
     title: "Someone answered your post",
     body: "Open the board to see who is asking.",
     data: { type: "board_request", eventId, requestId },
+  })
+}
+
+/**
+ * A moderator, or the automatic check, took your board post down (SV9).
+ *
+ * Says that, and nothing of what the post said or why: the board is anonymous
+ * and a lock screen is not an authenticated surface, so the push carries no
+ * words of the post (`notifyBoardRequest` follows the same rule). The app
+ * shows the rest on open, from `GET /events/:eventId/board`'s `takenDown`.
+ */
+export async function notifyBoardPostRemoved(
+  authorId: string,
+  eventId: string,
+  postId: string
+): Promise<boolean> {
+  return sendPushNotification({
+    userId: authorId,
+    title: "Your board post was taken down",
+    body: "It didn't meet the board's rules. Open the board to see where things stand.",
+    data: { type: "board_post_removed", eventId, postId },
   })
 }
 

@@ -2945,6 +2945,18 @@ and it is gated on presence rather than intent — a board that stayed open woul
 be a second room with a weaker gate running beside the real one, and a readable
 one would be a list of who came alone, open during the night.
 
+**A taken-down post is told to its author** (SV9). When a moderator removes a
+post, or the automatic check takes one down, its author gets a
+`board_post_removed` push ("Your board post was taken down", no words of the
+post), a bell row of that kind (`data: { type, eventId, postId }`), and
+`board:postRemoved` `{ eventId, postId }` on their own `user:` room (see
+`docs/SOCKET_EVENTS.md`). Only when that action is what took the post down: their
+own withdrawal tells nobody, and a post already withdrawn that a moderator then
+marks removed tells nobody either. `GET /events/:eventId/board` carries
+`takenDown`: `[{ id, kind, body, createdAt, takenDownAt }]`, the caller's own
+removed or hidden posts (at most 20, newest first, never anybody else's), so the
+app can show the state. Additive and optional.
+
 **Blocks apply both ways.** A post by somebody who blocked you, or whom you
 blocked, is not on your board; asking on one is refused exactly as asking on a
 post that is gone; and an ask from somebody blocked either way is left out of

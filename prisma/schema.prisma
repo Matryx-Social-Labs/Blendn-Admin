@@ -1343,6 +1343,9 @@ enum notification_kind {
   /// in (SV7). Sent once, to the people who were inside, in place of
   /// `event_update`'s cancellation line.
   event_cancelled
+  /// A moderator or the automatic check took your board post down (SV9). Ids
+  /// only; nothing of the post's words, on a lock screen or in this row.
+  board_post_removed
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.

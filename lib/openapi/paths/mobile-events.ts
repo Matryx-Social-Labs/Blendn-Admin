@@ -74,6 +74,20 @@ registry.registerPath({
                   requestCount: z.number(),
                 })
               ),
+              takenDown: z
+                .array(
+                  z.object({
+                    id: z.string(),
+                    kind: z.enum(["offer", "seeking", "chat"]),
+                    body: z.string(),
+                    createdAt: z.string(),
+                    takenDownAt: z.string(),
+                  })
+                )
+                .optional()
+                .describe(
+                  "YOUR posts a moderator or the automatic check took down, newest first, at most 20 (SV9). Yours only: another reader gets []. Your own withdrawals are not here. A `board_post_removed` push, bell row and `board:postRemoved` socket event say so when it happens."
+                ),
             })
           ),
         },

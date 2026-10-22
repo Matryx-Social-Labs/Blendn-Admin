@@ -178,6 +178,7 @@ already know each other's ids.
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `private:message` | Same as above | Notification when not in conversation room |
+| `board:postRemoved` | `user:{id}` (the author's own) | `{ eventId, postId }`. Your board post was taken down by a moderator or the automatic check; goes with a `board_post_removed` push and bell row. Never to anybody else, and never the post's words |
 | `event:cancelled` | `event:{id}` and `event:room:{id}` | `{ eventId }`. The event was cancelled: everyone checked in has been checked out (their check-in is `cancelled`, their presence closed `ended`). One emit to the rooms however many are inside, never one per person; carries nothing but the id. The same people get an `event_cancelled` push (`docs/API.md`, *What pushes, and when*). Not sent when nobody was inside |
 | `notification:new` | `{ kind }` | A row landed in the notifications bell; the app refreshes its badge. Never sent for messages, which write no row |
 | `live:ended` | `{ eventId, reason }` | Your Go Live at a venue ended and your sockets left its rooms. `eventId` is the venue day; `reason` is `expired` (the window ran out, or the venue's day reset), `event_started` (a real event took the venue over; the push names it), `switched_event`, `manual`, or `left_area` |
