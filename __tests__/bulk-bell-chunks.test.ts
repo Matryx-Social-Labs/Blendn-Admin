@@ -29,7 +29,10 @@ jest.mock("expo-server-sdk", () => ({
 const warn = jest.fn()
 jest.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => warn(...a), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 
-import { BELL_INSERT_CHUNK, sendBulkPushNotifications } from "@/lib/push-notifications"
+import { BELL_INSERT_CHUNK as REAL_CHUNK, sendBulkPushNotifications } from "@/lib/push-notifications"
+
+// The limit is written out here, not read from the module: a test that builds its audience from the constant it checks hangs when that constant is wrong.
+const BELL_INSERT_CHUNK = 5000
 
 const people = (n: number) => Array.from({ length: n }, (_, i) => `u${i}`)
 const rowsFor = (args: { data: Array<{ user_id: string }> }) => args.data.map((d) => ({ id: `row-${d.user_id}`, user_id: d.user_id }))
@@ -46,6 +49,10 @@ const send = (userIds: string[]) =>
   sendBulkPushNotifications({ userIds, title: "t", body: "b", data: { type: "announcement", eventId: "e1" } })
 
 describe("the bulk bell insert", () => {
+  it("is 5,000 rows to a statement", () => {
+    expect(REAL_CHUNK).toBe(BELL_INSERT_CHUNK)
+  })
+
   it("is one statement up to the chunk size and splits above it, every recipient exactly once", async () => {
     createManyAndReturn.mockImplementation(async (a) => rowsFor(a))
     await send(people(BELL_INSERT_CHUNK))
