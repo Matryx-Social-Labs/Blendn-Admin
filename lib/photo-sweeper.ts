@@ -50,6 +50,8 @@ export interface PhotoSweepResult {
 }
 
 export async function sweepUnmoderatedPhotos(now: Date = new Date()): Promise<PhotoSweepResult> {
+  // Without a key every look is "did not look": nothing to retry, and no attempt to spend.
+  if (!process.env.OPENAI_API_KEY) return { looked: 0, settled: 0 }
   /*
    * The per-person cap is in the query, not applied to what a read-ahead
    * happened to return: with the cap after a LIMIT, one person with more rows
@@ -80,15 +82,15 @@ export async function sweepUnmoderatedPhotos(now: Date = new Date()): Promise<Ph
   for (const { url, user_id: userId } of rows) {
     try {
       // Stamped first: a row that throws, or hangs the process, still goes to the back.
-      const { attempts } = await db.photo_checks.update({
-        where: { url },
-        data: { attempts: { increment: 1 }, last_attempted_at: now },
-        select: { attempts: true },
-      })
-      if (attempts === MAX_ATTEMPTS_PER_DAY_AFTER) {
-        logger.error("Photo still unjudged after many attempts; retried daily from here", { userId, attempts })
+      const { count } = await db.photo_checks.updateMany({ where: { url }, data: { last_attempted_at: now } })
+      if (count === 0) continue // the person's account went between the read and now
+      const asked = await recheck(url, userId)
+      // Only a real ask counts toward the back-off: storage or the vendor being down is not the photo's doing.
+      if (!asked) continue
+      const row = await db.photo_checks.update({ where: { url }, data: { attempts: { increment: 1 } }, select: { attempts: true } }).catch(() => null)
+      if (row?.attempts === MAX_ATTEMPTS_PER_DAY_AFTER) {
+        logger.error("Photo still unjudged after many attempts; retried daily from here", { userId, attempts: row.attempts })
       }
-      await recheck(url, userId)
     } catch (error) {
       logger.error("Unchecked photo sweep failed for one photo", {
         userId,
@@ -103,29 +105,55 @@ export async function sweepUnmoderatedPhotos(now: Date = new Date()): Promise<Ph
   return { looked: rows.length, settled: rows.length - stillUnchecked }
 }
 
-async function recheck(url: string, userId: string): Promise<void> {
-  // The SSRF gate, again: this URL goes to a vendor that fetches it. A URL that
-  // fails it can never be judged, so it does not stay on the profile unjudged.
+/** Whether the photo was really put to the vendor (and so counts as an attempt). */
+async function recheck(url: string, userId: string): Promise<boolean> {
+  // The SSRF gate, again: this URL goes to a vendor that fetches it.
   const key = ownedPhotoKey(url, userId)
   if (!key) {
+    /*
+     * Fail closed -- but only for a URL that is plainly not the person's. One in
+     * our storage family under their own path that merely fails the check is a
+     * bucket name this deployment is not configured for: configuration, not a
+     * verdict, and pulling on it would be bulk and irreversible.
+     */
+    if (looksOurs(url, userId)) {
+      logger.error("Unchecked photo looks like the person's own but fails the ownership check (bucket configuration?); left alone", { userId })
+      return false
+    }
     logger.warn("Unchecked photo is not the person's own object; pulled", { userId })
     await pullPhoto(url, userId)
-    return
+    return false
   }
-  const profile = await db.profiles.findUnique({ where: { id: userId }, select: { photos: true, blur_photo: true } })
-  const onProfile = Boolean(profile && (profile.photos.includes(url) || profile.blur_photo === url))
+  const profile = await db.profiles.findUnique({ where: { id: userId }, select: { blur_photo: true } })
 
   const presence = await objectPresence(key)
   // Anything but a confirmed 404 -- the network, a 5xx, a permissions error -- is "could not tell": next pass.
-  if (presence === "unknown") return
+  if (presence === "unknown") return false
   if (presence === "gone") {
-    // Nothing left to moderate, if nothing points at it. One the profile still points at is not
-    // a judged photo, so its row stays on the list.
-    if (!onProfile) await db.photo_checks.deleteMany({ where: { url, checked: false } })
-    return
+    /*
+     * Nothing left to moderate, if nothing points at it; one the profile still
+     * points at is not a judged photo, so its row stays. The profile is asked in
+     * the delete itself: a save can put the URL back while the storage call runs.
+     */
+    await db.$executeRaw`
+      DELETE FROM photo_checks
+       WHERE url = ${url} AND checked = false
+         AND NOT EXISTS (SELECT 1 FROM profiles WHERE id = ${userId} AND (${url} = ANY(photos) OR blur_photo = ${url}))`
+    return false
   }
   if (profile?.blur_photo === url) await moderateBlurPhoto(url, userId)
   else await moderateProfilePhoto(url, userId)
+  return true
+}
+
+/** In our storage family, under this person's own path. */
+function looksOurs(url: string, userId: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === "https:" && u.hostname.endsWith(".tigris.dev") && u.pathname.startsWith(`/profile/${userId}/`)
+  } catch {
+    return false
+  }
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null

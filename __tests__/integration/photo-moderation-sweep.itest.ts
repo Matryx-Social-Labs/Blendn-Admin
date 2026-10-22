@@ -60,6 +60,7 @@ const checkedOf = async (url: string) => (await db.photo_checks.findUnique({ whe
 afterEach(() => db.photo_checks.deleteMany({ where: { user_id: { in: users } } }))
 
 beforeEach(() => {
+  process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "sk-itest"
   jest.clearAllMocks()
   ;(objectPresence as jest.Mock).mockResolvedValue("present")
 })
@@ -126,6 +127,18 @@ describe("the unchecked-photo sweep", () => {
     expect(await checkedOf(p.photo)).toBe(false)
   })
 
+  it("does not drop the row of a gone object a save has put back on the profile since the sweep looked", async () => {
+    const p = await person()
+    await db.profiles.update({ where: { id: p.id }, data: { photos: [], blur_photo: null } })
+    // The save lands during the storage call: the profile points at the URL again by the time it answers.
+    ;(objectPresence as jest.Mock).mockImplementation(async () => {
+      await db.profiles.update({ where: { id: p.id }, data: { photos: [p.photo] } })
+      return "gone"
+    })
+    await sweepUnmoderatedPhotos()
+    expect(await checkedOf(p.photo)).toBe(false)
+  })
+
   it("does not read 'could not tell' as 'gone': a storage error leaves the row for the next pass", async () => {
     const p = await person()
     await db.profiles.update({ where: { id: p.id }, data: { photos: [], blur_photo: null } })
@@ -145,6 +158,42 @@ describe("the unchecked-photo sweep", () => {
     expect(checkImageContent).not.toHaveBeenCalledWith(foreign, expect.anything())
     expect((await db.profiles.findUniqueOrThrow({ where: { id: p.id }, select: { photos: true } })).photos).toEqual([p.photo])
     expect(await db.photo_checks.findUnique({ where: { url: foreign } })).toMatchObject({ checked: true, hidden: true })
+  })
+
+  it("does not pull what only LOOKS like ours: a bucket name that does not match is configuration, not a verdict", async () => {
+    const p = await person()
+    // Right host family, right person's path, a bucket name this deployment is not configured for.
+    const lookalike = `https://some-other-bucket.fly.storage.tigris.dev/profile/${p.id}/main-sealed`
+    await db.profiles.update({ where: { id: p.id }, data: { photos: [lookalike] } })
+    await db.photo_checks.create({ data: { url: lookalike, user_id: p.id, checked: false, created_at: OLD } })
+    await sweepUnmoderatedPhotos()
+    expect((await db.profiles.findUniqueOrThrow({ where: { id: p.id }, select: { photos: true } })).photos).toEqual([lookalike])
+    expect(await checkedOf(lookalike)).toBe(false)
+    expect(checkImageContent).not.toHaveBeenCalledWith(lookalike, expect.anything())
+  })
+
+  it("does not spend a row's attempts on the storage or the vendor being down: only a real ask counts", async () => {
+    const p = await person()
+    ;(objectPresence as jest.Mock).mockResolvedValue("unknown")
+    await sweepUnmoderatedPhotos()
+    expect((await db.photo_checks.findUniqueOrThrow({ where: { url: p.photo } })).attempts).toBe(0)
+    ;(objectPresence as jest.Mock).mockResolvedValue("present")
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: false, reason: "error" })
+    await sweepUnmoderatedPhotos()
+    expect((await db.photo_checks.findUniqueOrThrow({ where: { url: p.photo } })).attempts).toBe(1)
+  })
+
+  it("does nothing without a vendor key: no row is stamped, none is retried into back-off", async () => {
+    const p = await person()
+    const key = process.env.OPENAI_API_KEY
+    delete process.env.OPENAI_API_KEY
+    try {
+      await sweepUnmoderatedPhotos()
+    } finally {
+      if (key !== undefined) process.env.OPENAI_API_KEY = key
+    }
+    expect((await db.photo_checks.findUniqueOrThrow({ where: { url: p.photo } })).attempts).toBe(0)
+    expect(checkImageContent).not.toHaveBeenCalled()
   })
 
   it("records each attempt, so a row that never gets a verdict can be put behind the ones that might", async () => {

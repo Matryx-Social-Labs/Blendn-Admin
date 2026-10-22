@@ -68,4 +68,14 @@ describe("checkImageContent", () => {
       expect.objectContaining({ status: 400, body: expect.stringContaining("Failed to download image") })
     )
   })
+
+  it("does not log a URL from the vendor's error: a private image's is a signed bearer link", async () => {
+    fetchMock.mockResolvedValue(
+      json(400, { error: { message: "Failed to download image from https://bucket.example/chat/u/f?X-Amz-Credential=AKIA123&X-Amz-Signature=abc" } })
+    )
+    await checkImageContent("https://example/img")
+    const logged = JSON.stringify((logger.warn as jest.Mock).mock.calls)
+    expect(logged).toContain("Failed to download image")
+    expect(logged).not.toMatch(/X-Amz|AKIA123|bucket\.example/)
+  })
 })

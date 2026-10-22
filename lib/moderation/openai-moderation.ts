@@ -219,7 +219,8 @@ async function imageAttempt(
 
     if (!response.ok) {
       // The body says why (it is the vendor's error text, never our content).
-      const body = (await response.text().catch(() => "")).slice(0, BODY_LOG_CHARS)
+      // A download failure can echo the URL, and a private image's is a signed bearer link: never logged.
+      const body = (await response.text().catch(() => "")).replace(/https?:\/\/\S+/gi, "<url>").slice(0, BODY_LOG_CHARS)
       logger.warn("OpenAI Image Moderation API returned non-OK status", {
         status: response.status,
         statusText: response.statusText,
