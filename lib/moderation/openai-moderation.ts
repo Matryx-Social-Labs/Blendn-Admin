@@ -1,4 +1,4 @@
-import { logger } from "@/lib/logger"
+import { logger } from "../logger"
 import type { ModerationResult, OpenAIModerationCategory } from "./types"
 import { AUTO_HIDE_THRESHOLD, FLAG_THRESHOLD } from "./config"
 

@@ -2,8 +2,8 @@
 // `build:server` compiles with plain tsc -- the `@/` alias would be emitted verbatim.
 import { db } from "./db"
 import { logger } from "./logger"
-import { moderateBlurPhoto, moderateProfilePhoto } from "./photos"
-import { headObject, ownedPhotoKey } from "./tigris"
+import { moderateBlurPhoto, moderateProfilePhoto, pullPhoto } from "./photos"
+import { objectPresence, ownedPhotoKey } from "./tigris"
 
 /**
  * Photos the vendor could not look at get looked at again (SCRUM-732).
@@ -17,35 +17,76 @@ import { headObject, ownedPhotoKey } from "./tigris"
  * every unchecked photo would blank profiles for the length of any vendor
  * outage, and the failure it covers is overwhelmingly transient; this closes
  * the gap in minutes instead, and a photo found unsafe on the second look is
- * pulled exactly as the first look would have pulled it.
+ * pulled exactly as the first look would have pulled it. The exception fails
+ * closed: a URL on a profile that is not the person's own object can never be
+ * judged (it is never sent to the vendor), so it is pulled.
  *
- * The verdict goes through the two functions the profile write already uses
- * (`moderateProfilePhoto`, `moderateBlurPhoto`), so a pass, a pull and the
- * 180-day hold mean one thing wherever the verdict comes from.
+ * The verdict goes through the functions the profile write already uses
+ * (`moderateProfilePhoto`, `moderateBlurPhoto`, `pullPhoto`), so a pass, a
+ * pull and the 180-day hold mean one thing wherever the verdict comes from.
+ *
+ * ## Why one person cannot starve the queue
+ *
+ * A pass takes the least recently attempted rows first, at most
+ * `PER_USER_SLOTS` per person, and stamps each row it takes before asking the
+ * vendor. A pile of photos that never get a verdict rotates behind the ones
+ * that might; past `MAX_ATTEMPTS_PER_DAY_AFTER` tries a row is retried once a
+ * day, not every pass.
  */
 export const SWEEP_INTERVAL_MS = 10 * 60 * 1000
 /** The write that made the row runs its own check after the response; give it time to finish first. */
 export const SWEEP_SETTLE_MS = 2 * 60 * 1000
 const BATCH_LIMIT = 25
+export const PER_USER_SLOTS = 3
+/** Candidates read per pass, from which the per-person cap is applied. */
+const POOL = BATCH_LIMIT * 8
+/** ~8 hours of passes. After this a row is a standing problem for an operator, not a retry. */
+export const MAX_ATTEMPTS_PER_DAY_AFTER = 48
+const BACKOFF_MS = 24 * 60 * 60 * 1000
 
 export interface PhotoSweepResult {
-  /** Rows looked at this pass. */
+  /** Rows taken this pass. */
   looked: number
-  /** Rows no longer on the unchecked list: checked, or dropped because the object is gone. */
+  /** Rows no longer on the unchecked list: checked, pulled, or dropped because the object is gone. */
   settled: number
 }
 
 export async function sweepUnmoderatedPhotos(now: Date = new Date()): Promise<PhotoSweepResult> {
-  // Newest first: a photo that keeps failing must not hold the front of the queue against the ones behind it.
-  const rows = await db.photo_checks.findMany({
-    where: { checked: false, created_at: { lt: new Date(now.getTime() - SWEEP_SETTLE_MS) } },
-    orderBy: { created_at: "desc" },
-    take: BATCH_LIMIT,
+  const pool = await db.photo_checks.findMany({
+    where: {
+      checked: false,
+      created_at: { lt: new Date(now.getTime() - SWEEP_SETTLE_MS) },
+      OR: [
+        { attempts: { lt: MAX_ATTEMPTS_PER_DAY_AFTER } },
+        { last_attempted_at: null },
+        { last_attempted_at: { lt: new Date(now.getTime() - BACKOFF_MS) } },
+      ],
+    },
+    orderBy: [{ last_attempted_at: { sort: "asc", nulls: "first" } }, { created_at: "asc" }],
+    take: POOL,
     select: { url: true, user_id: true },
   })
 
+  const perUser = new Map<string, number>()
+  const rows = pool
+    .filter((r) => {
+      const n = perUser.get(r.user_id) ?? 0
+      perUser.set(r.user_id, n + 1)
+      return n < PER_USER_SLOTS
+    })
+    .slice(0, BATCH_LIMIT)
+
   for (const { url, user_id: userId } of rows) {
     try {
+      // Stamped first: a row that throws, or hangs the process, still goes to the back.
+      const { attempts } = await db.photo_checks.update({
+        where: { url },
+        data: { attempts: { increment: 1 }, last_attempted_at: now },
+        select: { attempts: true },
+      })
+      if (attempts === MAX_ATTEMPTS_PER_DAY_AFTER) {
+        logger.error("Photo still unjudged after many attempts; retried daily from here", { userId, attempts })
+      }
       await recheck(url, userId)
     } catch (error) {
       logger.error("Unchecked photo sweep failed for one photo", {
@@ -62,18 +103,26 @@ export async function sweepUnmoderatedPhotos(now: Date = new Date()): Promise<Ph
 }
 
 async function recheck(url: string, userId: string): Promise<void> {
-  // The SSRF gate, again: this URL goes to a vendor that fetches it.
+  // The SSRF gate, again: this URL goes to a vendor that fetches it. A URL that
+  // fails it can never be judged, so it does not stay on the profile unjudged.
   const key = ownedPhotoKey(url, userId)
   if (!key) {
-    logger.warn("Unchecked photo is not the person's own object; left alone", { userId })
+    logger.warn("Unchecked photo is not the person's own object; pulled", { userId })
+    await pullPhoto(url, userId)
     return
   }
-  // An object that is gone has nothing left to moderate; the row would be retried for ever.
-  if ((await headObject(key)) === null) {
-    await db.photo_checks.deleteMany({ where: { url, checked: false } })
+  const profile = await db.profiles.findUnique({ where: { id: userId }, select: { photos: true, blur_photo: true } })
+  const onProfile = Boolean(profile && (profile.photos.includes(url) || profile.blur_photo === url))
+
+  const presence = await objectPresence(key)
+  // Anything but a confirmed 404 -- the network, a 5xx, a permissions error -- is "could not tell": next pass.
+  if (presence === "unknown") return
+  if (presence === "gone") {
+    // Nothing left to moderate, if nothing points at it. One the profile still points at is not
+    // a judged photo, so its row stays on the list.
+    if (!onProfile) await db.photo_checks.deleteMany({ where: { url, checked: false } })
     return
   }
-  const profile = await db.profiles.findUnique({ where: { id: userId }, select: { blur_photo: true } })
   if (profile?.blur_photo === url) await moderateBlurPhoto(url, userId)
   else await moderateProfilePhoto(url, userId)
 }

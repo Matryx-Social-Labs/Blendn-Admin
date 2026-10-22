@@ -13,12 +13,12 @@ jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
   withdrawFromPublic: jest.fn().mockResolvedValue(undefined),
   // Every object exists unless a test says otherwise.
-  headObject: jest.fn().mockResolvedValue({ bytes: 100_000, contentType: "image/jpeg", versionId: null, checksumSha256: null }),
+  objectPresence: jest.fn().mockResolvedValue("present"),
 }))
 
 import { checkImageContent } from "@/lib/moderation/openai-moderation"
-import { headObject, withdrawFromPublic } from "@/lib/tigris"
-import { SWEEP_SETTLE_MS, sweepUnmoderatedPhotos } from "@/lib/photo-sweeper"
+import { objectPresence, withdrawFromPublic } from "@/lib/tigris"
+import { MAX_ATTEMPTS_PER_DAY_AFTER, PER_USER_SLOTS, SWEEP_SETTLE_MS, sweepUnmoderatedPhotos } from "@/lib/photo-sweeper"
 import { db, closeDb, makeUser, onboard } from "./helpers"
 
 const bucketHost = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage.tigris.dev`
@@ -58,7 +58,7 @@ const checkedOf = async (url: string) => (await db.photo_checks.findUnique({ whe
 
 beforeEach(() => {
   jest.clearAllMocks()
-  ;(headObject as jest.Mock).mockResolvedValue({ bytes: 100_000, contentType: "image/jpeg", versionId: null, checksumSha256: null })
+  ;(objectPresence as jest.Mock).mockResolvedValue("present")
 })
 
 describe("the unchecked-photo sweep", () => {
@@ -69,7 +69,8 @@ describe("the unchecked-photo sweep", () => {
     expect(await checkedOf(p.photo)).toBe(true)
     expect(await checkedOf(p.blur)).toBe(true)
     // Retried inside the call too: this is not the request path.
-    expect(checkImageContent).toHaveBeenCalledWith(p.photo, expect.objectContaining({ retries: expect.any(Number) }))
+    const asked = (checkImageContent as jest.Mock).mock.calls.find(([url]) => url === p.photo)
+    expect(asked?.[1]?.retries).toBeGreaterThan(0)
   })
 
   it("pulls a photo the second look finds unsafe, and its blur, exactly as the profile write's moderation does", async () => {
@@ -106,22 +107,89 @@ describe("the unchecked-photo sweep", () => {
     expect(await checkedOf(p.photo)).toBe(false)
   })
 
-  it("drops the row of an object that is gone, without asking the vendor about it", async () => {
+  it("drops the row of an object that is confirmed gone and no longer on the profile, without asking the vendor", async () => {
     const p = await person()
-    ;(headObject as jest.Mock).mockResolvedValue(null)
+    await db.profiles.update({ where: { id: p.id }, data: { photos: [], blur_photo: null } })
+    ;(objectPresence as jest.Mock).mockResolvedValue("gone")
     await sweepUnmoderatedPhotos()
     expect(await db.photo_checks.findUnique({ where: { url: p.photo } })).toBeNull()
     expect(checkImageContent).not.toHaveBeenCalledWith(p.photo, expect.anything())
   })
 
-  it("never sends the vendor a URL that is not the person's own object", async () => {
+  it("keeps the row of a gone object the profile still points at: a dangling photo is not a judged one", async () => {
+    const p = await person()
+    ;(objectPresence as jest.Mock).mockResolvedValue("gone")
+    await sweepUnmoderatedPhotos()
+    expect(await checkedOf(p.photo)).toBe(false)
+  })
+
+  it("does not read 'could not tell' as 'gone': a storage error leaves the row for the next pass", async () => {
+    const p = await person()
+    await db.profiles.update({ where: { id: p.id }, data: { photos: [], blur_photo: null } })
+    ;(objectPresence as jest.Mock).mockResolvedValue("unknown")
+    await sweepUnmoderatedPhotos()
+    expect(await db.photo_checks.findUnique({ where: { url: p.photo } })).not.toBeNull()
+    expect(checkImageContent).not.toHaveBeenCalledWith(p.photo, expect.anything())
+  })
+
+  it("fails closed on a URL that is not the person's own object: it is pulled from the profile, never sent to the vendor", async () => {
     const p = await person()
     const foreign = "https://example.com/not-ours.jpg"
+    await db.profiles.update({ where: { id: p.id }, data: { photos: [foreign, p.photo] } })
     await db.photo_checks.create({ data: { url: foreign, user_id: p.id, checked: false, created_at: OLD } })
     ;(checkImageContent as jest.Mock).mockResolvedValue(CLEAN)
     await sweepUnmoderatedPhotos()
     expect(checkImageContent).not.toHaveBeenCalledWith(foreign, expect.anything())
-    expect(await checkedOf(foreign)).toBe(false)
+    expect((await db.profiles.findUniqueOrThrow({ where: { id: p.id }, select: { photos: true } })).photos).toEqual([p.photo])
+    expect(await db.photo_checks.findUnique({ where: { url: foreign } })).toMatchObject({ checked: true, hidden: true })
+  })
+
+  it("records each attempt, so a row that never gets a verdict can be put behind the ones that might", async () => {
+    const p = await person()
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: false, reason: "error" })
+    await sweepUnmoderatedPhotos()
+    await sweepUnmoderatedPhotos()
+    const row = await db.photo_checks.findUniqueOrThrow({ where: { url: p.photo } })
+    expect(row.attempts).toBe(2)
+    expect(row.last_attempted_at).not.toBeNull()
+  })
+
+  it("cannot be starved: one person's pile of unjudgeable photos takes a few slots a pass, not the queue", async () => {
+    const flooder = await person()
+    const many = Array.from({ length: PER_USER_SLOTS * 4 }, (_, i) => urlOf(flooder.id, `extra-${i}-sealed`))
+    await db.photo_checks.createMany({ data: many.map((url) => ({ url, user_id: flooder.id, checked: false, created_at: new Date(OLD.getTime() - 1000) })) })
+    const honest = await person()
+    ;(checkImageContent as jest.Mock).mockImplementation(async (url: string) =>
+      url.includes(`/${flooder.id}/`) ? { checked: false, reason: "error" } : CLEAN
+    )
+    await sweepUnmoderatedPhotos()
+    expect(await checkedOf(honest.photo)).toBe(true)
+    const asked = (checkImageContent as jest.Mock).mock.calls.filter(([url]) => String(url).includes(`/${flooder.id}/`))
+    expect(asked.length).toBeLessThanOrEqual(PER_USER_SLOTS)
+  })
+
+  it("takes the least recently attempted first, so every row of a long queue gets its turn", async () => {
+    const flooder = await person()
+    // Four failing rows, one slot-set per pass: three passes must reach all of them.
+    ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: false, reason: "error" })
+    const urls = Array.from({ length: PER_USER_SLOTS + 2 }, (_, i) => urlOf(flooder.id, `q-${i}-sealed`))
+    await db.photo_checks.deleteMany({ where: { user_id: flooder.id } })
+    await db.photo_checks.createMany({ data: urls.map((url) => ({ url, user_id: flooder.id, checked: false, created_at: OLD })) })
+    await sweepUnmoderatedPhotos()
+    await sweepUnmoderatedPhotos()
+    const rows = await db.photo_checks.findMany({ where: { user_id: flooder.id } })
+    expect(rows.every((r) => r.attempts >= 1)).toBe(true)
+  })
+
+  it("backs a row off once it has been tried a lot: not again for a day", async () => {
+    const p = await person()
+    await db.photo_checks.update({ where: { url: p.photo }, data: { attempts: MAX_ATTEMPTS_PER_DAY_AFTER, last_attempted_at: new Date() } })
+    ;(checkImageContent as jest.Mock).mockResolvedValue(CLEAN)
+    await sweepUnmoderatedPhotos()
+    expect(checkImageContent).not.toHaveBeenCalledWith(p.photo, expect.anything())
+    await db.photo_checks.update({ where: { url: p.photo }, data: { last_attempted_at: new Date(Date.now() - 25 * 3_600_000) } })
+    await sweepUnmoderatedPhotos()
+    expect(await checkedOf(p.photo)).toBe(true)
   })
 
   it("reports what it settled, not what it selected", async () => {

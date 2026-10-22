@@ -1536,6 +1536,12 @@ model photo_checks {
   /// bucket and kept 180 days after account deletion (docs/RETENTION.md).
   hidden     Boolean  @default(false)
   created_at DateTime @default(now()) @db.Timestamptz(6)
+  /// How many times the sweep (lib/photo-sweeper.ts) has re-asked the vendor
+  /// about this row, and when last. The sweep takes the least recently
+  /// attempted first, so a row that never gets a verdict cannot hold the
+  /// queue against the ones behind it (SCRUM-732).
+  attempts          Int       @default(0)
+  last_attempted_at DateTime? @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
