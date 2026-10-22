@@ -2014,7 +2014,7 @@
       "date": "2026-10-22"
     },
     "bell-cost.itest.ts": {
-      "guards": "SCRUM-740: one poll of GET /notifications is a fixed number of statements (at most 13: the page, one read per kind present, the sender's two relation loads, two counts) however long the page, none sent twice; the unread-conversation count is answered by the partial index private_messages_unread_idx, probed once per conversation of the reader's.",
+      "guards": "SCRUM-740: one poll of GET /notifications is a fixed number of statements (at most 13: the page, one read per kind present, the sender's two relation loads, two counts) however long the page, none sent twice; the unread-conversation count is answered by the partial index private_messages_unread_idx.",
       "mutation": "M1608 the unread count's is_read filter removed (the partial index can no longer serve it). M1609 a per-row event read added to the decoration (an N+1).",
       "observed": "2026-10-22: M1608: 1 failing (the plan). M1609: 1 failing (a 50-row page costs more statements than a 10-row page). Each reverted; 2 of 2.",
       "date": "2026-10-22"

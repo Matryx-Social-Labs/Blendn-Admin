@@ -633,8 +633,8 @@ statements however long the page: the page, one read per kind present (friend
 requests with their senders in two more, crew invites and memberships, message and
 board requests, matches, events, crews), and two counts. Nothing runs per row.
 `unreadCount` is served by `notifications (user_id, read_at)`, and `badgeCount`'s
-unread conversations by the partial index `private_messages_unread_idx`, probed once
-per conversation of the reader's (`__tests__/integration/bell-cost.itest.ts` counts
+unread conversations by the partial index `private_messages_unread_idx`
+(`__tests__/integration/bell-cost.itest.ts` counts
 the statements and reads the plan; a 50-row page took a median of 8 ms against a local
 database).
 

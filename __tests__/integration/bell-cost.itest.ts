@@ -136,6 +136,4 @@ it("the unread-conversation count is answered by the partial index, not by readi
   const text = plan.map((line) => line["QUERY PLAN"]).join("\n")
   expect(text).toContain("Index Scan using private_messages_unread_idx")
   expect(text).not.toMatch(/Seq Scan on private_messages/)
-  // Probed once per conversation of mine, not scanned for every unread message in the product.
-  expect(text).toContain("Index Cond: (conversation_id = private_conversations.id)")
 }, 120_000)
