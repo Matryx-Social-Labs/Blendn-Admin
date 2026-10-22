@@ -186,7 +186,7 @@ registry.registerPath({
     "RSVPs with status `going` or `waitlisted` for events that have not ended, soonest first. " +
     "Cancelled events are included with their status so the cancellation is seen; drafts and " +
     "deleted events are not. Event fields use the favourites route's names, plus `rsvpStatus` " +
-    "and `rsvpAt` (when the RSVP was made).",
+    "and `rsvpAt` (when the RSVP was made). `visibility` is `public`, `unlisted` or `private`, so a card can say an event is unlisted.",
   security: bearerAuth,
   request: {
     query: z.object({
@@ -213,6 +213,7 @@ registry.registerPath({
                   session: EventSessionSchema,
                   timezone: z.string(),
                   status: z.enum(["published", "cancelled", "completed"]),
+                  visibility: z.enum(["public", "unlisted", "private"]),
                   venueName: z.string().nullable(),
                   address: z.string().nullable(),
                   city: z.string().nullable(),

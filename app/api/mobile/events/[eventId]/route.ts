@@ -19,6 +19,7 @@ import { canPublish } from "@/lib/geofence-input"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
+import { eventArea } from "@/lib/venue-visibility"
 import { getOccupancy } from "@/lib/occupancy"
 import { dayOccurrencesSelect, eventDays, eventSession } from "@/lib/occurrences"
 import { changeForResponse, updateEventTracked } from "@/lib/event-change"
@@ -98,6 +99,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         // `eventHostSelect`, which claims `organizer` with a narrower shape.
         organizer_org: { select: { display_name: true } },
         details: true,
+        // `eventArea` reads the venue's area, and `eventVenue` its link test.
+        venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true } },
         // What `session` below is computed from. See `eventSession`.
         occurrences: dayOccurrencesSelect,
         categories: {
@@ -265,6 +268,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       venueName: event.venue_name,
       address: event.address,
       city: resolvedCity,
+      // The area: the confirmed venue's area, else the city (what an unlisted event's page shows).
+      area: eventArea(event, resolvedCity),
       state: event.state,
       country: event.country,
       postalCode: event.postal_code,

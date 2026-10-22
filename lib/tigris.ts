@@ -473,6 +473,11 @@ const ALLOWED_PHOTO_HOSTS = new Set([
   `${TIGRIS_PRIVATE_BUCKET}.t3.storage.dev`,
 ])
 
+/** The hosts the PUBLIC bucket answers on: where a cover image a public page may show lives. */
+export function publicBucketHosts(): string[] {
+  return [`${TIGRIS_BUCKET}.fly.storage.tigris.dev`, `${TIGRIS_BUCKET}.t3.storage.dev`]
+}
+
 const PRIVATE_HOSTS = new Set([`${TIGRIS_PRIVATE_BUCKET}.fly.storage.tigris.dev`, `${TIGRIS_PRIVATE_BUCKET}.t3.storage.dev`])
 
 /**
