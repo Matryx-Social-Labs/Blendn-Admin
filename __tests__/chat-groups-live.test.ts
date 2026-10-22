@@ -9,7 +9,8 @@ import { join } from "path"
  * says, so the two ways of getting it wrong are pinned here.
  */
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
-const ROUTE = () => read("app", "api", "mobile", "chat", "groups", "route.ts")
+// The row builder moved out of the route so `GET /me/muted-rooms` builds the same rows (lib/chat-group-rows.ts).
+const ROUTE = () => read("lib", "chat-group-rows.ts")
 
 describe("live means standing in it, not merely underway", () => {
   it("requires checked_in AND no check_out_time", () => {
@@ -31,7 +32,7 @@ describe("live means standing in it, not merely underway", () => {
     // is a very different and much worse field.
     const route = ROUTE()
     const block = route.slice(route.indexOf("db.event_check_ins.findMany"))
-    expect(block.slice(0, block.indexOf("select:"))).toContain("user_id: authUser.userId")
+    expect(block.slice(0, block.indexOf("select:"))).toContain("user_id: userId")
   })
 
   it("does not infer it from the event's clock", () => {

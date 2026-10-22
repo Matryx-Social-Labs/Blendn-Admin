@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 
 /**
  * A person silencing a room for themselves.
@@ -62,12 +62,17 @@ export function isRoomMuted(prefs: Prisma.JsonValue | null | undefined, now: Dat
   return roomMuteState(prefs, now).muted
 }
 
-/** The column with the mute applied, every other key kept. */
+/**
+ * The column with the mute applied, every other key kept. `muted_at` is when
+ * the person muted it: the key "Muted rooms" orders by and pages on, so that
+ * reading the room (which touches the member row) never moves it in that list.
+ */
 export function withMute(
   prefs: Prisma.JsonValue | Prisma.InputJsonObject | null | undefined,
-  until: Date | null
+  until: Date | null,
+  now: Date
 ): Prisma.InputJsonObject {
-  return { ...asObject(prefs), muted: true, muted_until: until ? until.toISOString() : null }
+  return { ...asObject(prefs), muted: true, muted_until: until ? until.toISOString() : null, muted_at: now.toISOString() }
 }
 
 /** The column with the mute removed, every other key kept. */
@@ -77,5 +82,26 @@ export function withoutMute(
   const rest = { ...asObject(prefs) }
   delete rest.muted
   delete rest.muted_until
+  delete rest.muted_at
   return rest as Prisma.InputJsonObject
 }
+
+/**
+ * `roomMuteState(…).muted` as SQL, for a query on `chat_group_members m`.
+ *
+ * The first condition is the partial index's own predicate
+ * (`chat_group_members_muted_idx`), written the way the index is. The rest is
+ * the time: no `muted_until` (or one that is not a string) is for ever, a
+ * time in the past is lapsed, and a string that is not an ISO time reads as
+ * lapsed, as `roomMuteState` reads it. The CASE is what keeps the cast from
+ * running on a string that is not a time.
+ */
+export const mutedNowSql = (now: Date) => Prisma.sql`(
+  (m.notification_preferences->>'muted') = 'true'
+  AND CASE
+    WHEN jsonb_typeof(m.notification_preferences->'muted_until') IS DISTINCT FROM 'string' THEN true
+    WHEN (m.notification_preferences->>'muted_until') ~ '^\\d{4}-\\d{2}-\\d{2}T[0-9:.]+(Z|[+-]\\d{2}:\\d{2})$'
+      THEN (m.notification_preferences->>'muted_until')::timestamptz > ${now}::timestamptz
+    ELSE false
+  END
+)`

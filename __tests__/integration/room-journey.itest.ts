@@ -134,7 +134,7 @@ describe("a room you leave, mute and report", () => {
       where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: me.id } },
       select: { notification_preferences: true, status: true },
     })
-    expect(row.notification_preferences).toEqual({ muted: true, muted_until: until })
+    expect(row.notification_preferences).toEqual({ muted: true, muted_until: until, muted_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/) })
     expect(row.status).toBe("active") // not the organiser's mute
 
     const unmuted = await room(me, mute.DELETE as Handler, "DELETE")

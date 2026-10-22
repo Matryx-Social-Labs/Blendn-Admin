@@ -44,7 +44,7 @@ const READERS: Record<string, string> = {
   "lib/room-kind.ts#mayWriteToRoomFor": "the event arm only; an event room without its event is hidden",
   "lib/room-kind.ts#roomWindowFor": "the event arm only; an event room without its event is closed",
   "lib/room-kind.ts#roomScope": "an event room's handle scope; throws, never invents, when the event is missing",
-  "app/api/mobile/chat/groups/route.ts#GET": "lists event rooms only (kind: 'event' in the where), narrowed with nothing to fall back on",
+  "lib/chat-group-rows.ts#eventRowsWithEvent": "the chat list's event rooms only (kind: 'event' in EVENT_ROOM_WHERE), narrowed with nothing to fall back on; a row without its event is not listed",
   "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts#GET":
     "sender names: a null event names a broadcast 'Organiser', never a person (roomSenderName)",
   "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts#POST": "the quoted reply's sender name, as GET",
