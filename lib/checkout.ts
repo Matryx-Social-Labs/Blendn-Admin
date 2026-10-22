@@ -206,6 +206,7 @@ export async function checkOutOfOtherEvents(
     select: {
       id: true,
       event_id: true,
+      check_in_time: true,
       expires_at: true,
       event: { select: { kind: true, title: true, venue_name: true, venue: { select: { name: true } } } },
     },
@@ -215,7 +216,15 @@ export async function checkOutOfOtherEvents(
   for (const row of others) {
     const reason: CheckoutReason =
       row.expires_at && row.expires_at <= now ? "expired" : row.event_id === keep.eventId ? "occurrence_ended" : "switched_event"
-    const result = await performCheckout(row.id, reason, reason === "expired" && row.expires_at ? row.expires_at : now)
+    /*
+     * Never before they arrived. A door that lost the race to another door
+     * (`openCheckIn`) switches out of a row opened a moment AFTER its own
+     * `now`, and a departure stamped before the arrival is refused by
+     * `presence_sessions_departure_after_arrival` — a 500 at the door, found
+     * by the race test.
+     */
+    const arrived = row.check_in_time && row.check_in_time > now ? row.check_in_time : now
+    const result = await performCheckout(row.id, reason, reason === "expired" && row.expires_at ? row.expires_at : arrived)
     if (!result) continue
     const { kind } = row.event
     const left =

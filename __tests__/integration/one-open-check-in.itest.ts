@@ -4,6 +4,7 @@ process.env.MOBILE_JWT_SECRET = process.env.MOBILE_JWT_SECRET ?? "itest-mobile-s
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { ONE_OPEN_CHECK_IN } from "@/lib/check-in-core"
+import { checkOutOfOtherEvents } from "@/lib/checkout"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { violatedConstraint } from "@/lib/prisma-errors"
 
@@ -128,6 +129,22 @@ describe("one open check-in per person", () => {
       const closed = await db.event_check_ins.findFirstOrThrow({ where: { event_id: loser, user_id: who.id }, select: { status: true } })
       expect(closed.status).toBe("checked_out")
     }
+  })
+
+  it("the losing door switches out of a room opened after its own clock, never before the arrival", async () => {
+    // The race, held still: the winner's row arrived a moment after the loser's `now`.
+    const who = await person()
+    const a = await event("Winner")
+    const b = await event("Loser")
+    const winnerAt = new Date()
+    await putInRoom({ eventId: a.id, occurrenceId: a.occurrences[0], userId: who.id, at: winnerAt })
+    const loserNow = new Date(winnerAt.getTime() - 5)
+
+    const [switched] = await checkOutOfOtherEvents(who.id, { eventId: b.id, occurrenceId: b.occurrences[0] }, loserNow)
+
+    expect(switched).toMatchObject({ changed: true, reason: "switched_event", left: { eventId: a.id, name: "Winner" } })
+    const session = await db.presence_sessions.findFirstOrThrow({ where: { event_id: a.id, user_id: who.id } })
+    expect(session.departed_at!.getTime()).toBeGreaterThanOrEqual(session.arrived_at.getTime())
   })
 
   it("an earlier day of the same event closes when today's opens, as that day's end", async () => {

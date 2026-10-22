@@ -376,7 +376,7 @@ registry.registerPath({
     "banned from the room, a suspended or deleted account. `total` counts who may be listed.\n\n" +
     "Paged by `cursor`: send `nextCursor` (the last card's handle) back; it is valid in this room only. Ordered by " +
     "first arrival. `limit` 1–50, default 30. 404 for an unknown, draft or deleted event and for a venue's live " +
-    "room; 403 if you never checked in; 400 `INVALID_CURSOR` for a cursor that is not a card from this room.",
+    "room; 403 if you never checked in, and 403 `USER_BANNED` (the chat's answer) if a host removed you from the room; 400 `INVALID_CURSOR` for a cursor that is not a card from this room.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

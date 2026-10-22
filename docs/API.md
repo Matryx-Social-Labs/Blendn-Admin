@@ -711,7 +711,7 @@ or a reinstatement. It names no one and no thing, and it has no switch.
 | GET | `/events/:eventId/chat` | Get event chat group |
 | GET | `/events/:eventId/peer-ratings` | Who you can still rate |
 | POST | `/events/:eventId/peer-ratings` | Rate someone you met |
-| GET | `/events/:eventId/matches` | Who else was in the room, ranked |
+| GET | `/events/:eventId/matches` | Who else was in the room, ranked. 403 `USER_BANNED` for a member a host removed from the room (the chat's answer) |
 | POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
 | PUT | `/events/:eventId/matches/preferences` | Your intent and reveal, for this event |
 
@@ -913,6 +913,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 |---|---|
 | 404 | Unknown, draft or deleted event, or a venue's live room (its people are for whoever is live there now) |
 | 403 | You never checked in to it |
+| 403 `USER_BANNED` | A host removed you from the night's room: the chat's own answer and sentence. `GET /events/:eventId/matches` answers the same |
 | 400 `INVALID_CURSOR` | A cursor that is not a card from this room (another room's, forged, or an id): start from the top |
 | 429 `RATE_LIMITED` | 60 a minute per person |
 
