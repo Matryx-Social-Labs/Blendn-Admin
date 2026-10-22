@@ -132,7 +132,7 @@ export async function checkSpam(
    * flooding a room across four instances was previously allowed four times the
    * burst.
    */
-  const { count } = await hit(`spam:burst:${key}`, SPAM_BURST_WINDOW_MS)
+  const { count, resetAt } = await hit(`spam:burst:${key}`, SPAM_BURST_WINDOW_MS)
   if (count > SPAM_BURST_LIMIT) {
     history.messages.push({ content: normalizedContent, timestamp: now })
     return {
@@ -141,6 +141,8 @@ export async function checkSpam(
       categories: { spam: 0.95 },
       confidence: 0.95,
       reason: `Burst rate exceeded (${count} messages in ${SPAM_BURST_WINDOW_MS / 1000}s)`,
+      // When the window ends and this person can send again (SV13).
+      retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)),
     }
   }
 

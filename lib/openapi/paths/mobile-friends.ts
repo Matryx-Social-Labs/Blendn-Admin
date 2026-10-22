@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
+import { ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
 
 /*
  * Friends. Two rules shape every route here (see lib/friends.ts):
@@ -45,8 +45,12 @@ registry.registerPath({
   path: "/api/mobile/friends",
   tags,
   summary: "List my friends",
-  description: "Newest first, with the count the Me tab shows. Real names and photos: both people said yes.",
+  description:
+    "Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, otherwise default 100, 1-100), with the count the Me tab shows: " +
+    "`count` and `pagination.totalCount` are the whole list, not the page. Real names and photos: both people said yes. " +
+    "A blocked person is left out of the query, so a page is full.",
   security: bearerAuth,
+  request: { query: ListQuerySchema },
   responses: {
     200: {
       description: "Friends",
@@ -56,6 +60,7 @@ registry.registerPath({
             z.object({
               friends: z.array(PersonSchema.extend({ since: z.string() })),
               count: z.number().int(),
+              pagination: ListPaginationSchema,
             })
           ),
         },
@@ -217,14 +222,23 @@ registry.registerPath({
   summary: "Friend requests, both ways",
   description:
     "`incoming` leaves out what you answered \"Not now\". `outgoing` never says whether the other person did: " +
-    "a decline that reaches the asker is a rejection.",
+    "a decline that reaches the asker is a rejection. Newest first, `?limit=` of each (without `limit` or `cursor`: up to 200; otherwise default 50, 1-100), " +
+    "with `pagination.incoming` and `pagination.outgoing`. To page one list, ask for it alone: " +
+    "`?list=incoming&cursor=…` answers only that array (a cursor without `list` is 400).",
   security: bearerAuth,
+  request: { query: ListQuerySchema.extend({ list: z.enum(["incoming", "outgoing"]).optional() }) },
   responses: {
     200: {
       description: "Requests",
       content: {
         "application/json": {
-          schema: wrap(z.object({ incoming: z.array(RequestItemSchema), outgoing: z.array(RequestItemSchema) })),
+          schema: wrap(
+            z.object({
+              incoming: z.array(RequestItemSchema).optional().describe("Absent when `?list=outgoing`."),
+              outgoing: z.array(RequestItemSchema).optional().describe("Absent when `?list=incoming`."),
+              pagination: z.object({ incoming: ListPaginationSchema.optional(), outgoing: ListPaginationSchema.optional() }),
+            })
+          ),
         },
       },
     },

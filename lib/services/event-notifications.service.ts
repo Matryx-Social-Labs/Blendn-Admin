@@ -71,9 +71,13 @@ async function tellInterested(
   eventId: string,
   eventTitle: string,
   message: string,
-  changed: string
+  changed: string,
+  /** Already told another way (`cancelEventCheckIns`' `inside`): left out, so nobody hears it twice. */
+  skip: ReadonlySet<string> = new Set()
 ): Promise<number> {
-  const { going, others } = await interestedAudience(eventId)
+  const audience = await interestedAudience(eventId)
+  const going = audience.going.filter((id) => !skip.has(id))
+  const others = audience.others.filter((id) => !skip.has(id))
   await Promise.all([
     going.length > 0 ? notifyEventChanged(going, eventTitle, message, eventId, changed) : null,
     others.length > 0 ? notifyEventUpdate(others, eventTitle, message, eventId, reasonOf(changed.split(",")), changed) : null,
@@ -234,10 +238,12 @@ export async function sendEventReminders(minutesBefore: number = 60): Promise<nu
  */
 export async function notifyEventCancelled(
   eventId: string,
-  eventTitle: string
+  eventTitle: string,
+  /** Already told by their own push (`cancelEventCheckIns`' `inside`), so not told twice. */
+  alreadyTold: readonly string[] = []
 ): Promise<void> {
   try {
-    const recipientCount = await tellInterested(eventId, eventTitle, "This event has been cancelled", "cancelled")
+    const recipientCount = await tellInterested(eventId, eventTitle, "This event has been cancelled", "cancelled", new Set(alreadyTold))
     if (recipientCount > 0) logger.info("Event cancellation notification sent", { eventId, recipientCount })
   } catch (error) {
     logger.error("Failed to send cancellation notification", { eventId, error: String(error) })

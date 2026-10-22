@@ -21,6 +21,7 @@ import {
   validationErrorResponse,
   serverErrorResponse,
   ErrorCode,
+  spamBlockedResponse,
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
@@ -153,6 +154,8 @@ export async function GET(
             },
           },
         },
+        // A poll message's poll, for `pollId`. One join on the page, not a lookup each.
+        poll: { select: { id: true } },
         _count: {
           select: {
             replies: true,
@@ -215,10 +218,12 @@ export async function GET(
     const idFor = (userId: string) => idForViewer(user.userId, scope, userId)
 
     return successResponse({
-      messages: messagesToReturn.map((m) => {
+      messages: messagesToReturn.map(({ poll, ...m }) => {
         const isHidden = m.moderation_status === "hidden"
         return {
           ...m,
+          // The poll a `poll` message carries; absent on every other type.
+          ...(m.type === "poll" ? { pollId: isHidden ? null : (poll?.id ?? null) } : {}),
           user_id: idFor(m.user_id),
           deleted_by: m.deleted_by && idFor(m.deleted_by),
           /*
@@ -419,10 +424,9 @@ export async function POST(
     // Spam check (sync — block before saving)
     const spamResult = await checkSpam(user.userId, chatGroupId, content)
     if (spamResult && spamResult.action === "hide") {
-      return errorResponse(
+      return spamBlockedResponse(
         spamResult.reason || "Message blocked as spam. Please slow down.",
-        429,
-        ErrorCode.SPAM_BLOCKED
+        spamResult.retryAfter
       )
     }
 

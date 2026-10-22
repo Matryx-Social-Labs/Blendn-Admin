@@ -519,7 +519,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * door. Both routes now call one implementation.
      */
     if (isCancelling) {
-      await cancelEventCheckIns(eventId)
+      const { inside } = await cancelEventCheckIns(eventId)
       // And tell them. `notifyEventCancelled` never throws — the cancellation
       // has already committed and must not be undone by a failed push.
       //
@@ -527,7 +527,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       // description and status, and none of those is a fact anybody leaves the
       // house for. Time and venue are dashboard-only edits. The people who are
       // going are told with `event_changed`, the rest with `event_update`.
-      await notifyEventCancelled(updated.id, updated.title)
+      await notifyEventCancelled(updated.id, updated.title, inside)
     }
 
     return successResponse({
