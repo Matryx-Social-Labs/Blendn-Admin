@@ -74,7 +74,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const room = await roomForMember(chatGroupId, authUser.userId)
     if (!room) return notFound()
 
-    const prefs = withMute(room.membership.notification_preferences, until)
+    const prefs = withMute(room.membership.notification_preferences, until, now)
     await db.chat_group_members.update({
       where: { id: room.membership.id },
       data: { notification_preferences: prefs, updated_at: now },

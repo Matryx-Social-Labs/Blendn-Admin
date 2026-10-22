@@ -588,7 +588,10 @@ events, so the id is gone and answers like any unknown id.
 **`GET` / `PUT /me/notification-preferences`**: `{ matches, crew, night }`, all
 booleans, all `true` by default. `PUT` takes any non-empty subset (a missing key is
 left as it is; an unknown key or a non-boolean is a 400 `VALIDATION_FAILED`) and
-answers all three. The send path honours them, on the single and the bulk sender:
+answers all three. `GET` also says **`mutedRooms`**, an integer: how many rooms you
+have silenced, exactly the ones `GET /me/muted-rooms` lists, counted up to **1000**
+(show "999+" at 1000). `PUT` does not send it. The send path honours the switches, on
+the single and the bulk sender:
 
 | Switch | Stops the push of |
 |---|---|
@@ -674,6 +677,45 @@ each other still answer the same body.
 | `POST /friends/requests` to yourself | 400 | none | `CANNOT_ADD_SELF` |
 | `GET /friends/invite/:token` and `/preview`, every way a link fails | 404 | `NOT_FOUND` | `INVITE_UNAVAILABLE` |
 | `POST /friends/requests/:id`, gone, withdrawn, malformed or not yours | 404 | `NOT_FOUND` | `REQUEST_UNAVAILABLE` |
+
+**`GET /me/muted-rooms?limit=&cursor=`** (read rate tier): the rooms you silenced,
+Settings › Notifications › Muted rooms. Answers
+`{ rooms: Row[], nextCursor: string | null, pagination: { limit, hasMore } }`.
+
+- A **row is a `GET /chat/groups` row**, field for field, built by the same code
+  (`lib/chat-group-rows.ts`): `kind` is `event` (a `groups` row, `event` block and all),
+  `crew` or `blend` (a `rooms` row); `mute: { muted, until }` says until when
+  (`until: null` is "until I turn it back on").
+- **Which rooms**: your member rows (`active` or `muted`; a ban or a leave is a
+  removal) with a mute in force now (a `muted_until` in the past is lapsed and an
+  unreadable one reads as lapsed, as `mute` itself does), in a room the chat list would
+  list for you: a live room (not archived, no draft or deleted event, a venue's room
+  only while your Go Live is open) and, for a crew's or Blend's room, through its owner's
+  door as it stands now (a dissolved crew, a closed Blend, a Blend across a block, a
+  suspended crewmate are not listed). Unread counts and previews follow your blocks, as
+  on the chat list.
+- **Order and paging**: newest mute first, ties on the room id; a keyset on
+  `(muted_at DESC, chat_group_id)` (`muted_at`: when you muted the room, written by `POST
+  /chat/groups/:id/mute`; reading or posting in the room does not move it; a mute from
+  before it falls back to the member row's last change), the cursor opaque. `limit` 1-100 (default 50; a
+  non-number is the default, a number is clamped). A `cursor` an earlier answer did not
+  give is a **400 `VALIDATION_FAILED`**. A page can hold fewer than `limit` rows with a
+  `nextCursor` when the rooms between are not listed; stop when `nextCursor` is null.
+- **Cost**: the read starts at the partial index `chat_group_members_muted_idx`
+  (`user_id` where `notification_preferences->>'muted' = 'true'`), built `CONCURRENTLY`
+  in its own migration; the `mutedRooms` count uses it too.
+
+**Capped counts.** `unreadCount` on `GET /notifications` and on `POST
+/notifications/read` stops at **1000** (the app shows "999+"), and so does the bell's
+share of `badgeCount`: at most 1000 plus the unread conversations.
+
+**The icon's number rides on every push.** Every push sets `badge` to the same
+`badgeCount` the feed serves, counted when it is sent and after its own bell row is
+written, so the number is right while the app is closed (SCRUM-740). A single send counts
+the one person; a bulk send (an announcement, an event's change) counts everybody who has
+a device in two statements in all (one `groupBy` over the bell rows, one over the unread
+threads), never one per recipient. A caller that passes its own `badge` keeps it, and a
+count that fails sends the push without one.
 
 ### Push: the channel, the token's `channelSet`, `report_actioned` (Flow 9)
 
@@ -1300,7 +1342,7 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
              "latitude": 12.97, "longitude": 77.64,
              "venueType": "live_music_venue", "venueTypeLabel": "Live music venue",
              "floors": null, "claimed": false,
-             "capacity": 300, "dayResetHour": 6,
+             "capacity": 300, "dayResetHour": 6, "timezone": "Asia/Kolkata",
              "hours": [{ "day": 5, "open": "17:00", "close": "01:00" }],
              "description": null, "amenities": ["Live Music", "Outdoor Seating"],
              "upcoming": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
@@ -1325,7 +1367,7 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
 | `live.stayUntil` | The furthest "stay" can carry your window (four hours from the first stay today); null until you chose stay |
 | `venue.hours` | Opening hours, `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]` in the venue's own timezone (a close at or before the open runs past midnight); null until given |
 | `venue.description`, `venue.amenities` | Free text about the place (null) and amenity names from the shared vocabulary (`[]`) until given |
-| `venue.capacity`, `venue.dayResetHour` | The venue's capacity (null if unknown) and the local hour its day starts |
+| `venue.capacity`, `venue.dayResetHour`, `venue.timezone` | The venue's capacity (null if unknown), the local hour its day starts (0-23) and the IANA timezone (`Asia/Kolkata`, `UTC`) that hour is in. Read the two together: the phone derives neither from a time such as `dayEndsAt`, which is wrong across timezones |
 | `venue.upcoming` | Its next public events, at most 5, soonest first: the Places card's filter (published, public, not ended, link not disputed by the venue, within your age) — never its own live rooms |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
 | `claim` | `{ url }` for an unclaimed venue: the public claim page (`/claim/venue/:venueId`) on the dashboard host, built for the environment the app talks to — open it as given. Null once claimed. As `claim` on `GET /events/:eventId` |

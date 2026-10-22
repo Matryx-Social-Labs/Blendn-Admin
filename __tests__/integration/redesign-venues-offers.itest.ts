@@ -127,6 +127,11 @@ describe("GET /venues/:id carries the venue page's facts", () => {
 
     const a = await body(await get(detail, `/api/mobile/venues/${full}`, viewer, { venueId: full }))
     expect(a.data.venue).toMatchObject({ capacity: 80, dayResetHour: 6, hours, description: "A rooftop.", upcoming: [] })
+    // The day's reset hour and the zone it is read in, as the venue has them: not the default, so a hard-coded 6 / UTC fails.
+    const kolkata = await venue("Kolkata", { timezone: "Asia/Kolkata", day_reset_hour: 4 })
+    const k = await body(await get(detail, `/api/mobile/venues/${kolkata}`, viewer, { venueId: kolkata }))
+    expect(k.data.venue).toMatchObject({ dayResetHour: 4, timezone: "Asia/Kolkata" })
+    expect(a.data.venue).toMatchObject({ dayResetHour: 6, timezone: "UTC" })
     // The shared vocabulary, in its display order, without a retired amenity.
     expect(a.data.venue.amenities).toEqual(["Zed Music", "Zed Outdoor"])
     const b = await body(await get(detail, `/api/mobile/venues/${bare}`, viewer, { venueId: bare }))

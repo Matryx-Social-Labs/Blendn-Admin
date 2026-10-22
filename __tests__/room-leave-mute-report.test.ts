@@ -208,6 +208,8 @@ describe("POST/DELETE /chat/groups/:id/mute", () => {
       something_else: 1,
       muted: true,
       muted_until: null,
+      // When it was muted: what "Muted rooms" orders by (`withMute`).
+      muted_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/),
     })
   })
 

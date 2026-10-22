@@ -7,6 +7,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
+import { UNREAD_CAP } from "@/lib/badge-count"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
 
     const unreadCount = await db.notifications.count({
       where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
+      take: UNREAD_CAP,
     })
 
     return successResponse({ marked: count, unreadCount })

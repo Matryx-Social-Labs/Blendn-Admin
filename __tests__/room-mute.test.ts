@@ -103,8 +103,8 @@ describe("the stored preference", () => {
   })
 
   it("keeps every other key when muting and unmuting", () => {
-    const muted = withMute({ digest: "daily" }, null)
-    expect(muted).toEqual({ digest: "daily", muted: true, muted_until: null })
+    const muted = withMute({ digest: "daily" }, null, new Date("2026-10-22T10:00:00.000Z"))
+    expect(muted).toEqual({ digest: "daily", muted: true, muted_until: null, muted_at: "2026-10-22T10:00:00.000Z" })
     expect(withoutMute(muted)).toEqual({ digest: "daily" })
   })
 })
