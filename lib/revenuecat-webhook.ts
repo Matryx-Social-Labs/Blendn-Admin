@@ -337,6 +337,11 @@ async function applyPurchase(tx: Tx, e: RevenuecatEvent, now: Date): Promise<Out
     startsAt = existing?.startsAt ?? (running && running > bought ? running : bought)
     const natural = startsAt.getTime() + PLUS.NIGHT_PASS_MS
     expiresAt = new Date(refund ? Math.min(natural, e.event_timestamp_ms) : natural)
+    // A pass already cut short (a refund) stays cut: no later event of the pass lengthens it
+    // (SCRUM-736). Only the store undoing the refund can give the 24 hours back.
+    if (existing?.expiresAt && e.type !== "REFUND_REVERSED") {
+      expiresAt = new Date(Math.min(expiresAt.getTime(), existing.expiresAt.getTime()))
+    }
   } else {
     const until = e.type === "BILLING_ISSUE" ? (e.grace_period_expiration_at_ms ?? e.expiration_at_ms) : e.expiration_at_ms
     if (until === null || until === undefined) return refuse("malformed")
