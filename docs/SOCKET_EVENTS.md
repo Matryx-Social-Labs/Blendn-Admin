@@ -161,6 +161,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
+| `room:friends` | `{ eventId }` | Your **Friends here** changed: refetch `GET /events/:id/friends-here`. Content-free, to `user:{id}` rooms only (never the room): sent to a person's friends who are checked in at the same event when an opted-in friend checks in or out, flips "Friends can see I'm here" or "Show online status", or when a friendship is made or ended. A hidden friend's movements fire nothing. |
 | `room:match` | `{ eventId, otherUserId, conversationId, name }` | A like became mutual. `otherUserId` is the other person's handle in `eventId` — the same string the roster and deck show. |
 | `room:wave` | `{ eventId, fromUserId, fromName }` | Somebody in the room waved. `fromUserId` is their handle in `eventId`. |
 

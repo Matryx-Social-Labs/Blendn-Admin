@@ -1999,6 +1999,12 @@
       "mutation": "G12 the helper import and call removed from lib/room-preview.ts (and from each listed surface in turn). The control inside the test: a source without the helper is rejected by the same regex.",
       "observed": "G12: 1 failing (the missing file is named). Reverted; 3 of 3.",
       "date": "2026-10-22"
+    },
+    "friends-here.itest.ts": {
+      "guards": "B2 (Friends here): GET /events/:id/friends-here lists a friend only when they are the viewer's friend, checked in as an attendee, opted in (friends_see_me_in_rooms) AND show_online, not suspended or deleted, not still pseudonymous; refuses a viewer who is not checked in; order, clamp and cursor; 3 reads whatever the size; room:friends goes only to the friends who are here, only for a listable friend's movement, and on a switch that was or is listable.",
+      "mutation": "H1 the opt-in dropped from the query. H2 show_online dropped. H3 the staff filter dropped. H4 the holdingPair filter dropped. H5 the checked-in gate removed. H6 the limit clamp raised. H7 the recent order ignores the DM. H8 the cursor comparison made >=. H9 the listable test removed from notifyFriendsHere. H10 the profile PUT signals when hidden both before and after.",
+      "observed": "H1: 1 failing. H2: 1 failing. H3: 1 failing. H4: 1 failing. H5: 1 failing. H6: 1 failing. H7: 1 failing. H8: 1 failing. H9: 1 failing. H10: 1 failing. Each reverted; 11 of 11.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [

@@ -137,6 +137,11 @@ export interface ServerToClientEvents {
     conversationId: string
     name: string
   }) => void
+  /**
+   * "Your Friends here changed: refetch `GET /events/:id/friends-here`." Content-free
+   * (no id, no name) and only to the people it concerns, never to the room.
+   */
+  "room:friends": (data: { eventId: string }) => void
   /** Somebody in the room waved. Ephemeral; nothing is stored. `fromUserId` is their handle here. */
   "room:wave": (data: {
     eventId: string
@@ -1451,6 +1456,13 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
       )
     )
     .catch((error: unknown) => logger.warn("Check-out emit failed", { eventId, error: error instanceof Error ? error.message : String(error) }))
+}
+
+/** `room:friends` to these people's own rooms (`user:{id}`): bounded by a person's friends, never by the audience. */
+export function emitRoomFriends(userIds: readonly string[], eventId: string): void {
+  const io = currentIo()
+  if (!io || userIds.length === 0) return
+  io.to(userIds.map((id) => `user:${id}`)).emit("room:friends", { eventId })
 }
 
 /**

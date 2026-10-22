@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { closeConversation, conversationPair } from "@/lib/conversations"
 import { blockPairIn } from "@/lib/block-pair"
+import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -117,6 +118,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (closedConversationId) {
       closeConversationRoom(closedConversationId)
     }
+    // A friend who was listed in Friends here is not any more (a block severs the friendship).
+    void notifyFriendshipChanged(authUser.userId, targetId)
     // Out of any Blend room that now refuses them: the pair is hidden from each
     // other there, and the Blend goes on for everyone else (D-9).
     await evictBlockedFromBlends(authUser.userId, targetId)

@@ -19,6 +19,7 @@ import {
 import { readJson, isUuid } from "@/lib/api-input"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { blockPairIn } from "@/lib/block-pair"
+import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { closeConversationRoom } from "@/lib/socket-server"
 
 interface RouteParams {
@@ -158,6 +159,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // friendship and every friend request, crew invites, and the conversation.
       const closedId = await db.$transaction((tx) => blockPairIn(tx, authUser.userId, messageRequest.sender_id))
       if (closedId) closeConversationRoom(closedId)
+      void notifyFriendshipChanged(authUser.userId, messageRequest.sender_id)
       // Out of any Blend room that now refuses them; the Blend goes on for the rest (D-9).
       await evictBlockedFromBlends(authUser.userId, messageRequest.sender_id)
     }

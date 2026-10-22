@@ -6,6 +6,7 @@ import { conversationPair } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
 import { UNNAMED, cameFromMatch, mayShowRealName } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
+import { notifyFriendshipChanged } from "@/lib/room-friends"
 
 /**
  * Friends: two people who both said yes.
@@ -454,7 +455,10 @@ export async function requestFriend(
 
   // After the commit: a push is not a database write and cannot be rolled back.
   if ("requestId" in outcome && outcome.requestId) notifyFriendRequest(recipientId, outcome.requestId, via)
-  if ("accepted" in outcome && outcome.accepted) notifyFriendAccepted(recipientId)
+  if ("accepted" in outcome && outcome.accepted) {
+    notifyFriendAccepted(recipientId)
+    void notifyFriendshipChanged(senderId, recipientId)
+  }
   return outcome.state
 }
 
@@ -515,7 +519,10 @@ export async function acceptFriendRequest(requestId: string, recipientId: string
     })
     return still ? befriendIn(tx, recipientId, request.sender_id) : false
   })
-  if (made) notifyFriendAccepted(request.sender_id)
+  if (made) {
+    notifyFriendAccepted(request.sender_id)
+    void notifyFriendshipChanged(recipientId, request.sender_id)
+  }
   return made
 }
 
@@ -606,6 +613,7 @@ export async function releaseHeldRequests(userIds: readonly string[]): Promise<v
   for (const [a, b] of outcome.friends) {
     notifyFriendAccepted(a)
     notifyFriendAccepted(b)
+    void notifyFriendshipChanged(a, b)
   }
   for (const r of outcome.requests) if (!r.dismissed_at) notifyFriendRequest(r.recipient_id, r.id)
 }
@@ -662,6 +670,8 @@ export async function unfriend(a: string, b: string): Promise<void> {
     await tx.friendships.deleteMany({ where: { user1_id, user2_id } })
     await dropCrewInvitesBetween(tx, a, b)
   })
+  // Each side's Friends here moves, for the events both are live in.
+  void notifyFriendshipChanged(a, b)
 }
 
 /**

@@ -1699,6 +1699,17 @@ already is: counted in the headcount, listed nowhere.
   nothing written, even when no friend DM exists yet.
 - **Likes between friends go inert for good:** becoming friends deletes the
   `event_likes` between them, so an unfriend cannot resurrect a match.
+- **Friends here:** `GET /events/:id/friends-here?order=recent|name&limit&cursor&q`
+  → `{ friends: [{ userId, name, photo }], total, nextCursor }`. Your friends
+  checked in at the event who turned on "Friends can see I'm here"
+  (`friends_see_me_in_rooms`) and have "Show online status" on, by REAL id (open
+  the DM with `POST /friends/:userId/conversation`). Not reciprocal (it is the
+  friend's consent). Not listed: staff, suspended, checked out, a match still
+  pseudonymous. `recent` (default, `limit` 8, max 50): the friend you last talked
+  to first, then the newest arrival. `name`: A-Z, `cursor` is opaque, `q` filters
+  (1-40 chars, a word prefix). `total` is every friend listed for you, never the
+  page. No event, room or arrival time in the payload. 403 `NOT_CHECKED_IN` when
+  you are not checked in. The socket event `room:friends { eventId }` says "refetch".
 - The helpers are `lib/room-people.ts` (`notStrangersTo`, `knownToEachOther`,
   `strangersApartBetween`); a guard test fails the build when a people surface
   does not use them.

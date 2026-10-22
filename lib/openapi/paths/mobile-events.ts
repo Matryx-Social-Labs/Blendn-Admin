@@ -38,6 +38,46 @@ import {
 import { EventChatResponseSchema, SendMessageRequestSchema, ChatMessageSchema } from "@/lib/openapi/schemas/chat"
 
 // GET /api/mobile/events
+const FriendHereSchema = z.object({
+  userId: z.string().describe("The friend's REAL id (a friend surface, never a room handle). Open the DM with `POST /friends/{userId}/conversation`."),
+  name: z.string(),
+  photo: z.string().nullable(),
+})
+
+// GET /api/mobile/events/{eventId}/friends-here
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/friends-here",
+  tags: ["Mobile Events"],
+  summary: "Friends here",
+  description:
+    "Your friends checked in at this event who turned on \"Friends can see I'm here\" (and \"Show online status\"), by real id. Not reciprocal: it is the friend's consent. " +
+    "Staff, suspended, checked-out and still-pseudonymous (a match not revealed on both sides) friends are not listed. Friends are on no stranger surface (deck, roster, arrivals, waves, likes). " +
+    "`order=recent` (default): the friend you last talked to first, then the newest arrival; `limit` defaults to 8, max 50. `order=name`: A-Z with `cursor` (`nextCursor`) and `q` (1-40 chars, a word prefix) for See all. " +
+    "`total` is every friend listed for you here, not this page. No event, room or arrival time is in the payload. 403 `NOT_CHECKED_IN` when you are not checked in; 400 for a bad cursor or an over-long `q`.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    query: z.object({
+      order: z.enum(["recent", "name"]).optional(),
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+      cursor: z.string().optional(),
+      q: z.string().max(40).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Friends here",
+      content: {
+        "application/json": {
+          schema: wrap(z.object({ friends: z.array(FriendHereSchema), total: z.number().int(), nextCursor: z.string().nullable() })),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 registry.registerPath({
   method: "get",
   path: "/api/mobile/events/{eventId}/board",

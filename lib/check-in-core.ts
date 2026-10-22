@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import { ADULTS_ONLY, ageFrom, FINISH_ONBOARDING, isAdult, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
 import { openSession } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
+import { notifyFriendsHere } from "@/lib/room-friends"
 import { evaluateCheckIn, type Geofence } from "@/lib/geofence"
 import { ErrorCode, errorResponse } from "@/lib/api-response"
 import { MAX_GPS_ACCURACY_METERS, type CheckinInput } from "@/lib/validations/event"
@@ -486,6 +487,9 @@ async function announceArrival(eventId: string, userId: string, chatGroupId: str
     blockedIds,
     arriver?.profile?.show_online !== false
   )
+  // An opted-in friend of the arriver's, here too, gets "your Friends here moved"
+  // (and only then: a hidden friend's arrival fires nothing).
+  void notifyFriendsHere(userId, { eventIds: [eventId] })
 }
 
 /**

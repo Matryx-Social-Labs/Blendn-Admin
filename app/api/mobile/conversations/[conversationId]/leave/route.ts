@@ -17,6 +17,7 @@ import {
 } from "@/lib/api-response"
 import { isUuid, readOptionalJson } from "@/lib/api-input"
 import { leaveConversationIn } from "@/lib/leave-conversation"
+import { notifyFriendshipChanged } from "@/lib/room-friends"
 
 interface RouteParams {
   params: Promise<{ conversationId: string }>
@@ -163,6 +164,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * that is still open. Repeating it is harmless.
      */
     closeConversationRoom(conversationId)
+    if (action === "block") void notifyFriendshipChanged(authUser.userId, otherId)
     // Either way the pair is kept apart now (a closed conversation is a block
     // on every crew surface, C6): out of any Blend room that now refuses them;
     // the Blend goes on for everyone else (D-9).
