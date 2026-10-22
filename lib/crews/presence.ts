@@ -12,6 +12,7 @@ import { blocksBetween, blocksExclude } from "./blocks"
 import { CREW_TAGS, CREWS_OFF, NO_CREW, NO_EVENT, type CrewRefusal, type CrewTag } from "./crews"
 import { crewBadges, nightsTogether, rankCrewsFor, type RankedCrew } from "./signals"
 import type { Badge, Overlap } from "../overlaps"
+import { notHostBannedFrom } from "../room-kind"
 
 /**
  * A crew at an event: presence, the crew cards, "We're here" (plan v2 §6).
@@ -43,7 +44,13 @@ export async function presentMembersAt(occurrenceId: string, crewIds?: readonly 
     where: {
       ...(crewIds && { crew_id: { in: [...crewIds] } }),
       crew: { dissolved_at: null, hidden_at: null },
-      user: { suspended_at: null, deletedAt: null, event_check_ins: { some: hereNowAt(occurrenceId) } },
+      user: {
+        suspended_at: null,
+        deletedAt: null,
+        event_check_ins: { some: hereNowAt(occurrenceId) },
+        // A member a host banned from this room is no crew member here (review H2).
+        ...notHostBannedFrom({ event: { occurrences: { some: { id: occurrenceId } } } }),
+      },
     },
     select: { crew_id: true, user_id: true },
   })

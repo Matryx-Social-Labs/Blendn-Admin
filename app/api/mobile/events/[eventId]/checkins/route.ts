@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger"
 import { roomBanRefusal } from "@/lib/room-ban"
+import { notHostBannedFrom } from "@/lib/room-kind"
 import { NextRequest } from "next/server"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
 import { ageFrom } from "@/lib/age"
@@ -151,7 +152,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // A venue day lists the people whose window is open now, not whoever the sweeper has yet to reach.
       ...inRoomWhere(),
       ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
-      user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] },
+      user: {
+        OR: [{ profile: { is: null } }, { profile: { show_online: true } }],
+        // A member a host banned is not listed: "listed, but not here" would give the ban away (M3).
+        ...notHostBannedFrom({ event_id: eventId }),
+      },
     }
 
     const totalCount = await db.event_check_ins.count({

@@ -5,6 +5,7 @@ process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "itest-nextauth-sec
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
+import { applySuspension, liftSuspension } from "@/lib/suspension"
 import { roomHandle } from "@/lib/room-handle"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
@@ -122,6 +123,35 @@ describe("a member the room banned is refused the room's people, as the chat ref
     const like = await call(R.likes.POST, `events/${w.eventId}/matches/likes`, w.here.token, ev(), "POST", { userId: handleOf(w.banned) })
     expect(like).toMatchObject({ status: 404, json: { error: "User not found" } })
     expect(await db.event_likes.count({ where: { event_id: w.eventId, liked_id: w.banned.id } })).toBe(0)
+  })
+
+  it("is not listed to anybody: not on the roster, not in the deck (\"listed but not here\" would give it away)", async () => {
+    const roster = await call(R.roster.GET, `events/${w.eventId}/checkins`, w.here.token, ev())
+    expect(roster.status).toBe(200)
+    expect(JSON.stringify(roster.json)).not.toContain(handleOf(w.banned))
+    const deck = await call(R.matches.GET, `events/${w.eventId}/matches`, w.here.token, ev())
+    expect(deck.status).toBe(200)
+    expect(JSON.stringify(deck.json)).not.toContain(handleOf(w.banned))
+  })
+
+  it("counts only a host's ban: suspended and reinstated, a person is listed and may act again (M2)", async () => {
+    const back = await person()
+    await db.event_check_ins.create({ data: { event_id: w.eventId, occurrence_id: await occurrenceOf(w.eventId), user_id: back.id, status: "checked_in", check_in_time: new Date() } })
+    await db.chat_group_members.create({ data: { chat_group_id: w.groupId, user_id: back.id, anonymous_name: testId("Heron") } })
+    // A suspension bans every room with banned_by null; lifting it does not unban.
+    await db.$transaction(async (tx) => {
+      await applySuspension(tx, back.id, "itest-admin")
+      await liftSuspension(tx, back.id)
+    })
+    expect(await db.chat_group_members.findFirstOrThrow({ where: { chat_group_id: w.groupId, user_id: back.id } })).toMatchObject({ status: "banned", banned_by: null })
+
+    const token = signAccessToken(back.id, `${back.id}@itest.invalid`)
+    expect((await call(R.roster.GET, `events/${w.eventId}/checkins`, token, ev())).status).toBe(200)
+    expect((await call(R.matches.GET, `events/${w.eventId}/matches`, token, ev())).status).toBe(200)
+    const like = await call(R.likes.POST, `events/${w.eventId}/matches/likes`, token, ev(), "POST", { userId: handleOf(w.here) })
+    expect(like.status).toBe(200)
+    const roster = await call(R.roster.GET, `events/${w.eventId}/checkins`, w.here.token, ev())
+    expect(JSON.stringify(roster.json)).toContain(handleOf(back))
   })
 
   it("leaves everybody in good standing as they were, and opens again when the ban is lifted", async () => {

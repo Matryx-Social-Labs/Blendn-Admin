@@ -41,7 +41,11 @@ import { goLiveArea, venuesTakenOver } from "@/lib/venue-visibility"
 
 export interface PlaceInside {
   kind: "event" | "venue"
-  /** The event, or the venue's day when somebody has gone live there today; null for a venue with no day yet. */
+  /**
+   * The event; always null for a venue. A venue's day is not offered by id:
+   * its door is Go Live by `venueId` (a venue day's id refuses the event door,
+   * and nothing else needs it here — review M1).
+   */
   eventId: string | null
   venueId: string | null
   name: string
@@ -130,7 +134,10 @@ export async function placesInside(
   const age = ageFrom(profile)
 
   const [events, venues] = await Promise.all([eventsInside(userId, point, accuracy, age, now), isAdult(age) ? venuesInside(point, accuracy, age, now) : []])
-  const all: Ranked[] = [...events, ...venues].map((p) => ({ ...p, checkedIn: p.eventId !== null && p.eventId === current?.eventId }))
+  // Where you are now: an event by its id; a venue by the venue your live day is at.
+  const here = (p: Ranked) =>
+    p.kind === "venue" ? current?.kind === "venue_day" && current.venueId === p.venueId : p.eventId === current?.eventId
+  const all: Ranked[] = [...events, ...venues].map((p) => ({ ...p, checkedIn: here(p) }))
 
   // The order the pass docks in (SCRUM-704).
   all.sort(
@@ -245,7 +252,7 @@ async function venuesInside(point: LatLng, accuracy: number | undefined, age: nu
     if (!verdict?.ok) continue
     out.push({
       kind: "venue",
-      eventId: day?.id ?? null,
+      eventId: null,
       venueId: v.id,
       name: v.name,
       venueName: null,

@@ -7,7 +7,8 @@
 -- the person's earlier days of the same event, so day 1 stayed open beside
 -- day 2 until the sweeper got there. Either leaves a person with two open rows.
 --
--- Kept: the newest open row per person (check-in time, then creation). Closed:
+-- Kept: per person, a row still live over a Go Live whose window already ran
+-- out, then the newest (check-in time, then creation). Closed:
 -- every other, at now, with their open presence sessions. `sweeper` is the
 -- honest source: nobody saw them leave, this pass inferred it.
 --
@@ -23,7 +24,10 @@ SELECT "id", "occurrence_id", "user_id"
     SELECT "id", "occurrence_id", "user_id",
            row_number() OVER (
              PARTITION BY "user_id"
-             ORDER BY "check_in_time" DESC NULLS LAST, "created_at" DESC, "id" DESC
+             -- A live row before an expired Go Live the sweeper has not reached
+             -- yet, then the newest (review L2).
+             ORDER BY ("expires_at" IS NOT NULL AND "expires_at" <= now()) ASC,
+                      "check_in_time" DESC NULLS LAST, "created_at" DESC, "id" DESC
            ) AS "rank"
       FROM "event_check_ins"
      WHERE "status" = 'checked_in'

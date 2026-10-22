@@ -128,6 +128,9 @@ export async function nightPeople(
    * the plan's `notStrangersTo` (lib/room-people.ts, on top of
    * feat/friend-after-reveal) is not on this branch; at the merge this becomes
    * `notStrangersTo(viewerId)`, which adds friendships ended in the last 24 h (B4).
+   *
+   * TODO(#727): if #728 merges first, #727 adds lib/night-people.ts to its
+   * `PEOPLE_SURFACES` guard and swaps this read for `notStrangersTo` (review M4).
    */
   const [blocked, closed, friends] = await Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId), friendIdsOf(viewerId)])
   const hidden = [...new Set([viewerId, ...blocked, ...closed, ...friends])]
@@ -144,7 +147,7 @@ export async function nightPeople(
     AND c.user_id <> ALL(${hidden}::text[])
     AND NOT EXISTS (
       SELECT 1 FROM chat_group_members m JOIN chat_groups g ON g.id = m.chat_group_id
-       WHERE g.event_id = c.event_id AND m.user_id = c.user_id AND m.status = 'banned'
+       WHERE g.event_id = c.event_id AND m.user_id = c.user_id AND m.status = 'banned' AND m.banned_by IS NOT NULL
     )`
   const attendees = Prisma.sql`
       FROM event_check_ins c
@@ -167,13 +170,13 @@ export async function nightPeople(
   let after = Prisma.empty
   if (opts.cursor) {
     const last = roomMemberFromRef(eventId, opts.cursor, viewerId)
-    const at = last
-      ? await db.event_check_ins.aggregate({
-          where: { event_id: eventId, user_id: last, kind: "attendee", check_in_time: { not: null } },
-          _min: { check_in_time: true },
-        })
-      : null
-    const firstIn = at?._min.check_in_time
+    // Through the same `listable` as the page (L1): a person this viewer may not
+    // see is no cursor, whatever handle the client holds for them.
+    const [key] = last
+      ? await db.$queryRaw<{ first_in: Date }[]>`
+          SELECT ${FIRST_IN} AS first_in ${attendees} AND ${listable} AND c.user_id = ${last} GROUP BY c.user_id`
+      : []
+    const firstIn = key?.first_in
     if (!last || !firstIn) return { refused: "bad_cursor" }
     after = Prisma.sql`HAVING (${FIRST_IN}, c.user_id) > (${firstIn}::timestamptz, ${last})`
   }

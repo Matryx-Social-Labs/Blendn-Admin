@@ -1,6 +1,6 @@
 // Relative imports: chat-lifecycle.ts reaches this from server.ts, which plain
 // tsc compiles with the @/ alias left verbatim (see the note there).
-import type { chat_group_kind, chat_group_status } from "@prisma/client"
+import type { chat_group_kind, chat_group_status, Prisma } from "@prisma/client"
 import { db } from "./db"
 import {
   chatWindowState,
@@ -492,9 +492,27 @@ export async function ownerRoster(chatGroupId: string): Promise<Set<string> | nu
  */
 export async function eventRoomBan(eventId: string, userId: string): Promise<{ banned_by: string | null } | null> {
   return db.chat_group_members.findFirst({
-    where: { user_id: userId, status: "banned", chat_group: { event_id: eventId } },
+    where: { user_id: userId, ...HOST_BAN, chat_group: { event_id: eventId } },
     select: { banned_by: true },
   })
+}
+
+/**
+ * A host's ban: `banned_by` set. A suspension bans every room with `banned_by:
+ * null`, and reinstating does not unban (memory: reinstate leaves room bans),
+ * so counting those would keep a reinstated person out of the people of every
+ * room they were ever in (review M2). The chat keeps its own rule.
+ */
+const HOST_BAN = { status: "banned" as const, banned_by: { not: null } }
+
+/**
+ * A `User` filter for the lists that name a room's people — the roster, the
+ * deck, the crews here: not banned by a host from this room (review M3). A
+ * banned member listed but answered "not here" everywhere else would give the
+ * ban away. `chatGroup` picks the room: `{ event_id }`, or by occurrence.
+ */
+export function notHostBannedFrom(chatGroup: Prisma.chat_groupsWhereInput) {
+  return { chat_group_memberships: { none: { ...HOST_BAN, chat_group: chatGroup } } } satisfies Prisma.UserWhereInput
 }
 
 /**

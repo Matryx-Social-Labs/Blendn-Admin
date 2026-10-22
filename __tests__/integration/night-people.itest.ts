@@ -298,7 +298,11 @@ describe("GET /events/:id/people — a concert-sized night", () => {
     await wasThere(n, me)
     await wasThere(n, them)
 
-    for (const cursor of [them.id, roomHandle(elsewhere.id, them.id), "rh_forged"]) {
+    // A card this viewer may not see is no cursor either (L1): somebody they blocked.
+    const blocked = await person()
+    await wasThere(n, blocked)
+    await db.blocked_users.create({ data: { blocker_id: me.id, blocked_id: blocked.id } })
+    for (const cursor of [them.id, roomHandle(elsewhere.id, them.id), "rh_forged", roomHandle(n.id, blocked.id)]) {
       const res = await people(n.id, me.token, `?cursor=${encodeURIComponent(cursor)}`)
       expect(res.status).toBe(400)
       expect(res.json.errorCode).toBe("INVALID_CURSOR")

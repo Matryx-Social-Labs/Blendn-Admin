@@ -995,7 +995,7 @@ registry.registerPath({
 const PlaceInsideSchema = z
   .object({
     kind: z.enum(["event", "venue"]),
-    eventId: z.string().uuid().nullable().describe("The event; for a venue, today's room once somebody went live there, else null."),
+    eventId: z.string().uuid().nullable().describe("The event; always null for a venue, whose door is Go Live by `venueId`."),
     venueId: z.string().uuid().nullable().describe("A venue's id (Go Live); null for an event."),
     name: z.string(),
     venueName: z.string().nullable(),
@@ -1003,7 +1003,7 @@ const PlaceInsideSchema = z
     endTime: z.string().datetime().nullable(),
     going: z.boolean().describe("Your RSVP is `going`."),
     saved: z.boolean(),
-    checkedIn: z.boolean().describe("You are checked in here now."),
+    checkedIn: z.boolean().describe("You are checked in here now: at an event by its id, at a venue by the venue your live day is at."),
   })
   .openapi("PlaceInside")
 

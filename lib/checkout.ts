@@ -208,6 +208,7 @@ export async function checkOutOfOtherEvents(
       event_id: true,
       check_in_time: true,
       expires_at: true,
+      occurrence: { select: { end_time: true } },
       event: { select: { kind: true, title: true, venue_name: true, venue: { select: { name: true } } } },
     },
   })
@@ -217,14 +218,24 @@ export async function checkOutOfOtherEvents(
     const reason: CheckoutReason =
       row.expires_at && row.expires_at <= now ? "expired" : row.event_id === keep.eventId ? "occurrence_ended" : "switched_event"
     /*
+     * When it ended: a Go Live at its window's end; an earlier day at that
+     * day's end, not at today's door (review L5) — it ended then, and a stay
+     * running into the next day is one nobody had; a switch now.
+     *
      * Never before they arrived. A door that lost the race to another door
      * (`openCheckIn`) switches out of a row opened a moment AFTER its own
      * `now`, and a departure stamped before the arrival is refused by
      * `presence_sessions_departure_after_arrival` — a 500 at the door, found
      * by the race test.
      */
-    const arrived = row.check_in_time && row.check_in_time > now ? row.check_in_time : now
-    const result = await performCheckout(row.id, reason, reason === "expired" && row.expires_at ? row.expires_at : arrived)
+    const ended =
+      reason === "expired" && row.expires_at
+        ? row.expires_at
+        : reason === "occurrence_ended" && row.occurrence.end_time < now
+          ? row.occurrence.end_time
+          : now
+    const at = row.check_in_time && row.check_in_time > ended ? row.check_in_time : ended
+    const result = await performCheckout(row.id, reason, at)
     if (!result) continue
     const { kind } = row.event
     const left =

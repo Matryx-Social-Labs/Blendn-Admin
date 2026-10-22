@@ -17,6 +17,7 @@ import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 /* eslint-disable @typescript-eslint/no-require-imports */
 const insideRoute = require("@/app/api/mobile/checkins/inside/route") as typeof import("@/app/api/mobile/checkins/inside/route")
 const checkinRoute = require("@/app/api/mobile/events/[eventId]/checkin/route") as typeof import("@/app/api/mobile/events/[eventId]/checkin/route")
+const liveRoute = require("@/app/api/mobile/venues/[venueId]/live/route") as typeof import("@/app/api/mobile/venues/[venueId]/live/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -159,6 +160,24 @@ describe("POST /checkins/inside", () => {
     const byId = new Map((json.data.places as Place[]).map((x) => [x.eventId, x]))
     expect(byId.get(here)?.checkedIn).toBe(true)
     expect(byId.get(other)?.checkedIn).toBe(false)
+  })
+
+  it("never hands back a venue's day id, and marks the venue you are live at (M1)", async () => {
+    const p = spot()
+    const me = await person()
+    const bar = await venue(p)
+    const live = await liveRoute.POST(post(`/api/mobile/venues/${bar}/live`, me.token, { latitude: p.lat, longitude: p.lng, minutes: 20 }), {
+      params: Promise.resolve({ venueId: bar }),
+    })
+    expect(live.status).toBe(200)
+    const dayId = (await live.json()).data.venueDayId as string
+
+    const res = await insideRoute.POST(post("/api/mobile/checkins/inside", me.token, { latitude: p.lat, longitude: p.lng }))
+    const json = await res.json()
+    expect(json.data.places).toEqual([expect.objectContaining({ kind: "venue", venueId: bar, eventId: null, checkedIn: true })])
+    expect(json.data.current).toMatchObject({ kind: "venue_day", venueId: bar })
+    // The day's id rides only on `current` (the room you are in), never on a place.
+    expect(JSON.stringify(json.data.places)).not.toContain(dayId)
   })
 
   it("is nowhere a metre outside every fence, and nowhere on a fix the doors refuse", async () => {

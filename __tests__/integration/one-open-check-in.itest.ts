@@ -191,6 +191,11 @@ describe("one open check-in per person", () => {
     const day1 = await db.presence_sessions.findFirstOrThrow({ where: { occurrence_id: run.occurrences[0], user_id: who.id } })
     // `occurrence_ended` is inferred (`sweeper`), never a switch.
     expect(day1.departed_source).toBe("sweeper")
+    // Closed when that day ended, not at today's door (L5).
+    const end = (await db.event_occurrences.findUniqueOrThrow({ where: { id: run.occurrences[0] } })).end_time
+    expect(day1.departed_at).toEqual(end)
+    const row = await db.event_check_ins.findFirstOrThrow({ where: { occurrence_id: run.occurrences[0], user_id: who.id } })
+    expect(row.check_out_time).toEqual(end)
   })
 })
 

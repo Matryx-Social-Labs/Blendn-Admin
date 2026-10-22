@@ -8,7 +8,7 @@ import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { leaveRoomSockets } from "../room-close"
-import { ownerAdmits, ownerRoomClosesAt } from "../room-kind"
+import { eventRoomBan, ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
 import { blocksBetween, blocksExclude } from "./blocks"
 import {
@@ -193,6 +193,8 @@ export async function likePersonAsCrew(
   ])
   if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return { ...NOTHING_TOLD }
   if (blocksExclude(mine.members, [personId], await blocksBetween(mine.members, [personId]))) return { ...NOTHING_TOLD }
+  // A person a host banned from the room is not here to be liked: the same answer, never which (review H2).
+  if (await eventRoomBan(eventId, personId)) return { ...NOTHING_TOLD }
 
   /*
    * No line in the crew chat for a like of a person. A line only for a like

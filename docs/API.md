@@ -1454,6 +1454,8 @@ disc and dock the pass from this alone: the phone's own "nearest pin within
 - **`current`** is the room you're in now, or null. Beside a place that is not
   `checkedIn`, say "Checking in here takes you out of {current.name}." before
   the hold — the switch is never silent (SCRUM-635).
+- **A venue never carries an `eventId`**: its door is Go Live by `venueId`, and
+  `checkedIn` is true there when your live day is at that venue.
 - **No distance**, ever: a venue's area is shown to nobody. POST so the
   position never sits in a logged URL. 20 a minute per person (`429`).
 
