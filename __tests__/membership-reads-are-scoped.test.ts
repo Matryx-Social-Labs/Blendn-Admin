@@ -29,6 +29,11 @@ const ALLOWED = new Set([
   // both routes refuse a suspended org by its status a few lines earlier.
   "app/api/organisation/accept-invite/route.ts",
   "app/api/organisation/join-request/route.ts",
+  // "Is this person of the organisation that RAN this suspended event": it exists to read
+  // exactly the membership `activeMembership` hides, so that its staff, and only they, are
+  // told why the event went dark (`ORGANISER_SUSPENDED`). It grants nothing: the answer is
+  // a reason on a 404, never access.
+  "lib/event-access.ts",
 ])
 
 function walk(dir: string, out: string[] = []): string[] {
