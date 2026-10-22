@@ -13,6 +13,7 @@ const mockGetAuth = jest.fn()
 jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import { UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { changeForResponse } from "@/lib/event-change"
 import { canPublish } from "@/lib/geofence-input"
 import { refusalMessage } from "@/lib/refusal"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, testId } from "./helpers"
@@ -85,6 +86,22 @@ it("a cancel closes the live check-ins and tells the person going", async () => 
   expect(await db.event_check_ins.count({ where: { event_id: id, status: { in: ["pending", "checked_in"] } } })).toBe(0)
   const told = await db.notifications.findMany({ where: { user_id: guest }, select: { body: true } })
   expect(told.map((n) => n.body)).toContain("This event has been cancelled")
+})
+
+it("a cancel through this door is a change like the others: changed_at set, the cancel named, the goer told with event_changed", async () => {
+  const id = await event("asd-changed", { status: "published", latitude: 12.97, longitude: 77.59 })
+  const guest = await makeUser(testId("asd-changed-guest"))
+  users.push(guest)
+  await db.event_rsvps.create({ data: { event_id: id, user_id: guest, status: "going" } })
+
+  await updateEventStatus(id, "cancelled")
+
+  const row = await db.events.findUniqueOrThrow({ where: { id } })
+  expect(row.changed_at).not.toBeNull()
+  expect(changeForResponse(row).changedFields).toEqual(["cancelled"])
+  const told = await db.notifications.findFirstOrThrow({ where: { user_id: guest }, select: { kind: true, data: true } })
+  expect(told.kind).toBe("event_changed")
+  expect(told.data).toMatchObject({ reason: "cancelled", changed: "cancelled" })
 })
 
 it("refuses to publish a cancelled event, with the same sentence as the other doors", async () => {

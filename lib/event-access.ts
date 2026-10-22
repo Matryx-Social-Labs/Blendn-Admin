@@ -60,7 +60,7 @@ export async function attendeeEventAccess(
 ): Promise<EventAccessDenial | null> {
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { status: true, visibility: true, min_age: true, kind: true, pre_suspension_status: true },
+    select: { status: true, visibility: true, min_age: true, kind: true, pre_suspension_status: true, organizer_id: true, organizer_org_id: true },
   })
   /*
    * A venue day is not an event anybody opens, RSVPs to, saves or reads the
@@ -73,17 +73,18 @@ export async function attendeeEventAccess(
     const suspended = event?.status === "draft" && event.kind !== "venue_day" && event.pre_suspension_status !== null
     if (!suspended) return { kind: "not_found" }
     /*
-     * And not for a private event the viewer was not part of: the reason would
-     * tell a stranger holding the id that such an event exists (or did), which is
-     * the one fact the plain 404 for a private event is there to keep. Somebody on
-     * its list (an RSVP, which is what `canJoinEvent` asks of a private event) may
-     * hear why it went dark. `canJoinEvent` itself answers no for a draft, which
-     * this now is, so it cannot be the question here.
+     * Said only to people who have a stake in it: somebody who said they were
+     * going (or maybe, or is waitlisted — anything but `not_going`), and the
+     * organisation that runs it. A stranger, and somebody who declined, get the
+     * plain 404 a hidden event gives: for a private event the reason would also
+     * tell a stranger holding the id that it exists. (`canJoinEvent` cannot be
+     * the question: it answers no for any draft, and this is one.)
+     *
+     * The organisation is read from its members directly. `actorFor` leaves a
+     * suspended organisation's memberships out, which is the point of suspending
+     * it, and so cannot tell us whose event this was.
      */
-    if (event.visibility === "private") {
-      const onTheList = await db.event_rsvps.findFirst({ where: { event_id: eventId, user_id: userId }, select: { id: true } })
-      if (!onTheList) return { kind: "not_found" }
-    }
+    if (!(await hasStakeInSuspendedEvent(userId, eventId, event.organizer_id, event.organizer_org_id))) return { kind: "not_found" }
     return { kind: "not_found", reason: ErrorCode.ORGANISER_SUSPENDED }
   }
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
@@ -104,6 +105,15 @@ export async function attendeeEventAccess(
   if (age == null && intent === "view") return null
   const message = minAgeRefusal(age, event.min_age)
   return message ? { kind: "age", message, unknownAge: age == null } : null
+}
+
+async function hasStakeInSuspendedEvent(userId: string, eventId: string, organizerId: string, orgId: string | null): Promise<boolean> {
+  if (organizerId === userId) return true
+  const [rsvp, member] = await Promise.all([
+    db.event_rsvps.findFirst({ where: { event_id: eventId, user_id: userId, status: { not: "not_going" } }, select: { id: true } }),
+    orgId ? db.organisation_members.findFirst({ where: { org_id: orgId, user_id: userId }, select: { user_id: true } }) : null,
+  ])
+  return rsvp !== null || member !== null
 }
 
 /**

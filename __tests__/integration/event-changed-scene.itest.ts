@@ -313,6 +313,45 @@ describe("recording a change under concurrent edits", () => {
   })
 })
 
+describe("what the row lock protects", () => {
+  it("an edit that arrives while a publish is still open waits for it, so it is recorded against a PUBLISHED event", async () => {
+    /*
+     * A draft records no change (nobody is going to it). tx1 publishes it and
+     * holds. The edit starts meanwhile: without the `SELECT … FOR UPDATE` it
+     * reads the row first, still a draft, and only then waits at its UPDATE for
+     * tx1, so after tx1 commits it compares against a draft and records nothing.
+     * With the lock it waits before it reads, sees the published row, and
+     * records the venue change. (Two edits at once do not show this: the UPDATE's
+     * own lock and a consistent snapshot make them compute the same union.)
+     */
+    const id = await event({ status: "draft" })
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    let opened!: () => void
+    const began = new Promise<void>((r) => (opened = r))
+    const publish = db.$transaction(
+      async (tx) => {
+        await tx.events.update({ where: { id }, data: { status: "published" } })
+        opened()
+        await held
+      },
+      { timeout: 30_000 }
+    )
+    await began
+
+    const edit = updateEventTracked({ where: { id }, data: { venue_name: "Moved mid-publish" } })
+    await new Promise((r) => setTimeout(r, 400)) // long enough to have read the row, were it not waiting
+    release()
+    await publish
+    await edit
+
+    const row = await db.events.findUniqueOrThrow({ where: { id } })
+    expect(row.status).toBe("published")
+    expect(row.changed_at).not.toBeNull()
+    expect(row.changed_from).toEqual({ venue_name: "The Old Room" })
+  })
+})
+
 describe("GET /events/:id — the days of a run", () => {
   it("lists every day, a cancelled one marked, and says which day today is", async () => {
     const viewer = await person("scn-v5")
@@ -374,27 +413,75 @@ describe("GET /events/:id — why a link is refused", () => {
     expect(await res.json()).toMatchObject({ errorCode: "FORBIDDEN", reasonCode: "PROFILE_INCOMPLETE" })
   })
 
-  it("an event hidden because its organisation was suspended says so; a draft nobody published does not", async () => {
-    const viewer = await person("scn-v7")
-    const suspended = await event({ status: "draft", preSuspension: "published" })
+  it("an event hidden because its organisation was suspended says why only to people with a stake in it", async () => {
     const draft = await event({ status: "draft" })
+    const plain = { success: false, error: "Event not found", errorCode: "NOT_FOUND" }
+    const withReason = { errorCode: "NOT_FOUND", reasonCode: "ORGANISER_SUSPENDED", error: "Event not found" }
 
-    const a = await read(viewer, suspended)
-    expect(a.status).toBe(404)
-    expect(a.json).toMatchObject({ errorCode: "NOT_FOUND", reasonCode: "ORGANISER_SUSPENDED", error: "Event not found" })
+    for (const visibility of ["public", "private"] as const) {
+      const suspended = await event({ status: "draft", preSuspension: "published", visibility })
+      const rsvp = async (label: string, status: "going" | "maybe" | "waitlisted" | "not_going") => {
+        const who = await person(label)
+        await db.event_rsvps.create({ data: { event_id: suspended, user_id: who, status } })
+        return who
+      }
 
-    const priv = await event({ status: "draft", preSuspension: "published", visibility: "private" })
-    // A private event of a suspended organisation is a plain 404 to a stranger: the reason would say it exists.
-    const c = await read(viewer, priv)
-    expect(c.status).toBe(404)
-    expect(c.json).toEqual({ success: false, error: "Event not found", errorCode: "NOT_FOUND" })
-    // And to somebody who was on its list, the reason it went dark.
-    await db.event_rsvps.create({ data: { event_id: priv, user_id: viewer, status: "going" } })
-    expect((await read(viewer, priv)).json).toMatchObject({ errorCode: "NOT_FOUND", reasonCode: "ORGANISER_SUSPENDED" })
+      // A stranger: a plain 404, whether the event was public or private.
+      const stranger = await read(await person(`scn-sus-stranger-${visibility}`), suspended)
+      expect([stranger.status, stranger.json]).toEqual([404, plain])
 
-    const b = await read(viewer, draft)
-    expect(b.status).toBe(404)
-    expect(b.json).toEqual({ success: false, error: "Event not found", errorCode: "NOT_FOUND" })
+      // Somebody who said they were coming, in any way but no.
+      for (const status of ["going", "maybe", "waitlisted"] as const) {
+        const r = await read(await rsvp(`scn-sus-${status}-${visibility}`, status), suspended)
+        expect([r.status, r.json]).toEqual([404, expect.objectContaining(withReason)])
+      }
+      // Somebody who declined is a stranger again.
+      const declined = await read(await rsvp(`scn-sus-no-${visibility}`, "not_going"), suspended)
+      expect([declined.status, declined.json]).toEqual([404, plain])
+
+      // The organisation that runs it, read from its members: a suspended organisation is out of `actorFor`.
+      const staff = await person(`scn-sus-staff-${visibility}`)
+      await db.organisation_members.create({ data: { org_id: orgs[0], user_id: staff, role: "staff" } })
+      const org = await read(staff, suspended)
+      expect([org.status, org.json]).toEqual([404, expect.objectContaining(withReason)])
+    }
+
+    // A draft nobody ever published carries no reason for anyone, the people who RSVP'd included.
+    const goer = await person("scn-sus-draft-goer")
+    await db.event_rsvps.create({ data: { event_id: draft, user_id: goer, status: "going" } })
+    const b = await read(goer, draft)
+    expect([b.status, b.json]).toEqual([404, plain])
+  })
+})
+
+describe("the whole key set of GET /events/:id", () => {
+  // origin/dev's detail, before this branch: every key an installed build may read.
+  const OLD_KEYS = [
+    "address", "amenities", "categories", "chatGroup", "checkInRadius", "city", "claim", "country", "coverImageUrl", "createdAt",
+    "currentCapacity", "description", "details", "distance", "doorPolicy", "endTime", "externalLink", "id", "isFeatured", "isRecurring",
+    "latitude", "longitude", "maxCapacity", "media", "minAge", "organizer", "postalCode", "session", "shortDescription", "slug",
+    "startTime", "state", "stats", "status", "timezone", "title", "userStatus", "venueName", "visibility",
+  ]
+  const NEW_KEYS = ["changedAt", "changedFields", "changedFrom", "dayCount", "dayNumber", "days"]
+
+  it("is the old set and exactly the six new ones, nothing renamed or dropped", async () => {
+    const viewer = await person("scn-keys")
+    const { json } = await read(viewer, await event())
+    expect(Object.keys(json.data).sort()).toEqual([...OLD_KEYS, ...NEW_KEYS].sort())
+  })
+})
+
+describe("one notification when somebody is both going and has saved the event", () => {
+  it("a change is told to them once", async () => {
+    const id = await event()
+    const both = await going(id, "scn-both", "going", 2)
+    await db.event_favorites.create({ data: { event_id: id, user_id: both } })
+    const before = await db.events.findUniqueOrThrow({ where: { id } })
+
+    await dashboardPatch(id, { venue_name: "Both rooms", start_time: new Date(before.start_time.getTime() + HOUR).toISOString(), end_time: before.end_time.toISOString() })
+
+    expect(await db.notifications.count({ where: { user_id: both } })).toBe(1)
+    expect(sentMessages.filter((m) => m.to === `ExponentPushToken[${both}]`)).toHaveLength(1)
   })
 })
 
@@ -414,5 +501,21 @@ describe("the token a build registers", () => {
       "ExponentPushToken[old]": null,
       "ExponentPushToken[new]": 2,
     })
+  })
+
+  it("the same token re-registered: none then 2 stores 2, and none again leaves it at 2 (an older build must not undo it)", async () => {
+    const id = await person("scn-tok2")
+    const route = (await import("@/app/api/mobile/notifications/token/route")) as typeof import("@/app/api/mobile/notifications/token/route")
+    const post = (body: object) =>
+      route.POST(new NextRequest("http://localhost/api/mobile/notifications/token", { method: "POST", headers: { authorization: `Bearer ${tokenOf(id)}`, "content-type": "application/json" }, body: JSON.stringify(body) }))
+    const stored = async () => (await db.push_tokens.findFirstOrThrow({ where: { user_id: id, token: "ExponentPushToken[same]" } })).channel_set
+
+    expect((await post({ token: "ExponentPushToken[same]", platform: "android" })).status).toBe(200)
+    expect(await stored()).toBeNull()
+    expect((await post({ token: "ExponentPushToken[same]", platform: "android", channelSet: 2 })).status).toBe(200)
+    expect(await stored()).toBe(2)
+    expect((await post({ token: "ExponentPushToken[same]", platform: "android" })).status).toBe(200)
+    expect(await stored()).toBe(2)
+    expect(await db.push_tokens.count({ where: { user_id: id } })).toBe(1)
   })
 })
