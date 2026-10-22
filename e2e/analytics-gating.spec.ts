@@ -93,7 +93,15 @@ async function event(
   })
   for (const s of stays) {
     await db.event_check_ins.create({
-      data: { event_id: e.id, occurrence_id: occ.id, user_id: s.user_id, status: "checked_in", check_in_time: start },
+      // They left (the session below says when), and one person is open in one room at most (SCRUM-705).
+      data: {
+        event_id: e.id,
+        occurrence_id: occ.id,
+        user_id: s.user_id,
+        status: "checked_out",
+        check_in_time: start,
+        check_out_time: new Date(start.getTime() + s.minutes * MIN),
+      },
     })
     await db.presence_sessions.create({
       data: {

@@ -17,6 +17,8 @@ const mockDb = {
   // Revealing in the room carries into DMs opened from it.
   private_conversations: { updateMany: jest.fn() },
   user: { update: jest.fn(), findUnique: jest.fn() },
+  // `eventRoomBan`: nobody here is banned from the room unless a case says so.
+  chat_group_members: { findFirst: jest.fn().mockResolvedValue(null) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 

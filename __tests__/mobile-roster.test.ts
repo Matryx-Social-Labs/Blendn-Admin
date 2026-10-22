@@ -22,6 +22,8 @@ const mockDb = {
   // friends who let friends recognise them in rooms. Empty unless a case sets it.
   private_conversations: { findMany: jest.fn() },
   friendships: { findMany: jest.fn() },
+  // `eventRoomBan`: nobody here is banned from the room unless a case says so.
+  chat_group_members: { findFirst: jest.fn().mockResolvedValue(null) },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
