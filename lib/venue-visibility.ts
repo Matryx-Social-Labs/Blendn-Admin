@@ -201,6 +201,19 @@ export function eventVenue(event: {
   return atTheVenue(event, v.geofence) ? { id: v.id, name: v.name } : null
 }
 
+/**
+ * The neighbourhood a share page or the event screen names, "Koramangala"
+ * (Flow 16): the area of the venue the event is confirmed at (`eventVenue`'s
+ * own test), else the event's city. The venue's name is not part of this; an
+ * unlisted event shows this and nothing finer. Null when neither is known.
+ */
+export function eventArea(
+  event: Parameters<typeof eventVenue>[0] & { venue: { area: string | null } | null },
+  city: string | null | undefined
+): string | null {
+  return (eventVenue(event) ? event.venue?.area?.trim() : null) || city?.trim() || null
+}
+
 /** What `eventVenue` needs from an event row (the card's select already has its point). */
 export const eventVenueSelect = {
   venue_link_status: true,
