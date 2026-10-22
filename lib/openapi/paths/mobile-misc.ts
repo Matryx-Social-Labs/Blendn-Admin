@@ -669,6 +669,8 @@ registry.registerPath({
   path: "/api/mobile/notifications/token",
   tags: ["Mobile Notifications"],
   summary: "Register push notification token",
+  description:
+    "`channelSet: 2` says this build has the Android channels `people`, `crew` and `later`; a push to it is filed under one channel per kind, and `event_changed` is sent as itself. Without it the push is exactly what it always was (`event_changed` goes as `event_update`).",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: NotificationTokenRequestSchema } } },
@@ -725,6 +727,9 @@ const NotificationSchema = z.object({
     "crew_invite",
     "crew_here",
     "blend",
+    "venue_offer",
+    "event_changed",
+    "report_actioned",
   ]),
   title: z.string(),
   body: z.string(),

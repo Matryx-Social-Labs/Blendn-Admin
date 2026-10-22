@@ -2,7 +2,7 @@ import { checkImageContent } from "./moderation/openai-moderation"
 import { ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
-import { recordPhotoCheck, recordPhotoPulled } from "./photo-checks"
+import { notePulledProfilePhoto, recordPhotoCheck, recordPhotoPulled } from "./photo-checks"
 
 /**
  * Whether a photo may go on a profile.
@@ -157,14 +157,15 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
        * `User.image` in the same transaction, as the PUT writes both.
        */
       const row = await db.$transaction(async (tx) => {
-        const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null }[]>`
+        const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null; was_main: boolean | null }[]>`
           UPDATE profiles p
              SET photos = array_remove(p.photos, ${url}),
                  blur_photo = CASE WHEN p.photos[1] = ${url} THEN NULL ELSE p.blur_photo END
             FROM (SELECT id, photos, blur_photo FROM profiles WHERE id = ${userId} FOR UPDATE) prior
            WHERE prior.id = p.id
        RETURNING p.photos,
-                 CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur
+                 CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur,
+                 (prior.photos[1] = ${url}) AS was_main
         `
         if (pulledRow) {
           await tx.user.update({ where: { id: userId }, data: { image: pulledRow.photos[0] ?? null } })
@@ -173,6 +174,8 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
       })
       // The blur of a pulled photo is that photo, smaller: pulled with it.
       if (row?.cleared_blur) await recordPhotoPulled(row.cleared_blur, userId)
+      // Its owner is told, on `photo_states`, for a while (lib/photo-checks.ts).
+      if (row) await notePulledProfilePhoto(url, userId, row.was_main === true)
       await withdraw(url, userId)
       if (row?.cleared_blur) await withdraw(row.cleared_blur, userId)
       logger.warn("Profile photo removed after moderation", { userId })

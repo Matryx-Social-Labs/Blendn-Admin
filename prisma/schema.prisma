@@ -359,6 +359,17 @@ model profiles {
   /// Default true because that is what the UI has been claiming, so nobody's
   /// apparent settings change on the day these start being honoured.
   push_enabled   Boolean  @default(true)
+  /// Per-kind push switches under the master `push_enabled` (Flow 9 · 9.6).
+  /// They stop the PUSH only; the bell still fills. Default true, as the master
+  /// is, so nobody's pushes change the day these start being honoured.
+  /// "Matches and friends": match, reveal_request, reveal, friend_request,
+  /// friend_accepted. Offers keep their own pair (`offers_from_places`,
+  /// `offer_push_consent_at`), which is opt-in by App Store rule.
+  push_people    Boolean  @default(true)
+  /// "Your crew": crew_invite, crew_here, blend.
+  push_crew      Boolean  @default(true)
+  /// "After the night": rating_request.
+  push_later     Boolean  @default(true)
   /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
   /// default (the coordinator's default, flagged to the owner).
   offers_from_places Boolean @default(true)
@@ -470,6 +481,18 @@ model events {
   /// reinstatement; null at every other moment. An admin who cancels the event
   /// meanwhile wins — reinstatement restores only rows still `draft`.
   pre_suspension_status event_status?
+  /// When the time, the venue or the status last changed under people who had
+  /// already heard of this event ("changed while you're going", Flow 3 · 3.1).
+  /// Null until it has, and again if every change was put back. Only a
+  /// published event records one: nobody is going to a draft. See
+  /// `lib/event-change.ts`.
+  changed_at        DateTime?          @db.Timestamptz(6)
+  /// What those fields were BEFORE the first of the changes still standing
+  /// ({ start_time, end_time, venue_name, address } as they were, ISO strings,
+  /// and `cancelled: true`), so the app can strike the old time through. The
+  /// first value wins: a time moved twice is struck from what people were
+  /// first told. `changedFields` is derived from this and the row, never stored.
+  changed_from      Json?
   visibility        visibility_type    @default(public)
   max_capacity      Int?
   /// Minimum age to check in. Null — almost every event — means no restriction.
@@ -1255,6 +1278,13 @@ model push_tokens {
   user_id    String
   token      String
   platform   String // 'ios', 'android'
+  /// Which Android channels the install created (`lib/push-notifications.ts`
+  /// `deliveryFor`). Null is every build before Flow 9: it has `default`,
+  /// `messages`, `events`, `rooms` and (later) `offers`, and a push naming any
+  /// other channel lands in "Miscellaneous". 2 is the build that also created
+  /// `people`, `crew` and `later`, and knows `event_changed` and
+  /// `report_actioned`. The app says so when it registers its token.
+  channel_set Int?    @db.SmallInt
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
@@ -1303,6 +1333,10 @@ enum notification_kind {
   /// A venue sent its regulars an offer (step 12). The push names no venue:
   /// the app shows it on open.
   venue_offer
+  /// The time, the venue or the status of an event you are going to changed.
+  event_changed
+  /// A report you filed was acted on. Says that and nothing about whom.
+  report_actioned
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.
@@ -1535,6 +1569,13 @@ model photo_checks {
   /// this is what tells them apart. The object is withdrawn from the public
   /// bucket and kept 180 days after account deletion (docs/RETENTION.md).
   hidden     Boolean  @default(false)
+  /// When a PROFILE photo was pulled, so its owner is told for a while
+  /// (`pulled: true` on `photo_states`). Null for a blurred copy, which is
+  /// pulled with its photo and is not a tile, and for rows pulled before this
+  /// column: those are never listed.
+  pulled_at  DateTime? @db.Timestamptz(6)
+  /// It was the main photo, which changes what the owner is told.
+  pulled_was_main Boolean?
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)

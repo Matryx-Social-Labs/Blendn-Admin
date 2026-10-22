@@ -9,6 +9,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
+import { recordEventChange } from "@/lib/event-change"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
@@ -500,6 +501,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     // occurrence sync and the cancel cascade below can throw, and the row is
     // committed either way.
     const changes = materialEventChanges(event, updatedEvent)
+    // When it changed and what it was, for "changed while you're going" (lib/event-change.ts).
+    await recordEventChange(updatedEvent.id, event, updatedEvent)
     auditLog({
       userId: session.user.id,
       action: eventWriteAction(status ?? undefined, event.status),

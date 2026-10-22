@@ -233,6 +233,48 @@ export const EventDetailSchema = z
     startTime: z.string().datetime(),
     endTime: z.string().datetime(),
     session: EventSessionSchema,
+    changedAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .optional()
+      .describe(
+        "When the time, the venue or the status last moved under people who had heard of the event (\"changed while you're going\"). Null for an event that has not changed, and again when every change was put back."
+      ),
+    changedFields: z
+      .array(z.enum(["time", "venue", "cancelled"]))
+      .optional()
+      .describe("What moved, in that order; empty when nothing did. Derived on read."),
+    changedFrom: z
+      .object({
+        startTime: z.string().datetime().optional(),
+        endTime: z.string().datetime().optional(),
+        venueName: z.string().nullable().optional(),
+        address: z.string().nullable().optional(),
+      })
+      .nullable()
+      .optional()
+      .describe(
+        "What the time and venue were before the first change still standing, for the struck-through old value. Only fields that still differ; a cancel names none. The live values are `startTime`, `endTime` and `venueName`."
+      ),
+    days: z
+      .array(
+        z.object({
+          date: z.string().describe("The local calendar day, YYYY-MM-DD."),
+          startTime: z.string().datetime(),
+          endTime: z.string().datetime(),
+          cancelled: z.boolean().describe("A day called off without cancelling the run: draw it struck through."),
+        })
+      )
+      .optional()
+      .describe("Every day of the run, in order. One entry for a one-day event."),
+    dayCount: z.number().int().optional().describe("`days.length`."),
+    dayNumber: z
+      .number()
+      .int()
+      .nullable()
+      .optional()
+      .describe("The 1-based position of `session`'s day (\"Day 2 of 3\"). Null when every day is cancelled."),
     timezone: z.string(),
     status: z.string(),
     visibility: z.string(),
