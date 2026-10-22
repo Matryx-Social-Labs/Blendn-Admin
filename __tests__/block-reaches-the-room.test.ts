@@ -129,8 +129,10 @@ describe("blocking closes the conversation and cancels both request directions",
      * conversation between two blocked people. Once that row exists,
      * `mayConverse` returns true for them forever.
      */
-    expect(src).toMatch(/sender_id: targetId, recipient_id: authUser\.userId/)
-    expect(src).toMatch(/sender_id: authUser\.userId, recipient_id: targetId/)
+    // The block route blocks through the shared helper (lib/block-pair.ts).
+    const helper = readFileSync(join(process.cwd(), "lib/block-pair.ts"), "utf8")
+    expect(helper).toMatch(/sender_id: blockedId, recipient_id: blockerId/)
+    expect(helper).toMatch(/sender_id: blockerId, recipient_id: blockedId/)
   })
 
   it("the accept handler re-checks the block at accept time", () => {

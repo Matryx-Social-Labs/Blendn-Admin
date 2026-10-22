@@ -63,20 +63,22 @@ describe("B3 — the socket roster is for people in the room", () => {
      * exist to prevent. The REST twin already answers this with a 403.
      */
     const src = code("lib/socket-server.ts")
-    const open = /emitAsSeenBy\(io\.in\(`event:\$\{eventId\}`\), eventId, "event:checkin", \(idFor\) => \(\{[^}]*\}/.exec(src)
+    const open = /emitAsSeenBy\(io\.in\(`event:\$\{eventId\}`\), eventId, "event:checkin", \(idFor, _recognises, viewer\) => \(\{[\s\S]*?hereCount,\s*\}\)/.exec(src)
     expect(open).not.toBeNull()
     expect(open![0]).not.toContain("userName")
     expect(open![0]).not.toContain("userImage")
     // And not even the id: each watcher reads a handle unless it is their own
     // check-in (SCRUM-371) — a real id here was the same harvest by account.
     expect(open![0]).toContain("userId: idFor(userId)")
+    // A friend of the arriver gets the count and no handle at all (D23).
+    expect(open![0]).toContain("friends.has(viewer) ? {} : { userId: idFor(userId) }")
 
     // The `.except(...)` keeps the arriver's block counterparties off it (SCRUM-338).
     const roster = /io\.in\(`event:room:\$\{eventId\}`\)\.except\([^\n]*\),\s*eventId,\s*"event:room:checkin",\s*\(idFor, recognises\) => \{[\s\S]*?identity \? userId : undefined\s*\)/.exec(src)
     expect(roster).not.toBeNull()
     expect(roster![0]).toContain("userName")
     expect(roster![0]).toContain("userId: idFor(userId)")
-    expect(roster![0]).toContain(".except(excludeUserIds.map(")
+    expect(roster![0]).toContain(".except([...excludeUserIds, ...friends].map(")
     // The real name and photo go only to a recipient who may recognise the
     // arriver in this room (`recognisedInRoomBy`, the roster's rule); everybody
     // else gets the pseudonym and no photo.
@@ -130,7 +132,7 @@ describe("G7 — the blocked list is not a way to keep an identity", () => {
      * one person, and this list must not keep what the block undid.
      */
     const src = code("app/api/mobile/users/blocked/route.ts")
-    expect(src).toMatch(/knownAs\.set\(theirs, wasPseudonymous \? pseudonym : null\)/)
+    expect(src).toMatch(/knownAs\.set\(theirs, wasPseudonymous \? \(pseudonym \?\? "Attendee"\) : null\)/)
     expect(src).not.toMatch(/user1_revealed|user2_revealed|mayShowRealName/)
     // The photo stays behind the gate whatever the name says.
     expect(src).toMatch(/blocked_user_photo: visible\.has\(b\.blocked_id\) \? b\.blocked\.image : null/)

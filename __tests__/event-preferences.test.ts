@@ -36,6 +36,7 @@ const mockDb = {
   // friendships. None here: these fixtures are about multi-day check-ins.
   private_conversations: { findMany: jest.fn() },
   friendships: { findMany: jest.fn() },
+  ended_friendships: { findMany: jest.fn().mockResolvedValue([]) },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))

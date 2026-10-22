@@ -225,10 +225,11 @@ describe("a mutual like hands back what the moment needs to paint", () => {
      * for. The early return carries the bare `mutual: false`.
      */
     const src = MATCHES()
-    expect(src).toContain("if (!back) return { mutual: false }")
+    // The reciprocal-like lookup comes under the pair's lock and AFTER the linked check, and its early return is bare.
+    expect(src).toContain("if (!back || linked) return null")
     const code = codeOnly(src)
     const early = code.slice(
-      code.indexOf("if (!back) return"),
+      code.indexOf("if (!back || linked) return"),
       code.indexOf("const [pseudonymRows")
     )
     expect(early).not.toContain("pseudonyms")

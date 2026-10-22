@@ -452,7 +452,7 @@ describe("seatBoardRoom never leaves its transaction (step 10 review L2)", () =>
   const body = src.slice(src.indexOf("export async function seatBoardRoom"))
   it("passes tx to the pseudonyms and the kept-apart read", () => {
     expect(body).toMatch(/boardPseudonyms\(post\.event_id, seats, tx\)/)
-    expect(body).toMatch(/blocksBetween\(people, people, tx\)/)
+    expect(body).toMatch(/strangersApartBetween\(people, people, tx\)/)
     expect(body).not.toMatch(/\bdb\./)
   })
 })

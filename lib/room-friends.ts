@@ -4,7 +4,6 @@ import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
 import { logger } from "./logger"
 import { notStrangersTo } from "./room-people"
-import { emitRoomFriends } from "./socket-server"
 
 /**
  * `room:friends`: "your Friends here changed, refetch". Content-free (`{ eventId }`)
@@ -16,6 +15,14 @@ import { emitRoomFriends } from "./socket-server"
  *
  * Fire and forget, and logged: a signal never fails the write that caused it.
  */
+
+/**
+ * Loaded when there is something to send, not at import: `lib/friends.ts` reaches
+ * this, and everything that imports friends (the unit suites, the sweepers) should
+ * not pull the socket server and its auth stack with it.
+ */
+const emitRoomFriends = async (userIds: readonly string[], eventId: string) =>
+  (await import("./socket-server")).emitRoomFriends(userIds, eventId)
 
 /** Listable as "Friends here": opted in, "Show online status" on, not suspended or deleted. */
 async function listable(userId: string): Promise<boolean> {
@@ -58,7 +65,7 @@ export async function notifyFriendsHere(subjectId: string, opts: { eventIds?: re
     })
     const byEvent = new Map<string, Set<string>>()
     for (const v of viewers) byEvent.set(v.event_id, (byEvent.get(v.event_id) ?? new Set()).add(v.user_id))
-    for (const [eventId, ids] of byEvent) emitRoomFriends([...ids], eventId)
+    for (const [eventId, ids] of byEvent) await emitRoomFriends([...ids], eventId)
   } catch (error) {
     logger.warn("room:friends signal failed", { error: error instanceof Error ? error.message : String(error) })
   }
@@ -72,7 +79,7 @@ export async function notifyFriendshipChanged(a: string, b: string): Promise<voi
   try {
     const [mine, theirs] = await Promise.all([liveEventsOf(a), liveEventsOf(b)])
     const shared = mine.filter((e) => theirs.includes(e))
-    for (const eventId of shared) emitRoomFriends([a, b], eventId)
+    for (const eventId of shared) await emitRoomFriends([a, b], eventId)
   } catch (error) {
     logger.warn("room:friends signal failed", { error: error instanceof Error ? error.message : String(error) })
   }
