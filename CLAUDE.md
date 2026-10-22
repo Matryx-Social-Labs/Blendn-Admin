@@ -153,7 +153,7 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while nineteen exist in
+express a CHECK constraint, so `db push` creates none — while twenty exist in
 migration SQL and therefore in every deployed environment:
 
 | Constraint | What it enforces |
@@ -176,6 +176,7 @@ migration SQL and therefore in every deployed environment:
 | `crew_likes_solo_is_the_liker` | a person's own like is theirs (`from_user_id = liked_by_user_id`) |
 | `blends_one_b` | a Blend's side B is a crew or one person (side A is always a crew) |
 | `blends_pair_order` | two crews in one order only (`a_crew_id < b_crew_id`, uuid order — no collation), so a pair is one Blend |
+| `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per

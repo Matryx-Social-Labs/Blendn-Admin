@@ -49,7 +49,7 @@ registry.registerPath({
     "RSVP'd or favourited — somebody deciding whether to go is exactly who it is " +
     "for. Authors are pseudonyms, the same handle the room uses; the request " +
     "count is a number and never a list of who asked. An age-restricted event's " +
-    "board answers 403 `AGE_RESTRICTED` for an under-age or unknown age, before " +
+    "board answers 403 `AGE_RESTRICTED` for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter), before " +
     "the RSVP/favourite gate. Closed once the doors open (`start_time`): 403 " +
     "\"The board closes when the doors open — the room is open instead\". Posts " +
     "by anybody blocked either way are left out.",
@@ -331,6 +331,9 @@ registry.registerPath({
   description:
     PARTICIPATION_GATE +
     "GPS-verified check-in. Must be within event's check-in radius. Max GPS accuracy: 150m. " +
+    "A refusal the person can fix says so in `reasonCode`, with `errorCode` and the sentence unchanged: " +
+    "403 `FORBIDDEN` + `PROFILE_INCOMPLETE` before onboarding is finished, 403 `AGE_RESTRICTED` + " +
+    "`AGE_UNKNOWN` when an age-restricted event meets no age on file (a known age below the line has none). " +
     "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`).",
   security: bearerAuth,
   request: {
@@ -427,7 +430,7 @@ registry.registerPath({
   summary: "RSVP to event",
   description:
     PARTICIPATION_GATE +
-    "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age; 404 for a draft " +
+    "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter); 404 for a draft " +
     "or a private event you are not on the list for (lib/event-access.ts).",
   security: bearerAuth,
   request: {
@@ -490,8 +493,8 @@ registry.registerPath({
   summary: "Favorite event",
   description:
     PARTICIPATION_GATE +
-    "Same answers as RSVP: 403 `AGE_RESTRICTED` on an age-restricted event for an under-age or " +
-    "unknown age; 404 for a draft or a private event you are not on the list for.",
+    "Same answers as RSVP: 403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age " +
+    "(`reasonCode` `AGE_UNKNOWN` for the latter); 404 for a draft or a private event you are not on the list for.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {

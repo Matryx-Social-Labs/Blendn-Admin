@@ -37,7 +37,10 @@ export function generateOpenApiDocument() {
         "Mobile endpoints use JWT Bearer authentication. " +
         "Dashboard endpoints use NextAuth session cookies. " +
         "Note: `/api/mobile/v1/*` is rewritten to `/api/mobile/*` by middleware — both URL prefixes work identically. " +
-        "Bad input is a 4xx, never a 500: a path id or cursor that cannot be a row, or a body that is not JSON, answers 400 (see docs/API.md).",
+        "Bad input is a 4xx, never a 500: a path id or cursor that cannot be a row, or a body that is not JSON, answers 400 (see docs/API.md). " +
+        "Every `/api/mobile` request can also be refused before its route runs: 426 `UPDATE_REQUIRED` when `X-App-Version` " +
+        "is a plain version below the server's minimum (never when the header is absent, `unknown` or unparsable), and " +
+        "503 `MAINTENANCE` with `retryAfter` and a `Retry-After` header during planned downtime.",
     },
     servers: [{ url: "/" }],
     tags: [

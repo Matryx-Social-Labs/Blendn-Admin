@@ -1195,6 +1195,10 @@ model mobile_refresh_tokens {
   /// with a fresh pair and the orphaned successor revoked, instead of a 401
   /// that signs the device out. See verifyRefreshToken.
   replaced_by String?   @db.Uuid
+  /// Why `endPhoneSessions` ended this session ('password_reset' | 'signout_all'),
+  /// so the phone that presents the token next is told why (lib/session-end.ts,
+  /// `revokedSessionCode`). Null: rotated, signed out one device, or suspended.
+  revoked_reason String?
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 

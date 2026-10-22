@@ -557,7 +557,10 @@ describe("being known as a regular (RG-I02, RG-I03, SEC-09)", () => {
     const unclaimed = await venue(null)
     expect(await prefs(R[1].token, unclaimed, { known: true })).toMatchObject({ status: 409, json: { errorCode: "VENUE_UNCLAIMED" } })
     const minor = await person("rg_minor_optin", { age: 16 })
-    expect(await prefs(minor.token, A, { known: true })).toMatchObject({ status: 403, json: { errorCode: "AGE_RESTRICTED" } })
+    const refused = await prefs(minor.token, A, { known: true })
+    expect(refused).toMatchObject({ status: 403, json: { errorCode: "AGE_RESTRICTED" } })
+    // Flow 15's reasonCode is on the event doors only; this route is not one.
+    expect(refused.json).not.toHaveProperty("reasonCode")
     expect(await db.venue_regular_optins.count({ where: { venue_id: { in: [A, unclaimed] } } })).toBe(0)
   })
 })

@@ -7,6 +7,13 @@ export interface ApiResponse<T = unknown> {
   data?: T
   error?: string
   errorCode?: string
+  /**
+   * Why, for a client that knows how to read it, beside an `errorCode` that
+   * stays exactly what installed builds already match on (Flow 15):
+   * `ACCOUNT_*`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`,
+   * `PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`.
+   */
+  reasonCode?: string
   errors?: Array<{ field: string; message: string }>
 }
 
@@ -78,6 +85,29 @@ export const ErrorCode = {
    * there is nobody to tell (step 12). Not `NOT_FOUND`: the venue is there.
    */
   VENUE_UNCLAIMED: "VENUE_UNCLAIMED",
+  /**
+   * Why an account was refused or a session ended (Flow 15). Where a response
+   * already carried an `errorCode` installed builds match on (`FORBIDDEN`,
+   * `AGE_RESTRICTED`, `NOT_FOUND`), that stays and these go in `reasonCode`
+   * beside it; where it carried only the default 401, the code is both.
+   */
+  ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
+  /** An organiser, venue owner, sponsor or admin in the attendee app. */
+  ACCOUNT_STAFF: "ACCOUNT_STAFF",
+  /** The account was deleted. Never sent at sign-in with a password, which would confirm it existed. */
+  ACCOUNT_DELETED: "ACCOUNT_DELETED",
+  /** Refresh: every phone was signed out (Settings, or another device). */
+  SESSION_REVOKED_ELSEWHERE: "SESSION_REVOKED_ELSEWHERE",
+  /** Refresh: the password was reset or changed. */
+  PASSWORD_RESET: "PASSWORD_RESET",
+  /** 426, from `middleware.ts`: a build below `MOBILE_MIN_APP_VERSION`. */
+  UPDATE_REQUIRED: "UPDATE_REQUIRED",
+  /** 503, from `middleware.ts`: `MAINTENANCE_MODE` is on. Carries `retryAfter`. */
+  MAINTENANCE: "MAINTENANCE",
+  /** The age rule refused somebody whose age is not on file: the one case they can fix by adding it. */
+  AGE_UNKNOWN: "AGE_UNKNOWN",
+  /** Onboarding is unfinished, and no adult age on file stands in for it. */
+  PROFILE_INCOMPLETE: "PROFILE_INCOMPLETE",
 } as const
 
 /**
@@ -122,7 +152,9 @@ function defaultErrorCode(status: number): string | undefined {
 export function errorResponse(
   message: string,
   status: number = 400,
-  errorCode?: string
+  errorCode?: string,
+  /** The reason, in `reasonCode`, when `errorCode` must stay what it was. */
+  reasonCode?: string
 ): NextResponse<ApiResponse> {
   const code = errorCode ?? defaultErrorCode(status)
   return NextResponse.json(
@@ -130,6 +162,7 @@ export function errorResponse(
       success: false,
       error: message,
       ...(code && { errorCode: code }),
+      ...(reasonCode && { reasonCode }),
     },
     { status }
   )

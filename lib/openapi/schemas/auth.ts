@@ -112,6 +112,12 @@ export const SessionResponseSchema = z
     emailVerified: z.boolean(),
     image: z.string().nullable(),
     createdAt: z.string().datetime(),
+    signInMethod: z
+      .enum(["password", "google", "apple"])
+      .describe(
+        "What the account can sign in with: `password` when it has one, else the provider linked most recently. " +
+          "The tokens do not carry how *this* phone signed in, so this answers for the account."
+      ),
     profile: UserProfileSchema.nullable(),
   })
   .openapi("SessionResponse")
