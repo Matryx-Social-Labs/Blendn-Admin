@@ -1,6 +1,4 @@
 // Relative imports: see lib/conversations.ts. Enforced by __tests__/server-import-boundary.test.ts.
-import { Prisma } from "@prisma/client"
-
 import { db } from "./db"
 import { VISIBLE_DM_SQL } from "./dm-moderation"
 
