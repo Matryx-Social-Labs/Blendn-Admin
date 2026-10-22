@@ -3,6 +3,7 @@ import { z } from "zod"
 
 import {
   errorResponse,
+  forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
   successResponse,
@@ -11,7 +12,8 @@ import {
 } from "@/lib/api-response"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { castVote, getPollResults } from "@/lib/polls"
+import { castVote, getPollResults, pollVoteReason } from "@/lib/polls"
+import { Refusal } from "@/lib/refusal"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { readJson, isUuid } from "@/lib/api-input"
 
@@ -51,17 +53,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (message === "Poll not found") return notFoundResponse(message)
     /*
      * These are all things the voter can act on — a closed poll, a room they
-     * left, an option from another poll — so they come back as themselves rather
-     * than as a 500. Anything else is a fault and says nothing.
+     * left, an option from another poll, a venue day they are no longer live
+     * in — so they come back as themselves, with the sentence to show and a
+     * `reasonCode` to branch on, rather than as a 500. `errorCode` stays
+     * `CONFLICT`. Anything else is a fault and says nothing.
      */
-    if (
-      message === "This poll has closed" ||
-      message === "The chatroom is not open" ||
-      message === "You are not in this chatroom" ||
-      message === "That is not an option on this poll"
-    ) {
-      return errorResponse(message, 409)
-    }
+    const reason = pollVoteReason(message)
+    if (reason) return errorResponse(message, 409, undefined, reason)
+    // The room's own refusal (a banned member reading the results back), as the GET says it.
+    if (err instanceof Refusal) return forbiddenResponse(message)
     logger.error("Error casting vote", { error: message })
     return serverErrorResponse()
   }

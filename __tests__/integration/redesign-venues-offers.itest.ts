@@ -9,6 +9,7 @@ process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "itest-nextauth-sec
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
+import { randomUUID } from "crypto"
 import { NextRequest } from "next/server"
 
 import { myOffers } from "@/lib/offers/person"
@@ -22,6 +23,7 @@ import { closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const detail = require("@/app/api/mobile/venues/[venueId]/route") as typeof import("@/app/api/mobile/venues/[venueId]/route")
 const list = require("@/app/api/mobile/venues/route") as typeof import("@/app/api/mobile/venues/route")
+const upcomingRoute = require("@/app/api/mobile/venues/[venueId]/upcoming/route") as typeof import("@/app/api/mobile/venues/[venueId]/upcoming/route")
 const regular = require("@/app/api/mobile/venues/[venueId]/regular/route") as typeof import("@/app/api/mobile/venues/[venueId]/regular/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -188,6 +190,65 @@ describe("GET /venues/:id carries the venue page's facts", () => {
     for (let i = 1; i <= 7; i++) await eventAt(v, i * 3)
     const res = await body(await get(detail, `/api/mobile/venues/${v}`, viewer, { venueId: v }))
     expect(res.data.venue.upcoming).toHaveLength(5)
+    // And says there are seven, and where the other two are.
+    expect(res.data.venue.upcomingTotal).toBe(7)
+    expect(res.data.venue.upcomingNextCursor).toEqual(expect.any(String))
+  })
+
+  it("`upcomingTotal` and the cursor are the whole list's, and the cursor walks to the end through events sharing a start", async () => {
+    const v = await venue("Walk")
+    const same = new Date(Date.now() + 6 * HOUR)
+    const ids: string[] = []
+    // 14 events: 6 share one start, the rest follow; soonest first, id as the tiebreak.
+    for (let i = 0; i < 14; i++) {
+      ids.push(await eventAt(v, 6 + (i < 6 ? 0 : i), i < 6 ? { start_time: same, end_time: new Date(same.getTime() + 2 * HOUR) } : {}))
+    }
+    const expected = (
+      await db.events.findMany({ where: { id: { in: ids } }, orderBy: [{ start_time: "asc" }, { id: "asc" }], select: { id: true } })
+    ).map((e) => e.id)
+
+    const first = await body(await get(detail, `/api/mobile/venues/${v}`, viewer, { venueId: v }))
+    expect(first.data.venue.upcoming.map((e: { id: string }) => e.id)).toEqual(expected.slice(0, 5))
+    expect(first.data.venue.upcomingTotal).toBe(14)
+
+    const seen: string[] = []
+    let cursor: string | null = null
+    for (let guard = 0; guard < 10; guard++) {
+      const q: string = `limit=4${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`
+      const page = await body(await get(upcomingRoute, `/api/mobile/venues/${v}/upcoming?${q}`, viewer, { venueId: v }))
+      expect(page.status).toBe(200)
+      expect(page.data.pagination.totalCount).toBe(14)
+      seen.push(...page.data.events.map((e: { id: string }) => e.id))
+      if (!page.data.pagination.hasMore) break
+      cursor = page.data.pagination.nextCursor
+    }
+    expect(seen).toEqual(expected)
+  })
+
+  it("the full list is the same filter: a private event, a disputed link and an age-gated one are not in it or its total", async () => {
+    const v = await venue("Same")
+    const shown = await eventAt(v, 5)
+    await eventAt(v, 6, { visibility: "private" })
+    await eventAt(v, 7, { venue_link_status: "disputed" })
+    await eventAt(v, 8, { min_age: 40 })
+    const page = await body(await get(upcomingRoute, `/api/mobile/venues/${v}/upcoming`, viewer, { venueId: v }))
+    expect(page.data.events.map((e: { id: string }) => e.id)).toEqual([shown])
+    expect(page.data.pagination).toEqual({ limit: 20, hasMore: false, nextCursor: null, totalCount: 1 })
+    expect((await body(await get(detail, `/api/mobile/venues/${v}`, viewer, { venueId: v }))).data.venue.upcomingTotal).toBe(1)
+  })
+
+  it("the full list refuses a cursor that is not ours, an unknown venue, and caps limit", async () => {
+    const v = await venue("Refuse")
+    for (let i = 1; i <= 3; i++) await eventAt(v, i * 2)
+    expect((await body(await get(upcomingRoute, `/api/mobile/venues/${v}/upcoming?cursor=nope`, viewer, { venueId: v }))).status).toBe(400)
+    expect((await body(await get(upcomingRoute, `/api/mobile/venues/${randomUUID()}/upcoming`, viewer, { venueId: randomUUID() }))).status).toBe(404)
+    expect((await body(await get(upcomingRoute, `/api/mobile/venues/${v}/upcoming?limit=1000`, viewer, { venueId: v }))).data.pagination.limit).toBe(100)
+  })
+
+  it("a venue with nothing coming answers an empty list and a total of 0", async () => {
+    const v = await venue("Empty")
+    const d = await body(await get(detail, `/api/mobile/venues/${v}`, viewer, { venueId: v }))
+    expect(d.data.venue).toMatchObject({ upcoming: [], upcomingTotal: 0, upcomingNextCursor: null })
   })
 
   it("`live.stayUntil` is your own window's ceiling, null when you are not live", async () => {

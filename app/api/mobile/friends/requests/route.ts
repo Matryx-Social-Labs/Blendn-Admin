@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
-import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, requestFriend, withoutHeld } from "@/lib/friends"
+import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, releaseHeldRequests, requestFriend } from "@/lib/friends"
 import { identityForRef } from "@/lib/identity"
 import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -17,13 +17,20 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
+import { createdBefore, keysetPage, LEGACY_PAGE, LIST_PAGE, NEWEST_FIRST, parseListQuery, type ListPagination } from "@/lib/pagination"
 
 /**
- * GET /api/mobile/friends/requests — waiting for me, and waiting on others.
+ * GET /api/mobile/friends/requests — waiting for me, and waiting on others,
+ * a page of each at a time.
  *
  * `incoming` leaves out what I answered "Not now". `outgoing` never says
  * whether the other person did: the asker keeps seeing "Requested", because a
  * decline that reaches them is a rejection.
+ *
+ * Both lists come back, newest first, `?limit=` of each (default 50, at most
+ * 100), with `pagination.incoming` and `pagination.outgoing` (`hasMore`,
+ * `nextCursor`, `totalCount`). To page one of them, ask for it alone:
+ * `?list=incoming&cursor=…` answers only that array.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -31,25 +38,62 @@ export async function GET(request: NextRequest) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
     const me = authUser.userId
 
+    const params = request.nextUrl.searchParams
+    const list = params.get("list")
+    if (list !== null && list !== "incoming" && list !== "outgoing") return errorResponse("Invalid list", 400)
+    if (params.get("cursor") && !list) return errorResponse("A cursor needs ?list=incoming or ?list=outgoing", 400)
+    const query = parseListQuery(params, LIST_PAGE.REQUESTS, LEGACY_PAGE)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit, after } = query
+
+    /*
+     * A request held for a pseudonymous match is not delivered yet (`held_at`).
+     * Whatever has become deliverable since — both revealed, the conversation open
+     * — is released first (idempotent; one bounded read when nothing is held), so
+     * the page, the count and the cursor below are exact without a per-row filter.
+     */
+    await releaseHeldRequests([me]).catch(() => undefined)
+    const incomingWhere = { recipient_id: me, held_at: null, dismissed_at: null, withdrawn_at: null, sender: { deletedAt: null } }
+    const outgoingWhere = { sender_id: me, withdrawn_at: null, recipient: { deletedAt: null } }
+    const cursorFor = (which: "incoming" | "outgoing") => (list === which && after ? createdBefore(after) : {})
+
     const [incoming, outgoing] = await Promise.all([
-      db.friend_requests.findMany({
-        where: { recipient_id: me, dismissed_at: null, withdrawn_at: null, sender: { deletedAt: null } },
-        select: { id: true, created_at: true, sender_id: true, recipient_id: true, held_at: true, sender: { select: personSelect } },
-        orderBy: { created_at: "desc" },
-      }),
-      db.friend_requests.findMany({
-        where: { sender_id: me, withdrawn_at: null, recipient: { deletedAt: null } },
-        select: { id: true, created_at: true, recipient: { select: personSelect } },
-        orderBy: { created_at: "desc" },
-      }),
+      list === "outgoing"
+        ? null
+        : Promise.all([
+            db.friend_requests.count({ where: incomingWhere }),
+            db.friend_requests.findMany({
+              where: { ...incomingWhere, ...cursorFor("incoming") },
+              select: { id: true, created_at: true, sender: { select: personSelect } },
+              orderBy: NEWEST_FIRST,
+              take: limit + 1,
+            }),
+          ]),
+      list === "incoming"
+        ? null
+        : Promise.all([
+            db.friend_requests.count({ where: outgoingWhere }),
+            db.friend_requests.findMany({
+              where: { ...outgoingWhere, ...cursorFor("outgoing") },
+              select: { id: true, created_at: true, recipient: { select: personSelect } },
+              orderBy: NEWEST_FIRST,
+              take: limit + 1,
+            }),
+          ]),
     ])
 
-    // A request held for a pseudonymous match is not delivered yet.
-    const visibleIncoming = await withoutHeld(incoming)
+    const paged = <T extends { id: string; created_at: Date }>(r: [number, T[]] | null) => {
+      if (!r) return null
+      const page = keysetPage(r[1], limit, (row) => ({ at: row.created_at, id: row.id }))
+      return { ...page, pagination: { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount: r[0] } satisfies ListPagination }
+    }
+    const inc = paged(incoming)
+    const out = paged(outgoing)
 
     return successResponse({
-      incoming: visibleIncoming.map((r) => ({ id: r.id, person: personCard(r.sender), createdAt: r.created_at })),
-      outgoing: outgoing.map((r) => ({ id: r.id, person: personCard(r.recipient), createdAt: r.created_at })),
+      ...(inc && { incoming: inc.items.map((r) => ({ id: r.id, person: personCard(r.sender), createdAt: r.created_at })) }),
+      ...(out && { outgoing: out.items.map((r) => ({ id: r.id, person: personCard(r.recipient), createdAt: r.created_at })) }),
+      pagination: { ...(inc && { incoming: inc.pagination }), ...(out && { outgoing: out.pagination }) },
     })
   } catch (error) {
     logger.error("List friend requests error", { error: error instanceof Error ? error.message : String(error) })

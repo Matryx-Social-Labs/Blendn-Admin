@@ -165,13 +165,26 @@ export interface EventDay {
   endTime: Date
   /** Called off without cancelling the run: drawn struck through. */
   cancelled: boolean
+  /** When it was called off, or null. `cancelled` is `cancelledAt !== null`. */
+  cancelledAt: Date | null
 }
+
+/** The most days one event detail carries. A festival past this gets a window around today, not the run. */
+export const EVENT_DAYS_WINDOW = 31
+
+/** Days kept before today's, so "yesterday" still shows. */
+const DAYS_BEFORE_CURRENT = 2
 
 /**
  * The days of a run and where today is in it (Flow 3 · 3.2: "Day 2 of 3", the
  * day strip). `dayNumber` is the 1-based position of `eventSession`'s day, null
  * when every day is cancelled, and an event with no occurrences rows (legacy) is
  * one day, today's.
+ *
+ * Bounded: at most `EVENT_DAYS_WINDOW` days. Every day of an ordinary event; for
+ * a longer run the stretch starting two days before today's, so `dayCount` (the
+ * whole run) can exceed `days.length`, and `daysFrom` says which day of the run
+ * the first listed one is.
  */
 export function eventDays(
   event: {
@@ -180,21 +193,23 @@ export function eventDays(
     occurrences?: readonly { occurs_on: Date; start_time: Date; end_time: Date; cancelled_at: Date | null }[]
   },
   now: Date = new Date()
-): { days: EventDay[]; dayCount: number; dayNumber: number | null } {
+): { days: EventDay[]; dayCount: number; dayNumber: number | null; daysFrom: number } {
   const rows = [...(event.occurrences ?? [])].sort((a, b) => a.start_time.getTime() - b.start_time.getTime())
   if (rows.length === 0) {
-    const day = { date: event.start_time.toISOString().slice(0, 10), startTime: event.start_time, endTime: event.end_time, cancelled: false }
-    return { days: [day], dayCount: 1, dayNumber: 1 }
+    const day = { date: event.start_time.toISOString().slice(0, 10), startTime: event.start_time, endTime: event.end_time, cancelled: false, cancelledAt: null }
+    return { days: [day], dayCount: 1, dayNumber: 1, daysFrom: 1 }
   }
-  const days = rows.map((r) => ({
+  const current = eventSession(event, now)
+  const index = current ? rows.findIndex((r) => r.start_time.getTime() === current.startTime.getTime()) : -1
+  const first = Math.max(0, Math.min(index < 0 ? 0 : index - DAYS_BEFORE_CURRENT, rows.length - EVENT_DAYS_WINDOW))
+  const days = rows.slice(first, first + EVENT_DAYS_WINDOW).map((r) => ({
     date: r.occurs_on.toISOString().slice(0, 10),
     startTime: r.start_time,
     endTime: r.end_time,
     cancelled: r.cancelled_at !== null,
+    cancelledAt: r.cancelled_at,
   }))
-  const current = eventSession(event, now)
-  const index = current ? rows.findIndex((r) => r.start_time.getTime() === current.startTime.getTime()) : -1
-  return { days, dayCount: days.length, dayNumber: index >= 0 ? index + 1 : null }
+  return { days, dayCount: rows.length, dayNumber: index >= 0 ? index + 1 : null, daysFrom: first + 1 }
 }
 
 /** The occurrence columns `eventSession` reads, for a Prisma `select`. */

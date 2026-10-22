@@ -55,6 +55,14 @@ export const ErrorResponseSchema = z
           "`NOT_A_REVEALED_MATCH` (404 on `POST /friends/requests`), `RATE_LIMITED` (429 on the friend routes, with `retryAfter`). " +
           "Read `reasonCode ?? errorCode`."
       ),
+    retryAfter: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Seconds to wait before trying again (also the `Retry-After` header), on a 429 `RATE_LIMITED`, on a 429 `SPAM_BLOCKED` for a burst " +
+          "(absent when waiting would not help, as for too many links), and on the 503 `MAINTENANCE`."
+      ),
   })
   .openapi("ErrorResponse")
 
@@ -83,6 +91,32 @@ export const RateLimitErrorSchema = z
   .openapi("RateLimitErrorResponse")
 
 // Offset-based pagination meta
+/**
+ * The `pagination` block of a list paged by cursor (`lib/pagination.ts`
+ * `ListPagination`): the inbox, friends, friend requests, blocked people and
+ * the board. `totalCount` is the whole list, whatever page this is.
+ */
+export const ListPaginationSchema = z
+  .object({
+    limit: z.number().int(),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable().describe("Send as `?cursor=` for the next page. Opaque. Null on the last page."),
+    totalCount: z.number().int().describe("How many there are in all, not on this page."),
+  })
+  .openapi("ListPagination")
+
+/** `?limit=&cursor=` on a list paged by cursor. */
+export const ListQuerySchema = z.object({
+  limit: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "A page's size, 1-100; each list has its own default. A request with neither `limit` nor `cursor` (an installed build, which cannot page) is answered up to 200 on the inbox, friends, friend requests and blocked lists; the board is 100 either way. A new client sends `limit` on its first page."
+    ),
+  cursor: z.string().optional().describe("The previous page's `pagination.nextCursor`. A cursor that is not ours is 400."),
+})
+
 export const PaginationMetaSchema = z
   .object({
     page: z.number().int(),

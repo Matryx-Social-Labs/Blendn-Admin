@@ -21,6 +21,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { createdBefore, keysetPage, LIST_PAGE, NEWEST_FIRST, parseListQuery, type ListPagination } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -37,6 +38,9 @@ interface RouteParams {
  * travel somewhere with a stranger, and a name on it would be the one place in
  * the product where identity is handed over before anybody consented to it.
  */
+
+/** How many of an author's own taken-down posts the board read lists. */
+const TAKEN_DOWN_SHOWN = 20
 
 // GET /api/mobile/events/[eventId]/board
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -67,7 +71,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const blocked = [...(await blockCounterparties(user.userId)), ...(await notStrangersTo(user.userId))]
 
     /*
-     * Live posts only, newest first, and the author as a pseudonym.
+     * Live posts only, newest first, a page at a time (`?limit=` default 100, `?cursor=`), and the author as a pseudonym.
      *
      * `anonymous_name` comes from `chat_group_members`, the same handle the
      * room uses — so somebody who posts on the board and then talks in the room
@@ -75,10 +79,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * else. A second naming scheme would either break that continuity or
      * create a handle that follows them between events.
      */
-    const posts = await db.board_posts.findMany({
-      where: { event_id: eventId, deleted_at: null, author_id: { notIn: blocked } },
-      orderBy: { created_at: "desc" },
-      take: 100,
+    const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit, after } = query
+
+    const live = { event_id: eventId, deleted_at: null, author_id: { notIn: blocked } }
+    const [totalCount, rows] = await Promise.all([
+      db.board_posts.count({ where: live }),
+      db.board_posts.findMany({
+      where: after ? { AND: [live, createdBefore(after)] } : live,
+      orderBy: NEWEST_FIRST,
+      take: limit + 1,
       select: {
         id: true,
         kind: true,
@@ -89,14 +100,36 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         // Not the silenced ones, except your own: see `visibleBoardRequests`.
         _count: { select: { requests: { where: visibleBoardRequests(user.userId) } } },
       },
-    })
+    }),
+    ])
+    const page = keysetPage(rows, limit, (p) => ({ at: p.created_at, id: p.id }))
+    const posts = page.items
 
     const pseudonymOf = await boardPseudonyms(
       eventId,
       posts.map((p) => p.author_id)
     )
 
+    /*
+     * Your own posts a moderator or the automatic check took down, so the app
+     * can say so (SV9). Yours only, newest first, a few: the author is the one
+     * person the board tells, and a withdrawal by the author is not here.
+     */
+    const takenDown = after ? [] : await db.board_posts.findMany({
+      where: { event_id: eventId, author_id: user.userId, deleted_at: { not: null }, moderation_status: { in: ["removed", "hidden"] } },
+      orderBy: { deleted_at: "desc" },
+      take: TAKEN_DOWN_SHOWN,
+      select: { id: true, kind: true, body: true, created_at: true, deleted_at: true },
+    })
+
     return successResponse({
+      takenDown: takenDown.map((p) => ({
+        id: p.id,
+        kind: p.kind,
+        body: p.body,
+        createdAt: p.created_at,
+        takenDownAt: p.deleted_at,
+      })),
       posts: posts.map((p) => ({
         id: p.id,
         kind: p.kind,
@@ -113,6 +146,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
          */
         requestCount: p._count.requests,
       })),
+      pagination: { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount } satisfies ListPagination,
     })
   } catch (error) {
     logger.error("Board read error", {

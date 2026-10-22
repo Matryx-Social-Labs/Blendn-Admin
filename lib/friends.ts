@@ -547,7 +547,7 @@ const HELD_RELEASE_BATCH = 200
  *
  * Called by the two writers of a reveal (`POST /conversations/:id/reveal`, and a
  * reveal in a room carrying into its DMs). A request this misses is still
- * delivered by reads (`withoutHeld`, `friendState`), only without the push.
+ * delivered by reads (the requests list releases first; `friendState` tests it), only without the push.
  */
 export async function releaseHeldRequests(userIds: readonly string[]): Promise<void> {
   if (userIds.length === 0) return
@@ -620,22 +620,6 @@ export async function releaseHeldRequests(userIds: readonly string[]): Promise<v
     void notifyFriendshipChanged(a, b)
   }
   for (const r of outcome.requests) if (!r.dismissed_at) notifyFriendRequest(r.recipient_id, r.id)
-}
-
-/**
- * Requests as the recipient sees them: a held one is shown only on a positive
- * test — its pair's conversation is open and both have revealed.
- */
-export async function withoutHeld<T extends { sender_id: string; recipient_id: string; held_at: Date | null }>(rows: T[]): Promise<T[]> {
-  const held = rows.filter((r) => r.held_at !== null)
-  if (held.length === 0) return rows
-  const pairs = held.map((r) => conversationPair(r.sender_id, r.recipient_id))
-  const conversations = await db.private_conversations.findMany({
-    where: { OR: pairs.map(([user1_id, user2_id]) => ({ user1_id, user2_id })) },
-    select: matchSelect,
-  })
-  const shown = new Set(conversations.filter(heldMayShow).map((c) => `${c.user1_id}|${c.user2_id}`))
-  return rows.filter((r) => r.held_at === null || shown.has(conversationPair(r.sender_id, r.recipient_id).join("|")))
 }
 
 /**

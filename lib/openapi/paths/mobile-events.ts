@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -94,10 +94,10 @@ registry.registerPath({
     "\"The board closes when the doors open — the room is open instead\". Posts " +
     "by anybody blocked either way are left out.",
   security: bearerAuth,
-  request: { params: z.object({ eventId: z.string() }) },
+  request: { params: z.object({ eventId: z.string() }), query: ListQuerySchema },
   responses: {
     200: {
-      description: "Live posts, newest first",
+      description: "Live posts, newest first, a page at a time (`?limit=` default 100, at most 100; `?cursor=`)",
       content: {
         "application/json": {
           schema: wrap(
@@ -114,6 +114,21 @@ registry.registerPath({
                   requestCount: z.number(),
                 })
               ),
+              pagination: ListPaginationSchema,
+              takenDown: z
+                .array(
+                  z.object({
+                    id: z.string(),
+                    kind: z.enum(["offer", "seeking", "chat"]),
+                    body: z.string(),
+                    createdAt: z.string(),
+                    takenDownAt: z.string(),
+                  })
+                )
+                .optional()
+                .describe(
+                  "YOUR posts a moderator or the automatic check took down, newest first, at most 20 (SV9). Yours only: another reader gets []. Your own withdrawals are not here. A `board_post_removed` push, bell row and `board:postRemoved` socket event say so when it happens."
+                ),
             })
           ),
         },
