@@ -31,7 +31,11 @@ jest.mock("@/lib/db", () => ({
     },
   },
 }))
-jest.mock("@/lib/conversations", () => ({ blockCounterparties: (...a: unknown[]) => blocks(...a) }))
+// keptApartIn: the room's kept-apart set (board rooms add closed pairs); blocks here.
+jest.mock("@/lib/conversations", () => ({
+  blockCounterparties: (...a: unknown[]) => blocks(...a),
+  keptApartIn: (...a: unknown[]) => blocks(...a),
+}))
 jest.mock("@/lib/socket-server", () => ({ emitChatMessage: jest.fn() }))
 jest.mock("@/lib/room-handle", () => ({ roomHandle: (_e: string, u: string) => `handle-of-${u}` }))
 jest.mock("expo-server-sdk", () => ({
@@ -55,6 +59,12 @@ import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { isRoomMuted, roomMuteState, withMute, withoutMute } from "@/lib/room-mute"
 
 const NOW = new Date("2026-09-28T20:00:00Z")
+/** An event's room: `last_allowed_at` is read only in a venue day's (`liveInVenueDay`). */
+// The room's door reads its kind and owner too (step 7): an event room, published.
+const EVENT_ROOM = {
+  last_allowed_at: null,
+  chat_group: { kind: "event", event: { kind: "event", status: "published", deleted_at: null }, board_post: null },
+}
 const HOUR = 60 * 60 * 1000
 
 beforeEach(() => {
@@ -103,7 +113,7 @@ describe("a muted room does not ring", () => {
   const reply = () =>
     deliverToRoom({
       chatGroupId: "g1",
-      eventId: "e1",
+      scope: "e1",
       groupName: "Friday at Toit",
       senderId: "sender",
       senderAnonName: "Cosmic Panda",
@@ -119,7 +129,7 @@ describe("a muted room does not ring", () => {
     })
 
   it("a reply to somebody who muted the room pushes nothing", async () => {
-    membershipOf.mockResolvedValue({ status: "active", notification_preferences: { muted: true, muted_until: null } })
+    membershipOf.mockResolvedValue({ status: "active", notification_preferences: { muted: true, muted_until: null }, ...EVENT_ROOM })
     await reply()
     expect(mockSent).toHaveLength(0)
     // The membership read asks for the preference, or the rule has nothing to read.
@@ -130,6 +140,7 @@ describe("a muted room does not ring", () => {
     membershipOf.mockResolvedValue({
       status: "active",
       notification_preferences: { muted: true, muted_until: new Date(Date.now() - HOUR).toISOString() },
+      ...EVENT_ROOM,
     })
     await reply()
     expect(mockSent).toHaveLength(1)

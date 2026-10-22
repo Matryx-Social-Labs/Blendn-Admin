@@ -3,6 +3,7 @@
 import type { Prisma, user_role } from "@prisma/client"
 
 import { db } from "./db"
+import { realEventsWhere } from "./event-kind"
 import { hostNotSuspended } from "./event-access"
 import { actorFor } from "./org-membership"
 
@@ -44,7 +45,9 @@ export async function visibleEventsScope(user: {
   id: string
   role: user_role
 }): Promise<{ where: Prisma.eventsWhereInput; actor: { id: string; orgIds: string[] } }> {
-  const where: Prisma.eventsWhereInput = { deleted_at: null }
+  // Venue days are nobody's to list (step 3): their owner reaches the room
+  // from the venue, and an admin from the moderation queue.
+  const where: Prisma.eventsWhereInput = { deleted_at: null, ...realEventsWhere }
   if (user.role === "app_admin") return { where, actor: { id: user.id, orgIds: [] } }
 
   const actor = await actorFor(user)

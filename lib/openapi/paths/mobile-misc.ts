@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -17,9 +17,11 @@ import {
   ActiveCheckinSchema,
 } from "@/lib/openapi/schemas/profile"
 import { MessageResponseSchema } from "@/lib/openapi/schemas/auth"
+import { CheckinRequestSchema } from "@/lib/openapi/schemas/event"
+import { LIVE_COUNT_BUCKETS, type LiveCountBucket } from "@/lib/disclosure"
 
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
+/** The live-count buckets, from the one list the routes bucket with — never typed out twice. */
+const LIVE_COUNT_ENUM = LIVE_COUNT_BUCKETS as unknown as [LiveCountBucket, ...LiveCountBucket[]]
 
 // === Categories ===
 
@@ -56,13 +58,37 @@ const VenueListItemSchema = z
     latitude: z.number().nullable(),
     longitude: z.number().nullable(),
     capacity: z.number().int().nullable(),
+    tier: z.enum(["live", "open", "quiet"]).describe("The tier `order=live` ranks by: `live` (somebody is live here now, `liveNow` not `quiet`), `open` (open tonight: hours for the venue's current day, or a public event starting before its day ends), else `quiet`. Present on every item, whatever the order; null `liveNow` (a caller who may not go live) never makes a venue `live`."),
     venueType: z.string().nullable(),
     venueTypeLabel: z.string(),
+    area: z.string().nullable().describe("The neighbourhood, as the dataset names it (Overture's own division polygons): \"Indiranagar\". Null when unknown: never guessed, so fall back to the address or city."),
+    areaSlug: z.string().nullable().describe("`area`'s slug, the value of the `area=` filter and of `areas[].slug` on `GET /api/mobile/venues/summary`. Null with `area`."),
+    tonight: z
+      .object({
+        opensAt: z.string().regex(/^\d\d:\d\d$/),
+        closesAt: z.string().regex(/^\d\d:\d\d$/),
+      })
+      .nullable()
+      .describe("Tonight's opening from `venues.hours`: wall-clock `HH:MM` in the venue's own timezone, for the weekday of its current day (a day resets at its `dayResetHour`, not midnight). A close at or before the open runs past midnight. With two openings in a day, the later one. Null when no hours are given for that day (all of them, today: nothing writes `hours` yet)."),
+    floors: z.number().int().min(1).max(200).nullable()
+      .describe(
+        "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
+          "`floors × 3.2` m tall over the building data's own height. `null`: use the map's height."
+      ),
     distance: z
       .number()
       .nullable()
       .describe("Kilometres from the supplied lat/lon, or null when either side has no fix."),
     upcomingEventCount: z.number().int(),
+    liveNow: z
+      .enum(LIVE_COUNT_ENUM)
+      .nullable()
+      .describe(
+        "How many guests are live here (Go Live), as a bucket and never a number: `quiet` is under 5, " +
+          "none included. Steady for a minute per venue, slow to fall, and leaving the caller out only when " +
+          "the figure counted them — the same figure as `live.liveNow` on `GET /api/mobile/venues/{venueId}`. " +
+          "`null` for a caller the venue page would refuse (not onboarded, or no known adult age): hide the chip."
+      ),
     nextEvent: z
       .object({
         id: z.string().uuid(),
@@ -92,7 +118,15 @@ registry.registerPath({
     "between them.\n\n" +
     "Returns active, non-deleted venues only. Each item carries `upcomingEventCount` and its " +
     "`nextEvent`, both computed with the **same** filter — published, public, not yet ended, " +
-    "and within the caller's `min_age` where their age is known.\n\n" +
+    "not disputed by the venue, and within the caller's `min_age` where their age is known.\n\n" +
+    "**A venue a real event has taken over is left out**: from an hour before a published, public " +
+    "event at it starts until that event ends (per day of a multi-day run), when its link is confirmed " +
+    "or its area is at the venue, and never for a disputed link, a venue's own Go Live day, or an event " +
+    "the caller is too young for. The event's card on `GET /api/mobile/events` names the venue instead " +
+    "(`venue`). **A claimed venue its owner took off Blendn** (\"Open on Blendn\" switched off, D-13) is " +
+    "left out too; its events still show on `GET /api/mobile/events`. An unclaimed venue is always listed. " +
+    "Each item's `liveNow` is a bucket, never a count, or null for a caller who may not go live. " +
+    "Ordered by name then id, so equal names keep one order across pages. 60 reads a minute per person.\n\n" +
     "`radius` has no default: sending coordinates means *sort by distance*, never *hide " +
     "anything further than N km*. `sortBy` offers `name` and `distance` only — ranking by " +
     "\"most going on\" would need a filtered relation count Prisma cannot order by.",
@@ -101,12 +135,15 @@ registry.registerPath({
     query: z.object({
       page: z.coerce.number().int().min(1).optional(),
       limit: z.coerce.number().int().min(1).max(100).optional(),
-      search: z.string().max(200).optional(),
+      search: z.string().max(200).optional().describe("Matches name, address, city and area (the neighbourhood)."),
       city: z.string().min(1).max(100).optional(),
       lat: z.coerce.number().min(-90).max(90).optional(),
       lon: z.coerce.number().min(-180).max(180).optional(),
       radius: z.coerce.number().min(0.1).max(100).optional(),
-      venueType: z.string().optional(),
+      venueType: z.string().optional().describe("One venue type, or a comma list (`pub_bar,brewery`): a venue of any of them. Each must be a known type; an unknown one is a 400."),
+      venueTypes: z.string().optional().describe("The same filter as `venueType`; if both are sent, a venue of either matches."),
+      area: z.string().min(1).max(100).optional().describe("A neighbourhood by `areaSlug`. A venue with no area is in none."),
+      order: z.enum(["live"]).optional().describe("`live`: three tiers — live now (`liveNow` not `quiet`), then open tonight (hours for the venue's current day, or a public event starting before its day ends), then the rest — each in the chosen sort, id as tiebreak, so pages never repeat or skip. A caller who may not go live gets the last two tiers. The response echoes `pagination.order: \"live\"` when applied. Venues can move between tiers between two page requests: de-duplicate by `id` across pages."),
       sortBy: z.enum(["name", "distance"]).optional(),
       sortOrder: z.enum(["asc", "desc"]).optional(),
     }),
@@ -119,12 +156,232 @@ registry.registerPath({
           schema: wrap(
             z.object({
               venues: z.array(VenueListItemSchema),
-              pagination: PaginationMetaSchema,
+              pagination: PaginationMetaSchema.extend({
+                order: z.literal("live").optional().describe("Echoed only when `order=live` was applied. Pages are windows over a ranking that can shift between requests (a venue goes live), so de-duplicate by venue `id` across pages."),
+              }),
             })
           ),
         },
       },
     },
+    ...standardErrors,
+  },
+})
+
+const VenueSummarySchema = z
+  .object({
+    total: z.number().int().describe("Venues `GET /api/mobile/venues` lists for you in this city."),
+    liveCount: z.number().int().describe("Venues with live guests (`liveNow` not `quiet`) for a caller who may go live; 0 for anyone else, as their `liveNow` is null. Places, never people."),
+    openTonightCount: z.number().int().describe("Venues whose tier is `open` (not also live): hours for their current day, or a public event starting before it ends."),
+    types: z
+      .array(z.object({ venueType: z.string(), label: z.string(), count: z.number().int() }))
+      .describe("Venues per type, most first; unclassified venues are in `total` only."),
+    areas: z
+      .array(
+        z.object({
+          slug: z.string(),
+          name: z.string(),
+          count: z.number().int(),
+          liveCount: z.number().int(),
+          typeMix: z.array(z.string()).max(4).describe("Up to the 4 most common venue types here, most first."),
+        })
+      )
+      .describe("Busiest first: live venues, then places, then slug. At most 100. Venues with no area are in no entry."),
+  })
+  .openapi("VenueSummary")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/venues/summary",
+  tags: ["Mobile Venues"],
+  summary: "Places counts by type and by area",
+  description:
+    "Counts of places, never of people, over exactly the venues `GET /api/mobile/venues` lists for you in `city`: " +
+    "active, not deleted, not taken off Blendn by its owner, and not taken over by an event (the takeover rule is " +
+    "per your age). The split is one grouped read; the answer is kept 60 s per city, per your age and per whether you " +
+    "may go live. `lat` and `lon` are accepted and ignored. Without `city`, every city. Same limit as the list: 60 reads a minute per person.",
+  security: bearerAuth,
+  request: {
+    query: z.object({
+      city: z.string().min(1).max(100).optional(),
+      lat: z.coerce.number().min(-90).max(90).optional(),
+      lon: z.coerce.number().min(-180).max(180).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Counts",
+      content: { "application/json": { schema: wrap(VenueSummarySchema) } },
+    },
+    ...standardErrors,
+  },
+})
+
+const LiveCountBucketSchema = z
+  .enum(LIVE_COUNT_ENUM)
+  .describe(
+    "How many guests are live here, never as a number (D-19): a count that moved from 4 to 5 as you watched " +
+      "would tell you somebody just walked in. `quiet` is under 5, none included. Never counts the caller."
+  )
+
+const VenueDetailSchema = z
+  .object({
+    venue: z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      address: z.string().nullable(),
+      city: z.string().nullable(),
+      latitude: z.number().nullable(),
+      longitude: z.number().nullable(),
+      venueType: z.string().nullable(),
+      venueTypeLabel: z.string(),
+      floors: z.number().int().min(1).max(200).nullable()
+        .describe(
+          "How many floors the venue's building has, set by its owner or an admin: the 3D map draws it " +
+            "`floors × 3.2` m tall over the building data's own height. `null`: use the map's height."
+        ),
+      claimed: z.boolean().describe("False: the app may offer \"Own this place? Claim it\"."),
+      capacity: z.number().int().nullable().describe("Null when unknown."),
+      dayResetHour: z.number().int().min(0).max(23).describe("The local hour (venue timezone) its day starts."),
+      hours: z
+        .array(z.object({ day: z.number().int().min(0).max(6), open: z.string(), close: z.string() }))
+        .nullable()
+        .describe("Opening hours: `day` 0 (Sunday) to 6, wall-clock `HH:MM` in the venue's own timezone; a close at or before the open runs past midnight. Null until given."),
+      description: z.string().nullable(),
+      amenities: z.array(z.string()).describe("Names from the shared amenity vocabulary (`venue_amenities`), in display order. `[]` until given."),
+      upcoming: z
+        .array(
+          z.object({
+            id: z.string().uuid(),
+            title: z.string(),
+            slug: z.string(),
+            coverImageUrl: z.string().nullable(),
+            startTime: z.string().datetime(),
+            endTime: z.string().datetime(),
+          })
+        )
+        .describe("Its next public events, soonest first (id as tiebreak), at most 5: published, public, not ended, link not disputed by the venue, within your age; never its own live rooms."),
+    }),
+    live: z.object({
+      open: z.boolean().describe("Whether `POST .../live` would be accepted here now (the fence aside)."),
+      closedReason: z
+        .enum(["event_live_here", "no_check_in_area"])
+        .nullable()
+        .describe("`event_live_here`: a real event has the venue — check in to `eventId` instead."),
+      eventId: z.string().uuid().nullable(),
+      liveNow: LiveCountBucketSchema,
+      youAreLive: z.boolean(),
+      expiresAt: z
+        .string()
+        .datetime()
+        .nullable()
+        .describe("When your window here ends. Count down from this, not from the tap."),
+      stay: z.boolean(),
+      stayUntil: z.string().datetime().nullable().describe("The furthest \"stay\" can carry your window (four hours from the first stay today); null until you chose stay."),
+      venueDayId: z.string().uuid().nullable().describe("Today's room here, when you are live in it."),
+      chatGroupId: z.string().uuid().nullable(),
+    }),
+    tonight: z
+      .object({
+        id: z.string().uuid(),
+        title: z.string(),
+        slug: z.string(),
+        coverImageUrl: z.string().nullable(),
+        startTime: z.string().datetime(),
+        endTime: z.string().datetime(),
+      })
+      .nullable()
+      .describe("The next public event here before the venue's day resets, age-filtered for you."),
+    claim: z
+      .object({ url: z.string().url() })
+      .nullable()
+      .describe(
+        "The public claim page (`/claim/venue/{venueId}`) on the dashboard host, for an unclaimed venue; null once " +
+          "claimed. Open it as given: it is built for the environment the app is talking to."
+      ),
+  })
+  .openapi("VenueDetail")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/venues/{venueId}",
+  tags: ["Mobile Venues"],
+  summary: "One venue, for Go Live",
+  description:
+    PARTICIPATION_GATE +
+    "404 for an unknown, archived or deleted venue. Whether you could go live here now, how many " +
+    "are live (a bucket), your own window, and tonight's event. Never the check-in area, and never " +
+    "who is live: that is the venue day's roster, which only somebody live here may read.",
+  security: bearerAuth,
+  request: { params: z.object({ venueId: z.string().uuid() }) },
+  responses: {
+    200: { description: "The venue", content: { "application/json": { schema: wrap(VenueDetailSchema) } } },
+    ...standardErrors,
+  },
+})
+
+const GoLiveRequestSchema = z
+  .union([
+    CheckinRequestSchema.extend({ minutes: z.union([z.literal(20), z.literal(45), z.literal(60)]) }),
+    CheckinRequestSchema.extend({ stay: z.literal(true) }),
+  ])
+  .openapi("GoLiveRequest")
+
+const GoLiveResponseSchema = z
+  .object({
+    venueDayId: z.string().uuid().describe("Today's room at this venue: its roster, grid and presence pings use this id."),
+    chatGroupId: z.string().uuid(),
+    expiresAt: z.string().datetime().describe("When this window ends. Never past the venue's daily reset."),
+    stay: z.boolean(),
+    stayUntil: z
+      .string()
+      .datetime()
+      .nullable()
+      .describe("For `stay`: the furthest in-fence pings may carry `expiresAt` (four hours, or the reset)."),
+    checkIn: z.object({ id: z.string().uuid(), status: z.string(), checkInTime: z.string().datetime() }),
+    revealSuggestion: z.boolean(),
+    intentNeeded: z.boolean(),
+  })
+  .openapi("GoLiveResponse")
+
+const EventLiveHereSchema = z
+  .object({
+    success: z.literal(false),
+    error: z.string(),
+    errorCode: z.literal("EVENT_LIVE_HERE"),
+    eventId: z.string().uuid().describe("The event to check in to instead."),
+  })
+  .openapi("EventLiveHere")
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/venues/{venueId}/live",
+  tags: ["Mobile Venues"],
+  summary: "Go Live at a venue",
+  description:
+    "Be visible at this venue for a window you choose: `minutes` 20, 45 or 60, or `stay: true` " +
+    "(60 minutes, then carried on by each presence ping inside the area, up to four hours). No window " +
+    "runs past the venue's daily reset (06:00 local by default). Going live again while live extends " +
+    "the window, never shortens it; going live elsewhere, or checking in to an event, ends it as a " +
+    "switch. When it ends you are checked out (`expired`) and the venue's room closes to you.\n\n" +
+    "Refusals, in order: 404 unknown, archived or deleted venue; " +
+    "(403 `AGE_RESTRICTED` carries `reasonCode` `AGE_UNKNOWN` when no age is on file, same sentence); " +
+    PARTICIPATION_GATE +
+    "409 `EVENT_LIVE_HERE` with `eventId` when a public event linked to this venue is on or starts " +
+    "within the hour — check in to it instead; 400 `GPS_TOO_VAGUE` for a fix worse than 150 m, " +
+    "`NO_CHECK_IN_AREA` for a venue with no check-in area, `OUT_OF_RANGE` for a position outside it; " +
+    "last, 403 `PLUS_REQUIRED` for `stay` where Blendn+ is gated in the venue's city and the caller " +
+    "holds neither Plus nor a live Night Pass (open the paywall). In a city's launch season `stay` is " +
+    "everyone's. While a stay runs, a ping no longer carries it once Plus lapses in a gated city: it " +
+    "ends at most 20 minutes after the last ping that did.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ venueId: z.string().uuid() }),
+    body: { content: { "application/json": { schema: GoLiveRequestSchema } } },
+  },
+  responses: {
+    200: { description: "Live", content: { "application/json": { schema: wrap(GoLiveResponseSchema) } } },
+    409: { description: "A real event has the venue", content: { "application/json": { schema: EventLiveHereSchema } } },
     ...standardErrors,
   },
 })
@@ -164,6 +421,84 @@ registry.registerPath({
         },
       },
     },
+    ...standardErrors,
+  },
+})
+
+// GET /api/mobile/profile-options
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/profile-options",
+  tags: ["Mobile Categories"],
+  summary: "The matching v2 profile vocabulary",
+  description:
+    "What the profile editor picks from (plan v2 §8): `languages` besides English (at most `maxLanguages`), `homeStates` " +
+    "(states, union territories and `abroad`), the twelve `signs` with their Western and rashi names, and the twelve " +
+    "`thisOrThat` questions (answer `a` or `b` through PUT /me/this-or-that). Every one is display only — printed as a " +
+    "shared line, never used to rank. Identical for every caller, cached for an hour.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "The vocabulary",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              languages: z.array(z.object({ slug: z.string(), label: z.string() })),
+              maxLanguages: z.number().int(),
+              homeStates: z.array(z.object({ slug: z.string(), label: z.string() })),
+              signs: z.array(z.object({ slug: z.string(), western: z.string(), rashi: z.string(), symbol: z.string() })),
+              thisOrThat: z.array(z.object({ slug: z.string(), a: z.string(), b: z.string() })),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+const ThisOrThatAnswers = z
+  .record(z.string(), z.enum(["a", "b"]))
+  .describe("Question slug → `a` or `b`, for the questions still asked")
+
+// GET /api/mobile/me/this-or-that
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/this-or-that",
+  tags: ["Mobile Profiles"],
+  summary: "Your this-or-that answers",
+  description: "Yours only — `/me`, no id. Display only: \"you both picked filter coffee over chai\" on a card when shared.",
+  security: bearerAuth,
+  responses: {
+    200: { description: "Your answers", content: { "application/json": { schema: wrap(z.object({ answers: ThisOrThatAnswers })) } } },
+    ...standardErrors,
+  },
+})
+
+// PUT /api/mobile/me/this-or-that
+registry.registerPath({
+  method: "put",
+  path: "/api/mobile/me/this-or-that",
+  tags: ["Mobile Profiles"],
+  summary: "Answer, change or take back this-or-that answers",
+  description:
+    "`{ answers: { [question]: \"a\" | \"b\" | null } }`: a choice sets it, `null` takes it back, a question not sent is " +
+    "left alone. An unknown question or choice refuses the whole request (400) — nothing is half saved. 409 " +
+    "`PROFILE_REQUIRED` before the account has a profile. Rate limited per user. Answers with every answer you now hold.",
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ answers: z.record(z.string(), z.enum(["a", "b"]).nullable()) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Saved", content: { "application/json": { schema: wrap(z.object({ answers: ThisOrThatAnswers })) } } },
+    409: { description: "No profile yet", content: { "application/json": { schema: ErrorResponseSchema } } },
     ...standardErrors,
   },
 })
@@ -225,6 +560,10 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}/block",
   tags: ["Mobile Users"],
   summary: "Unblock user",
+  description:
+    "`userId` is the `blocked_id` from `GET /users/blocked` (an opaque `bk_…` ref to one of your " +
+    "blocks), a room handle, or — for older clients — a raw id. Only a block you made is removed; " +
+    "anything else is a 200 that changes nothing.",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
@@ -383,6 +722,9 @@ const NotificationSchema = z.object({
     "friend_request",
     "friend_accepted",
     "rating_request",
+    "crew_invite",
+    "crew_here",
+    "blend",
   ]),
   title: z.string(),
   body: z.string(),
@@ -678,6 +1020,11 @@ registry.registerPath({
   path: "/api/mobile/users/blocked",
   tags: ["Mobile Safety"],
   summary: "List blocked users",
+  description:
+    "`blocked_id` is an opaque ref to the block (`bk_…`), not the person's account id: somebody " +
+    "blocked by their board post or room handle was never shown an id, and this list must not be " +
+    "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
+    "appear only where the identity rules allow.",
   security: bearerAuth,
   responses: {
     200: {
@@ -688,6 +1035,7 @@ registry.registerPath({
             z.object({
               users: z.array(
                 z.object({
+                  /** An opaque ref to this block (`bk_…`), never an account id. */
                   blocked_id: z.string(),
                   blocked_user_name: z.string().nullable(),
                   blocked_user_photo: z.string().nullable(),
@@ -714,6 +1062,73 @@ registry.registerPath({
   security: bearerAuth,
   responses: {
     200: { description: "Account deleted", content: { "application/json": { schema: wrap(MessageResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+/*
+ * Blendn+ (step 11). The paywall's two calls. Plus itself is granted only by
+ * the stores' webhook (`/api/webhooks/revenuecat`, not part of this API).
+ */
+const PlusStatusSchema = z
+  .object({
+    active: z.boolean().describe("Blendn+ is unlocked now: a subscription, a live Night Pass, the trial or a referral month."),
+    gated: z
+      .boolean()
+      .describe(
+        "Blendn+ is for sale to this person: gated in the city of their latest night (an open check-in is the latest). False in a launch season — sell nothing, say Plus is free there."
+      ),
+    product: z.enum(["plus", "night_pass"]).nullable(),
+    source: z
+      .enum(["apple", "google", "grant"])
+      .nullable()
+      .describe("`grant`: the trial or a referral month. Manage a store subscription in that store."),
+    expiresAt: z.string().datetime().nullable().describe("When the row that lasts longest ends; null never ends."),
+  })
+  .openapi("PlusStatus")
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/plus",
+  tags: ["Mobile Profiles"],
+  summary: "Do I have Blendn+, and until when",
+  description:
+    "Read after a purchase or restore and polled until `active`: the app saying \"bought\" unlocks " +
+    "nothing — the store's webhook grants it, usually within seconds. Not cached (`no-store`). " +
+    "Not a gate: every Plus feature is checked on the server.",
+  security: bearerAuth,
+  responses: {
+    200: { description: "Blendn+ status", content: { "application/json": { schema: wrap(PlusStatusSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/me/plus/paywall-events",
+  tags: ["Mobile Profiles"],
+  summary: "Record what the Blendn+ paywall did",
+  description:
+    "Measurement only (`product_events`, one row per person, day, step and trigger). The app keeps " +
+    "the cooldowns. `purchased` here grants nothing.",
+  security: bearerAuth,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            event: z.enum(["shown", "dismissed", "purchase_started", "purchased", "restored"]),
+            trigger: z.enum(["go_live_expiry", "second_event", "first_match", "recap", "perk", "profile"]),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Recorded",
+      content: { "application/json": { schema: wrap(z.object({ recorded: z.literal(true) })) } },
+    },
     ...standardErrors,
   },
 })

@@ -1,10 +1,11 @@
 "use client"
 
-import Image from "next/image"
 import Link from "next/link"
 import { useState } from "react"
-import { IconArrowLeft, IconMailForward } from "@tabler/icons-react"
+import { IconArrowLeft } from "@tabler/icons-react"
 
+import { Callout } from "@/components/dashboard/kit"
+import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -41,79 +42,44 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-6">
-      <Image
-        src="/brand/monogram-gradient.png"
-        alt=""
-        aria-hidden
-        width={560}
-        height={560}
-        className="pointer-events-none absolute -bottom-[18%] -right-[8%] w-[560px] max-w-none opacity-[0.04]"
-      />
-
-      <div className="relative flex w-full max-w-[400px] flex-col gap-7">
-        <div className="flex flex-col items-center gap-3.5">
-          <Image src="/brand/monogram-gradient.png" alt="Blend'n" width={64} height={64} priority />
-          <div className="text-center">
-            <h1 className="text-[length:var(--text-h1)] font-bold">
-              {sent ? "Check your email" : "Reset your password"}
-            </h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              {sent
-                ? "If that address has an account, a reset link is on its way."
-                : "We'll send a link to set a new one."}
-            </p>
-          </div>
-        </div>
-
-        {sent ? (
-          <div className="flex flex-col items-center gap-4 rounded-[var(--radius)] border border-border bg-card p-6 text-center">
-            <IconMailForward className="size-8 text-primary" />
-            <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-              The link expires in an hour and works once. If nothing arrives, check spam — and
-              remember the address has to match the one on your account exactly.
-            </p>
-            <Button asChild variant="outline">
-              <Link href="/login">Back to sign in</Link>
-            </Button>
-          </div>
-        ) : (
-          <form
-            onSubmit={submit}
-            className="relative flex flex-col gap-4 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-6"
-          >
-            <div
-              aria-hidden
-              className="absolute inset-x-0 top-0 h-[3px] bg-[image:var(--gradient-brand)]"
+    <AuthFrame
+      title={sent ? "Check your email" : "Forgotten your password?"}
+      sub={sent ? "If that address has an account, a reset link is on its way." : "We'll email a link to set a new one."}
+      after={
+        <Link
+          href="/login"
+          className="mx-auto inline-flex items-center gap-1.5 text-[0.8125rem] text-muted-foreground hover:text-foreground"
+        >
+          <IconArrowLeft aria-hidden className="size-3.5" /> Back to sign in
+        </Link>
+      }
+    >
+      {sent ? (
+        // The same words whether or not the address has an account (see above).
+        <Callout tone="success" role="status">
+          The link works once and expires in an hour. If nothing arrives, check spam — and the address
+          has to match the one on your account exactly.
+        </Callout>
+      ) : (
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="email">Work email</Label>
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@venue.com"
+              autoComplete="email"
+              required
+              className="h-11"
             />
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@venue.com"
-                autoComplete="email"
-                required
-                className="h-11"
-              />
-            </div>
-            <Button type="submit" size="lg" disabled={loading} className="w-full">
-              {loading ? "Sending…" : "Send reset link"}
-            </Button>
-          </form>
-        )}
-
-        {!sent ? (
-          <Link
-            href="/login"
-            className="mx-auto inline-flex items-center gap-1.5 text-[0.8125rem] text-muted-foreground hover:text-foreground"
-          >
-            <IconArrowLeft className="size-3.5" /> Back to sign in
-          </Link>
-        ) : null}
-      </div>
-    </main>
+          </div>
+          <Button type="submit" size="lg" disabled={loading} className="w-full">
+            {loading ? "Sending…" : "Send reset link"}
+          </Button>
+        </form>
+      )}
+    </AuthFrame>
   )
 }

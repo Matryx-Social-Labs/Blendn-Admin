@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors } from "@/lib/openapi/schemas/common"
+import { standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   SendMessageRequestSchema,
   ChatMessageSchema,
@@ -8,9 +8,6 @@ import {
   GroupMessagesResponseSchema,
   ParticipantsResponseSchema,
 } from "@/lib/openapi/schemas/chat"
-
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
 // GET /api/mobile/chat/groups
 registry.registerPath({
@@ -61,7 +58,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups",
   tags: ["Mobile Chat"],
   summary: "List chat groups",
-  description: "List all chat groups the user is a member of, with last message and unread count.",
+  description: "List the rooms the user is a member of, with last message and unread count. `groups`: event and venue-day rooms, paged, each `kind: \"event\"` with its `event`. `rooms`: the user's crews' chats and their Blends' rooms while open (`kind` `crew` or `blend`, with `crewId`/`blendId`), not paged — a person is in at most ten crews and a night's few Blends — so sent with page 1 and `[]` after. No preview, unread count or `rooms` time comes from somebody in a block with the caller. A board post's room is not listed.",
   security: bearerAuth,
   request: {
     query: z.object({
@@ -81,7 +78,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/messages",
   tags: ["Mobile Chat"],
   summary: "Get group messages",
-  description: "Messages are the stored rows, snake_case (`created_at`, `is_edited`, `parent_message`, `_count.replies`) — not the camelCase `ChatMessage` of `GET /events/{eventId}/chat`. Cursor-based pagination. Pass `before` (message UUID) to load older messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
+  description: "Messages are the stored rows, snake_case (`created_at`, `is_edited`, `parent_message`, `_count.replies`) — not the camelCase `ChatMessage` of `GET /events/{eventId}/chat`. Cursor-based pagination. Pass `before` (message UUID) to load older messages. Loading the newest page (no `before`) marks the room read, so its row in `GET /chat/groups` stops counting what you have seen. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),
@@ -132,7 +129,7 @@ const MuteResultSchema = z.object({
   mute: z.object({ muted: z.boolean(), until: z.string().datetime().nullable() }),
 })
 const ROOM_404 =
-  "404 `NOT_FOUND` for a malformed id, an unknown room, a draft or deleted event's room, or a room you have no membership in — one answer for all, so this cannot be used to learn which rooms exist. "
+  "404 `NOT_FOUND` for a malformed id, an unknown room, a draft or deleted event's room, a room whose owner does not admit you (a room of any kind — `chat_groups.kind`), or a room you have no membership in — one answer for all, so this cannot be used to learn which rooms exist. "
 
 // POST + DELETE /api/mobile/chat/groups/{chatGroupId}/leave
 registry.registerPath({
@@ -224,10 +221,38 @@ registry.registerPath({
   description:
     "For what no single message shows — a pile-on, a room gone hostile. Same body as the other reports. Members only, any status: somebody who left or was " +
     "banned may need this most. A room whose event was taken down is still reportable. Lands in the admin reports queue as \"Room\". " +
-    "404 `NOT_FOUND` for a malformed id, an unknown room, or a room you were never in.",
+    "404 `NOT_FOUND` for a malformed id, an unknown room, a room you were never in, or a room that is not an event's (a report is filed against the room's event; report its messages instead).",
   security: bearerAuth,
   request: {
     params: RoomParams,
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ reason: z.string().min(1).max(200), description: z.string().max(2000).optional() }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: { description: "Report filed", content: { "application/json": { schema: wrap(z.object({ reported: z.literal(true) })) } } },
+    ...standardErrors,
+  },
+})
+
+// POST /api/mobile/chat/groups/{chatGroupId}/members/{userId}/report
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/chat/groups/{chatGroupId}/members/{userId}/report",
+  tags: ["Mobile Safety"],
+  summary: "Report a person in a crew's or a Blend's room",
+  description:
+    "`userId` is the handle that room showed you (`GET /crews/{id}`, `GET /blends`). Members of the room only. Lands in the same admin queue as " +
+    "`POST /users/{userId}/report`, with the room's kind in the description. Nobody is told who reported. 400 for yourself; 404 `NOT_FOUND` for a malformed id, " +
+    "a room you are not let into, a room that is not a crew's or a Blend's, a handle from another room, a forged one, or somebody not in the room. " +
+    "Capped per minute and per day, as every report is.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ chatGroupId: z.string().uuid(), userId: z.string().describe("The person's handle in this room") }),
     body: {
       content: {
         "application/json": {
@@ -248,7 +273,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/participants",
   tags: ["Mobile Chat"],
   summary: "List group participants",
-  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
+  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies. In a room that is not an event's (a board post's), only the people its owner admits are listed.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),

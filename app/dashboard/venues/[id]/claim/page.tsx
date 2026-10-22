@@ -1,12 +1,19 @@
 import { notFound, redirect } from "next/navigation"
 
+import { Panel } from "@/components/dashboard/kit"
+import { PageHeader } from "@/components/dashboard/page-header"
 import { VenueClaimForm } from "@/components/venue-claim-form"
 import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { activeMembership } from "@/lib/org-membership"
+import { realEventsWhere } from "@/lib/event-kind"
 
 export const dynamic = "force-dynamic"
+
+// Not the venue's name: a claimant is, by definition, not its owner, and the
+// tab title is read before the page's own checks have run.
+export const metadata = { title: "Claim a venue" }
 
 export default async function ClaimVenuePage({
   params,
@@ -35,7 +42,7 @@ export default async function ClaimVenuePage({
       owner_org: { select: { display_name: true } },
       // What the owner hosted, not every row: the form calls it evidence in a
       // dispute, and QA Circle Venue read 32 while hosting 11 (SCRUM-312).
-      _count: { select: { events: { where: { deleted_at: null } } } },
+      _count: { select: { events: { where: { deleted_at: null, ...realEventsWhere } } } },
     },
   })
   if (!venue) notFound()
@@ -53,24 +60,29 @@ export default async function ClaimVenuePage({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* h2: the site header owns the page's only h1. */}
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <h2 className="text-[length:var(--text-h2)] font-bold">{venue.name}</h2>
-        <span className="text-[0.8125rem] text-muted-foreground">
-          {venueTypeLabel(venue.venue_type)}
-          {[venue.address, venue.city].filter(Boolean).length
+      {/* Owned header (`OWNED_HEADERS`): the venue being claimed, by name. */}
+      <PageHeader
+        title={venue.name}
+        description={`${venueTypeLabel(venue.venue_type)}${
+          [venue.address, venue.city].filter(Boolean).length
             ? ` · ${[venue.address, venue.city].filter(Boolean).join(", ")}`
-            : ""}
-        </span>
-      </div>
-
-      <VenueClaimForm
-        venueId={venue.id}
-        venueName={venue.name}
-        isDispute={venue.owner_org_id !== null}
-        currentOwnerName={venue.owner_org?.display_name ?? null}
-        hostedEvents={venue._count.events}
+            : ""
+        }`}
+        back={{ href: `/dashboard/venues`, label: "Venues" }}
       />
+
+      <Panel
+        title="Your claim"
+        hint={`${venue._count.events} event${venue._count.events === 1 ? "" : "s"} held here · reviewed by a person`}
+      >
+        <VenueClaimForm
+          venueId={venue.id}
+          venueName={venue.name}
+          isDispute={venue.owner_org_id !== null}
+          currentOwnerName={venue.owner_org?.display_name ?? null}
+          hostedEvents={venue._count.events}
+        />
+      </Panel>
     </div>
   )
 }

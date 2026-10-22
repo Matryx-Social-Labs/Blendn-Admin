@@ -25,6 +25,9 @@ jest.mock("@/lib/db", () => ({
 
 import { claimAnonymousName } from "@/lib/anonymous-names"
 
+// The preferred handle is keyed on the server's secret (SCRUM-517).
+process.env.NEXTAUTH_SECRET ??= "pseudonym-collision-test-secret-0123456789"
+
 /**
  * What Prisma raises when a unique index is violated — in BOTH shapes.
  *

@@ -21,7 +21,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`dark ${satoshi.variable}`}>
+    // `scroll-pt-16`: the dashboard's top bar is sticky and 60px tall, so a
+    // focused element scrolled into view would otherwise sit underneath it
+    // (WCAG 2.4.11). Harmless on the pages without one.
+    <html lang="en" className={`dark scroll-pt-16 ${satoshi.variable}`}>
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>
         {/*
@@ -31,10 +34,9 @@ export default function RootLayout({
           removing a member, a refused domain claim. The guard would fire, the
           product would say nothing, and the button read as broken.
 
-          `theme` is pinned rather than left to the wrapper's `useTheme()`.
-          There is no ThemeProvider, so that hook falls back to "system" and
-          would render a light toast on a dashboard whose <html> is hardcoded
-          `dark`.
+          `theme` is pinned rather than left to the wrapper's "system" default,
+          which would render a light toast on a dashboard whose <html> is
+          hardcoded `dark`.
         */}
         <Toaster theme="dark" richColors />
       </body>

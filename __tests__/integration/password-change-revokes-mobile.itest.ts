@@ -47,7 +47,7 @@ it("revokes every live mobile session with the hash, and the phone's next refres
     data: { password: await bcrypt.hash("Old-Password-2026!", 12) },
     select: { email: true },
   })
-  mockAuth.mockResolvedValue({ user: { id, email, role: "attendee" } })
+  mockAuth.mockResolvedValue({ user: { id, email, role: "attendee", signedInAt: Date.now() } })
 
   // One session that had already ended and must stay as it was, then two phones.
   const earlier = signRefreshToken(id, email)
@@ -94,7 +94,7 @@ it("revokes nothing, and says so, when the current password is wrong", async () 
     data: { password: await bcrypt.hash("Old-Password-2026!", 12) },
     select: { email: true },
   })
-  mockAuth.mockResolvedValue({ user: { id, email, role: "attendee" } })
+  mockAuth.mockResolvedValue({ user: { id, email, role: "attendee", signedInAt: Date.now() } })
   const phone = signRefreshToken(id, email)
   await storeRefreshToken(id, phone)
 

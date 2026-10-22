@@ -42,6 +42,7 @@ import bcrypt from "bcryptjs"
 import { occurrencesForSpan } from "../lib/occurrences"
 import { checkPassword } from "../lib/password"
 import { syncOccurrences } from "../lib/occurrences"
+import { realEventsWhere } from "../lib/event-kind"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -133,7 +134,7 @@ async function main() {
 
   // Only if the reviewer would otherwise see an empty Events tab.
   const upcoming = await db.events.count({
-    where: { status: "published", end_time: { gte: new Date() } },
+    where: { ...realEventsWhere, status: "published", end_time: { gte: new Date() } },
   })
 
   let eventNote = `${upcoming} upcoming event(s) already published — none created`

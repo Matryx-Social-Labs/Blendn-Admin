@@ -18,7 +18,9 @@ import {
 import { ISSUE_CATEGORIES } from "@/lib/sentiment/taxonomy"
 import { cn } from "@/lib/utils"
 
-import { correctFeedbackLabel, type FeedbackMessage } from "./actions"
+import { correctFeedbackLabel } from "./actions"
+// Type-only: the digest's module reads the database, and nothing of it reaches the bundle.
+import type { FeedbackMessage } from "@/lib/feedback-digest"
 import { refusalMessage } from "@/lib/refusal"
 
 const SENTIMENTS: feedback_sentiment[] = ["positive", "neutral", "negative"]

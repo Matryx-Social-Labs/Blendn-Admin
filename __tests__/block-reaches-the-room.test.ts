@@ -31,7 +31,8 @@ describe("every group-chat surface consults blocked_users", () => {
 
   it.each(surfaces)("%s filters history on the block list", (rel) => {
     const src = read(rel)
-    expect(src).toContain("blockCounterparties")
+    // `keptApartIn` is the block list, plus closed conversations in a board post's room (step 10 review H2).
+    expect(src).toMatch(/blockCounterparties|keptApartIn/)
     expect(src).toMatch(/notIn: blockedIds/)
   })
 
@@ -53,7 +54,7 @@ describe("every group-chat surface consults blocked_users", () => {
     const src = read("lib/room-delivery.ts")
     // The exclusion list is the third argument; the room's event may follow it
     // (SCRUM-371 — it saves the emitter a lookup, and changes nobody's filter).
-    expect(src).toMatch(/emitChatMessage\(\s*\n?\s*chatGroupId,[\s\S]{0,600}\},\s*senderBlocked(,\s*input\.eventId)?\s*\n?\s*\)/)
+    expect(src).toMatch(/emitChatMessage\(\s*\n?\s*chatGroupId,[\s\S]{0,600}\},\s*senderBlocked(,\s*input\.(?:eventId|scope))?\s*\n?\s*\)/)
   })
 
   it("every chat write path delivers through the one place that filters", () => {
@@ -101,7 +102,8 @@ describe("every group-chat surface consults blocked_users", () => {
   })
 
   it("the live check-in roster does not announce someone you blocked", () => {
-    const src = read("app/api/mobile/events/[eventId]/checkin/route.ts")
+    // Both doors (an event's check-in, Go Live) seat people through lib/check-in-core.ts.
+    const src = read("lib/check-in-core.ts")
     expect(src).toContain("blockCounterparties")
   })
 })

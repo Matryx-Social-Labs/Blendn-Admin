@@ -5,16 +5,47 @@
  * reconciliation somebody has to do by hand months later.
  */
 
+const mockAuth = jest.fn()
+
 const mockDb = {
+  /*
+   * Raw SQL: the charge's row lock (lockCharge) answers with the charge
+   * `findUnique` last returned; the payment-link lock and reach (nothing sent
+   * in these fixtures) answer with nothing.
+   */
+  $queryRaw: jest.fn(async (sql: TemplateStringsArray): Promise<unknown[]> => {
+    if (!/FROM placement_charges[\s\S]*FOR UPDATE/.test(sql.join("?"))) return []
+    const charge = (await mockDb.placement_charges.findUnique.mock.results.at(-1)?.value) as Record<string, unknown> | null
+    return charge ? [charge] : []
+  }),
+  // The one-at-a-time lock on a charge.
+  $executeRaw: jest.fn().mockResolvedValue(1),
+  // A transaction runs its callback against the same client.
+  $transaction: jest.fn(async (cb: (tx: unknown) => Promise<unknown>): Promise<unknown> => cb(mockDb)),
+  // The role is read from the database (lib/current-user.ts): here, the session's own.
+  user: {
+    findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })),
+    findMany: jest.fn(),
+  },
+  audit_logs: { create: jest.fn() },
+  billing_checkouts: { update: jest.fn() },
   event_sponsors: { findUnique: jest.fn(), findMany: jest.fn() },
   placement_charges: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
 }
 
-const mockAuth = jest.fn()
-
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
-jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
+// As getAuth() returns it: the jwt callback always writes `signedInAt` (lib/session-revocation.ts).
+jest.mock("@/lib/auth", () => ({
+  getAuth: async () => {
+    const session = await mockAuth()
+    return session?.user ? { ...session, user: { signedInAt: 0, ...session.user } } : session
+  },
+}))
+// The in-transaction writer, as lib/audit-log.ts writes it: through the transaction's audit_logs.
+jest.mock("@/lib/audit-log", () => ({
+  auditLog: jest.fn(),
+  auditInTx: (tx: { audit_logs: { create: (a: unknown) => unknown } }, entry: unknown) => tx.audit_logs.create({ data: entry }),
+}))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { advanceCharge, getChargeLedger, pricePlacement } from "@/lib/charge-actions"
@@ -62,10 +93,15 @@ describe("pricing", () => {
     expect(data.priced_by).toBe(ADMIN)
   })
 
-  it("rounds at the boundary, once", async () => {
-    // A person typed this. Every read from here on is an integer.
-    await pricePlacement(PLACEMENT, { amount: 0.015 })
-    expect(mockDb.placement_charges.create.mock.calls[0][0].data.amount_minor).toBe(2)
+  it("refuses less than ₹1 and fractions of a paisa, writing nothing (final review D4)", async () => {
+    // 0.015 used to be rounded to 2 paise and stored; a price is whole paise.
+    await expect(pricePlacement(PLACEMENT, { amount: 0.5 })).rejects.toThrow("at least ₹1")
+    await expect(pricePlacement(PLACEMENT, { amount: 0.015 })).rejects.toThrow("at least ₹1")
+    await expect(pricePlacement(PLACEMENT, { amount: 12.345 })).rejects.toThrow("two decimals")
+    await expect(pricePlacement("not-a-uuid", { amount: 100 })).rejects.toThrow("Placement not found")
+    expect(mockDb.placement_charges.create).not.toHaveBeenCalled()
+    await pricePlacement(PLACEMENT, { amount: 1 })
+    expect(mockDb.placement_charges.create.mock.calls[0][0].data.amount_minor).toBe(100)
   })
 
   it("refuses a second live charge on the same placement", async () => {
@@ -180,17 +216,19 @@ describe("the status walk", () => {
   it("writes only from the status it read, and audits nothing when that moved underneath", async () => {
     charge("settled")
     mockDb.placement_charges.updateMany.mockResolvedValue({ count: 0 })
-    const { auditLog } = jest.requireMock("@/lib/audit-log")
 
     await expect(advanceCharge(CHARGE, "void", undefined, "duplicate invoice, re-raised")).rejects.toThrow(/someone else/i)
     expect(mockDb.placement_charges.updateMany.mock.calls[0][0].where).toEqual({ id: CHARGE, status: "settled" })
-    expect(auditLog).not.toHaveBeenCalled()
+    expect(mockDb.audit_logs.create).not.toHaveBeenCalled()
   })
 })
 
 describe("the ledger", () => {
-  function placements(rows: unknown[]) {
-    mockDb.event_sponsors.findMany.mockResolvedValue(rows)
+  function placements(rows: Array<Record<string, unknown> & { charges: object[] }>) {
+    // Every charge as the query selects it: with its payment links (step 17), none here.
+    mockDb.event_sponsors.findMany.mockResolvedValue(
+      rows.map((r) => ({ ...r, charges: r.charges.map((c) => ({ payment_links: [], ...c })) }))
+    )
   }
 
   const base = {
@@ -243,6 +281,50 @@ describe("the ledger", () => {
     ])
     // Money that was voided is not money settled.
     expect(ledger.totals).toEqual([{ currency: "INR", settledMinor: 0, agreedMinor: 0 }])
+  })
+
+  it("names who voided a charge: the admin, Razorpay for a webhook void, nobody for a deleted admin (SCRUM-611)", async () => {
+    const voidRow = (id: string, voided_by: string | null, void_reason: string | null) => ({
+      id,
+      amount_minor: 100000,
+      currency: "INR",
+      status: "void",
+      agreed_at: new Date(),
+      settled_at: new Date(),
+      external_ref: "plink_1",
+      created_at: new Date(),
+      voided_at: new Date(),
+      voided_by,
+      void_reason,
+      pricer: null,
+    })
+    mockDb.user.findMany.mockResolvedValue([{ id: "admin-1", name: "Ada Admin" }])
+    placements([
+      {
+        ...base,
+        charges: [
+          voidRow("refund", null, "Refunded at Razorpay (rfnd_1)"),
+          voidRow("dispute", null, "Dispute lost at Razorpay (pay_1)"),
+          voidRow("by-admin", "admin-1", "duplicate invoice"),
+          // An admin typed a reason that happens to open like the webhook's: still an admin's void.
+          voidRow("deleted-admin", "gone-1", "Refunded at Razorpay by hand, the sponsor asked"),
+          // Not worded by the webhook and no voider: nothing to name.
+          voidRow("unknown", null, "something else"),
+          voidRow("before-reasons", null, null),
+        ],
+      },
+    ])
+
+    const ledger = await getChargeLedger()
+
+    expect(Object.fromEntries(ledger.placements[0].voided.map((v) => [v.id, v.voidedByName]))).toEqual({
+      refund: "Razorpay (refund)",
+      dispute: "Razorpay (dispute lost)",
+      "by-admin": "Ada Admin",
+      "deleted-admin": null,
+      unknown: null,
+      "before-reasons": null,
+    })
   })
 
   it("totals per currency, never across them", async () => {

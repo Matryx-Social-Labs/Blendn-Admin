@@ -71,6 +71,10 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "SCRUBBED",
     why: "A two-party row, so it stays or the recipient's inbox develops holes. Only the message they SENT is theirs to erase.",
   },
+  this_or_that_answers: {
+    how: "DELETED",
+    why: "Their own answers to the this-or-that questions (matching v2). Nobody else's record, and nothing counts them after the person is gone.",
+  },
   product_events: {
     how: "DELETED",
     why: "Behavioural signals about one person — when they opened the app, what they looked at. A scrubbed row cannot be counted as a distinct person, so nulling `user_id` would keep a record of when somebody was awake and looking while no longer answering anything. Historical 'active this week' therefore drops by the days they contributed, and that is correct: keeping behaviour after somebody asked to be erased, to make a chart smoother, is not a trade this product should make.",
@@ -93,7 +97,31 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
   },
   board_posts: {
     how: "DELETED",
-    why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence. A post moderation hid is kept: it is removed content, which the IT Rules 2021 r.3(1)(g) require for 180 days.",
+    why: "An offer of a spare seat whose author has deleted their account cannot be accepted — the whole point of answering is to meet them. The cascade takes requests against those posts too, which is right: a request to a post that no longer exists is a dangling sentence. A post moderation hid is kept: it is removed content, which the IT Rules 2021 r.3(1)(g) require for 180 days. A post WITH A ROOM is kept as a row too (step 7): the room is other people's conversation and kept evidence, and board_post_id is ON DELETE RESTRICT — so the post is taken off the board (deleted_at, which closes the room's door), its body erased, and the room archived with its messages and members.",
+  },
+  crew_members: {
+    how: "DELETED",
+    why: "Being in a crew is the person's own standing with their friends, and their reveal consent with it. Deleted inside the erasure (`DELETE … RETURNING`, the crews locked first); each crew they leave is settled after the commit: one left alone dissolves (D-15), an owner is handed on — and the chat sweeper repairs any that settle missed.",
+  },
+  crew_invites: {
+    how: "DELETED",
+    why: "Invites to them, and the open invites from them: an invite from an erased account would put a ghost's name on somebody's screen, and one to them can never be accepted. A removal marker or a decline they wrote about somebody else stays — it is that person's protection (the owner's word that they are out; their 30 days of quiet), and erasing the owner must not lift it.",
+  },
+  crew_likes: {
+    how: "RETAINED",
+    why: "A like a crew made is the crew's, and a like on a person is half of somebody else's Blend: `liked_by_user_id` stays as the record of who tapped (CR-I15), on an account that is anonymised, never deleted. Nothing reads it to name anybody.",
+  },
+  blend_reveals: {
+    how: "DELETED",
+    why: "Their name and photo shown inside one Blend (a crew reveal, C2): the disclosure is theirs, and an erased account has no name to show anyway. The Blend and its other people's reveals stay.",
+  },
+  blends: {
+    how: "RETAINED",
+    why: "A Blend is two sides' shared night and the owner of a room of other people's messages (RESTRICT). An erased solo side is out of it at once — the door refuses a deleted account — and it closes 12 hours after the night anyway.",
+  },
+  crews: {
+    how: "RETAINED",
+    why: "A crew belongs to the friends still in it, not to whoever made it: its name and bio are the crew's, `created_by` is an audit field, and the crew goes on (or dissolves) without them.",
   },
   board_requests: {
     how: "SCRUBBED",
@@ -107,9 +135,21 @@ const CONTRACT: Record<string, { how: Disposition; why: string }> = {
     how: "RETAINED",
     why: "Written BY the deletion: what they registered with, which the IT Rules 2021 r.3(1)(h) require for 180 days after the account goes. No route reads it, and the retention sweeper purges each row on its date.",
   },
+  venue_regular_optins: {
+    how: "DELETED",
+    why: "\"Let this venue know I'm a regular\" is the person's own disclosure to a venue: it goes with them, so an erased account is never on a venue's list.",
+  },
+  venue_offer_mutes: {
+    how: "DELETED",
+    why: "Their choice to hear no offers from a venue; nobody else reads it.",
+  },
+  venue_offer_sends: {
+    how: "SCRUBBED",
+    why: "The row stays so a venue's weekly opened and redeemed totals still add up, and nothing of the person stays on it: no account (user_id null), the sent, opened and redeemed times cut to the day, and pass_seen_at — when a pass was on their screen at a door — gone. Written in SQL (`UPDATE venue_offer_sends`) because Prisma cannot truncate a timestamp.",
+  },
   audit_logs: {
     how: "RETAINED",
-    why: "What an admin did and from where. An accountability record that a subject can erase is not one — and these describe staff actions, not the deleted person's own activity.",
+    why: "What an admin did and from where. An accountability record that a subject can erase is not one — and these describe staff actions, not the deleted person's own activity: a person's own choices (being known as a regular somewhere, muting a venue's offers) are never written here (step 12 review H1, regulars-never-listed.test.ts).",
   },
 }
 
@@ -184,7 +224,11 @@ describe("the deletion contract", () => {
         continue
       }
       const verb = how === "SCRUBBED" ? "updateMany" : "deleteMany"
-      if (!new RegExp(`db\\.${model}\\.${verb}\\(`).test(route)) {
+      // A DELETE written in SQL counts too: the crew rows are deleted with
+      // `DELETE … RETURNING`, so the erasure learns which crews to settle. An
+      // UPDATE in SQL counts for a scrub: the offer sends' times are cut to the day.
+      const sql = how === "DELETED" ? `|DELETE FROM ${model}\\b` : `|UPDATE ${model}\\b`
+      if (!new RegExp(`db\\.${model}\\.${verb}\\(${sql}`).test(route)) {
         broken.push(`${model}: declared ${how} but no db.${model}.${verb} in the deletion path`)
       }
     }

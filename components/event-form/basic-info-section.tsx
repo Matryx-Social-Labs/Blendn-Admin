@@ -80,7 +80,7 @@ export function BasicInfoSection({
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   return (
-    <FormSection step="01" title="What is it" hint="the four things the card shows" id="step-what">
+    <FormSection step="01" title="Basics" hint="the four things the card shows" id="step-what">
       <FormField
         control={form.control}
         name="title"

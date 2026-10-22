@@ -10,6 +10,8 @@
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 const mockUpdate = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { board_posts: { updateMany: (...a: unknown[]) => mockUpdate(...a) } } }))
+const mockClosePostRooms = jest.fn()
+jest.mock("@/lib/room-close", () => ({ closePostRooms: (...a: unknown[]) => mockClosePostRooms(...a) }))
 const mockCheck = jest.fn()
 jest.mock("@/lib/moderation/openai-moderation", () => ({
   checkTextContent: (...a: unknown[]) => mockCheck(...a),
@@ -23,6 +25,7 @@ const HIDE = { checked: true, result: { action: "hide", source: "openai_text", c
 beforeEach(() => {
   mockUpdate.mockReset()
   mockCheck.mockReset()
+  mockClosePostRooms.mockReset()
 })
 
 describe("checkBoardText", () => {
@@ -49,12 +52,22 @@ describe("checkBoardText", () => {
 describe("hideBoardPostIfFlagged", () => {
   it("takes the post down, marked hidden, when the second look refuses it", async () => {
     mockCheck.mockResolvedValue(HIDE)
+    mockUpdate.mockResolvedValueOnce({ count: 1 })
     await hideBoardPostIfFlagged("post-1", "something vile")
     expect(mockUpdate).toHaveBeenCalledWith({
       // `deleted_at: null` — a post its author withdrew meanwhile keeps its own record.
       where: { id: "post-1", deleted_at: null },
       data: expect.objectContaining({ moderation_status: "hidden", deleted_at: expect.any(Date) }),
     })
+    // Down, so its room (if it has one) is closed and emptied (step 7, E3).
+    expect(mockClosePostRooms).toHaveBeenCalledWith(["post-1"])
+  })
+
+  it("closes no room when the post was already down", async () => {
+    mockCheck.mockResolvedValue(HIDE)
+    mockUpdate.mockResolvedValueOnce({ count: 0 })
+    await hideBoardPostIfFlagged("post-4", "something vile")
+    expect(mockClosePostRooms).not.toHaveBeenCalled()
   })
 
   it("leaves a clean post, and one it still could not check, alone", async () => {

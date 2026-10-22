@@ -8,8 +8,9 @@ import { revalidatePath } from "next/cache"
 // and a type import is erased.
 import type { Prisma } from "@prisma/client"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
-import { auditLog } from "@/lib/audit-log"
+import { requireAdmin } from "@/lib/current-user"
+import { auditInTx, auditLog } from "@/lib/audit-log"
+import { reasonFrom, refuseUnlessDecided } from "@/lib/decision"
 import { logger } from "@/lib/logger"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { isAggregatorDomain } from "@/lib/curation-sources"
@@ -17,6 +18,8 @@ import { emailDomain, isFreeProvider } from "@/lib/org-invites"
 import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/email"
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { notifyEventUpdate } from "@/lib/push-notifications"
+import { realEventsWhere } from "./event-kind"
+import { liveAnalyticsByOrg } from "./entitlements"
 
 /**
  * Reviewing host applications.
@@ -27,7 +30,7 @@ import { notifyEventUpdate } from "@/lib/push-notifications"
  * resolves on membership), and an org with no members is unreachable.
  *
  * `createRoleUser` in admin-role-actions.ts is deliberately not reused. It
- * exists for an admin adding a host by hand and does its own session check,
+ * exists for an admin adding a host by hand and does its own admin check,
  * revalidation, and nothing about organisations; calling it from here would
  * mean a user created outside the transaction that creates the org, which is
  * exactly the half-state to avoid.
@@ -47,12 +50,6 @@ const SET_PASSWORD_TTL_MS = 24 * 60 * 60 * 1000
 
 function undisclosedPassword(): string {
   return crypto.randomBytes(32).toString("base64url")
-}
-
-async function requireAdmin() {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  return session.user
 }
 
 export interface OnboardingRow {
@@ -188,6 +185,9 @@ export interface ApprovalResult {
   orgId: string
 }
 
+/** An application nobody has decided: waiting on its address, or on us. */
+const UNDECIDED: Array<"pending" | "email_pending"> = ["pending", "email_pending"]
+
 export async function approveOnboardingRequest(
   requestId: string,
   note?: string
@@ -212,6 +212,19 @@ export async function approveOnboardingRequest(
   const hashed = await bcrypt.hash(undisclosedPassword(), 12)
 
   const { orgId, userId } = await db.$transaction(async (tx) => {
+    /*
+     * The guard, first (M1): the application goes from undecided to approved
+     * here or the transaction ends. Two approvals racing used to each create
+     * an organisation — or the second died on the unique email — because the
+     * status check above is a read. `org_id` is written at the end, once the
+     * organisation exists.
+     */
+    const claimed = await tx.organiser_onboarding_requests.updateMany({
+      where: { id: requestId, status: { in: UNDECIDED } },
+      data: { status: "approved", reviewed_by: admin.id, reviewed_at: new Date(), review_note: note?.trim() || null },
+    })
+    refuseUnlessDecided(claimed.count)
+
     const org = await tx.organisations.create({
       data: {
         kind: request.kind,
@@ -285,14 +298,18 @@ export async function approveOnboardingRequest(
       }
     }
 
-    await tx.organiser_onboarding_requests.update({
-      where: { id: requestId },
-      data: {
-        status: "approved",
-        reviewed_by: admin.id,
-        reviewed_at: new Date(),
-        review_note: note?.trim() || null,
-        org_id: org.id,
+    await tx.organiser_onboarding_requests.update({ where: { id: requestId }, data: { org_id: org.id } })
+
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: "onboarding.approved",
+      resource: "organiser_onboarding_request",
+      resourceId: requestId,
+      details: {
+        orgId: org.id,
+        role: request.requested_role,
+        promotedExisting: !!existing,
+        note: note?.trim() || null,
       },
     })
 
@@ -313,20 +330,6 @@ export async function approveOnboardingRequest(
     }
   }
 
-  auditLog({
-    userId: admin.id,
-    action: "onboarding.approved",
-    resource: "organiser_onboarding_request",
-    resourceId: requestId,
-    details: {
-      orgId,
-      role: request.requested_role,
-      promotedExisting: !!existing,
-      emailSent,
-      note: note?.trim() || null,
-    },
-  })
-
   revalidatePath("/dashboard/onboarding")
   revalidatePath("/dashboard/organisations")
   revalidatePath("/dashboard/organisers")
@@ -346,8 +349,7 @@ export async function declineOnboardingRequest(requestId: string, reason: string
 
   // A decline that reaches the applicant with no reason is worse than none —
   // they reapply identically and the queue gets the same row again.
-  const trimmed = reason.trim()
-  if (trimmed.length < 10) throw new Refusal("Give a reason — it's sent to the applicant.")
+  const trimmed = reasonFrom(reason, true, "Give a reason — it's sent to the applicant.") ?? ""
 
   const request = await db.organiser_onboarding_requests.findUnique({
     where: { id: requestId },
@@ -356,14 +358,21 @@ export async function declineOnboardingRequest(requestId: string, reason: string
   if (!request) throw new Refusal("Application not found")
   if (request.status === "approved") throw new Refusal("Already approved — suspend the org instead")
 
-  await db.organiser_onboarding_requests.update({
-    where: { id: requestId },
-    data: {
-      status: "declined",
-      decline_reason: trimmed,
-      reviewed_by: admin.id,
-      reviewed_at: new Date(),
-    },
+  // Conditional on still undecided, with its record (H1): a decline racing an
+  // approval, or another decline, is refused and sends no second email.
+  await db.$transaction(async (tx) => {
+    const decided = await tx.organiser_onboarding_requests.updateMany({
+      where: { id: requestId, status: { in: UNDECIDED } },
+      data: { status: "declined", decline_reason: trimmed, reviewed_by: admin.id, reviewed_at: new Date() },
+    })
+    refuseUnlessDecided(decided.count)
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: "onboarding.declined",
+      resource: "organiser_onboarding_request",
+      resourceId: requestId,
+      details: { reason: trimmed },
+    })
   })
 
   if (emailConfigured()) {
@@ -373,14 +382,6 @@ export async function declineOnboardingRequest(requestId: string, reason: string
     })
     if (!result.sent) logger.error("Decline email failed", { requestId, reason: result.reason })
   }
-
-  auditLog({
-    userId: admin.id,
-    action: "onboarding.declined",
-    resource: "organiser_onboarding_request",
-    resourceId: requestId,
-    details: { reason: trimmed },
-  })
 
   revalidatePath("/dashboard/onboarding")
 }
@@ -403,6 +404,11 @@ export interface OrgSummary {
   venueCount: number
   domains: { domain: string; verified: boolean }[]
   primaryContact: { name: string | null; email: string } | null
+  /** The live Analytics grant and paid row, apart, for the admin's control. */
+  analytics: {
+    grant: { id: string; expiresAt: Date | null } | null
+    paid: { id: string; expiresAt: Date | null } | null
+  }
 }
 
 /**
@@ -454,12 +460,14 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
       _count: {
         select: {
           members: true,
-          events: { where: { deleted_at: null } },
+          events: { where: { deleted_at: null, ...realEventsWhere } },
           venues: { where: { deleted_at: null } },
         },
       },
     },
   })
+
+  const analytics = await liveAnalyticsByOrg(orgs.map((o) => o.id))
 
   return orgs.map((o) => ({
     id: o.id,
@@ -477,6 +485,11 @@ export async function getOrganisations(): Promise<OrgSummary[]> {
     venueCount: o._count.venues,
     domains: o.domains.map((d) => ({ domain: d.domain, verified: !!d.verified_at })),
     primaryContact: o.members[0]?.user ?? null,
+    analytics: (() => {
+      const live = analytics.get(o.id)
+      const pick = (e: { id: string; expiresAt: Date | null } | null | undefined) => (e ? { id: e.id, expiresAt: e.expiresAt } : null)
+      return { grant: pick(live?.grant), paid: pick(live?.paid) }
+    })(),
   }))
 }
 
@@ -528,19 +541,24 @@ export async function setOrganisationStatus(
     })
 
     if (status === "suspended") {
+      /*
+       * The org's own nights, not its venues' daily live rooms: a venue day is
+       * the venue's, the platform moderates it, and suspending the company that
+       * claimed a bar does not shut the bar's room on everybody standing in it.
+       */
       const events = await tx.events.findMany({
-        where: { organizer_org_id: orgId, status: "published", deleted_at: null },
+        where: { organizer_org_id: orgId, ...realEventsWhere, status: "published", deleted_at: null },
         select: { id: true, title: true, end_time: true },
       })
       await tx.events.updateMany({
-        where: { id: { in: events.map((e) => e.id) } },
+        where: { id: { in: events.map((e) => e.id) }, ...realEventsWhere },
         data: { status: "draft", pre_suspension_status: "published" },
       })
       return events
     }
 
     await tx.events.updateMany({
-      where: { organizer_org_id: orgId, status: "draft", pre_suspension_status: "published", deleted_at: null },
+      where: { organizer_org_id: orgId, ...realEventsWhere, status: "draft", pre_suspension_status: "published", deleted_at: null },
       data: { status: "published", pre_suspension_status: null },
     })
     return []

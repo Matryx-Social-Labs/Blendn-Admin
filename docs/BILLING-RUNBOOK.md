@@ -1,0 +1,267 @@
+# Billing runbook (Razorpay, and Blendn+ through RevenueCat)
+
+What to do when money and the dashboard disagree. The design is in
+`lib/razorpay-webhook.ts`; this is the operator's half. Blendn+ (the app's
+store purchases) is its own section at the end; its setup is
+docs/IAP-SETUP.md.
+
+## Setup, per environment
+
+| Variable | Where it comes from | Notes |
+|---|---|---|
+| `RAZORPAY_KEY_ID` | Razorpay dashboard → API keys | `rzp_test_…` everywhere except production; `rzp_live_…` only where `RAILWAY_ENVIRONMENT_NAME=production`. The wrong mode refuses to boot. |
+| `RAZORPAY_KEY_SECRET` | same | |
+| `RAZORPAY_WEBHOOK_SECRET` | chosen by us when registering the webhook, 32+ characters | Required once the keys are set: keys without it would take money and grant nothing. |
+
+Register the webhook at `https://<api host>/api/webhooks/razorpay` with these
+events: `subscription.activated`, `subscription.charged`,
+`subscription.pending`, `subscription.halted`, `subscription.cancelled`,
+`subscription.completed`, `subscription.paused`, `subscription.resumed`,
+`payment.captured`, `payment.failed`, `order.paid`, `payment_link.paid`,
+`payment_link.expired`, `payment_link.cancelled`, `refund.processed`,
+`payment.dispute.created`, `payment.dispute.lost`, `payment.dispute.won`.
+**Owner action (step 17):** add `payment_link.expired` and
+`payment_link.cancelled` to an already-registered webhook; without them a link
+closed at Razorpay stays "open" here until a new send expires it.
+Then run `npx tsx scripts/razorpay-plans.ts --apply` once with that
+environment's keys (dry run without `--apply`).
+
+## Sponsor payment links (step 17)
+
+On Charges, an **agreed** charge for a claimed brand gets "Send payment link":
+a Razorpay Payment Link in the charge's own amount, emailed by Razorpay to the
+sponsor organisation's primary contact and shown on the sponsor's Placements
+page as "Pay ₹…". Our record of it is a `billing_checkouts` row (kind
+`payment_link`, the sponsor's organisation, `charge_id`, `pay_url`); the
+charge keeps its pricing note in `external_ref` until the link settles it.
+The link is created silent and emailed only once our record is committed; if
+our side fails after Razorpay made it, it is cancelled at Razorpay and the id
+logged (`orphanProviderRef`). A second click returns the open link; links
+expire after 14 days, after which a new one can be sent (a stale one is
+marked expired then, even if `payment_link.expired` never arrived). Ten sends
+a minute per admin.
+
+**Void and "Payment received" close the link first.** Razorpay cancels it,
+then our row says so, then the charge moves, in one transaction with its
+audit row (`closedLinks`). If money already came through the link (paid or
+partly paid, here or at Razorpay) the change is refused: let the webhook
+settle it, or refund at Razorpay. If Razorpay will not cancel, nothing
+changes; try again. If Razorpay cancelled and our side then failed, the log
+names the link (`paymentLinkIds`) and the next attempt goes through. Sends,
+voids and settlements on one charge run one at a time; thirty moves a minute
+per admin.
+
+`payment_link.paid` settles the charge, once, against that row: the amount,
+currency and "paid" status must match it and the charge. `notes` are never
+read. The charge's `settled_at` and the payment's `captured_at` are the
+payment's own time: the delivery is stamped with the link's creation, up to
+14 days earlier (SCRUM-606). Link payments recorded before that fix were put
+right by the migration `20261011200000_link_payment_time_backfill`, from each
+stored delivery. Then, by case:
+
+- **Already settled by this link:** a replay changes nothing.
+- **Settled some other way** (by hand, a bank transfer): the sponsor paid
+  twice. `charge.paid_twice` and an error log. **Refund the link's payment
+  from the Razorpay dashboard**; its refund leaves the hand settlement alone.
+- **Voided:** a charge voided before the payment landed stays void. The
+  webhook writes `charge.paid_after_void` and logs an error. **Refund it from
+  the Razorpay dashboard.**
+- **Refunded:** refunds that reach the whole payment (`refund.processed`, one
+  or several partial ones added up) void the charge this link settled, with
+  the last refund's id as the reason — also when Razorpay delivered the
+  refunds before the payment.
+- **Disputed:** `charge.disputed` and an error log; answer it at Razorpay. A
+  dispute lost voids the charge this link settled.
+- **Any other state** (a link is only sent for an agreed charge):
+  `charge.paid_unexpected` and an error log; the payment is recorded and the
+  charge left as it is. Reconcile it by hand.
+
+Money that arrives any other way is still settled by hand with "Payment
+received" and its reference.
+
+## Venue Pro (step 17)
+
+A venue owner buys Venue Pro per venue on `/dashboard/plan` (₹2,999 a month or
+₹29,990 a year, before GST; `lib/billing-plans.ts`). The purchase is a
+`billing_checkouts` row naming the venue (`venue_id`); the webhook grants the
+**venue** (`entitlements.subject_kind = 'venue'`, product `venue_pro`), never
+the organisation. One open subscription per venue
+(`billing_checkouts_one_open_subscription_per_venue`); an organisation's own
+Analytics keeps its own index.
+
+- **No charge before four weeks of venue-day data.** Checkout refuses until 28
+  days after the first person went live at the venue (`lib/venue-plan.ts`);
+  the Plan page shows each venue's days of data. Nothing to do by hand.
+- **Founding grant: 3 months per claimed Bengaluru venue.** An admin gives it
+  from the venue's page (Venue Pro panel), with a reason; it is audited on the
+  venue. A grant blocks buying until it ends: subscribe after it.
+- `scripts/razorpay-plans.ts --apply` creates the two Venue Pro plans with the
+  others; run it once per environment after this ships.
+- **The payer controls its mandate.** Cancelling is authorised on the
+  organisation that pays (`billing_checkouts.org_id`), not on who owns the
+  venue today, and the Plan page lists only the caller's organisation's
+  subscriptions and payments.
+- **A venue changing hands** (an approved dispute) ends the previous owner's
+  paid Venue Pro in the same transaction as the transfer
+  (`entitlement.ended_on_transfer` on the venue), then cancels its mandate at
+  the end of the paid cycle. A cancel Razorpay refused is audited
+  `billing.subscription.cancel_failed` on the venue: **cancel it from the
+  Razorpay dashboard**. If it charges anyway the webhook grants nothing
+  (`billing.payer_not_owner`) and cancels it; refund that payment. Grants
+  stay; end them on the venue page.
+- **The new owner never resumes the previous owner's unpaid checkout.** A
+  `created` checkout is resumed only by the organisation that opened it. When
+  the new owner starts Venue Pro and a previous owner's `created` one is still
+  there (the transfer's cancel was refused, or it was opened as the venue
+  moved), starting expires it and cancels it at Razorpay before making the new
+  one, under the same lock. That cancel is best effort: a refusal is logged
+  (`Cancelling the previous owner's unpaid checkout at Razorpay failed`, with
+  `providerRef`) and Razorpay's own `expire_by` ends it; a payment that still
+  lands grants the payer nothing (`billing.payer_not_owner`): refund it.
+- **A mandate on a retired plan key stays on the Plan page.** The organisation's
+  Subscriptions list shows it as "Analytics, <period>, ₹<stored price> (earlier
+  plan)" so it can be cancelled, and Buy stays refused while it is open.
+- **Cancels: Razorpay first, then us.** A cancel Razorpay refused changes
+  nothing here and the user is told so. One Razorpay confirmed whose record
+  here failed is logged (`providerRef`) and refused; Razorpay's
+  `subscription.cancelled` settles the row and the entitlement. Every state
+  change and its audit row are one transaction; the money actions read the
+  role from the database, not the session.
+- **`superseded`** on a subscription is ours: a second mandate paid late
+  beside a live one. The webhook cancels it at Razorpay and writes
+  `billing.duplicate_subscription`; **refund that payment** from the Razorpay
+  dashboard. A checkout we had expired and the customer paid anyway takes the
+  open slot, and the unpaid one beside it is cancelled.
+
+## Razorpay's retries, and when it gives up
+
+- The webhook answers 200 for every delivery whose signature verifies,
+  including one it refused to apply (`payment_events.error` says why:
+  `unknown_ref`, `plan_mismatch`, `amount_mismatch`, `malformed`). Retrying a
+  refusal would change nothing.
+- It answers 5xx only when the database failed. The whole delivery is one
+  transaction, so nothing was half-applied, and Razorpay's retry applies it.
+- **429 after 30 failed signatures a minute from one network**, with
+  `Retry-After`, before any database work. Only failed signatures count: a
+  valid delivery is never limited. A burst of 429s is someone probing, or
+  Razorpay signing with a secret we do not have: check
+  `RAZORPAY_WEBHOOK_SECRET` against the dashboard's.
+- **Razorpay retries a failing webhook for about 24 hours and then disables
+  it.** A disabled webhook means every later payment is taken and never
+  granted. Alert on any 5xx from `/api/webhooks/razorpay` (Sentry, or the
+  Railway log line `POST /api/webhooks/razorpay 500`), and re-enable the
+  webhook in the Razorpay dashboard once the cause is fixed.
+
+## A payment that was taken but not granted
+
+1. Find it: `SELECT provider_event_id, type, error, received_at FROM payment_events ORDER BY received_at DESC LIMIT 20` and the logger line `Razorpay delivery refused` (it names the subscription, order or payment id).
+2. If the webhook was down: in the Razorpay dashboard, Webhooks → the webhook → the failed deliveries → **Resend**. A resend carries the same event id and body, so one that did land is a no-op.
+3. If it was refused (`amount_mismatch`, `plan_mismatch`): the amount or plan Razorpay reported is not the one this server started. Do not hand-write an entitlement. Refund from the Razorpay dashboard, or, if the purchase is genuine, give the organisation a grant from Organisations (audited) and file a bug with the delivery.
+4. Never write `entitlements` by hand: an admin grant is the lever.
+
+## Refunds, disputes, a second pass
+
+- Refunds of one payment add up (SCRUM-610). Once what was refunded
+  (`refund.processed`, each refund id counted once) reaches the payment, what
+  it bought ends at Razorpay's time for the last refund, and a refunded
+  subscription is also cancelled at Razorpay. Until then a partial refund
+  changes nothing. A refund with no id is refused (`malformed`).
+- **A refund of an earlier period changes nothing but the payment.** When a
+  subscription has renewed since the refunded payment (a newer payment is
+  captured on the same purchase), the running period was paid for: access and
+  the mandate stay, the payment reads refunded, and `audit_logs` has
+  `entitlement.refund_old_period` naming both payments. To end the plan as
+  well, cancel the subscription at Razorpay, or Revoke on the organisation.
+- A refund Razorpay delivered before its payment (`payment_events.error`
+  `unknown_ref`) is applied when the payment lands: a subscription charge,
+  an Event Pass or a link. The earlier delivery is then marked processed.
+- A dispute opened or lost ends it; a dispute won restores it.
+- `entitlement.duplicate_pass` in `audit_logs` (and a logger error) means an
+  organisation paid twice for one event's pass. Refund the second order from
+  the Razorpay dashboard.
+- To end paid access by hand (a refund done outside Razorpay, a mistake):
+  Organisations → the organisation → Revoke. It does not cancel or refund at
+  Razorpay; do that there.
+
+## Rolling back
+
+The migration that created these tables is additive. Rolling back the CODE is
+safe. Rolling back the SCHEMA is a new forward migration that drops the four
+tables (`entitlements`, `payment_events`, `billing_payments`,
+`billing_checkouts`); export `payment_events`, `billing_payments` and
+`billing_checkouts` first, because once a real payment has landed they are
+GST records, kept for 72 months. Never run SQL by hand against staging or
+production: the next boot's `prisma migrate deploy` dies on a schema it did not
+write.
+
+## Blendn+ (RevenueCat, step 11)
+
+The app's Blendn+ is sold by Apple and Google; RevenueCat tells us. The design
+is in `lib/revenuecat-webhook.ts`; setup, per environment, is
+docs/IAP-SETUP.md. Razorpay never sells Blendn+ (a database CHECK refuses the
+row, and `__tests__/plus-gate-boundary.test.ts` the code).
+
+- **Every authorised delivery answers 200**, including one that changed
+  nothing. `payment_events` (`provider = 'revenuecat'`) keeps each one — ids,
+  products and times; never the subscriber attributes, aliases or country —
+  and `error` says why it changed nothing:
+  - `stale`: older than what we hold for that purchase. Normal: RevenueCat
+    retries out of order. Each event carries the purchase's whole state, so the
+    newer one already said it.
+  - `wrong_environment`: a sandbox purchase in production, or a real one on
+    staging. App Review buys in the sandbox against production: the review
+    account holds a grant instead (docs/IAP-SETUP.md).
+  - `unknown_user`: `app_user_id` is not one of our accounts (anonymous, or
+    deleted). **Money was taken and nothing granted** — see below.
+  - `not_ours` / `unsupported_store`: not a Blendn+ product, or not the App
+    Store / Play. Check the RevenueCat entitlement `plus` and product ids.
+  - `malformed`: a purchase with no transaction id or end date, or a body we
+    could not read at all (`provider_event_id` = `unreadable:<hash>`, kept by
+    its hash and answered 200 so it is not retried into the void). File a bug
+    with the delivery.
+  - `old_period_refund`: a refund of a subscription period that has since
+    renewed. The running period was paid for, so access stays; an
+    `entitlement.refund_old_period` audit row says which transaction.
+  - `unreconciled`: a `TRANSFER` while `REVENUECAT_SECRET_KEY` is unset.
+    Nothing moved (fail closed). Set the key; the next event about each
+    purchase puts its owner right, or ask the person to restore again.
+- **5xx only when the database failed.** The whole delivery is one
+  transaction, so the claim rolled back with it and RevenueCat's retry applies
+  it. RevenueCat retries five times (5, 10, 20, 40, 80 minutes) and then
+  stops for that event. Alert on any 5xx from `/api/webhooks/revenuecat`.
+- **A delivery that never landed** (the retries ran out): for a subscription,
+  the next event about it — renewal, cancellation, expiration — carries the
+  whole state and puts the row right. A Night Pass has no next event: find
+  the purchase in RevenueCat → Customers → the user id, and give the person
+  the time through the dashboard: Users → the row's ⋯ → Blendn+ → Grant
+  (audited). Never by hand in the database.
+- **Refunds** are the store's: Apple's or Google's. RevenueCat reports one as
+  a CANCELLATION with `cancel_reason` `CUSTOMER_SUPPORT` (or
+  `DEVELOPER_INITIATED`), and the webhook ends access at that moment — never
+  later than it would have ended anyway. `REFUND_REVERSED` gives it back.
+- **Transfers** (`TRANSFER`, somebody restoring on another account) move only
+  what RevenueCat's own record of the receiving account confirms, read with
+  `REVENUECAT_SECRET_KEY` before the delivery's transaction; a failed read is a
+  5xx RevenueCat retries. Every move is an `entitlement.transferred` audit row.
+- **A deleted account** loses its Blendn+ rows with the account (D-17), in the
+  same transaction as the rest of the erasure and after any purchase being
+  granted at that moment (the erasure takes the person's `revenuecat:` lock
+  first). With `REVENUECAT_SECRET_KEY` set the customer is deleted at
+  RevenueCat too (best effort, logged). The person is told to cancel in their
+  store; a later renewal for that account is `unknown_user`.
+- **Rolling back** step 11's migration (`20261010120000_blendn_plus`) is a new
+  forward migration dropping `referrals` and the three `entitlements` columns.
+  Rolling back the code alone is safe.
+
+Read back:
+
+```sql
+SELECT u.email, e.product, e.source, e.starts_at, e.expires_at
+  FROM entitlements e JOIN "User" u ON u.id = e.subject_id
+ WHERE e.subject_kind = 'user' ORDER BY e.created_at DESC LIMIT 5;
+SELECT provider_event_id, type, processed_at, error,
+       count(*) OVER (PARTITION BY provider, provider_event_id) AS times
+  FROM payment_events WHERE provider = 'revenuecat'
+ ORDER BY received_at DESC LIMIT 10;
+```
+

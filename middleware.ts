@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { getToken } from "next-auth/jwt"
 import { canAccessDashboard } from "@/lib/rbac"
+import { mobileGateRefusal } from "@/lib/mobile-gate"
 import type { user_role } from "@prisma/client"
 
 const ALLOWED_ORIGINS = [
@@ -66,7 +67,7 @@ function checkHost(pathname: string, host: string | null): HostVerdict {
 function getCorsHeaders(origin: string | null): Record<string, string> {
   const baseHeaders = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Version",
   }
 
   // Native mobile clients (Expo/React Native fetch) don't send an Origin
@@ -121,6 +122,27 @@ export async function middleware(req: NextRequest) {
     return refused
   }
 
+  /*
+   * Planned downtime and builds the server no longer serves, for every mobile
+   * request including the versioned ones (Flow 15). Only `/api/mobile` is
+   * asked: `/api/health` (Railway's healthcheck would fail the deploy), the
+   * dashboard and the socket handshake never pass through here, by the
+   * matcher below, and a preflight is answered by the CORS branch, which
+   * carries no `X-App-Version` to judge.
+   */
+  if (pathname.startsWith("/api/mobile") && req.method !== "OPTIONS") {
+    const refusal = mobileGateRefusal(req.headers.get("x-app-version"), {
+      MOBILE_MIN_APP_VERSION: process.env.MOBILE_MIN_APP_VERSION,
+      MAINTENANCE_MODE: process.env.MAINTENANCE_MODE,
+      MAINTENANCE_RETRY_AFTER_SECONDS: process.env.MAINTENANCE_RETRY_AFTER_SECONDS,
+    })
+    if (refusal) {
+      const refused = NextResponse.json(refusal.body, { status: refusal.status, headers: refusal.headers })
+      Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => refused.headers.set(key, value))
+      return refused
+    }
+  }
+
   // API versioning: rewrite /api/mobile/v1/* to /api/mobile/*
   if (pathname.startsWith("/api/mobile/v1/") || pathname === "/api/mobile/v1") {
     const rewritten = pathname.replace("/api/mobile/v1", "/api/mobile")
@@ -170,9 +192,15 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (pathname === "/login" && signedIn) {
-    return NextResponse.redirect(new URL("/dashboard", req.url))
-  }
+  /*
+   * `/login` is not bounced to the dashboard here any more (step 18 security
+   * review, M6). This reads the cookie's claims and cannot ask the database;
+   * the dashboard's pages can, and send a session the database has ended to
+   * /login — which this sent straight back, a redirect loop for every ended
+   * session. The sign-in page moves a live session along itself, once
+   * `/api/auth/session` has vouched for it, and that same call clears an
+   * ended one's cookie.
+   */
 
   /*
    * The API documentation is internal, and was public.

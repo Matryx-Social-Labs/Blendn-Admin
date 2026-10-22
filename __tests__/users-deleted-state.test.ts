@@ -23,7 +23,7 @@ const mockDb = {
 }
 const mockAuth = jest.fn()
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("@/lib/location", () => ({ normalizeLocationToCity: jest.fn(async (s: string) => s) }))
 jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
@@ -43,7 +43,12 @@ beforeEach(() => {
   mockDb.user.update.mockResolvedValue({ id: "u1" })
   // The pre-write read the audit row is built from; `deletedAt: null` in
   // its where is what makes an erased row "not found" before any write.
-  mockDb.user.findUnique.mockResolvedValue({ name: "Old", email: "old@x", role: "attendee", profile: null })
+  mockDb.user.findUnique.mockImplementation(async (args: { select?: { suspended_at?: true } }) =>
+    // requireAdmin's read of the caller's own row (lib/current-user.ts).
+    args.select?.suspended_at
+      ? { role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }
+      : { name: "Old", email: "old@x", role: "attendee", profile: null }
+  )
   mockDb.audit_logs.create.mockReturnValue({ catch: () => undefined, then: () => undefined })
 })
 
@@ -89,7 +94,7 @@ describe("an erased account cannot be edited back into existence", () => {
     await updateUser("u1", { name: "Resurrected" })
     expect(mockDb.user.update.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
     // And the read before it, so an erased row is refused before any write.
-    expect(mockDb.user.findUnique.mock.calls[0][0].where).toEqual({ id: "u1", deletedAt: null })
+    expect(mockDb.user.findUnique.mock.calls.at(-1)![0].where).toEqual({ id: "u1", deletedAt: null })
   })
 
   it("updateUserRole does too", async () => {
@@ -109,7 +114,7 @@ describe("the stats line", () => {
     const stats = await getUserStats()
     expect(stats).toEqual({ total: 119, onboarded: 76, verified: 40, suspended: 1, deleted: 2 })
     const wheres = mockDb.user.count.mock.calls.map((c) => c[0].where)
-    expect(wheres[0]).toEqual({ deletedAt: null })
+    expect(wheres[0]).toEqual({ deletedAt: null, id: { not: "blendn-system" } })
     expect(wheres[1]).toMatchObject({ deletedAt: null })
     expect(wheres[2]).toMatchObject({ deletedAt: null })
     expect(wheres[3]).toEqual({ deletedAt: { not: null } })
@@ -118,8 +123,8 @@ describe("the stats line", () => {
 
   it("renders the erased count only when there is one", () => {
     const page = read("app/dashboard/users/page.tsx")
-    expect(page).toMatch(/stats\.deleted > 0 \? \(/)
-    expect(page).toMatch(/\{stats\.deleted\.toLocaleString\(\)\}<\/span> deleted/)
+    // The kit's StatLine (step 18): an item only when the count is not zero, faint.
+    expect(page).toMatch(/stats\.deleted > 0 && \{ value: stats\.deleted\.toLocaleString\(\), label: "deleted", tone: "faint" \}/)
   })
 })
 

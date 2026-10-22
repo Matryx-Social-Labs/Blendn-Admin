@@ -1,12 +1,15 @@
 "use server"
 
 import { Refusal } from "./refusal"
+import { cancelPreviousOwnersMandates, endPreviousOwnersPro } from "./subscription-cancel"
 import { z } from "zod"
 
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
-import { auditLog } from "@/lib/audit-log"
+import { requireAdmin } from "@/lib/current-user"
+import { ALREADY_DECIDED, decisionFrom, reasonFrom } from "@/lib/decision"
+import { auditInTx, auditLog } from "@/lib/audit-log"
 import { validateGstin, gstinMessage } from "@/lib/gstin"
 import { venueTypeLabel } from "@/lib/venue-types"
 import { reviewableUrl } from "@/lib/tigris"
@@ -20,6 +23,7 @@ import { claimEmail, claimInputRefusal, claimVenueInput } from "@/lib/claim-inpu
 import { claimVenueWhere } from "@/lib/curation"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { logger } from "@/lib/logger"
+import { realEventsWhere } from "@/lib/event-kind"
 
 /**
  * Claiming a venue.
@@ -168,6 +172,9 @@ export async function fileVenueClaim(
     resource: "venue",
     resourceId: venue.id,
     details: { claimId: claim.id, orgId: membership.org_id, venue: venue.name },
+    // The claimant's, never the venue's owner: a dispute filed against an owner
+    // is not the owner's to read in its log (step 18, M3).
+    orgId: membership.org_id,
   })
 
   revalidatePath("/dashboard/venues")
@@ -275,6 +282,8 @@ export async function filePublicVenueClaim(
       resource: "venue",
       resourceId: venue.id,
       details: { claimId: claim.id, onboardingId: input.onboardingId, withoutAccount: true },
+      // No organisation yet: the platform's alone.
+      orgId: null,
     })
     return { ok: true, claimId: claim.id }
   } catch (error) {
@@ -344,8 +353,7 @@ function noAccountFlags(contactEmail: string | null, website: string | null, gst
 }
 
 export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const claims = await db.venue_claims.findMany({
     where: { status: "pending" },
@@ -363,7 +371,7 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
           owner_org_id: true,
           owner_org: { select: { display_name: true } },
           // Live events only, as on the claim form (SCRUM-312).
-          _count: { select: { events: { where: { deleted_at: null } } } },
+          _count: { select: { events: { where: { deleted_at: null, ...realEventsWhere } } } },
         },
       },
     },
@@ -454,12 +462,12 @@ export async function getVenueClaimQueue(): Promise<ClaimQueueRow[]> {
  */
 export async function decideVenueClaim(
   claimId: string,
-  decision: "approve" | "decline",
+  decisionInput: "approve" | "decline",
   note?: string
 ): Promise<{ notified: boolean }> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
-  const admin = session.user
+  const admin = await requireAdmin()
+  // Before anything else: a word this queue does not take is refused (M2).
+  const decision = decisionFrom(["approve", "decline"], decisionInput)
 
   const claim = await db.venue_claims.findUnique({
     where: { id: claimId },
@@ -479,10 +487,7 @@ export async function decideVenueClaim(
 
   // A decline that reaches the claimant with no reason produces an identical
   // re-file, and the queue gets the same row again.
-  const trimmed = note?.trim() ?? ""
-  if (decision === "decline" && trimmed.length < 10) {
-    throw new Refusal("Give a reason — it is sent to the claimant.")
-  }
+  const trimmed = reasonFrom(note, decision === "decline", "Give a reason — it is sent to the claimant.") ?? ""
 
   /*
    * A claim filed with no account carries its application, not an
@@ -547,14 +552,40 @@ export async function decideVenueClaim(
 
       if (decision !== "approve" || !orgId) return
 
+      // The owner it is taken from, locked so the row below names exactly them.
+      const [before] = await tx.$queryRaw<{ owner_org_id: string | null }[]>`
+        SELECT owner_org_id::text AS owner_org_id FROM venues WHERE id = ${claim.venue.id}::uuid FOR UPDATE`
       const handed = await tx.venues.updateMany({
         where: {
           id: claim.venue.id,
           ...(claim.is_dispute ? {} : { OR: [{ owner_org_id: null }, { owner_org_id: orgId }] }),
         },
-        data: { owner_org_id: orgId, claimed_at: new Date() },
+        // A new owner starts open on Blendn (M5): an incumbent who lost a
+        // dispute could otherwise close the venue on the way out.
+        data: { owner_org_id: orgId, claimed_at: new Date(), open_on_blendn: true },
       })
       if (handed.count !== 1) throw new Refusal(OWNER_SINCE_FILING)
+      /*
+       * The organisation that lost it reads that it did (SCRUM-604). The claim's
+       * rows are the claimant's, so its evidence stays theirs; without this one
+       * the previous owner's log stopped at its own last change. Nothing of the
+       * claimant's in it — not who, not why — as `endPreviousOwnersPro` does for
+       * the new owner's side of the money.
+       */
+      const previousOwner = before?.owner_org_id ?? null
+      if (previousOwner && previousOwner !== orgId) {
+        await auditInTx(tx, {
+          userId: admin.id,
+          action: "venue.ownership_ended",
+          resource: "venue",
+          resourceId: claim.venue.id,
+          details: { venue: claim.venue.name, note: "Transferred to another organisation after a claim was upheld" },
+          orgId: previousOwner,
+        })
+      }
+      // Whoever paid for Pro here before does not hand it over with the venue:
+      // it ends in this transaction, with the transfer or not at all (review M7).
+      await endPreviousOwnersPro(tx, claim.venue.id, orgId, admin.id)
 
       // One owner per venue, so every other request for it is now moot.
       await tx.venue_claims.updateMany({
@@ -572,6 +603,9 @@ export async function decideVenueClaim(
     if (violatedConstraint(error, "venue_claims_venue_id_org_id_key")) throw new Refusal(ORG_ALREADY_CLAIMED)
     throw error
   }
+
+  // And their mandate stops at Razorpay, now the transfer has committed.
+  if (decision === "approve" && orgId) await cancelPreviousOwnersMandates(claim.venue.id, orgId, admin.id)
 
   const notified = await tellVenueClaimants(
     { ...claim, verified: Boolean(request?.email_verified_at) },
@@ -593,6 +627,8 @@ export async function decideVenueClaim(
       note: trimmed || null,
       emailSent: notified,
     },
+    // The claimant's (the organisation it was decided for), never the venue's owner.
+    orgId,
   })
 
   revalidatePath("/dashboard/venue-owners")
@@ -600,7 +636,6 @@ export async function decideVenueClaim(
   return { notified }
 }
 
-const ALREADY_DECIDED = "This claim has already been decided."
 const OWNER_SINCE_FILING =
   "This venue has been given an owner since the claim was filed. Decline it, or have them dispute it from the dashboard."
 const ORG_ALREADY_CLAIMED =

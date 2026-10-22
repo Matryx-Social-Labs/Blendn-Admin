@@ -1,21 +1,16 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
-import {
-  IconAlertTriangle,
-  IconExternalLink,
-  IconFileText,
-  IconLoader2,
-} from "@tabler/icons-react"
+import { IconBuildingStore } from "@tabler/icons-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { ClaimFlags, EvidenceDocs, Gstin } from "@/components/claim-evidence"
+import { DecideBox } from "@/components/dashboard/decide-box"
+import { Callout, Facts, Panel } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
-import { IconBuildingStore } from "@tabler/icons-react"
 import { decideVenueClaim, type ClaimQueueRow } from "@/lib/venue-claim-actions"
 import { formatDay } from "@/lib/dashboard-format"
 import { refusalMessage } from "@/lib/refusal"
@@ -47,7 +42,7 @@ export function VenueClaimQueue({ claims }: { claims: ClaimQueueRow[] }) {
   }
 
   return (
-    <div className="flex flex-col divide-y divide-border border-t border-border">
+    <div className="flex flex-col gap-3.5">
       {claims.map((claim) => (
         <ClaimCard key={claim.id} claim={claim} />
       ))}
@@ -58,10 +53,8 @@ export function VenueClaimQueue({ claims }: { claims: ClaimQueueRow[] }) {
 function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [note, setNote] = useState("")
-  const [declining, setDeclining] = useState(false)
 
-  function decide(decision: "approve" | "decline") {
+  function decide(decision: "approve" | "decline", note?: string) {
     startTransition(async () => {
       try {
         const { notified } = await decideVenueClaim(claim.id, decision, note)
@@ -79,115 +72,59 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
     })
   }
 
-  const docs = Object.entries(claim.evidence).filter(([, url]) => !!url)
+  const docs = Object.entries(claim.evidence).filter((d): d is [string, string] => !!d[1])
 
   return (
-    <section className="flex flex-col gap-4 py-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/dashboard/venues/${claim.venueId}`}
-              className="text-[0.9375rem] font-bold underline-offset-4 hover:underline"
-            >
+    <Panel>
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-[0.9375rem] font-bold">
+            <Link href={`/dashboard/venues/${claim.venueId}`} className="underline-offset-4 hover:underline">
               {claim.venueName}
             </Link>
-            <Badge variant="secondary">{claim.venueType}</Badge>
-            {claim.isDispute ? <Badge variant="destructive">Dispute</Badge> : null}
-          </div>
-          <p className="text-[0.78125rem] text-muted-foreground">
-            {claim.venueAddress ?? "No address on record"}
-          </p>
+          </h2>
+          <Badge variant="secondary">{claim.venueType}</Badge>
+          {claim.isDispute ? <Badge variant="destructive">Dispute</Badge> : null}
+          <span className="ml-auto text-[0.75rem] text-faint-foreground">
+            Filed {formatDay(claim.createdAt.toISOString())}
+          </span>
         </div>
-        <p className="text-[0.75rem] text-faint-foreground">
-          Filed {formatDay(claim.createdAt.toISOString())}
-        </p>
+        <p className="text-[0.8125rem] text-muted-foreground">{claim.venueAddress ?? "No address on record"}</p>
       </div>
 
-      <dl className="grid gap-3 text-[0.8125rem] @2xl/main:grid-cols-2">
-        <div className="flex flex-col gap-0.5">
-          <dt className="text-faint-foreground">Claimed by</dt>
-          <dd className="font-medium">
-            {claim.orgName}
-            {!claim.filedByName && claim.contactEmail ? (
-              <span className="font-normal text-muted-foreground"> · no account yet</span>
-            ) : claim.filedByName ? (
-              <span className="font-normal text-muted-foreground"> · {claim.filedByName}</span>
-            ) : null}
-            {claim.contactEmail ? (
-              <span className="block font-normal text-muted-foreground">{claim.contactEmail}</span>
-            ) : null}
-          </dd>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <dt className="text-faint-foreground">GSTIN</dt>
-          <dd className="font-mono text-[0.78125rem]">
-            {claim.gstin ?? "—"}
-            {claim.gstinCheck ? (
-              <span className="ml-2 font-sans text-[0.75rem] text-muted-foreground">
-                {claim.gstinCheck}
-              </span>
-            ) : null}
-          </dd>
-        </div>
-      </dl>
+      <Facts
+        items={[
+          {
+            label: "Claimed by",
+            value: (
+              <>
+                <span className="font-medium">{claim.orgName}</span>
+                {!claim.filedByName && claim.contactEmail ? (
+                  <span className="text-muted-foreground"> · no account yet</span>
+                ) : claim.filedByName ? (
+                  <span className="text-muted-foreground"> · {claim.filedByName}</span>
+                ) : null}
+                {claim.contactEmail ? (
+                  <span className="block text-muted-foreground">{claim.contactEmail}</span>
+                ) : null}
+              </>
+            ),
+          },
+          { label: "GSTIN", value: claim.gstin ? <Gstin gstin={claim.gstin} check={claim.gstinCheck} /> : null },
+        ]}
+      />
 
-      {claim.note ? (
-        <p className="text-[0.8125rem] leading-6 text-muted-foreground">{claim.note}</p>
-      ) : null}
+      {claim.note ? <p className="text-[0.8125rem] leading-6 text-muted-foreground">{claim.note}</p> : null}
 
       {claim.isDispute && claim.currentOwnerName ? (
-        <div className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 px-3.5 py-3">
-          <p className="flex items-center gap-2 text-[0.8125rem] font-bold">
-            <IconAlertTriangle className="size-4 text-warning" />
-            Currently owned by {claim.currentOwnerName}
-          </p>
-          <p className="text-[0.78125rem] text-muted-foreground">
-            {claim.currentOwnerEventCount} event
-            {claim.currentOwnerEventCount === 1 ? "" : "s"} hosted here. Approving transfers the
-            venue away from them.
-          </p>
-        </div>
+        <Callout title={`Currently owned by ${claim.currentOwnerName}`}>
+          {claim.currentOwnerEventCount} event{claim.currentOwnerEventCount === 1 ? "" : "s"} hosted here. Approving
+          transfers the venue away from them.
+        </Callout>
       ) : null}
 
-      <div className="flex flex-col gap-2">
-        <p className="text-[0.75rem] font-bold uppercase tracking-wide text-faint-foreground">
-          Evidence
-        </p>
-        {docs.length === 0 ? (
-          <p className="text-[0.78125rem] text-muted-foreground">Nothing attached.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {docs.map(([key, url]) => (
-              <a
-                key={key}
-                href={url as string}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-md border border-border-strong px-3 py-1.5 text-[0.78125rem] hover:bg-surface-raised"
-              >
-                <IconFileText className="size-3.5" />
-                {DOC_LABELS[key] ?? key}
-                <IconExternalLink className="size-3 text-faint-foreground" />
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {claim.flags.length > 0 ? (
-        <ul className="flex flex-col gap-1">
-          {claim.flags.map((flag) => (
-            <li
-              key={flag}
-              className="flex items-center gap-2 text-[0.78125rem] text-muted-foreground"
-            >
-              <IconAlertTriangle className="size-3.5 shrink-0 text-warning" />
-              {flag}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <EvidenceDocs docs={docs} labels={DOC_LABELS} />
+      <ClaimFlags flags={claim.flags} />
 
       {claim.waitingOn ? (
         /*
@@ -195,7 +132,7 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
          * from the public page with no account, so the venue cannot be handed
          * over until the address is proved and the application approved.
          */
-        <p className="rounded border border-border bg-surface-raised px-3 py-2 text-[0.75rem] text-muted-foreground">
+        <Callout>
           {claim.waitingOn === "email" ? (
             "Their email address is not confirmed yet. Approving waits until they click the link we sent."
           ) : (
@@ -207,58 +144,19 @@ function ClaimCard({ claim }: { claim: ClaimQueueRow }) {
               first; approving this claim then hands the venue to the organisation it creates.
             </>
           )}
-        </p>
+        </Callout>
       ) : null}
 
-      {declining ? (
-        <div className="flex flex-col gap-2">
-          <Textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Why this was declined — it is sent to the claimant, and a decline with no reason produces an identical re-file."
-            rows={3}
-            autoFocus
-          />
-          <p className="text-[0.75rem] text-faint-foreground">
-            {note.trim().length < 10
-              ? `${10 - note.trim().length} more characters needed.`
-              : "Ready to send."}
-          </p>
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        {declining ? (
-          <>
-            <Button type="button" variant="ghost" onClick={() => setDeclining(false)}>
-              Back
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={pending || note.trim().length < 10}
-              onClick={() => decide("decline")}
-            >
-              {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}
-              Send decline
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button type="button" variant="outline" onClick={() => setDeclining(true)}>
-              Decline
-            </Button>
-            <Button
-              type="button"
-              disabled={pending || claim.waitingOn !== null}
-              onClick={() => decide("approve")}
-            >
-              {pending ? <IconLoader2 className="size-4 animate-spin" /> : null}
-              {claim.isDispute ? "Transfer venue" : "Approve claim"}
-            </Button>
-          </>
-        )}
-      </div>
-    </section>
+      <DecideBox
+        approveLabel={claim.isDispute ? "Transfer venue" : "Approve claim"}
+        sendLabel="Send decline"
+        reasonLabel={`Why the claim on ${claim.venueName} is declined`}
+        placeholder="Why this was declined — it is sent to the claimant, and a decline with no reason produces an identical re-file."
+        pending={pending}
+        approveDisabled={claim.waitingOn !== null}
+        onApprove={() => decide("approve")}
+        onDecline={(reason) => decide("decline", reason)}
+      />
+    </Panel>
   )
 }

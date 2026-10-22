@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
+import { realEventsWhere } from "./event-kind"
 import type { Geofence } from "./geofence"
 
 /**
@@ -43,7 +44,9 @@ import type { Geofence } from "./geofence"
 const CLAIM_PAGE_STATUSES = ["published", "completed"] as const
 
 export function claimPageWhere(id: string): Prisma.eventsWhereUniqueInput {
-  return { id, deleted_at: null, status: { in: [...CLAIM_PAGE_STATUSES] }, visibility: { not: "private" } }
+  // Never a venue day: it is published and unlisted, so without the kind its
+  // id would open a claim page for the venue's own room (PL-I16).
+  return { id, deleted_at: null, ...realEventsWhere, status: { in: [...CLAIM_PAGE_STATUSES] }, visibility: { not: "private" } }
 }
 
 /**

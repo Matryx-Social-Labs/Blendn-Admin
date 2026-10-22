@@ -7,6 +7,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 import { sweepPresence, MASS_CHECKOUT_THRESHOLD, MASS_CHECKOUT_FLOOR } from "@/lib/presence-sweeper"
 import { getOccupancy } from "@/lib/occupancy"
 import { DEPARTURE_GRACE_MINUTES, DEPARTURE_ALLOWANCE_MINUTES } from "@/lib/presence"
+import { seatAtTheDoor } from "@/lib/check-in-core"
 
 import { db, closeDb, makeUser, testId } from "./helpers"
 
@@ -27,6 +28,11 @@ const FENCE = { type: "circle", lat: LAT, lng: LNG, radius: 40, buffer: 20 }
 
 afterAll(async () => {
   if (events.length) {
+    // What the door writes besides the check-in (the re-check-in test).
+    await db.chat_group_members.deleteMany({ where: { chat_group: { event_id: { in: events } } } })
+    await db.chat_groups.deleteMany({ where: { event_id: { in: events } } })
+    await db.event_match_preferences.deleteMany({ where: { event_id: { in: events } } })
+    await db.presence_sessions.deleteMany({ where: { event_id: { in: events } } })
     await db.event_check_ins.deleteMany({ where: { event_id: { in: events } } })
     await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
     await db.events.deleteMany({ where: { id: { in: events } } })
@@ -293,5 +299,42 @@ describe("staff", () => {
     await sweepPresence()
     const row = await db.event_check_ins.findUniqueOrThrow({ where: { id: crew.id } })
     expect(row.status).toBe("checked_in")
+  })
+})
+
+describe("coming back", () => {
+  it("a re-check-in starts a new visit: the sweeper does not check them out on the old departure", async () => {
+    /*
+     * Staging, Room A: out at 21:21 (left_area_at), checked out, back through
+     * the door at 21:29 — and the row kept 21:21, so the sweeper read the new
+     * visit as twenty minutes outside and checked them out at 21:43 from inside.
+     */
+    const { eventId, occurrenceId } = await liveEvent()
+    const back = await present(eventId, occurrenceId, "back", {
+      left_area_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 30),
+      departure_prompted_at: ago(DEPARTURE_ALLOWANCE_MINUTES + 25),
+    })
+    await db.event_check_ins.update({ where: { id: back.id }, data: { status: "checked_out", check_out_time: ago(10) } })
+    for (const l of ["b2", "b3", "b4", "b5"]) await present(eventId, occurrenceId, l)
+
+    const event = await db.events.findUniqueOrThrow({
+      where: { id: eventId },
+      include: { venue: { select: { owner_org_id: true } } },
+    })
+    await seatAtTheDoor({
+      event,
+      occurrenceId,
+      userId: back.user_id,
+      profile: null,
+      point: { lat: LAT, lng: LNG },
+      deviceInfo: undefined,
+      now: new Date(),
+    })
+
+    await sweepPresence()
+    const row = await db.event_check_ins.findUniqueOrThrow({ where: { id: back.id } })
+    expect(row.status).toBe("checked_in")
+    expect(row.left_area_at).toBeNull()
+    expect(row.departure_prompted_at).toBeNull()
   })
 })

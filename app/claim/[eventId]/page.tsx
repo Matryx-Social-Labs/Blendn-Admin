@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import { IconExternalLink } from "@tabler/icons-react"
 
-import { Card } from "@/components/ui/card"
+import { PublicChip, PublicFrame, PublicLockup } from "@/components/public-frame"
 import { getAuth } from "@/lib/auth"
 import { claimPageWhere, claimRefusal, curationSelect } from "@/lib/curation"
 import { isUuid } from "@/lib/api-input"
@@ -90,35 +90,32 @@ export default async function ClaimEventPage({
   }).format(event.start_time)
 
   return (
-    <main className="flex min-h-screen items-start justify-center px-6 py-12">
-      <div className="flex w-full max-w-xl flex-col gap-5">
-        <div className="flex flex-col gap-1.5">
-          <h1 className="text-2xl font-bold tracking-tight">Is this your event?</h1>
+    <PublicFrame width="medium">
+      <div className="flex flex-col gap-6 px-6 py-8 sm:px-9 sm:py-9">
+        <PublicLockup className="h-[30px]" priority />
+        <div className="flex flex-col gap-2.5">
+          <PublicChip>Listed by Blend&rsquo;n</PublicChip>
+          <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight">{event.title}</h1>
+          <p className="text-[0.875rem] tabular-nums text-muted-foreground">
+            {[when, event.venue_name, event.city].filter(Boolean).join(" · ")}
+          </p>
           <p className="text-[0.875rem] leading-6 text-muted-foreground">
-            We added this listing from a public source so people in {event.city ?? "the city"} could
-            find it. If you run it, take it over — you get the attendee list, the room, and every
-            organiser screen.
+            We added this from a public listing so people in {event.city ?? "the city"} could find it.
+            If it&rsquo;s yours, claim it — you get its attendee list, room chat and feedback, and it&rsquo;s
+            listed under your name.
           </p>
-        </div>
-
-        <Card className="flex flex-col gap-2 rounded-xl p-5">
-          <h2 className="text-base font-bold">{event.title}</h2>
-          <p className="text-[0.8125rem] text-muted-foreground">
-            {[event.venue_name, event.city].filter(Boolean).join(" · ")}
-          </p>
-          <p className="text-[0.8125rem] tabular-nums text-muted-foreground">{when}</p>
           {event.source_url ? (
             <a
               href={event.source_url}
               target="_blank"
               rel="noreferrer noopener"
-              className="inline-flex w-fit items-center gap-1.5 text-[0.8125rem] text-muted-foreground hover:text-foreground"
+              className="inline-flex w-fit items-center gap-1.5 text-[0.8125rem] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               Where we found it
-              <IconExternalLink className="size-3.5" />
+              <IconExternalLink aria-hidden className="size-3.5" />
             </a>
           ) : null}
-        </Card>
+        </div>
 
         {refusal ? (
           /*
@@ -126,7 +123,7 @@ export default async function ClaimEventPage({
            * error about the person. All three are states somebody honest can
            * arrive in, and two of them resolve on their own.
            */
-          <Card className="flex flex-col gap-2 rounded-xl p-5">
+          <div className="flex flex-col gap-2 rounded-2xl border border-border p-5">
             <p className="text-[0.875rem] font-medium">
               {refusal === "not_curated"
                 ? "This one already has an organiser."
@@ -141,11 +138,11 @@ export default async function ClaimEventPage({
                   ? "Somebody proved it was theirs and we handed it over. If that was not you and it should have been, get in touch."
                   : "Claims reopen once the room closes. We will not hand over an attendee list for people who are physically in a building right now — come back after it ends."}
             </p>
-          </Card>
+          </div>
         ) : (
           <ClaimForm eventId={event.id} hasOrg={hasOrg} />
         )}
       </div>
-    </main>
+    </PublicFrame>
   )
 }

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors, PaginationMetaSchema, UserRefParamSchema } from "@/lib/openapi/schemas/common"
+import { standardErrors, PaginationMetaSchema, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   UpdateProfileRequestSchema,
   InterestCategoryIdsSchema,
@@ -8,9 +8,6 @@ import {
   InterestsResponseSchema,
 } from "@/lib/openapi/schemas/profile"
 import { EventSessionSchema } from "@/lib/openapi/schemas/event"
-
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
 // GET /api/mobile/profiles/{userId}
 registry.registerPath({
@@ -41,7 +38,11 @@ registry.registerPath({
     "interested in are for 18+ only.\" A new `age` or `dateOfBirth` under 18 is 400 (Blend'n is 18+, " +
     "SCRUM-330); clearing the age to unknown clears the stored dating intent, the \"dating\" in `looking_for`, " +
     "and the orientation fields. `onboarded: true` on a profile not yet onboarded is 403 \"Blend'n is for " +
-    "people 18 and over. Add your date of birth to finish.\" unless the age after the request is 18+.",
+    "people 18 and over. Add your date of birth to finish.\" unless the age after the request is 18+. " +
+    "Changing `languages`, `home_state`, `sun_sign`/`sign_system` or `work_field` (a real change, once onboarded) " +
+    "is limited to three a day — the fourth is 429 RATE_LIMITED \"You can change your languages, home state, sign " +
+    "or field of work three times a day. Try again tomorrow.\" — and stamps `tier_b_changed_at`: in a room you " +
+    "checked into before the change, your new values print no shared line.",
   security: bearerAuth,
   request: {
     params: z.object({ userId: z.string().uuid() }),
@@ -120,9 +121,12 @@ registry.registerPath({
   summary: "The events the authenticated user has attended",
   description:
     "One entry per event, however many days of it they turned up for, most recently attended " +
-    "first. `attendedAt` is the first check-in for that event. `pagination.totalCount` is the " +
-    "same figure shown as `stats.eventsAttended` on a profile — the two share one predicate so " +
-    "the list and the number cannot disagree. Working an event as staff is not attending it.",
+    "first. `attendedAt` is the first check-in for that event. `pagination.totalCount` plus " +
+    "`lockedCount` is the figure shown as `stats.eventsAttended` on a profile — they share one " +
+    "predicate so the list and the number cannot disagree. Working an event as staff is not " +
+    "attending it. Places you went live at are included, with `kind: venue_day`. Where Blendn+ is " +
+    "gated (the city of your latest night) and you have none, the list stops at your latest 3 " +
+    "nights and `lockedCount` says how many more there are (Blendn+ unlocks them).",
   security: bearerAuth,
   request: {
     query: z.object({
@@ -140,6 +144,11 @@ registry.registerPath({
               events: z.array(
                 z.object({
                   id: z.string().uuid(),
+                  kind: z
+                    .enum(["event", "venue_day"])
+                    .describe(
+                      "`venue_day` is a place you went live at (D-6): show `venue_name`, labelled as a place. Its `title` is bookkeeping, not for display."
+                    ),
                   slug: z.string(),
                   title: z.string(),
                   cover_image_url: z.string().nullable(),
@@ -151,6 +160,7 @@ registry.registerPath({
                 })
               ),
               pagination: PaginationMetaSchema,
+              lockedCount: z.number().int().min(0).describe("Older nights behind Blendn+. 0 when nothing is locked."),
             })
           ),
         },

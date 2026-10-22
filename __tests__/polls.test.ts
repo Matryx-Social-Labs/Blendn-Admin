@@ -8,6 +8,13 @@
  */
 
 const mockDb = {
+  // actorFor reads the caller's role from their row (step 18): here, the role the session names.
+  user: {
+    findUnique: jest.fn(async () => {
+      const s = await mockAuth()
+      return s?.user ? { role: s.user.role, suspended_at: null, deletedAt: null } : null
+    }),
+  },
   events: { findUnique: jest.fn() },
   organisation_members: { findMany: jest.fn() },
   organisations: { findFirst: jest.fn() },
@@ -81,6 +88,7 @@ beforeEach(() => {
     id: EVENT,
     start_time: new Date(NOW - HOUR),
     end_time: new Date(NOW + 3 * HOUR),
+    kind: "event",
     organizer_org_id: ORG,
     venue: null,
     deleted_at: null,
@@ -247,6 +255,7 @@ describe("creating a poll", () => {
       id: EVENT,
       start_time: new Date(NOW - HOUR),
       end_time: new Date(NOW + 3 * HOUR),
+      kind: "event",
       organizer_org_id: ORG,
       venue: null,
       deleted_at: null,

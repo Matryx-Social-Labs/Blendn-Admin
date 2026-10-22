@@ -1,3 +1,5 @@
+import type { event_kind } from "@prisma/client"
+
 /**
  * Who to show as an event's host.
  *
@@ -26,12 +28,16 @@
 
 /** The columns `eventHost` needs. Spread it; do not hand-pick. */
 export const eventHostSelect = {
+  kind: true,
+  venue_name: true,
   curated_at: true,
   organizer_org: { select: { display_name: true } },
   organizer: { select: { name: true } },
 } as const
 
 export interface HostSource {
+  kind?: event_kind
+  venue_name?: string | null
   curated_at?: Date | null
   organizer_org?: { display_name: string | null } | null
   organizer?: { name: string | null } | null
@@ -52,6 +58,16 @@ export interface EventHost {
 }
 
 export function eventHost(event: HostSource): EventHost {
+  /*
+   * A venue day is the venue's room, and nobody hosts it (F2): it has no org,
+   * and its creating user is the system user. The venue's name, copied onto
+   * the row when the day was made — not the company that owns the venue
+   * ("Indiranagar Hospitality Group" is not what anybody calls The Humming Tree).
+   */
+  if (event.kind === "venue_day") {
+    return { name: event.venue_name?.trim() || PLATFORM_HOST, isPlatform: true }
+  }
+
   const org = event.organizer_org?.display_name?.trim()
   if (org) return { name: org, isPlatform: false }
 

@@ -352,3 +352,19 @@
 .apply-card {
   box-shadow: 0 4px 20px rgb(0 0 0 / 8%);
 }
+
+/*
+ * Print for the door (the event's QR & link tab, step 15): the door slide is
+ * portalled to <body>, and printing hides everything else there, so the page
+ * is the slide and nothing but it. Scoped by `:has`, so printing any other
+ * page is untouched.
+ */
+@media print {
+  body:has(> [data-door-slide]) > :not([data-door-slide]) {
+    display: none !important;
+  }
+  body > [data-door-slide] {
+    display: flex !important;
+    min-height: 100vh;
+  }
+}

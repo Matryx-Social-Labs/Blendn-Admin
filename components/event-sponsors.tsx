@@ -60,13 +60,11 @@ export function EventSponsors({ eventId }: { eventId: string }) {
   const full = occupying >= SPONSORSHIP.MAX_PLACEMENTS_PER_EVENT
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <h3 className="text-[0.9375rem] font-bold">Sponsors</h3>
-        <span className="text-[0.8125rem] text-muted-foreground">
-          {occupying} of {SPONSORSHIP.MAX_PLACEMENTS_PER_EVENT}
-        </span>
-      </div>
+    <section className="flex flex-col gap-3" aria-label="Sponsors">
+      {/* The panel around this is titled "Sponsors"; the slots are its first line. */}
+      <p className="text-[0.8125rem] text-muted-foreground">
+        {occupying} of {SPONSORSHIP.MAX_PLACEMENTS_PER_EVENT} placements taken
+      </p>
 
       {rows === null ? (
         <p className="text-[0.8125rem] text-muted-foreground">Loading…</p>
@@ -76,9 +74,9 @@ export function EventSponsors({ eventId }: { eventId: string }) {
           so add one here first.
         </p>
       ) : (
-        <ul className="flex flex-col divide-y rounded-lg border bg-card">
+        <ul className="flex flex-col divide-y divide-border border-y border-border">
           {rows.map((r) => (
-            <li key={r.id} className="flex items-center justify-between gap-3 p-3">
+            <li key={r.id} className="flex items-center justify-between gap-3 py-3">
               <div className="flex min-w-0 flex-col gap-0.5">
                 <span className="truncate font-medium">{r.name}</span>
                 <span className="text-[0.8125rem] text-muted-foreground">

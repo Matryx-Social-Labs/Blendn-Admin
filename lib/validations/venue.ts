@@ -2,6 +2,13 @@ import { z } from "zod"
 
 import { VENUE_TYPES } from "@/lib/venue-types"
 
+/** `a,b` to `["a", "b"]`, each one of `VENUE_TYPES`; a blank entry is not one. */
+const venueTypeList = z
+  .string()
+  .transform((v) => v.split(",").map((t) => t.trim()))
+  .pipe(z.array(z.enum(VENUE_TYPES)).min(1).max(VENUE_TYPES.length))
+  .optional()
+
 /**
  * The query for `GET /api/mobile/venues` — the Hotspots feed.
  *
@@ -34,7 +41,16 @@ export const venueQuerySchema = z.object({
   /** Only bites when asked for. See the note above — no default, ever. */
   radius: z.coerce.number().min(0.1).max(100).optional(),
 
-  venueType: z.enum(VENUE_TYPES).optional(),
+  /**
+   * One type or a comma list (`pub_bar,brewery`), each of the vocabulary: a
+   * value outside it is a 400, not an empty page. `venueTypes` is the same
+   * parameter under its plural name; the route takes the union of the two.
+   */
+  venueType: venueTypeList,
+  venueTypes: venueTypeList,
+
+  /** A neighbourhood by its slug (`venues.area_slug`, e.g. `koramangala-1st-block`). */
+  area: z.string().min(1).max(100).optional(),
 
   /*
    * `name` and `distance` only.
@@ -51,6 +67,13 @@ export const venueQuerySchema = z.object({
    * matters the moment there is more than one page — which is why this is
    * recorded here rather than papered over with an in-page sort.
    */
+  /**
+   * `live`: venues somebody is live at now come first, in the chosen sort, then
+   * the rest — so "Live now" does not depend on paging to wherever a name sort
+   * happens to put them. "Live" is the `liveNow` the card shows (not `quiet`),
+   * so the order never knows more than the label does.
+   */
+  order: z.enum(["live"]).optional(),
   sortBy: z.enum(["name", "distance"]).default("name"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
 })

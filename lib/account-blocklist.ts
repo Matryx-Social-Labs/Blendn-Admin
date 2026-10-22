@@ -5,48 +5,97 @@ import { logger } from "./logger"
 
 /**
  * Accounts deleted or suspended recently enough that a signed access token
- * for them could still exist. See `accountBlockReason` in lib/mobile-auth.ts
- * for why this is the one database read on the request path, and why it is
- * bounded. Its own module so a dashboard action can call `blockAccountNow`
- * without importing the JWT stack.
+ * for them could still exist, and accounts whose phones were signed out
+ * (`mobile_sessions_revoked_at`: Settings, a password change or reset —
+ * SCRUM-603), whose tokens from before that moment are refused. See
+ * `accountBlockReason` in lib/mobile-auth.ts for why this is the one database
+ * read on the request path, and why it is bounded. Its own module so a
+ * dashboard action can call `blockAccountNow` without importing the JWT stack.
  */
 const BLOCKLIST_REFRESH_MS = 30 * 1000
 const BLOCKLIST_LOOKBACK_MS = 20 * 60 * 1000 // an access token's life, plus a margin
-let blocklist = new Set<string>()
-let blocklistFetchedAt = 0
-let blocklistRefresh: Promise<void> | null = null
+
+/*
+ * On globalThis, not in module scope (SCRUM-603). Next bundles its own copy of
+ * this module per layer, so the dashboard action that suspended somebody or
+ * signed their phones out told a different copy from the one the mobile
+ * routes read: driven on staging, a signed-out phone's access token still
+ * answered 200 four seconds later and 401 only at the next refresh, 29 s on.
+ * The socket server's `io` is shared the same way, for the same reason.
+ *
+ * What an action says at once is kept apart from what the database last said,
+ * so a refresh that started before the action committed cannot drop it.
+ */
+interface BlocklistState {
+  /** From the database: deleted or suspended in the lookback. */
+  blocked: Set<string>
+  /** From the database: userId → when its phones were signed out, in ms. */
+  phonesEndedAt: Map<string, number>
+  /** Said by an action in this process: userId → when, in ms. */
+  blockedNow: Map<string, number>
+  phonesEndedNow: Map<string, number>
+  fetchedAt: number
+  refresh: Promise<void> | null
+}
+const shared = globalThis as typeof globalThis & { __blendnBlocklist?: BlocklistState }
+const state: BlocklistState = (shared.__blendnBlocklist ??= {
+  blocked: new Set(),
+  phonesEndedAt: new Map(),
+  blockedNow: new Map(),
+  phonesEndedNow: new Map(),
+  fetchedAt: 0,
+  refresh: null,
+})
 
 async function refreshBlocklist(): Promise<void> {
   const since = new Date(Date.now() - BLOCKLIST_LOOKBACK_MS)
   const rows = await db.user.findMany({
-    where: { OR: [{ deletedAt: { gte: since } }, { suspended_at: { gte: since } }] },
-    select: { id: true },
+    where: { OR: [{ deletedAt: { gte: since } }, { suspended_at: { gte: since } }, { mobile_sessions_revoked_at: { gte: since } }] },
+    select: { id: true, deletedAt: true, suspended_at: true, mobile_sessions_revoked_at: true },
   })
-  blocklist = new Set(rows.map((r) => r.id))
-  blocklistFetchedAt = Date.now()
+  const recent = (at: Date | null) => at !== null && at >= since
+  state.blocked = new Set(rows.filter((r) => recent(r.deletedAt) || recent(r.suspended_at)).map((r) => r.id))
+  state.phonesEndedAt = new Map(
+    rows.filter((r) => recent(r.mobile_sessions_revoked_at)).map((r) => [r.id, r.mobile_sessions_revoked_at!.getTime()])
+  )
+  for (const said of [state.blockedNow, state.phonesEndedNow]) {
+    for (const [id, at] of said) if (at < since.getTime()) said.delete(id)
+  }
+  state.fetchedAt = Date.now()
+}
+
+/** The action that signed somebody's phones out tells this process at once. */
+export function phonesSignedOutNow(userId: string, at: Date): void {
+  state.phonesEndedNow.set(userId, Math.max(state.phonesEndedNow.get(userId) ?? 0, at.getTime()))
 }
 
 /** The route that deleted or suspended somebody tells this process at once. */
 export function blockAccountNow(userId: string): void {
-  blocklist.add(userId)
+  state.blockedNow.set(userId, Date.now())
 }
 
-export async function recentlyBlocked(userId: string): Promise<boolean> {
-  if (Date.now() - blocklistFetchedAt > BLOCKLIST_REFRESH_MS) {
+/**
+ * Refused: the account was deleted or suspended, or its phones were signed out
+ * at or after this token was issued (`issuedAt`, the JWT's `iat`, in seconds —
+ * a tie goes to the sign-out, as in lib/session-revocation.ts).
+ */
+export async function recentlyBlocked(userId: string, issuedAt: number): Promise<boolean> {
+  if (Date.now() - state.fetchedAt > BLOCKLIST_REFRESH_MS) {
     // One refresh at a time; a failure keeps the previous set rather than
     // failing every request, and is retried on the next.
-    blocklistRefresh ??= refreshBlocklist()
+    state.refresh ??= refreshBlocklist()
       .catch((error) => {
         logger.warn("Could not refresh the blocked-accounts set", {
           error: error instanceof Error ? error.message : String(error),
         })
-        blocklistFetchedAt = Date.now()
+        state.fetchedAt = Date.now()
       })
       .finally(() => {
-        blocklistRefresh = null
+        state.refresh = null
       })
-    await blocklistRefresh
+    await state.refresh
   }
-  return blocklist.has(userId)
+  if (state.blocked.has(userId) || state.blockedNow.has(userId)) return true
+  const phonesEnded = Math.max(state.phonesEndedAt.get(userId) ?? 0, state.phonesEndedNow.get(userId) ?? 0)
+  return phonesEnded > 0 && issuedAt * 1000 <= phonesEnded
 }
-

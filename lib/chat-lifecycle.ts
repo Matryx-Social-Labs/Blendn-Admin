@@ -4,6 +4,9 @@
 import { db } from "./db"
 import { logger } from "./logger"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
+import { OWNER_ROOM_HOURS } from "./room-kind"
+import { closeRoomSockets } from "./room-close"
+import { purgeLapsedCrewLikes, repairCrews } from "./crews/sweep"
 
 /** Bounded so one pass cannot hold locks for an unbounded period. */
 const SWEEP_BATCH = 500
@@ -34,20 +37,53 @@ export interface SweepResult {
  * manually while the timer is also running.
  */
 export async function sweepExpiredChats(): Promise<SweepResult> {
-  const cutoff = new Date(Date.now() - CHAT_WINDOW_HOURS * 60 * 60 * 1000)
+  const now = Date.now()
+  const cutoff = new Date(now - CHAT_WINDOW_HOURS * 60 * 60 * 1000)
 
   const expired = await db.chat_groups.findMany({
     where: {
       status: "active",
+      // An event's room closes on its event's clock; another kind's on its owner's (below).
+      kind: "event",
+      // any-kind: every room closes the same way once its event is over; a venue day's ends at its reset.
       event: { end_time: { lt: cutoff } },
     },
     select: { id: true },
     take: SWEEP_BATCH,
   })
 
-  if (expired.length === 0) return { archived: 0, released: 0, hasMore: false }
+  /*
+   * A board post's room closes `OWNER_ROOM_HOURS` after the post's event ends
+   * (E2), and a Blend's at its `closes_at` (the occurrence's end + the same
+   * twelve hours). Their doors already refuse on the clock (`roomWindowFor`,
+   * `roomOwnerDenial`); this archives them, releases their members and takes
+   * their sockets out (E3). A crew's room never closes on a clock, and a Blend
+   * closed early (its crew dissolved or hidden) was archived when it closed.
+   */
+  const ownerExpired = await db.chat_groups.findMany({
+    where: {
+      status: "active",
+      kind: "board_post",
+      // any-kind: a post's room closes on its post's night, whatever kind of event it was.
+      board_post: { event: { end_time: { lt: new Date(now - OWNER_ROOM_HOURS * 60 * 60 * 1000) } } },
+    },
+    select: { id: true },
+    take: SWEEP_BATCH,
+  })
+  // Read from the Blends themselves, open ones past their clock, through the
+  // partial index that holds only open ones (`blends_open_closes_at`).
+  const blendsOver = await db.blends.findMany({
+    where: { closed_at: null, closes_at: { lte: new Date(now) } },
+    select: { id: true, room: { select: { id: true } } },
+    take: SWEEP_BATCH,
+  })
+  const blendRooms = blendsOver.flatMap((b) => (b.room ? [b.room] : []))
 
-  const ids = expired.map((group) => group.id)
+  if (expired.length === 0 && ownerExpired.length === 0 && blendsOver.length === 0) {
+    return { archived: 0, released: 0, hasMore: false }
+  }
+
+  const ids = [...expired, ...ownerExpired, ...blendRooms].map((group) => group.id)
 
   const [archived, released] = await db.$transaction([
     db.chat_groups.updateMany({
@@ -77,13 +113,21 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
       where: { chat_group_id: { in: ids }, status: { in: ["active", "muted"] } },
       data: { status: "left" },
     }),
+    // Closed on its clock: out of the open-only index, so no pass reads it again.
+    db.blends.updateMany({
+      where: { id: { in: blendsOver.map((b) => b.id) }, closed_at: null },
+      data: { closed_at: new Date(now) },
+    }),
   ])
+
+  // Only another kind's: an archived event room stays readable to its members, as before.
+  for (const { id } of [...ownerExpired, ...blendRooms]) closeRoomSockets(id)
 
   return {
     // What changed, not what was selected.
     archived: archived.count,
     released: released.count,
-    hasMore: expired.length === SWEEP_BATCH,
+    hasMore: expired.length === SWEEP_BATCH || ownerExpired.length === SWEEP_BATCH || blendsOver.length === SWEEP_BATCH,
   }
 }
 
@@ -102,6 +146,21 @@ async function runSweep(): Promise<void> {
     logger.error("Chat lifecycle sweep failed", {
       error: error instanceof Error ? error.message : String(error),
     })
+  }
+  /*
+   * Crews left below two active members or without an active owner — by an
+   * erasure whose settle failed after its commit, or by a suspension, which
+   * writes no crew row — are settled here, and crew likes that never made a
+   * Blend go 12 hours after their night (lib/crews/sweep.ts). Its own catch,
+   * so one arm failing never stops the other.
+   */
+  try {
+    const crews = await repairCrews()
+    if (crews.repaired > 0) logger.info("Repaired crews", { ...crews })
+    const purged = await purgeLapsedCrewLikes()
+    if (purged > 0) logger.info("Purged crew likes that never made a Blend", { purged })
+  } catch (error) {
+    logger.error("Crew repair sweep failed", { error: error instanceof Error ? error.message : String(error) })
   }
 }
 

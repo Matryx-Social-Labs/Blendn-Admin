@@ -8,9 +8,9 @@
  * and which ones a row is even allowed to offer.
  */
 const tx = {
-  user_reports: { update: jest.fn() },
-  message_reports: { update: jest.fn() },
-  event_reports: { update: jest.fn() },
+  user_reports: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+  message_reports: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+  event_reports: { update: jest.fn(), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   chat_messages: { update: jest.fn() },
   user: { update: jest.fn() },
   mobile_refresh_tokens: { updateMany: jest.fn() },
@@ -19,22 +19,29 @@ const tx = {
 }
 
 const mockDb = {
+  // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
+  user: { findUnique: jest.fn(async () => ({ role: (await mockAuth()).user.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })) },
   user_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   message_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   event_reports: { findMany: jest.fn(), findUnique: jest.fn(), groupBy: jest.fn() },
   chat_messages: { findMany: jest.fn(), findUnique: jest.fn() },
   private_messages: { findMany: jest.fn(), findUnique: jest.fn() },
+  board_posts: { findMany: jest.fn() },
+  board_requests: { findMany: jest.fn() },
   $transaction: jest.fn(),
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
 const mockAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 const mockAuditLog = jest.fn()
-jest.mock("@/lib/audit-log", () => ({ auditLog: (...a: unknown[]) => mockAuditLog(...a) }))
+jest.mock("@/lib/audit-log", () => ({
+  auditLog: (...a: unknown[]) => mockAuditLog(...a),
+  auditInTx: (_tx: unknown, entry: unknown) => mockAuditLog(entry),
+}))
 
 const emitChatMessageHidden = jest.fn()
 const evictUserSockets = jest.fn()
@@ -55,6 +62,8 @@ beforeEach(() => {
   mockDb.event_reports.groupBy.mockResolvedValue([])
   mockDb.chat_messages.findMany.mockResolvedValue([])
   mockDb.private_messages.findMany.mockResolvedValue([])
+  mockDb.board_posts.findMany.mockResolvedValue([])
+  mockDb.board_requests.findMany.mockResolvedValue([])
   mockDb.$transaction.mockImplementation((fn: (t: typeof tx) => unknown) => fn(tx))
 })
 
@@ -64,7 +73,7 @@ describe("getReportQueue", () => {
     // component nowhere in the path — the page's redirect guards the view, not
     // this. And this returns private message content beside real names.
     mockAuth.mockResolvedValue({ user: { id: "o1", role: "organizer" } })
-    await expect(getReportQueue()).rejects.toThrow(/not authorised/i)
+    await expect(getReportQueue()).rejects.toThrow(/forbidden/i)
     expect(mockDb.user_reports.findMany).not.toHaveBeenCalled()
   })
 
@@ -168,6 +177,102 @@ describe("getReportQueue", () => {
   })
 })
 
+describe("getReportQueue — board rows", () => {
+  const person = (id: string) => ({ id, name: `Name ${id}`, email: `${id}@b.com`, suspended_at: null })
+  const boardReport = (id: string, type: "board_post" | "board_request", messageId: string, over = {}) => ({
+    id,
+    created_at: T0,
+    reason: "harassment",
+    description: null,
+    message_id: messageId,
+    message_type: type,
+    excerpt: null,
+    reviewed_by: null,
+    reporter_id: "rep",
+    reporter: { name: "Reporter", email: "r@b.com" },
+    ...over,
+  })
+  const post = (over = {}) => ({
+    id: "bp1",
+    kind: "offer",
+    body: "two seats, insta first",
+    deleted_at: null,
+    moderation_status: "reported",
+    event_id: "e1",
+    event: { title: "Techno Tuesday" },
+    author: person("author"),
+    ...over,
+  })
+
+  it("names a board post's kind and author, and offers removal while it stands", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([boardReport("r1", "board_post", "bp1")])
+    mockDb.board_posts.findMany.mockResolvedValue([post()])
+    const [row] = (await getReportQueue()).rows
+    expect(row).toMatchObject({
+      messageType: "board_post",
+      boardKind: "offer",
+      subjectId: "author",
+      excerpt: "two seats, insta first",
+      eventId: "e1",
+      gone: false,
+      removable: true,
+      messageDeleted: false,
+    })
+  })
+
+  it("prefers the words as reported over the post as it reads now", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_post", "bp1", { excerpt: "what it said then" }),
+    ])
+    mockDb.board_posts.findMany.mockResolvedValue([post({ body: "edited since" })])
+    expect((await getReportQueue()).rows[0].excerpt).toBe("what it said then")
+  })
+
+  it("still offers removal on a post its author withdrew, and not on one already removed", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_post", "bp1"),
+      boardReport("r2", "board_post", "bp2"),
+    ])
+    mockDb.board_posts.findMany.mockResolvedValue([
+      post({ id: "bp1", deleted_at: new Date() }),
+      post({ id: "bp2", deleted_at: new Date(), moderation_status: "removed" }),
+    ])
+    const rows = (await getReportQueue()).rows
+    expect(rows.find((r) => r.id === "r1")).toMatchObject({ messageDeleted: true, removable: true })
+    expect(rows.find((r) => r.id === "r2")).toMatchObject({ messageDeleted: true, removable: false })
+  })
+
+  it("says an erased post or ask is gone, and offers nothing to remove", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_post", "gone-post"),
+      boardReport("r2", "board_request", "gone-ask"),
+    ])
+    const rows = (await getReportQueue()).rows
+    expect(rows.find((r) => r.id === "r1")).toMatchObject({ gone: true, removable: false, excerpt: null, subjectId: null })
+    expect(rows.find((r) => r.id === "r2")).toMatchObject({ gone: true, excerpt: null, subjectId: null })
+  })
+
+  it("reports an ask about whichever of its two people did not file it", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([
+      boardReport("r1", "board_request", "ask1", { reporter_id: "author" }),
+    ])
+    mockDb.board_requests.findMany.mockResolvedValue([
+      { id: "ask1", message: null, event_id: "e1", event: { title: "T" }, from: person("asker"), to: person("author") },
+    ])
+    const [row] = (await getReportQueue()).rows
+    expect(row).toMatchObject({ subjectId: "asker", gone: false, excerpt: null, removable: false })
+  })
+
+  it("counts the reports that name the same thing", async () => {
+    mockDb.message_reports.findMany.mockResolvedValue([boardReport("r1", "board_post", "bp1")])
+    mockDb.board_posts.findMany.mockResolvedValue([post()])
+    mockDb.message_reports.groupBy.mockImplementation((args: { by: string[] }) =>
+      Promise.resolve(args.by[0] === "message_id" ? [{ message_id: "bp1", _count: { _all: 3 } }] : [])
+    )
+    expect((await getReportQueue()).rows[0].sameSubject).toBe(3)
+  })
+})
+
 describe("resolveReport", () => {
   const pendingUserReport = { id: "ur1", status: "pending", reported_id: "u9" }
   const pendingGroupReport = {
@@ -179,7 +284,7 @@ describe("resolveReport", () => {
 
   it("refuses anyone who is not a platform admin", async () => {
     mockAuth.mockResolvedValue({ user: { id: "o1", role: "organizer" } })
-    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/only platform admins/i)
+    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/forbidden/i)
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })
 
@@ -187,7 +292,7 @@ describe("resolveReport", () => {
     // Two people working the queue at once would otherwise both act on it, and
     // the second click would suspend an account for a report already dismissed.
     mockDb.user_reports.findUnique.mockResolvedValue({ ...pendingUserReport, status: "resolved" })
-    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/already been reviewed/i)
+    await expect(resolveReport("user", "ur1", "suspend")).rejects.toThrow(/Someone else decided this/)
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })
 
@@ -235,7 +340,7 @@ describe("resolveReport", () => {
     mockDb.user_reports.findUnique.mockResolvedValue(pendingUserReport)
     await resolveReport("user", "ur1", "dismiss")
 
-    expect(tx.user_reports.update).toHaveBeenCalledWith(
+    expect(tx.user_reports.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: "reviewed", reviewed_by: "admin1" }),
       })
@@ -248,7 +353,7 @@ describe("resolveReport", () => {
     // and "we removed it" — the question that gets asked six weeks later.
     mockDb.message_reports.findUnique.mockResolvedValue(pendingGroupReport)
     await resolveReport("message", "mr1", "remove_message")
-    expect(tx.message_reports.update).toHaveBeenCalledWith(
+    expect(tx.message_reports.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "resolved" }) })
     )
     expect(tx.chat_messages.update).toHaveBeenCalledWith(
@@ -280,7 +385,7 @@ describe("resolveReport", () => {
       message_type: "private",
     })
     await expect(resolveReport("message", "mr1", "remove_message")).rejects.toThrow(
-      /group room/i
+      /only a room message or a board post/i
     )
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })
@@ -317,7 +422,7 @@ describe("resolveReport", () => {
       data: { suspended_at: null, suspended_by: null },
     })
     // The report's own verdict stands; only the suspension is lifted.
-    expect(tx.user_reports.update).not.toHaveBeenCalled()
+    expect(tx.user_reports.updateMany).not.toHaveBeenCalled()
   })
 
   it("writes every decision to the audit log", async () => {

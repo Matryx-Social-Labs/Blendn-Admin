@@ -75,9 +75,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     const event = await db.events.findUnique({
       where: { id: eventId },
-      select: { id: true },
+      select: { id: true, kind: true },
     })
-    if (!event) {
+    // A venue day is reported through its room's messages, not as an event a
+    // host runs: nobody runs it (step 4 review).
+    if (!event || event.kind === "venue_day") {
       return notFoundResponse("Event not found")
     }
 

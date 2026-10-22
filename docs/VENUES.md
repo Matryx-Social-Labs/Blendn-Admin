@@ -223,10 +223,120 @@ this and was corrected rather than the code.
 
 ---
 
+## Floors — the 3D map's height (step 17)
+
+`venues.floors` (1–200, nullable; CHECK `venues_floors_range`) is how many
+floors the venue's building has. The app's 3D map draws the building
+`floors × 3.2` m tall over the building data's own height
+(`lib/venue-floors.ts`; 3.2 m a floor is what our own building tiles are
+baked with, scripts/map-buildings). Null leaves the map's height. The venue's owner or an
+admin sets it on the venue page's record; the organisation that only added an
+unclaimed venue corrects the place but not its floors (`updateVenue`). It rides
+on `GET /venues` and `GET /venues/:id` (docs/API.md).
+
+## Venue days — every venue is live (plan v2 §3, step 3)
+
+Every active venue has a live room from day one, claimed or not (owner decision
+D2). The room hangs off a **venue day**: an `events` row with
+`kind = 'venue_day'`, one per venue per local day, made by `venueDayFor` in
+`lib/venue-day.ts` the first time somebody goes live there that day (the Go
+Live route is step 4). Being an events row is the point — occurrences,
+check-ins, presence, the room, moderation and the sweepers all work unchanged —
+and also the risk, because every reader of `events` would otherwise treat it as
+a published night out.
+
+| Question | Answer | Why |
+|---|---|---|
+| When does a day start? | `venues.day_reset_hour` (default 6) in `venues.timezone` (default `Asia/Kolkata`) | 02:00 is still last night's room; the reset is what makes pseudonyms new each day. CHECKs: hour 0–23, an IANA-shaped name. The default puts every venue in India — true today; a venue abroad must be given its zone, and a venue editor must validate it with Intl |
+| One per day? | Partial unique `events_one_venue_day_per_day` on `(venue_id, start_time) WHERE kind = 'venue_day'`; the day is found by the one that contains now | Migration SQL only — a `db push` database has none. A lost race is matched on that name (`lib/prisma-errors.ts`), never `meta.target`. Found by containment, so changing a venue's zone or reset hour mid-day keeps today's room |
+| Shape | CHECK `events_venue_day_shape`: a venue, `unlisted`, no org | A hard delete of a venue with days is refused rather than orphaning them |
+| Who owns it? | `organizer_id` = the system user `blendn-system`; never a person (F2) | `organizer_id` cascades on a hard delete. The migration creates the user (no password, `.invalid` address, no profile) and a trigger refuses its deletion |
+| Which org? | None: `organizer_org_id` is always null (CHECK `events_venue_day_shape`) | Nobody runs a venue day, so no reader scoped to an organisation's events can reach one. The venue's owner moderates it through the venue (`eventPermissions`); an unclaimed venue's room is the platform's |
+| Who is shown as host? | The venue's name (`lib/event-host.ts`) | Not the owning company, not the system user, never a founder |
+| Area | Copied from the venue (owner's ruling 3) | A venue with no area gets a day with none, and Go Live refuses it there |
+| Visibility | `published`, `unlisted` | Belt and braces: an attendee feed that only asks for `public` stays blind to it even if it forgot the kind |
+
+**Who may do what** (`eventPermissions`, F1, D-1). A venue day is decided
+before the organiser branch, which must never be the one that answers for it:
+
+| Actor | edit | operate (room, moderation) | attendees |
+|---|---|---|---|
+| app_admin | yes | yes | yes |
+| venue owner (claimed, day started after the claim) | no | yes — the room's messages and its per-day handles, the live counts | **no** attendee list, as labels or as a count |
+| anyone else, organisers of the same org included | no | no | no |
+
+**Hidden from every reader that is not about it.** `lib/event-kind.ts` exports
+`realEventsWhere` (and `venueDaysWhere`); raw SQL says `kind = 'event'`.
+`__tests__/events-kind-boundary.test.ts` scans `app/`, `lib/`, `components/`,
+`scripts/` and `server.ts` for every events reader — `db.events.*`, relation
+filters, `_count.events`, raw SQL — and fails on one that neither filters nor
+carries an `any-kind: <reason>` comment. Excluded: the feed, search, cities,
+`/venues` counts, the RSVP and favourite lists, the claim page, the venue-link
+confirm/dispute/unlink actions, every dashboard list,
+overview, report and export, organiser counts, demand, reminders, rating
+requests, the issue sweeper, the sponsored scheduler, the loop funnel, an
+organisation's suspension, and the seeds. Included, on purpose: a person's own
+nights (`/me/attendance`, D-6 — labelled as places by the client), a member's
+own rooms, room archival, reveals, room entry by check-in, and sentiment
+classification (an escalation is how an unclaimed room reaches the platform).
+Building occupancy includes them since the owner's screens were redesigned
+(step 17): "In the building" lists the venue's own live room as "Live at the
+venue", for its owner a range (`liveCountBucket`) like every room they do not
+run, and exactly for an admin. The venue owner's overview carries it there and
+nowhere else (`venue-day-hidden.itest.ts`).
+
+**Retention.** One row per active venue per day, every day anybody goes
+live: venue days will soon outnumber events many times over. Nothing archives
+them yet; a retention plan (roll old days' counts into the venue's aggregates,
+then delete or archive the rows) is a follow-up: SCRUM-528.
+
+**Reachable since step 4 (Go Live, docs/CHECKIN.md § Go Live).**
+`POST /venues/:id/live` is the one door into a venue day; what step 3 left open
+is closed:
+
+- The by-id attendee routes — `GET /events/:id`, RSVP, favourite, interest,
+  the board, the room preview, rating and the plain event check-in — answer a
+  venue day's id with `404`, as for an unknown id (`attendeeEventAccess`, and
+  the check-in and rating routes themselves).
+- The presence sweeper has a venue-day pass with its own bounds (F5): expiries
+  as `expired` at the window's end (F6), never through the mass-checkout guard
+  (D-20); the venue's sessions closed as `ended` with one push each when a
+  public event there starts; then the same fence-and-guard pass as events.
+- Check-in kind: somebody whose organisation owns the venue going live at it is
+  `staff`, as at an event there (`checkInKindFor` already reads the venue's
+  owner; pinned by a test). Decided by step 4.
+- `/me/attendance` carries `kind`, so the app labels a venue day as a place
+  (D-6).
+- The room, its roster, grid and counter are for the people live there now
+  (`liveInVenueDay`, `inRoomWhere`), and close at the reset (D-5).
+
+`GET /venues/:id` answers whether going live is open, the live count as a
+bucket (D-19), the caller's own window and tonight's event — never the area,
+never who is live.
+
+D-13, "Open on Blendn" (step 18): an opt-out for **claimed** venues only. The
+owner's organisation (or an admin) switches it on the venue's page; off, the
+venue leaves the app's Places and home map (both read `GET /venues`), while its
+events still show and still name it. `venues.open_on_blendn`, written with an
+`audit_logs` row in one transaction (`setVenueOpenOnBlendn`). The reader's rule
+is `openOnBlendnWhere`: open, or unclaimed — so a claim that is revoked or
+transferred never leaves a place hidden that nobody owns. The venue page and Go
+Live are not affected; whether they should close too is the owner's call.
+
+Already closed here: the system user can sign in on no surface
+(`accountBlockReason`) and has no public profile. Two people live at the same
+venue day count as having shared an event for message requests
+(`haveSharedAnEvent`) — allowed, and pinned by a test.
+
+---
+
 ## Files
 
 | File | What lives there |
 |---|---|
+| `lib/venue-day.ts` | `venueDayFor`, `venueDayBounds`, `SYSTEM_USER_ID` — the venue day |
+| `lib/event-kind.ts` | `realEventsWhere` / `venueDaysWhere`, the fragments every events reader uses; `inRoomWhere`, "in this room" for a check-in lookup |
+| `lib/venue-visibility.ts` | `venueTakeoverWhere`: when a real event takes its venue over (Go Live refused, sessions closed at its start, the venue left out of Places by `venuesTakenOver`); `eventVenue`: the venue an event card names; `openOnBlendnWhere`: which venues Places may list (D-13) |
 | `lib/venue-types.ts` | The 35-type vocabulary, labels, default extents, OSM mapping |
 | `lib/venue-actions.ts` | `venuesNear`, `createVenue`, `updateVenue`, `assignVenueOwner`, `searchVenues`, `venueById` — all `"use server"` |
 | `lib/venue-claim-actions.ts` | `fileVenueClaim`, `getVenueClaimQueue`, `decideVenueClaim` |
@@ -255,6 +365,6 @@ Tests: `__tests__/venue-types.test.ts`, `venue-actions.test.ts`,
 - **No PostGIS.** All geometry is pure JS over one event's fence at a time. The
   seam is "events near me", which would want a spatial index.
 - ~~Five production events carry oversized check-in radii~~ — **fixed in
-  v0.35.0**. `scripts/clamp-oversized-radii.ts` replaced the five pre-cap radii
+  v0.35.0**. A one-off script (#138) replaced the five pre-cap radii
   (100 km, 10 km ×2, 5 km ×2) with real geofences. All five were past events, so
   no live check-in was affected.

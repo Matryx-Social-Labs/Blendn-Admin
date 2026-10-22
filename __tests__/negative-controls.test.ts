@@ -127,7 +127,9 @@ describe("every structural guard has a recorded negative control", () => {
      * deleted file.
      */
     const onDisk = (f: string) =>
-      existsSync(join(TESTS_DIR, f)) || existsSync(join(TESTS_DIR, "integration", f))
+      existsSync(join(TESTS_DIR, f)) ||
+      existsSync(join(TESTS_DIR, "integration", f)) ||
+      existsSync(join(TESTS_DIR, "..", "e2e", f))
     const stale = [...Object.keys(REGISTRY.verified), ...REGISTRY.grandfathered].filter(
       (f) => !onDisk(f)
     )

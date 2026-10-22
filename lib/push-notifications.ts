@@ -14,7 +14,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -32,14 +32,7 @@ interface SendNotificationOptions {
   sound?: "default" | null
 }
 
-interface SendBulkNotificationOptions {
-  userIds: string[]
-  title: string
-  body: string
-  data?: NotificationData
-  badge?: number
-  sound?: "default" | null
-}
+type SendBulkNotificationOptions = Omit<SendNotificationOptions, "userId"> & { userIds: string[] }
 
 /**
  * Where a notification lands on the phone, decided by what it is rather than
@@ -54,9 +47,12 @@ interface SendBulkNotificationOptions {
  * normal importance while room chatter rode `default` as a heads-up. The
  * things that were about you were quieter than the things that were not.
  *
- * Three, because there are three things a person might want to silence
- * separately: people (`messages`), the room (`rooms`), and events (`events`).
- * The app creates exactly these; `default` is only for a payload with no type.
+ * Four, because there are four things a person might want to silence
+ * separately: people (`messages`), the room (`rooms`), events (`events`), and
+ * venues' offers (`offers`, SCRUM-628: a promotion, never mixed in with
+ * events). The app creates these; `default` is only for a payload with no
+ * type. An install older than `offers` files an offer under "Miscellaneous",
+ * as it did `messages` above.
  *
  * ## Replaced in place, or stacked
  *
@@ -81,6 +77,11 @@ export function deliveryFor(
     // One per event, and a second could only ever say the same thing.
     case "rating_request":
       return replaced("events", data.eventId && `rate:${data.eventId}`)
+    // A venue's offer (step 12): a promotion, so on its own channel, silenced
+    // apart from events (SCRUM-628); and each its own line, since two offers
+    // are two things to use.
+    case "venue_offer":
+      return { channelId: "offers" }
     case "announcement":
     case "waitlist_promoted":
       return data.eventId
@@ -170,9 +171,18 @@ const NOT_OPTED_OUT = {
   NOT: { user: { profile: { is: { push_enabled: false } } } },
 } as const
 
-async function getUserPushTokens(userId: string): Promise<string[]> {
+/**
+ * A venue's offer is a promotion: its push goes only to someone who said yes
+ * (SCRUM-628). App Store guideline 4.5.4 allows a promotional push only with
+ * an opt-in given in the app, so this one includes rather than excludes: no
+ * profile, or no yes, is no push. The offer's bell line is written either way.
+ */
+const consentFor = (data?: NotificationData) =>
+  data?.type === "venue_offer" ? { user: { profile: { is: { offer_push_consent_at: { not: null } } } } } : {}
+
+async function getUserPushTokens(userId: string, data?: NotificationData): Promise<string[]> {
   const tokens = await db.push_tokens.findMany({
-    where: { user_id: userId, ...NOT_OPTED_OUT },
+    where: { user_id: userId, ...NOT_OPTED_OUT, ...consentFor(data) },
     select: { token: true },
     orderBy: { updated_at: "desc" },
     take: 5, // Limit to 5 most recent tokens per user
@@ -184,7 +194,7 @@ async function getUserPushTokens(userId: string): Promise<string[]> {
 /**
  * Get push tokens for multiple users
  */
-async function getBulkUserPushTokens(userIds: string[]): Promise<Map<string, string[]>> {
+async function getBulkUserPushTokens(userIds: string[], data?: NotificationData): Promise<Map<string, string[]>> {
   const tokens = await db.push_tokens.findMany({
     where: {
       user_id: { in: userIds },
@@ -192,6 +202,7 @@ async function getBulkUserPushTokens(userIds: string[]): Promise<Map<string, str
       // an announcement to a full room is the loudest sender in the product,
       // so a preference that works everywhere except here would look broken.
       ...NOT_OPTED_OUT,
+      ...consentFor(data),
     },
     select: { user_id: true, token: true },
     orderBy: { updated_at: "desc" },
@@ -339,7 +350,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
   await recordNotification(userId, title, body, data)
 
   try {
-    const pushTokens = await getUserPushTokens(userId)
+    const pushTokens = await getUserPushTokens(userId, data)
 
     if (pushTokens.length === 0) {
       logger.debug("No push tokens for user", { userId })
@@ -452,7 +463,7 @@ export async function sendBulkPushNotifications(
       })
   }
 
-  const tokenMap = await getBulkUserPushTokens(userIds)
+  const tokenMap = await getBulkUserPushTokens(userIds, data)
   const messages: ExpoPushMessage[] = []
 
   for (const [userId, pushTokens] of tokenMap) {
@@ -697,6 +708,12 @@ export async function notifyRoomReply(reply: {
   preview: string
   chatGroupId: string
   senderHandle: string
+  /**
+   * The room's kind — `event` (a venue day's room is one too), `crew`,
+   * `blend` or `board_post` — and its crew or Blend, so the tap opens the
+   * right screen. Ids of rooms the recipient is in; never a person's.
+   */
+  room: { kind: string; crewId?: string | null; blendId?: string | null }
 }): Promise<boolean> {
   const fresh = await firstInWindow(
     `push:room-reply:${reply.chatGroupId}:${reply.recipientId}`,
@@ -708,7 +725,14 @@ export async function notifyRoomReply(reply: {
     userId: reply.recipientId,
     title: reply.groupName,
     body: `${reply.senderName} replied: ${clip(reply.preview, 80)}`,
-    data: { type: "group_message", chatGroupId: reply.chatGroupId, senderId: reply.senderHandle },
+    data: {
+      type: "group_message",
+      chatGroupId: reply.chatGroupId,
+      senderId: reply.senderHandle,
+      kind: reply.room.kind,
+      ...(reply.room.crewId && { crewId: reply.room.crewId }),
+      ...(reply.room.blendId && { blendId: reply.room.blendId }),
+    },
   })
 }
 
@@ -736,9 +760,7 @@ export async function notifyAnnouncement(
 
   if (userIds.length === 0) return { sent: 0, failed: 0 }
 
-  const preview = announcementText.length > 100
-    ? announcementText.substring(0, 97) + "..."
-    : announcementText
+  const preview = clip(announcementText, 100)
 
   return sendBulkPushNotifications({
     userIds,

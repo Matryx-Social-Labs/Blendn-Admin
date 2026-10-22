@@ -7,8 +7,7 @@ import { refusalText } from "@/lib/refusal"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
-import { format } from "date-fns"
-import { toZonedTime } from "date-fns-tz"
+import { formatInTimeZone } from "date-fns-tz"
 import { wallClockToUtc } from "@/lib/event-wall-clock"
 import type { AmenityOption } from "@/components/event-form/amenities-section"
 import { EventForm, type EventFormValues } from "@/components/event-form"
@@ -40,6 +39,7 @@ interface EventEditorData {
   cover_image_url?: string | null
   external_link?: string | null
   is_featured?: boolean | null
+  crews_enabled?: boolean | null
   check_in_radius?: number | null
   geofence?: unknown
   category_ids?: string[]
@@ -71,7 +71,7 @@ interface EventEditorProps {
 const formatDateTimeInput = (value?: string, timezone = "Asia/Kolkata") => {
   if (!value) return ""
   // Convert the UTC timestamp from the DB into the event's timezone for display
-  return format(toZonedTime(new Date(value), timezone), "yyyy-MM-dd'T'HH:mm")
+  return formatInTimeZone(new Date(value), timezone, "yyyy-MM-dd'T'HH:mm")
 }
 
 const parseToKvArray = (value: unknown): Array<{ key: string; value: string }> => {
@@ -144,6 +144,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
       cover_image_url: initialEvent.cover_image_url ?? undefined,
       external_link: initialEvent.external_link ?? undefined,
       is_featured: initialEvent.is_featured ?? false,
+      crews_enabled: initialEvent.crews_enabled ?? true,
       check_in_radius: initialEvent.check_in_radius ?? DEFAULT_CHECK_IN_RADIUS_M,
       geofence: initialEvent.geofence ?? undefined,
       category_ids: initialEvent.category_ids ?? [],
@@ -263,7 +264,7 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
 
   return (
     /*
-     * No `h1` and no strapline. `site-header.tsx` owns the page's only `h1` and
+     * No `h1` and no strapline. The layout's `PageHeader` owns the page's only `h1` and
      * already renders "New event" with "Publish an event. Save a draft at any
      * point." — so this rendered a SECOND `h1` saying almost the same thing,
      * and a second sentence saying exactly the same thing.

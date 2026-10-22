@@ -7,7 +7,7 @@ import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import {
   cancelEventCheckIns,
@@ -19,6 +19,7 @@ import {
 import { canPublish } from "@/lib/geofence-input"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import type { user_role, event_status } from "@prisma/client"
+import { realEventsWhere } from "./event-kind"
 
 export interface RoleUser {
   id: string
@@ -97,8 +98,7 @@ function generatePassword(length = 12): string {
  * who curated it, so it can never land on an organiser's row here.
  */
 export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   // A deleted account is not a host, whatever role it kept (SCRUM-310).
   const users = await db.user.findMany({
@@ -122,12 +122,12 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
   const [byStatus, lastPublished] = await Promise.all([
     db.events.groupBy({
       by: ["organizer_id", "status"],
-      where: { organizer_id: { in: ids }, deleted_at: null },
+      where: { organizer_id: { in: ids }, deleted_at: null, ...realEventsWhere },
       _count: { _all: true },
     }),
     db.events.groupBy({
       by: ["organizer_id"],
-      where: { organizer_id: { in: ids }, deleted_at: null, status: "published" },
+      where: { organizer_id: { in: ids }, deleted_at: null, ...realEventsWhere, status: "published" },
       _max: { start_time: true },
     }),
   ])
@@ -154,8 +154,7 @@ export async function getRoleUsers(role: user_role): Promise<RoleUser[]> {
 }
 
 export async function getRoleUserById(id: string): Promise<RoleUserWithEvents | null> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   const user = await db.user.findUnique({
     where: { id },
@@ -209,8 +208,7 @@ export async function createRoleUser(
   email: string,
   role: user_role
 ): Promise<{ name: string; email: string; password: string }> {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  await requireAdmin()
 
   // Stored lowercase (SCRUM-328): one address is one account whatever its case.
   const address = email.trim().toLowerCase()
@@ -231,8 +229,7 @@ export async function createRoleUser(
 }
 
 export async function updateEventStatus(eventId: string, status: event_status) {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") throw new Refusal("Forbidden")
+  const admin = await requireAdmin()
 
   const before = await db.events.findUnique({
     where: { id: eventId },
@@ -259,7 +256,7 @@ export async function updateEventStatus(eventId: string, status: event_status) {
 
   // A fourth door onto the same transitions, audited like the others (SCRUM-89).
   auditLog({
-    userId: session.user.id,
+    userId: admin.id,
     action: eventWriteAction(status, before.status),
     resource: "event",
     resourceId: eventId,

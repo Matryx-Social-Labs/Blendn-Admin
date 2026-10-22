@@ -28,14 +28,18 @@ const SEND = [
   "app", "api", "mobile", "events", "[eventId]", "board", "[postId]", "requests", "route.ts",
 ]
 
-describe("a handle that exists before the room does", () => {
+describe.each(["keyed", "legacy"] as const)("a handle that exists before the room does (%s)", (scheme) => {
+  beforeAll(() => {
+    process.env.NEXTAUTH_SECRET ??= "board-requests-test-secret-0123456789abcdef"
+  })
+
   it("is stable for one person at one event", () => {
     /*
      * The board is read over days. A name that changed between two reads would
      * make the person who offered a seat yesterday a stranger today.
      */
-    const a = preferredPseudonymFor("event-1", "user-1")
-    expect(preferredPseudonymFor("event-1", "user-1")).toBe(a)
+    const a = preferredPseudonymFor("event-1", "user-1", scheme)
+    expect(preferredPseudonymFor("event-1", "user-1", scheme)).toBe(a)
   })
 
   it("is different at the next event, which is the whole point", () => {
@@ -44,8 +48,8 @@ describe("a handle that exists before the room does", () => {
      * exist to prevent — `pseudonymAvatar.ts` states it in as many words about
      * seeding on a user id, and the same argument applies to the name.
      */
-    expect(preferredPseudonymFor("event-1", "user-1")).not.toBe(
-      preferredPseudonymFor("event-2", "user-1")
+    expect(preferredPseudonymFor("event-1", "user-1", scheme)).not.toBe(
+      preferredPseudonymFor("event-2", "user-1", scheme)
     )
   })
 
@@ -56,11 +60,52 @@ describe("a handle that exists before the room does", () => {
      * before check-in, so every post fell back to the literal "Attendee".
      */
     const names = new Set(
-      ["u1", "u2", "u3", "u4", "u5", "u6"].map((u) => preferredPseudonymFor("event-1", u))
+      ["u1", "u2", "u3", "u4", "u5", "u6"].map((u) => preferredPseudonymFor("event-1", u, scheme))
     )
     expect(names.size).toBeGreaterThan(1)
     expect(names.has("Attendee")).toBe(false)
   })
+})
+
+describe("the keyed handle (SCRUM-517)", () => {
+  it("cannot be computed from the ids alone: it changes with the server's secret", () => {
+    /*
+     * The legacy hash was FNV-1a of `eventId:userId`, so anybody holding a
+     * friend's account id could compute their board name. The keyed one needs
+     * the secret, and is not the legacy name.
+     */
+    const before = process.env.NEXTAUTH_SECRET
+    const names = new Set<string>()
+    try {
+      for (const secret of ["secret-one-0123456789abcdef0123", "secret-two-0123456789abcdef0123", "secret-3-0123456789abcdef012345"]) {
+        process.env.NEXTAUTH_SECRET = secret
+        names.add(preferredPseudonymFor("event-1", "user-1", "keyed"))
+      }
+    } finally {
+      process.env.NEXTAUTH_SECRET = before
+    }
+    expect(names.size).toBeGreaterThan(1)
+  })
+
+  it("refuses to derive without a secret rather than fall back to an unkeyed hash", () => {
+    const before = process.env.NEXTAUTH_SECRET
+    delete process.env.NEXTAUTH_SECRET
+    try {
+      expect(() => preferredPseudonymFor("event-2", "user-9", "keyed")).toThrow(/NEXTAUTH_SECRET/)
+    } finally {
+      process.env.NEXTAUTH_SECRET = before
+    }
+  })
+
+  it("is chosen per event, so an event already running keeps its board's names", () => {
+    const src = codeOnly(read("lib", "anonymous-names.ts"))
+    expect(src).toMatch(/event && event\.created_at < KEYED_PSEUDONYMS_FROM \? "legacy" : "keyed"/)
+    const board = codeOnly(read("lib", "board-access.ts"))
+    expect(board).toContain("const scheme = await pseudonymSchemeFor(eventId, client)")
+  })
+})
+
+describe("the board handle at check-in", () => {
 
   it("is a preference at check-in, not an override", () => {
     /*
@@ -71,7 +116,7 @@ describe("a handle that exists before the room does", () => {
      */
     const src = codeOnly(read("lib", "anonymous-names.ts"))
     const fn = src.slice(src.indexOf("export async function generateUniqueAnonymousName"))
-    expect(fn).toContain("const preferred = preferredPseudonymFor(preferFor.eventId, preferFor.userId)")
+    expect(fn).toMatch(/const preferred = preferredPseudonymFor\(\s*preferFor\.eventId,\s*preferFor\.userId,\s*await pseudonymSchemeFor\(preferFor\.eventId\)\s*\)/)
     expect(fn).toContain("if (!existingNames.has(preferred)) return preferred")
   })
 
@@ -82,8 +127,10 @@ describe("a handle that exists before the room does", () => {
      * has promised this continuity since it was written; until this line it
      * described behaviour the code did not have.
      */
-    const src = codeOnly(read("app", "api", "mobile", "events", "[eventId]", "checkin", "route.ts"))
-    expect(src).toContain("{ eventId, userId: authUser.userId }")
+    // The door's seat moved to lib/check-in-core.ts (step 4), shared by Go Live.
+    const src = codeOnly(read("lib", "check-in-core.ts"))
+    expect(src).toContain("claimAnonymousName(chatGroupId, rejoin, { eventId, userId })")
+    expect(src).toMatch(/\{ eventId, userId \}\s*\)\s*\n\s*\n\s*await db\.chat_groups\.update/)
   })
 })
 
@@ -161,28 +208,34 @@ describe("accepting opens a conversation that can be told apart from a match", (
   it("claims the request with the status in the predicate", () => {
     /*
      * The read above the claim is not a lock, so two taps — or a decline racing
-     * a withdraw — both pass it. `updateMany` with `status: "pending"` in the
-     * where clause means exactly one writes and the loser is told the truth
-     * rather than silently overwriting the first answer.
+     * an accept — both pass it. `updateMany` with the status in the where
+     * clause means exactly one writes and the loser is told the truth rather
+     * than silently overwriting the first answer.
      */
     const src = codeOnly(read(...DECIDE))
-    const claims = src.match(/db\.board_requests\.updateMany\(\{[\s\S]*?\}\)/g) ?? []
-    // Two claims (the decline/withdraw path and the accept path) plus the revert.
-    expect(claims.length).toBeGreaterThanOrEqual(3)
-    expect(claims.filter((c) => c.includes('status: "pending"')).length).toBeGreaterThanOrEqual(2)
+    const claims = src.match(/(?:db|tx)\.board_requests\.updateMany\(\{[\s\S]*?\}\)/g) ?? []
+    // In the WHERE, not anywhere in the call: a revert's `data: { status:
+    // "pending" }` once satisfied a bare-string count with the predicate gone.
+    // The decline claims a pending row; the accept claims a LIVE one, which is
+    // pending plus its event and post still up (`liveRequest`).
+    expect(claims.filter((c) => c.includes('where: { id: requestId, status: "pending" }')).length).toBeGreaterThanOrEqual(1)
+    expect(claims.some((c) => /tx\.board_requests\.updateMany\(\{\s*where: \{ id: requestId, \.\.\.liveRequest\(now\) \}/.test(c))).toBe(true)
   })
 
-  it("puts the request back if the conversation cannot be opened", () => {
+  it("opens the conversation inside the claim's transaction", () => {
     /*
      * Unmatching is permanent, so `openConversation` throws on a closed pair.
-     * Claiming first and discovering it second would leave the request marked
-     * accepted with no conversation behind it — a state nothing retries and no
-     * screen can explain, and the asker's cap consumed for ever.
+     * Claimed and seated in one transaction and opened in another, a failure
+     * between them left an accepted ask and a spent seat with no conversation
+     * behind them — and the hand-written give-back was two more writes that
+     * could fail on their own. Opened with the transaction's client, a
+     * failure undoes all three.
      */
     const src = codeOnly(read(...DECIDE))
-    const handler = src.slice(src.indexOf("} catch (error) {", src.indexOf("openConversation(")))
-    expect(handler).toContain('status: "pending"')
-    expect(handler).toContain("decided_at: null")
+    const txn = src.slice(src.indexOf("db.$transaction(async (tx) => {"))
+    expect(txn.length).toBeLessThan(src.length)
+    const call = txn.slice(txn.indexOf("openConversation("))
+    expect(call.slice(0, call.indexOf("\n        )"))).toMatch(/,\s*tx\s*$/)
   })
 
   it("lets a decision happen after doors", () => {
@@ -220,7 +273,7 @@ describe("accepting opens a conversation that can be told apart from a match", (
     expect(src).toMatch(/action === "accept" && !isLiveRequest\(/)
     // ...and it must read the row, not a value it invented.
     expect(src).toContain("event: { select: { end_time: true } }")
-    expect(src).toContain("post: { select: { deleted_at: true } }")
+    expect(src).toContain("post: { select: { deleted_at: true, spaces_left: true, body: true } }")
   })
 })
 

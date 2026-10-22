@@ -10,6 +10,11 @@ import { OrgSuspendedNotice } from "@/components/org-suspended-notice"
 import { JoinRequest } from "./join-request"
 import { OrgPanel } from "./panel"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/organisation")
+
 export const dynamic = "force-dynamic"
 
 /**

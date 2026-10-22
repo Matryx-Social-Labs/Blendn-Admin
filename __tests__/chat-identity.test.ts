@@ -26,8 +26,9 @@ const ATTENDEE = {
 /** Mirrors app/api/events/[id]/chat/messages/route.ts message shaping. */
 function shapeUser(role: Role, anonymousName: string | null) {
   const isPlatformAdmin = role === "app_admin"
+  // The id itself is a room handle for hosts (SCRUM-517), pinned on the wire by
+  // __tests__/integration/dashboard-chat-no-user-ids.itest.ts, not mirrored here.
   return {
-    id: ATTENDEE.id,
     anonymousName,
     ...(isPlatformAdmin
       ? { name: ATTENDEE.name, email: ATTENDEE.email, image: ATTENDEE.image }
@@ -54,13 +55,6 @@ describe("chat message identity shaping", () => {
       expect(json).not.toContain(ATTENDEE.email)
       expect(json).not.toContain("@")
     }
-  })
-
-  it("keeps the user id for hosts, because ban and mute need it", () => {
-    const shaped = shapeUser("organizer", "Quiet Otter")
-    // /api/events/[id]/chat/members/[userId] is keyed on this. A cuid names
-    // nobody, and hosts have no surface that resolves one to a person.
-    expect(shaped.id).toBe(ATTENDEE.id)
   })
 
   it("still gives app_admin the real identity", () => {

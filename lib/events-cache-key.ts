@@ -41,6 +41,10 @@ export interface EventsCacheKeyInput {
   startDate?: string
   endDate?: string
   includePast?: boolean
+  /** `featured=true` is a different result set from the same page without it. */
+  featured?: boolean
+  /** The day's rotation (`featuredSeed`): a featured page is in that order, so it is not served across the day's turn. */
+  featuredSeed?: string
   status?: string
   sortBy: string
   sortOrder: string
@@ -79,6 +83,8 @@ export function buildEventsCacheKey(input: EventsCacheKeyInput): string {
     startDate: input.startDate || null,
     endDate: input.endDate || null,
     includePast: input.includePast,
+    featured: input.featured ?? false,
+    featuredSeed: input.featured ? (input.featuredSeed ?? null) : null,
     status: input.status || null,
     sortBy: input.sortBy,
     sortOrder: input.sortOrder,

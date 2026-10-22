@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs"
 import { jwtVerify, createRemoteJWKSet } from "jose"
 import { db } from "./db"
 import { recentlyBlocked } from "./account-blocklist"
+import { SYSTEM_USER_ID } from "./event-kind"
 import { PRODUCT_EVENTS, record } from "./product-events"
 import { Prisma } from "@prisma/client"
 
@@ -95,8 +96,9 @@ const BCRYPT_ROUNDS = 12
  *
  * This is checked where tokens are *issued* — sign-in, OAuth, refresh, session.
  * `getAuthenticatedUser` adds one more, cheap, check: `recentlyBlocked`, a
- * per-process set of accounts deleted or suspended in the last few minutes,
- * refreshed from one indexed query every 30 seconds. Because deletion and
+ * per-process set of accounts deleted or suspended in the last few minutes
+ * (and of phones signed out, whose older tokens it refuses — SCRUM-603),
+ * refreshed from one query every 30 seconds. Because deletion and
  * suspension revoke refresh tokens, the only access token that can outlive
  * either is at most one lifetime old — so the set only ever needs the last
  * twenty minutes, and it is small. Without it, a deleted account's still-valid
@@ -105,9 +107,10 @@ const BCRYPT_ROUNDS = 12
  * the same span (SCRUM-119 recorded the bound; this closes it to seconds).
  */
 export function accountBlockReason(
-  user: { deletedAt: Date | null; suspended_at: Date | null; role: string } | null
+  user: { id?: string; deletedAt: Date | null; suspended_at: Date | null; role: string } | null
 ): "deleted" | "suspended" | "staff" | null {
-  if (!user || user.deletedAt) return "deleted"
+  // The owner of every venue day is nobody to be (lib/event-kind.ts).
+  if (!user || user.deletedAt || user.id === SYSTEM_USER_ID) return "deleted"
   if (user.suspended_at) return "suspended"
   /*
    * The app is for attendees (SCRUM-198). Organisers, venue owners, sponsors
@@ -169,6 +172,10 @@ export function verifyAccessToken(token: string): DecodedToken | null {
   }
 }
 
+export function hashRefreshToken(token: string): Promise<string> {
+  return bcrypt.hash(token, BCRYPT_ROUNDS)
+}
+
 /**
  * Store a bcrypt-hashed refresh token in the database
  * Uses the JWT's jti claim as the record ID for lookups
@@ -176,7 +183,9 @@ export function verifyAccessToken(token: string): DecodedToken | null {
 export async function storeRefreshToken(
   userId: string,
   token: string,
-  deviceInfo?: Prisma.InputJsonValue
+  deviceInfo?: Prisma.InputJsonValue,
+  /** A transaction to write in, with the hash made beforehand: bcrypt must not run while a row lock is held. */
+  within?: { client: Prisma.TransactionClient; tokenHash: string }
 ): Promise<void> {
   // Decode without verification to extract jti (we just signed it)
   const decoded = jwt.decode(token) as DecodedToken | null
@@ -186,10 +195,10 @@ export async function storeRefreshToken(
     throw new Error("Cannot store a refresh token without a jti")
   }
 
-  const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS)
+  const tokenHash = within?.tokenHash ?? (await hashRefreshToken(token))
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS)
 
-  await db.mobile_refresh_tokens.create({
+  await (within?.client ?? db).mobile_refresh_tokens.create({
     data: {
       id: decoded.jti,
       user_id: userId,
@@ -215,40 +224,80 @@ export async function storeRefreshToken(
 }
 
 /**
- * Whether this refused refresh token is one a **suspension** ended — so the
- * route can say "This account has been suspended" instead of a bare 401.
- *
- * Suspension revokes every refresh token, which is why the route's suspended
- * check was unreachable and a suspended phone could only say "You were signed
- * out" (SCRUM-290). The answer is scoped as tightly as that case allows: a
- * token we signed, not expired, whose stored row was revoked **at or after**
- * the account's `suspended_at` — i.e. a session that was live when the
- * suspension landed. A token revoked earlier (sign-out, a replayed-and-killed
- * family) or forged or expired tells its holder nothing, so an old leaked
- * token is not a 30-day oracle for the account's standing.
+ * Why `endPhoneSessions` revoked a refresh token, as stored in
+ * `mobile_refresh_tokens.revoked_reason` — and the `errorCode` the refresh
+ * answers with when that token is presented again (Flow 15). Suspension and
+ * deletion are not here: they answer `ACCOUNT_SUSPENDED` / `ACCOUNT_DELETED`
+ * from the account itself.
  */
-export async function revokedBySuspension(token: string): Promise<boolean> {
+export const REVOKED_REASON_CODE = {
+  password_reset: "PASSWORD_RESET",
+  signout_all: "SESSION_REVOKED_ELSEWHERE",
+} as const
+export type RevokedReason = keyof typeof REVOKED_REASON_CODE
+
+/**
+ * Why a refused refresh token was refused, for the token's holder (Flow 15): a
+ * suspension that ended it, an erased account, or a password reset / sign-out
+ * everywhere (`REVOKED_REASON_CODE`). One signature check and at most two reads.
+ * Scoped as tightly as each case allows, so a leaked old token is not a 30-day
+ * oracle for the account's standing:
+ *
+ * - suspension: a token we signed, unexpired, whose row was revoked **at or after**
+ *   the account's `suspended_at` (a session live when the suspension landed; SCRUM-290);
+ * - deletion: a token we signed, unexpired, whose row is **gone** (erasure
+ *   hard-deletes them) for a user whose `deletedAt` is set. A row that still
+ *   exists says nothing about deletion;
+ * - reason: a row of the same user, revoked, carrying a `revoked_reason`.
+ *
+ * Anything else (forged, expired, an ordinary sign-out, a rotation) is null: the
+ * plain 401 it always was.
+ */
+export type RefusedRefreshReason = "ACCOUNT_SUSPENDED" | "ACCOUNT_DELETED" | (typeof REVOKED_REASON_CODE)[RevokedReason]
+
+export async function refusedRefreshReason(token: string): Promise<RefusedRefreshReason | null> {
   let claim: DecodedToken
   try {
     claim = jwt.verify(token, getJwtSecret()) as DecodedToken
   } catch {
-    return false
+    return null
   }
-  if (claim.type !== "refresh" || !claim.jti) return false
+  if (claim.type !== "refresh" || !claim.jti) return null
 
   const row = await db.mobile_refresh_tokens.findUnique({
     where: { id: claim.jti },
-    select: { user_id: true, revoked_at: true, user: { select: { suspended_at: true, deletedAt: true } } },
+    select: {
+      user_id: true,
+      revoked_at: true,
+      revoked_reason: true,
+      user: { select: { suspended_at: true, deletedAt: true } },
+    },
   })
-  const suspendedAt = row?.user.suspended_at
-  return Boolean(
-    row &&
-      row.user_id === claim.userId &&
-      !row.user.deletedAt &&
-      suspendedAt &&
-      row.revoked_at &&
-      row.revoked_at >= suspendedAt
-  )
+  if (!row) {
+    const user = await db.user.findUnique({ where: { id: claim.userId }, select: { deletedAt: true } })
+    return user?.deletedAt ? "ACCOUNT_DELETED" : null
+  }
+  if (row.user_id !== claim.userId) return null
+
+  const suspendedAt = row.user.suspended_at
+  if (!row.user.deletedAt && suspendedAt && row.revoked_at && row.revoked_at >= suspendedAt) return "ACCOUNT_SUSPENDED"
+  if (row.revoked_at && row.revoked_reason) return REVOKED_REASON_CODE[row.revoked_reason as RevokedReason] ?? null
+  return null
+}
+
+export type SignInMethod = "password" | "google" | "apple"
+
+/**
+ * What this account can sign in with, for the one row the app shows or hides.
+ * The session does not know which way *this* phone signed in (the tokens carry
+ * no method), so it answers for the account: a password first — it is the
+ * method that has a password to change — else the provider linked most
+ * recently. `oauth_accounts` must be loaded newest first.
+ */
+export function signInMethodOf(user: { password: string | null; oauth_accounts: { provider: string }[] }): SignInMethod {
+  if (user.password) return "password"
+  const provider = user.oauth_accounts[0]?.provider
+  return provider === "google" || provider === "apple" ? provider : "password"
 }
 
 /**
@@ -295,6 +344,14 @@ export async function verifyRefreshToken(
     // kills the legitimate successor, and the legitimate device's next
     // refresh then trips reuse detection and ends the family.
     if (storedToken.revoked_at) {
+      // Ended on purpose (a password reset, a sign-out-everywhere) and not
+      // rotated by `endPhoneSessions`: there is no successor to retire, and a
+      // replay is a phone that was told to sign out, not theft. Without this it
+      // read as reuse and revoked whatever sessions the person had opened since.
+      // This covers only rows carrying a reason; a rotated token's replay still
+      // goes through the grace and reuse rules below.
+      if (storedToken.revoked_reason) return null
+
       const sinceRevokedMs = Date.now() - storedToken.revoked_at.getTime()
 
       if (sinceRevokedMs <= REFRESH_REUSE_GRACE_MS) {
@@ -422,7 +479,7 @@ export async function getAuthenticatedUser(
     return null
   }
 
-  if (await recentlyBlocked(decoded.userId)) {
+  if (await recentlyBlocked(decoded.userId, decoded.iat)) {
     return null
   }
 
@@ -459,12 +516,16 @@ export async function cleanupExpiredTokens(): Promise<number> {
   // row is what lets a client that lost the rotation response be re-issued
   // (see verifyRefreshToken), and deleting it inside the grace window turned
   // that path into a plain 401.
+  //
+  // A row with a `revoked_reason` (a password reset, a sign-out everywhere) is
+  // not swept with them: it is what tells the phone that comes back a day later
+  // why it was signed out, and it goes at `expires_at` like any other.
   const revokedBefore = new Date(Date.now() - REVOKED_TOKEN_RETENTION_MS)
   const result = await db.mobile_refresh_tokens.deleteMany({
     where: {
       OR: [
         { expires_at: { lt: new Date() } },
-        { revoked_at: { lt: revokedBefore } },
+        { revoked_at: { lt: revokedBefore }, revoked_reason: null },
       ],
     },
   })

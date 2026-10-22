@@ -1,6 +1,6 @@
 import { venueCounts } from "@/lib/attendee-roster"
 import { db } from "@/lib/db"
-import { discloseHeadcount, discloseRating, MIN_CELL } from "@/lib/disclosure"
+import { discloseHeadcount, discloseRating, liveCountBucket, liveCountLabel, MIN_CELL } from "@/lib/disclosure"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
@@ -30,7 +30,11 @@ export interface EventOverview {
 
 const pct = (n: number, d: number) => (d === 0 ? null : Math.round((n / d) * 100))
 const fmt = (n: number | null, suffix = "") => (n === null ? null : `${n}${suffix}`)
-/** A held-back count, in a sentence. */
+/**
+ * A count held back by the floor alone, in a sentence. Not for "came": that is
+ * also held back when it is complete, residual or past the going count, and
+ * "fewer than 5" would then be false.
+ */
 const say = (n: number | null) => (n === null ? `fewer than ${MIN_CELL}` : String(n))
 
 /**
@@ -99,7 +103,6 @@ export async function getEventOverview(
   const fillPct = venue ? venue.fillPct : capacity ? pct(going, capacity) : null
   const maybeN = shown(maybe)
   const savedN = shown(event._count.favorites)
-  const insideN = shown(checkedIn)
   // Turn-up is against people who said they were coming, not against capacity —
   // an event that half-filled and had everyone turn up did the hard part right.
   const attendedPeople = venue ? venue.came : distinctAttendees(everCheckedIn)
@@ -160,7 +163,8 @@ export async function getEventOverview(
         : state === "live"
           ? {
               label: "Checked in now",
-              value: fmt(insideN),
+              // A range for the venue: it moves with every arrival (SCRUM-516).
+              value: venue ? liveCountLabel(liveCountBucket(checkedIn)) : fmt(checkedIn),
               hint: going === 0 ? "Nobody RSVP'd" : `${say(goingN)} said they were coming`,
             }
           : going === 0
@@ -173,7 +177,10 @@ export async function getEventOverview(
             : {
                 label: "Turned up",
                 value: fmt(turnUpPct, "%"),
-                hint: `${say(attendedPeople)} of ${say(goingN)} who said they would`,
+                hint:
+                  attendedPeople === null || goingN === null
+                    ? "held back, so it cannot point at anybody"
+                    : `${attendedPeople} of ${goingN} who said they would`,
               }
 
   const tiles: EventOverview["tiles"] =
@@ -187,7 +194,8 @@ export async function getEventOverview(
             { label: "Capacity", value: capacity === null ? null : String(capacity) },
             {
               label: "Checked in",
-              value: fmt(attendedPeople),
+              // Check-in opens before the doors, so it can already be moving.
+              value: venue ? liveCountLabel(venue.cameSoFar) : fmt(attendedPeople),
               hint: "before the doors, usually zero",
             },
             {
@@ -206,7 +214,7 @@ export async function getEventOverview(
           ]
         : state === "live"
           ? [
-              { label: "Ever checked in", value: fmt(attendedPeople) },
+              { label: "Ever checked in", value: venue ? liveCountLabel(venue.cameSoFar) : fmt(attendedPeople) },
               { label: "Going", value: fmt(goingN) },
               { label: "Capacity", value: capacity === null ? null : String(capacity) },
             ]

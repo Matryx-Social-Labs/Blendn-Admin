@@ -195,6 +195,11 @@ Launch **A, B, C in parallel**. S4 waits on both A and B. S5 waits on A. S7 last
 | D11 | Detail endpoint only | The cards render no amenity |
 | D12 | Precedence chain + organiser override | Derived is a default; the human wins |
 
+**Update (client redesign): the `venue_amenities` table ships read-only.** The venue page
+lists a venue's amenities from it (`GET /venues/:id` → `venue.amenities`, names from this
+vocabulary). Nothing writes it yet: no `venuePermissions`, no picker, so every venue lists
+none until the owner-curation layer below is built.
+
 **Resolved — the event layer ships alone** (#244). The open question was
 whether the venue layer should ship before venue ownership is dense enough to
 populate suggestions. It should not, and the reasoning is short: an **unowned**

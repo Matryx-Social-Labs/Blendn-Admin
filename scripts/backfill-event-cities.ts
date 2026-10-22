@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { eventCentre } from "../lib/geofence"
 import { haversineDistanceMeters } from "../lib/geo"
 import { reverseGeocodeCity } from "../lib/location"
+import { realEventsWhere } from "../lib/event-kind"
 
 /**
  * Re-derive every event's city and pin from the map, once.
@@ -64,7 +65,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function main() {
   const events = await db.events.findMany({
-    where: { deleted_at: null },
+    // A venue day carries its venue's city, copied when it was made.
+    where: { deleted_at: null, ...realEventsWhere },
     select: {
       id: true,
       title: true,

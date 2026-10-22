@@ -2,6 +2,7 @@ import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib
 import { friendIdsOf } from "@/lib/friends"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { notifyMatch } from "@/lib/push-notifications"
 import {
   effectiveIntents,
@@ -11,9 +12,24 @@ import {
 } from "@/lib/matching"
 import type { Gender } from "@/lib/dating"
 import { ageFrom } from "@/lib/age"
-import { workFieldLabel } from "@/lib/work-fields"
+import { MIN_ROOM_FOR_WORK_FIELD, workFieldLabel } from "@/lib/work-fields"
 import { roomHandle } from "@/lib/room-handle"
 import { visibleInRoom } from "@/lib/identity"
+import { IPL_PARENT_SLUG } from "@/lib/about-you"
+import {
+  badgesFor,
+  NIGHTS_OUT_DAYS,
+  NO_TRAITS,
+  personCard,
+  REGULAR_HERE_DAYS,
+  roomTeam,
+  SHOWS_UP_DAYS,
+  traitHolders,
+  viewerTierB,
+  type Badge,
+  type DisplayTraits,
+  type Overlap,
+} from "@/lib/overlaps"
 
 /**
  * Everything `rankMatches` needs, gathered from the database.
@@ -62,7 +78,69 @@ export interface MatchCard {
   insideNow: boolean
   /** Whether *you* have liked them. Never whether they have liked you. */
   youLiked: boolean
+  /**
+   * Display-only lines both of you share, as sentences: an IPL team, a
+   * this-or-that answer, and — budgeted, Tier B — a language, a home state or
+   * a sign (`lib/overlaps.ts`). Never scored. Empty when nothing is shared.
+   */
+  overlaps: Overlap[]
+  /** Their sign — "Leo ♌" — when they chose to show it and the card's Tier B budget allows. */
+  sign: string | null
+  /** Earned by check-ins ("Regular here", "Shows up", "5+ nights this month"). Empty in a small room. */
+  badges: Badge[]
 }
+
+/** Interest-tree leaves that are IPL teams: category id → team code ("CSK"). */
+export async function iplTeamIds(): Promise<Map<string, string>> {
+  const rows = await db.categories.findMany({
+    where: { parent: { slug: IPL_PARENT_SLUG } },
+    select: { id: true, name: true },
+  })
+  return new Map(rows.map((r) => [r.id, r.name]))
+}
+
+/** The display traits of these people, by id — profile columns plus this-or-that answers. */
+export interface TraitProfile {
+  languages: string[]
+  home_state: string | null
+  sun_sign: string | null
+  sign_system: string | null
+  work_field: string | null
+}
+
+export async function displayTraitsOf(
+  profiles: ReadonlyMap<string, TraitProfile | null | undefined>
+): Promise<Map<string, DisplayTraits>> {
+  const ids = [...profiles.keys()]
+  const answers = ids.length
+    ? await db.this_or_that_answers.findMany({
+        where: { user_id: { in: ids } },
+        select: { user_id: true, question: true, choice: true },
+      })
+    : []
+  const answersOf = new Map<string, Record<string, string>>()
+  for (const a of answers) answersOf.set(a.user_id, { ...answersOf.get(a.user_id), [a.question]: a.choice })
+  return new Map(
+    ids.map((id) => {
+      const p = profiles.get(id)
+      return [
+        id,
+        p
+          ? {
+              answers: answersOf.get(id) ?? {},
+              languages: p.languages ?? [],
+              homeState: p.home_state ?? null,
+              sign: p.sun_sign && p.sign_system ? { slug: p.sun_sign, system: p.sign_system } : null,
+              workField: p.work_field ?? null,
+            }
+          : { ...NO_TRAITS, answers: answersOf.get(id) ?? {} },
+      ]
+    })
+  )
+}
+
+/** Display traits, as `displayTraitsOf` reads them from a profile. */
+const traitColumns = { languages: true, home_state: true, sun_sign: true, sign_system: true, work_field: true } as const
 
 /**
  * Child → parent, for the whole interest taxonomy. Two levels, ~80 rows.
@@ -119,8 +197,11 @@ export async function matchesForEvent(
     // you in the room with everyone else who came, on any day. Existence only —
     // what they *chose* now lives in `event_match_preferences`, because this
     // query returns an arbitrary one of their check-in rows.
-    where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null } },
-    select: { id: true },
+    // At a venue day, only while live (`inRoomWhere`): the grid is reciprocal.
+    where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null }, ...inRoomWhere(viewerId) },
+    // Their latest: whether their own Tier B predates it (`viewerTierB`, step 10 review H1).
+    select: { id: true, check_in_time: true },
+    orderBy: { check_in_time: "desc" },
   })
   if (!viewerCheckIn) return null
 
@@ -128,13 +209,15 @@ export async function matchesForEvent(
     await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
-      select: { intent_default: true, work_field: true, gender: true, interested_in: true },
+      select: { intent_default: true, gender: true, interested_in: true, tier_b_changed_at: true, ...traitColumns },
     }),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
     db.event_check_ins.findMany({
       where: {
         event_id: eventId,
         check_in_time: { not: null },
+        // A venue day's grid is the people live there now.
+        ...inRoomWhere(),
         // Staff are working, not mingling. They are excluded from attendance for
         // the same reason and it would be strange to offer the bar manager as a
         // match.
@@ -152,7 +235,7 @@ export async function matchesForEvent(
               select: {
                 intent_default: true,
                 photos: true,
-                work_field: true,
+                // `work_field` comes with `traitColumns` below.
                 // "Show online status" off: in the room, counted, not listed
                 // (SCRUM-141). Read here and filtered below rather than in the
                 // `where`, so a person with no profile row is not dropped by a
@@ -173,6 +256,10 @@ export async function matchesForEvent(
                 // either, and a card has never stated anyone's gender.
                 gender: true,
                 interested_in: true,
+                // Display only (lib/overlaps.ts): printed when shared, never scored.
+                ...traitColumns,
+                shows_up_badge: true,
+                show_badges: true,
               },
             },
             user_interests: { select: { category_id: true } },
@@ -376,6 +463,7 @@ export async function matchesForEvent(
             JOIN events e ON e.id = t.event_id
            WHERE t.event_id IN (SELECT event_id FROM mine)
              AND t.event_id <> ${eventId}::uuid
+             AND e.kind = 'event'
              AND e.start_time > now()
              AND e.deleted_at IS NULL
         GROUP BY t.user_id
@@ -402,6 +490,33 @@ export async function matchesForEvent(
     exposuresFor(eventId, candidateIds),
   ])
   const likesOf = new Map(likeRows.map((r) => [r.liked_id, r._count._all]))
+
+  /*
+   * What the cards may print beyond the score (lib/overlaps.ts): display
+   * traits for the room, the IPL leaves, and the badges check-ins earned.
+   * Read once for the whole room, like everything above.
+   */
+  const [traits, iplTeams] = await Promise.all([
+    displayTraitsOf(
+      new Map<string, TraitProfile | null | undefined>([
+        [viewerId, viewerProfile],
+        ...eligible.map((c) => [c.user_id, c.user.profile] as const),
+      ])
+    ),
+    iplTeamIds(),
+  ])
+  const traitsOf = (id: string) => traits.get(id) ?? NO_TRAITS
+  // The viewer's own Tier B only if it predates this check-in (H1).
+  const viewerTraits = viewerTierB(traitsOf(viewerId), viewerProfile?.tier_b_changed_at, viewerCheckIn.check_in_time)
+  const holders = traitHolders(eligible.map((c) => traitsOf(c.user_id)))
+  /*
+   * The floor counts who is inside NOW, plus the viewer (step 10 review M1):
+   * the deck keeps people who went home, and two people left in a room of
+   * twenty are two, whatever the deck says. Rarity keeps the whole deck.
+   */
+  const peopleInside = eligible.filter((c) => c.status === "checked_in").length + 1
+  const leadTeam = roomTeam(iplTeams, interestHolders, peopleInside >= MIN_ROOM_FOR_WORK_FIELD)
+  const viewerInterestIds = expand(viewerInterests.map((i) => i.category_id))
 
   const candidates: MatchCandidate[] = eligible.map((c) => ({
     userId: c.user_id,
@@ -441,7 +556,7 @@ export async function matchesForEvent(
   const ranked = rankMatches(
     {
       userId: viewerId,
-      interestIds: expand(viewerInterests.map((i) => i.category_id)),
+      interestIds: viewerInterestIds,
       intents: effectiveIntents(
         prefsOf.get(viewerId)?.intent ?? [],
         viewerProfile?.intent_default ?? []
@@ -453,7 +568,7 @@ export async function matchesForEvent(
       },
     },
     candidates,
-    { interestHolders, parentOf, population: eligible.length, limit }
+    { interestHolders, parentOf, population: eligible.length, peopleInside, limit }
   )
 
   // Category names, resolved once for the whole page rather than per card.
@@ -485,29 +600,124 @@ export async function matchesForEvent(
     ranked.map((m) => m.userId)
   ).catch(() => {})
 
-  return ranked.map((m) => ({
-    /*
-     * Their handle in this room, never the real id (SCRUM-371). The viewer is
-     * never in their own deck, so every card is somebody else's. The same
-     * string as the roster's and `room:match`'s, and `POST /matches/likes`
-     * takes it back.
-     */
-    userId: roomHandle(eventId, m.userId),
-    displayName: m.displayName,
-    photo: m.photo,
-    sharedInterests: m.sharedInterestIds.map((id) => nameOf.get(id) ?? id),
-    sharedIntents: m.sharedIntents,
-    // `rankMatches` has already applied the small-room floor; this only turns
-    // the surviving slug into something a person can read.
-    workField: workFieldLabel(m.workField),
-    sharedWorkField: m.sharedWorkField,
-    age: m.age,
-    insideNow: m.insideNow,
-    // Already floored by `rankMatches` — this only carries it to the card.
-    sharedEvents: m.sharedEvents,
-    sharedPlans: m.sharedPlans,
-    youLiked: liked.has(m.userId),
-  }))
+  const interestsOf = new Map(candidates.map((c) => [c.userId, c.interestIds]))
+  const profileOf = new Map(eligible.map((c) => [c.user_id, c.user.profile]))
+
+  /*
+   * Badges for the page that is returned, never the whole room (step 10
+   * review M6): two set-based reads over at most `limit` people. Only for those
+   * who did not turn badges off, and "Shows up" only for those who turned it on.
+   */
+  const badgeFacts = await badgeFactsFor(
+    eventId,
+    ranked.filter((m) => m.roomIsBigEnough && profileOf.get(m.userId)?.show_badges !== false).map((m) => m.userId),
+    ranked.filter((m) => profileOf.get(m.userId)?.shows_up_badge).map((m) => m.userId)
+  )
+
+  return ranked.map((m) => {
+    const card = personCard(
+      { traits: viewerTraits, interestIds: viewerInterestIds },
+      { traits: traitsOf(m.userId), interestIds: interestsOf.get(m.userId) ?? [] },
+      { holders, interestHolders, population: eligible.length, iplTeams, roomTeam: leadTeam },
+      m.labelBudget
+    )
+    return {
+      /*
+       * Their handle in this room, never the real id (SCRUM-371). The viewer is
+       * never in their own deck, so every card is somebody else's. The same
+       * string as the roster's and `room:match`'s, and `POST /matches/likes`
+       * takes it back.
+       */
+      userId: roomHandle(eventId, m.userId),
+      displayName: m.displayName,
+      photo: m.photo,
+      sharedInterests: m.sharedInterestIds.map((id) => nameOf.get(id) ?? id),
+      sharedIntents: m.sharedIntents,
+      // `rankMatches` has applied the small-room floor; the card's Tier B slot
+      // decides whether the field shows at all (`personCard`, step 10 review M3).
+      workField: card.showWorkField ? workFieldLabel(m.workField) : null,
+      sharedWorkField: card.showWorkField && m.sharedWorkField,
+      age: m.age,
+      insideNow: m.insideNow,
+      // Already floored by `rankMatches` — this only carries it to the card.
+      sharedEvents: m.sharedEvents,
+      sharedPlans: m.sharedPlans,
+      youLiked: liked.has(m.userId),
+      overlaps: card.overlaps,
+      sign: card.sign,
+      // Attendance facts, so the attendance floor (`roomIsBigEnough`), and only if they show badges.
+      badges:
+        m.roomIsBigEnough && profileOf.get(m.userId)?.show_badges !== false ? badgesFor(badgeFacts(m.userId)) : [],
+    }
+  })
+}
+
+/**
+ * The check-in facts behind the badges, for a room's candidates, in two
+ * set-based reads (lib/overlaps.ts `badgesFor`).
+ *
+ * Nights are distinct occurrences checked into as an attendee — a venue day
+ * counts, it is a night out. "Here" is this event's venue, which a venue day
+ * has too; an event with no venue has no "Regular here". "Shows up" reads only
+ * the people who turned it on, and only past, uncancelled events they said
+ * they were going to.
+ */
+async function badgeFactsFor(
+  eventId: string,
+  candidateIds: readonly string[],
+  showsUpOptIns: readonly string[]
+) {
+  const day = 24 * 60 * 60 * 1000
+  const now = Date.now()
+  const event = await db.events.findUnique({ where: { id: eventId }, select: { venue_id: true } })
+  const venueId = event?.venue_id ?? null
+  const [nights, rsvps] = await Promise.all([
+    candidateIds.length
+      ? // any-kind: a night out at a venue's Go Live is a night out, and a regular there is a regular (§8.6)
+        db.$queryRaw<{ user_id: string; nights_out: bigint; nights_here: bigint }[]>`
+          SELECT ci.user_id,
+                 COUNT(DISTINCT ci.occurrence_id) FILTER (WHERE ci.check_in_time >= ${new Date(now - NIGHTS_OUT_DAYS * day)}) AS nights_out,
+                 COUNT(DISTINCT ci.occurrence_id) FILTER (WHERE e.venue_id = ${venueId}::uuid) AS nights_here
+            FROM event_check_ins ci
+            JOIN events e ON e.id = ci.event_id
+           WHERE ci.user_id = ANY(${[...candidateIds]})
+             AND ci.kind = 'attendee'
+             AND ci.check_in_time >= ${new Date(now - Math.max(NIGHTS_OUT_DAYS, REGULAR_HERE_DAYS) * day)}
+        GROUP BY ci.user_id
+        `
+      : [],
+    showsUpOptIns.length
+      ? db.$queryRaw<{ user_id: string; rsvps: bigint; attended: bigint }[]>`
+          SELECT r.user_id,
+                 COUNT(*) AS rsvps,
+                 COUNT(*) FILTER (WHERE EXISTS (
+                   SELECT 1 FROM event_check_ins ci
+                    WHERE ci.event_id = r.event_id AND ci.user_id = r.user_id
+                      AND ci.kind = 'attendee' AND ci.check_in_time IS NOT NULL
+                 )) AS attended
+            FROM event_rsvps r
+            JOIN events e ON e.id = r.event_id
+           WHERE r.user_id = ANY(${[...showsUpOptIns]})
+             AND r.status = 'going'
+             AND e.kind = 'event'
+             AND e.deleted_at IS NULL
+             AND e.status <> 'cancelled'
+             AND e.end_time < now()
+             AND e.end_time >= ${new Date(now - SHOWS_UP_DAYS * day)}
+        GROUP BY r.user_id
+        `
+      : [],
+  ])
+  const nightsOf = new Map(nights.map((r) => [r.user_id, r]))
+  const rsvpsOf = new Map(rsvps.map((r) => [r.user_id, r]))
+  const optedIn = new Set(showsUpOptIns)
+  return (userId: string) => ({
+    nightsHere: venueId ? Number(nightsOf.get(userId)?.nights_here ?? 0) : null,
+    nightsOut: Number(nightsOf.get(userId)?.nights_out ?? 0),
+    rsvpsPast: Number(rsvpsOf.get(userId)?.rsvps ?? 0),
+    rsvpsAttended: Number(rsvpsOf.get(userId)?.attended ?? 0),
+    showsUpOptIn: optedIn.has(userId),
+  })
 }
 
 export interface LikeOutcome {
@@ -624,4 +834,28 @@ export async function likeAtEvent(
     if (e instanceof ConversationClosedError) return { mutual: false }
     throw e
   }
+}
+
+/**
+ * Going public in a room carries into the DMs already opened from it.
+ *
+ * Somebody who reveals mid-event has shown their name and face to everyone
+ * there — including people they already matched with — so a DM still calling
+ * them by their pseudonym would protect nothing. Monotonic: `revealed: false`
+ * in the filter leaves a revealed side alone, and nothing here ever hides a
+ * name again (D-10: a reveal can't be unseen).
+ */
+export async function revealConversationsFrom(eventId: string, userIds: readonly string[]): Promise<void> {
+  if (userIds.length === 0) return
+  const ids = [...userIds]
+  await Promise.all([
+    db.private_conversations.updateMany({
+      where: { origin_event_id: eventId, user1_id: { in: ids }, user1_revealed: false, closed_at: null },
+      data: { user1_revealed: true },
+    }),
+    db.private_conversations.updateMany({
+      where: { origin_event_id: eventId, user2_id: { in: ids }, user2_revealed: false, closed_at: null },
+      data: { user2_revealed: true },
+    }),
+  ])
 }

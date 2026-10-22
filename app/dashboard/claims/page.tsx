@@ -8,6 +8,11 @@ import { db } from "@/lib/db"
 import { ClaimSwitch } from "./claim-switch"
 import { EventClaimsTable } from "./event-claims-table"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/claims")
+
 export const dynamic = "force-dynamic"
 
 /**
@@ -38,15 +43,6 @@ export default async function ClaimsPage() {
         venueCount={venueCount}
         brandCount={brandCount}
       />
-      {/* h2, not h1: `components/site-header.tsx` owns the page's only h1. */}
-      <div className="flex flex-col gap-1">
-        <h2 className="text-[length:var(--text-h2)] font-bold">Event claims</h2>
-        <p className="max-w-2xl text-[0.8125rem] leading-6 text-muted-foreground">
-          Oldest first, because age is the SLA. Approving hands over the attendee
-          list and cannot be undone — the flags are evidence to weigh, never a
-          verdict.
-        </p>
-      </div>
       {total > rows.length ? (
         // A capped queue that does not say so reads as "this is all of them".
         <p className="text-[0.75rem] text-muted-foreground">

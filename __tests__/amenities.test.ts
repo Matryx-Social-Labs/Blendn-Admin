@@ -1,10 +1,10 @@
-import { readFileSync } from "fs"
+import { readdirSync, readFileSync } from "fs"
 import { join } from "path"
 
 /**
  * Amenities — the event layer.
  *
- * `docs/AMENITIES.md` planned a venue layer too. It is deliberately not built:
+ * `docs/AMENITIES.md` planned a venue layer too. Its curation is deliberately not built:
  * an **unowned** venue has no list to suggest from, and almost no venue is
  * owned today, so it would be a permission system and a picker that did
  * nothing. These tests pin the decisions that make the event layer safe to
@@ -161,13 +161,24 @@ describe("the organiser asserts; nothing is inherited or assumed", () => {
   })
 })
 
-describe("the venue layer is absent on purpose, not by omission", () => {
-  it("ships no venue_amenities table", () => {
-    // If this ever appears, `docs/AMENITIES.md`'s open question has been
-    // answered — and `venuePermissions` has to land with it, or any venue
-    // owner can edit any building's list.
-    expect(SCHEMA()).not.toContain("model venue_amenities")
-    expect(MIGRATION()).not.toContain("venue_amenities")
+describe("the venue layer is read-only until owners can curate it", () => {
+  const sources = (dir: string): string[] =>
+    readdirSync(join(__dirname, "..", dir), { withFileTypes: true }).flatMap((e) => {
+      const rel = join(dir, e.name)
+      if (e.isDirectory()) return e.name === "node_modules" || e.name === ".next" ? [] : sources(rel)
+      return /\.tsx?$/.test(e.name) ? [rel] : []
+    })
+
+  it("keeps Restrict on the amenity side, like the event layer", () => {
+    const model = SCHEMA().slice(SCHEMA().indexOf("model venue_amenities"))
+    expect(model.slice(0, model.indexOf("\n}"))).toContain("onDelete: Restrict")
+  })
+
+  it("has no writer: `venuePermissions` has to land with one, or any venue owner can edit any building's list", () => {
+    const writers = ["app", "lib", "scripts"]
+      .flatMap(sources)
+      .filter((f) => /\bvenue_amenities\.(?:create|createMany|upsert|update|updateMany|delete|deleteMany)\(|(?:INSERT INTO|UPDATE|DELETE FROM) "?venue_amenities\b/.test(readFileSync(join(__dirname, "..", f), "utf8")))
+    expect(writers).toEqual([])
   })
 })
 

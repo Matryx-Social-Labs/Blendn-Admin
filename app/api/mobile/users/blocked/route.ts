@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { maySeeIdentityFor } from "@/lib/identity"
+import { blockRef } from "@/lib/room-handle"
 import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 
 // GET /api/mobile/users/blocked — List users blocked by the current user
@@ -97,7 +98,14 @@ export async function GET(request: NextRequest) {
           ? (knownAs.get(b.blocked_id) ?? b.blocked.name)
           : null
       return {
-        blocked_id: b.blocked_id,
+        /*
+         * Not their account id: a ref to this block (`blockRef`). Somebody
+         * blocked by their board post or room handle was never shown an id,
+         * and the list must not be the place it arrives. The unblock route
+         * takes this back; the field keeps its name so installed apps, which
+         * only send it back, need no change.
+         */
+        blocked_id: blockRef(b.id),
         blocked_user_name: name,
         blocked_user_photo: visible.has(b.blocked_id) ? b.blocked.image : null,
         reason: null,

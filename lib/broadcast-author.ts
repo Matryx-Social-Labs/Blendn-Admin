@@ -83,15 +83,19 @@ export const SPONSORED_AUTHOR = "Sponsored"
  * video). `metadata.kind` is read only on a poll, whose metadata only
  * `createPoll` writes; on anything else a client could have put it there.
  * Everyone else is their pseudonym, or the old "Attendee".
+ *
+ * `event` is null in a room that is not an event's (a crew, a Blend, a board
+ * post), where no broadcast is written; one that got there anyway is
+ * "Organiser", never a person.
  */
 export function roomSenderName(
   message: { type: string; metadata?: unknown },
   pseudonym: string | undefined,
-  event: BroadcastAuthorEvent
+  event: BroadcastAuthorEvent | null
 ): string {
   if (message.type === "poll" && (message.metadata as { kind?: string } | null)?.kind === "sponsored") {
     return SPONSORED_AUTHOR
   }
-  if (BROADCAST_TYPES.has(message.type)) return broadcastAuthorName(event)
+  if (BROADCAST_TYPES.has(message.type)) return event ? broadcastAuthorName(event) : GENERIC_AUTHOR
   return pseudonym ?? "Attendee"
 }

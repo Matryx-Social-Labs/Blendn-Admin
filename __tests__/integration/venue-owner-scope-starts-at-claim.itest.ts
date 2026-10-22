@@ -1,5 +1,5 @@
 let session: { user: { id: string; role: string } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 
 import { NextRequest } from "next/server"
 import { getDashboardOverview } from "@/app/dashboard/actions"
@@ -58,6 +58,8 @@ beforeAll(async () => {
     five: await at(w.v1, ago(22 * HOUR), { guests: [5] }),
     complete: await at(w.v1, ago(30 * HOUR), { guests: [6], going: 6 }),
     residual: await at(w.v1, ago(32 * HOUR), { guests: [5], going: 6 }),
+    // Walk-ins: eight came against two going.
+    walkIn: await at(w.v1, ago(33 * HOUR), { guests: [8], going: 2 }),
     staffMix: await at(w.v1, ago(34 * HOUR), { guests: [5], staff: [3] }),
     staffFew: await at(w.v1, ago(36 * HOUR), { guests: [3], staff: [2] }),
     statuses: await at(w.v1, ago(38 * HOUR), {
@@ -212,8 +214,14 @@ describe("the venue check-ins export is counts, never people (F5)", () => {
     ["four guests: under the floor", "four", ""],
     ["five guests: at the floor", "five", "5"],
     ["six guests of ten going", "after", "6"],
-    ["every going RSVP came: completeness", "complete", ""],
-    ["all but one came: residual", "residual", ""],
+    /*
+     * Not held back for a venue (orchestrator's decision, 2026-10-01): it cannot
+     * see who RSVP'd, so "everyone who said yes came" names nobody to it, and
+     * the going-population rule hid every walk-in night.
+     */
+    ["every going RSVP came: shown", "complete", "6"],
+    ["all but one came: shown", "residual", "5"],
+    ["walk-ins past the RSVPs: shown", "walkIn", "8"],
     ["5 guests and 3 staff count 5", "staffMix", "5"],
     ["3 guests and 2 staff count 3, held back", "staffFew", ""],
     ["checked_out counts; pending and cancelled do not", "statuses", "5"],
@@ -259,16 +267,21 @@ describe("other hosts' counts are held back wherever a venue owner sees them", (
     expect(rowsFor(out, n.small.id)[0].split(",").slice(-2)).toEqual(["", ""])
     expect(rowsFor(out, n.small.id)[0].split(",").slice(-3)[0]).toBe("10")
     expect(rowsFor(out, n.five.id)[0].split(",").slice(-2)[0]).toBe("5")
-    // Every going RSVP came: held back here too, or this file undoes the other.
-    expect(rowsFor(out, n.complete.id)[0].split(",").slice(-2)[0]).toBe("")
+    // Every going RSVP came, and walk-ins past them: shown, as in the venue file.
+    expect(rowsFor(out, n.complete.id)[0].split(",").slice(-2)[0]).toBe("6")
+    expect(rowsFor(out, n.walkIn.id)[0].split(",").slice(-2)[0]).toBe("8")
   })
 
   it("blanks them on the Events screen", async () => {
-    const page = (await EventsPage()) as { props: { rows: Array<{ id: string; rsvps: number | null; arrivals: number | null }> } }
+    const page = (await EventsPage()) as { props: { rows: Array<{ id: string; going: number | null; arrivals: number | null }> } }
     const row = (id: string) => page.props.rows.find((r) => r.id === id)
+    // Going too: two going is held back for the venue, ten is shown.
+    expect(row(n.walkIn.id)?.going).toBeNull()
+    expect(row(n.small.id)?.going).toBe(10)
     expect(row(n.small.id)?.arrivals).toBeNull()
     expect(row(n.five.id)?.arrivals).toBe(5)
-    expect(row(n.complete.id)?.arrivals).toBeNull()
+    expect(row(n.complete.id)?.arrivals).toBe(6)
+    expect(row(n.walkIn.id)?.arrivals).toBe(8)
     // Their own night is exact.
     expect(row(n.ownBefore.id)?.arrivals).toBe(2)
   })

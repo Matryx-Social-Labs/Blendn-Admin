@@ -28,6 +28,7 @@ import {
   IconMapPin,
   IconPhone,
   IconSearch,
+  IconSparkles,
 } from "@tabler/icons-react"
 import { format } from "date-fns"
 
@@ -69,7 +70,10 @@ import {
 } from "@/components/ui/table"
 import { toast } from "sonner"
 
+import { personPlus } from "@/lib/billing-actions"
+import { refusalMessage } from "@/lib/refusal"
 import { rowCountLabel } from "@/lib/row-count-label"
+import { OrgAnalyticsGrantControl } from "../organisations/analytics-grant-control"
 import { UserWithProfile, updateUser, updateUserRole } from "./actions"
 import type { user_role } from "@prisma/client"
 
@@ -77,7 +81,6 @@ interface UsersTableProps {
   data: UserWithProfile[]
   total: number
   currentUserRole: string
-  onRefresh?: () => void
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -106,13 +109,14 @@ function ActionsCell({
   row: { original: UserWithProfile }
   table: {
     options: {
-      meta?: { onRefresh?: () => void; currentUserRole?: string }
+      meta?: { currentUserRole?: string }
     }
   }
 }) {
   const user = row.original
   const currentUserRole = table.options.meta?.currentUserRole
   const [isEditOpen, setIsEditOpen] = React.useState(false)
+  const [isPlusOpen, setIsPlusOpen] = React.useState(false)
 
   return (
     <>
@@ -132,6 +136,10 @@ function ActionsCell({
             <IconEdit className="mr-2 size-4" />
             Edit
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setIsPlusOpen(true)}>
+            <IconSparkles className="mr-2 size-4" />
+            Blendn+
+          </DropdownMenuItem>
           {/*
             No Delete. Suspension is the reversible control and it lives on the
             moderation screens; a hard delete here cascaded other users' events,
@@ -144,11 +152,82 @@ function ActionsCell({
         user={user}
         open={isEditOpen}
         onOpenChange={setIsEditOpen}
-        onSuccess={() => table.options.meta?.onRefresh?.()}
         currentUserRole={currentUserRole}
       />
-
+      {isPlusOpen ? <PlusSheet user={user} onOpenChange={setIsPlusOpen} /> : null}
     </>
+  )
+}
+
+const PLUS_DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+const PLUS_FROM: Record<string, string> = { apple: "the App Store", google: "Google Play", grant: "a grant" }
+
+/**
+ * A person's Blendn+ (SCRUM-583): where it comes from, then the admin's grant
+ * control. The source line is the point of the sheet — a store's purchase is
+ * shown and is the store's; only a grant has an End button.
+ */
+function PlusSheet({ user, onOpenChange }: { user: UserWithProfile; onOpenChange: (open: boolean) => void }) {
+  type State = Awaited<ReturnType<typeof personPlus>>
+  const [state, setState] = React.useState<State | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const name = user.name || user.email
+
+  const load = React.useCallback(() => {
+    personPlus(user.id)
+      .then((s) => {
+        setState(s)
+        setError(null)
+      })
+      .catch((err) => setError(refusalMessage(err, "Could not load Blendn+")))
+  }, [user.id])
+  React.useEffect(load, [load])
+
+  const held = state?.held
+  const until = held?.expiresAt ? ` until ${PLUS_DAY.format(new Date(held.expiresAt))}` : ""
+  /*
+   * A grant is told once, by the control that can end it ("Blendn+, granted
+   * until …"). This line said the same thing above it. It stays for everything
+   * the control does not describe: a store's purchase, and nothing held at all.
+   */
+  const grantTellsItself = held?.source === "grant" && state?.grant != null
+  return (
+    <Sheet open onOpenChange={onOpenChange}>
+      <SheetContent className="sm:max-w-[500px]">
+        <SheetHeader>
+          <SheetTitle>Blendn+</SheetTitle>
+          <SheetDescription>{name}</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col gap-4 px-4 py-4 text-[0.8125rem]">
+          {error ? (
+            <p role="alert" className="text-destructive">{error}</p>
+          ) : !state ? (
+            <p className="text-muted-foreground">Loading…</p>
+          ) : (
+            <>
+              {grantTellsItself ? null : (
+                <p data-plus-source={held?.source ?? "none"}>
+                  {held
+                    ? `${held.product === "night_pass" ? "A Night Pass" : "Blendn+"} from ${PLUS_FROM[held.source] ?? held.source}${until}${
+                        held.source === "apple" || held.source === "google" ? " — managed in the store" : ""
+                      }`
+                    : "No Blendn+ right now."}
+                </p>
+              )}
+              <OrgAnalyticsGrantControl
+                subject="user"
+                subjectId={user.id}
+                name={name}
+                status="active"
+                grant={state.grant}
+                paid={null}
+                onChanged={load}
+              />
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -386,6 +465,8 @@ const columns: ColumnDef<typeof features, UserWithProfile>[] = [
   },
   {
     id: "actions",
+    // A header with no text is announced as a blank column (axe: empty-table-header).
+    header: () => <span className="sr-only">Actions</span>,
     cell: ({ row, table }) =>
       row.original.deletedAt ? null : <ActionsCell row={row} table={table} />,
   },
@@ -395,11 +476,10 @@ interface EditUserDialogProps {
   user: UserWithProfile
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: () => void
   currentUserRole?: string
 }
 
-function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }: EditUserDialogProps) {
+function EditUserDialog({ user, open, onOpenChange, currentUserRole }: EditUserDialogProps) {
   const [isLoading, setIsLoading] = React.useState(false)
   const [formData, setFormData] = React.useState({
     name: user.name || "",
@@ -432,7 +512,6 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
       }
       toast.success("User updated successfully")
       onOpenChange(false)
-      onSuccess()
     } catch {
       toast.error("Failed to update user")
     } finally {
@@ -449,7 +528,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
             Update user information and profile details.
           </SheetDescription>
         </SheetHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 py-4">
+        <form onSubmit={handleSubmit} className="space-y-4 px-4 py-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
@@ -532,7 +611,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
               </Select>
             </div>
           )}
-          <SheetFooter>
+          <SheetFooter className="px-0">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
@@ -546,7 +625,7 @@ function EditUserDialog({ user, open, onOpenChange, onSuccess, currentUserRole }
   )
 }
 
-export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTableProps) {
+export function UsersTable({ data, total, currentUserRole }: UsersTableProps) {
   const router = useRouter()
   const params = useSearchParams()
 
@@ -635,7 +714,6 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange: setPagination,
     meta: {
-      onRefresh,
       currentUserRole,
     },
   })
@@ -668,7 +746,8 @@ export function UsersTable({ data, total, currentUserRole, onRefresh }: UsersTab
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
+              {/* Named for the narrow column too, where the word is hidden (axe: button-name). */}
+              <Button variant="outline" size="sm" aria-label="Columns">
                 <IconLayoutColumns />
                 <span className="hidden @2xl/main:inline">Columns</span>
                 <IconChevronDown />

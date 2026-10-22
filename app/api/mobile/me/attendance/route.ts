@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
+import { lockedNights } from "@/lib/plus"
 
 export const dynamic = "force-dynamic"
 
@@ -40,6 +41,13 @@ export const dynamic = "force-dynamic"
  * `event_check_ins` holds a row per person per occurrence, and counting those
  * as events is what told a three-day-conference attendee they had been to three
  * events (I1).
+ *
+ * ## The free nights and the rest (Blendn+, step 11)
+ *
+ * Where Blendn+ is gated, a person without it sees their latest
+ * `PLUS.FREE_HISTORY_NIGHTS` (3) and `lockedCount` says how many more there
+ * are; the pages stop at the third. The count on the profile stays the true
+ * one — how many nights is theirs to know; the list of where is the Plus part.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -54,18 +62,28 @@ export async function GET(request: NextRequest) {
       searchParams.get("limit") ?? undefined
     )
 
-    const [attended, totalCount] = await Promise.all([
-      attendedEventIds(authUser.userId, { limit, skip: paginationSkip(page, limit) }),
-      distinctEventsAttended(authUser.userId),
+    const skip = paginationSkip(page, limit)
+    const [pageRows, totalCount] = await Promise.all([
+      attendedEventIds(authUser.userId, { limit, skip }),
+      // Places included: the list below includes them (D-6).
+      distinctEventsAttended(authUser.userId, { places: true }),
     ])
+    const lockedCount = await lockedNights(authUser.userId, totalCount)
+    const visible = totalCount - lockedCount
+    const attended = pageRows.slice(0, Math.max(0, visible - skip))
 
     // Deleted events are already out of both queries (SCRUM-432). This filter
     // only covers one deleted between the two reads.
     const events = attended.length
       ? await db.events.findMany({
+          // any-kind: your own nights include the places you went live at —
+          // venue days stay in your history, labelled as places (D-6).
           where: { id: { in: attended.map((a) => a.event_id) }, deleted_at: null },
           select: {
             id: true,
+            // `event` or `venue_day`: the app labels a venue day as a place
+            // (D-6) — its title is bookkeeping, its `venue_name` is the place.
+            kind: true,
             slug: true,
             title: true,
             cover_image_url: true,
@@ -89,7 +107,8 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       events: rows,
-      pagination: paginationMeta(page, limit, totalCount),
+      pagination: paginationMeta(page, limit, visible),
+      lockedCount,
     })
   } catch (error) {
     logger.error("Get own attendance failed", {

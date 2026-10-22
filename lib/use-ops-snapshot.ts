@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { io, type Socket } from "socket.io-client"
 
-import type { LiveSnapshot } from "@/lib/live-metrics"
+import type { LiveSnapshot, VenueLiveSnapshot } from "@/lib/live-metrics"
 
 export type OpsStatus = "connecting" | "live" | "denied" | "error"
 
@@ -20,7 +20,7 @@ export type OpsStatus = "connecting" | "live" | "denied" | "error"
  * open.
  */
 export function useOpsSnapshot(eventId: string, enabled: boolean) {
-  const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null)
+  const [snapshot, setSnapshot] = useState<LiveSnapshot | VenueLiveSnapshot | null>(null)
   const [status, setStatus] = useState<OpsStatus>("connecting")
 
   useEffect(() => {
@@ -37,7 +37,8 @@ export function useOpsSnapshot(eventId: string, enabled: boolean) {
       socket?.emit("join:eventOps", eventId)
     })
 
-    socket.on("ops:snapshot", (data: LiveSnapshot) => {
+    // Which copy arrives is the server's decision, by who is watching (SCRUM-516).
+    socket.on("ops:snapshot", (data: LiveSnapshot | VenueLiveSnapshot) => {
       if (cancelled || data.eventId !== eventId) return
       setSnapshot(data)
       setStatus("live")

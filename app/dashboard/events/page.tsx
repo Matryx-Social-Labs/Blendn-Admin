@@ -4,12 +4,19 @@ import { EventsTable, type EventRow } from "./events-table"
 import { getAuth } from "@/lib/auth"
 import { mayCreateEvents } from "@/lib/event-ownership"
 import { curationState } from "@/lib/curation"
-import { whenLabel } from "@/lib/dashboard-format"
+import { eventRowFields } from "@/lib/event-row"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
 import { db } from "@/lib/db"
 import { discloseVenueCounts } from "@/lib/disclosure"
+import { eventHost } from "@/lib/event-host"
+import { stillArriving } from "@/lib/occurrences"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { canAccessDashboard } from "@/lib/rbac"
+
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/events")
 
 export const dynamic = "force-dynamic"
 
@@ -26,6 +33,7 @@ export default async function EventsPage() {
    * cannot have changed in between.
    */
   const { where, actor } = await visibleEventsScope(session.user)
+  const names = session.user.role !== "organizer"
 
   /*
    * The rows and the total start together; only the attendance counts wait.
@@ -56,12 +64,22 @@ export default async function EventsPage() {
       venue_name: true,
       latitude: true,
       geofence: true,
+      max_capacity: true,
       curated_at: true,
       claimed_at: true,
       organizer_id: true,
       organizer_org_id: true,
-      organizer: { select: { name: true, email: true } },
-      _count: { select: { rsvps: true } },
+      /*
+       * Whose night it is: for an admin and for a venue, never for an
+       * organiser, whose list is their own organisation's — so it is not even
+       * selected for them, and never an email.
+       */
+      organizer: names ? { select: { name: true } } : false,
+      // The owning organisation: after a claim it, not the founder in `organizer`, is the host (`eventHost`).
+      organizer_org: names ? { select: { display_name: true } } : false,
+      // Going, as every other screen counts it: `not_going` is a decline, and
+      // "maybe" is not a seat (the overview's hero names it separately).
+      _count: { select: { rsvps: { where: { status: "going" } } } },
     },
     }),
     db.events.count({ where }),
@@ -81,61 +99,44 @@ export default async function EventsPage() {
   const arrivals = await distinctAttendeeCounts(events.map((event) => event.id))
 
   /*
-   * A venue owner sees another host's event as the venue does: counts held
-   * back under the floor, by the rule the venue page and the exports use, so
+   * A venue owner sees another host's event as the venue does: counts under
+   * the floor held back, by the rule the venue page and the exports use, so
    * this list cannot print what they blank (SCRUM-501). Their own events, and
-   * everybody else's lists, are exact. The going RSVPs are the population.
+   * everybody else's lists, are exact.
    */
   const throughBuilding = new Set(
     session.user.role === "venue_owner"
       ? events.filter((e) => !hostsEvent(actor, e)).map((e) => e.id)
       : []
   )
-  const going = throughBuilding.size
-    ? new Map(
-        (
-          await db.event_rsvps.groupBy({
-            by: ["event_id"],
-            where: { event_id: { in: [...throughBuilding] }, status: "going" },
-            _count: { _all: true },
-          })
-        ).map((g) => [g.event_id, g._count._all])
-      )
-    : new Map<string, number>()
   const counts = (event: (typeof events)[number]) => {
-    const exact = { rsvps: event._count.rsvps, arrivals: arrivals.get(event.id) ?? 0 }
+    const exact = { going: event._count.rsvps, arrivals: arrivals.get(event.id) ?? 0 }
     if (!throughBuilding.has(event.id)) return exact
     const shown = discloseVenueCounts({
-      going: going.get(event.id) ?? 0,
+      going: exact.going,
       attended: exact.arrivals,
       capacity: null,
+      arriving: stillArriving(event, now),
     })
-    return {
-      rsvps: shown.going === null ? null : exact.rsvps,
-      arrivals: shown.attended,
-    }
+    return { going: shown.going, arrivals: shown.attended }
   }
 
   const rows: EventRow[] = events.map((event) => ({
-    id: event.id,
-    title: event.title,
-    status: event.status,
+    ...eventRowFields(event, now),
     startTime: event.start_time.toISOString(),
-    when: whenLabel(event.start_time, event.end_time, now, event.timezone),
-    where: event.venue_name ?? event.city ?? null,
-    city: event.city,
-    host: event.organizer?.name ?? null,
+    /*
+     * Null for a curated listing nobody has claimed: `organizer_id` there is
+     * the admin who curated it, and the founder's name must not reach the page
+     * payload as its host (T83). The row says "Listed by us" instead.
+     *
+     * Once it is claimed the host is the organisation, as everywhere else
+     * (`eventHost`): `organizer_id` still names the founder, and this list read
+     * it, so a claimed listing said "Priya Menon" (SCRUM-612). Null for an
+     * organiser, who is not selected `names` and whose list is their own.
+     */
+    host: !names || curationState(event) === "curated_open" ? null : eventHost(event).name,
     ...counts(event),
     curation: curationState(event),
-    /*
-     * The one thing that decides whether the door works.
-     *
-     * `canPublish` refuses an event with no coordinates and no fence, and it
-     * only reached a caller recently — so published events predating that exist
-     * and 400 at the door with nothing on any screen saying why. Surfacing it
-     * on the list is how you find them without opening 200 events.
-     */
-    checkInReady: event.latitude !== null || event.geofence !== null,
   }))
 
   // Only an account that could save the event is offered the button (SCRUM-145).

@@ -4,6 +4,7 @@ import { z } from "zod"
 import {
   errorResponse,
   forbiddenResponse,
+  notFoundResponse,
   serverErrorResponse,
   successResponse,
   unauthorizedResponse,
@@ -29,6 +30,16 @@ const ratingSchema = z.object({
 })
 
 /**
+ * A venue's day is not a night out to rate anybody from: no host, no end the
+ * room agreed on, and a rating there would be a record of who was at a bar
+ * with whom (step 4 review). Not found, as on every by-id route.
+ */
+async function isVenueDay(eventId: string): Promise<boolean> {
+  const event = await db.events.findUnique({ where: { id: eventId }, select: { kind: true } })
+  return event?.kind === "venue_day"
+}
+
+/**
  * Who you can still rate for this event.
  *
  * The client asks this at check-out or when the event ends, and shows nothing if
@@ -41,6 +52,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    if (await isVenueDay(eventId)) return notFoundResponse("Event not found")
 
     return successResponse({ userIds: await ratablePeers(eventId, authUser.userId) })
   } catch (error) {
@@ -70,6 +82,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const limited = await rateLimit(request, userLimit("write", "peer-rating", authUser.userId))
     if (limited) return limited
+    if (await isVenueDay(eventId)) return notFoundResponse("Event not found")
 
     const parsed = ratingSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)

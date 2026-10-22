@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { initialsOf } from "@/lib/utils"
 
 /**
  * The account control, sized for a header row.
@@ -42,13 +43,7 @@ export function AccountMenu({
   showOrganisation: boolean
 }) {
   const router = useRouter()
-  const initials =
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase())
-      .join("") || "B"
+  const initials = initialsOf(name)
 
   return (
     <DropdownMenu>

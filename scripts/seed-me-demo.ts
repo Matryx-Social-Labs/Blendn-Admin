@@ -35,6 +35,7 @@ import { join } from "node:path"
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { syncOccurrences } from "../lib/occurrences"
+import { realEventsWhere } from "../lib/event-kind"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -147,10 +148,10 @@ async function main() {
   const slugBase = `me-demo-${user.id.slice(-8).toLowerCase()}`
 
   if (UNDO) {
-    const existing = await db.events.findMany({ where: { slug: { startsWith: slugBase } }, select: { id: true, title: true } })
+    const existing = await db.events.findMany({ where: { slug: { startsWith: slugBase }, ...realEventsWhere }, select: { id: true, title: true } })
     console.log(`would delete ${existing.length} demo event(s)`)
     if (APPLY || process.argv.includes("--yes")) {
-      const { count } = await db.events.deleteMany({ where: { slug: { startsWith: slugBase } } })
+      const { count } = await db.events.deleteMany({ where: { slug: { startsWith: slugBase }, ...realEventsWhere } })
       console.log(`deleted ${count} event(s), with their occurrences and check-ins`)
     } else {
       console.log("pass --undo --yes to delete")

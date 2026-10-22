@@ -11,6 +11,7 @@ jest.mock("@/lib/location", () => ({
 // caller cannot build a list without answering "how many people" first.
 jest.mock("@/lib/attendee-counts", () => ({
   distinctAttendeeCounts: jest.fn(async () => new Map([["e1", 4]])),
+  hereCounts: jest.fn(async () => new Map([["e1", 3]])),
 }))
 
 const transformOne = async (event: unknown, ctx: Parameters<typeof transformEvents>[1]) =>

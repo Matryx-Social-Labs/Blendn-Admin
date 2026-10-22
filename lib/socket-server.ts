@@ -5,16 +5,26 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation } from "./conversation-identity"
-import { blockCounterparties } from "./conversations"
+import { keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
-import { authenticateDashboardSocket, canJoinEventOps } from "./socket-ops-auth"
+import { liveInVenueDay } from "./chat-window"
+import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
-import { roomHandle } from "./room-handle"
+import { roomHandle, type RoomScope } from "./room-handle"
+import { ownerDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
 import { readableUrl } from "./tigris"
-import { recognisedInRoomBy } from "./identity"
-import type { LiveSnapshot } from "./live-metrics"
+import { isUuid } from "./api-input"
+import { namesInRoom, recognisedInRoomBy } from "./identity"
+import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
+
+/** `error.data.code` on a refused handshake, by the account's state. */
+const SOCKET_REFUSAL_CODE = {
+  deleted: "ACCOUNT_DELETED",
+  suspended: "ACCOUNT_SUSPENDED",
+  staff: "ACCOUNT_STAFF",
+} as const
 
 /*
  * The Socket.io instance lives on `globalThis`, not in this module.
@@ -63,6 +73,14 @@ export interface ServerToClientEvents {
    * to `user:{id}`.
    */
   "notification:new": (data: { kind: string }) => void
+  /**
+   * Your Go Live at a venue ended, and your sockets have left its rooms (the
+   * chat, the roster, the counter). `reason` is the checkout's: `expired` when
+   * the window ran out (or the day reset), `event_started` when a real event
+   * took the venue over (the push says which), otherwise how you left. To
+   * `user:{id}` only.
+   */
+  "live:ended": (data: { eventId: string; reason: string }) => void
   // Event-related
   /**
    * A check-in happened. Deliberately carries no name.
@@ -86,7 +104,7 @@ export interface ServerToClientEvents {
      */
     hereCount?: number
   }) => void
-  /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. */
+  /** Who arrived, by pseudonym. Only to `event:room:{id}` — checked-in only. Never for an arriver the roster hides (`show_online` off). */
   "event:room:checkin": (data: {
     eventId: string
     userId: string
@@ -215,8 +233,11 @@ export interface ServerToClientEvents {
   error: (data: { message: string; code?: string }) => void
   connected: (data: { userId: string }) => void
 
-  /** Live operations aggregate. Dashboard-only; carries no attendee rows. */
-  "ops:snapshot": (data: LiveSnapshot) => void
+  /**
+   * Live operations aggregate. Dashboard-only; carries no attendee rows. A venue
+   * watching a night it does not run gets the ranged copy (SCRUM-516).
+   */
+  "ops:snapshot": (data: LiveSnapshot | VenueLiveSnapshot) => void
 }
 
 export interface ClientToServerEvents {
@@ -244,9 +265,6 @@ export interface ClientToServerEvents {
   "private:markRead": (conversationId: string, messageIds: string[]) => void
   /** The app received these messages (a socket delivery or a push it handled). */
   "private:delivered": (conversationId: string, messageIds: string[]) => void
-
-  // Ping for connection health
-  ping: () => void
 }
 
 interface SocketData {
@@ -336,15 +354,20 @@ export function startOpsBroadcast(eventId: string): void {
   const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
 
   const tick = async (): Promise<void> => {
-    const room = `event:${eventId}:ops`
     try {
-      const watchers = io ? await io.in(room).fetchSockets() : []
-      if (watchers.length === 0) {
+      // One snapshot per pass, shaped per room: the venue's copy is the host's
+      // with its counts rounded, never a second round of queries.
+      const views = (["host", "venue"] as const).map((view) => ({ view, room: opsRoom(eventId, view) }))
+      const watched = await Promise.all(
+        views.map(async (v) => ((await io.in(v.room).fetchSockets()).length > 0 ? v : null))
+      )
+      const rooms = watched.filter((v) => v !== null)
+      if (rooms.length === 0) {
         stopOpsBroadcast(eventId)
         return
       }
       const snapshot = await buildLiveSnapshot(eventId)
-      if (snapshot) io?.to(room).emit("ops:snapshot", snapshot)
+      if (snapshot) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, snapshot))
     } catch (error) {
       // A failed pass must not kill the loop or the process — the next one may
       // well succeed, and a dead loop is a silently frozen screen.
@@ -360,6 +383,11 @@ export function startOpsBroadcast(eventId: string): void {
 
   state.timer = setTimeout(() => void tick(), OPS_INTERVAL_MS)
   opsTimers.set(eventId, state)
+}
+
+/** The snapshot a watcher of this view is sent. */
+function asSeenBy(view: OpsView, snapshot: LiveSnapshot): LiveSnapshot | VenueLiveSnapshot {
+  return view === "host" ? snapshot : forVenue(snapshot)
 }
 
 export function stopOpsBroadcast(eventId: string): void {
@@ -446,15 +474,40 @@ export async function emitChatTyping(
           user_id: socket.data.userId,
         },
       },
-      select: { anonymous_name: true, status: true, chat_group: { select: { event_id: true } } },
+      select: {
+        anonymous_name: true,
+        status: true,
+        last_allowed_at: true,
+        chat_group: {
+          select: {
+            id: true,
+            kind: true,
+            event_id: true,
+            event: { select: { status: true, deleted_at: true, kind: true } },
+            ...ownerDoor(socket.data.userId),
+          },
+        },
+      },
     })
 
     if (!membership || membership.status !== "active") return
+    // The room's door, for every kind: a member row whose owner no longer
+    // admits them (a board post's ask that is not accepted) types to nobody.
+    if (roomOwnerDenial(membership.chat_group, socket.data.userId)) return
+    // A venue day's room is the people live in it: an ended Go Live types into nothing.
+    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
 
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
     // room, so a blocker watched the person they blocked type (SCRUM-338).
-    const hidden = await blockCounterparties(socket.data.userId)
+    // A board post's room hides a closed conversation's pair too (`keptApartIn`).
+    const hidden = await keptApartIn(socket.data.userId, membership.chat_group.kind)
+    // A crew's room calls its members by first name, a Blend's by tonight's
+    // pseudonym (`namesInRoom`); an event's by the pseudonym on the row.
+    const userName =
+      membership.chat_group.kind !== "event"
+        ? ((await namesInRoom(membership.chat_group, [socket.data.userId])).get(socket.data.userId) ?? "Someone")
+        : membership.anonymous_name || "Someone"
     /*
      * Per recipient, and still not back to the typing socket: `socket.to()`
      * left out the sender's own socket, so this does too. `socket.nsp` is the
@@ -463,12 +516,12 @@ export async function emitChatTyping(
      */
     await emitAsSeenBy(
       socket.nsp.in(`chat:${chatGroupId}`).except(hidden.map((id) => `user:${id}`)),
-      membership.chat_group.event_id,
+      roomScope(membership.chat_group),
       "chat:typing",
       (idFor) => ({
         chatGroupId,
         userId: idFor(socket.data.userId),
-        userName: membership.anonymous_name || "Someone",
+        userName,
         isTyping,
       }),
       socket.id
@@ -558,7 +611,7 @@ export async function emitPrivateTyping(
  * an unbounded `IN (…)`. Two hundred is far more than a screenful and far less
  * than a query worth worrying about.
  */
-const READ_RECEIPT_BATCH = 200
+export const READ_RECEIPT_BATCH = 200
 
 export async function emitPrivateRead(
   socket: AuthenticatedSocket,
@@ -583,15 +636,15 @@ export async function emitPrivateRead(
     const ids = messageIds.slice(0, READ_RECEIPT_BATCH)
     if (ids.length === 0) return
 
-    await db.private_messages.updateMany({
-      where: {
-        id: { in: ids },
-        conversation_id: conversationId,
-        sender_id: { not: socket.data.userId },
-        is_read: false,
-      },
-      data: { is_read: true },
-    })
+    const theirs = { id: { in: ids }, conversation_id: conversationId, sender_id: { not: socket.data.userId } }
+    // A read counts as delivered (SCRUM-408): the ones not delivered yet, named for the off branch below.
+    const undelivered = (
+      await db.private_messages.findMany({ where: { ...theirs, delivered_at: null }, select: { id: true } })
+    ).map((m) => m.id)
+    await db.private_messages.updateMany({ where: { ...theirs, is_read: false }, data: { is_read: true } })
+    if (undelivered.length > 0) {
+      await db.private_messages.updateMany({ where: { id: { in: undelivered }, delivered_at: null }, data: { delivered_at: new Date() } })
+    }
 
     /*
      * The setting governs disclosure, never the record above. Somebody with
@@ -602,7 +655,15 @@ export async function emitPrivateRead(
       where: { id: socket.data.userId },
       select: { read_receipts: true },
     })
-    if (reader?.read_receipts === false) return
+    if (reader?.read_receipts === false) {
+      // Delivery is not private (it goes out whatever the setting): the sender
+      // still sees ✓✓ for what this read delivered. With receipts on, the
+      // `private:read` below says more than that, so it is not sent twice.
+      if (undelivered.length > 0) {
+        socket.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds: undelivered })
+      }
+      return
+    }
 
     socket.to(`conversation:${conversationId}`).emit("private:read", {
       conversationId,
@@ -666,6 +727,42 @@ export function emitDelivered(conversationId: string, messageIds: string[]): voi
   const io = currentIo()
   if (!io || messageIds.length === 0) return
   io.to(`conversation:${conversationId}`).emit("private:delivered", { conversationId, messageIds })
+}
+
+/**
+ * A read a route recorded (a thread opened, "Mark all read"): tell the
+ * conversation, unless the reader has read receipts off. The record is written
+ * either way; the setting governs disclosure only, as in `emitPrivateRead`.
+ * Not awaited by the route: a failure is logged and never fails the read.
+ * At most `READ_RECEIPT_BATCH` ids per conversation: the caller sends the newest.
+ */
+export function emitRead(conversationId: string, messageIds: string[], readerId: string): void {
+  emitReads(readerId, [[conversationId, messageIds]])
+}
+
+/** `emitRead` for many conversations, with one look at the reader's setting. */
+export function emitReads(readerId: string, reads: ReadonlyArray<readonly [string, string[]]>): void {
+  const toSend = reads.filter(([, ids]) => ids.length > 0)
+  const io = currentIo()
+  if (!io || toSend.length === 0) return
+  db.profiles
+    .findUnique({ where: { id: readerId }, select: { read_receipts: true } })
+    .then((reader) => {
+      if (reader?.read_receipts === false) return
+      for (const [conversationId, ids] of toSend) {
+        io.to(`conversation:${conversationId}`).emit("private:read", {
+          conversationId,
+          messageIds: ids.slice(0, READ_RECEIPT_BATCH),
+          readBy: readerId,
+        })
+      }
+    })
+    .catch((error: unknown) => {
+      logger.warn("Private read receipt failed", {
+        userId: readerId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
 }
 
 /**
@@ -762,9 +859,18 @@ export function initSocketServer(httpServer: HttpServer): Server {
          */
         const account = await db.user.findUnique({
           where: { id: decoded.userId },
-          select: { deletedAt: true, suspended_at: true, role: true },
+          select: { deletedAt: true, suspended_at: true, role: true, mobile_sessions_revoked_at: true },
         })
-        if (accountBlockReason(account)) {
+        const blocked = accountBlockReason(account)
+        if (blocked) {
+          // The reason rides on `data.code` so the phone can say why (Flow 15);
+          // the message is the one it always was.
+          return next(Object.assign(new Error("Authentication required"), { data: { code: SOCKET_REFUSAL_CODE[blocked] } }))
+        }
+        // A token from before the phones were signed out (SCRUM-603): the
+        // eviction closed its socket, and this keeps it from reconnecting.
+        const phonesEnded = account?.mobile_sessions_revoked_at
+        if (phonesEnded && decoded.iat * 1000 <= phonesEnded.getTime()) {
           return next(new Error("Authentication required"))
         }
 
@@ -801,11 +907,22 @@ export function initSocketServer(httpServer: HttpServer): Server {
     // Send connection confirmation
     authSocket.emit("connected", { userId: authSocket.data.userId })
 
-    // Join user's personal room for direct notifications
-    authSocket.join(`user:${authSocket.data.userId}`)
+    // Join user's personal room for direct notifications, and the one for
+    // this kind of session, so ending one kind closes only those (SCRUM-603).
+    authSocket.join([`user:${authSocket.data.userId}`, `user:${authSocket.data.userId}:${authSocket.data.principal}`])
 
     // Event room handlers
     authSocket.on("join:event", async (eventId) => {
+      /*
+       * The attendee counter, for phones. It carries the exact count in the
+       * room on every arrival and departure; the dashboard never asks for it,
+       * and a dashboard cookie in it would hand a venue the number its Live
+       * tab gives as a range (SCRUM-516).
+       */
+      if (authSocket.data.principal === "dashboard") {
+        authSocket.emit("error", { message: "Not authorized to join this event", code: "FORBIDDEN" })
+        return
+      }
       await guardJoin(
         authSocket,
         `event:${eventId}`,
@@ -848,35 +965,55 @@ export function initSocketServer(httpServer: HttpServer): Server {
      * carries attendee-facing traffic including check-in names, and a host must
      * not receive it. This one carries aggregates only.
      */
-    authSocket.on("join:eventOps", async (eventId) => {
-      if (authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
+    authSocket.on("join:eventOps", async (rawEventId) => {
+      // A uuid or nothing: the id names the room and keys the broadcast loop,
+      // so an object or a second spelling would start a loop of its own.
+      if (!isUuid(rawEventId) || authSocket.data.principal !== "dashboard" || !authSocket.data.role) {
         // An attendee token must never reach ops aggregates, even if the user
         // behind it also happens to hold a dashboard role.
         authSocket.emit("error", { message: "Not authorized", code: "OPS_FORBIDDEN" })
         return
       }
+      const eventId = rawEventId.toLowerCase()
       const principal = {
         userId: authSocket.data.userId,
         email: authSocket.data.email,
         role: authSocket.data.role,
       }
-      await guardJoin(
-        authSocket,
-        `event:${eventId}:ops`,
-        "Not authorized to watch this event",
-        () => canJoinEventOps(principal, eventId)
-      )
-      // Send one snapshot immediately so the screen is populated on open
-      // rather than blank until the first tick.
-      if (authSocket.rooms.has(`event:${eventId}:ops`)) {
-        const snapshot = await buildLiveSnapshot(eventId).catch(() => null)
-        if (snapshot) authSocket.emit("ops:snapshot", snapshot)
-        startOpsBroadcast(eventId)
+      /*
+       * Not `guardJoin`: which room is decided by who is asking. Whoever runs
+       * the event and the venue it is held at are sent different copies of the
+       * snapshot, to different rooms (SCRUM-516). Fails closed the same way --
+       * a throw (a malformed id from a hostile client) denies -- and with the
+       * code the dashboard hook reads as "denied" rather than "connection lost".
+       */
+      const view = await eventOpsView(principal, eventId).catch((error: unknown) => {
+        logger.warn("Socket join authorization check failed", {
+          room: `event:${eventId}:ops`,
+          userId: authSocket.data.userId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        return null
+      })
+      // Out of both first: a socket asking again after its access changed keeps
+      // neither copy it had, whatever the answer is now.
+      authSocket.leave(opsRoom(eventId, "host"))
+      authSocket.leave(opsRoom(eventId, "venue"))
+      if (!view) {
+        authSocket.emit("error", { message: "Not authorized to watch this event", code: "OPS_FORBIDDEN" })
+        return
       }
+      authSocket.join(opsRoom(eventId, view))
+      // One snapshot now, so the screen is populated on open rather than blank
+      // until the first tick.
+      const snapshot = await buildLiveSnapshot(eventId).catch(() => null)
+      if (snapshot) authSocket.emit("ops:snapshot", asSeenBy(view, snapshot))
+      startOpsBroadcast(eventId)
     })
 
     authSocket.on("leave:eventOps", (eventId) => {
-      authSocket.leave(`event:${eventId}:ops`)
+      authSocket.leave(opsRoom(eventId, "host"))
+      authSocket.leave(opsRoom(eventId, "venue"))
     })
 
     // Chat room handlers
@@ -935,11 +1072,6 @@ export function initSocketServer(httpServer: HttpServer): Server {
     authSocket.on("private:markRead", (conversationId, messageIds) =>
       void emitPrivateRead(authSocket, conversationId, messageIds)
     )
-
-    // Ping handler for connection health
-    authSocket.on("ping", () => {
-      // Socket.io handles pong automatically
-    })
 
     // Disconnect handler
     authSocket.on("disconnect", (reason) => {
@@ -1003,21 +1135,73 @@ type Payload<E extends keyof ServerToClientEvents> = Parameters<ServerToClientEv
  * person, so send the handled copy as one broadcast `except` that person's
  * `user:` room and fetch only their own sockets for the real-id copy.
  */
+/** Event kinds never change, so one lookup per event is enough. Bounded. */
+const eventKinds = new Map<string, string>()
+
+/**
+ * Who in this audience may still hear a venue day's room: null for an event
+ * (everyone the room let in), else the members whose Go Live is open now.
+ *
+ * The eviction at a window's end (`evictFromVenueDay`) takes a socket out of
+ * the rooms, but it runs when the checkout runs; between the window's end and
+ * that moment — a timer that slipped, a sweep still to come, a replica that
+ * never heard — a socket still in `chat:<room>` would go on receiving it.
+ * Asking here, per emit, makes the window the rule rather than the timer
+ * (step 4 review).
+ */
+async function liveAudienceOf(eventId: string, viewers: string[]): Promise<Set<string> | null> {
+  let kind = eventKinds.get(eventId)
+  if (!kind) {
+    kind = (await db.events.findUnique({ where: { id: eventId }, select: { kind: true } }))?.kind ?? "event"
+    if (eventKinds.size > 5_000) eventKinds.clear()
+    eventKinds.set(eventId, kind)
+  }
+  if (kind !== "venue_day") return null
+  const rows = await db.chat_group_members.findMany({
+    where: {
+      chat_group: { event_id: eventId },
+      user_id: { in: viewers },
+      status: { not: "banned" },
+      last_allowed_at: { gt: new Date() },
+    },
+    select: { user_id: true },
+  })
+  return new Set(rows.map((r) => r.user_id))
+}
+
 async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
   audience: { fetchSockets(): Promise<RemoteSocket<ServerToClientEvents, Partial<SocketData> | undefined>[]> },
-  eventId: string,
+  /** The room the handles are minted in: an event id, or a room of another kind (`RoomScope`). */
+  scope: RoomScope,
   event: E,
   build: (idFor: (userId: string) => string, recognises: boolean) => Payload<E>,
   skipSocketId?: string,
   about?: string
 ): Promise<void> {
-  const sockets = await audience.fetchSockets()
-  const viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
-  const recognising = about ? await recognisedInRoomBy(eventId, about, viewers) : new Set<string>()
+  let sockets = await audience.fetchSockets()
+  let viewers = [...new Set(sockets.map((s) => s.data?.userId).filter((id): id is string => !!id))]
+  /*
+   * A room that is not an event's asks its owner again on every delivery
+   * (E3): a post withdrawn, taken down or blocked between two of its people
+   * closes the room for them, and a socket that joined before it closed must
+   * not keep hearing it. Whoever the owner no longer admits is left out and
+   * taken out of the room. An event's room keeps its own rule: a venue day's
+   * is asked per emit too (`liveAudienceOf`), any other's door is the join.
+   */
+  if (typeof scope !== "string") {
+    const admitted = (await ownerAdmits(scope.groupId, viewers)) ?? new Set(viewers)
+    for (const s of sockets) if (!admitted.has(s.data?.userId ?? "")) s.leave(`chat:${scope.groupId}`)
+    sockets = sockets.filter((s) => admitted.has(s.data?.userId ?? ""))
+    viewers = viewers.filter((v) => admitted.has(v))
+  }
+  const live = typeof scope === "string" ? await liveAudienceOf(scope, viewers) : null
+  // Recognition is an event room's rule (the roster's); `about` is only ever an arrival there.
+  const recognising =
+    about && typeof scope === "string" ? await recognisedInRoomBy(scope, about, viewers) : new Set<string>()
   const handles = new Map<string, string>()
   const handleOf = (userId: string) => {
     let handle = handles.get(userId)
-    if (!handle) handles.set(userId, (handle = roomHandle(eventId, userId)))
+    if (!handle) handles.set(userId, (handle = roomHandle(scope, userId)))
     return handle
   }
   const copies = new Map<string, Payload<E>>()
@@ -1025,6 +1209,8 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
     if (recipient.id === skipSocketId) continue
     // No user on the socket means nobody is "own": every id goes out handled.
     const viewer = recipient.data?.userId ?? ""
+    // A venue day's room: only the people live in it now.
+    if (live && !live.has(viewer)) continue
     let copy = copies.get(viewer)
     if (!copy) {
       const idFor = (userId: string) => (userId === viewer ? userId : handleOf(userId))
@@ -1035,13 +1221,14 @@ async function emitAsSeenBy<E extends keyof ServerToClientEvents>(
 }
 
 /**
- * `emitAsSeenBy` for a chat room, which knows its group and not always its event.
+ * `emitAsSeenBy` for a chat room, which knows its group and not always its scope.
  *
- * The handle is per event (`chat_groups.event_id`, one room per event). A
- * caller that already holds the event passes it — room delivery, the announce
- * routes, polls and the organiser moderation routes all do — and the rest are
- * looked up here rather than asked for, since a handle minted from the wrong
- * id would be a different person. Never rejects, like the rest of this file's
+ * The handle is per room: an event's room by its event (one room per event),
+ * a room of another kind by its own id and kind (`roomScope`). A caller that
+ * already holds the scope passes it — room delivery, the announce routes,
+ * polls and the organiser moderation routes all do — and the rest are looked
+ * up here rather than asked for, since a handle minted from the wrong id
+ * would be a different person. Never rejects, like the rest of this file's
  * emitters: the write it reports has already committed.
  */
 async function toChatRoom<E extends keyof ServerToClientEvents>(
@@ -1049,14 +1236,16 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
   audience: Parameters<typeof emitAsSeenBy<E>>[0],
   event: E,
   build: Parameters<typeof emitAsSeenBy<E>>[3],
-  knownEventId?: string
+  knownScope?: RoomScope
 ): Promise<void> {
   try {
-    const eventId =
-      knownEventId ??
-      (await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { event_id: true } }))?.event_id
-    if (!eventId) return
-    await emitAsSeenBy(audience, eventId, event, build)
+    let scope = knownScope
+    if (!scope) {
+      const room = await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { id: true, kind: true, event_id: true } })
+      if (!room) return
+      scope = roomScope(room)
+    }
+    await emitAsSeenBy(audience, scope, event, build)
   } catch (error) {
     logger.error("Room emit failed", {
       chatGroupId,
@@ -1082,8 +1271,8 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
  * somebody arrived or left matters more than the number, and a client that
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
-function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): void {
-  hereCountFor(eventId)
+function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): Promise<void> {
+  return hereCountFor(eventId)
     .catch((error: unknown) => {
       logger.warn("hereCount lookup failed; emitting without it", {
         eventId,
@@ -1115,14 +1304,20 @@ export function emitEventCheckIn(
    */
   identity?: { name: string | null; image: string | null },
   /** The arriver's block counterparties: kept off the roster, as off the push (SCRUM-338). */
-  excludeUserIds: readonly string[] = []
-): void {
+  excludeUserIds: readonly string[] = [],
+  /**
+   * False when the REST roster leaves them out ("Show online status" off):
+   * then no `event:room:checkin` at all, to anybody — only `event:checkin`,
+   * which names nobody, so the count still moves (SCRUM-620).
+   */
+  listed = true
+): Promise<void> {
   const io = currentIo()
-  if (!io) return
+  if (!io) return Promise.resolve()
 
   const checkInTime = new Date().toISOString()
 
-  sendWithHereCount(eventId, (hereCount) => {
+  return sendWithHereCount(eventId, (hereCount) => {
     /*
      * Two rooms, because two audiences want different things.
      *
@@ -1154,6 +1349,7 @@ export function emitEventCheckIn(
        * room made an opted-in friend arrive as "Cosmic Panda" and turn into
        * their name on the next refresh.
        */
+      listed &&
       emitAsSeenBy(
         io.in(`event:room:${eventId}`).except(excludeUserIds.map((id) => `user:${id}`)),
         eventId,
@@ -1305,10 +1501,28 @@ export function closeConversationRoom(conversationId: string): void {
  * the underlying connections across the Redis adapter; the client's reconnect
  * then meets the handshake gate and stays out.
  */
-export function evictUserSockets(userId: string): void {
+export function evictUserSockets(userId: string, only?: "mobile" | "dashboard"): void {
   const io = currentIo()
   if (!io) return
-  io.in(`user:${userId}`).disconnectSockets(true)
+  // Only the dashboard's sockets, or only the phones', when one kind of
+  // session ends (Settings, a password change; SCRUM-603).
+  if (only) io.in(`user:${userId}:${only}`).disconnectSockets(true)
+  else io.in(`user:${userId}`).disconnectSockets(true)
+}
+
+/**
+ * Out of a venue day's rooms, on every instance (`liveInVenueDay`).
+ *
+ * The joins are refused once a Go Live ends, but a socket already in
+ * `chat:<room>` keeps receiving until it disconnects — the SCRUM-205 shape.
+ * Told first, on their own `user:` room, so the app can say why.
+ */
+export function evictFromVenueDay(eventId: string, chatGroupId: string | null, userId: string, reason: string): void {
+  const io = currentIo()
+  if (!io) return
+  io.to(`user:${userId}`).emit("live:ended", { eventId, reason })
+  const rooms = [`event:${eventId}`, `event:room:${eventId}`, ...(chatGroupId ? [`chat:${chatGroupId}`] : [])]
+  io.in(`user:${userId}`).socketsLeave(rooms)
 }
 
 /**
@@ -1344,8 +1558,8 @@ export function emitChatMessage(
     parentId?: string
   },
   excludeUserIds: readonly string[] = [],
-  /** The room's event, when the caller has it — saves `toChatRoom` a lookup. */
-  eventId?: string
+  /** The room's handle scope, when the caller has it — saves `toChatRoom` a lookup. */
+  scope?: RoomScope
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1355,7 +1569,7 @@ export function emitChatMessage(
     io.in(`chat:${chatGroupId}`).except(excludeUserIds.map((id) => `user:${id}`)),
     "chat:message",
     (idFor) => ({ chatGroupId, message: { ...message, userId: idFor(message.userId) } }),
-    eventId
+    scope
   )
 }
 
@@ -1407,7 +1621,7 @@ export function emitChatMessageDeleted(chatGroupId: string, messageId: string): 
  * Includes userId and moderation flag so the client can show a
  * "message removed" placeholder to the sender instead of just deleting it.
  */
-export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string, eventId?: string): void {
+export function emitChatMessageHidden(chatGroupId: string, messageId: string, userId: string, scope?: RoomScope): void {
   const io = currentIo()
   if (!io) return
   // The author still sees their own id and draws the placeholder; the rest of
@@ -1417,14 +1631,14 @@ export function emitChatMessageHidden(chatGroupId: string, messageId: string, us
     io.in(`chat:${chatGroupId}`),
     "chat:messageDeleted",
     (idFor) => ({ chatGroupId, messageId, moderation: true, userId: idFor(userId) }),
-    eventId
+    scope
   )
 }
 
 /**
  * Emit a member ban/unban to the chat room
  */
-export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean, eventId?: string): void {
+export function emitChatMemberBanned(chatGroupId: string, userId: string, banned: boolean, scope?: RoomScope): void {
   const io = currentIo()
   if (!io) return
   /*
@@ -1445,7 +1659,7 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
     io.in(`chat:${chatGroupId}`),
     "chat:memberBanned",
     (idFor) => ({ chatGroupId, userId: idFor(userId), banned }),
-    eventId
+    scope
   ).then(() => {
     if (banned) io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
   })
@@ -1471,7 +1685,7 @@ export function emitChatMemberLeft(
   chatGroupId: string,
   userId: string,
   excludeUserIds: readonly string[] | null,
-  eventId?: string
+  scope?: RoomScope
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1484,7 +1698,7 @@ export function emitChatMemberLeft(
     io.in(`chat:${chatGroupId}`).except(excludeUserIds.map((id) => `user:${id}`)),
     "chat:memberLeft",
     (idFor) => ({ chatGroupId, userId: idFor(userId) }),
-    eventId
+    scope
   ).then(() => {
     io.in(`user:${userId}`).socketsLeave(`chat:${chatGroupId}`)
   })
@@ -1498,7 +1712,7 @@ export function emitChatMemberMuted(
   userId: string,
   muted: boolean,
   reason?: string,
-  eventId?: string
+  scope?: RoomScope
 ): void {
   const io = currentIo()
   if (!io) return
@@ -1507,7 +1721,7 @@ export function emitChatMemberMuted(
     io.in(`chat:${chatGroupId}`),
     "chat:memberMuted",
     (idFor) => ({ chatGroupId, userId: idFor(userId), muted, reason }),
-    eventId
+    scope
   )
 }
 

@@ -4,6 +4,8 @@ import {
   columnsOf,
   coordinatesFromMapsUrl,
   duplicateInFile,
+  listedDuplicate,
+  nameKey,
   followShortLink,
   readRow,
   venueTypeFrom,
@@ -67,7 +69,21 @@ describe("readRow", () => {
   it("accepts a complete row", async () => {
     await expect(readRow(base, 2, offline)).resolves.toEqual({
       ok: true,
-      row: { line: 2, name: "Toit Brewpub", address: null, city: "Bengaluru", venueType: "brewery", lat: 12.9792, lng: 77.6407, source: "lat/lng" },
+      row: { line: 2, name: "Toit Brewpub", address: null, city: "Bengaluru", venueType: "brewery", lat: 12.9792, lng: 77.6407, source: "lat/lng", origin: null },
+    })
+  })
+
+  it("reads a dataset row's source and record id, and refuses one without the other", async () => {
+    const fromDataset = { ...base, source: "overture:2026-09-23.1", source_id: "abc-123" }
+    await expect(readRow(fromDataset, 2, offline)).resolves.toMatchObject({
+      ok: true,
+      row: { origin: { source: "overture:2026-09-23.1", recordId: "abc-123" } },
+    })
+    await expect(readRow({ ...base, source_id: "abc-123" }, 3, offline)).resolves.toEqual({
+      ok: false,
+      line: 3,
+      name: "Toit Brewpub",
+      reason: "source and source_id go together",
     })
   })
 
@@ -99,12 +115,43 @@ describe("readRow", () => {
 
 describe("duplicateInFile", () => {
   const row = (line: number, lat: number, lng: number): VenueRow =>
-    ({ line, name: `r${line}`, address: null, city: "Bengaluru", venueType: null, lat, lng, source: "lat/lng" })
+    ({ line, name: `r${line}`, address: null, city: "Bengaluru", venueType: null, lat, lng, source: "lat/lng", origin: null })
 
   it("catches a second row within 100 m of an earlier one, and lets one 150 m away through", () => {
     const first = row(2, 12.9792, 77.6407)
     expect(duplicateInFile(row(3, 12.9795, 77.6408), [first])).toMatchObject({ of: first, metres: 35 })
     expect(duplicateInFile(row(4, 12.97785, 77.6407), [first])).toBeNull()
+  })
+
+  it("keeps two differently named dataset rows 35 m apart, as a dense strip of bars needs, and still merges one name", () => {
+    const fromDataset = (line: number, name: string, lat: number): VenueRow => ({
+      ...row(line, lat, 77.6407),
+      name,
+      origin: { source: "overture:2026-09-23.1", recordId: `id${line}` },
+    })
+    const first = fromDataset(2, "Toit Brewpub", 12.9792)
+    expect(duplicateInFile(fromDataset(3, "Hoot", 12.9795), [first])).toBeNull()
+    expect(duplicateInFile(fromDataset(4, "TOIT brew pub", 12.9795), [first])).toMatchObject({ of: first, metres: 33 })
+    expect(duplicateInFile(fromDataset(5, "Toit", 12.9795), [first])).toMatchObject({ of: first })
+  })
+})
+
+describe("listedDuplicate", () => {
+  const fromDataset: VenueRow = {
+    line: 2, name: "Phoenix Mall", address: null, city: "Bengaluru", venueType: null,
+    lat: 12.9972, lng: 77.6963, source: "lat/lng", origin: { source: "overture:2026-09-23.1", recordId: "id2" },
+  }
+
+  it("matches a same-named venue whose outline holds the pin, though its own pin is 167 m off", () => {
+    expect(listedDuplicate(fromDataset, [{ name: "Phoenix Mall", distanceMetres: 167 }])).toEqual({ name: "Phoenix Mall", distanceMetres: 167 })
+    expect(listedDuplicate(fromDataset, [{ name: "Toit", distanceMetres: 40 }])).toBeUndefined()
+  })
+})
+
+describe("nameKey", () => {
+  it("compares letters and digits in any script, so a Kannada name is never the empty name", () => {
+    expect(nameKey("The Loft.")).toBe(nameKey("the loft"))
+    expect(nameKey("ಟೋಯ್ಟ್")).not.toBe("")
   })
 })
 

@@ -16,7 +16,7 @@ import { join, relative, resolve } from "path"
  *
  * Two things are deliberately still viewport-based:
  *
- *   - **padding** (`lg:px-6`) mirrors the shell's own padding, and an element
+ *   - **padding** (`md:px-8`) mirrors the shell's own padding, and an element
  *     cannot query the container it establishes
  *   - **overlays** — a `Sheet` or `Dialog` is anchored to the window and is not
  *     inside the content column at all

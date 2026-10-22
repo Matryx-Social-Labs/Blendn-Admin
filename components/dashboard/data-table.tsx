@@ -8,7 +8,6 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconColumns3,
-  IconRefresh,
   IconSearch,
   IconX,
 } from "@tabler/icons-react"
@@ -112,10 +111,8 @@ export function DataTable<T extends { id: string | number }>({
   rows,
   emptyState,
   label,
-  toolbar,
   footer,
   rowHref,
-  className,
   sortable,
   defaultSort,
   selectable,
@@ -125,21 +122,15 @@ export function DataTable<T extends { id: string | number }>({
   filters = [],
   pagination,
   defaultPageSize = 20,
-  pageSizes = [10, 20, 50, 100],
   columnMenu,
-  loading,
-  error,
-  onRetry,
 }: {
   columns: Column<T>[]
   rows: T[]
   emptyState: ReactNode
   /** The table's accessible name, for a screen with no heading right above it. */
   label?: string
-  toolbar?: ReactNode
   footer?: ReactNode
   rowHref?: (row: T) => string
-  className?: string
   sortable?: boolean
   defaultSort?: SortState
   selectable?: boolean
@@ -155,11 +146,7 @@ export function DataTable<T extends { id: string | number }>({
   filters?: TableFilter[]
   pagination?: boolean
   defaultPageSize?: number
-  pageSizes?: number[]
   columnMenu?: boolean
-  loading?: boolean
-  error?: string
-  onRetry?: () => void
 }) {
   const [sort, setSort] = useState<SortState | null>(defaultSort ?? null)
   const [selection, setSelection] = useState(emptySelection)
@@ -229,8 +216,7 @@ export function DataTable<T extends { id: string | number }>({
   const headerState = headerCheckState(selection, pageIds)
 
   return (
-    <div className={cn("flex flex-col gap-3", className)}>
-      {toolbar}
+    <div className="flex flex-col gap-3">
 
       {search || filters.length > 0 || columnMenu ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -446,36 +432,7 @@ export function DataTable<T extends { id: string | number }>({
         </div>
       ) : null}
 
-      {error ? (
-        <div className="flex flex-col items-center gap-2.5 rounded-lg border border-border px-5 py-8 text-center">
-          <p className="text-[0.84375rem]">{error}</p>
-          {onRetry ? (
-            <Button size="sm" variant="outline" onClick={onRetry}>
-              <IconRefresh className="size-4" /> Retry
-            </Button>
-          ) : null}
-        </div>
-      ) : loading ? (
-        <div
-          aria-busy="true"
-          aria-label="Loading"
-          className="overflow-hidden rounded-lg border border-border"
-        >
-          {/* A skeleton shaped like the table, not a spinner — the eye keeps
-              its place when the real rows land. */}
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} className="flex gap-3 border-b border-border px-3 py-3 last:border-0">
-              {visibleColumns.map((c) => (
-                <span
-                  key={c.key}
-                  className="h-3 flex-1 animate-pulse rounded bg-surface-raised"
-                  style={{ animationDelay: `${i * 80}ms` }}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
-      ) : sorted.length === 0 && !isFiltered ? (
+      {sorted.length === 0 && !isFiltered ? (
         emptyState
       ) : sorted.length === 0 ? (
         // Distinct from the designed empty state: nothing matches a filter the
@@ -618,7 +575,7 @@ export function DataTable<T extends { id: string | number }>({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {pageSizes.map((n) => (
+                {[10, 20, 50, 100].map((n) => (
                   <SelectItem key={n} value={String(n)}>
                     {n}
                   </SelectItem>

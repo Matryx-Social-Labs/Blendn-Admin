@@ -5,6 +5,11 @@ import { getAmenities } from "@/lib/amenity-actions"
 
 import { AmenityManager } from "./manager"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/amenities")
+
 export const dynamic = "force-dynamic"
 
 /**

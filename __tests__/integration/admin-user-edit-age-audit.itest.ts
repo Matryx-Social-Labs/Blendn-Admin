@@ -12,7 +12,7 @@ import type { DashboardRole } from "@/lib/dashboard-types"
  * canonically audited. Real actions against real Postgres, rows read back.
  */
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { getUsers, updateUser, updateUserRole } from "@/app/dashboard/users/actions"
@@ -97,6 +97,22 @@ describe("every admin edit is accountable", () => {
     expect(row?.details).toMatchObject({
       changed: { name: { from: expect.any(String), to: "After" }, age: { from: 22, to: 23 }, onboarded: { from: false, to: true } },
     })
+  })
+
+  it("writes no user.updated row for a save that changed nothing, as a role-only edit sends it (SCRUM-614)", async () => {
+    await admin()
+    const id = await makeUser(testId("aua-noop"), "attendee")
+    users.push(id)
+    const before = await db.user.findUniqueOrThrow({ where: { id } })
+
+    // The Edit dialog sends every field it shows, changed or not, and then the role.
+    await updateUser(id, { name: before.name ?? undefined, email: before.email })
+    await updateUserRole(id, "organizer")
+
+    // The role row landing proves the writes are done; the empty one never comes.
+    expect(await auditRow({ resource_id: id, action: "user.role_changed" })).not.toBeNull()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(await db.audit_logs.count({ where: { resource_id: id, action: "user.updated" } })).toBe(0)
   })
 
   it("writes user.role_changed with from and to", async () => {

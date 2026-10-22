@@ -145,7 +145,17 @@ describe("authorization is not hand-rolled outside lib/rbac.ts", () => {
  * other ways in, and the positive checks below pin the known readers to the
  * doors. Scans every file, including the ones `ALLOWED` exempts above.
  */
-const VENUE_RULES: Array<{ name: string; pattern: RegExp; why: string }> = [
+/**
+ * Files that read events by a list of venue ids and are not an owner's scope.
+ * The rule below exists for "an owner's venues, then their events"; a guest
+ * count over the venues an attendee is browsing is a different question.
+ */
+const VENUE_IN_READS_ALLOWED = new Map([
+  ["lib/live-count.ts", "who is live at the venues on an attendee's list or venue page, kept as a bucket; nothing per person reaches anyone, nothing reaches an owner"],
+  ["lib/venue-plan.ts", "a venue's purchases (`billing_checkouts.venue_id`, step 17), not its events"],
+])
+
+const VENUE_RULES: Array<{ name: string; pattern: RegExp; why: string; allowed?: Map<string, string> }> = [
   {
     name: "relation filter on the venue's owner",
     // Any key order, `is:`, shorthand, `venues: { some: … }`. Not a `select`
@@ -157,6 +167,7 @@ const VENUE_RULES: Array<{ name: string; pattern: RegExp; why: string }> = [
     name: "owned venue ids, then events by `venue_id: { in }`",
     pattern: /\bvenue_id\s*:\s*\{\s*in\s*:/,
     why: "the two-step version of the same scope; use claimedVenueEventsWhere()",
+    allowed: VENUE_IN_READS_ALLOWED,
   },
   {
     name: "raw SQL joining events to a venue's owner",
@@ -175,6 +186,17 @@ const VENUE_ID_READ = /\b(?:where|event|events)\s*:\s*\{[^{}]*\bvenue_id\s*:(?!\
 const VENUE_ID_READS_ALLOWED = new Map([
   ["lib/venue-actions.ts", "counts future bookings to refuse a retire; nothing is shown"],
   ["lib/venue-claim-actions.ts", "venue_claims rows, not events"],
+  ["lib/venue-day.ts", "finds the venue's own day to go live in; nothing is shown to an owner"],
+  ["lib/venue-visibility.ts", "whether a real event has a venue now, for Go Live, the venue page and the sweeper; nothing is shown to an owner"],
+  ["app/api/mobile/venues/[venueId]/route.ts", "the attendee's venue page: a bucketed live count and tonight's public event; nothing per person, nothing to an owner"],
+  ["lib/presence-sweeper.ts", "closes a venue's Go Live sessions when an event there starts; nothing is shown to anyone"],
+  ["lib/live-count.ts", "who is live at an attendee's venues, kept as a bucket; nothing per person, nothing to an owner"],
+  ["lib/billing.ts", "an organisation's own purchases (`billing_checkouts.venue_id: null`), not events"],
+  ["lib/venue-plan.ts", "a venue's purchases (`billing_checkouts.venue_id`), not events"],
+  ["lib/subscription-cancel.ts", "a venue's purchases ended when it changes hands (`billing_checkouts.venue_id`), not events"],
+  ["lib/offer-actions.ts", "a venue's offers this week and the passes on screen at its door (`venue_offers`, `venue_offer_sends`), not events; regulars' nights come through lib/regulars.ts, clamped to the claim"],
+  ["lib/offers/person.ts", "the caller's own pass tonight at a venue (`venue_offer_sends`), not events"],
+  ["lib/offers/venue.ts", "a venue's offers this week (`venue_offers`), not events; regulars' nights come through lib/regulars.ts, clamped to the claim"],
 ])
 
 describe("a venue owner's view starts at the claim", () => {
@@ -182,9 +204,18 @@ describe("a venue owner's view starts at the claim", () => {
     (abs) => [abs.replace(`${ROOT}/`, ""), stripComments(readFileSync(abs, "utf8"))] as const
   )
 
-  it.each(VENUE_RULES)("no file has a $name", ({ pattern, why }) => {
-    const offenders = files.filter(([, src]) => pattern.test(src)).map(([rel]) => `${rel} — ${why}`)
+  it.each(VENUE_RULES)("no file has a $name", ({ pattern, why, allowed }) => {
+    const offenders = files
+      .filter(([rel, src]) => pattern.test(src) && !allowed?.has(rel))
+      .map(([rel]) => `${rel} — ${why}`)
     expect(offenders).toEqual([])
+  })
+
+  it("keeps the venue_id-in allowlist honest: each entry still reads that way", () => {
+    for (const rel of VENUE_IN_READS_ALLOWED.keys()) {
+      const src = files.find(([f]) => f === rel)?.[1] ?? ""
+      expect(VENUE_RULES[1].pattern.test(src)).toBe(true)
+    }
   })
 
   it("every read of one venue's events by id goes through claimedWindow()", () => {
@@ -215,7 +246,8 @@ describe("a venue owner's view starts at the claim", () => {
     ["lib/building-occupancy.ts", /opts\.asOwner && venue \? claimedWindow\(venue\)/],
     ["app/dashboard/venues/[id]/page.tsx", /isAdmin \? undefined : claimedWindow\(venue\)/],
     ["app/dashboard/venues/[id]/page.tsx", /: claimedWindow\(venue, \{ from: range\.from, to: range\.to \}\)/],
-    ["app/dashboard/venues/[id]/page.tsx", /getBuildingOccupancy\(id, \{ asOwner: !isAdmin \}\)/],
+    ["app/dashboard/venues/[id]/page.tsx", /const actor = isAdmin \? null : await actorFor\(session\.user\)/],
+    ["app/dashboard/venues/[id]/page.tsx", /getBuildingOccupancy\(id, \{ asOwner: actor \}\)/],
   ])("%s goes through the claim window", (rel, shape) => {
     const src = files.find(([f]) => f === rel)?.[1]
     expect(src).toBeDefined()

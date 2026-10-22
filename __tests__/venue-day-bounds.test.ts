@@ -1,0 +1,65 @@
+import { venueDayBounds } from "@/lib/venue-day"
+
+/**
+ * PL-U01: a venue's day is counted on its own clock, never UTC's. The reset is
+ * the privacy control (pseudonyms are new each day), so a day computed in UTC
+ * would reset at 05:30 in Bengaluru and an hour apart across a DST change.
+ */
+describe("venueDayBounds", () => {
+  it("puts 05:59 in yesterday and 06:00 in today, in Bengaluru", () => {
+    const before = venueDayBounds("Asia/Kolkata", 6, new Date("2026-10-02T00:29:00Z")) // 05:59 IST
+    const at = venueDayBounds("Asia/Kolkata", 6, new Date("2026-10-02T00:30:00Z")) // 06:00 IST
+    expect(before.localDate).toBe("2026-10-01")
+    expect(at.localDate).toBe("2026-10-02")
+    expect(before.end).toEqual(at.start)
+    expect(at.start.toISOString()).toBe("2026-10-02T00:30:00.000Z")
+  })
+
+  it("keeps both ends at 06:00 local across the end of summer time, so that day is 25 h", () => {
+    // Berlin leaves CEST at 03:00 on Sunday 25 Oct 2026.
+    const day = venueDayBounds("Europe/Berlin", 6, new Date("2026-10-24T22:00:00Z"))
+    expect(day.localDate).toBe("2026-10-24")
+    expect(day.start.toISOString()).toBe("2026-10-24T04:00:00.000Z") // 06:00 CEST
+    expect(day.end.toISOString()).toBe("2026-10-25T05:00:00.000Z") // 06:00 CET
+    expect(day.end.getTime() - day.start.getTime()).toBe(25 * 3_600_000)
+  })
+
+  it("honours a venue's own reset hour", () => {
+    expect(venueDayBounds("Asia/Kolkata", 4, new Date("2026-10-01T22:00:00Z")).localDate).toBe("2026-10-01") // 03:30 IST
+    expect(venueDayBounds("Asia/Kolkata", 4, new Date("2026-10-01T22:30:00Z")).localDate).toBe("2026-10-02") // 04:00 IST
+  })
+
+  it("refuses an hour off the clock and a zone it cannot read", () => {
+    for (const hour of [24, -1, 1.5, Number.NaN]) {
+      expect(() => venueDayBounds("Asia/Kolkata", hour, new Date())).toThrow(RangeError)
+    }
+    expect(() => venueDayBounds("Mars/Olympus_Mons", 6, new Date())).toThrow(RangeError)
+  })
+
+  /*
+   * Every instant is inside its own day, and each day ends where the next
+   * begins — across DST changes, and when the reset hour itself is skipped or
+   * repeated (02:00 in Berlin and New York). The coverage review's failing
+   * seeds are among the sampled days.
+   */
+  it("always contains now, and days meet end to start, through DST changes", () => {
+    const zones = ["Asia/Kolkata", "Europe/Berlin", "America/New_York", "Australia/Lord_Howe", "Africa/Casablanca", "Pacific/Auckland"]
+    const days = ["2026-03-08", "2026-03-29", "2026-04-05", "2026-10-04", "2026-10-25", "2026-11-01", "2026-02-15", "2026-10-03"]
+    const misses: string[] = []
+    for (const zone of zones) {
+      for (const hour of [0, 2, 3, 6]) {
+        for (const day of days) {
+          for (let m = -24 * 60; m <= 48 * 60; m += 20) {
+            const now = new Date(Date.parse(`${day}T00:00:00Z`) + m * 60_000)
+            const b = venueDayBounds(zone, hour, now)
+            const next = venueDayBounds(zone, hour, b.end)
+            if (!(b.start <= now && now < b.end) || next.start.getTime() !== b.end.getTime()) {
+              misses.push(`${zone} ${hour}h ${now.toISOString()}`)
+            }
+          }
+        }
+      }
+    }
+    expect(misses).toEqual([])
+  })
+})

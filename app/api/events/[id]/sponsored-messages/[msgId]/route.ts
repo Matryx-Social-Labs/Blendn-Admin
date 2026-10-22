@@ -5,7 +5,6 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { canBroadcast, eventPermissions } from "@/lib/rbac"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
-import { firstWindow } from "@/lib/sponsored-scheduler"
 import { sponsoredMessageUpdateSchema } from "@/lib/validations/event"
 import { canActivate, creativeEditPatch, touchesCreative } from "@/lib/sponsored-moderation"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -25,7 +24,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId },
-      select: { organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } }, chat_group: { select: { id: true } } },
+      select: { kind: true, organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } }, chat_group: { select: { id: true } } },
     })
     if (!event) return errorResponse("Not found", 404)
 
@@ -109,7 +108,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     /*
      * `next_send_at` IS the schedule now — there is no timer to arm.
      *
-     * Switching on sets it to `firstWindow()`, which is *now*: the old
+     * Switching on sets it to *now*: the old
      * `setInterval` had no leading edge, so flipping the switch bought an
      * interval of silence and read as a broken control. Switching off clears it,
      * along with any claim a worker holds, so a pass already in flight finds
@@ -122,7 +121,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const schedule =
       is_active === true && !editsCreative
         ? {
-            next_send_at: firstWindow(),
+            next_send_at: new Date(),
             consecutive_failures: 0,
             deactivated_reason: null,
             claim_token: null,
@@ -182,7 +181,7 @@ export async function DELETE(_: Request, { params }: RouteContext) {
 
     const event = await db.events.findUnique({
       where: { id: eventId },
-      select: { organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } },
+      select: { kind: true, organizer_id: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } },
     })
     if (!event) return errorResponse("Not found", 404)
     if (!eventPermissions(await actorFor(session.user), event).canEdit) {

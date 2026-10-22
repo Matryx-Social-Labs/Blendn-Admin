@@ -4,7 +4,8 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom } from "@/lib/chat-window"
+import { chatClosedMessage, LEFT_ROOM_MESSAGE } from "@/lib/chat-window"
+import { ownerDoor, mayWriteToRoomFor } from "@/lib/room-kind"
 import { bannedRefusal, mutedRefusal } from "@/lib/moderation/actions"
 import { emitChatReaction } from "@/lib/socket-server"
 import {
@@ -42,7 +43,7 @@ interface RouteParams {
  * and the recovery is a duplicate-key error or a silent no-op depending on
  * which way round it guessed.
  *
- * Gated by `mayWriteToRoom`, the same rule the two message write paths use. A
+ * Gated by `mayWriteToRoomFor`, the same rule the two message write paths use. A
  * reaction is participation: somebody muted for what they posted should not be
  * able to keep posting a smaller version of it, and a banned member should not
  * be reachable through a side door in a room they were removed from.
@@ -75,12 +76,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       where: { id: chatGroupId },
       select: {
         id: true,
+        kind: true,
         status: true,
-        members: { where: { user_id: user.userId }, select: { status: true, muted_by: true, banned_by: true } },
+        ...ownerDoor(user.userId),
+        members: { where: { user_id: user.userId }, select: { status: true, muted_by: true, banned_by: true, last_allowed_at: true } },
         // Spread of both bounds, not just `end_time`: `chatWindowState` reads a
         // missing start as "no lower bound", which would open a room that has
         // not opened yet.
-        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } },
+        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
       },
     })
     if (!chatGroup) return notFoundResponse("Chat group not found")
@@ -95,8 +98,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * closed got a different, vaguer answer for the heart on the last message
      * (SCRUM-154).
      */
-    const denial = mayWriteToRoom(membership, chatGroup.event, chatGroup)
+    const denial = mayWriteToRoomFor(chatGroup, membership, user.userId)
     if (denial) {
+      if (denial.reason === "not_member") return forbiddenResponse("You are not a member of this chat group")
       if (denial.reason === "banned") {
         return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
       }
@@ -109,7 +113,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(
         chatClosedMessage(denial.reason),
         403,
-        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
       )
     }
 

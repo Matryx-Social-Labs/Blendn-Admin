@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
@@ -23,6 +24,9 @@ import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
 import { buildEventsCacheKey } from "@/lib/events-cache-key"
 import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
+import { realEventsWhere } from "@/lib/event-kind"
+import { paginationMeta } from "@/lib/pagination"
+import { FEATURED_MAX, featuredSeed, rotated } from "@/lib/featured"
 
 /**
  * The most events a distance sort will pull into memory at once.
@@ -89,7 +93,7 @@ export async function GET(request: NextRequest) {
     }
 
     const {
-      page,
+      page: requestedPage,
       limit,
       search,
       city,
@@ -101,11 +105,23 @@ export async function GET(request: NextRequest) {
       startDate,
       endDate,
       includePast,
+      featured,
       status,
       sortBy,
       sortOrder,
       include,
     } = parsed.data
+
+    /*
+     * `featured=true`: the featured section, at most FEATURED_MAX however big
+     * `limit` is, in the day's rotation (`rotated`, seeded by day and city).
+     * Every other rule of discovery below still applies to it, so a featured
+     * event the viewer is too young for, or that has ended, is not one of the
+     * five. It is always page 1: a page 2 would be a second five, past the cap.
+     */
+    const pageSize = featured ? Math.min(limit, FEATURED_MAX) : limit
+    const page = featured ? 1 : requestedPage
+    const seed = featuredSeed(city, new Date())
 
     const includeSet = new Set(
       (include || "")
@@ -128,6 +144,9 @@ export async function GET(request: NextRequest) {
      */
     const where: Record<string, unknown> = {
       deleted_at: null,
+      // A venue's daily live room is an events row too, and never a night out
+      // to browse (step 3, lib/event-kind.ts).
+      ...realEventsWhere,
       status: "published",
       visibility: "public",
     }
@@ -166,8 +185,11 @@ export async function GET(request: NextRequest) {
      * `includePast=true` still returns them, because "my past events" and
      * "search history" are real screens; they just have to ask.
      */
-    if (!includePast) {
+    if (!includePast || featured) {
       where.end_time = { gte: new Date() }
+    }
+    if (featured) {
+      where.is_featured = true
     }
 
     // Search filter
@@ -254,12 +276,13 @@ export async function GET(request: NextRequest) {
       where.end_time = { ...(where.end_time as object ?? {}), lte: new Date(endDate) }
     }
 
+    // The featured section is in the day's rotation, not by distance.
     const shouldSortByDistance =
-      sortBy === "distance" && lat !== undefined && lon !== undefined
+      !featured && sortBy === "distance" && lat !== undefined && lon !== undefined
 
     const cacheKey = buildEventsCacheKey({
       page,
-      limit,
+      limit: pageSize,
       search,
       city,
       // The DERIVED age, matching the filter above. Keying on the stored number
@@ -277,259 +300,138 @@ export async function GET(request: NextRequest) {
       // return different event sets, so omitting it would let a history
       // response be served straight back to a discovery request.
       includePast,
+      featured,
+      // The day's rotation is part of what a featured page is, so the cache turns over with the day.
+      featuredSeed: featured ? seed : undefined,
       status,
       sortBy,
       sortOrder,
     })
 
     const cached = eventsCache.get(cacheKey)
-    if (cached && cached.expiresAt > Date.now()) {
-      const events = cached.events
-      const totalCount = cached.totalCount
-
-      const eventIds = events.map((e) => e.id)
-
-      // Get user's favorites for these events
-      const userFavoritesPromise = db.event_favorites.findMany({
-        where: {
-          user_id: authUser.userId,
-          event_id: { in: eventIds },
-        },
-        select: { event_id: true },
-      })
-
-      const userCheckinsPromise = includeSet.has("checkins")
-        ? db.event_check_ins.findMany({
-            where: {
-              user_id: authUser.userId,
-              event_id: { in: eventIds },
-            },
-            select: {
-              event_id: true,
-              id: true,
-              status: true,
-              check_in_time: true,
-            },
-          })
-        : Promise.resolve([])
-
-      const activeCheckinsPromise = includeSet.has("activeCheckins")
-        ? db.event_check_ins.findMany({
-            where: {
-              user_id: authUser.userId,
-              status: "checked_in",
-            },
-            include: {
-              event: {
-                select: {
-                  id: true,
-                  title: true,
-                  slug: true,
-                  cover_image_url: true,
-                  start_time: true,
-                  end_time: true,
-                  venue_name: true,
-                  address: true,
-                  city: true,
-                  status: true,
-                },
-              },
-            },
-            orderBy: { check_in_time: "desc" },
-          })
-        : Promise.resolve([])
-
-      const profilePromise = includeSet.has("profile")
-        ? db.user.findUnique({
-            where: { id: authUser.userId },
-            select: {
-              id: true,
-              name: true,
-              image: true,
-              profile: true,
-            },
-          })
-        : Promise.resolve(null)
-
-      const [userFavorites, userCheckins, activeCheckins, profile] =
-        await Promise.all([
-          userFavoritesPromise,
-          userCheckinsPromise,
-          activeCheckinsPromise,
-          profilePromise,
-        ])
-
-      const favoriteEventIds = new Set(userFavorites.map((f) => f.event_id))
-
-      const userCheckinMap: Record<
-        string,
-        { status: string; checkInId?: string; checkInTime?: Date | null }
-      > = {}
-      if (includeSet.has("checkins")) {
-        for (const checkIn of userCheckins) {
-          userCheckinMap[checkIn.event_id] = {
-            status: checkIn.status,
-            checkInId: checkIn.id,
-            checkInTime: checkIn.check_in_time,
-          }
-        }
-      }
-
-
-      /*
-       * One budget for the whole response, shared by the event list and the
-       * activeCheckins block below it -- otherwise each gets its own and the
-       * page can still fan out twice the cap. See lib/location.ts.
-       */
-      const geocodes = geocodeBudget()
-
-      const transformedEvents = await transformEvents(events, {
-        favoriteEventIds,
-        userCheckinMap,
-        userLat: lat,
-        userLon: lon,
-        includeCheckins: includeSet.has("checkins"),
-        geocodes,
-      })
-
-      const normalizedProfile = await selfProfileEnvelope(profile)
-
-      return successResponse({
-        events: transformedEvents,
-        pagination: {
-          page,
-          limit,
-          totalCount,
-          totalPages: Math.ceil(totalCount / limit),
-          hasMore: page * limit < totalCount,
-        },
-        ...(includeSet.has("activeCheckins") && {
-          activeCheckins: await Promise.all(
-            activeCheckins.map(async (c) => ({
-              id: c.id,
-              eventId: c.event_id,
-              checkInTime: c.check_in_time,
-              event: {
-                id: c.event.id,
-                title: c.event.title,
-                slug: c.event.slug,
-                coverImageUrl: c.event.cover_image_url,
-                startTime: c.event.start_time,
-                endTime: c.event.end_time,
-                venueName: c.event.venue_name,
-                address: c.event.address,
-                city: await resolveEventCity(c.event.city, null, null, geocodes),
-                status: c.event.status,
-              },
-            }))
-          ),
-        }),
-        ...(includeSet.has("profile") && {
-          profile: normalizedProfile,
-        }),
-      })
-    }
-
-    // Build orderBy
-    const orderBy: Record<string, string> = shouldSortByDistance
-      ? { start_time: "asc" }
-      : { [sortBy]: sortOrder }
-
     let events: EventListItem[]
     let totalCount: number
+    if (cached && cached.expiresAt > Date.now()) {
+      ;({ events, totalCount } = cached)
+    } else {
+      // Build orderBy
+      const orderBy: Prisma.eventsOrderByWithRelationInput = shouldSortByDistance
+        ? { start_time: "asc" }
+        : { [sortBy]: sortOrder }
 
-
-    if (shouldSortByDistance) {
-      /*
-       * Fetch only id + coordinates to sort by distance in-memory, avoiding
-       * loading full relations for all rows. Only the page's worth of events
-       * get the full select.
-       *
-       * `take` is a backstop, not tuning. This used to be bounded in practice
-       * by the 10 km radius that was applied before it; with distance demoted
-       * to a sort, an unscoped `sortBy=distance` would pull every future public
-       * event on the platform into memory. Three columns per row is cheap, but
-       * cheap times unbounded is still unbounded.
-       *
-       * Ordered by `start_time` so the ceiling, if it is ever hit, drops the
-       * furthest-off events rather than an arbitrary slice — and the drop is
-       * logged rather than silent, because a discovery list that quietly stops
-       * being complete is the kind of bug nobody reports.
-       *
-       * Past this, the sort belongs in SQL. That is the seam `lib/geofence.ts`
-       * already names as the point where a real spatial index would earn its
-       * migration.
-       */
-      const lightweight = await db.events.findMany({
-        where,
-        select: { id: true, latitude: true, longitude: true },
-        orderBy: { start_time: "asc" },
-        take: DISTANCE_SORT_CEILING,
-      })
-
-      if (lightweight.length === DISTANCE_SORT_CEILING) {
-        logger.warn("Distance sort hit its ceiling; results are truncated", {
-          ceiling: DISTANCE_SORT_CEILING,
-          city: city ?? null,
+      if (featured) {
+        /*
+         * The featured set is small (an admin's picks), so every candidate's id
+         * is read, put in the day's rotation, and only the first five get the
+         * full select. `take` is the same kind of backstop as the distance sort's.
+         */
+        const candidates = await db.events.findMany({
+          where,
+          select: { id: true },
+          orderBy: [{ start_time: "asc" }, { id: "asc" }],
+          take: DISTANCE_SORT_CEILING,
         })
+        totalCount = Math.min(candidates.length, FEATURED_MAX)
+        const topIds = rotated(candidates, seed).slice(0, FEATURED_MAX).map((e) => e.id)
+        const picked = await db.events.findMany({
+          where: { id: { in: topIds }, ...realEventsWhere },
+          select: eventListSelect,
+        })
+        const byId = new Map(picked.map((e) => [e.id, e]))
+        events = topIds.map((id) => byId.get(id)).filter((e): e is EventListItem => Boolean(e))
+      } else if (shouldSortByDistance) {
+        /*
+         * Fetch only id + coordinates to sort by distance in-memory, avoiding
+         * loading full relations for all rows. Only the page's worth of events
+         * get the full select.
+         *
+         * `take` is a backstop, not tuning. This used to be bounded in practice
+         * by the 10 km radius that was applied before it; with distance demoted
+         * to a sort, an unscoped `sortBy=distance` would pull every future public
+         * event on the platform into memory. Three columns per row is cheap, but
+         * cheap times unbounded is still unbounded.
+         *
+         * Ordered by `start_time` so the ceiling, if it is ever hit, drops the
+         * furthest-off events rather than an arbitrary slice — and the drop is
+         * logged rather than silent, because a discovery list that quietly stops
+         * being complete is the kind of bug nobody reports.
+         *
+         * Past this, the sort belongs in SQL. That is the seam `lib/geofence.ts`
+         * already names as the point where a real spatial index would earn its
+         * migration.
+         */
+        const lightweight = await db.events.findMany({
+          where,
+          select: { id: true, latitude: true, longitude: true },
+          orderBy: { start_time: "asc" },
+          take: DISTANCE_SORT_CEILING,
+        })
+
+        if (lightweight.length === DISTANCE_SORT_CEILING) {
+          logger.warn("Distance sort hit its ceiling; results are truncated", {
+            ceiling: DISTANCE_SORT_CEILING,
+            city: city ?? null,
+          })
+        }
+
+        const withDistance = lightweight
+          .map((e) => ({
+            id: e.id,
+            distance:
+              e.latitude && e.longitude
+                ? haversineDistance(lat, lon, e.latitude, e.longitude)
+                : null,
+          }))
+          // The second radius filter. Only bites when the caller asked for a
+          // bounded search — see the bounding box above, which is the other half
+          // of the same decision and was easy to fix alone and believe done.
+          .filter((e) => radius === undefined || e.distance === null || e.distance <= radius)
+          .sort((a, b) => {
+            if (a.distance === null) return 1
+            if (b.distance === null) return -1
+            return sortOrder === "asc"
+              ? a.distance - b.distance
+              : b.distance - a.distance
+          })
+
+        totalCount = withDistance.length
+        const pageIds = withDistance
+          .slice((page - 1) * pageSize, page * pageSize)
+          .map((e) => e.id)
+
+        // Fetch full data only for the current page's events
+        const pageEvents = await db.events.findMany({
+          // Hydrating ids `where` (with the fragment) already chose.
+          where: { id: { in: pageIds }, ...realEventsWhere },
+          select: eventListSelect,
+        })
+        // Restore distance order (findMany with `in` doesn't preserve order)
+        const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
+        events = pageIds.map((id) => eventMap.get(id)!).filter(Boolean)
+      } else {
+        /*
+         * Both at once. `count` needs only `where`, so awaiting the page first
+         * added a full sequential round trip to every cache miss on the
+         * discovery feed — the highest-traffic read in the product.
+         */
+        ;[events, totalCount] = await Promise.all([
+          db.events.findMany({
+            where,
+            select: eventListSelect,
+            orderBy,
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+          }),
+          db.events.count({ where }),
+        ])
       }
 
-      const withDistance = lightweight
-        .map((e) => ({
-          id: e.id,
-          distance:
-            e.latitude && e.longitude
-              ? haversineDistance(lat, lon, e.latitude, e.longitude)
-              : null,
-        }))
-        // The second radius filter. Only bites when the caller asked for a
-        // bounded search — see the bounding box above, which is the other half
-        // of the same decision and was easy to fix alone and believe done.
-        .filter((e) => radius === undefined || e.distance === null || e.distance <= radius)
-        .sort((a, b) => {
-          if (a.distance === null) return 1
-          if (b.distance === null) return -1
-          return sortOrder === "asc"
-            ? a.distance - b.distance
-            : b.distance - a.distance
-        })
-
-      totalCount = withDistance.length
-      const pageIds = withDistance
-        .slice((page - 1) * limit, page * limit)
-        .map((e) => e.id)
-
-      // Fetch full data only for the current page's events
-      const pageEvents = await db.events.findMany({
-        where: { id: { in: pageIds } },
-        select: eventListSelect,
+      setCache(cacheKey, {
+        expiresAt: Date.now() + EVENTS_CACHE_TTL_MS,
+        events,
+        totalCount,
       })
-      // Restore distance order (findMany with `in` doesn't preserve order)
-      const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
-      events = pageIds.map((id) => eventMap.get(id)!).filter(Boolean)
-    } else {
-      /*
-       * Both at once. `count` needs only `where`, so awaiting the page first
-       * added a full sequential round trip to every cache miss on the
-       * discovery feed — the highest-traffic read in the product.
-       */
-      ;[events, totalCount] = await Promise.all([
-        db.events.findMany({
-          where,
-          select: eventListSelect,
-          orderBy,
-          skip: (page - 1) * limit,
-          take: limit,
-        }),
-        db.events.count({ where }),
-      ])
     }
-
-    setCache(cacheKey, {
-      expiresAt: Date.now() + EVENTS_CACHE_TTL_MS,
-      events,
-      totalCount,
-    })
 
     const eventIds = events.map((e) => e.id)
 
@@ -630,6 +532,7 @@ export async function GET(request: NextRequest) {
       userLat: lat,
       userLon: lon,
       includeCheckins: includeSet.has("checkins"),
+      featuredSeed: seed,
       geocodes,
     })
 
@@ -637,13 +540,7 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       events: transformedEvents,
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, pageSize, totalCount),
       ...(includeSet.has("activeCheckins") && {
         activeCheckins: await Promise.all(
           activeCheckins.map(async (c) => ({

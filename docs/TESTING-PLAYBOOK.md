@@ -298,8 +298,8 @@ and any quoting a number.
 ### Design system and accessibility
 
 `ecc:a11y-architect` / `frontend-a11y`, against `docs/DESIGN_SYSTEM.md`. The
-rules that are actually enforced here: one `h1` per page (`site-header` owns it
-until step 14 moves it into the content `PageHeader`, R5), **exactly one
+rules that are actually enforced here: one `h1` per page (the content
+`PageHeader`, R5), **exactly one
 `HeroMetric`** and one gradient element (plus the plan-card stripe, R4),
 bordered panels (R3) with no card inside a card, hosts see labels never names
 (R1), container queries not viewport breakpoints, no raw

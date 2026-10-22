@@ -21,9 +21,9 @@ import {
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 
 const ENDS = new Date("2026-08-16T22:00:00Z")
-const EVENT = { end_time: ENDS, deleted_at: null }
+const EVENT = { end_time: ENDS, deleted_at: null, kind: "event" as const }
 const OPEN_GROUP = { status: "active" as const }
-const MEMBER = { status: "active" }
+const MEMBER = { status: "active", last_allowed_at: null }
 
 const at = (hoursFromEnd: number) =>
   new Date(ENDS.getTime() + hoursFromEnd * 60 * 60 * 1000)
@@ -42,13 +42,25 @@ describe("the assertion that would have caught the bug", () => {
     expect(mayWriteToRoom(MEMBER, EVENT, OPEN_GROUP, at(1))).toBeNull()
   })
 
-  it("does not read last_allowed_at at all", () => {
+  it("does not read last_allowed_at for an event's room", () => {
     /*
-     * A departure is not a forfeit. If this column ever comes back into the
-     * write path, the bug comes back with it — so the absence is asserted, not
-     * merely true today.
+     * A departure is not a forfeit. If this column ever comes back into an
+     * event room's write path, the bug comes back with it — so the absence is
+     * asserted, not merely true today.
+     *
+     * It is read for one kind of room only: a venue day, where the room is
+     * for the people live in it and the column is the end of their Go Live
+     * (`liveInVenueDay`, plan v2 F6/F7). So, behaviourally first: a member
+     * checked out (cut) an hour before the end posts an hour after it.
      */
+    expect(mayWriteToRoom({ status: "active", last_allowed_at: at(-1) }, EVENT, OPEN_GROUP, at(1))).toBeNull()
+
     const src = read("lib", "chat-window.ts")
+    // And the one reader answers "yes" for every event room before it looks.
+    const live = src.slice(src.indexOf("export function liveInVenueDay"))
+    expect(live.slice(0, live.indexOf("\n}"))).toMatch(
+      /if \(event\.kind !== "venue_day"\) return true\n\s*return membership\?\.last_allowed_at/
+    )
     /*
      * Bounded to the function, where it used to run to the end of the file.
      *
@@ -64,7 +76,8 @@ describe("the assertion that would have caught the bug", () => {
     const start = src.indexOf("export function mayWriteToRoom")
     const fn = src.slice(start, src.indexOf("\n}", start) + 2)
     expect(fn).toContain("membership.status")
-    expect(fn).not.toContain("last_allowed_at")
+    // Only through `liveInVenueDay`, never itself.
+    expect(fn).not.toMatch(/membership\.last_allowed_at|\.last_allowed_at\s*[<>!=]/)
     expect(fn).not.toContain("check_out_time")
     expect(fn).not.toContain("checked_in")
   })
@@ -108,13 +121,13 @@ describe("every scenario, as agreed", () => {
 
 describe("the rules that still bite", () => {
   it("refuses a banned member even while the room is open", () => {
-    expect(mayWriteToRoom({ status: "banned" }, EVENT, OPEN_GROUP, at(-1))).toEqual({
+    expect(mayWriteToRoom({ status: "banned", last_allowed_at: null }, EVENT, OPEN_GROUP, at(-1))).toEqual({
       reason: "banned",
     })
   })
 
   it("refuses a muted member", () => {
-    expect(mayWriteToRoom({ status: "muted" }, EVENT, OPEN_GROUP, at(-1))).toEqual({
+    expect(mayWriteToRoom({ status: "muted", last_allowed_at: null }, EVENT, OPEN_GROUP, at(-1))).toEqual({
       reason: "muted",
     })
   })
@@ -141,7 +154,7 @@ describe("the rules that still bite", () => {
   it("puts standing before the clock", () => {
     // A banned member past the window should read as banned, not as "the room
     // closed" — the second invites them to come back tomorrow.
-    expect(mayWriteToRoom({ status: "banned" }, EVENT, OPEN_GROUP, at(30))).toEqual({
+    expect(mayWriteToRoom({ status: "banned", last_allowed_at: null }, EVENT, OPEN_GROUP, at(30))).toEqual({
       reason: "banned",
     })
   })
@@ -193,7 +206,7 @@ describe("one rule, and it cannot fork again", () => {
 
 describe("the room has a floor now, not only a ceiling", () => {
   const STARTS = new Date("2026-08-16T18:00:00Z")
-  const TIMED = { start_time: STARTS, end_time: ENDS, deleted_at: null }
+  const TIMED = { start_time: STARTS, end_time: ENDS, deleted_at: null, kind: "event" as const }
   const before = (hours: number) =>
     new Date(STARTS.getTime() - hours * 60 * 60 * 1000)
 
@@ -236,7 +249,7 @@ describe("the room has a floor now, not only a ceiling", () => {
      * close rooms that used to open, and read as the chat being broken rather
      * than as a rule — so the absence of a start means the absence of a floor.
      */
-    expect(chatWindowState({ end_time: ENDS, deleted_at: null }, OPEN_GROUP, before(48)).open).toBe(true)
+    expect(chatWindowState({ end_time: ENDS, deleted_at: null, kind: "event" }, OPEN_GROUP, before(48)).open).toBe(true)
   })
 })
 

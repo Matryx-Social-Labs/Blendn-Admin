@@ -20,6 +20,8 @@ jest.mock("@/lib/db", () => ({
   db: {
     event_check_ins: { findMany: (...a: unknown[]) => mockFindMany(...a) },
     chat_groups: { findUnique: (...a: unknown[]) => mockChatGroup(...a) },
+    // The emitter asks a room's kind: a venue day's goes only to the people live in it.
+    events: { findUnique: async () => ({ kind: "event" }) },
   },
 }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn(), accountBlockReason: jest.fn() }))
@@ -89,7 +91,7 @@ beforeEach(() => {
   mockFindMany.mockReset()
   mockFindMany.mockResolvedValue(people(7))
   mockChatGroup.mockReset()
-  mockChatGroup.mockResolvedValue({ event_id: EVENT })
+  mockChatGroup.mockResolvedValue({ id: CHAT, kind: "event", event_id: EVENT })
 })
 
 describe("hereCount", () => {
@@ -235,8 +237,9 @@ describe("every recipient gets their own copy (SCRUM-371)", () => {
     ])
     expect(realIdsIn(reader, "pr-sender")).toEqual([])
     expect(blocker["chat:message"]).toBeUndefined()
-    // The handle is minted from the room's event, not from the chat group id.
-    expect(mockChatGroup).toHaveBeenCalledWith({ where: { id: CHAT }, select: { event_id: true } })
+    // The handle is minted from the room's event, not from the chat group id —
+    // an event room's scope is its event (`roomScope`).
+    expect(mockChatGroup).toHaveBeenCalledWith({ where: { id: CHAT }, select: { id: true, kind: true, event_id: true } })
   })
 
   it("event:checkout: the leaver's own socket reads their real id, a watcher a handle", async () => {

@@ -36,6 +36,31 @@ export async function closeDb() {
   await closeAppDb()
 }
 
+/**
+ * The real database refuses one kind of write while `run` runs: a trigger,
+ * dropped after. For "the database failed after Razorpay said yes" — a
+ * failure a mock would only describe. `when` is a trigger WHEN condition over
+ * NEW, built from fixture ids; the suites run one at a time (maxWorkers 1).
+ */
+export async function refusingWrites(
+  table: "billing_checkouts" | "audit_logs" | "entitlements",
+  op: "INSERT" | "UPDATE",
+  when: string,
+  run: () => Promise<unknown>
+): Promise<void> {
+  await db.$executeRawUnsafe(
+    `CREATE OR REPLACE FUNCTION itest_refuse_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'itest: write refused'; END $$`
+  )
+  // A run that died inside `run` left its trigger behind: drop it first, or every later write here fails.
+  await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS itest_refuse ON ${table}`)
+  await db.$executeRawUnsafe(`CREATE TRIGGER itest_refuse BEFORE ${op} ON ${table} FOR EACH ROW WHEN (${when}) EXECUTE FUNCTION itest_refuse_write()`)
+  try {
+    await run()
+  } finally {
+    await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS itest_refuse ON ${table}`)
+  }
+}
+
 /** Namespace every fixture so a failed run can never collide with the next. */
 export const testId = (label: string) =>
   `itest_${label}_${Math.random().toString(36).slice(2, 10)}`
@@ -45,6 +70,13 @@ export const testId = (label: string) =>
  * would race the other suites, since jest shares one database here.
  */
 export async function cleanup(userIds: string[], eventIds: string[]) {
+  // A board post's room first: `board_post_id` is ON DELETE RESTRICT, so the
+  // post (cascaded from its event or its author below) cannot go while it has one.
+  if (eventIds.length || userIds.length) {
+    await db.chat_groups.deleteMany({
+      where: { board_post: { OR: [{ event_id: { in: eventIds } }, { author_id: { in: userIds } }] } },
+    })
+  }
   if (eventIds.length) {
     await db.chat_messages.deleteMany({ where: { chat_group: { event_id: { in: eventIds } } } })
     await db.chat_group_members.deleteMany({ where: { chat_group: { event_id: { in: eventIds } } } })

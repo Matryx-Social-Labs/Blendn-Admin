@@ -10,7 +10,7 @@ system project so the placement and the file agree:
 
 | File | Used by |
 |---|---|
-| `monogram-gradient.png` | `BrandLogo` — sidebar, header, login |
+| `monogram-gradient.png` | `BrandLogo` — sidebar |
 | `lockup-white.png` | reserved for full-lockup contexts |
 
 Both are transparent RGBA. The previous `blend-logo.png` was not, which is why

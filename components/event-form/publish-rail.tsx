@@ -224,11 +224,13 @@ export function PublishRail(props: PublishRailProps) {
       ? "Published"
       : isEditing && status === "cancelled"
         ? "Cancelled"
-        : "Before it can publish"
+        : "Before it can go out"
   return (
     <aside
       aria-label="Publish"
-      className="hidden @4xl/main:flex sticky top-5 flex-col gap-5 self-start"
+      // Below the 60px sticky top bar, plus the page's 24px gap: at `top-5`
+      // the rail's first line slid under the bar once the page scrolled.
+      className="hidden @4xl/main:flex sticky top-[84px] flex-col gap-5 self-start"
     >
       <div>
         <p className="mb-2 text-[0.75rem] font-medium uppercase tracking-[0.06em] text-faint-foreground">
@@ -236,13 +238,18 @@ export function PublishRail(props: PublishRailProps) {
         </p>
         <CardPreview {...card} />
       </div>
-      <div role="status" aria-live="polite">
-        <p className="mb-2 text-[0.75rem] font-medium uppercase tracking-[0.06em] text-faint-foreground">
-          {label}
-        </p>
-        <ReadinessList readiness={readiness} />
-      </div>
-      <Actions {...props} />
+      {/* The kit's rail panel: the list empties as the form fills, and the
+          buttons that act on it sit under it. */}
+      <section className="flex flex-col gap-3.5 rounded-panel border border-border bg-card p-5">
+        <div className="flex flex-col gap-2">
+          {/* The heading outside the live region: announcing it on every keystroke is noise. */}
+          <h2 className="text-panel-title font-bold">{label}</h2>
+          <div role="status" aria-live="polite">
+            <ReadinessList readiness={readiness} />
+          </div>
+        </div>
+        <Actions {...props} />
+      </section>
     </aside>
   )
 }
@@ -255,7 +262,7 @@ export function PublishRail(props: PublishRailProps) {
 export function PublishBar(props: Omit<PublishRailProps, "card">) {
   const left = props.readiness.blockers.length
   return (
-    <div className="@4xl/main:hidden sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-border bg-background/90 px-4 py-2.5 text-[0.8125rem] backdrop-blur lg:-mx-6 lg:px-6">
+    <div className="@4xl/main:hidden sticky bottom-0 z-20 -mx-4 flex items-center gap-3 border-t border-border bg-background/90 px-4 py-2.5 text-[0.8125rem] backdrop-blur md:-mx-8 md:px-8">
       <span className="flex-1 truncate text-muted-foreground">
         {left === 0
           ? "Everything the app needs is here"

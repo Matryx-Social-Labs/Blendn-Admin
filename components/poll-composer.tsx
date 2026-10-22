@@ -66,7 +66,7 @@ export function PollComposer({ eventId }: { eventId: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
+    <div className="flex flex-col gap-3 border-t border-border pt-4">
       <div className="flex flex-col gap-2">
         <Label htmlFor="poll-question">Question</Label>
         <Textarea

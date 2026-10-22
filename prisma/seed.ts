@@ -1,108 +1,10 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
-import fs from "fs"
-import path from "path"
 import { ensureTestAccounts } from "../scripts/test-accounts"
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 })
-
-// --- Tigris image upload helpers ---
-
-const TIGRIS_ENDPOINT = process.env.TIGRIS_ENDPOINT || ""
-const TIGRIS_ACCESS_KEY = process.env.TIGRIS_ACCESS_KEY || ""
-const TIGRIS_SECRET_KEY = process.env.TIGRIS_SECRET_KEY || ""
-const TIGRIS_BUCKET = process.env.TIGRIS_BUCKET || "blendn-media"
-const TIGRIS_REGION = process.env.TIGRIS_REGION || "auto"
-
-function isTigrisConfigured(): boolean {
-  return !!(TIGRIS_ENDPOINT && TIGRIS_ACCESS_KEY && TIGRIS_SECRET_KEY)
-}
-
-function getTigrisClient(): S3Client {
-  return new S3Client({
-    endpoint: TIGRIS_ENDPOINT,
-    region: TIGRIS_REGION,
-    credentials: {
-      accessKeyId: TIGRIS_ACCESS_KEY,
-      secretAccessKey: TIGRIS_SECRET_KEY,
-    },
-    forcePathStyle: true,
-  })
-}
-
-function getTigrisPublicUrl(key: string): string {
-  return `https://${TIGRIS_BUCKET}.fly.storage.tigris.dev/${key}`
-}
-
-async function uploadToTigris(
-  client: S3Client,
-  key: string,
-  body: Buffer,
-  contentType: string
-): Promise<string> {
-  await client.send(
-    new PutObjectCommand({
-      Bucket: TIGRIS_BUCKET,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-      CacheControl: "public, max-age=31536000",
-    })
-  )
-  return getTigrisPublicUrl(key)
-}
-
-function getContentType(filename: string): string {
-  const ext = path.extname(filename).toLowerCase()
-  if (ext === ".png") return "image/png"
-  if (ext === ".webp") return "image/webp"
-  return "image/jpeg"
-}
-
-// Local image files mapped to each event (in prisma/seed-images/)
-const SEED_IMAGE_FILES = [
-  "snggnbh3bgutilnhm22y.webp",                                    // Paradox Baby J b2b Tye Turner
-  "c_crop,g_custom_v1770111150_hpcqu1byg51zrapodpx9.jpg",          // The Sixth Sense 2026
-  "c_crop,g_custom_v1770404217_yg7uennjs3lp7ib3vny4.jpg",          // BFC vs Sporting Club Delhi
-  "c_crop,g_custom_v1770382025_gblhdki7b4qdvydgnkzc.png",          // Soul Jams Valentine's
-  "c_crop,g_custom_v1764142943_gaqts0blrdpxuox4ukfa.jpg",          // Karan Aujla P-Pop Culture
-  "c_crop,g_custom_v1770369611_uhlez0ie2r6xv0uatkbw.jpg",          // Sauvage Chef Collab (reused for chef event)
-  "c_crop,g_custom_v1770675196_dzdem7x0nbyr194ltgxt.png",          // HG Music Showcase (reused)
-]
-
-async function uploadSeedImages(): Promise<(string | null)[]> {
-  if (!isTigrisConfigured()) {
-    console.log("⚠️  Tigris not configured — events will have no cover images")
-    return SEED_IMAGE_FILES.map(() => null)
-  }
-
-  console.log("📸 Uploading seed images to Tigris from local files...")
-  const client = getTigrisClient()
-  const seedImagesDir = path.join(__dirname, "seed-images")
-  const urls: (string | null)[] = []
-
-  for (let i = 0; i < SEED_IMAGE_FILES.length; i++) {
-    const filename = SEED_IMAGE_FILES[i]
-    const filePath = path.join(seedImagesDir, filename)
-    try {
-      const imageBuffer = fs.readFileSync(filePath)
-      const contentType = getContentType(filename)
-      const ext = path.extname(filename)
-      const key = `events/seed/event-cover-${i}${ext}`
-      const publicUrl = await uploadToTigris(client, key, imageBuffer, contentType)
-      urls.push(publicUrl)
-      console.log(`  ✅ Uploaded image ${i + 1}/${SEED_IMAGE_FILES.length}: ${filename}`)
-    } catch (err) {
-      console.warn(`  ⚠️  Failed to upload image ${i + 1} (${filename}):`, err instanceof Error ? err.message : err)
-      urls.push(null)
-    }
-  }
-
-  return urls
-}
 
 // --- Main seed ---
 
@@ -145,9 +47,6 @@ async function main() {
     categories.push(category)
   }
   console.log("✅ Created", categories.length, "categories")
-
-  // Upload seed images to Tigris (or get nulls if not configured)
-  const coverImages = await uploadSeedImages()
 
   // 7 real Bengaluru events from district.in
   const eventsData = [
@@ -298,7 +197,7 @@ async function main() {
         current_capacity: Math.floor(Math.random() * Math.min(30, eventData.capacity)),
         organizer_id: users.organiser,
         organizer_org_id: orgs.events.id,
-        cover_image_url: coverImages[i] ?? null,
+        cover_image_url: null,
         is_featured: eventData.is_featured,
         check_in_radius: 100,
       },
@@ -326,13 +225,12 @@ async function main() {
       },
     })
 
-    console.log(`✅ Created event: ${event.title}${coverImages[i] ? ' (with image)' : ''}`)
+    console.log(`✅ Created event: ${event.title}`)
   }
 
   console.log("\n🎉 Seed completed!")
   console.log(`   - ${categories.length} categories created`)
   console.log(`   - ${createdEvents.length} events created`)
-  console.log(`   - ${coverImages.filter(Boolean).length} cover images uploaded`)
 }
 
 main()

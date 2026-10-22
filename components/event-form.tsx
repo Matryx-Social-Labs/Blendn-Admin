@@ -72,6 +72,7 @@ export function EventForm({
       status: "draft" as const,
       visibility: "public" as const,
       is_featured: false,
+      crews_enabled: true,
       check_in_radius: DEFAULT_CHECK_IN_RADIUS_M,
       category_ids: [],
       amenity_ids: [],
@@ -278,9 +279,9 @@ export function EventForm({
     <Form {...form}>
       <form
         onSubmit={(e) => e.preventDefault()}
-        className="grid gap-7 @4xl/main:grid-cols-[minmax(0,1fr)_300px]"
+        className="grid gap-5 @4xl/main:grid-cols-[minmax(0,1fr)_300px]"
       >
-        <div className="min-w-0">
+        <div className="flex min-w-0 flex-col gap-5">
           <BasicInfoSection
             form={form}
             categories={categories}

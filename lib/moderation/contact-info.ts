@@ -234,3 +234,67 @@ export function contactInfoWarning(findings: readonly ContactInfoFinding[]): str
   const what = findings.map((f) => f.hint).join(" ")
   return `${what} This room is anonymous — a message with contact details is removed before anyone sees it.`
 }
+
+/*
+ * ── Profile-like text: names and bios ─────────────────────────────────────
+ *
+ * A crew's name and bio are on a card shown to strangers every night out, and
+ * a bio is the classic hole a pseudonymous product leaks through: "find us
+ * @thesaturdaylot" undoes the room. A room message is one line among many and
+ * `findContactInfo` is tuned not to fire on conversation ("@priya you
+ * coming?", "tickets on bookmyshow.com"). A name or a bio has no conversation
+ * in it, so it gets the stricter reading below as well: any @word, any email,
+ * any web address — written out or spelled ("at gmail dot com").
+ *
+ * Refused on write, never stored (lib/crews/crews.ts) — the fix is the
+ * writer's to make, so the finding says which.
+ */
+
+/**
+ * Mail providers people spell out to get an address past a filter. Only
+ * names that are not ordinary words: "outlook" and "live" are, and a bio of
+ * "live music, positive outlook" must pass. Those still fall to "dot com".
+ */
+const MAIL_PROVIDERS = ["gmail", "googlemail", "yahoo", "ymail", "hotmail", "icloud", "protonmail", "rediffmail"]
+
+/** The top-level domains a web address here would plausibly end in. */
+const TLDS = "com|in|net|org|io|co|me|app|xyz|ly|gg|link|site|online|info|biz|bio"
+
+/** `name@host.tld`, and `name (at) host (dot) tld` in its common spellings. */
+const EMAIL = /[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+/i
+const SPELLED_AT = /(\(|\[|\s)\s*at\s*(\)|\]|\s)/i
+const SPELLED_DOT = new RegExp(`(\\(|\\[|\\s)\\s*dot\\s*(\\)|\\]|\\s)\\s*(${TLDS})\\b`, "i")
+const URL = new RegExp(`(https?:\\/\\/|www\\.|\\b[a-z0-9-]+\\.(${TLDS})\\b)`, "i")
+/** An @ starting a word: a handle on any platform, named or not. */
+const AT_HANDLE = /(^|[^a-z0-9._%+-])@[a-z0-9_.]{2,}/i
+
+export interface ProfileContactFinding {
+  kind: ContactInfoFinding["kind"] | "email" | "url"
+  hint: string
+}
+
+/**
+ * Contact details in text that is shown as somebody's name or bio: everything
+ * `findContactInfo` finds, plus emails, web addresses and bare @handles, in
+ * their spelled-out forms too. Pure and synchronous, like the room's.
+ */
+export function findProfileContactInfo(content: string): ProfileContactFinding[] {
+  if (!content?.trim()) return []
+  const findings: ProfileContactFinding[] = [...findContactInfo(content)]
+  const has = (kind: ProfileContactFinding["kind"]) => findings.some((f) => f.kind === kind)
+  const lower = collapseRuns(content.toLowerCase())
+
+  const spelledEmail =
+    MAIL_PROVIDERS.some((p) => new RegExp(`\\b${p}\\b`).test(lower)) ||
+    (SPELLED_AT.test(` ${lower} `) && SPELLED_DOT.test(` ${lower} `))
+  if (EMAIL.test(content) || spelledEmail) {
+    findings.push({ kind: "email", hint: "This looks like an email address." })
+  }
+  if (!has("link") && (URL.test(content) || SPELLED_DOT.test(` ${lower} `))) {
+    findings.push({ kind: "url", hint: "This looks like a web address." })
+  }
+  if (!has("handle") && !EMAIL.test(content) && AT_HANDLE.test(content)) {
+    findings.push({ kind: "handle", hint: "This looks like a social media handle." })
+  }
+  return findings
+}

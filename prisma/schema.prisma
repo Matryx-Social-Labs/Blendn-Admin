@@ -58,6 +58,16 @@ model User {
   // punish one person. Reversible; `suspended_by` mirrors the plain-String
   // pattern used by chat_group_members.banned_by, with audit_logs as the trail.
   suspended_at      DateTime? @db.Timestamptz(6)
+  /// When the password last changed (reset link or Settings): a dashboard
+  /// session that signed in before it is refused (lib/auth.ts, step 18 M6).
+  password_changed_at DateTime? @db.Timestamptz(6)
+  /// When the account last ended every dashboard session (Settings, SCRUM-603):
+  /// a session that signed in at or before it is refused, as for the password.
+  sessions_revoked_at DateTime? @db.Timestamptz(6)
+  /// When the account last ended its phone sessions (Settings, a password
+  /// change or reset): an access token issued at or before it is refused
+  /// (lib/account-blocklist.ts, the socket handshake; SCRUM-603).
+  mobile_sessions_revoked_at DateTime? @db.Timestamptz(6)
   suspended_by      String?
   suspension_reason String?
 
@@ -120,6 +130,26 @@ model User {
   sent_friend_requests     friend_requests[] @relation("FriendRequestSender")
   received_friend_requests friend_requests[] @relation("FriendRequestRecipient")
   friend_invite            friend_invites?
+  /// Blendn+ referrals (step 11): whose link brought them, and whom theirs brought.
+  referred_by              referrals?        @relation("ReferralInvitee")
+  referrals_made           referrals[]       @relation("ReferralInviter")
+
+  // Crews — see `crews`
+  crews_created            crews[]           @relation("CrewCreator")
+  crew_memberships         crew_members[]
+  crew_invites_got         crew_invites[]    @relation("CrewInvitee")
+  crew_invites_sent        crew_invites[]    @relation("CrewInviter")
+  crew_likes_as_solo       crew_likes[]      @relation("CrewLikeFromUser")
+  crew_likes_got           crew_likes[]      @relation("CrewLikeToUser")
+  crew_likes_made          crew_likes[]      @relation("CrewLikeBy")
+  blends_as_solo           blends[]          @relation("BlendSolo")
+  blend_reveals            blend_reveals[]
+
+  // Regulars and offers (step 12) — see `venue_offers`
+  venue_offers_written     venue_offers[]         @relation("VenueOfferAuthor")
+  venue_offer_sends        venue_offer_sends[]
+  venue_regular_optins     venue_regular_optins[]
+  venue_offer_mutes        venue_offer_mutes[]
 
   // Announcements
   sent_announcements event_announcements[]
@@ -329,6 +359,15 @@ model profiles {
   /// Default true because that is what the UI has been claiming, so nobody's
   /// apparent settings change on the day these start being honoured.
   push_enabled   Boolean  @default(true)
+  /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
+  /// default (the coordinator's default, flagged to the owner).
+  offers_from_places Boolean @default(true)
+  /// When they said yes to offer pushes; null is no (SCRUM-628). A venue's
+  /// offer is a promotion, and App Store guideline 4.5.4 allows a promotional
+  /// push only to someone who opted in through the app — so nobody has one
+  /// until they give it. Without it the offer still arrives, in the bell and
+  /// Passes & offers; only the push waits (`lib/push-notifications.ts`).
+  offer_push_consent_at DateTime? @db.Timestamptz(6)
   /// Honoured on the two surfaces where another attendee can see you are in
   /// a room: the roster (`GET /events/:id/checkins`) and the grid
   /// (`lib/matches.ts`). Off means counted and not listed — the numbers
@@ -359,6 +398,41 @@ model profiles {
   /// `maySeeIdentityFor`, which is what every room surface asks; the friends
   /// list and the friend's profile are friend surfaces and do not depend on it.
   friends_see_me_in_rooms Boolean @default(false)
+
+  /// Matching v2, display only (plan v2 §8, `lib/about-you.ts`). Shown as a
+  /// named overlap when two people share one — "You both speak Malayalam",
+  /// "Both from Kerala", "Both Leos" — and **never scored**: ranking by origin
+  /// would sort rooms by region, and by sign, by stars. Tier B (§8.5): before a
+  /// reveal, only in rooms of eight or more and one per card.
+  ///
+  /// Languages besides English, curated slugs, at most five.
+  languages      String[] @default([])
+  /// State or union territory, a curated slug — never a district or a town.
+  home_state     String?
+  /// Their sign, **only if they picked one** (opt-in, off by default). Never
+  /// derived behind their back: the editor suggests the Western sign of their
+  /// birth date, and nothing is stored until they choose. The same slug in
+  /// either calendar; `sign_system` says which one is theirs.
+  sun_sign       String?
+  /// `western` or `rashi`. Set exactly when `sun_sign` is (`profiles_sign_shape`).
+  sign_system    String?
+  /// Show "Shows up" (attended 80% of RSVPs, at least three) on your card.
+  /// Off unless turned on, as Hinge's Signals are.
+  shows_up_badge Boolean  @default(false)
+  /// "Show my badges" — every badge from check-ins on your card. On by
+  /// default (they are earned, not typed), and the person's to turn off.
+  show_badges    Boolean  @default(true)
+  /// When languages, home state, sign or work field last changed. A viewer's
+  /// own Tier B counts toward overlap lines only if it was set before their
+  /// current check-in, so editing it mid-event to see which cards light up
+  /// learns nothing (step 10 review H1). Null: never changed since this existed.
+  tier_b_changed_at DateTime? @db.Timestamptz(6)
+  /// The times of the last Tier B changes, for "three a day" (lib/tier-b.ts).
+  /// In the database rather than the Redis limiter, so the limit holds across
+  /// replicas and restarts and fails closed.
+  tier_b_changes    DateTime[] @default([]) @db.Timestamptz(6)
+
+  this_or_that   this_or_that_answers[]
   // push_token and push_platform removed — use push_tokens table instead
   created_at     DateTime @default(now()) @db.Timestamptz(6)
   updated_at     DateTime @default(now()) @db.Timestamptz(6)
@@ -472,11 +546,22 @@ model events {
   external_link     String?
   is_featured       Boolean            @default(false)
   is_recurring      Boolean            @default(false)
+  /// The host lets crews show up together here (plan v2 §6, the kit's "Allow
+  /// group check-in"): crew cards, "We're here" and crew likes. Default on.
+  crews_enabled     Boolean            @default(true)
   check_in_radius   Float              @default(30)
   /// Extent + buffer, superseding check_in_radius. Null falls back to
   /// latitude/longitude/check_in_radius so no existing event needs a backfill.
   /// Circle or polygon — see lib/geofence.ts for why both, and why not PostGIS.
   geofence          Json?
+  /// `event` for everything a host runs. `venue_day` is the hidden daily room
+  /// of a venue that people Go Live in (plan v2 §3, `lib/venue-day.ts`): one
+  /// per venue per local day, owned by the system user, never listed. Every
+  /// reader of this table filters on it or says why not —
+  /// `__tests__/events-kind-boundary.test.ts`. The one-per-day rule is a
+  /// partial unique index that lives only in migration SQL
+  /// (`events_one_venue_day_per_day`).
+  kind              event_kind         @default(event)
 
   // Relations
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
@@ -519,6 +604,8 @@ model events {
   sponsors           event_sponsors[]
   rsvps              event_rsvps[]
   feedback           event_feedback[]
+  entitlements       entitlements[]
+  billing_checkouts  billing_checkouts[]
   venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
   organizer_org      organisations?             @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
   eventClaims        event_claims[]
@@ -625,6 +712,7 @@ model amenities {
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
   events event_amenities[]
+  venues venue_amenities[]
 
   @@index([is_active, sort_order])
 }
@@ -650,6 +738,22 @@ model event_amenities {
   amenity amenities @relation(fields: [amenity_id], references: [id], onDelete: Restrict)
 
   @@id([event_id, amenity_id])
+  @@index([amenity_id])
+}
+
+/// What a venue offers, from the same vocabulary events tick from (`amenities`).
+/// Shown on the venue page; nothing writes it yet (no dashboard field), so a
+/// venue lists none until one does. `Restrict` for the same reason as
+/// `event_amenities`: retiring an amenity is `is_active`, not a delete.
+model venue_amenities {
+  venue_id   String   @db.Uuid
+  amenity_id String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  venue   venues    @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  amenity amenities @relation(fields: [amenity_id], references: [id], onDelete: Restrict)
+
+  @@id([venue_id, amenity_id])
   @@index([amenity_id])
 }
 
@@ -701,6 +805,18 @@ model event_check_ins {
   last_seen_at          DateTime? @db.Timestamptz(6)
   left_area_at          DateTime? @db.Timestamptz(6)
   departure_prompted_at DateTime? @db.Timestamptz(6)
+  /// When a Go Live window at a venue ends (step 4). Null for an event
+  /// check-in, which ends with the event or a checkout.
+  expires_at            DateTime? @db.Timestamptz(6)
+  /// The furthest an in-fence ping may push `expires_at` while `stay` — four
+  /// hours from the first time "stay" was chosen here today, or the venue's
+  /// reset if sooner (lib/go-live.ts). Kept for the day once set, so choosing
+  /// "stay" again never buys a fresh four hours. Null until "stay" is chosen,
+  /// and for events.
+  stay_until            DateTime? @db.Timestamptz(6)
+  /// Whether this Go Live is "stay" now. A fixed window keeps `stay_until`
+  /// (for a later "stay") but is not extended.
+  stay                  Boolean   @default(false)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -732,14 +848,44 @@ model event_check_ins {
   @@index([check_in_time])
   /// Drives the sweeper: everyone still inside with a departure pending.
   @@index([status, left_area_at])
+  /// The Go Live expiry sweep: still checked in, window ended, oldest first.
+  /// The partial `expires_at` index alone walks every Go Live ever made.
+  @@index([status, expires_at])
+  /// One person's nights, newest first: the badges on a match card ("5+
+  /// nights this month", "Regular here") and a crew's nights together ask it
+  /// per person (step 10 review M6). Every other index on `check_in_time`
+  /// starts with the event.
+  @@index([user_id, check_in_time])
   @@index([occurrence_id, status])
   @@index([user_id])
   @@index([user_id, status])
 }
 
+/// A room. Every room has a kind and exactly one owner of that kind (plan v2
+/// §7): an event's room is owned by the event, a board post's by the post, a
+/// crew's chat by the crew, a Blend's by the Blend. `chat_groups_one_owner` (a
+/// CHECK in the migration; schema.prisma cannot say it, and `db push` drops
+/// it) holds the pairing.
+///
+/// Who may enter is `roomOwnerDenial` in lib/room-kind.ts, one switch on
+/// `kind` for the socket join and every HTTP read — never "has a member row".
 model chat_groups {
   id              String            @id @default(uuid()) @db.Uuid
-  event_id        String            @unique @db.Uuid
+  kind            chat_group_kind   @default(event)
+  /// Set exactly when `kind = event`. Still `@unique`: NULLs are distinct in
+  /// Postgres, so this is one room per event and any number of rooms with no
+  /// event — the partial unique `WHERE kind = 'event'` would say, given the
+  /// CHECK, and Prisma keeps its by-event lookups.
+  event_id        String?           @unique @db.Uuid
+  /// Set exactly when `kind = board_post`. One room per post; the post cannot
+  /// be hard-deleted while it has one (RESTRICT).
+  board_post_id   String?           @unique @db.Uuid
+  /// Set exactly when `kind = crew`. One room per crew, made with the crew; it
+  /// outlives nights out and archives when the crew dissolves (RESTRICT).
+  crew_id         String?           @unique @db.Uuid
+  /// Set exactly when `kind = blend`. One room per Blend, made with it.
+  blend_id        String?           @unique @db.Uuid
+  /// Unread since the baseline: every row is `event`. Room kinds are `kind`.
   type            chat_group_type   @default(event)
   name            String
   description     String?
@@ -752,9 +898,18 @@ model chat_groups {
   deleted_at      DateTime?         @db.Timestamptz(6)
 
   // Relations
-  event    events               @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  messages chat_messages[]
-  members  chat_group_members[]
+  event      events?              @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  /// RESTRICT, not cascade: a room is other people's conversation and kept
+  /// evidence, so deleting a post with a room is refused. Account erasure
+  /// soft-deletes such a post and archives its room instead.
+  board_post board_posts?         @relation(fields: [board_post_id], references: [id], onDelete: Restrict)
+  /// RESTRICT: a crew is never deleted, only dissolved, and its room keeps
+  /// its members' messages as evidence like every other room.
+  crew       crews?               @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  /// RESTRICT, as every owner: a Blend's room is two sides' messages.
+  blend      blends?              @relation(fields: [blend_id], references: [id], onDelete: Restrict)
+  messages   chat_messages[]
+  members    chat_group_members[]
 
   @@index([status])
 }
@@ -962,9 +1117,14 @@ model message_reports {
   id           String        @id @default(uuid()) @db.Uuid
   reporter_id  String
   message_id   String        @db.Uuid
-  message_type String // 'group' | 'private'
+  message_type String // 'group' | 'private' | 'board_post' | 'board_request' | 'crew' (message_id = the crew's id)
   reason       String
   description  String?
+  /// What the reported words said when the report was filed — board reports
+  /// only, for now. The words can change or go (an author withdraws a post,
+  /// an erased account's ask loses its message) between the report and the
+  /// review; the evidence should not.
+  excerpt      String?
   status       report_status @default(pending)
   created_at   DateTime      @default(now()) @db.Timestamptz(6)
   updated_at   DateTime      @default(now()) @db.Timestamptz(6)
@@ -978,6 +1138,9 @@ model message_reports {
   @@index([status])
   @@index([reporter_id])
   @@index([status, created_at])
+  /// NOT here, because `schema.prisma` cannot express it: one PENDING report
+  /// per reporter per board post or ask (a partial unique in the migration
+  /// `20261001210000_board_reports_evidence`). A second tap is the same report.
 }
 
 /// One day (or session) of an event.
@@ -1011,6 +1174,8 @@ model event_occurrences {
   event     events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
   check_ins event_check_ins[]
   presence_sessions presence_sessions[]
+  crew_likes        crew_likes[]
+  blends            blends[]
 
   @@unique([event_id, occurs_on])
   @@index([event_id, start_time])
@@ -1030,11 +1195,32 @@ model mobile_refresh_tokens {
   /// with a fresh pair and the orphaned successor revoked, instead of a 401
   /// that signs the device out. See verifyRefreshToken.
   replaced_by String?   @db.Uuid
+  /// Why `endPhoneSessions` ended this session ('password_reset' | 'signout_all'),
+  /// so the phone that presents the token next is told why (lib/session-end.ts,
+  /// `revokedSessionCode`). Null: rotated, signed out one device, or suspended.
+  revoked_reason String?
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id])
   @@index([expires_at])
+}
+
+/// This-or-that answers (plan v2 §8.3). One per person per question; the
+/// questions are constants in `lib/this-or-that.ts`, so a question retired
+/// there simply stops being read. Display only — "you both picked filter
+/// coffee over chai" — until data says which answers precede a mutual like.
+model this_or_that_answers {
+  user_id     String
+  /// A slug from `THIS_OR_THAT`.
+  question    String
+  /// `a` or `b` (`this_or_that_choice`).
+  choice      String
+  answered_at DateTime @default(now()) @db.Timestamptz(6)
+
+  profile profiles @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, question])
 }
 
 model user_interests {
@@ -1108,6 +1294,15 @@ enum notification_kind {
   /// with. Sent once per event by `sendRatingRequests`; the app routes this
   /// exact string to `/rate/[eventId]`.
   rating_request
+  /// A friend invited you into a crew; joining needs your accept.
+  crew_invite
+  /// A crewmate tapped "We're here". No place in it: the crew chat says where.
+  crew_here
+  /// Two crews (or a crew and a person) liked each other: a Blend room is open.
+  blend
+  /// A venue sent its regulars an offer (step 12). The push names no venue:
+  /// the app shows it on open.
+  venue_offer
 }
 
 /// One line in the notifications centre — the bell in The Pulse's top bar.
@@ -1449,6 +1644,38 @@ model venues {
   /// claimed, the owner decides. Null for venues added before this, and for
   /// admin-added ones — those stay admin-only while unclaimed.
   created_by_org_id String? @db.Uuid
+  /// The venue's day starts at this local hour (venue days, `lib/venue-day.ts`):
+  /// somebody live at 02:00 is still in last night's room. CHECK 0–23 in SQL.
+  day_reset_hour Int          @default(6) @db.SmallInt
+  /// IANA zone the venue's day is counted in. CHECK in SQL that Postgres knows it.
+  timezone       String       @default("Asia/Kolkata")
+  /// How many floors the building has: the app's 3D map draws it this tall,
+  /// over the building data's own height (owner, 2026-10-09). Null leaves the
+  /// map's height. Set by the venue's owner or an admin; CHECK 1–200 in SQL.
+  floors         Int?         @db.SmallInt
+  /// Opening hours as the venue page shows them: `[{ day: 0-6 (Sun-Sat), open: "HH:MM", close: "HH:MM" }]`
+  /// in the venue's own timezone (`lib/venue-hours.ts`). Null: not given. No writer yet.
+  hours          Json?
+  /// A few lines about the place, shown on the venue page. Null: not given.
+  description    String?
+  /// The neighbourhood a person would name ("Koramangala"), as the dataset names it:
+  /// scripts/backfill-venue-areas.ts sets it from Overture's own division polygons
+  /// (scripts/places/areas.sql). Null: unknown, never guessed. `area_slug` is `areaSlug(area)`.
+  area           String?
+  area_slug      String?
+  /// "Open on Blendn" (D-13): false takes a CLAIMED venue out of the app's
+  /// Places and home map; its events still show. Set by the owner's
+  /// organisation or an admin, audited. Ignored on an unclaimed venue, which is
+  /// always listed (`openOnBlendnWhere` in lib/venue-visibility.ts).
+  open_on_blendn Boolean      @default(true)
+  /// Where a seeded venue came from: the dataset and release, e.g.
+  /// "overture:2026-09-23.1" (scripts/places). Null for typed-in venues.
+  source         String?
+  /// The record's id in that dataset; unique (partial index in SQL), so a
+  /// re-run of an import cannot insert the same place twice.
+  source_record_id String?
+  /// When an import last listed the place; a refresh moves it forward.
+  source_seen_at DateTime?    @db.Timestamptz(6)
   created_at   DateTime     @default(now()) @db.Timestamptz(6)
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   deleted_at   DateTime?    @db.Timestamptz(6)
@@ -1458,14 +1685,21 @@ model venues {
   claims    venue_claims[]
   owner     User?          @relation("VenueOwner", fields: [owner_id], references: [id], onDelete: SetNull)
   owner_org      organisations? @relation("VenueOwnerOrg", fields: [owner_org_id], references: [id], onDelete: SetNull)
+  billing_checkouts billing_checkouts[]
   created_by_org organisations? @relation("VenueCreatedByOrg", fields: [created_by_org_id], references: [id], onDelete: SetNull)
   events         events[]
+  amenity_links  venue_amenities[]
+  offers         venue_offers[]
+  offer_sends    venue_offer_sends[]
+  regular_optins venue_regular_optins[]
+  offer_mutes    venue_offer_mutes[]
 
   @@index([owner_id])
   @@index([owner_org_id])
   @@index([created_by_org_id])
   @@index([city])
   @@index([status])
+  @@index([area_slug])
   /// The Hotspots feed bounding-boxes on these. `events` has had the matching
   /// index since it shipped; this table did not, so the venue-proximity query
   /// was the one geo lookup in the product doing a scan.
@@ -1507,6 +1741,14 @@ model organisations {
   /// somebody paid; if everyone who can announce can also mark a message
   /// sponsored, the label stops meaning anything and becomes a styling choice.
   may_sponsor  Boolean             @default(false)
+  /// When Analytics stops being free for this organisation: 30 days after the
+  /// end of its first event with at least 5 people checked in, and that event
+  /// (step 16, lib/analytics-access.ts). Written ONCE, by the first read that
+  /// finds such an event, and never moved: soft-deleting the event, or a
+  /// later re-count, cannot restart the 30 days. A plain id, no foreign key:
+  /// it is a record of a decision, kept if the event goes.
+  analytics_free_until DateTime? @db.Timestamptz(6)
+  first_free_event_id  String?   @db.Uuid
   verified_at  DateTime?           @db.Timestamptz(6)
   verified_by  String?
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
@@ -1525,6 +1767,9 @@ model organisations {
   sponsors       sponsors[]
   sponsor_claims sponsor_claims[]
   upload_grants  upload_grants[]
+  billing_checkouts billing_checkouts[]
+  venue_offers   venue_offers[]
+  regular_optins venue_regular_optins[]
 
   @@index([status])
 }
@@ -1984,7 +2229,9 @@ model placement_charges {
   voided_at    DateTime?     @db.Timestamptz(6)
   voided_by    String?
   void_reason  String?
-  /// External reference. No payment provider is integrated.
+  /// External reference: the pricing note while a draft, then the Razorpay
+  /// Payment Link's id once one is sent (step 17), or the payment reference an
+  /// admin typed when settling by hand.
   external_ref String?
   created_at   DateTime      @default(now()) @db.Timestamptz(6)
   updated_at   DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
@@ -1996,6 +2243,8 @@ model placement_charges {
   /// "Who priced this" must stay answerable. A bare String id pointing at a
   /// deleted user is an audit trail that cannot be resolved.
   pricer    User           @relation("ChargePricer", fields: [priced_by], references: [id], onDelete: Restrict)
+  /// Razorpay Payment Links sent for this charge (step 17); `external_ref` names the latest.
+  payment_links billing_checkouts[]
 
   @@index([placement_id])
   @@index([status])
@@ -2291,6 +2540,12 @@ enum rsvp_status {
   waitlisted
 }
 
+/// What an `events` row is. See `events.kind`.
+enum event_kind {
+  event
+  venue_day
+}
+
 enum event_status {
   draft
   published
@@ -2362,6 +2617,11 @@ model event_match_preferences {
   /// Empty falls back to `profiles.intent_default` — see `effectiveIntents`.
   intent   connection_intent[]
   revealed Boolean             @default(false)
+  /// "Open to joining a crew tonight" — a solo person's opt-in to crew cards
+  /// and crew likes (plan v2 §8.3), until the end of the occurrence they said
+  /// it at: null or past means no. A crew never appears in the deck of
+  /// somebody who did not ask for crews, and Tuesday's answer is not Wednesday's.
+  open_to_crews_until DateTime? @db.Timestamptz(6)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -2596,6 +2856,14 @@ enum chat_group_type {
   announcement
 }
 
+/// What a room belongs to (plan v2 §7). See `chat_groups`.
+enum chat_group_kind {
+  event
+  crew
+  blend
+  board_post
+}
+
 enum chat_group_status {
   active
   archived
@@ -2720,6 +2988,12 @@ model event_sponsored_messages {
   /// SAME update that writes the new content, so there is no window where the
   /// words are new and the verdict is old.
   moderation_status    moderation_status_type @default(pending)
+  /// Distinct people the campaign reached, counted once from its sends'
+  /// `recipient_hashes` after the event ended; the hashes are then emptied
+  /// (`materialiseEndedReach`, lib/sponsor-reach.ts). Null until then, when
+  /// reach is counted live. Both columns or neither (CHECK in the migration).
+  reach                 Int?
+  reach_materialised_at DateTime?              @db.Timestamptz(6)
 
   event     events                    @relation(fields: [event_id], references: [id], onDelete: Cascade)
   sponsor   sponsors?                 @relation(fields: [sponsor_id], references: [id], onDelete: SetNull)
@@ -2805,7 +3079,8 @@ model sponsored_message_sends {
   /// the report needs — while making the array useless for cross-campaign
   /// intersection and non-reversible without `NEXTAUTH_SECRET`.
   ///
-  /// Emptied at event end, once reach is materialised onto the campaign. A
+  /// Emptied after the event ends, once reach is materialised onto the
+  /// campaign (`event_sponsored_messages.reach`, lib/sponsor-reach.ts). A
   /// campaign that ended has a number and no roster.
   ///
   /// **Never serialised to any client, export or CSV.**
@@ -2963,11 +3238,16 @@ model audit_logs {
   details     Json?
   ip_address  String?
   created_at  DateTime @default(now()) @db.Timestamptz(6)
+  /// The organisation whose data the action changed, whoever acted
+  /// (lib/audit-log.ts ORG_RESOURCES); an organisation's log reads by it
+  /// (step 18, M3). Null: the platform's alone.
+  org_id      String?  @db.Uuid
 
   @@index([user_id])
   @@index([action])
   @@index([resource])
   @@index([created_at])
+  @@index([org_id, created_at])
 }
 
 /// What a person registered with, kept for 180 days after they delete their
@@ -3122,6 +3402,219 @@ model friend_invites {
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+// ── Crews ─────────────────────────────────────────────
+
+/// Friends who go out together (plan v2 §6).
+///
+/// Made from the friend graph: every member was invited by a friend and
+/// accepted, and joining is consent to the crew reveal (`crew_members`).
+/// Never deleted — a crew that drops below two members is dissolved
+/// (`dissolved_at`, D-15) and its room archived, so other people's messages
+/// stay. Presence is never stored: "here tonight" is ≥2 members checked into
+/// the same occurrence, asked of `event_check_ins` (lib/crews/presence.ts).
+///
+/// CHECKs in the migration (schema.prisma cannot say them): a name of 2–32
+/// characters, a bio of at most 140, at most 3 tags.
+model crews {
+  id           String              @id @default(uuid()) @db.Uuid
+  /// 2–32 characters, not unique ("The Usual Suspects" can exist twice).
+  /// Through the moderation pipeline and the contact-detail detector.
+  name         String
+  /// At most 140 characters, the same checks.
+  bio          String?
+  /// What the crew is out for. Empty means "not said".
+  intent       connection_intent[]
+  /// Curated slugs only (`CREW_TAGS`), at most 3. Never free text.
+  tags         String[]
+  /// Seeds the generated emblem, so an anonymous crew has a face that is not a face.
+  emblem_seed  String
+  /// "Room for one more tonight": the crew may be matched with one person,
+  /// not only with crews. Never for a crew over `CREW.MAX_SOLO_MATCH` (§8.3).
+  open_to_solo Boolean             @default(false)
+  /// Who made it. Audit only: the owner is `crew_members.role`.
+  created_by   String
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime            @default(now()) @db.Timestamptz(6)
+  dissolved_at DateTime?           @db.Timestamptz(6)
+  /// Hidden by a platform admin after a report (the moderation queue): off
+  /// every surface outside the crew — cards, likes, Blends. Audited.
+  hidden_at    DateTime?           @db.Timestamptz(6)
+
+  creator User           @relation("CrewCreator", fields: [created_by], references: [id], onDelete: Restrict)
+  members crew_members[]
+  invites crew_invites[]
+  likes_sent     crew_likes[] @relation("CrewLikeFrom")
+  likes_got      crew_likes[] @relation("CrewLikeTo")
+  blends_as_a    blends[]     @relation("BlendSideA")
+  blends_as_b    blends[]     @relation("BlendSideB")
+  /// The crew chat (kind `crew`), made with the crew.
+  room    chat_groups?
+
+  @@index([created_by])
+}
+
+enum crew_role {
+  owner
+  member
+}
+
+/// Who is in a crew now. Leaving deletes the row; there is no "left" state to
+/// drift. At most `CREW.MAX_MEMBERS` per crew, counted under a lock on the
+/// crew row (lib/crews/crews.ts), never by a read-then-write.
+model crew_members {
+  crew_id             String    @db.Uuid
+  user_id             String
+  role                crew_role @default(member)
+  joined_at           DateTime  @default(now()) @db.Timestamptz(6)
+  /// "Keep me anonymous even when my crew reveals." A crew reveal writes the
+  /// per-event reveal of every member without this; it never undoes one
+  /// already written (D-10: a reveal can't be unseen).
+  keep_me_anonymous   Boolean   @default(false)
+  /// When they accepted "anyone in this crew can reveal the crew — your name
+  /// and photos — to people you match with". Required: no member without it.
+  consented_reveal_at DateTime  @db.Timestamptz(6)
+
+  crew crews @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  user User  @relation(fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@id([crew_id, user_id])
+  /// "My crews", and the cascade path a user's rows are found by.
+  @@index([user_id])
+  /// NOT here, because schema.prisma cannot express it: one owner per crew, a
+  /// partial unique (`crew_members_one_owner`) in the migration.
+}
+
+/// A friend asked into a crew, waiting for their accept. Only ever a friend of
+/// the person who invited them. Accepting deletes it and writes the member;
+/// declining sets `declined_at`, which hides it from the invitee and holds the
+/// slot nowhere — the inviter is not told, as a friend "Not now" is not told.
+model crew_invites {
+  id              String    @id @default(uuid()) @db.Uuid
+  crew_id         String    @db.Uuid
+  invited_user_id String
+  invited_by      String
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  declined_at     DateTime? @db.Timestamptz(6)
+  /// The owner removed this person. A marker, not an invite: only an owner
+  /// can invite them back, which clears it.
+  removed_at      DateTime? @db.Timestamptz(6)
+
+  crew    crews @relation(fields: [crew_id], references: [id], onDelete: Restrict)
+  invitee User  @relation("CrewInvitee", fields: [invited_user_id], references: [id], onDelete: Restrict)
+  inviter User  @relation("CrewInviter", fields: [invited_by], references: [id], onDelete: Restrict)
+
+  /// One invite per person per crew, whatever became of it: asking again
+  /// after a decline would re-notify somebody who said no.
+  @@unique([crew_id, invited_user_id])
+  @@index([invited_user_id])
+  @@index([invited_by])
+}
+
+/// A like between crews, or between a crew and one person, at one occurrence
+/// (plan v2 §6 "no voting", §8.3). Person ↔ person stays `event_likes`.
+///
+/// **Any member present can like on the crew's behalf**: `from_crew_id` is the
+/// crew, `liked_by_user_id` the member who tapped — shown to their own crew as
+/// "Rohan liked Crew Nebula for the crew", and to nobody else. Nobody is told
+/// who liked first; the only outcome anybody sees is a Blend.
+///
+/// Written only by lib/crews/like.ts (`crew-likes-one-writer.test.ts`), which
+/// checks presence, the guardrails and blocks across every member. CHECKs in
+/// the migration: one `from` and one `to`, at least one side a crew, never a
+/// crew liking itself, and a solo like is the solo's own.
+model crew_likes {
+  id               String   @id @default(uuid()) @db.Uuid
+  occurrence_id    String   @db.Uuid
+  from_crew_id     String?  @db.Uuid
+  from_user_id     String?
+  to_crew_id       String?  @db.Uuid
+  to_user_id       String?
+  liked_by_user_id String
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Restrict)
+  from_crew  crews?            @relation("CrewLikeFrom", fields: [from_crew_id], references: [id], onDelete: Restrict)
+  to_crew    crews?            @relation("CrewLikeTo", fields: [to_crew_id], references: [id], onDelete: Restrict)
+  from_user  User?             @relation("CrewLikeFromUser", fields: [from_user_id], references: [id], onDelete: Restrict)
+  to_user    User?             @relation("CrewLikeToUser", fields: [to_user_id], references: [id], onDelete: Restrict)
+  liked_by   User              @relation("CrewLikeBy", fields: [liked_by_user_id], references: [id], onDelete: Restrict)
+
+  /// Liking twice is liking once, per direction per occurrence. NULLs are
+  /// distinct, so each unique binds only the shape it names.
+  @@unique([occurrence_id, from_crew_id, to_crew_id])
+  @@unique([occurrence_id, from_crew_id, to_user_id])
+  @@unique([occurrence_id, from_user_id, to_crew_id])
+  @@index([from_crew_id])
+  @@index([to_crew_id])
+  @@index([from_user_id])
+  @@index([to_user_id])
+  @@index([liked_by_user_id])
+}
+
+/// A mutual like: two crews, or a crew and one person, at one occurrence.
+///
+/// Side A is always a crew. Side B is a crew with a greater id
+/// (`blends_pair_order`, uuid order — no collation applies to a uuid, so the
+/// app's ordering and the CHECK cannot disagree) or one person. One row per
+/// pair per occurrence, so two sides liking each other at the same moment
+/// make one Blend (lib/crews/like.ts serialises the pair too).
+///
+/// Its room (`chat_groups.blend_id`) holds a member row for each person who
+/// was here at match time — the present members of each side, and the person
+/// (a snapshot: a late arrival has no row and the door refuses them) — and
+/// admits those still on their side; it closes `closes_at` = the occurrence's
+/// end + 12 h, or earlier at `closed_at` (a side's crew dissolved or hidden).
+/// A block across the sides hides that pair; the room goes on for the rest.
+model blends {
+  id            String    @id @default(uuid()) @db.Uuid
+  occurrence_id String    @db.Uuid
+  a_crew_id     String    @db.Uuid
+  b_crew_id     String?   @db.Uuid
+  b_user_id     String?
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  closes_at     DateTime  @db.Timestamptz(6)
+  closed_at     DateTime? @db.Timestamptz(6)
+  /// When someone on side A / side B tapped "reveal" in this Blend. Set by every
+  /// tap, whoever consented, so "has my crew revealed?" is a fact about the tap
+  /// and never about which member said yes (`crewRevealed`). Side B is a crew or
+  /// the one matched person.
+  a_revealed_at DateTime? @db.Timestamptz(6)
+  b_revealed_at DateTime? @db.Timestamptz(6)
+
+  occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Restrict)
+  a_crew     crews             @relation("BlendSideA", fields: [a_crew_id], references: [id], onDelete: Restrict)
+  b_crew     crews?            @relation("BlendSideB", fields: [b_crew_id], references: [id], onDelete: Restrict)
+  b_user     User?             @relation("BlendSolo", fields: [b_user_id], references: [id], onDelete: Restrict)
+  room       chat_groups?
+  reveals    blend_reveals[]
+
+  @@unique([occurrence_id, a_crew_id, b_crew_id])
+  @@unique([occurrence_id, a_crew_id, b_user_id])
+  @@index([a_crew_id])
+  @@index([b_crew_id])
+  @@index([b_user_id])
+  /// NOT here, because schema.prisma cannot express it: the sweeper's partial
+  /// index `blends_open_closes_at` (closes_at) WHERE closed_at IS NULL.
+}
+
+/// One person revealed inside one Blend (C2): their first name and photo shown
+/// to that Blend's people, and nowhere else — not the event's room, its deck,
+/// nor a DM. Written by a crew member's tap for their crew's members here in
+/// the Blend (minus "keep me anonymous", re-read in the writing transaction),
+/// or by the matched person for themselves. Kept (D-10); shown only while the
+/// Blend is open.
+model blend_reveals {
+  blend_id    String   @db.Uuid
+  user_id     String
+  revealed_at DateTime @default(now()) @db.Timestamptz(6)
+
+  blend blends @relation(fields: [blend_id], references: [id], onDelete: Restrict)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@id([blend_id, user_id])
+  @@index([user_id])
 }
 
 // ── Content Moderation ────────────────────────────────
@@ -3361,6 +3854,8 @@ model board_posts {
   event    events          @relation(fields: [event_id], references: [id], onDelete: Cascade)
   author   User            @relation("BoardAuthor", fields: [author_id], references: [id], onDelete: Cascade)
   requests board_requests[]
+  /// The post's room, once its author and accepted askers have one.
+  room     chat_groups?
 
   /// The board itself: this event's live posts, newest first.
   @@index([event_id, deleted_at, created_at])
@@ -3391,6 +3886,15 @@ model board_requests {
 
   created_at DateTime  @default(now()) @db.Timestamptz(6)
   decided_at DateTime? @db.Timestamptz(6)
+  /// The asker took back an ask that had already been declined.
+  ///
+  /// A decline is never delivered to the asker, so to them it is still
+  /// waiting and they may withdraw it. Rewriting the row to `withdrawn` would
+  /// erase the author's decision and tell them the asker was still active; so
+  /// the author keeps `declined` and `decided_at`, and this is the asker's
+  /// half — they see `withdrawn`, and the ask stops counting against their
+  /// cap. Only ever set on a `declined` row (a CHECK in the migration).
+  asker_withdrawn_at DateTime? @db.Timestamptz(6)
 
   event events      @relation(fields: [event_id], references: [id], onDelete: Cascade)
   post  board_posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
@@ -3406,13 +3910,11 @@ model board_requests {
   /// unindexed foreign key makes that a sequential scan — which is what
   /// `fk-indexes.itest.ts` exists to catch, and did.
   @@index([event_id])
-  ///
-  /// NOTE: the invariant that matters is NOT here, because `schema.prisma`
-  /// cannot express it: at most ONE PENDING request per direction per post, as
-  /// a partial unique WHERE `status = 'pending'`. It lives in the migration
-  /// SQL. Without it, tapping twice on a slow connection asks the same person
-  /// the same question twice, which is exactly the pestering the cap exists to
-  /// prevent.
+  /// One ask per post, ever, whatever became of it. Refusing a re-ask only
+  /// after a decline told the asker they had been declined; so every re-ask is
+  /// refused, and the database holds the rule rather than a read-then-write.
+  /// Replaced the partial unique on pending rows (2026-10-01).
+  @@unique([post_id, from_user_id])
 }
 
 enum board_post_kind {
@@ -3494,6 +3996,9 @@ model product_events {
   user User? @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   /// DAU, WAU and MAU: one name over a date range.
+  /// Also, in migration SQL only: `product_events_event_viewed_by_entity`, a
+  /// partial covering index (entity_id, name) INCLUDE (user_id) WHERE
+  /// entity_id IS NOT NULL, for an event's views → RSVPs (lib/org-analytics.ts).
   @@index([name, occurred_at])
   /// One person's activity, for cohorts and retention curves.
   @@index([user_id, occurred_at])
@@ -3526,4 +4031,331 @@ model domain_email_tokens {
   domain organisation_domains @relation(fields: [domain_id], references: [id], onDelete: Cascade)
 
   @@index([domain_id])
+}
+
+// ---------------------------------------------------------------------------
+// Money (step 16, plan v2 §9). Who may use what they paid for, what the
+// payment provider told us, and what this server started there.
+// ---------------------------------------------------------------------------
+
+enum entitlement_subject {
+  user
+  org
+  venue
+}
+
+enum entitlement_product {
+  analytics
+  event_pass
+  venue_pro
+  plus
+  night_pass
+}
+
+enum entitlement_source {
+  razorpay
+  apple
+  google
+  grant
+}
+
+/// What a subject may use, from when until when. `hasEntitlement` in
+/// `lib/entitlements.ts` is the only reader and the only gate
+/// (`__tests__/entitlements-boundary.test.ts`).
+///
+/// A paid row is written by a provider's webhook only, never by a browser
+/// redirect. A grant is written by an admin, with an audit row saying why.
+///
+/// `subject_id` has no foreign key because it names one of three tables
+/// (`subject_kind`). The migration's CHECKs, which `schema.prisma` cannot
+/// express and `db push` drops, hold the shape: which product belongs to
+/// which kind of subject, an Event Pass and only an Event Pass names its
+/// event, Blendn+ is never sold through Razorpay, a paid row names its
+/// provider reference, and a row never ends before it starts.
+model entitlements {
+  id           String              @id @default(uuid()) @db.Uuid
+  subject_kind entitlement_subject
+  subject_id   String
+  product      entitlement_product
+  /// The event an Event Pass unlocks. Null for every other product.
+  event_id     String?             @db.Uuid
+  source       entitlement_source
+  starts_at    DateTime            @db.Timestamptz(6)
+  /// Null never ends (an Event Pass). Ending a row early sets this to now.
+  expires_at   DateTime?           @db.Timestamptz(6)
+  /// The provider's id: a Razorpay subscription or order. One row per id, so
+  /// a renewal extends the row and a replayed payment finds it already there.
+  external_ref String?
+  /// The store's time (RevenueCat `event_timestamp_ms`) of the event that last
+  /// set this row's window, and of the one that last set its owner. An older
+  /// delivery never moves either (step 11). Null on rows the store's webhook
+  /// did not write.
+  window_event_at DateTime?        @db.Timestamptz(6)
+  owner_event_at  DateTime?        @db.Timestamptz(6)
+  /// The store transaction behind the current window (the latest renewal).
+  /// A refund of an older period ends nothing; a TRANSFER matches by it.
+  window_transaction_id String?
+  created_at   DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict: a paid pass is the proof somebody paid for that event. Events
+  /// are soft-deleted (deleted_at); nothing in the product hard-deletes one.
+  event events? @relation(fields: [event_id], references: [id], onDelete: Restrict)
+
+  @@unique([source, external_ref])
+  @@index([subject_kind, subject_id, product])
+  @@index([event_id])
+}
+
+/// Who brought whom to Blendn: the first invite link a person used (plan v2
+/// §9.3, "3 friends who check in = 1 month of Blendn+"). One row per invitee,
+/// ever, so a friend counts once and for one inviter. The CHECK that nobody
+/// refers themselves lives in the migration (`db push` drops it).
+model referrals {
+  invitee_id String   @id
+  inviter_id String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  /// When this invitee counted toward a referral month, and which: once each.
+  rewarded_at  DateTime? @db.Timestamptz(6)
+  rewarded_ref String?
+
+  invitee User @relation("ReferralInvitee", fields: [invitee_id], references: [id], onDelete: Cascade)
+  inviter User @relation("ReferralInviter", fields: [inviter_id], references: [id], onDelete: Cascade)
+
+  @@index([inviter_id])
+}
+
+/// Every webhook delivery a payment provider made, as it arrived.
+///
+/// `provider_event_id` is the provider's id for the delivery (Razorpay's
+/// `x-razorpay-event-id`, which is NOT covered by the signature) and
+/// `body_sha256` is the hash of the signed body. Either unique key makes a
+/// replay a no-op, so a signed body re-sent under a new event id is a
+/// duplicate too.
+///
+/// `payload` is the delivery after `redactDelivery`: ids, amounts, states and
+/// times, never the payer's email or phone. Kept, not deleted with an
+/// account: these are the tax record (test plan D-17).
+model payment_events {
+  id                String    @id @default(uuid()) @db.Uuid
+  provider          String
+  provider_event_id String
+  body_sha256       String    @unique
+  type              String
+  payload           Json
+  received_at       DateTime  @default(now()) @db.Timestamptz(6)
+  /// Set once the delivery has been applied. Null with `error` set means it
+  /// was refused or failed; null with neither means a retry may apply it.
+  processed_at      DateTime? @db.Timestamptz(6)
+  error             String?
+  /// The purchase it was about, once resolved from our own record.
+  checkout_id       String?   @db.Uuid
+
+  checkout billing_checkouts? @relation(fields: [checkout_id], references: [id], onDelete: SetNull)
+
+  @@unique([provider, provider_event_id])
+  @@index([checkout_id, received_at])
+}
+
+enum billing_checkout_kind {
+  subscription
+  order
+  /// A Razorpay Payment Link for one placement charge (step 17).
+  payment_link
+}
+
+/// A purchase this server started at the provider, so a webhook resolves the
+/// organisation from our own row and never from the payload's `notes`.
+///
+/// `status` follows the provider's word for it (created, active, halted,
+/// cancelled, completed, paid, failed), plus two of ours: `expired` (an unpaid
+/// checkout we stopped counting as open) and `superseded` (a second mandate,
+/// paid late beside a live one, cancelled; lib/razorpay-webhook.ts). `status_at` is the provider's time
+/// for the event that set it, so an older delivery arriving late changes
+/// nothing (out-of-order webhooks).
+model billing_checkouts {
+  id                  String                @id @default(uuid()) @db.Uuid
+  provider            String                @default("razorpay")
+  kind                billing_checkout_kind
+  /// `sub_…` or `order_…`.
+  provider_ref        String
+  /// The Razorpay plan a subscription was created on. Null for an order.
+  provider_plan_id    String?
+  org_id              String                @db.Uuid
+  /// The event an Event Pass order is for.
+  event_id            String?               @db.Uuid
+  /// The venue a Venue Pro subscription is for (step 17). Null for an
+  /// organisation's own purchase. CHECK `billing_checkouts_venue_shape` in SQL:
+  /// only a subscription names a venue.
+  venue_id            String?               @db.Uuid
+  /// The placement charge a payment link is for (step 17). CHECK
+  /// `billing_checkouts_charge_shape`: a payment link names one, and nothing
+  /// else does. The webhook settles it from this row, never from notes.
+  charge_id           String?               @db.Uuid
+  /// Where a payment link is paid (Razorpay's short URL). Null for any other kind.
+  pay_url             String?
+  /// A key of `BILLING_PLANS` (lib/billing-plans.ts).
+  plan_key            String
+  /// What the provider must charge, GST included, in paise.
+  amount_minor        Int
+  currency            String                @default("INR")
+  status              String                @default("created")
+  status_at           DateTime?             @db.Timestamptz(6)
+  current_end         DateTime?             @db.Timestamptz(6)
+  cancel_at_cycle_end Boolean               @default(false)
+  /// Who started it. A user id without a foreign key, like
+  /// `organisations.verified_by`: the purchase outlives the person.
+  created_by          String?
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict: a payment record is a tax record, and an organisation that
+  /// paid is suspended, never deleted.
+  org            organisations      @relation(fields: [org_id], references: [id], onDelete: Restrict)
+  /// SetNull: an event that goes (its creator's account cascades it) keeps
+  /// the purchase record and loses only the pointer.
+  event          events?            @relation(fields: [event_id], references: [id], onDelete: SetNull)
+  /// Restrict: a purchase is a tax record; venues are retired, never deleted.
+  venue          venues?            @relation(fields: [venue_id], references: [id], onDelete: Restrict)
+  /// Restrict: a charge with a payment behind it is voided, never deleted.
+  charge         placement_charges? @relation(fields: [charge_id], references: [id], onDelete: Restrict)
+  payment_events payment_events[]
+  payments       billing_payments[]
+
+  /// Also, in migration SQL only: `billing_checkouts_one_open_subscription_per_org`
+  /// and `…_per_venue` (partial unique indexes: one open subscription per
+  /// organisation for its own plan, and per venue) and the shape CHECKs.
+  @@unique([provider, provider_ref])
+  @@index([org_id, kind, created_at])
+  @@index([event_id])
+  @@index([venue_id, kind, created_at])
+  /// Also `billing_checkouts_one_link_per_charge` (partial unique, migration SQL).
+  @@index([charge_id])
+}
+
+/// One captured payment, with the columns the Plan page and refunds need, so
+/// nothing reads the delivery JSON. `status` moves captured → refunded, or
+/// captured → disputed → dispute_won | dispute_lost.
+model billing_payments {
+  id                  String    @id @default(uuid()) @db.Uuid
+  provider            String    @default("razorpay")
+  provider_payment_id String
+  checkout_id         String    @db.Uuid
+  amount_minor        Int
+  currency            String
+  /// Razorpay Invoices' id, for a subscription charge.
+  invoice_id          String?
+  status              String    @default("captured")
+  /// When the payment was made: Razorpay's `created_at` for the payment itself, never the delivery's (SCRUM-606).
+  captured_at         DateTime  @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict: a payment is a tax record; its purchase is never deleted.
+  checkout billing_checkouts @relation(fields: [checkout_id], references: [id], onDelete: Restrict)
+
+  @@unique([provider, provider_payment_id])
+  @@index([checkout_id, captured_at])
+}
+
+/// Who a venue's offer is for (step 12). Regulars only for now: lapsed and
+/// first-timers are the plan's other audiences and wait for the owner.
+enum venue_offer_audience {
+  regulars
+}
+
+/// An offer a venue on Venue Pro sent its regulars (plan v2 §2): blind.
+///
+/// The venue writes it and picks the audience by a rule; we deliver it. The
+/// venue sees how many it was sent to, opened and redeemed, never who
+/// (`lib/offers/venue.ts`, `__tests__/regulars-never-listed.test.ts`).
+/// The migration's CHECKs (which `db push` drops) hold `audience_size >= 5`
+/// and `ends_at > created_at`.
+model venue_offers {
+  id            String               @id @default(uuid()) @db.Uuid
+  venue_id      String               @db.Uuid
+  /// The organisation that owned the venue when it sent this. Results and the
+  /// door read only the current owner's offers.
+  org_id        String               @db.Uuid
+  created_by    String?
+  text          String               @db.VarChar(140)
+  audience      venue_offer_audience @default(regulars)
+  /// How many it went to, at send time. Never under 5 (CHECK in SQL).
+  audience_size Int
+  ends_at       DateTime             @db.Timestamptz(6)
+  created_at    DateTime             @default(now()) @db.Timestamptz(6)
+
+  venue  venues              @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  org    organisations       @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  author User?               @relation("VenueOfferAuthor", fields: [created_by], references: [id], onDelete: SetNull)
+  sends  venue_offer_sends[]
+
+  @@index([venue_id, created_at])
+  @@index([org_id])
+  @@index([created_by])
+}
+
+/// One person an offer went to, and what became of it. Only the push sender
+/// and the person themselves read `user_id`; the venue reads counts.
+///
+/// Not expressible here, in the migration: a CHECK that `redeemed_at` and
+/// `redeemed_night` are set together and only after `opened_at`; a partial
+/// unique `(venue_id, user_id, redeemed_night)` — one pass a night per person
+/// per venue, whichever offer it is; and the door's partial index on
+/// `(venue_id, pass_seen_at)`.
+model venue_offer_sends {
+  id             String    @id @default(uuid()) @db.Uuid
+  offer_id       String    @db.Uuid
+  /// The offer's venue, copied so "one pass a night" can be a unique index.
+  venue_id       String    @db.Uuid
+  /// Null once the person's account is erased: the row stays as a count.
+  user_id        String?
+  sent_at        DateTime  @default(now()) @db.Timestamptz(6)
+  opened_at      DateTime? @db.Timestamptz(6)
+  /// The last time the pass was on their screen; the door matches only those.
+  pass_seen_at   DateTime? @db.Timestamptz(6)
+  redeemed_at    DateTime? @db.Timestamptz(6)
+  /// The venue's night (its day_reset_hour) it was redeemed on.
+  redeemed_night DateTime? @db.Date
+
+  offer venue_offers @relation(fields: [offer_id], references: [id], onDelete: Cascade)
+  venue venues       @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  user  User?        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([offer_id, user_id])
+  @@index([user_id, sent_at])
+}
+
+/// "Let this venue know I'm a regular" (step 12): a row is an explicit yes,
+/// given to the organisation that ran the venue then (`org_id`); revoking
+/// deletes it. That organisation sees the person's first name and their
+/// nights in the last 30, and nobody else's; after a transfer the new owner
+/// sees none of the old yeses. `created_at` is the record of consent — a
+/// person's own choices are never written to audit_logs.
+model venue_regular_optins {
+  venue_id   String   @db.Uuid
+  user_id    String
+  org_id     String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  venue venues        @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  org   organisations @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@id([venue_id, user_id, org_id])
+  @@index([user_id])
+  @@index([org_id, venue_id])
+}
+
+/// "No offers from this venue": a row mutes it (step 12, RG-I07).
+model venue_offer_mutes {
+  venue_id   String   @db.Uuid
+  user_id    String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  venue venues @relation(fields: [venue_id], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([venue_id, user_id])
+  @@index([user_id])
 }

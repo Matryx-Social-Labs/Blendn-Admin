@@ -53,6 +53,18 @@ export const eventQuerySchema = z.object({
     .optional()
     .default(false),
 
+  /**
+   * Only the featured events: published, public, age-gated and not ended (the
+   * same `where` as ever), `is_featured`, ordered by start time, at most
+   * `FEATURED_MAX` (5) however large `limit` is. `sortBy` is ignored: the order
+   * is the rank (`featured.rank`).
+   */
+  featured: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .transform((v) => v === true || v === "true")
+    .optional()
+    .default(false),
+
   // Status filter
   status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
 
@@ -143,6 +155,22 @@ export type EventQueryInput = z.infer<typeof eventQuerySchema>
 export type CheckinInput = z.infer<typeof checkinSchema>
 export type RatingInput = z.infer<typeof ratingSchema>
 
+/** The body of the three batch lookups (interests, interest counts, check-ins). */
+export const eventIdsBatchSchema = z.object({
+  eventIds: z.array(z.string().uuid()).min(1).max(50),
+})
+
+/** A Json body field for Prisma: a string is parsed; blank or unparseable is `undefined`. */
+export function parseJsonField(value: unknown) {
+  if (typeof value !== "string") return value
+  if (value.trim() === "") return undefined
+  try {
+    return JSON.parse(value)
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * The event write body.
  *
@@ -203,6 +231,8 @@ export const eventWriteSchema = z
     cover_image_url: z.string().url().max(2048).nullish(),
     external_link: z.string().url().max(2048).nullish(),
     is_featured: z.boolean().nullish(),
+    /** "Allow crews at this event" — on unless the host turns it off (plan v2 §6). */
+    crews_enabled: z.boolean().nullish(),
     is_recurring: z.boolean().nullish(),
     check_in_radius: z.number().nullish(),
     full_description: z.string().max(20000).nullish(),

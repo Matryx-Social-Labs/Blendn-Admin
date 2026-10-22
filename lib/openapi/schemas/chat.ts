@@ -6,17 +6,11 @@ import { PaginationMetaSchema, RoomUserRefSchema, UserRefParamSchema } from "./c
 export const SendMessageRequestSchema = z
   .object({
     content: z.string().min(1).max(4000),
-    type: z.enum(["text", "image", "video"]).default("text"),
+    type: z.literal("text").default("text").openapi({
+      description:
+        "Words only. A room takes no media: any other type, or any `metadata`, is 400 \"Photos can only be sent in a direct message\" (R9, SCRUM-626).",
+    }),
     parentId: z.string().uuid().optional(),
-    metadata: z
-      .object({
-        mediaUrl: z.string().url().optional().openapi({
-          description: "The sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400.",
-        }),
-      })
-      .strict()
-      .optional()
-      .openapi({ description: "Only `mediaUrl`. Any other key is refused (400): the server writes the rest (SCRUM-426)." }),
   })
   .openapi("SendMessageRequest")
 
@@ -24,9 +18,11 @@ export const SendDMRequestSchema = z
   .object({
     text: z.string().max(5000).optional(),
     mediaUrl: z.string().url().optional().openapi({
-      description: "The sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400 (SCRUM-426).",
+      description:
+        "A photo: the sender's own chat upload (POST /uploads/presigned-url, folder chat). Any other URL is 400 (SCRUM-426). " +
+        "403 until both people are named to each other or are friends; stored as a copy with its metadata (EXIF, GPS, XMP) removed (R9, SCRUM-626).",
     }),
-    mediaType: z.enum(["image", "video"]).optional(),
+    mediaType: z.literal("image").optional().openapi({ description: "Photos only: `video` is 400 (R9, SCRUM-626)." }),
   })
   .openapi("SendDMRequest")
 
@@ -102,14 +98,17 @@ export const RoomWriteSchema = z
   .object({
     allowed: z.boolean(),
     reason: z
-      .enum(["archived", "locked", "window_closed", "not_open_yet", "hidden", "muted", "banned", "left"])
+      .enum(["archived", "locked", "window_closed", "not_open_yet", "hidden", "not_live", "muted", "banned", "left"])
       .nullable()
       .describe("Null when `allowed`."),
     message: z
       .string()
       .nullable()
       .describe("A sentence for the composer. Null when allowed, and for `muted`, `banned` and `left`."),
-    closesAt: z.string().datetime().describe("When the 24-hour window after the event shuts."),
+    closesAt: z
+      .string()
+      .datetime()
+      .describe("When the 24-hour window after the event shuts. A venue day's room closes at its reset instead."),
     eventEndedAt: z.string().datetime().describe("Past this, the room is a read-only record of the night."),
   })
   .openapi("RoomWrite")
@@ -136,10 +135,14 @@ export const EventChatResponseSchema = z
 export const ChatGroupSchema = z
   .object({
     id: z.string().uuid(),
+    kind: z.literal("event").describe("Always `event` (a venue day's room is one too). Crew and Blend rooms are in `rooms`."),
     name: z.string(),
     type: z.string(),
-    memberCount: z.number(),
-    unreadCount: z.number(),
+    memberCount: z
+      .number()
+      .nullable()
+      .describe("Members of an event's room. Null for a venue day's room: an exact count there is a differencing channel (D-19)."),
+    unreadCount: z.number().describe("Messages you can see and have not read: none from somebody in a block with you."),
     mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable(),
     fromMatch: z
@@ -154,9 +157,14 @@ export const ChatGroupSchema = z
         createdAt: z.string().datetime(),
         user: z.object({ id: RoomUserRefSchema, name: z.string() }),
       })
-      .nullable(),
+      .nullable()
+      .describe("The newest message you can see — never one from somebody in a block with you, either way."),
     event: z.object({
       id: z.string().uuid(),
+      kind: z
+        .enum(["event", "venue_day"])
+        .describe("`venue_day`: a place's room (listed only while your Go Live there is open). Name it by the room's `name`, the place; its `title` is bookkeeping."),
+      venueId: z.string().uuid().nullable().describe("The place, for a venue day's room (\"Go live again\" opens it); null for an event's room."),
       slug: z.string(),
       title: z.string(),
       coverImageUrl: z.string().nullable(),
@@ -182,9 +190,41 @@ export const ChatGroupSchema = z
   })
   .openapi("ChatGroup")
 
+/** A crew's chat or a Blend's room, as the chat list shows it (step 9). */
+export const ChatRoomListItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    kind: z.enum(["crew", "blend"]).describe("Open it as that room, never as an event's."),
+    name: z.string(),
+    crewId: z.string().uuid().nullable().describe("A crew's chat: its crew (`GET /crews/{crewId}`)."),
+    blendId: z.string().uuid().nullable().describe("A Blend's room: its Blend (`GET /blends`)."),
+    closesAt: z.string().datetime().nullable().describe("A Blend's clock — gone from this list then. Null for a crew's chat."),
+    unreadCount: z.number().describe("Messages you can see and have not read: none from somebody in a block with you."),
+    mute: RoomMuteSchema,
+    lastMessageAt: z.string().datetime().nullable().describe("The newest message you can see — never one from somebody in a block with you."),
+    lastMessage: z
+      .object({
+        id: z.string().uuid(),
+        content: z.string(),
+        createdAt: z.string().datetime(),
+        user: z
+          .object({ id: RoomUserRefSchema, name: z.string() })
+          .describe("As the room names people: a crewmate's first name; in a Blend, tonight's pseudonym (a reveal names people on GET /blends, never in the chat)."),
+      })
+      .nullable(),
+    membership: z.object({ role: z.string(), joinedAt: z.string().datetime(), status: z.enum(["active", "muted"]) }),
+    status: z.enum(["active", "locked"]),
+  })
+  .openapi("ChatRoomListItem")
+
 export const ChatGroupListResponseSchema = z
   .object({
-    groups: z.array(ChatGroupSchema),
+    groups: z.array(ChatGroupSchema).describe("Event and venue-day rooms, paged."),
+    rooms: z
+      .array(ChatRoomListItemSchema)
+      .describe(
+        "My crews' chats and my Blends' rooms while open, each as its door admits me now (never a Blend across a block), newest message I can see first. Not paged: sent with page 1, [] after."
+      ),
     pagination: PaginationMetaSchema,
   })
   .openapi("ChatGroupListResponse")
@@ -337,6 +377,7 @@ const schemas = {
   EventChatResponse: EventChatResponseSchema,
   GroupChatMessage: GroupChatMessageSchema,
   ChatGroup: ChatGroupSchema,
+  ChatRoomListItem: ChatRoomListItemSchema,
   ChatGroupListResponse: ChatGroupListResponseSchema,
   GroupMessagesResponse: GroupMessagesResponseSchema,
   Participant: ParticipantSchema,

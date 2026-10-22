@@ -1,36 +1,25 @@
-"use client"
-
-// Client because it hands DataTable `render`/`sortValue` functions, and
-// DataTable is a client component. A server component cannot serialise a
-// function across that boundary — it throws at render, not at build. These
-// take their data as a prop and touch nothing server-only, so the directive
-// is the whole fix.
 import Link from "next/link"
-import {
-  IconCalendarPlus,
-  IconPlus,
-} from "@tabler/icons-react"
+import { IconArrowRight, IconCheck, IconChevronRight, IconPlus, IconQrcode } from "@tabler/icons-react"
 
 import { PacingChart } from "@/components/dashboard/charts"
-import { DataTable, type Column } from "@/components/dashboard/data-table"
-import {
-  EmptyState,
-  HeroMetric,
-  MetricTile,
-  RatingBars,
-  SectionTitle,
-} from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
+import { EventRow } from "@/components/dashboard/event-row"
+import { KpiStrip, LiveDot, Panel } from "@/components/dashboard/kit"
+import { HeroMetric, RatingBars } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
-import type { EventRow, OrganizerOverview } from "@/lib/dashboard-types"
-import { formatDay, formatNumber, formatPct, statusTone } from "@/lib/dashboard-format"
+import type { LiveEvent, OrganizerOverview } from "@/lib/dashboard-types"
+import { formatNumber, formatPct } from "@/lib/dashboard-format"
+import { tileDelta } from "@/lib/metric-delta"
+import { setupChecklist } from "@/lib/setup-checklist"
+import { cn } from "@/lib/utils"
 
 /**
- * Organiser overview — "how is my next event pacing" answered first, in the
- * largest type on the page, before anything trailing.
+ * Organiser overview, in the kit's order: what is live, whether the next night
+ * is filling, what is left to set up, how the last month went, and what is
+ * coming.
  *
- * The previous version led with four 30-day lookback cards, so the one question
- * an organiser actually arrives with was not on the screen at all.
+ * One HeroMetric — the next event's fill — and the live banner above it only
+ * while a night runs. No paywall here: everything on this screen is free
+ * (step 16 decides what Analytics adds), and none of it names a person.
  */
 export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerOverview; canCreate?: boolean }) {
   // Where "Create event" would be, for an account that cannot save one: the
@@ -41,176 +30,284 @@ export function OverviewOrganizer({ data, canCreate = true }: { data: OrganizerO
     </Button>
   )
   const { nextEvent } = data
-
-  const columns: Column<EventRow>[] = [
-    { key: "name", label: "Event" },
-    { key: "startAt", label: "Date", render: (r) => formatDay(r.startAt) },
-    {
-      key: "status",
-      label: "Status",
-      // Published is the norm and unmarked. The old version put a brand-orange
-      // badge on every published row -- fourteen of them, shouting the default.
-      render: (r) =>
-        r.status === "published" ? null : (
-          <Badge variant={statusTone(r.status)}>{r.status.replace(/_/g, " ")}</Badge>
-        ),
-    },
-    { key: "going", label: "Going", align: "right", secondary: true },
-    {
-      key: "fillPct",
-      label: "Fill",
-      align: "right",
-      render: (r) => formatPct(r.fillPct),
-      secondary: true,
-    },
-    {
-      key: "turnUpPct",
-      label: "Turn-up",
-      align: "right",
-      render: (r) => formatPct(r.turnUpPct),
-      secondary: true,
-    },
-  ]
+  const steps = setupChecklist(data.setup)
+  const stepsLeft = steps.filter((s) => !s.done).length
 
   return (
     <div className="flex flex-col gap-6">
-      {nextEvent ? (
-        <HeroMetric
-          // The venue only when the title does not already say it — "Sunset
-          // Sessions at The Humming Tree · The Humming Tree" read twice.
-          eyebrow={`${formatDay(nextEvent.startAt)} · ${nextEvent.title}${
-            nextEvent.venue !== "Venue TBD" && !nextEvent.title.includes(nextEvent.venue)
-              ? ` · ${nextEvent.venue}`
-              : ""
-          }`}
-          value={nextEvent.fillPct === null ? formatNumber(nextEvent.going) : formatPct(nextEvent.fillPct)}
-          unit={
-            nextEvent.fillPct === null
-              ? `going · ${daysToGo(nextEvent.daysOut)}`
-              : `filled · ${daysToGo(nextEvent.daysOut)}`
-          }
-          progress={nextEvent.fillPct}
-          // The value above already says going (or fill, with going as the
-          // "N of capacity" here). Never the same number twice on one card.
-          description={[
-            ...(nextEvent.capacity
-              ? [`${formatNumber(nextEvent.going)} of ${formatNumber(nextEvent.capacity)} going`]
-              : []),
-            `${formatNumber(nextEvent.maybe)} maybe`,
-            `${formatNumber(nextEvent.favourites)} saved`,
-          ]
-            .join(" · ")
-            .concat(nextEvent.pacingNote ? `. ${nextEvent.pacingNote}` : "")}
-          action={
-            <Button asChild size="sm" variant="secondary">
-              <Link href={`/dashboard/events/${nextEvent.id}`}>Open event</Link>
-            </Button>
-          }
-        />
-      ) : (
-        <HeroMetric
-          eyebrow="Next event"
-          value="—"
-          description="No upcoming event. Publish one and RSVPs, saves and the pacing curve appear here."
-          action={
-            createAction ?? (
-              <Button asChild size="sm">
-                <Link href="/dashboard/events/new">
-                  <IconPlus className="size-4" />
-                  Create event
-                </Link>
-              </Button>
-            )
-          }
-        />
-      )}
+      {data.live ? <LiveBanner live={data.live} /> : null}
 
-      {/*
-        The chart takes the width until there are ratings to show beside it:
-        five or more, since fewer are withheld (SCRUM-437). An organiser with
-        none used to get an empty dashed box for 40% of the top row, and the
-        tile below already says why there is nothing.
-      */}
-      <div className={data.averageRating !== null ? "grid gap-6 @3xl/main:grid-cols-[3fr_2fr]" : "grid gap-6"}>
-        <PacingChart
-          points={data.pacing}
-          capacity={data.pacingCapacity}
-          benchmark={data.benchmark}
-          windowDays={data.pacing.length ? data.pacing[0].daysOut : 21}
-          empty={!nextEvent || data.pacing.every((p) => p.cumulative === 0)}
-        />
-        {data.averageRating !== null ? (
-          <div className="flex flex-col gap-3">
-            <SectionTitle hint={`avg ${data.averageRating}`}>Ratings</SectionTitle>
-            <RatingBars counts={data.ratings} />
-          </div>
+      {/* The checklist sits beside the hero until it is done, then gets out of the way. */}
+      <div className={cn("grid gap-5", stepsLeft > 0 && "@3xl/main:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]")}>
+        {nextEvent ? (
+          <HeroMetric
+            // The venue only when the title does not already say it — "Sunset
+            // Sessions at The Humming Tree · The Humming Tree" read twice.
+            eyebrow={`Next up · ${nextEvent.dayLabel} · ${nextEvent.title}${
+              nextEvent.venue !== "Venue TBD" && !nextEvent.title.includes(nextEvent.venue)
+                ? ` · ${nextEvent.venue}`
+                : ""
+            }`}
+            value={nextEvent.fillPct === null ? formatNumber(nextEvent.going) : formatPct(nextEvent.fillPct)}
+            unit={
+              nextEvent.fillPct === null
+                ? `going · ${daysToGo(nextEvent.daysOut)}`
+                : `filled · ${daysToGo(nextEvent.daysOut)}`
+            }
+            progress={nextEvent.fillPct}
+            // The value above already says going (or fill, with going as the
+            // "N of capacity" here). Never the same number twice on one card.
+            description={[
+              ...(nextEvent.capacity
+                ? [`${formatNumber(nextEvent.going)} of ${formatNumber(nextEvent.capacity)} going`]
+                : []),
+              `${formatNumber(nextEvent.maybe)} maybe`,
+              `${formatNumber(nextEvent.favourites)} saved`,
+            ]
+              .join(" · ")
+              .concat(nextEvent.pacingNote ? `. ${nextEvent.pacingNote}` : "")}
+            action={
+              <div className="flex flex-wrap gap-2">
+                <Button asChild size="sm" variant="secondary" className="pointer-coarse:h-11">
+                  <Link href={`/dashboard/events/${nextEvent.id}`}>Open event</Link>
+                </Button>
+                {/* Next up is always a published night of the organisation's own:
+                    the QR & link tab is theirs (`sharesLink`). */}
+                <Button asChild size="sm" variant="ghost" className="pointer-coarse:h-11">
+                  <Link href={`/dashboard/events/${nextEvent.id}?tab=share`}>
+                    <IconQrcode aria-hidden className="size-4" />
+                    Get the QR code
+                  </Link>
+                </Button>
+              </div>
+            }
+          />
+        ) : (
+          <HeroMetric
+            eyebrow="Next up"
+            value="—"
+            description="No upcoming event. Publish one and RSVPs, saves and the pacing curve appear here."
+            action={
+              createAction ?? (
+                <Button asChild size="sm">
+                  <Link href="/dashboard/events/new">
+                    <IconPlus className="size-4" />
+                    Create event
+                  </Link>
+                </Button>
+              )
+            }
+          />
+        )}
+
+        {stepsLeft > 0 ? (
+          <Panel title="Getting set up" hint={`${steps.length - stepsLeft} of ${steps.length}`}>
+            <ul className="flex flex-col">
+              {steps.map((step) => (
+                <li key={step.key}>
+                  <Link
+                    href={step.href}
+                    className={cn(
+                      "flex min-h-11 items-center gap-2.5 rounded-md text-[0.84375rem] transition-colors hover:text-foreground",
+                      step.done ? "text-muted-foreground" : "text-foreground"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-[18px] shrink-0 items-center justify-center rounded-full",
+                        step.done ? "bg-success" : "border-[1.5px] border-border-strong"
+                      )}
+                    >
+                      {step.done ? <IconCheck aria-hidden className="size-3 text-brand-ink" /> : null}
+                    </span>
+                    <span className={cn("flex-1", step.done && "line-through")}>
+                      {step.label}
+                      <span className="sr-only">{step.done ? " (done)" : " (to do)"}</span>
+                    </span>
+                    {step.done ? null : (
+                      <IconChevronRight aria-hidden className="size-3.5 text-faint-foreground" />
+                    )}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Panel>
         ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-1">
-        <MetricTile
-          label="No-show rate"
-          value={data.noShowRatePct === null ? null : formatPct(data.noShowRatePct)}
-          delta={data.noShowDelta ?? undefined}
-          deltaInvert
-          hint={data.noShowRatePct === null ? "needs a past event" : "last 30 days"}
-          href="/dashboard/attendees"
-        />
-        <MetricTile
-          label="Repeat attendees"
-          value={data.repeatAttendees}
-          hint="came back for a 2nd event"
-          href="/dashboard/attendees"
-        />
-        <MetricTile
-          label="Avg rating"
-          value={data.averageRating}
-          hint={
-            data.ratingCount === 0
-              ? "no ratings yet"
-              : data.averageRating === null
-                ? "not enough ratings yet"
-                : `${formatNumber(data.ratingCount)} ratings`
-          }
-        />
-        <MetricTile
-          label="Chat today"
-          value={data.chatToday}
-          hint="messages"
-          href="/dashboard/chatrooms"
-        />
-      </div>
+      {/*
+        Pacing against the last event that ran — kept from the previous overview
+        though the kit moves it: it is a free figure (the pricing audit's
+        "pacing vs last event"), and this is the only place it is drawn.
+      */}
+      {nextEvent ? (
+        <Panel>
+          <PacingChart
+            points={data.pacing}
+            capacity={data.pacingCapacity}
+            benchmark={data.benchmark}
+            windowDays={data.pacing.length ? data.pacing[0].daysOut : 21}
+            empty={data.pacing.every((p) => p.cumulative === 0)}
+          />
+        </Panel>
+      ) : null}
 
-      <div className="flex flex-col gap-3">
-        <SectionTitle>Your events</SectionTitle>
-        <DataTable
-          columns={columns}
-          rows={data.events}
-          rowHref={(row) => `/dashboard/events/${row.id}`}
-          emptyState={
-            <EmptyState
-              icon={<IconCalendarPlus />}
-              title="No events yet"
-              description="Create your first event — pacing, attendance and ratings all start here."
-              action={
-                createAction ?? (
-                  <Button asChild size="sm">
-                    <Link href="/dashboard/events/new">Create event</Link>
-                  </Button>
-                )
-              }
-            />
-          }
-          footer={
-            <span>
-              {formatNumber(data.events.length)} events · published is unmarked · fill is — when no
-              capacity is set
-            </span>
-          }
+      <section className="flex flex-col gap-2.5" aria-labelledby="last-30-days">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <h2 id="last-30-days" className="text-panel-title font-bold">
+            Last 30 days
+          </h2>
+          <span className="text-[0.75rem] text-faint-foreground">
+            {formatNumber(data.checkIns.current)} check-in{data.checkIns.current === 1 ? "" : "s"} · ratings and
+            came back count every event
+          </span>
+        </div>
+        <KpiStrip
+          items={[
+            {
+              label: "Check-ins",
+              value: formatNumber(data.checkIns.current),
+              ...withHint(tileDelta(data.checkIns), "vs the 30 days before"),
+            },
+            {
+              label: "No-show rate",
+              value: data.noShowRatePct === null ? null : formatPct(data.noShowRatePct),
+              // A change in a rate is in points: 30% → 36% is +6 pts, not +6%.
+              delta: data.noShowDelta ?? undefined,
+              deltaInvert: true,
+              deltaSuffix: "pts",
+              hint: data.noShowRatePct === null ? "needs a past event" : "RSVP'd, didn't come",
+              href: "/dashboard/attendees",
+            },
+            {
+              label: "Avg rating",
+              value: data.averageRating,
+              hint:
+                data.ratingCount === 0
+                  ? "no ratings yet"
+                  : data.averageRating === null
+                    ? "not enough ratings yet"
+                    : `${formatNumber(data.ratingCount)} ratings`,
+            },
+            {
+              label: "Came back",
+              value: data.repeatAttendees,
+              hint: "for a 2nd event",
+              href: "/dashboard/attendees",
+            },
+          ]}
         />
+      </section>
+
+      <div className="grid items-start gap-5 @3xl/main:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+        <Panel
+          title="Coming up"
+          action={
+            <Link
+              href="/dashboard/events"
+              className="text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground pointer-coarse:py-3"
+            >
+              All events
+            </Link>
+          }
+          bodyClassName="p-0 pt-3"
+        >
+          {data.comingUp.length ? (
+            <div className="@container/rows">
+              {data.comingUp.map((row) => (
+                <EventRow key={row.id} row={row} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-start gap-3 border-t border-border px-5 py-5">
+              <p className="text-[0.84375rem] text-muted-foreground">
+                Nothing scheduled. Events you publish or draft appear here, soonest first.
+              </p>
+              {createAction ?? (
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/dashboard/events/new">Create event</Link>
+                </Button>
+              )}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Latest feedback" hint={data.latestFeedback?.title}>
+          {data.latestFeedback ? (
+            <>
+              <RatingBars counts={data.latestFeedback.ratings} />
+              <Link
+                href={`/dashboard/events/${data.latestFeedback.eventId}/feedback`}
+                className="inline-flex w-fit items-center gap-1 text-[0.8125rem] text-muted-foreground transition-colors hover:text-foreground pointer-coarse:py-3"
+              >
+                What people said
+                <IconArrowRight aria-hidden className="size-3.5" />
+              </Link>
+            </>
+          ) : (
+            <p className="text-[0.84375rem] text-muted-foreground">
+              An event&apos;s ratings show here once five people have rated it. Fewer would let each rater work out
+              another&apos;s score.
+            </p>
+          )}
+        </Panel>
       </div>
     </div>
   )
+}
+
+/**
+ * The night that is running now. A red-edged strip, the only one on the page,
+ * there only while it runs; the flagged-message count is the one red sentence.
+ */
+function LiveBanner({ live }: { live: LiveEvent }) {
+  return (
+    <section
+      aria-label={`${live.title} is live`}
+      className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-panel border border-destructive/40 bg-destructive/[0.06] px-5 py-4"
+    >
+      <LiveDot />
+      <span className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
+        <span className="text-sm font-bold">{live.title} is live</span>
+        <span className="text-[0.8125rem] text-muted-foreground">
+          {[live.venue, `doors ${live.doors}`].filter(Boolean).join(" · ")}
+          {live.flags > 0 ? (
+            <>
+              {" · "}
+              <b className="font-bold text-destructive">
+                {live.flags} flagged message{live.flags === 1 ? "" : "s"} need{live.flags === 1 ? "s" : ""} you
+              </b>
+            </>
+          ) : null}
+        </span>
+      </span>
+      <dl className="flex gap-7">
+        {(
+          [
+            [live.inside, "in the room"],
+            [live.checkedIn, "checked in"],
+            [live.messages, "messages"],
+          ] as const
+        ).map(([value, label]) => (
+          <div key={label} className="flex flex-col-reverse">
+            <dt className="text-[0.75rem] text-faint-foreground">{label}</dt>
+            <dd className="text-[1.375rem] font-bold leading-[1.1] tabular-nums">{formatNumber(value)}</dd>
+          </div>
+        ))}
+      </dl>
+      <Button asChild className="pointer-coarse:h-11">
+        <Link href={`/dashboard/events/${live.id}?tab=live`}>
+          Open live view
+          <IconArrowRight aria-hidden className="size-4" />
+        </Link>
+      </Button>
+    </section>
+  )
+}
+
+/** A tile's own hint unless the delta brought one ("new"). */
+function withHint(delta: { delta?: number; hint?: string }, fallback: string) {
+  return { ...delta, hint: delta.hint ?? fallback }
 }
 
 const daysToGo = (days: number) =>

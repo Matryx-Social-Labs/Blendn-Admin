@@ -1,5 +1,10 @@
 import { redirect } from "next/navigation"
 
+import { routeMetadata } from "@/lib/dashboard-route-content"
+
+// The tab says what the h1 says (WCAG 2.4.2).
+export const metadata = routeMetadata("/dashboard/venue-claims")
+
 /**
  * Moved into the shared claim queue.
  *

@@ -8,6 +8,7 @@ import { IconAlertTriangle, IconCheck, IconLoader2, IconX } from "@tabler/icons-
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { Panel } from "@/components/dashboard/kit"
 import { EmptyState } from "@/components/dashboard/primitives"
 import { IconCalendar } from "@tabler/icons-react"
 import { whenLabel } from "@/lib/dashboard-format"
@@ -30,40 +31,44 @@ import { refusalMessage } from "@/lib/refusal"
  * hide events they would rather not answer for, so it flags the link for an
  * admin instead. Detaching is the organiser's call.
  */
-export function LinkedEvents({ events }: { events: VenueLinkedEvent[] }) {
-  if (events.length === 0) {
-    return (
-      <EmptyState
-        icon={<IconCalendar />}
-        title="No events linked yet"
-        description="When an organiser picks one of your venues, their event appears here — and so do its chatroom and attendee count. You can dispute anything that is not actually yours."
-      />
-    )
-  }
-
+export function LinkedEvents({ events, total }: { events: VenueLinkedEvent[]; total: number }) {
   const disputed = events.filter((e) => e.linkStatus === "disputed").length
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[length:var(--text-h2)] font-bold">Events at your venues</h2>
-        {disputed > 0 ? (
-          <p className="text-[0.78125rem] text-warning">
-            {disputed} disputed, waiting on an admin
+    <Panel
+      title="Events at your venues"
+      hint={disputed > 0 ? <span className="text-warning">{disputed} disputed, waiting on an admin</span> : undefined}
+      bodyClassName="gap-0 px-0 pb-0 pt-3"
+    >
+      {events.length === 0 ? (
+        <div className="px-5 pb-5">
+          <EmptyState
+            icon={<IconCalendar />}
+            title="No events linked yet"
+            description="When an organiser picks one of your venues, their event appears here — and so do its chatroom and attendee count. You can dispute anything that is not actually yours."
+          />
+        </div>
+      ) : (
+        <>
+          <p className="max-w-prose px-5 pb-3 text-[0.8125rem] text-muted-foreground">
+            You see the chatroom, attendee count and feedback for each of these. If one is not actually at your
+            venue, dispute it — an admin resolves it and the organiser is told.
           </p>
-        ) : null}
-      </div>
-      <p className="max-w-prose text-[0.8125rem] text-muted-foreground">
-        You see the chatroom, attendee count and feedback for each of these. If one is not
-        actually at your venue, dispute it — an admin resolves it and the organiser is told.
-      </p>
-
-      <ul className="flex flex-col divide-y divide-border border-t border-border">
-        {events.map((event) => (
-          <LinkedEventRow key={event.id} event={event} />
-        ))}
-      </ul>
-    </section>
+          <ul className="flex flex-col">
+            {events.map((event) => (
+              <LinkedEventRow key={event.id} event={event} />
+            ))}
+          </ul>
+          {total > events.length ? (
+            /* A venue owner reads this list to find an event wrongly linked to
+               their building. A cap that hides one is a dispute never filed. */
+            <p className="border-t border-border px-5 py-3 text-[0.8125rem] text-muted-foreground">
+              Showing {events.length} of {total}.
+            </p>
+          ) : null}
+        </>
+      )}
+    </Panel>
   )
 }
 
@@ -91,7 +96,7 @@ function LinkedEventRow({ event }: { event: VenueLinkedEvent }) {
     /* A row, not a card. The link state is a word after the meta line —
        twelve brand-orange "Auto-linked" chips said nothing twelve times;
        disputed is the one state that changes anything, and it is in colour. */
-    <li className="flex flex-col gap-2 py-3 @2xl/main:flex-row @2xl/main:items-start @2xl/main:justify-between @2xl/main:gap-6">
+    <li className="flex flex-col gap-2 border-t border-border px-5 py-3 @2xl/main:flex-row @2xl/main:items-start @2xl/main:justify-between @2xl/main:gap-6">
       <div className="flex min-w-0 flex-col gap-0.5">
         <Link
           href={`/dashboard/events/${event.id}`}

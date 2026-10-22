@@ -1,7 +1,7 @@
 import type { DashboardRole } from "@/lib/dashboard-types"
 
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 const as = (role: DashboardRole, id: string) => {
   session = { user: { id, role } }
 }
@@ -106,7 +106,7 @@ describe("organisation-shaped overviews", () => {
     const overview = await getDashboardOverview()
     expect(overview.role).toBe("organizer")
     if (overview.role !== "organizer") return
-    expect(overview.events.map((e) => e.id)).toContain(eventId)
+    expect(overview.comingUp.map((e) => e.id)).toContain(eventId)
     expect(overview.nextEvent?.id).toBe(eventId)
   })
 
@@ -145,6 +145,6 @@ describe("organisation-shaped overviews", () => {
     as("organizer", stranger)
     const overview = await getDashboardOverview()
     if (overview.role !== "organizer") throw new Error("expected organiser overview")
-    expect(overview.events.map((e) => e.id)).not.toContain(eventId)
+    expect(overview.comingUp.map((e) => e.id)).not.toContain(eventId)
   })
 })

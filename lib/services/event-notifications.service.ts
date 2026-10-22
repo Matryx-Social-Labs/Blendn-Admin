@@ -12,6 +12,7 @@ import { logger } from "../logger"
 import { db } from "../db"
 import { notifyEventUpdate, sendBulkPushNotifications } from "../push-notifications"
 import type { rsvp_status } from "@prisma/client"
+import { realEventsWhere } from "../event-kind"
 
 /**
  * Who hears about a change to an event.
@@ -120,6 +121,8 @@ export async function sendEventReminders(minutesBefore: number = 60): Promise<nu
     // Find events starting within the reminder window
     const events = await db.events.findMany({
       where: {
+        // A venue day "starts" at the venue's reset hour, and nobody is waiting for it.
+        ...realEventsWhere,
         status: "published",
         deleted_at: null,
         start_time: {
@@ -265,6 +268,8 @@ export async function sendRatingRequests(now: Date = new Date()): Promise<number
         // `completed` too: an organiser may close the night before the clock does.
         status: { in: ["published", "completed"] },
         deleted_at: null,
+        // Rating who you met is for a night. A venue day ends at 06:00 (PL-I16).
+        ...realEventsWhere,
         rating_requested_at: null,
         end_time: { lte: now, gt: new Date(now.getTime() - RATING_REQUEST_LOOKBACK_MS) },
       },

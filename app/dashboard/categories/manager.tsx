@@ -4,6 +4,7 @@ import { useId, useMemo, useState, useTransition } from "react"
 import { IconArrowsJoin, IconPencil, IconPlus } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { Callout, Panel } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -48,7 +49,7 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
   const orphans = categories.filter((c) => c.parentId && !parents.some((p) => p.id === c.parentId))
 
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[0.8125rem] text-muted-foreground">
           Two levels: a parent like <b className="text-foreground">Sports</b> with children like{" "}
@@ -63,55 +64,94 @@ export function CategoryManager({ categories }: { categories: CategoryRow[] }) {
       {creating ? <CreateForm parents={parents} onDone={() => setCreating(false)} /> : null}
 
       {orphans.length > 0 ? (
-        <p className="border-l-2 border-destructive pl-3 text-[0.8125rem]">
+        <Callout tone="destructive">
           {orphans.length} categor{orphans.length === 1 ? "y" : "ies"} point at a parent that no
           longer exists. They will not appear under any parent filter.
-        </p>
+        </Callout>
       ) : null}
 
-      <div className="flex flex-col gap-6">
-        {parents.map((parent) => (
-          <section key={parent.id} className="border-t border-border">
-            <Row
-              row={parent}
-              isParent
-              renaming={renaming === parent.id}
-              onRename={() => setRenaming(parent.id)}
-              onCancelRename={() => setRenaming(null)}
-              onMerge={() => setMerging(parent)}
-              pending={pending}
-              start={start}
-            />
-            {(childrenOf.get(parent.id) ?? []).map((child) => (
-              <Row
-                key={child.id}
-                row={child}
-                renaming={renaming === child.id}
-                onRename={() => setRenaming(child.id)}
-                onCancelRename={() => setRenaming(null)}
-                onMerge={() => setMerging(child)}
-                pending={pending}
-                start={start}
-              />
-            ))}
-          </section>
-        ))}
+      {/*
+        The kit's Categories: a Panel per top-level category with its children
+        as rows. Two columns once the content column is wide enough — a row
+        carries a rename and a merge control, which a narrower panel cannot.
+      */}
+      <div className="grid items-start gap-4 @3xl/main:grid-cols-2">
+        {parents.map((parent) => {
+          const children = childrenOf.get(parent.id) ?? []
+          const mergingHere = merging !== null && (merging.id === parent.id || merging.parentId === parent.id)
+          return (
+            <Panel
+              key={parent.id}
+              title={parent.name}
+              hint={<Counts row={parent} />}
+              action={
+                <span className="flex shrink-0">
+                  <Button size="sm" variant="ghost" onClick={() => setRenaming(parent.id)} aria-label={`Rename ${parent.name}`}>
+                    <IconPencil className="size-4" />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setMerging(parent)} aria-label={`Merge ${parent.name}`}>
+                    <IconArrowsJoin className="size-4" />
+                  </Button>
+                </span>
+              }
+              bodyClassName="gap-0 pb-3 pt-2"
+            >
+              {renaming === parent.id ? (
+                <div className="flex flex-wrap items-center gap-2.5 pb-2">
+                  <RenameInline row={parent} pending={pending} start={start} onDone={() => setRenaming(null)} />
+                </div>
+              ) : null}
+              {children.length === 0 ? (
+                <p className="border-t border-border py-2 text-[0.8125rem] text-muted-foreground">No subcategories.</p>
+              ) : null}
+              {children.map((child) => (
+                <Row
+                  key={child.id}
+                  row={child}
+                  renaming={renaming === child.id}
+                  onRename={() => setRenaming(child.id)}
+                  onCancelRename={() => setRenaming(null)}
+                  onMerge={() => setMerging(child)}
+                  pending={pending}
+                  start={start}
+                />
+              ))}
+              {mergingHere && merging ? (
+                <MergeForm
+                  from={merging}
+                  options={categories.filter((c) => c.id !== merging.id && !c.parentId === !merging.parentId)}
+                  onDone={() => setMerging(null)}
+                />
+              ) : null}
+            </Panel>
+          )
+        })}
       </div>
-
-      {merging ? (
-        <MergeForm
-          from={merging}
-          options={categories.filter((c) => c.id !== merging.id && !c.parentId === !merging.parentId)}
-          onDone={() => setMerging(null)}
-        />
-      ) : null}
     </div>
+  )
+}
+
+/**
+ * A category's events and saved interests, or "—" when it has neither.
+ *
+ * Interests sit beside events because they are what matching ranks on. A
+ * category with no events and four hundred interests looks dead by the event
+ * count alone, and retiring it used to destroy all four hundred. Plain text,
+ * tabular — seventy rows of chips was a wall. Zero of both is the dead one, and
+ * it reads as a dash rather than "0 events · 0 interests".
+ */
+function Counts({ row }: { row: CategoryRow }) {
+  if (row.eventCount === 0 && row.interestCount === 0) return <span className="tabular-nums">—</span>
+  return (
+    <span className="tabular-nums">
+      {row.eventCount} event{row.eventCount === 1 ? "" : "s"} · {row.interestCount} interest
+      {row.interestCount === 1 ? "" : "s"}
+    </span>
   )
 }
 
 function Row({
   row,
-  isParent,
   renaming,
   onRename,
   onCancelRename,
@@ -120,7 +160,6 @@ function Row({
   start,
 }: {
   row: CategoryRow
-  isParent?: boolean
   renaming: boolean
   onRename: () => void
   onCancelRename: () => void
@@ -129,12 +168,7 @@ function Row({
   start: React.TransitionStartFunction
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-2.5 border-b border-border py-2 last:border-0",
-        !isParent && "pl-6"
-      )}
-    >
+    <div className="flex flex-wrap items-center gap-2.5 border-t border-border py-1.5">
       {renaming ? (
         // Its own component, so it mounts fresh each time the pencil is
         // clicked. Held in Row's state, a cancelled edit's text came back the
@@ -142,31 +176,26 @@ function Row({
         <RenameInline row={row} pending={pending} start={start} onDone={onCancelRename} />
       ) : (
         <>
-          <span className={cn("flex-1 text-sm", isParent && "text-[0.9375rem] font-bold")}>{row.name}</span>
-          <code className="text-[0.6875rem] text-faint-foreground">{row.slug}</code>
-          {/*
-            Interests sit beside events because they are what matching ranks
-            on. A category with no events and four hundred interests looks dead
-            by the event count alone, and retiring it used to destroy all four
-            hundred. Plain text, tabular — seventy rows of chips was a wall.
-          */}
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="text-[0.84375rem]">{row.name}</span>
+            <code className="text-[0.6875rem] text-faint-foreground">{row.slug}</code>
+          </span>
           <span
             className={cn(
-              "w-40 text-right text-[0.75rem] tabular-nums",
-              row.eventCount === 0 && row.interestCount === 0
-                ? "text-faint-foreground"
-                : "text-muted-foreground"
+              "text-right text-[0.75rem]",
+              row.eventCount === 0 && row.interestCount === 0 ? "text-faint-foreground" : "text-muted-foreground"
             )}
           >
-            {row.eventCount} event{row.eventCount === 1 ? "" : "s"} · {row.interestCount} interest
-            {row.interestCount === 1 ? "" : "s"}
+            <Counts row={row} />
           </span>
-          <Button size="sm" variant="ghost" onClick={onRename} aria-label={`Rename ${row.name}`}>
-            <IconPencil className="size-4" />
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onMerge} aria-label={`Merge ${row.name}`}>
-            <IconArrowsJoin className="size-4" />
-          </Button>
+          <span className="flex shrink-0">
+            <Button size="sm" variant="ghost" onClick={onRename} aria-label={`Rename ${row.name}`}>
+              <IconPencil className="size-4" />
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onMerge} aria-label={`Merge ${row.name}`}>
+              <IconArrowsJoin className="size-4" />
+            </Button>
+          </span>
         </>
       )}
     </div>
@@ -287,7 +316,7 @@ function MergeForm({
   const into = options.find((o) => o.id === intoId)
 
   return (
-    <div className="flex flex-col gap-3 border-l-2 border-warning pl-3">
+    <div className="mt-2 flex flex-col gap-3 border-l-2 border-warning pl-3">
       <p className="text-[0.8125rem] leading-6">
         Merge <b>{from.name}</b> into another category. Its {from.eventCount} event
         {from.eventCount === 1 ? "" : "s"} and {from.interestCount} saved interest

@@ -5,11 +5,17 @@ import * as SwitchPrimitive from "@radix-ui/react-switch"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * `label` wraps the switch in a `<label>`, so the words are its accessible name
+ * and clicking them flips it — the kit's settings-row shape. Without a label it
+ * is the bare control, and the caller names it.
+ */
 function Switch({
   className,
+  label,
   ...props
-}: React.ComponentProps<typeof SwitchPrimitive.Root>) {
-  return (
+}: React.ComponentProps<typeof SwitchPrimitive.Root> & { label?: React.ReactNode }) {
+  const control = (
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
@@ -25,6 +31,14 @@ function Switch({
         )}
       />
     </SwitchPrimitive.Root>
+  )
+
+  if (label === undefined) return control
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-4 text-[0.875rem] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+      <span>{label}</span>
+      {control}
+    </label>
   )
 }
 

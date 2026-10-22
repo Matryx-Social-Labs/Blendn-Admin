@@ -8,7 +8,52 @@
     "data": [
       "events",
       "pagination"
-    ]
+    ],
+    "nested": {
+      "events[]": [
+        "address",
+        "categories",
+        "checkInCount",
+        "city",
+        "claimUrl",
+        "country",
+        "coverImageUrl",
+        "currentCapacity",
+        "distance",
+        "doorPolicy",
+        "endTime",
+        "favoriteCount",
+        "featured",
+        "goingCount",
+        "hereCount",
+        "id",
+        "isFavorited",
+        "isFeatured",
+        "latitude",
+        "longitude",
+        "maxCapacity",
+        "media",
+        "organizer",
+        "ratingCount",
+        "session",
+        "shortDescription",
+        "slug",
+        "startTime",
+        "state",
+        "status",
+        "timezone",
+        "title",
+        "venue",
+        "venueName"
+      ],
+      "pagination": [
+        "hasMore",
+        "limit",
+        "page",
+        "totalCount",
+        "totalPages"
+      ]
+    }
   },
   "/api/mobile/events/cities": {
     "status": 200,
@@ -63,6 +108,30 @@
       "workFields"
     ]
   },
+  "/api/mobile/profile-options": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "homeStates",
+      "languages",
+      "maxLanguages",
+      "signs",
+      "thisOrThat"
+    ]
+  },
+  "/api/mobile/me/this-or-that": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "answers"
+    ]
+  },
   "/api/mobile/venues": {
     "status": 200,
     "envelope": [
@@ -72,6 +141,49 @@
     "data": [
       "pagination",
       "venues"
+    ],
+    "nested": {
+      "venues[]": [
+        "address",
+        "area",
+        "areaSlug",
+        "capacity",
+        "city",
+        "distance",
+        "floors",
+        "id",
+        "latitude",
+        "liveNow",
+        "longitude",
+        "name",
+        "nextEvent",
+        "tier",
+        "tonight",
+        "upcomingEventCount",
+        "venueType",
+        "venueTypeLabel"
+      ],
+      "pagination": [
+        "hasMore",
+        "limit",
+        "page",
+        "totalCount",
+        "totalPages"
+      ]
+    }
+  },
+  "/api/mobile/venues/summary": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "areas",
+      "liveCount",
+      "openTonightCount",
+      "total",
+      "types"
     ]
   },
   "/api/mobile/conversations": {
@@ -92,8 +204,37 @@
     ],
     "data": [
       "groups",
-      "pagination"
-    ]
+      "pagination",
+      "rooms"
+    ],
+    "nested": {
+      "groups[]": [
+        "event",
+        "id",
+        "isCheckedIn",
+        "kind",
+        "lastMessage",
+        "lastMessageAt",
+        "memberCount",
+        "membership",
+        "mute",
+        "name",
+        "status",
+        "type",
+        "unreadCount"
+      ],
+      "groups[].event": [
+        "coverImageUrl",
+        "endTime",
+        "id",
+        "kind",
+        "slug",
+        "startTime",
+        "status",
+        "title",
+        "venueId"
+      ]
+    }
   },
   "/api/mobile/notifications": {
     "status": 200,
@@ -136,7 +277,20 @@
     ],
     "data": [
       "checkIns"
-    ]
+    ],
+    "nested": {
+      "checkIns[]": [
+        "checkInTime",
+        "event",
+        "eventId",
+        "expiresAt",
+        "id",
+        "kind",
+        "revealed",
+        "stay",
+        "venueId"
+      ]
+    }
   },
   "/api/mobile/board/requests": {
     "status": 200,
@@ -147,6 +301,51 @@
     "data": [
       "incoming",
       "outgoing"
+    ]
+  },
+  "/api/mobile/crews": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "crews",
+      "invites"
+    ]
+  },
+  "/api/mobile/blends": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "blends"
+    ]
+  },
+  "/api/mobile/offers": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "offers"
+    ]
+  },
+  "/api/mobile/me/plus": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "active",
+      "expiresAt",
+      "gated",
+      "product",
+      "source"
     ]
   },
   "/api/mobile/events/:eventId": {
@@ -327,14 +526,18 @@
         "friends_see_me_in_rooms",
         "gender",
         "goals",
+        "home_state",
         "id",
         "intent_default",
         "interested_in",
         "interests",
+        "languages",
         "location",
         "looking_for",
         "name",
         "occupation",
+        "offer_push_consent_at",
+        "offers_from_places",
         "onboarded",
         "orientations",
         "phone",
@@ -343,10 +546,61 @@
         "read_receipts",
         "reveal_by_default",
         "share_location",
+        "show_badges",
         "show_online",
         "show_orientation",
+        "shows_up_badge",
+        "sign_system",
+        "suggested_sun_sign",
+        "sun_sign",
+        "tier_b_changed_at",
         "updated_at",
         "work_field"
+      ]
+    }
+  },
+  "/api/mobile/venues/:venueId": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "claim",
+      "live",
+      "tonight",
+      "venue"
+    ],
+    "nested": {
+      "venue": [
+        "address",
+        "amenities",
+        "capacity",
+        "city",
+        "claimed",
+        "dayResetHour",
+        "description",
+        "floors",
+        "hours",
+        "id",
+        "latitude",
+        "longitude",
+        "name",
+        "upcoming",
+        "venueType",
+        "venueTypeLabel"
+      ],
+      "live": [
+        "chatGroupId",
+        "closedReason",
+        "eventId",
+        "expiresAt",
+        "liveNow",
+        "open",
+        "stay",
+        "stayUntil",
+        "venueDayId",
+        "youAreLive"
       ]
     }
   }

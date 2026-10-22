@@ -12,6 +12,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { PAGINATION } from "@/lib/constants"
+import { paginationMeta } from "@/lib/pagination"
 
 const searchSchema = z.object({
   q: z.string().min(1).max(200),
@@ -126,6 +127,7 @@ export async function GET(request: NextRequest) {
               ) as rank
        FROM events
        WHERE deleted_at IS NULL
+         AND kind = 'event'
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(4)}
@@ -145,6 +147,7 @@ export async function GET(request: NextRequest) {
       `SELECT count(*) as count
        FROM events
        WHERE deleted_at IS NULL
+         AND kind = 'event'
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(2)}
@@ -171,13 +174,7 @@ export async function GET(request: NextRequest) {
         city: e.city,
         status: e.status,
       })),
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     logger.error("Event search error", { error: error instanceof Error ? error.message : String(error) })

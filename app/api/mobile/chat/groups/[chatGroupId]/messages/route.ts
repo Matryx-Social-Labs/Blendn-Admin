@@ -2,11 +2,12 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { blockCounterparties } from "@/lib/conversations"
+import { keptApartIn } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
+import { namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
@@ -23,15 +24,15 @@ import {
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
-import { chatClosedMessage, LEFT_ROOM_MESSAGE, mayWriteToRoom, roomReadDenial } from "@/lib/chat-window"
-import { clientMessageMetadata, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
+import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
+import { ownerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { roomMessageWords } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 
 const sendMessageSchema = z.object({
   content: z.string().min(1, "Message content is required").max(4000),
-  type: z.enum(["text", "image", "video"]).default("text"),
-  metadata: clientMessageMetadata.optional(),
+  ...roomMessageWords,
   parentId: z.string().uuid().optional(),
   /** The app's own id for this send: a retry with it returns the first write (SCRUM-410). */
   clientId: z.string().uuid().optional(),
@@ -66,7 +67,8 @@ export async function GET(
         members: {
           where: { user_id: user.userId },
         },
-        event: { select: { status: true, deleted_at: true, ...broadcastAuthorSelect } },
+        event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
+        ...ownerDoor(user.userId),
       },
     })
 
@@ -74,12 +76,14 @@ export async function GET(
       return notFoundResponse("Chat group not found")
     }
 
-    // Any membership row used to pass, `banned` included (SCRUM-205).
+    // Any membership row used to pass, `banned` included (SCRUM-205); and a
+    // room that is not an event's asks its owner too (F8).
     const membership = chatGroup.members[0]
-    const denial = roomReadDenial(membership, chatGroup.event)
+    const denial = roomReadDenialFor(chatGroup, membership, user.userId)
     if (denial === "hidden") return notFoundResponse("Chat group not found")
     if (denial === "not_member") return forbiddenResponse("You are not a member of this chat group")
     if (denial === "banned") return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+    if (denial === "not_live") return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
 
     // Build query for messages — include moderation-hidden messages
     // so the sender can see "This message was removed" placeholders
@@ -91,7 +95,8 @@ export async function GET(
      * their messages still arrived in the history, over the socket and as a
      * push notification.
      */
-    const blockedIds = await blockCounterparties(user.userId)
+    // …and in a board post's room, a closed conversation's too (`keptApartIn`).
+    const blockedIds = await keptApartIn(user.userId, chatGroup.kind)
 
     const whereClause: Record<string, unknown> = {
       chat_group_id: chatGroupId,
@@ -162,6 +167,19 @@ export async function GET(
     const hasMore = messages.length > limit
     const messagesToReturn = hasMore ? messages.slice(0, limit) : messages
 
+    /*
+     * Reading the newest page is reading the room: the read marker the event
+     * chat route writes (`GET /events/:eventId/chat`), here for every kind —
+     * a crew's or a Blend's room is read only through this route, and its row
+     * in `GET /chat/groups` counted everything as unread for ever without it.
+     */
+    if (!before && membership && messagesToReturn.length > 0) {
+      await db.chat_group_members.update({
+        where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
+        data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
+      })
+    }
+
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()
 
@@ -184,13 +202,8 @@ export async function GET(
       pseudonymFor.add(m.user.id)
       if (m.parent_message) pseudonymFor.add(m.parent_message.user.id)
     }
-    const pageMembers = pseudonymFor.size
-      ? await db.chat_group_members.findMany({
-          where: { chat_group_id: chatGroupId, user_id: { in: [...pseudonymFor] } },
-          select: { user_id: true, anonymous_name: true },
-        })
-      : []
-    const anonMap = new Map(pageMembers.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))
+    // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
+    const anonMap = await namesInRoom(chatGroup, [...pseudonymFor])
 
     /*
      * Every other person's id as their handle in this room, yours as yours
@@ -198,7 +211,8 @@ export async function GET(
      * straight out of the table, beside `user.id` — so both are overridden,
      * not just the one the client reads.
      */
-    const idFor = (userId: string) => idForViewer(user.userId, chatGroup.event_id, userId)
+    const scope = roomScope(chatGroup)
+    const idFor = (userId: string) => idForViewer(user.userId, scope, userId)
 
     return successResponse({
       messages: messagesToReturn.map((m) => {
@@ -290,12 +304,7 @@ export async function POST(
       return validationErrorResponse(validation.error)
     }
 
-    const { content, type, metadata, parentId, clientId } = validation.data
-
-    // The sender's own upload, or no media (SCRUM-426).
-    if (metadata?.mediaUrl && !isOwnChatMedia(metadata.mediaUrl, user.userId)) {
-      return errorResponse(NOT_OWN_MEDIA, 400)
-    }
+    const { content, type, parentId, clientId } = validation.data
 
     /*
      * A retry of a send that already landed: answered with the first write. Its
@@ -319,7 +328,8 @@ export async function POST(
         // only `end_time` would leave this path silently un-floored --
         // `chatWindowState` treats a missing start as "no lower bound", which
         // is the right default for old callers and the wrong one here.
-        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } },
+        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
+        ...ownerDoor(user.userId),
       },
     })
 
@@ -332,6 +342,14 @@ export async function POST(
     if (!membership) {
       return forbiddenResponse("You are not a member of this chat group")
     }
+    /*
+     * The owner's door before anything with a side effect: the auto-unmute
+     * below writes, and must not run for somebody the room no longer admits
+     * (a board post's ask that is not accepted, a post taken down).
+     */
+    const owner = roomOwnerDenial(chatGroup, user.userId)
+    if (owner === "not_member") return forbiddenResponse("You are not a member of this chat group")
+    if (owner === "hidden") return errorResponse(chatClosedMessage("hidden"), 403, ErrorCode.CHAT_CLOSED)
 
     // Check if user is muted or banned
     let effectiveStatus: string = membership.status
@@ -358,12 +376,15 @@ export async function POST(
      * recovery, not a predicate — `mayWriteToRoom` sees the status it leaves
      * behind.
      */
-    const denial = mayWriteToRoom(
-      { status: effectiveStatus },
-      chatGroup.event,
-      chatGroup
+    const denial = mayWriteToRoomFor(
+      chatGroup,
+      { status: effectiveStatus, last_allowed_at: membership.last_allowed_at },
+      user.userId
     )
     if (denial) {
+      if (denial.reason === "not_member") {
+        return forbiddenResponse("You are not a member of this chat group")
+      }
       if (denial.reason === "banned") {
         return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
       }
@@ -376,7 +397,7 @@ export async function POST(
       return errorResponse(
         chatClosedMessage(denial.reason),
         403,
-        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
       )
     }
 
@@ -406,14 +427,6 @@ export async function POST(
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    /*
-     * What is stored is the upload's sealed copy, which nobody can write to
-     * (SCRUM-425). Made here, after every gate, so a refused send copies nothing.
-     */
-    const media = metadata?.mediaUrl ? await sealChatMedia(metadata.mediaUrl, user.userId) : null
-    if (media && "refusal" in media) return errorResponse(media.refusal, 400)
-    const stored = media ? { ...metadata, mediaUrl: media.url } : metadata
-
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save the message but immediately mark it as hidden
@@ -425,7 +438,6 @@ export async function POST(
           user_id: user.userId,
           content,
           type,
-          ...(stored != null && { metadata: stored }),
           parent_id: parentId || null,
           ...(clientId && { client_id: clientId }),
           moderation_status: "hidden",
@@ -433,7 +445,6 @@ export async function POST(
         },
       })
       } catch (error) {
-        await discardSealedChatMedia(media)
         // A concurrent retry with the same clientId wrote it first.
         const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
         if (!raced) throw error
@@ -481,14 +492,6 @@ export async function POST(
         user_id: user.userId,
         content,
         type,
-        /*
-         * Conditional spread, not `metadata || undefined`. The client omits
-         * `metadata` on every plain text message, and with
-         * `strictUndefinedChecks` on, an explicit undefined here made
-         * `chat_messages.create` throw — every message sent from the app into
-         * a room returned 500. Found by sending one from a phone.
-         */
-        ...(stored != null && { metadata: stored }),
         parent_id: parentId || null,
         ...(clientId && { client_id: clientId }),
       },
@@ -517,7 +520,6 @@ export async function POST(
       },
     })
     } catch (error) {
-      await discardSealedChatMedia(media)
       // Two sends with one clientId raced; the other wrote it first.
       const raced =
         clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(user.userId, clientId) : null
@@ -534,92 +536,74 @@ export async function POST(
     /*
      * Did anybody actually look at this message?
      *
-     * Only the inline text check can answer yes. Media goes to the async
-     * pipeline, which records its own outcome, and so does anything the inline
-     * check failed to examine -- so `clean` is written here only when this
-     * request examined the content itself and found nothing.
+     * Only the inline text check can answer yes. Anything it failed to examine
+     * goes to the async pipeline, which records its own outcome -- so `clean`
+     * is written here only when this request examined the content itself and
+     * found nothing. A room message is words only (R9, SCRUM-626).
      */
     let examinedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
     // Run OpenAI moderation before broadcasting. If it takes >1s, emit anyway
     // and fall back to the post-emit hide behavior for safety.
-    if (type === "text") {
-      try {
-        /*
-         * The loser of this race used to keep its timer alive: `Promise.race`
-         * settles on the first result and abandons the rest, but a pending
-         * `setTimeout` is a live handle the event loop still holds. One per
-         * message, for a second each — harmless at rest, and exactly the kind of
-         * thing that stops being harmless under load.
-         */
-        let timeoutHandle: NodeJS.Timeout | undefined
-        /*
-         * The timeout is a *reason*, not a verdict.
-         *
-         * This resolved to `null`, which was the same value the check returns
-         * for clean content -- and for a missing API key, and for an API error.
-         * Four facts in one value, and the code below then wrote
-         * `moderation_status: "clean"` for all of them.
-         */
-        const openaiCheck = await Promise.race([
-          checkTextContent(content),
-          new Promise<ModerationCheck>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
-          }),
-        ]).finally(() => clearTimeout(timeoutHandle))
-        /*
-         * The caption is checked here, before the emit, with or without media:
-         * its words go out in the push preview. The inline check reads text
-         * only, so a message that carries media is not examined until the
-         * pipeline has looked at the image too (SCRUM-444).
-         */
-        examinedInline = openaiCheck.checked && !stored?.mediaUrl
-        const openaiResult = openaiCheck.checked ? openaiCheck.result : null
-        if (openaiResult && openaiResult.action === "hide") {
-          // Hide immediately — never broadcast to other users
-          await hideMessage(message.id, chatGroupId, user.userId, openaiResult)
-          await flagForReview(message.id, chatGroupId, user.userId, openaiResult)
-          void checkAndAutoMute(user.userId, chatGroupId)
-          return successResponse({
-            id: message.id,
-            type: message.type,
-            content: null,
-            moderation_hidden: true,
-            createdAt: message.created_at.toISOString(),
-          })
-        }
-        // If flagged (not hidden), let it through but flag for review
-        if (openaiResult && openaiResult.action === "flag") {
-          void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
-        }
-        /*
-         * Anything the inline check did not examine goes to the full pipeline,
-         * which owns the verdict and will record `unchecked` if it cannot get
-         * one either.
-         *
-         * The `content.length > 5` guard is gone. It meant a short message that
-         * timed out was examined by nobody and then recorded as clean, and short
-         * messages are not a category that needs less moderation -- a slur is
-         * five characters.
-         */
-        if (!examinedInline) {
-          void moderateMessage(message.id, content, type, user.userId, chatGroupId, stored?.mediaUrl)
-        }
-      } catch {
-        // OpenAI failed — fall back to async moderation
-        void moderateMessage(message.id, content, type, user.userId, chatGroupId, stored?.mediaUrl)
+    try {
+      /*
+       * The loser of this race used to keep its timer alive: `Promise.race`
+       * settles on the first result and abandons the rest, but a pending
+       * `setTimeout` is a live handle the event loop still holds. One per
+       * message, for a second each — harmless at rest, and exactly the kind of
+       * thing that stops being harmless under load.
+       */
+      let timeoutHandle: NodeJS.Timeout | undefined
+      /*
+       * The timeout is a *reason*, not a verdict.
+       *
+       * This resolved to `null`, which was the same value the check returns
+       * for clean content -- and for a missing API key, and for an API error.
+       * Four facts in one value, and the code below then wrote
+       * `moderation_status: "clean"` for all of them.
+       */
+      const openaiCheck = await Promise.race([
+        checkTextContent(content),
+        new Promise<ModerationCheck>((resolve) => {
+          timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
+        }),
+      ]).finally(() => clearTimeout(timeoutHandle))
+      examinedInline = openaiCheck.checked
+      const openaiResult = openaiCheck.checked ? openaiCheck.result : null
+      if (openaiResult && openaiResult.action === "hide") {
+        // Hide immediately — never broadcast to other users
+        await hideMessage(message.id, chatGroupId, user.userId, openaiResult)
+        await flagForReview(message.id, chatGroupId, user.userId, openaiResult)
+        void checkAndAutoMute(user.userId, chatGroupId)
+        return successResponse({
+          id: message.id,
+          type: message.type,
+          content: null,
+          moderation_hidden: true,
+          createdAt: message.created_at.toISOString(),
+        })
       }
-    } else {
-      // For images/media, run full async moderation (can't block on image analysis)
-      void moderateMessage(
-        message.id,
-        content,
-        type,
-        user.userId,
-        chatGroupId,
-        stored?.mediaUrl
-      )
+      // If flagged (not hidden), let it through but flag for review
+      if (openaiResult && openaiResult.action === "flag") {
+        void flagForReview(message.id, chatGroupId, user.userId, openaiResult)
+      }
+      /*
+       * Anything the inline check did not examine goes to the full pipeline,
+       * which owns the verdict and will record `unchecked` if it cannot get
+       * one either.
+       *
+       * The `content.length > 5` guard is gone. It meant a short message that
+       * timed out was examined by nobody and then recorded as clean, and short
+       * messages are not a category that needs less moderation -- a slur is
+       * five characters.
+       */
+      if (!examinedInline) {
+        void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+      }
+    } catch {
+      // OpenAI failed — fall back to async moderation
+      void moderateMessage(message.id, content, type, user.userId, chatGroupId)
     }
 
     /*
@@ -659,8 +643,14 @@ export async function POST(
       data: { last_message_at: new Date() },
     })
 
-    // Use anonymous name for socket emit and push
-    const senderAnonName = membership.anonymous_name || "Attendee"
+    /*
+     * The sender and the quoted author by the names this room gives them — a
+     * pseudonym, or a first name in a crew's room (`namesInRoom`) — for the
+     * socket emit, the push and the response alike.
+     */
+    const quoted = message.parent_message
+    const names = await namesInRoom(chatGroup, quoted ? [user.userId, quoted.user.id] : [user.userId])
+    const senderAnonName = names.get(user.userId) ?? "Attendee"
 
     /*
      * Socket then push, block-filtered, in `lib/room-delivery.ts`.
@@ -678,7 +668,7 @@ export async function POST(
      */
     await deliverToRoom({
       chatGroupId,
-      eventId: chatGroup.event_id,
+      scope: roomScope(chatGroup),
       groupName: chatGroup.name,
       senderId: user.userId,
       senderAnonName,
@@ -687,19 +677,11 @@ export async function POST(
     })
 
     /*
-     * The quoted author by their own name in this room. This labelled them with
-     * the SENDER's pseudonym — reply to Cosmic Panda as Quiet Otter and the
-     * response said Quiet Otter had written the quote — which the history GET,
-     * reading the author's own row, then contradicted.
+     * The quoted author by their own name in this room (`names`, above). This
+     * once labelled them with the SENDER's pseudonym — reply to Cosmic Panda
+     * as Quiet Otter and the response said Quiet Otter had written the quote —
+     * which the history GET, reading the author's own row, then contradicted.
      */
-    const quoted = message.parent_message
-    const quotedAuthor =
-      quoted && quoted.user.id !== user.userId
-        ? await db.chat_group_members.findUnique({
-            where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: quoted.user.id } },
-            select: { anonymous_name: true },
-          })
-        : membership
 
     // Return anonymized response. The sender's own id stays real; the quoted
     // author's is their handle in this room (SCRUM-371).
@@ -714,8 +696,8 @@ export async function POST(
         ? {
             ...quoted,
             user: {
-              id: idForViewer(user.userId, chatGroup.event_id, quoted.user.id),
-              name: roomSenderName(quoted, quotedAuthor?.anonymous_name || undefined, chatGroup.event),
+              id: idForViewer(user.userId, roomScope(chatGroup), quoted.user.id),
+              name: roomSenderName(quoted, names.get(quoted.user.id), chatGroup.event),
             },
           }
         : null,

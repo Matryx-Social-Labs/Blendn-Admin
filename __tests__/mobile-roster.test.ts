@@ -115,6 +115,8 @@ describe("GET /events/:id/checkins — who counts as present", () => {
     expect(where).toEqual({
       event_id: EVENT,
       status: "checked_in",
+      // A venue day lists only open Go Live windows; at an event this is a no-op (`inRoomWhere`).
+      AND: [{ OR: [{ event: { kind: "event" } }, { status: "checked_in", expires_at: { gt: expect.any(Date) } }] }],
       // The one profile predicate that belongs here: "Show online status" off
       // is counted and not listed (SCRUM-141) — and a missing profile row is
       // not "off", so the NULL case is spelled out.

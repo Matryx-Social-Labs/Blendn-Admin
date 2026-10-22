@@ -51,6 +51,9 @@ const ORDER = [
   "event_categories",
   "event_media",
   "recurring_events",
+  // Before chat_groups: a board post's room points at its post.
+  "board_posts",
+  "board_requests",
   "chat_groups",
   "chat_group_members",
   "chat_messages",

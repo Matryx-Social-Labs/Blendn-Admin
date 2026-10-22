@@ -62,19 +62,26 @@ describe("the rail answers 'can this publish' from every scroll position", () =>
     }
   })
 
-  it("the sticky rail is not defeated by the layout: the sidebar inset clips, it does not scroll", () => {
-    // `overflow-hidden` makes the inset a scroll container, and a sticky
-    // element sticks to the nearest one — the rail scrolled away with the page.
+  /** The column beside the sidebar: the element whose children are the top bar and `main`. */
+  const column = () => {
     const layout = read("app/dashboard/layout.tsx")
-    expect(layout).toMatch(/<SidebarInset className="overflow-x-clip /)
-    expect(layout).not.toMatch(/<SidebarInset className="overflow-hidden/)
+    const m = layout.match(/<div className="([^"]*)">\s*<SiteHeader/)
+    expect(m).not.toBeNull()
+    return m![1].split(/\s+/)
+  }
+
+  it("the sticky rail is not defeated by the layout: the content column clips, it does not scroll", () => {
+    // `overflow-hidden` makes the column a scroll container, and a sticky
+    // element sticks to the nearest one — the rail scrolled away with the page.
+    expect(column()).toContain("overflow-x-clip")
+    expect(column()).not.toContain("overflow-hidden")
   })
 
-  it("and the inset may be narrower than its content, so the header can truncate", () => {
-    // Clip is not a scroller, so `min-width: auto` still measures the nowrap
-    // subtitle: at 768 with the sidebar open, /dashboard/chatrooms was 77px
+  it("and the column may be narrower than its content", () => {
+    // Clip is not a scroller, so `min-width: auto` still measures nowrap
+    // content: at 768 with the sidebar open, /dashboard/chatrooms was 77px
     // wider than its slot and the account button sat past the right edge.
-    expect(read("app/dashboard/layout.tsx")).toMatch(/<SidebarInset className="overflow-x-clip min-w-0 /)
+    expect(column()).toContain("min-w-0")
   })
 })
 

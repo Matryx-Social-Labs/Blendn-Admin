@@ -125,8 +125,9 @@ describe("filing a claim", () => {
 describe("deciding one", () => {
   const src = code(ACTIONS)
 
-  it("is app_admin only", () => {
-    expect(src).toMatch(/session\?\.user\?\.role !== "app_admin"/)
+  it("is app_admin only, on the role the database holds", () => {
+    const decide = src.slice(src.indexOf("export async function decideEventClaim("))
+    expect(decide).toMatch(/^[\s\S]{0,400}const admin = await requireAdmin\(\)/)
   })
 
   it("re-checks claimability at decision time, not only at filing", () => {
@@ -229,6 +230,17 @@ describe("who to show as the host", () => {
     // organiser's event should not.
     expect(eventHost({ curated_at: new Date(), organizer_org: null, organizer: null }).isPlatform)
       .toBe(true)
+  })
+
+  it("names a venue day by its venue, never its org or the system user (F2)", () => {
+    const host = eventHost({
+      kind: "venue_day",
+      venue_name: "The Humming Tree",
+      organizer_org: { display_name: "Indiranagar Hospitality Group" },
+      organizer: { name: "Blendn" },
+    })
+    expect(host).toEqual({ name: "The Humming Tree", isPlatform: true })
+    expect(eventHost({ kind: "venue_day", venue_name: null, organizer: { name: "A Founder" } }).name).toBe(PLATFORM_HOST)
   })
 })
 

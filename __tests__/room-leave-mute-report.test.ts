@@ -21,7 +21,11 @@ const mockAuth = jest.fn()
 jest.mock("@/lib/mobile-auth", () => ({ getAuthenticatedUser: (...a: unknown[]) => mockAuth(...a) }))
 
 const mockBlocks = jest.fn()
-jest.mock("@/lib/conversations", () => ({ blockCounterparties: (...a: unknown[]) => mockBlocks(...a) }))
+// keptApartIn: blocks, plus closed pairs in a board post's room (step 10 review H2).
+jest.mock("@/lib/conversations", () => ({
+  blockCounterparties: (...a: unknown[]) => mockBlocks(...a),
+  keptApartIn: (id: unknown) => mockBlocks(id),
+}))
 
 const mockLeftEmit = jest.fn()
 jest.mock("@/lib/socket-server", () => ({ emitChatMemberLeft: (...a: unknown[]) => mockLeftEmit(...a) }))
@@ -65,7 +69,7 @@ beforeEach(() => {
   jest.clearAllMocks()
   mockAuth.mockResolvedValue({ userId: ME, email: "me@b.com" })
   mockBlocks.mockResolvedValue(["user_blocked"])
-  group = { id: ROOM, event_id: EVENT, status: "active", event: openEvent() }
+  group = { id: ROOM, kind: "event", event_id: EVENT, status: "active", event: openEvent(), board_post: null }
   membership = {
     id: "m1",
     status: "active",

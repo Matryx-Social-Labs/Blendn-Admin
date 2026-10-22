@@ -39,19 +39,18 @@ const UPDATE = process.env.UPDATE_CONTRACTS === "1"
  * covers is the *read* surface a client renders.
  */
 const ROUTES = [
-  "/api/mobile/events",
   "/api/mobile/events/cities",
   "/api/mobile/events/search?q=sessions",
   "/api/mobile/categories",
   "/api/mobile/amenities",
   "/api/mobile/work-fields",
-  "/api/mobile/venues",
+  // Matching v2's vocabulary and your this-or-that answers (step 10).
+  "/api/mobile/profile-options",
+  "/api/mobile/me/this-or-that",
   "/api/mobile/conversations",
-  "/api/mobile/chat/groups",
   "/api/mobile/notifications",
   "/api/mobile/message-requests",
   "/api/mobile/users/blocked",
-  "/api/mobile/checkins/active",
   /*
    * The board's two reads. Both are new client surfaces with no caller yet, so
    * this is the shape the Phase 2 migration will be written against — recorded
@@ -59,6 +58,16 @@ const ROUTES = [
    * weeks.
    */
   "/api/mobile/board/requests",
+  // My crews and the invites waiting for me (step 8): `{ crews, invites }`.
+  "/api/mobile/crews",
+  // My open Blends (step 8): `{ blends }`.
+  "/api/mobile/blends",
+  // Do I have Blendn+ (step 11): what the paywall polls after a purchase.
+  "/api/mobile/me/plus",
+  // The offers venues sent me (step 12): \`{ offers }\`. The venue's side is counts, on the dashboard.
+  "/api/mobile/offers",
+  // Places' counts by type and by area (home panes C5): `{ total, liveCount, openTonightCount, types, areas }`.
+  "/api/mobile/venues/summary",
 ]
 
 /**
@@ -150,14 +159,17 @@ test.describe("mobile API contract", () => {
     // The QA seed's live event, whose room it fills with one line per attendee.
     const live = await db.events.findUnique({
       where: { slug: "founders-filter-coffee" },
-      select: { id: true, chat_group: { select: { id: true } } },
+      select: { id: true, venue_id: true, chat_group: { select: { id: true } } },
     })
     await db.$disconnect()
     expect(user, "the QA seed must have run — this is a seeded attendee").toBeTruthy()
     expect(live?.chat_group, "the QA seed's live event must have its room").toBeTruthy()
+    expect(live?.venue_id, "the QA seed's live event must be at a venue").toBeTruthy()
 
     const eventId = live!.id
     const PARAM_ROUTES: Record<string, ParamRoute> = {
+      // The feed, one card down: `featured` is `{ kind, rank, by }` or null (home panes C1).
+      "/api/mobile/events": { url: "/api/mobile/events", pin: ["events[]", "pagination"] },
       "/api/mobile/events/:eventId": { url: `/api/mobile/events/${eventId}`, pin: ["chatGroup"] },
       "/api/mobile/events/:eventId/interested-users": { url: `/api/mobile/events/${eventId}/interested-users` },
       "/api/mobile/events/:eventId/chat": {
@@ -169,6 +181,14 @@ test.describe("mobile API contract", () => {
         pin: ["messages[]", "pagination"],
       },
       "/api/mobile/profiles/:userId (own)": { url: `/api/mobile/profiles/${user!.id}`, pin: ["profile"] },
+      // The room list, one row down (step 5): `memberCount` is null on a venue day's row; `event.kind`/`venueId` say which.
+      "/api/mobile/chat/groups": { url: "/api/mobile/chat/groups", pin: ["groups[]", "groups[].event"] },
+      // A Go Live is an active check-in too: `kind`, `expiresAt`, `stay` and `venueId` say which (step 4, 5).
+      "/api/mobile/checkins/active": { url: "/api/mobile/checkins/active", pin: ["checkIns[]"] },
+      // The Places list, one row down: `tier` is what `order=live` ranks by; `area`/`areaSlug` and `tonight` are home panes C4/C6.
+      "/api/mobile/venues": { url: "/api/mobile/venues", pin: ["venues[]", "pagination"] },
+      // Go Live's venue (PL-C02): `venue` must never grow a `geofence`.
+      "/api/mobile/venues/:venueId": { url: `/api/mobile/venues/${live!.venue_id}`, pin: ["venue", "live"] },
     }
 
     const token = signAccessToken(user!.id, user!.email)

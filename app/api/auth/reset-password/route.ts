@@ -7,6 +7,7 @@ import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { hashInviteToken } from "@/lib/org-invites"
 import { checkPassword } from "@/lib/password"
+import { dashboardSessionsEnded, endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { readJson } from "@/lib/api-input"
 
 /**
@@ -94,6 +95,8 @@ export async function POST(req: NextRequest) {
 
     const hashed = await bcrypt.hash(password, 12)
 
+    const at = new Date()
+    let phonesEndedAt = at
     await db.$transaction(async (tx) => {
       // Claiming with `used_at: null` in the filter is the concurrency guard:
       // the second of two simultaneous submissions matches zero rows.
@@ -103,14 +106,17 @@ export async function POST(req: NextRequest) {
       })
       if (claimed.count === 0) throw new Error("ALREADY_USED")
 
-      await tx.user.update({ where: { id: row.user.id }, data: { password: hashed } })
+      // And every dashboard session signed in before now (step 18 M6): the
+      // JWT has no row to delete, so `isRevoked` (lib/session-revocation.ts)
+      // ends it by this time, wherever it is read.
+      await tx.user.update({ where: { id: row.user.id }, data: { password: hashed, password_changed_at: at } })
 
-      // The point of resetting after a compromise.
-      await tx.mobile_refresh_tokens.updateMany({
-        where: { user_id: row.user.id, revoked_at: null },
-        data: { revoked_at: new Date() },
-      })
+      // The point of resetting after a compromise: every phone too.
+      phonesEndedAt = (await endPhoneSessions(tx, row.user.id, "password_reset")).at
     })
+    // And what was live when it changed closes now (SCRUM-603).
+    dashboardSessionsEnded(row.user.id)
+    phoneSessionsEnded(row.user.id, phonesEndedAt)
 
     auditLog({
       userId: row.user.id,

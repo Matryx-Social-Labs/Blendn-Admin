@@ -1,6 +1,5 @@
 import { logger } from "@/lib/logger"
 import { NextRequest, NextResponse } from "next/server"
-import { Prisma } from "@prisma/client"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
@@ -25,11 +24,12 @@ import {
   LEFT_ROOM_MESSAGE,
   leftByChoice,
   mayWriteToRoom,
+  NOT_LIVE_MESSAGE,
   roomEntitlement,
   roomReadDenial,
   type RoomEntitlement,
 } from "@/lib/chat-window"
-import { chatQuerySchema, discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia, sendMessageSchema } from "@/lib/validations/chat"
+import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
@@ -39,6 +39,8 @@ import { roomMuteState } from "@/lib/room-mute"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
 import { readJson, isUuid } from "@/lib/api-input"
+import { createRoom } from "@/lib/check-in-core"
+import { paginationMeta } from "@/lib/pagination"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -107,7 +109,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // rejected after the user has typed.
     let chatGroup = await db.chat_groups.findUnique({
       where: { event_id: eventId },
-      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
     })
 
     if (!chatGroup) {
@@ -123,7 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
       const event = await db.events.findUnique({
         where: { id: eventId, deleted_at: null },
-        select: { title: true, status: true },
+        select: { title: true, status: true, kind: true, venue_name: true },
       })
       // No room is ever made for a missing or hidden event — refusing it only
       // after creation left a row the 404 concealed (SCRUM-205).
@@ -131,17 +133,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         return notFoundResponse("Chat not available for this event")
       }
 
-      chatGroup = await db.chat_groups.create({
-        data: {
-          event_id: eventId,
-          name: `${event.title || "Event"} Chat`,
-          description: `Chat for ${event.title || "Event"}`,
-          status: "active",
-          member_count: 0,
-        },
-        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, ...broadcastAuthorSelect } } },
+      // The one room writer, which reads back a room somebody made a moment ago.
+      const room = await createRoom(event, eventId)
+      chatGroup = await db.chat_groups.findUniqueOrThrow({
+        where: { id: room.id },
+        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
       })
     }
+
+    // Found or made by its event, so an event's room, and its event is there
+    // (`chat_groups_one_owner`). Without it — only on a database built without
+    // the CHECK — there is no room, never a stand-in event.
+    const roomEvent = chatGroup.event
+    if (!roomEvent) return notFoundResponse("Chat not available for this event")
 
     // Check if user is a member of the chat group
     const membership = await db.chat_group_members.findUnique({
@@ -159,10 +163,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * history — the ban stopped their posts and served them the room. A
      * non-member is not refused here: the join below is how they get in.
      */
-    const readDenial = roomReadDenial(membership, chatGroup.event)
+    const readDenial = roomReadDenial(membership, roomEvent)
     if (readDenial === "hidden") return notFoundResponse("Chat not available for this event")
     if (readDenial === "banned" && membership) {
       return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+    }
+    /*
+     * A venue day's room has one door, Go Live, which writes the membership
+     * and its window; there is no auto-join below for it (F7). Not live — never
+     * joined, or the window ended — is refused, never re-joined.
+     */
+    if (readDenial === "not_live" || (!membership && roomEvent.kind === "venue_day")) {
+      return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
     }
     /*
      * Somebody who left the room themselves stays out of it. Without this the
@@ -208,7 +220,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * would be a licence to a public channel for three months.
        */
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
-      const window = chatWindowState(chatGroup.event, chatGroup)
+      const window = chatWindowState(roomEvent, chatGroup)
 
       if (!entitlementAdmits(entitlement, window)) {
         // Says which of the two things is missing, because they have different
@@ -403,8 +415,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Null only when the auto-join above just created the row, which creates
       // it `active`. A banned or muted row is never replaced, so it arrives here
       // intact and `mayWriteToRoom` sees the truth.
-      membership ?? { status: "active" },
-      chatGroup.event,
+      membership ?? { status: "active", last_allowed_at: null },
+      roomEvent,
       chatGroup
     )
 
@@ -418,9 +430,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           ? chatClosedMessage(denial.reason)
           : null,
         /** When the 24-hour window shuts. Independent of the archive job. */
-        closesAt: chatClosesAt(chatGroup.event),
+        closesAt: chatClosesAt(roomEvent),
         /** Past this, the room is a read-only record of the night. */
-        eventEndedAt: chatGroup.event.end_time,
+        eventEndedAt: roomEvent.end_time,
       },
       /**
        * Whether you silenced this room's pushes (`POST /chat/groups/:id/mute`),
@@ -446,20 +458,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             // an organiser's announcement included — as their handle in this
             // room (SCRUM-371, `lib/room-handle.ts`).
             id: idForViewer(authUser.userId, eventId, m.user.id),
-            name: roomSenderName(m, anonMap.get(m.user.id), chatGroup.event),
+            name: roomSenderName(m, anonMap.get(m.user.id), roomEvent),
             image: null,
           },
           reactions: isHidden ? [] : tallyReactions(m.reactions, authUser.userId),
           isOwn: m.user_id === authUser.userId,
         }
       }),
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      pagination: paginationMeta(page, limit, totalCount),
     })
   } catch (error) {
     logger.error("Get chat messages error", { error: error instanceof Error ? error.message : String(error) })
@@ -490,12 +496,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { content, type, parentId, metadata, clientId } = parsed.data
-
-    // The sender's own upload, or no media (SCRUM-426).
-    if (metadata?.mediaUrl && !isOwnChatMedia(metadata.mediaUrl, authUser.userId)) {
-      return errorResponse(NOT_OWN_MEDIA, 400)
-    }
+    const { content, type, parentId, clientId } = parsed.data
 
     // Get chat group for event (create on demand if user is checked in)
     let chatGroup = await db.chat_groups.findUnique({
@@ -505,7 +506,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // undefined here, so the pre-event floor added in #262 silently did not
       // apply on this path while it did on the GET twin above: one room, two
       // endpoints, opposite answers about whether chat is open.
-      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
+      include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
     })
 
     if (!chatGroup) {
@@ -528,23 +529,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         // pulled anyway because `chatWindowState` treats a missing start as "no
         // floor" rather than erroring, so an event object in this file that
         // lacks it is one edit away from silently opening a room early.
-        select: { title: true, start_time: true, end_time: true, status: true },
+        select: { title: true, start_time: true, end_time: true, status: true, kind: true, venue_name: true },
       })
       if (!event || event.status === "draft") {
         return notFoundResponse("Chat not available for this event")
       }
 
-      chatGroup = await db.chat_groups.create({
-        data: {
-          event_id: eventId,
-          name: `${event.title || "Event"} Chat`,
-          description: `Chat for ${event.title || "Event"}`,
-          status: "active",
-          member_count: 0,
-        },
-        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true } } },
+      const room = await createRoom(event, eventId)
+      chatGroup = await db.chat_groups.findUniqueOrThrow({
+        where: { id: room.id },
+        include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
       })
     }
+
+    // Found or made by its event, so an event's room, and its event is there
+    // (`chat_groups_one_owner`). Without it — only on a database built without
+    // the CHECK — there is no room, never a stand-in event.
+    const roomEvent = chatGroup.event
+    if (!roomEvent) return notFoundResponse("Chat not available for this event")
 
     /*
      * Same rule as the other write path — see lib/chat-window.ts.
@@ -553,7 +555,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * an event that finished last month must close immediately, not be born
      * open because it happens to be new.
      */
-    const window = chatWindowState(chatGroup.event, chatGroup)
+    const window = chatWindowState(roomEvent, chatGroup)
     if (!window.open) {
       return forbiddenResponse(chatClosedMessage(window.reason))
     }
@@ -597,9 +599,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * is on the read: the user was told they could write. One resolver, both
      * handlers, is the only version of this that stays fixed.
      */
+    // Go Live is a venue day's only door (see the GET).
+    if (!membership && roomEvent.kind === "venue_day") {
+      return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)
+    }
     if (!membership) {
       const entitlement = await resolveEntitlement(eventId, authUser.userId)
-      const window = chatWindowState(chatGroup.event, chatGroup)
+      const window = chatWindowState(roomEvent, chatGroup)
 
       if (!entitlementAdmits(entitlement, window)) {
         // Which of the two things is missing, because the remedies differ:
@@ -663,7 +669,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * write does not: leaving does not unsee what you saw.
      */
     if (membershipFresh) {
-      const denial = mayWriteToRoom(membershipFresh, chatGroup.event, chatGroup)
+      const denial = mayWriteToRoom(membershipFresh, roomEvent, chatGroup)
       if (denial) {
         if (denial.reason === "banned") {
           return errorResponse(bannedRefusal(membershipFresh), 403, ErrorCode.USER_BANNED)
@@ -681,7 +687,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return errorResponse(
           chatClosedMessage(denial.reason),
           403,
-          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : ErrorCode.CHAT_CLOSED
+          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
         )
       }
     }
@@ -715,14 +721,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (existing) return answerRoomRetry(existing, chatGroup.id)
     }
 
-    /*
-     * What is stored is the upload's sealed copy, which nobody can write to
-     * (SCRUM-425). Made here, after every gate, so a refused send copies nothing.
-     */
-    const media = metadata?.mediaUrl ? await sealChatMedia(metadata.mediaUrl, authUser.userId) : null
-    if (media && "refusal" in media) return errorResponse(media.refusal, 400)
-    const stored = media ? { ...metadata, mediaUrl: media.url } : metadata
-
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users
@@ -736,13 +734,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           type,
           parent_id: parentId ?? null,
           ...(clientId && { client_id: clientId }),
-          ...(stored != null && { metadata: stored as Prisma.InputJsonValue }),
           moderation_status: "hidden",
           deleted_at: new Date(),
         },
       })
       } catch (error) {
-        await discardSealedChatMedia(media)
         // A concurrent retry with the same clientId wrote it first.
         const raced = clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(authUser.userId, clientId) : null
         if (!raced) throw error
@@ -775,18 +771,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         type,
         parent_id: parentId ?? null,
         ...(clientId && { client_id: clientId }),
-        /*
-         * Conditional spread. `metadata as … | undefined` wrote an explicit
-         * undefined whenever the client omitted it — every plain message —
-         * and `strictUndefinedChecks` threw. Same defect as the group route's
-         * `metadata || undefined`, in a shape the ratchet could not see. Found
-         * by POSTing a text message through this route.
-         */
-        ...(stored != null && { metadata: stored as Prisma.InputJsonValue }),
       },
     })
     } catch (error) {
-      await discardSealedChatMedia(media)
       // Two sends with one clientId raced; the other wrote it first.
       const raced =
         clientId && (error as { code?: string }).code === "P2002" ? await findRoomSend(authUser.userId, clientId) : null
@@ -797,88 +784,71 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     /*
      * Did anybody actually look at this message?
      *
-     * Only the inline text check can answer yes. Media goes to the async
-     * pipeline, which records its own outcome, and so does anything the inline
-     * check failed to examine -- so `clean` is written here only when this
-     * request examined the content itself and found nothing.
+     * Only the inline text check can answer yes. Anything it failed to examine
+     * goes to the async pipeline, which records its own outcome -- so `clean`
+     * is written here only when this request examined the content itself and
+     * found nothing. A room message is words only (R9, SCRUM-626).
      */
     let examinedInline = false
 
     // --- Pre-emit moderation: OpenAI check with 1s timeout ---
-    if (type === "text") {
-      try {
-        /*
-         * The loser of this race used to keep its timer alive: `Promise.race`
-         * settles on the first result and abandons the rest, but a pending
-         * `setTimeout` is a live handle the event loop still holds. One per
-         * message, for a second each — harmless at rest, and exactly the kind of
-         * thing that stops being harmless under load.
-         */
-        let timeoutHandle: NodeJS.Timeout | undefined
-        /*
-         * The timeout is a *reason*, not a verdict.
-         *
-         * This resolved to `null`, which was the same value the check returns
-         * for clean content -- and for a missing API key, and for an API error.
-         * Four facts in one value, and the code below then wrote
-         * `moderation_status: "clean"` for all of them.
-         */
-        const openaiCheck = await Promise.race([
-          checkTextContent(content),
-          new Promise<ModerationCheck>((resolve) => {
-            timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
-          }),
-        ]).finally(() => clearTimeout(timeoutHandle))
-        /*
-         * The caption is checked here, before the emit, with or without media:
-         * its words go out in the push preview. The inline check reads text
-         * only, so a message that carries media is not examined until the
-         * pipeline has looked at the image too (SCRUM-444).
-         */
-        examinedInline = openaiCheck.checked && !stored?.mediaUrl
-        const openaiResult = openaiCheck.checked ? openaiCheck.result : null
-        if (openaiResult && openaiResult.action === "hide") {
-          await hideMessage(message.id, chatGroup.id, authUser.userId, openaiResult)
-          await flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
-          void checkAndAutoMute(authUser.userId, chatGroup.id)
-          return successResponse({
-            message: {
-              id: message.id,
-              type: message.type,
-              content: null,
-              moderation_hidden: true,
-              createdAt: message.created_at,
-            },
-          })
-        }
-        if (openaiResult && openaiResult.action === "flag") {
-          void flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
-        }
-        /*
-         * Anything the inline check did not examine goes to the full pipeline,
-         * which owns the verdict and will record `unchecked` if it cannot get
-         * one either.
-         *
-         * The `content.length > 5` guard is gone. It meant a short message that
-         * timed out was examined by nobody and then recorded as clean, and short
-         * messages are not a category that needs less moderation -- a slur is
-         * five characters.
-         */
-        if (!examinedInline) {
-          void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id, stored?.mediaUrl)
-        }
-      } catch {
-        void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id, stored?.mediaUrl)
+    try {
+      /*
+       * The loser of this race used to keep its timer alive: `Promise.race`
+       * settles on the first result and abandons the rest, but a pending
+       * `setTimeout` is a live handle the event loop still holds. One per
+       * message, for a second each — harmless at rest, and exactly the kind of
+       * thing that stops being harmless under load.
+       */
+      let timeoutHandle: NodeJS.Timeout | undefined
+      /*
+       * The timeout is a *reason*, not a verdict.
+       *
+       * This resolved to `null`, which was the same value the check returns
+       * for clean content -- and for a missing API key, and for an API error.
+       * Four facts in one value, and the code below then wrote
+       * `moderation_status: "clean"` for all of them.
+       */
+      const openaiCheck = await Promise.race([
+        checkTextContent(content),
+        new Promise<ModerationCheck>((resolve) => {
+          timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
+        }),
+      ]).finally(() => clearTimeout(timeoutHandle))
+      examinedInline = openaiCheck.checked
+      const openaiResult = openaiCheck.checked ? openaiCheck.result : null
+      if (openaiResult && openaiResult.action === "hide") {
+        await hideMessage(message.id, chatGroup.id, authUser.userId, openaiResult)
+        await flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
+        void checkAndAutoMute(authUser.userId, chatGroup.id)
+        return successResponse({
+          message: {
+            id: message.id,
+            type: message.type,
+            content: null,
+            moderation_hidden: true,
+            createdAt: message.created_at,
+          },
+        })
       }
-    } else {
-      void moderateMessage(
-        message.id,
-        content,
-        type,
-        authUser.userId,
-        chatGroup.id,
-        stored?.mediaUrl
-      )
+      if (openaiResult && openaiResult.action === "flag") {
+        void flagForReview(message.id, chatGroup.id, authUser.userId, openaiResult)
+      }
+      /*
+       * Anything the inline check did not examine goes to the full pipeline,
+       * which owns the verdict and will record `unchecked` if it cannot get
+       * one either.
+       *
+       * The `content.length > 5` guard is gone. It meant a short message that
+       * timed out was examined by nobody and then recorded as clean, and short
+       * messages are not a category that needs less moderation -- a slur is
+       * five characters.
+       */
+      if (!examinedInline) {
+        void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
+      }
+    } catch {
+      void moderateMessage(message.id, content, type, authUser.userId, chatGroup.id)
     }
 
     // Mark clean if passed all checks
@@ -948,7 +918,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     await deliverToRoom({
       chatGroupId: chatGroup.id,
-      eventId,
+      // An event's room is scoped by its event (`roomScope`).
+      scope: eventId,
       groupName: chatGroup.name,
       senderId: authUser.userId,
       senderAnonName: senderMembership?.anonymous_name || "Attendee",

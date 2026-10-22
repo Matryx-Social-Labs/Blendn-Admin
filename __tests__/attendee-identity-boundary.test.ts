@@ -117,6 +117,11 @@ const ALLOWED = new Map([
   // The caller's own account, by the email they typed.
   ["app/api/auth/forgot-password/route.ts", "the caller's own account"],
   ["app/api/auth/reset-password/route.ts", "the caller's own account"],
+  // The address an applicant typed, to mail that address; nothing read is
+  // returned to them (step 18, M4).
+  ["app/api/onboarding/apply/route.ts", "the applicant's own address"],
+  // The caller's own address, read to bind an invitation to it (step 18, L4).
+  ["app/api/organisation/accept-invite/route.ts", "the caller's own account"],
   // `sender` of an announcement is the host (or staff) who sent it -- the
   // organisation's own voice, never an attendee.
   ["app/api/events/[id]/announcements/route.ts", "the sender is a host, not an attendee"],
@@ -161,5 +166,97 @@ describe("no host surface reads a person's identity without an admin gate", () =
       return IDENTITY_READS.some((p) => p.test(src)) && !ADMIN_GATE.test(src)
     })
     expect(open).toEqual([])
+  })
+})
+
+describe("the Events list names a host only where a host is the point (step 15)", () => {
+  /*
+   * The row's host is `eventHost`'s answer: the owning organisation, which is
+   * a name an attendee would recognise and no person's. `organizer` is
+   * selected for an admin and for a venue, never for an organiser (whose list
+   * is their own organisation's), never with an email, and the row says
+   * nothing for an unclaimed listing, where the creator is the founder who
+   * curated it (T83). The row used to read the creator's name for everything
+   * else, so a claimed listing named the founder as its host (SCRUM-612).
+   */
+  const page = code("app/dashboard/events/page.tsx")
+  const table = code("app/dashboard/events/events-table.tsx")
+
+  it("selects the creator's name only when the viewer is not an organiser, and no email", () => {
+    expect(page).toMatch(/const names = session\.user\.role !== "organizer"/)
+    expect(page).toMatch(/organizer: names \? \{ select: \{ name: true \} \} : false,/)
+    expect(page).not.toMatch(/\bemail\s*:\s*true/)
+    expect(page).not.toMatch(/db\.user\b/)
+  })
+
+  it("sends no host for an unclaimed listing, and the owning organisation's name for the rest", () => {
+    expect(page).toMatch(/host: !names \|\| curationState\(event\) === "curated_open" \? null : eventHost\(event\)\.name/)
+    // The organisation is selected on the same terms as the creator, and the creator is never the label.
+    expect(page).toMatch(/organizer_org: names \? \{ select: \{ display_name: true \} \} : false,/)
+    expect(page).not.toMatch(/host:[^\n]*event\.organizer\?\.name/)
+  })
+
+  it("renders no person but the host it was given", () => {
+    expect(table).not.toMatch(/\.(email|image|phone|photos)\b/)
+    expect(table).not.toMatch(/organizer/)
+  })
+})
+
+describe("the organiser overview and the Events list rows reach no attendee (step 15)", () => {
+  /*
+   * The live banner, the setup checklist, Coming up and the latest feedback
+   * read counts, an organisation's own name and domain, and a venue's name — a
+   * place. Never an attendee.
+   */
+  const SOURCES = [
+    "lib/organiser-overview.ts",
+    "lib/setup-checklist.ts",
+    "lib/event-row.ts",
+    "components/dashboard/overview-organizer.tsx",
+    "components/dashboard/event-row.tsx",
+  ]
+
+  it.each(SOURCES)("%s selects no user, profile, name, email, image or phone", (rel) => {
+    // A venue's name is a place, not a person: the one name these may read.
+    const src = code(rel).replace(/venue:\s*\{\s*select:\s*\{[^{}]*\}\s*\}/g, "")
+    expect(src).not.toMatch(/db\.user\b/)
+    // A select of a person, not a filter on one (`members: { where: { user: … } } }`).
+    expect(src).not.toMatch(/\b(user|profile|organizer|attendees?)\s*:\s*(true|\{\s*select\b)/)
+    expect(src).not.toMatch(new RegExp(`\\b(${IDENTITY})\\s*:\\s*true`))
+    expect(src).not.toMatch(/\.(email|image|phone|photos)\b/)
+  })
+})
+
+describe("the event's header, loader, Room chat, feedback digest and QR & link tab reach no person (step 15)", () => {
+  /*
+   * The pieces step 15 put on every event page. They read the event, the
+   * venue's name (a place), the room's handles (pseudonyms) and the viewer's
+   * permissions, and the QR encodes the event's id — never an attendee, and
+   * never who is looking.
+   */
+  const SOURCES = [
+    "lib/event-page.ts",
+    "lib/event-share.ts",
+    "lib/feedback-digest.ts",
+    "components/dashboard/event-header.tsx",
+    "components/dashboard/event-share.tsx",
+    "app/dashboard/events/[id]/messaging/page.tsx",
+  ]
+
+  it.each(SOURCES)("%s selects no user, profile, name, email, image or phone", (rel) => {
+    // A venue's name is a place, not a person: the one name these may read.
+    const src = code(rel).replace(/venue:\s*\{\s*select:\s*\{[^{}]*\}\s*\}/g, "")
+    expect(src).not.toMatch(/db\.user\b/)
+    // A select of a person, not a filter on one.
+    expect(src).not.toMatch(/\b(user|profile|organizer|attendees?)\s*:\s*(true|\{\s*select\b)/)
+    expect(src).not.toMatch(new RegExp(`\\b(${IDENTITY})\\s*:\\s*true`))
+    expect(src).not.toMatch(/\.(email|image|phone|photos)\b/)
+  })
+
+  it("encodes the event's id in the link and nothing about the viewer", () => {
+    const share = code("lib/event-share.ts")
+    expect(share).toMatch(/return EVENT_LINK_BASE \+ encodeURIComponent\(eventId\)\s*\n\s*\}/)
+    const page = code("app/dashboard/events/[id]/page.tsx")
+    expect(page).toMatch(/url=\{eventShareUrl\(event\.id\)\}/)
   })
 })

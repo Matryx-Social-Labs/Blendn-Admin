@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
 import { auditLog } from "@/lib/audit-log"
 import { actorFor } from "@/lib/org-membership"
+import { realEventsWhere } from "@/lib/event-kind"
 import { claimedVenueEventsWhere, startsAfterClaim } from "@/lib/event-visibility"
 
 /**
@@ -87,6 +88,8 @@ export async function getLinkedEventsForOwner(): Promise<{
    */
   const where = {
     deleted_at: null,
+    // Events a host linked to the building. A venue day is the building's own.
+    ...realEventsWhere,
     venue_id: { not: null },
     ...(actor.role === "app_admin" ? {} : { OR: await claimedVenueEventsWhere(actor.orgIds) }),
   }
@@ -149,7 +152,9 @@ export async function disputeVenueLink(eventId: string, reason: string): Promise
   }
 
   const event = await db.events.findUnique({
-    where: { id: eventId, deleted_at: null },
+    // Never a venue day: it is the building's own room, and unlinking one
+    // would free its slot and split the room in two.
+    where: { id: eventId, deleted_at: null, ...realEventsWhere },
     select: {
       id: true,
       title: true,
@@ -200,7 +205,9 @@ export async function confirmVenueLink(eventId: string): Promise<void> {
   const actor = await actorFor(session.user)
 
   const event = await db.events.findUnique({
-    where: { id: eventId, deleted_at: null },
+    // Never a venue day: it is the building's own room, and unlinking one
+    // would free its slot and split the room in two.
+    where: { id: eventId, deleted_at: null, ...realEventsWhere },
     select: {
       id: true,
       venue_id: true,
@@ -249,7 +256,9 @@ export async function unlinkEventVenue(eventId: string, reason: string): Promise
   }
 
   const event = await db.events.findUnique({
-    where: { id: eventId, deleted_at: null },
+    // Never a venue day: it is the building's own room, and unlinking one
+    // would free its slot and split the room in two.
+    where: { id: eventId, deleted_at: null, ...realEventsWhere },
     select: {
       id: true,
       venue_id: true,

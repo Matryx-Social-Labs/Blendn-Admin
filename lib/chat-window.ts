@@ -1,4 +1,4 @@
-import type { chat_group_status, event_status } from "@prisma/client"
+import type { chat_group_status, event_kind, event_status } from "@prisma/client"
 
 /**
  * How long an event's chatroom stays open after the event ends.
@@ -34,6 +34,36 @@ export const PRE_EVENT_CHAT_HOURS = 24
 export type ChatWindowState =
   | { open: true }
   | { open: false; reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden" }
+
+/**
+ * A venue day's room is for the people live in it now (F6, F7, D-4, D-5).
+ *
+ * An event's room outlives presence: membership is attendance, and the 24-hour
+ * window exists for the people who have left (`mayWriteToRoom`). A venue day's
+ * room does not. Going live at a venue is a time-boxed act — the daily reset is
+ * the privacy control, and a window that lapsed is a person who is no longer
+ * offering to be seen — so the room is entered, read and written only while
+ * the caller's window is open.
+ *
+ * The window is on the membership: `chat_group_members.last_allowed_at` is the
+ * moment the caller's Go Live ends. Go Live writes it, an in-fence ping during
+ * "stay" moves it, and every checkout of a venue day (expiry, a switch, a
+ * manual checkout, the event that takes the venue over) sets it to that
+ * instant. It is compared with the clock rather than waited on, so access ends
+ * at the second the window does, not when the sweeper next runs. Null means
+ * never live through Go Live, which is no access — fail closed. For an event
+ * room the column is not read at all.
+ */
+export const NOT_LIVE_MESSAGE = "You're not live here any more. Go live at the venue to join today's room."
+
+export function liveInVenueDay(
+  event: { kind: event_kind },
+  membership: { last_allowed_at: Date | null } | null | undefined,
+  now: Date = new Date()
+): boolean {
+  if (event.kind !== "venue_day") return true
+  return membership?.last_allowed_at != null && membership.last_allowed_at > now
+}
 
 /**
  * The one rule for whether an event chatroom accepts writes.
@@ -72,18 +102,22 @@ export function eventHidesRoom(event: { status?: string; deleted_at: Date | null
 }
 
 export function chatWindowState(
-  event: { start_time?: Date | null; end_time: Date; status?: event_status; deleted_at: Date | null },
+  event: { start_time?: Date | null; end_time: Date; status?: event_status; deleted_at: Date | null; kind: event_kind },
   group: { status: chat_group_status },
   now: Date = new Date()
 ): ChatWindowState {
   // `status` stays optional (a caller that does not select it behaves as it
-  // did); `deleted_at` does not — see `eventHidesRoom`.
+  // did); `deleted_at` does not — see `eventHidesRoom`. Nor does `kind`: a
+  // venue day's room closes at the reset, not a day later (D-5), and a caller
+  // that forgot to ask would hold it open for 24 hours.
   if (eventHidesRoom(event)) return { open: false, reason: "hidden" }
   if (group.status === "locked") return { open: false, reason: "locked" }
   if (group.status === "archived") return { open: false, reason: "archived" }
 
-  const closesAt = new Date(event.end_time.getTime() + CHAT_WINDOW_HOURS * 60 * 60 * 1000)
+  const closesAt = chatClosesAt(event)
   if (now >= closesAt) return { open: false, reason: "window_closed" }
+  // A venue day has no feedback window and no pre-event room: the day is the room.
+  if (event.kind === "venue_day") return { open: true }
 
   /*
    * The floor, and it is optional on purpose.
@@ -106,8 +140,9 @@ export function chatWindowState(
 
 /** Message shown to a client that tried to post into a closed room. */
 export function chatClosedMessage(
-  reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden"
+  reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden" | "not_live"
 ): string {
+  if (reason === "not_live") return NOT_LIVE_MESSAGE
   if (reason === "hidden") return "This event is no longer available."
   if (reason === "locked") return "This chat has been locked by the organiser"
   // Says when, not just no. "Closed" for a room that has never opened reads as
@@ -116,14 +151,15 @@ export function chatClosedMessage(
   return "This chat has closed. Event chats stay open for 24 hours after the event ends."
 }
 
-/** When a given event's chat closes — used by the cron and the dashboard. */
-export function chatClosesAt(event: { end_time: Date }): Date {
+/** When a given event's chat closes — used by the cron and the dashboard. A venue day's at its reset (D-5). */
+export function chatClosesAt(event: { end_time: Date; kind?: event_kind }): Date {
+  if (event.kind === "venue_day") return event.end_time
   return new Date(event.end_time.getTime() + CHAT_WINDOW_HOURS * 60 * 60 * 1000)
 }
 
 /** Why a member cannot write. `null` from `mayWriteToRoom` means they can. */
 export type WriteDenial =
-  | { reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden" }
+  | { reason: "archived" | "locked" | "window_closed" | "not_open_yet" | "hidden" | "not_live" }
   | { reason: "muted" | "banned" | "left" }
 
 /**
@@ -196,13 +232,16 @@ export function leftByChoice(membership: { status: string; left_at: Date | null 
  * most wants.
  */
 export function mayWriteToRoom(
-  membership: { status: string },
-  event: { start_time?: Date | null; end_time: Date; status?: event_status; deleted_at: Date | null },
+  membership: { status: string; last_allowed_at: Date | null },
+  event: { start_time?: Date | null; end_time: Date; status?: event_status; deleted_at: Date | null; kind: event_kind },
   group: { status: chat_group_status },
   now: Date = new Date()
 ): WriteDenial | null {
   if (membership.status === "banned") return { reason: "banned" }
   if (membership.status === "muted") return { reason: "muted" }
+  // Before the window: after the reset nobody is live in yesterday's room, and
+  // "go live to join today's" is the true remedy (see `liveInVenueDay`).
+  if (!eventHidesRoom(event) && !liveInVenueDay(event, membership, now)) return { reason: "not_live" }
 
   const window = chatWindowState(event, group, now)
   if (!window.open) return { reason: window.reason }
@@ -258,15 +297,23 @@ export function bannedRefusal(membership: { banned_by: string | null }): string 
     : "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it."
 }
 
-export type ReadDenial = "hidden" | "not_member" | "banned"
+/**
+ * `not_live`: a venue day's member whose Go Live has ended (`liveInVenueDay`).
+ * Its own answer rather than `not_member`, because the remedy is theirs —
+ * go live again — and because a caller that let `not_member` fall through to
+ * a join would put them straight back in.
+ */
+export type ReadDenial = "hidden" | "not_member" | "banned" | "not_live"
 
 export function roomReadDenial(
-  membership: { status: string; left_at: Date | null } | null | undefined,
-  event: { status: string; deleted_at: Date | null }
+  membership: { status: string; left_at: Date | null; last_allowed_at: Date | null } | null | undefined,
+  event: { status: string; deleted_at: Date | null; kind: event_kind },
+  now: Date = new Date()
 ): ReadDenial | null {
   if (eventHidesRoom(event)) return "hidden"
   if (!membership) return "not_member"
   if (membership.status === "banned") return "banned"
+  if (!liveInVenueDay(event, membership, now)) return "not_live"
   /*
    * Somebody who left by choice is not a member until they come back. `left_at`
    * is required in the type so no reader can forget to select it and quietly

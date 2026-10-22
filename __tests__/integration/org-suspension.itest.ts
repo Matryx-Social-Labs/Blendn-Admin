@@ -16,7 +16,7 @@ process.env.MOBILE_JWT_SECRET =
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 let session: { user: { id: string; role: DashboardRole } } | null = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(session) }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await session; return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
 jest.mock("@/lib/rate-limit", () => ({ rateLimit: jest.fn().mockResolvedValue(null), userLimit: jest.fn() }))
 // The push transport is mocked; the `notifications` rows are real.
 jest.mock("@/lib/push-notifications", () => {
@@ -154,13 +154,13 @@ describe("suspending an organisation", () => {
     expect(await canJoinChat(f.stranger, f.group.id)).toBe(false)
     expect(await canJoinEvent(f.stranger, f.live)).toBe(false)
     expect(await canJoinEventRoom(f.stranger, f.live)).toBe(false)
-    expect(chatWindowState({ start_time: null, end_time: new Date(Date.now() + 3600_000), status: "draft", deleted_at: null }, { status: "active" })).toEqual({ open: false, reason: "hidden" })
+    expect(chatWindowState({ start_time: null, end_time: new Date(Date.now() + 3600_000), status: "draft", deleted_at: null, kind: "event" }, { status: "active" })).toEqual({ open: false, reason: "hidden" })
 
     // The member's doors: no org, no permission, nothing listed — not even the event they created.
     const actor = await actorFor({ id: f.host, role: "organizer" })
     expect(actor.orgIds).toEqual([])
-    const upcomingRow = await db.events.findUniqueOrThrow({ where: { id: f.upcoming }, select: { organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
-    expect(eventPermissions(actor, upcomingRow)).toEqual({ canEdit: false, canOperate: false })
+    const upcomingRow = await db.events.findUniqueOrThrow({ where: { id: f.upcoming }, select: { kind: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } } } })
+    expect(eventPermissions(actor, upcomingRow)).toEqual({ canEdit: false, canOperate: false, canViewAttendees: false })
     const visible = await db.events.findMany({ where: await visibleEventsWhere({ id: f.host, role: "organizer" }), select: { id: true } })
     const visibleIds = new Set(visible.map((e) => e.id))
     expect(visibleIds.has(f.upcoming)).toBe(false)

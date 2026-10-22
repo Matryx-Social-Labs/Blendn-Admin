@@ -7,9 +7,11 @@ import { openSession } from "../lib/presence-sessions"
 import { storedBodyFor } from "../lib/push-notifications"
 import { normaliseSponsorName } from "../lib/sponsor-name"
 import { ensureOrgBrand, ensurePendingBrandClaim, findBrandByName } from "./seed-brand"
+import { seedMatrixMarkers, seedTaxonomy } from "./seed-admin-world"
 import { describeLive, describeRefresh, refreshSeededEvent } from "./seed-occurrences"
 import { cover, mirrorToTigris, RETIRED_COVER_HOST, revivedCover, SEED_BUCKET, stayedHotlinked } from "./seed-media"
 import { ensureTestAccounts, environmentRefusal, TEST_ACCOUNTS, upsertOrg } from "./test-accounts"
+import { realEventsWhere } from "../lib/event-kind"
 
 /**
  * A world the QA team can actually test against.
@@ -93,6 +95,23 @@ const CITY = {
 /** The claimant's organisation: a sponsor with no brand yet (SCRUM-465). */
 const CLAIMANT_ORG = "Third Wave Coffee Roasters"
 
+/**
+ * Organisations for the shell's personas (step 14), each belonging to nobody
+ * else, so a persona never changes what the role accounts see.
+ *
+ * The sidebar names the organisation you act for — the oldest live membership
+ * — and counts the rest; a member of a suspended organisation is told on every
+ * page. Neither is visible on the role accounts, who each belong to exactly
+ * one live organisation.
+ */
+const PERSONA_ORGS = {
+  older: "Lantern Lane Events",
+  newer: "Monsoon Club",
+  live: "Sunday Supper Club",
+  suspended: "Retired Rooms Co",
+  secondVenue: "Koramangala Social House",
+} as const
+
 const ACCOUNTS = [
   /*
    * The three product owners, by name — their own admin accounts, so the audit
@@ -145,6 +164,38 @@ const ACCOUNTS = [
      * cannot be the claimant: its organisation owns Blue Tokai (SCRUM-465).
      */
     note: "Sponsor, org with no brand. Filed the pending Third Wave claim.",
+  },
+  /*
+   * Personas for the dashboard shell (step 14). Each is in organisations of
+   * its own; see PERSONA_ORGS.
+   */
+  {
+    key: "multiOrg",
+    email: "ishaan.multi@blendn.app",
+    name: "Ishaan Mehta",
+    role: "organizer" as user_role,
+    note: `Organiser in two live orgs: ${PERSONA_ORGS.older} (joined first) and ${PERSONA_ORGS.newer}. The card names the first, "+1 more".`,
+  },
+  {
+    key: "partSuspended",
+    email: "tara.suspended@blendn.app",
+    name: "Tara Nair",
+    role: "organizer" as user_role,
+    note: `Organiser in ${PERSONA_ORGS.live} (live) and ${PERSONA_ORGS.suspended} (suspended). The card names the live one; the suspension notice shows.`,
+  },
+  {
+    key: "onlySuspended",
+    email: "omar.suspended@blendn.app",
+    name: "Omar Siddiqui",
+    role: "organizer" as user_role,
+    note: `Organiser only in ${PERSONA_ORGS.suspended} (suspended). The card still names it; no Create event.`,
+  },
+  {
+    key: "secondVenueOwner",
+    email: "kabir.venue@blendn.app",
+    name: "Kabir Shah",
+    role: "venue_owner" as user_role,
+    note: `A second venue owner (${PERSONA_ORGS.secondVenue}, no venues): the venue-owners list has a row that is not venue.owner@'s own.`,
   },
 ] as const
 
@@ -412,7 +463,7 @@ async function refreshTimes() {
  */
 async function reviveCopiedCovers() {
   const events = await db.events.findMany({
-    where: { cover_image_url: { contains: RETIRED_COVER_HOST, mode: "insensitive" } },
+    where: { cover_image_url: { contains: RETIRED_COVER_HOST, mode: "insensitive" }, ...realEventsWhere },
     select: { id: true, slug: true, cover_image_url: true },
   })
   for (const e of events) {
@@ -563,6 +614,9 @@ async function main() {
     ownerId: null,
     geofence: null,
   })
+
+  // The taxonomy the events below are tagged with (see seed-admin-world.ts).
+  await seedTaxonomy(db)
 
   // ── events ───────────────────────────────────────────────────────────────
   const hotlinked: string[] = []
@@ -1100,7 +1154,7 @@ async function main() {
 
   const eventClaimSpecs = [
     { eventId: openId, email: "events@toit.in", status: "pending" as const,
-      flags: ["domain_matches_source"], note: "We run this every Sunday." },
+      flags: ["email_matches_source"], note: "We run this every Sunday." },
     { eventId: openId, email: "bookings@in.bookmyshow.com", status: "pending" as const,
       flags: ["source_is_aggregator", "no_organisation_yet"], note: "Listing is ours." },
     { eventId: claimedId, email: "hello@permitroom.in", status: "approved" as const,
@@ -1196,7 +1250,7 @@ async function main() {
 
   // ── sponsors and a brand claim ───────────────────────────────────────────
   const brandName = "Blue Tokai"
-  await ensureOrgBrand(db, {
+  const ownBrand = await ensureOrgBrand(db, {
     name: brandName,
     orgId: orgs.brands.id,
     createdBy: users.admin,
@@ -1217,6 +1271,44 @@ async function main() {
     create: { org_id: claimantOrg.id, user_id: users.claimant, role: "owner", is_primary_contact: true },
   })
   await ensurePendingBrandClaim(db, { brandId: unclaimedBrand.id, orgId: claimantOrg.id, filedBy: users.claimant })
+
+  // ── the shell's personas: several orgs, a suspended one ──────────────────
+  const personaOrg = async (name: string, status: "verified" | "suspended") => {
+    const org = await upsertOrg(db, name)
+    return status === org.status
+      ? org
+      : db.organisations.update({
+          where: { id: org.id },
+          data: {
+            status,
+            suspension_reason: status === "suspended" ? "QA persona: a suspended organisation." : null,
+          },
+        })
+  }
+  const [older, newer, live, suspendedOrg, secondVenue] = await Promise.all([
+    personaOrg(PERSONA_ORGS.older, "verified"),
+    personaOrg(PERSONA_ORGS.newer, "verified"),
+    personaOrg(PERSONA_ORGS.live, "verified"),
+    personaOrg(PERSONA_ORGS.suspended, "suspended"),
+    personaOrg(PERSONA_ORGS.secondVenue, "verified"),
+  ])
+  // created_at is set, not left to the clock: which membership is oldest is the
+  // thing under test, and two upserts a millisecond apart would decide it.
+  const PERSONA_MEMBERSHIPS = [
+    { user: users.multiOrg, org: older.id, joined: hoursFromNow(-24 * 90) },
+    { user: users.multiOrg, org: newer.id, joined: hoursFromNow(-24 * 10) },
+    { user: users.partSuspended, org: live.id, joined: hoursFromNow(-24 * 60) },
+    { user: users.partSuspended, org: suspendedOrg.id, joined: hoursFromNow(-24 * 120) },
+    { user: users.onlySuspended, org: suspendedOrg.id, joined: hoursFromNow(-24 * 30) },
+    { user: users.secondVenueOwner, org: secondVenue.id, joined: hoursFromNow(-24 * 45) },
+  ]
+  for (const m of PERSONA_MEMBERSHIPS) {
+    await db.organisation_members.upsert({
+      where: { org_id_user_id: { org_id: m.org, user_id: m.user } },
+      update: { created_at: m.joined },
+      create: { org_id: m.org, user_id: m.user, role: "owner", created_at: m.joined },
+    })
+  }
 
   // ── onboarding applications, both paths and every state ──────────────────
   /*
@@ -1335,10 +1427,13 @@ async function main() {
     })
   }
 
+  // ── a row on every admin screen the access matrix reads (step 18) ───────
+  await seedMatrixMarkers(db, { admin: users.admin, attendees: attendeeIds, brandId: ownBrand.id })
+
   // ── retire the previous names ────────────────────────────────────────────
   if (APPLY) {
     const retired = await db.events.updateMany({
-      where: { slug: { in: RETIRED_SLUGS }, deleted_at: null },
+      where: { slug: { in: RETIRED_SLUGS }, deleted_at: null, ...realEventsWhere },
       data: { deleted_at: new Date(), updated_at: new Date() },
     })
     if (retired.count > 0) console.log(`Retired ${retired.count} event(s) under old QA names.`)

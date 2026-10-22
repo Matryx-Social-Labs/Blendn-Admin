@@ -45,7 +45,7 @@ export const hostNotSuspended = {
  */
 export type EventAccessDenial =
   | { kind: "not_found" }
-  | { kind: "age"; message: string }
+  | { kind: "age"; message: string; unknownAge: boolean }
   | { kind: "unfinished"; message: string }
 
 /*
@@ -60,9 +60,15 @@ export async function attendeeEventAccess(
 ): Promise<EventAccessDenial | null> {
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { status: true, visibility: true, min_age: true },
+    select: { status: true, visibility: true, min_age: true, kind: true },
   })
-  if (!event || event.status === "draft") return { kind: "not_found" }
+  /*
+   * A venue day is not an event anybody opens, RSVPs to, saves or reads the
+   * board of: it is `unlisted`, not `private`, so without this its id passed
+   * every rule below. Its one door is Go Live (`POST /venues/:id/live`), and
+   * its room's own routes check being live (`liveInVenueDay`, `inRoomWhere`).
+   */
+  if (!event || event.status === "draft" || event.kind === "venue_day") return { kind: "not_found" }
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
     return { kind: "not_found" }
   }
@@ -80,7 +86,7 @@ export async function attendeeEventAccess(
   const age = ageFrom(profile)
   if (age == null && intent === "view") return null
   const message = minAgeRefusal(age, event.min_age)
-  return message ? { kind: "age", message } : null
+  return message ? { kind: "age", message, unknownAge: age == null } : null
 }
 
 /**
@@ -97,7 +103,9 @@ export async function participationRefusal(userId: string): Promise<string | nul
 
 /** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
-  if (denial.kind === "age") return errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED)
-  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN)
+  if (denial.kind === "age") {
+    return errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED, denial.unknownAge ? ErrorCode.AGE_UNKNOWN : undefined)
+  }
+  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
   return notFoundResponse("Event not found")
 }

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema } from "./common"
+import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema } from "./common"
 
 /** Likes and waves name somebody only by this event's handle (SCRUM-371). */
 const ThisRoomRefSchema = z.string().min(1).openapi({
@@ -44,6 +44,13 @@ export const EventQuerySchema = z
       .openapi({
         description:
           "Include events that have already ended. Off by default — discovery only returns events you can still go to. Set true for history screens.",
+      }),
+    featured: z
+      .boolean()
+      .default(false)
+      .openapi({
+        description:
+          "Only the featured events: published, public, within your age, not ended, in `city`, in the day's rotation (`featured.rank`; a hash of the UTC day and the city, so one order for everyone in a city all day), **at most 5** however large `limit` is. `sortBy` is ignored, and the answer is always page 1: `page=2` returns the same five. Today's only source is the admin-set `isFeatured`, so every one is `featured.kind: \"editorial\"`.",
       }),
     status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
     sortBy: z.enum(["start_time", "created_at", "distance"]).default("start_time"),
@@ -134,7 +141,15 @@ export const EventCitiesResponseSchema = z
     cities: z.array(
       z.object({
         city: z.string().openapi({ description: "Pass this back as the `city` query parameter." }),
-        eventCount: z.number().int(),
+        eventCount: z.number().int().openapi({ description: "Upcoming events this city opens with; 0 for a city with places only." }),
+        placeCount: z.number().int().openapi({ description: "Listed places (venues) in the city: what Places opens with." }),
+        centre: z
+          .object({ latitude: z.number(), longitude: z.number() })
+          .nullable()
+          .openapi({
+            description:
+              "Where to point a map for this city: the mean of its listed events' points, or of its places' points when it has no events (rows with no point, or 0,0, left out). Null when none has a point; keep the map where it is.",
+          }),
       })
     ),
   })
@@ -161,7 +176,8 @@ const EventCategorySchema = z.object({
 })
 
 const EventStatsSchema = z.object({
-  checkInCount: z.number(),
+  checkInCount: z.number().openapi({ description: "People who checked in, including those who have since left (came, not here now)." }),
+  hereCount: z.number().openapi({ description: "People checked in right now: not checked out, guests only, the Room's count. Use this for \"here now\"." }),
   favoriteCount: z.number(),
   ratingCount: z.number(),
   rsvpCount: z.number().openapi({ description: "RSVPs with status `going`." }),
@@ -317,7 +333,12 @@ export const EventDetailSchema = z
 
 export const EventListResponseSchema = z
   .object({
-    events: z.array(z.unknown().openapi({ description: "Transformed event objects" })),
+    events: z.array(
+      z.unknown().openapi({
+        description:
+          "Transformed event objects. Each carries `venue`: `{ id, name }` of the venue it is at — linked by a confirmed link, or with its own area at the venue (the takeover's test) — or null: a disputed link, an auto-link whose area is elsewhere, an archived or deleted venue, or none; then say the free-text `venueName`. While the event has its venue (from an hour before it starts until it ends), `GET /api/mobile/venues` leaves the venue out, so this card is where the place is named. Counts: `checkInCount` (came: everybody who checked in, left or not; `currentCapacity` is the same number), `hereCount` (here now: checked in and not checked out, guests only — the Room's count; use this for 'here now'), `favoriteCount`, `ratingCount`, and `goingCount` — RSVPs with status `going` only (not `waitlisted`, `maybe` or `not_going`), the same number as the detail's `stats.rsvpCount`. `featured`: `{ kind: \"editorial\" | \"promoted\", rank: number, by: string | null }` or null. `kind` `editorial` is Blendn's own pick (`by: \"blendn\"`, drawn without a label); `promoted` is a paid placement and must be labelled \"Promoted\" (nothing sells one yet, so none is returned; handle it anyway). `rank` is 1-based in the day's rotation among the featured events in this response (for `featured=true`, the whole section); it is not start-time order. `isFeatured` is the same fact as `featured !== null`, kept for older builds. Build a section with `featured=true`, not by filtering a page.",
+      })
+    ),
     pagination: PaginationMetaSchema,
     activeCheckins: z.array(z.unknown()).optional(),
     profile: z.unknown().optional(),
@@ -482,17 +503,40 @@ export const MatchListResponseSchema = z
         insideNow: z.boolean(),
         /** Whether you liked them. Never whether they liked you. */
         youLiked: z.boolean(),
+        sharedEvents: z.number().int().describe("Nights you were both at before this one. 0 below the eight-person floor."),
+        sharedPlans: z.number().int().describe("Future events you are both going to. 0 below the floor."),
+        overlaps: z
+          .array(OverlapSchema)
+          .describe(
+            "Matching v2: display-only lines you share, as sentences, rarest first — an IPL team (\"Both CSK — in RCB country 💛\"), a this-or-that answer, and at most ONE Tier B line (a language, a home state or a sign) before a reveal, none in a room below eight people. At most two lines before a reveal, four after. Never scored."
+          ),
+        sign: z
+          .string()
+          .nullable()
+          .describe("Their own sign, \"Leo ♌\", when they chose to show one and the card has Tier B left — never beside a Tier B line before a reveal, never below eight people."),
+        badges: z.array(BadgeSchema).describe("Earned by check-ins. Empty below the eight-person floor (they are attendance facts)."),
       })
     ),
   })
   .openapi("MatchListResponse")
 
 export const LikeRequestSchema = z
-  .object({ userId: ThisRoomRefSchema })
+  .object({
+    userId: ThisRoomRefSchema,
+    /** Like them on your crew's behalf (crew → person); see the description. */
+    asCrewId: z.string().uuid().optional(),
+  })
   .openapi("LikeRequest")
 
 export const LikeResponseSchema = z
-  .object({ mutual: z.boolean(), conversationId: z.string().optional() })
+  .object({
+    mutual: z.boolean().optional(),
+    conversationId: z.string().optional(),
+    /** With `asCrewId`: the crew like was recorded. */
+    liked: z.literal(true).optional(),
+    /** With `asCrewId`: the Blend it made, if they had liked your crew. */
+    blend: z.object({ blendId: z.string().uuid(), chatGroupId: z.string().uuid() }).nullable().optional(),
+  })
   .openapi("LikeResponse")
 
 export const RoomPreviewResponseSchema = z
@@ -516,6 +560,8 @@ export const MatchPreferencesSchema = z
   .object({
     intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).optional(),
     revealed: z.boolean().optional(),
+    /** "Open to joining a crew tonight": crews are shown to you, and may like you, only with this on — until the end of the occurrence you are checked in at; `false` clears it. */
+    openToCrews: z.boolean().optional(),
     /** Writes `profiles.intent_default`. */
     rememberIntent: z.boolean().optional(),
     /** Writes `profiles.reveal_by_default` — the *suggestion*, not a state. */

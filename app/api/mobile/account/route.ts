@@ -5,7 +5,12 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { evictUserSockets } from "@/lib/socket-server"
+import { closeRoomSockets } from "@/lib/room-close"
+import { settleCrewsAfterErasure } from "@/lib/crews/sweep"
 import { recordDeletedAccount } from "@/lib/deleted-account-records"
+import { eraseUserEntitlements } from "@/lib/entitlements"
+import { revenuecatSecretKey } from "@/lib/env"
+import { deleteSubscriber } from "@/lib/revenuecat-api"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
 import { eraseChatMedia, retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
@@ -49,15 +54,69 @@ export async function DELETE(request: NextRequest) {
      * would. Read before the transaction so the promotion can run after it.
      */
     const openRsvps = await db.event_rsvps.findMany({
+      // any-kind: erasure releases every seat the person held, whatever the row (PL-I22).
       where: { user_id: authUser.userId, event: { start_time: { gt: new Date() } } },
       select: { event_id: true },
     })
     const openEventIds = [...new Set(openRsvps.map((r) => r.event_id))]
 
+    /*
+     * Their board asks somebody reported and nobody has reviewed: the words
+     * are the evidence, so the scrub below leaves them until a reviewer has
+     * looked (SCRUM-322 review). Read before the transaction, as above.
+     */
+    const reportedAsks = (
+      await db.message_reports.findMany({
+        where: {
+          message_type: "board_request",
+          status: "pending",
+          message_id: {
+            in: (
+              await db.board_requests.findMany({
+                where: { from_user_id: authUser.userId },
+                select: { id: true },
+              })
+            ).map((r) => r.id),
+          },
+        },
+        select: { message_id: true },
+      })
+    ).map((r) => r.message_id)
+
+    /*
+     * Their crews: locked, then left, INSIDE the erasure below, and settled
+     * after it (D-15: one left dissolves; an owner is handed on). Read inside,
+     * not before, so a crew they joined a moment ago is not missed: the
+     * DELETE returns exactly the rows it took. The lock comes before the
+     * room rows are touched — crew row first, then its room, the order every
+     * crew writer takes (lib/crews/sweep.ts).
+     */
+    const lockCrews = db.$queryRaw<{ id: string }[]>`
+      SELECT c.id::text FROM crews c
+      WHERE c.dissolved_at IS NULL
+        AND c.id IN (SELECT crew_id FROM crew_members WHERE user_id = ${authUser.userId})
+      ORDER BY c.id
+      FOR UPDATE OF c`
+    const leaveCrews = db.$queryRaw<{ crew_id: string }[]>`
+      DELETE FROM crew_members WHERE user_id = ${authUser.userId} RETURNING crew_id::text`
+
+    // The rooms of their posts, which close with the erasure below (E1, E3).
+    const postRooms = await db.chat_groups.findMany({
+      where: { kind: "board_post", board_post: { author_id: authUser.userId } },
+      select: { id: true },
+    })
+
     const deletedAt = new Date()
-    await db.$transaction([
+    const erasure = [
       /*
-       * FIRST, before anything below scrubs it: the copy of what they
+       * Before anything: this person's RevenueCat lock, the one the store's
+       * webhook takes. A purchase being granted right now finishes first and
+       * its row is erased below; one arriving after waits, then finds a
+       * deleted account and grants nothing (review M2).
+       */
+      db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`revenuecat:${authUser.userId}`}, 0))`,
+      /*
+       * Then, before anything below scrubs it: the copy of what they
        * registered with that the IT Rules 2021, r.3(1)(h), require for 180
        * days. Inside the batch, so it commits or rolls back with the erasure.
        */
@@ -129,9 +188,22 @@ export async function DELETE(request: NextRequest) {
           // Three slugs narrow a person further than the bucket above them, so
           // they go for the same reason it does.
           expertise: [],
+          // Matching v2 (plan v2 §8): origin-like facts and a sign — exactly
+          // what "delete my account" means to be gone.
+          languages: [],
+          home_state: null,
+          sun_sign: null,
+          sign_system: null,
+          shows_up_badge: false,
+          show_badges: true,
+          tier_b_changed_at: null,
+          tier_b_changes: [],
           onboarded: false,
         },
       }),
+      // Their this-or-that answers: theirs alone, and the profile row they
+      // hang off is kept, so nothing cascades.
+      db.this_or_that_answers.deleteMany({ where: { user_id: authUser.userId } }),
       // Structured interests. Nothing cascades here, because the `User` row is
       // deliberately kept — deleting it would cascade other people's chat
       // history and event history along with it.
@@ -147,6 +219,8 @@ export async function DELETE(request: NextRequest) {
        * them still hold a conversation. The *choices* are personal and go.
        */
       db.event_match_preferences.deleteMany({ where: { user_id: authUser.userId } }),
+      // Their crews' rows locked before any room row below (see `lockCrews`).
+      lockCrews,
       /*
        * Out of every room they were in. `left`, not deleted, for the reason
        * the sweeper gives (lib/chat-lifecycle.ts): the pseudonym lives on the
@@ -180,6 +254,39 @@ export async function DELETE(request: NextRequest) {
         where: { OR: [{ sender_id: authUser.userId }, { recipient_id: authUser.userId }] },
       }),
       db.friend_invites.deleteMany({ where: { user_id: authUser.userId } }),
+      // Who brought whom, either way: their place in somebody's referral count goes too.
+      db.referrals.deleteMany({ where: { OR: [{ invitee_id: authUser.userId }, { inviter_id: authUser.userId }] } }),
+      /*
+       * Their Blendn+ (test plan D-17). A store subscription still running is
+       * the store's to stop — the app tells them to cancel there first — and a
+       * later renewal for this account grants nothing: the webhook knows only
+       * accounts that were not deleted. `payment_events` stays: ids and times,
+       * no personal data.
+       */
+      eraseUserEntitlements(authUser.userId),
+      /*
+       * Out of every crew, and every crew invite to them or from them goes —
+       * their removal markers too (there is nobody left to keep out), but not
+       * the ones they wrote about others (below). Their crew chats'
+       * member rows went `left` above with every room's, and their messages
+       * stay, as in any room. Each crew is settled after the commit
+       * (`settleCrewsAfterErasure`): one left alone dissolves.
+       */
+      db.crew_invites.deleteMany({
+        where: {
+          OR: [
+            { invited_user_id: authUser.userId },
+            // Their open invites go. What they wrote about somebody else stays:
+            // a removal marker (the owner's word that a person is out) and a
+            // decline (that person's 30 days of quiet) belong to the person
+            // they are about, and erasing the owner must not lift either.
+            { invited_by: authUser.userId, removed_at: null, declined_at: null },
+          ],
+        },
+      }),
+      leaveCrews,
+      // Their reveals inside Blends: a name shown to that night's people, theirs to take back now.
+      db.blend_reveals.deleteMany({ where: { user_id: authUser.userId } }),
       /*
        * DELETED, not scrubbed, and the consequence is stated because it is
        * visible: every historical "active this week" figure drops by the days
@@ -192,6 +299,26 @@ export async function DELETE(request: NextRequest) {
        * make a chart smoother, is not a trade this product should make.
        */
       db.product_events.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * Their choices about venues (step 12): being known somewhere as a
+       * regular is theirs, and an erased account must not stay on a venue's
+       * list; a mute protects nobody once there is nobody to send to.
+       */
+      db.venue_regular_optins.deleteMany({ where: { user_id: authUser.userId } }),
+      db.venue_offer_mutes.deleteMany({ where: { user_id: authUser.userId } }),
+      /*
+       * The offers they were sent stay as counts, and nothing more (review
+       * M3): no account on them, the times cut to the day, and no trace of
+       * when a pass was last on their screen — a venue's opens and
+       * redemptions still add up, and nobody's nights at a door can be read.
+       */
+      db.$executeRaw`UPDATE venue_offer_sends
+                        SET user_id = NULL,
+                            sent_at = date_trunc('day', sent_at),
+                            opened_at = date_trunc('day', opened_at),
+                            redeemed_at = date_trunc('day', redeemed_at),
+                            pass_seen_at = NULL
+                      WHERE user_id = ${authUser.userId}`,
       db.user_oauth_accounts.deleteMany({ where: { user_id: authUser.userId } }),
       db.account.deleteMany({ where: { userId: authUser.userId } }),
       db.session.deleteMany({ where: { userId: authUser.userId } }),
@@ -276,7 +403,41 @@ export async function DELETE(request: NextRequest) {
        * be the way to destroy the evidence. It is already hidden, so nobody
        * is left holding an offer they cannot take.
        */
-      db.board_posts.deleteMany({ where: { author_id: authUser.userId, moderation_status: null } }),
+      db.board_posts.deleteMany({ where: { author_id: authUser.userId, moderation_status: null, room: { is: null } } }),
+
+      /*
+       * EXCEPT a post with a room (step 7, E1). The room is other people's
+       * conversation — the accepted askers' messages, anything moderation hid
+       * or somebody reported, which the IT Rules keep for 180 days — and a
+       * room cannot outlive its post (`board_post_id` is ON DELETE RESTRICT).
+       * So the post stays as a row: off the board (`deleted_at`, which also
+       * closes the room's door), its words erased like an ask's, and its room
+       * archived with every message and member kept.
+       */
+      db.chat_groups.updateMany({
+        where: { kind: "board_post", board_post: { author_id: authUser.userId }, status: { not: "archived" } },
+        data: { status: "archived" },
+      }),
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, moderation_status: null, room: { isNot: null }, deleted_at: null },
+        data: { deleted_at: deletedAt },
+      }),
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, moderation_status: null, room: { isNot: null } },
+        data: { body: "" },
+      }),
+
+      /*
+       * And a post somebody REPORTED, still waiting for a reviewer. Filing the
+       * report stamps it `moderation_status = "reported"` (lib/board-access.ts,
+       * `fileBoardReport`), so the delete above leaves it — the post is the
+       * evidence, and an author deleting their account must not be how a
+       * report loses it. It comes off the board here, as the author does.
+       */
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, moderation_status: "reported", deleted_at: null },
+        data: { deleted_at: new Date() },
+      }),
 
       /*
        * Requests they SENT to other people's posts: the row survives — the
@@ -285,7 +446,9 @@ export async function DELETE(request: NextRequest) {
        * they received is somebody else's sentence.
        */
       db.board_requests.updateMany({
-        where: { from_user_id: authUser.userId },
+        // Except an ask somebody reported that nobody has reviewed yet: its
+        // words are the evidence. The report also keeps a copy (`excerpt`).
+        where: { from_user_id: authUser.userId, id: { notIn: reportedAsks } },
         data: { message: null },
       }),
 
@@ -339,7 +502,8 @@ export async function DELETE(request: NextRequest) {
           AND data->>'requestId' IN (
             SELECT id::text FROM message_requests WHERE recipient_id = ${authUser.userId}
           )`,
-    ])
+    ]
+    const erased = await db.$transaction(erasure)
 
     /*
      * After the transaction, not inside it: storage is not transactional and
@@ -355,6 +519,26 @@ export async function DELETE(request: NextRequest) {
     // a new one, but a second phone's live connection kept its rooms and DMs
     // coming after the erasure (SCRUM-449). Suspension does the same.
     evictUserSockets(authUser.userId)
+    // Their posts' rooms are archived and their door now says hidden; whoever
+    // was still in one is taken out, as from a post withdrawn (E3).
+    for (const room of postRooms) closeRoomSockets(room.id)
+    // A crew they leave with one person in it dissolves; an owner is handed
+    // on. Never throws; a crew it misses, the chat sweeper repairs.
+    const leftCrews = erased[erasure.indexOf(leaveCrews)] as { crew_id: string }[]
+    await settleCrewsAfterErasure(leftCrews.map((row) => row.crew_id))
+
+    // Gone at RevenueCat too (best effort; it holds their purchase history
+    // under our user id). A store subscription still running is the store's.
+    const rcKey = revenuecatSecretKey()
+    const erasedId = authUser.userId
+    if (rcKey) {
+      await deleteSubscriber(erasedId, rcKey).catch((error) =>
+        logger.warn("Account deletion: RevenueCat delete failed; delete the customer in RevenueCat by hand", {
+          userId: erasedId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
 
     // Seats they held are free now; the waitlist moves, per event.
     for (const eventId of openEventIds) {

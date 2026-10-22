@@ -239,6 +239,6 @@ describe("the room broadcast carries counts, never a reactor", () => {
     )
     expect(route).toMatch(/db\.message_reactions\.create\(/)
     // Gated by the same rule as the two message write paths, not a new one.
-    expect(route).toMatch(/mayWriteToRoom\(/)
+    expect(route).toMatch(/mayWriteToRoom(?:For)?\(/)
   })
 })

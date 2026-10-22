@@ -23,6 +23,10 @@
 const mockDb = {
   profiles: { findUnique: jest.fn() },
   venues: { findMany: jest.fn(), count: jest.fn() },
+  // The hiding rule's one read (`venuesTakenOver`); nothing takes a venue over here.
+  events: { findMany: jest.fn() },
+  // `liveGuestIds`: nobody live.
+  event_check_ins: { findMany: jest.fn() },
 }
 
 const mockAuth = jest.fn()
@@ -51,6 +55,11 @@ const venueRow = (over: Record<string, unknown> = {}) => ({
   longitude: 77.59,
   capacity: 300,
   venue_type: "live_music_venue",
+  area: null,
+  area_slug: null,
+  timezone: "Asia/Kolkata",
+  day_reset_hour: 6,
+  hours: null,
   _count: { events: 2 },
   events: [
     {
@@ -65,12 +74,15 @@ const venueRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+
 beforeEach(() => {
   jest.clearAllMocks()
   mockAuth.mockResolvedValue({ userId: VIEWER })
   mockDb.profiles.findUnique.mockResolvedValue({ age: null, date_of_birth: null })
   mockDb.venues.findMany.mockResolvedValue([venueRow()])
   mockDb.venues.count.mockResolvedValue(1)
+  mockDb.events.findMany.mockResolvedValue([])
+  mockDb.event_check_ins.findMany.mockResolvedValue([])
 })
 
 /** The `select` the route handed Prisma on its one full fetch. */
@@ -101,7 +113,8 @@ describe("GET /api/mobile/venues", () => {
     await GET(req())
 
     const nested = selectArg().events.where
-    expect(nested.OR).toEqual([{ min_age: null }, { min_age: { lte: 16 } }])
+    // Beside the link's OR, under `AND`, so neither replaces the other (F4).
+    expect(nested.AND).toContainEqual({ OR: [{ min_age: null }, { min_age: { lte: 16 } }] })
     expect(nested).toMatchObject({ status: "published", visibility: "public" })
   })
 
@@ -123,7 +136,7 @@ describe("GET /api/mobile/venues", () => {
     // Most OAuth accounts have no age. Failing closed would empty the screen to
     // punish a missing field — the events feed made this decision first.
     await GET(req())
-    expect(selectArg().events.where.OR).toBeUndefined()
+    expect(JSON.stringify(selectArg().events.where)).not.toContain("min_age")
   })
 
   it("does not filter by radius unless a radius was asked for", async () => {
@@ -167,9 +180,92 @@ describe("GET /api/mobile/venues", () => {
     expect(body.data.venues[0].upcomingEventCount).toBe(0)
   })
 
+  it("leaves out the venues an event has taken over, and says liveNow as a bucket to an adult", async () => {
+    mockDb.profiles.findUnique.mockResolvedValue({ age: 30, date_of_birth: null, onboarded: true })
+    // A confirmed link takes the venue over wherever the event's area is
+    // (`atTheVenue`); the integration suite walks every other link state.
+    const taken = "44444444-4444-4444-4444-444444444444"
+    mockDb.events.findMany.mockResolvedValue([
+      { id: "e", title: "t", venue_id: taken, venue_link_status: "confirmed", geofence: null, latitude: null, longitude: null, venue: { geofence: null } },
+    ])
+    const res = await GET(req())
+    expect(mockDb.venues.findMany.mock.calls[0][0].where.id).toEqual({ notIn: [taken] })
+    expect((await res.json()).data.venues[0].liveNow).toBe("quiet")
+  })
+
+  it("tells nobody the venue page would refuse how many are live: unknown age, under 18, not onboarded", async () => {
+    for (const viewer of [
+      { age: null, date_of_birth: null, onboarded: true },
+      { age: 16, date_of_birth: null, onboarded: true },
+      { age: null, date_of_birth: null, onboarded: false },
+    ]) {
+      mockDb.profiles.findUnique.mockResolvedValue(viewer)
+      const res = await GET(req())
+      expect((await res.json()).data.venues[0].liveNow).toBeNull()
+    }
+    // And never asked: the count is not read for somebody it is not for.
+    expect(mockDb.event_check_ins.findMany).not.toHaveBeenCalled()
+  })
+
   it("rejects a venue type outside the vocabulary", async () => {
     const res = await GET(req("?venueType=speakeasy"))
     expect(res.status).toBe(400)
+  })
+
+  // C7 (home panes): the kind filter takes a list.
+  it("filters by any of a comma list of types", async () => {
+    await GET(req("?venueType=pub_bar,brewery"))
+    expect(mockDb.venues.findMany.mock.calls[0][0].where.venue_type).toEqual({ in: ["pub_bar", "brewery"] })
+  })
+
+  it("takes `venueTypes` as the same filter, and the union when both are sent", async () => {
+    await GET(req("?venueTypes=pub_bar,brewery"))
+    expect(mockDb.venues.findMany.mock.calls[0][0].where.venue_type).toEqual({ in: ["pub_bar", "brewery"] })
+    mockDb.venues.findMany.mockClear()
+    await GET(req("?venueType=cafe&venueTypes=cafe,nightclub"))
+    expect(mockDb.venues.findMany.mock.calls[0][0].where.venue_type).toEqual({ in: ["cafe", "nightclub"] })
+  })
+
+  it("refuses a list with one unknown type or a blank entry, rather than quietly dropping it", async () => {
+    expect((await GET(req("?venueType=pub_bar,speakeasy"))).status).toBe(400)
+    expect((await GET(req("?venueType=pub_bar,,brewery"))).status).toBe(400)
+    expect((await GET(req("?venueTypes="))).status).toBe(400)
+  })
+
+  it("does not filter by type unless asked", async () => {
+    await GET(req())
+    expect(mockDb.venues.findMany.mock.calls[0][0].where).not.toHaveProperty("venue_type")
+  })
+
+  it("searches the neighbourhood name too, beside name, address and city", async () => {
+    await GET(req("?search=indiranagar"))
+    const or = mockDb.venues.findMany.mock.calls[0][0].where.OR
+    expect(or).toContainEqual({ area: { contains: "indiranagar", mode: "insensitive" } })
+    expect(or).toHaveLength(4)
+  })
+
+  // C4 (home panes): the neighbourhood.
+  it("filters by area slug, and carries the area and its slug, null when unknown", async () => {
+    await GET(req("?area=indiranagar"))
+    expect(mockDb.venues.findMany.mock.calls[0][0].where.area_slug).toBe("indiranagar")
+
+    mockDb.venues.findMany.mockResolvedValue([
+      venueRow({ area: "Indiranagar", area_slug: "indiranagar" }),
+      venueRow({ id: "44444444-4444-4444-4444-444444444444" }),
+    ])
+    const items = (await (await GET(req())).json()).data.venues
+    expect(items[0]).toMatchObject({ area: "Indiranagar", areaSlug: "indiranagar" })
+    expect(items[1]).toMatchObject({ area: null, areaSlug: null })
+  })
+
+  // C6 (home panes): tonight's hours.
+  it("says tonight's hours from the venue's own clock, null when none are given", async () => {
+    // Every weekday, so the test does not depend on the day it runs.
+    const everyDay = [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: "18:00", close: "01:00" }))
+    mockDb.venues.findMany.mockResolvedValue([venueRow({ hours: everyDay }), venueRow({ hours: null })])
+    const items = (await (await GET(req())).json()).data.venues
+    expect(items[0].tonight).toEqual({ opensAt: "18:00", closesAt: "01:00" })
+    expect(items[1].tonight).toBeNull()
   })
 
   it("carries no field shaped like a person", async () => {

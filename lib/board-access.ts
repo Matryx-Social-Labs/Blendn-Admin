@@ -1,17 +1,23 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
+import type { board_request_status, Prisma } from "@prisma/client"
+
 import { ageFrom } from "./age"
-import { preferredPseudonymFor } from "./anonymous-names"
+import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
 import {
   mayPostToBoard,
   type BoardEntitlement,
   type BoardWriteDenial,
 } from "./board"
 import { BOARD } from "./constants"
+import { blockCounterparties } from "./conversations"
 import { db } from "./db"
+import { closePostRooms } from "./room-close"
+import { blocksBetween } from "./crews/blocks"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
+import { violatedConstraint } from "./prisma-errors"
 
 /**
  * The database half of the board's gates.
@@ -81,6 +87,65 @@ export function isLiveRequest(
   )
 }
 
+/**
+ * A decline is never delivered to the asker (product rule).
+ *
+ * To the person who asked, a declined ask is an unanswered one: `pending`, no
+ * decision time, live until it lapses with its event or its post like any
+ * other. Three things carry that rule, and they are pinned against each other
+ * over real rows in `board-safety.itest.ts`:
+ *
+ * - `asTheAskerSees` — the row the asker is shown;
+ * - `isLiveToTheAsker` — whether that row is still waiting, for a row read;
+ * - `outstandingAsk` — the same question as a where clause, for the cap.
+ *
+ * The cap is the one that gets missed: if a decline freed a slot, somebody at
+ * five outstanding who could suddenly ask a sixth has been told one of the five
+ * said no.
+ *
+ * And a block reads as a withdrawn post. Somebody blocked either way vanishes
+ * from the asker's board, and their post with it; an ask on it that stayed
+ * live, with the post's words, while the post itself was gone, would tell the
+ * asker the difference between "they took it down" and "they shut me out". So
+ * to the asker it lapses exactly as an ask on a withdrawn post does — no body,
+ * not live, and no longer holding a slot.
+ */
+export function outstandingAsk(now: Date = new Date(), blocked: readonly string[] = []) {
+  return {
+    ...liveRequest(now),
+    status: { in: ["pending", "declined"] as board_request_status[] },
+    // A declined ask the asker took back is withdrawn, to them.
+    asker_withdrawn_at: null,
+    to_user_id: { notIn: [...blocked] },
+  }
+}
+
+/** The row as its asker may see it. Only ever applied to the asker's own rows. */
+export function asTheAskerSees<
+  T extends { status: board_request_status; decided_at: Date | null; asker_withdrawn_at: Date | null },
+>(request: T): T {
+  if (request.status !== "declined") return request
+  return request.asker_withdrawn_at
+    ? { ...request, status: "withdrawn", decided_at: request.asker_withdrawn_at }
+    : { ...request, status: "pending", decided_at: null }
+}
+
+/** `outstandingAsk`, for a row already read. */
+export function isLiveToTheAsker(
+  request: {
+    status: board_request_status
+    decided_at: Date | null
+    asker_withdrawn_at: Date | null
+    to_user_id: string
+    event: { end_time: Date }
+    post: { deleted_at: Date | null }
+  },
+  blocked: ReadonlySet<string>,
+  now: Date = new Date()
+): boolean {
+  return isLiveRequest(asTheAskerSees(request), now) && !blocked.has(request.to_user_id)
+}
+
 /** What the viewer has done about this event. Both gates read it. */
 export async function entitlementFor(
   eventId: string,
@@ -122,7 +187,9 @@ export async function boardWriteDenial(
       select: { name: true, age: true, date_of_birth: true, intent_default: true },
     }),
     db.user_interests.count({ where: { user_id: userId } }),
-    db.board_requests.count({ where: { from_user_id: userId, ...liveRequest() } }),
+    blockCounterparties(userId).then((blocked) =>
+      db.board_requests.count({ where: { from_user_id: userId, ...outstandingAsk(new Date(), blocked) } })
+    ),
     db.board_requests.count({
       where: {
         from_user_id: userId,
@@ -165,12 +232,15 @@ export async function boardWriteDenial(
  */
 export async function boardPseudonyms(
   eventId: string,
-  userIds: readonly string[]
+  userIds: readonly string[],
+  // Inside a transaction, its client: a second pool connection from inside one
+  // can wait on the pool the transaction holds (step 10 review L2).
+  client: Pick<Prisma.TransactionClient, "chat_group_members" | "events"> = db
 ): Promise<Map<string, string>> {
   const ids = [...new Set(userIds)]
   if (ids.length === 0) return new Map()
 
-  const members = await db.chat_group_members.findMany({
+  const members = await client.chat_group_members.findMany({
     where: { chat_group: { event_id: eventId }, user_id: { in: ids } },
     select: { user_id: true, anonymous_name: true },
   })
@@ -180,7 +250,8 @@ export async function boardPseudonyms(
       .map((m) => [m.user_id, m.anonymous_name as string])
   )
 
-  return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id)]))
+  const scheme = await pseudonymSchemeFor(eventId, client)
+  return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id, scheme)]))
 }
 
 /** What refused board text is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
@@ -240,8 +311,208 @@ export async function hideBoardPostIfFlagged(postId: string, body: string): Prom
   if (!check.checked || check.result?.action !== "hide") return
   // Only a post still up: one its author withdrew meanwhile keeps its own
   // timestamp and reads as a withdrawal, not as something we caught.
-  await db.board_posts.updateMany({
+  const { count } = await db.board_posts.updateMany({
     where: { id: postId, deleted_at: null },
     data: { deleted_at: new Date(), moderation_status: "hidden", updated_at: new Date() },
   })
+  // Down, so its room is closed: out with anyone still in it (E3).
+  if (count > 0) await closePostRooms([postId])
+}
+
+/*
+ * Who a board report or block is about (SCRUM-322).
+ *
+ * The board is pseudonymous, so the client never holds a user id to report or
+ * block — it holds the post or the ask it saw. The person is resolved here, on
+ * the server, and never returned. Null — answered as not found — for anything
+ * the caller could not have seen, so these cannot be used to probe ids.
+ *
+ * "Could have seen" is deliberately wide, because these are safety actions and
+ * must stay reachable after the thing that made them necessary: anybody who
+ * was ever this event's audience (an RSVP of any answer — including one later
+ * changed to not going — or a save), or who has an ask on the post. Not the
+ * board-read gate: that closes at doors and hides blocked authors, and the
+ * person most in need of a report is the one who was just blocked, or who
+ * found the message after the night began.
+ */
+
+/** The author of a post the caller could have seen (see above). */
+export async function boardPostAuthorFor(
+  viewerId: string,
+  eventId: string,
+  postId: string
+): Promise<string | null> {
+  const post = await db.board_posts.findFirst({
+    where: { id: postId, event_id: eventId },
+    select: { author_id: true },
+  })
+  if (!post) return null
+  // Withdrawn or removed posts stay reportable: the person most motivated to
+  // take a post down is the one about to be reported for it.
+  const { rsvp, favourited } = await entitlementFor(eventId, viewerId)
+  if (rsvp !== null || favourited) return post.author_id
+  const asked = await db.board_requests.findFirst({
+    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId }] },
+    select: { id: true },
+  })
+  return asked ? post.author_id : null
+}
+
+/**
+ * File a report about a board post or ask.
+ *
+ * Idempotent per reporter while it is pending — a partial unique in the
+ * migration — so a second tap, or a script, is the same report rather than a
+ * second row burying everybody else's in a queue that shows the oldest
+ * hundred. `excerpt` is the words as they were when reported: the post can be
+ * withdrawn and an erased account's ask loses its message before anybody
+ * reviews it.
+ *
+ * A reported post is stamped `moderation_status = "reported"` (if moderation
+ * has not already marked it), which is what account erasure reads: it deletes
+ * only posts with no status, so evidence under review is retained. Clearing
+ * the stamp is the reviewer's (`resolveReport`, on dismiss).
+ */
+export async function fileBoardReport(input: {
+  reporterId: string
+  type: "board_post" | "board_request"
+  id: string
+  reason: string
+  description?: string
+  excerpt: string | null
+}): Promise<void> {
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.message_reports.create({
+        data: {
+          reporter_id: input.reporterId,
+          message_id: input.id,
+          message_type: input.type,
+          reason: input.reason,
+          ...(input.description && { description: input.description }),
+          ...(input.excerpt && { excerpt: input.excerpt.slice(0, 500) }),
+        },
+      })
+      if (input.type === "board_post") {
+        await tx.board_posts.updateMany({
+          where: { id: input.id, moderation_status: null },
+          data: { moderation_status: "reported" },
+        })
+      }
+    })
+  } catch (error) {
+    if (violatedConstraint(error, "message_reports_one_pending_board")) return
+    throw error
+  }
+}
+
+/** The other person on an ask, if the caller is one of its two people. */
+export async function boardRequestCounterpart(
+  viewerId: string,
+  requestId: string
+): Promise<string | null> {
+  const r = await db.board_requests.findUnique({
+    where: { id: requestId },
+    select: { from_user_id: true, to_user_id: true },
+  })
+  if (r?.from_user_id === viewerId) return r.to_user_id
+  if (r?.to_user_id === viewerId) return r.from_user_id
+  return null
+}
+
+/* -------------------------------------------------------------------------- */
+/* The post's room                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Accepted askers a post needs before it has a room. One asker and the author
+ * already have their conversation (the accept opens it); a room is for the
+ * car of three, the table of four — CR-I16, "an offer with 2 accepted → the
+ * post's group".
+ */
+export const BOARD_ROOM_MIN_ACCEPTED = 2
+
+/** A post's room is named by what the post offered, cut to a line. */
+const ROOM_NAME_MAX = 60
+
+/**
+ * Seat everybody a post's room admits — its author and every accepted asker —
+ * creating the room on the accept that makes it worth having (step 10,
+ * SCRUM-535). Inside the accept's transaction, after the claim, under the
+ * post's row lock, so two accepts at once count each other and make one room.
+ *
+ * **Nobody is seated beside somebody they are kept apart from** (step 10
+ * review H2): a block either way, or a closed conversation — an unmatch is
+ * permanent, the same "kept apart" crews use (`blocksBetween`). In accept
+ * order, an asker kept apart from anyone already in the room or seated before
+ * them is not seated, silently: their accept still stands and their 1:1
+ * conversation still opens, and nothing tells either of them why there is no
+ * room. A suspended or erased asker is not seated either (L1).
+ *
+ * The member row is what the room's socket, roster and pseudonym read; the
+ * door is still the post (`roomOwnerDenial` in lib/room-kind.ts) — a row never
+ * admits anybody the owner does not. A row that already exists is left as it
+ * is: somebody who left the room or was banned from it is not put back by the
+ * next accept.
+ *
+ * Pseudonyms are the event room's (`boardPseudonyms`), the names the board
+ * already showed them by. One name per room: should two people somehow carry
+ * the same one, the later goes unnamed ("Attendee") rather than failing the
+ * accept on the room's unique name.
+ */
+export async function seatBoardRoom(
+  tx: Prisma.TransactionClient,
+  post: { id: string; event_id: string; author_id: string; body: string }
+): Promise<string | null> {
+  const accepted = await tx.board_requests.findMany({
+    where: { post_id: post.id, status: "accepted", from: { suspended_at: null, deletedAt: null } },
+    select: { from_user_id: true },
+    orderBy: [{ decided_at: "asc" }, { id: "asc" }],
+  })
+  const people = [post.author_id, ...accepted.map((a) => a.from_user_id)]
+  const [apart, existing] = await Promise.all([
+    blocksBetween(people, people, tx),
+    tx.chat_groups.findUnique({
+      where: { board_post_id: post.id },
+      select: { id: true, members: { select: { user_id: true, anonymous_name: true } } },
+    }),
+  ])
+
+  // In accept order: a seat for each person kept apart from nobody already in.
+  const inRoom = existing?.members.map((m) => m.user_id) ?? []
+  const seats: string[] = []
+  for (const id of people) {
+    if (inRoom.includes(id)) continue
+    if ([...inRoom, ...seats].some((other) => apart.has(`${id}|${other}`))) continue
+    seats.push(id)
+  }
+  const askers = [...inRoom, ...seats].filter((id) => id !== post.author_id)
+  if (!existing && askers.length < BOARD_ROOM_MIN_ACCEPTED) return null
+  if (seats.length === 0) return existing?.id ?? null
+
+  const room =
+    existing ??
+    (await tx.chat_groups.upsert({
+      where: { board_post_id: post.id },
+      create: {
+        kind: "board_post",
+        board_post_id: post.id,
+        name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Board",
+        status: "active",
+      },
+      update: {},
+      select: { id: true, members: { select: { user_id: true, anonymous_name: true } } },
+    }))
+
+  const names = await boardPseudonyms(post.event_id, seats, tx)
+  const taken = new Set(room.members.flatMap((m) => (m.anonymous_name ? [m.anonymous_name] : [])))
+  for (const userId of seats) {
+    const name = names.get(userId)
+    const seatName = name && !taken.has(name) ? name : null
+    if (seatName) taken.add(seatName)
+    await tx.chat_group_members.create({
+      data: { chat_group_id: room.id, user_id: userId, status: "active", anonymous_name: seatName },
+    })
+  }
+  return room.id
 }

@@ -1,4 +1,6 @@
-import { SPONSORSHIP } from "@/lib/constants"
+// Relative: the live tick reaches this from server.ts, which `build:server`
+// compiles with plain tsc (see __tests__/server-import-boundary.test.ts).
+import { SPONSORSHIP } from "./constants"
 
 /**
  * When an aggregate stops being an aggregate.
@@ -134,15 +136,19 @@ export function discloseFigure(input: DiscloseInput): Disclosure {
 }
 
 /**
- * Guests at one event, or one day of it, as a venue sees them (SCRUM-501).
+ * Guests at one event, or one day of it, as a venue sees them (SCRUM-501):
+ * the minimum cell, and nothing else.
  *
- * The going RSVPs are the population, so the completeness and residual rules
- * fire as well as the floor: "everybody who said yes came", or all but one, is
- * a statement about each of them. A cell over the population — walk-ins — is
- * held back by the same rule, because it covers the whole of it.
+ * Not the completeness and residual rules against the going RSVPs. Those
+ * identify somebody only to a reader who knows who RSVP'd, and the venue does
+ * not — "everyone who said yes came" names nobody it can see. Applied anyway,
+ * they held back every night walk-ins outnumbered RSVPs, which is the venue's
+ * busiest kind (orchestrator's decision, 2026-10-01; the owner may reverse it).
+ * An organiser reading their own event is a different reader and keeps exact
+ * counts.
  */
-export function discloseGuests(guests: number, going: number): number | null {
-  return discloseFigure({ count: guests, contributors: guests, population: going }).value
+export function discloseGuests(guests: number): number | null {
+  return discloseFigure({ count: guests, contributors: guests, population: 0 }).value
 }
 
 /**
@@ -152,16 +158,22 @@ export function discloseGuests(guests: number, going: number): number | null {
  * The same rule wherever those counts appear — the Events list, the venue
  * page, the Events export — so no surface prints what another blanks. Fill is
  * Going over capacity, so it goes when Going does.
+ *
+ * `arriving` (`stillArriving`): who came is held back altogether while people
+ * can still be coming in. Reloading a list or re-downloading an export is
+ * watching the number, and it moves by one with each arrival; the Live tab
+ * gives the venue the night as ranges instead (SCRUM-516).
  */
 export function discloseVenueCounts(c: {
   going: number
   attended: number
   capacity: number | null
+  arriving?: boolean
 }): { going: number | null; attended: number | null; fillPct: number | null } {
   const going = discloseFigure({ count: c.going, contributors: c.going, population: 0 }).value
   return {
     going,
-    attended: discloseGuests(c.attended, c.going),
+    attended: c.arriving ? null : discloseGuests(c.attended),
     fillPct: going !== null && c.capacity ? Math.round((going / c.capacity) * 100) : null,
   }
 }
@@ -177,6 +189,29 @@ export function discloseVenueCounts(c: {
 export function discloseHeadcount(count: number): number | null {
   if (count === 0) return 0
   return discloseFigure({ count, contributors: count, population: 0 }).value
+}
+
+/**
+ * How many people are live -- at a venue, or in a room a venue watches but
+ * does not run -- as a bucket (D-19, F14, D-x2).
+ *
+ * Never a number. The floor alone is not enough for a figure that updates
+ * while you watch: a count that goes from "a few" to 5 the moment one person
+ * walks in tells the watcher that person is there (cf. SCRUM-472). Buckets
+ * move only at their edges, and under the floor (`MIN_CELL`) there is no
+ * number at all.
+ *
+ * Zero is `quiet` too, unlike `discloseHeadcount`'s 0 (D-x2). An empty room
+ * names nobody, but the step from empty to "a few" is the one arrival that
+ * names somebody, and from "a few" to empty the one departure.
+ */
+export type LiveCountBucket = "quiet" | "5-9" | "10-19" | "20+"
+
+export function liveCountBucket(count: number): LiveCountBucket {
+  if (count < MIN_CELL) return "quiet"
+  if (count < 10) return "5-9"
+  if (count < 20) return "10-19"
+  return "20+"
 }
 
 /**
@@ -246,15 +281,22 @@ export function discloseStarsAcross(perEvent: StarSpread[]): ReturnType<typeof d
   return { ...stars, ratingCount: perEvent.flat().reduce((a, b) => a + b, 0) }
 }
 
+type RatingGroupRow = { event_id: string; rating: number; _count: { _all: number } }
+
 /** `groupBy(["event_id", "rating"])` rows as one star spread per event. */
-export function spreadsByEvent(rows: Array<{ event_id: string; rating: number; _count: { _all: number } }>): StarSpread[] {
+export function spreadsByEvent(rows: RatingGroupRow[]): StarSpread[] {
+  return [...spreadsByEventId(rows).values()]
+}
+
+/** The same, keyed by event, for a screen that names the event it shows. */
+export function spreadsByEventId(rows: RatingGroupRow[]): Map<string, StarSpread> {
   const byEvent = new Map<string, StarSpread>()
   for (const row of rows) {
     const spread = byEvent.get(row.event_id) ?? [0, 0, 0, 0, 0]
     if (row.rating >= 1 && row.rating <= 5) spread[row.rating - 1] = row._count._all
     byEvent.set(row.event_id, spread)
   }
-  return [...byEvent.values()]
+  return byEvent
 }
 
 /**
@@ -358,6 +400,14 @@ export function discloseBreakdown(
 }
 
 /**
+ * A part of a known group, shown only when the part and the rest both reach
+ * the floor. The rest is never shown beside it, so neither can be subtracted
+ * from a total to recover the other.
+ */
+export const heldPart = (part: number, whole: number): number | null =>
+  whole < MIN_CELL ? null : discloseBreakdown([part, whole - part]).cells[0]
+
+/**
  * What to render in place of a withheld number.
  *
  * Centralised so two surfaces cannot describe the same suppression differently,
@@ -368,4 +418,25 @@ export function suppressedLabel(kind: "figure" | "poll"): string {
   return kind === "poll"
     ? "Results appear once more people vote"
     : `Fewer than ${FLOOR} people — not reported`
+}
+
+/**
+ * The buckets in order, smallest first, and each as the dashboard prints it.
+ *
+ * On the dashboard they are what a venue is told of a night it does not run,
+ * or its own venue day, while it is still moving (SCRUM-516): in the room,
+ * arrived, left, the last ten minutes. "20+" is a bucket too: an exact count
+ * of a big room still says who just came in. Whether a room is over its
+ * event's capacity is a separate flag, decided on the exact figure: the venue
+ * does not set that capacity. The building's flag is decided on what is shown
+ * (lib/building-occupancy.ts), because the owner edits the building's capacity
+ * and could walk it until an exact-figure flag flipped (step 17 review).
+ */
+export const LIVE_COUNT_BUCKETS: readonly LiveCountBucket[] = ["quiet", "5-9", "10-19", "20+"]
+
+/** A count as printed: an exact one as itself, a bucket as words. */
+export function liveCountLabel(count: number | LiveCountBucket): string {
+  if (typeof count === "number") return String(count)
+  if (count === "quiet") return `Under ${MIN_CELL}`
+  return count.replace("-", "–")
 }

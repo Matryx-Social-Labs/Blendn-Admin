@@ -2,15 +2,23 @@ const mockDb = {
   venues: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   venue_claims: { upsert: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
   organisation_members: { findFirst: jest.fn() },
-  user: { findMany: jest.fn() },
+  // requireAdmin reads the role from the database (lib/current-user.ts): here, the session's own.
+  user: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(async () => ({ role: (await mockAuth())?.user?.role, suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null })),
+  },
   $transaction: jest.fn(),
+  // The transfer's locked read of who owned the venue (SCRUM-604).
+  $queryRaw: jest.fn(),
 }
 
 const mockAuth = jest.fn()
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
-jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn(), auditInTx: jest.fn() }))
+// What a transfer does to the previous owner's Venue Pro is the venue-plans itest's.
+jest.mock("@/lib/subscription-cancel", () => ({ endPreviousOwnersPro: jest.fn(), cancelPreviousOwnersMandates: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 const sent: { to: string; subject: string; text: string }[] = []
 jest.mock("@/lib/email", () => {
@@ -45,6 +53,7 @@ beforeEach(() => {
   // The decision's guarded writes: one row each, as when nobody raced it.
   mockDb.venue_claims.updateMany.mockResolvedValue({ count: 1 })
   mockDb.venues.updateMany.mockResolvedValue({ count: 1 })
+  mockDb.$queryRaw.mockResolvedValue([{ owner_org_id: null }])
 })
 
 /**
@@ -216,7 +225,7 @@ describe("deciding a claim", () => {
       venue: { id: VENUE, name: "Toit", owner_org_id: null },
     })
     await expect(decideVenueClaim("claim_1", "decline", "a good long reason")).rejects.toThrow(
-      /already been decided/i
+      /Someone else decided this/
     )
   })
 

@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, PARTICIPATION_GATE, standardErrors } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -37,9 +37,6 @@ import {
 } from "@/lib/openapi/schemas/event"
 import { EventChatResponseSchema, SendMessageRequestSchema, ChatMessageSchema } from "@/lib/openapi/schemas/chat"
 
-const bearerAuth = [{ BearerAuth: [] }]
-const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
-
 // GET /api/mobile/events
 registry.registerPath({
   method: "get",
@@ -52,8 +49,10 @@ registry.registerPath({
     "RSVP'd or favourited — somebody deciding whether to go is exactly who it is " +
     "for. Authors are pseudonyms, the same handle the room uses; the request " +
     "count is a number and never a list of who asked. An age-restricted event's " +
-    "board answers 403 `AGE_RESTRICTED` for an under-age or unknown age, before " +
-    "the RSVP/favourite gate.",
+    "board answers 403 `AGE_RESTRICTED` for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter), before " +
+    "the RSVP/favourite gate. Closed once the doors open (`start_time`): 403 " +
+    "\"The board closes when the doors open — the room is open instead\". Posts " +
+    "by anybody blocked either way are left out.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string() }) },
   responses: {
@@ -209,7 +208,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Cities you can browse",
   description:
-    "The cities that currently have events, busiest first, with counts. Feeds the city picker: the client shows this immediately rather than reverse-geocoding on first launch, so a cold install with no location still has somewhere to browse. A city listed with N events opens with N events — the counts apply the same visibility and age rules as GET /api/mobile/events.",
+    "The cities that have upcoming events or listed places: event cities first, busiest first, then cities with places only, by place count. Feeds the city picker: the client shows this immediately rather than reverse-geocoding on first launch, so a cold install with no location still has somewhere to browse. A city listed with N events opens with N events — the counts apply the same visibility and age rules as GET /api/mobile/events.",
   security: bearerAuth,
   responses: {
     200: {
@@ -329,7 +328,13 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/checkin",
   tags: ["Mobile Events"],
   summary: "Check in to event",
-  description: PARTICIPATION_GATE + "GPS-verified check-in. Must be within event's check-in radius. Max GPS accuracy: 150m.",
+  description:
+    PARTICIPATION_GATE +
+    "GPS-verified check-in. Must be within event's check-in radius. Max GPS accuracy: 150m. " +
+    "A refusal the person can fix says so in `reasonCode`, with `errorCode` and the sentence unchanged: " +
+    "403 `FORBIDDEN` + `PROFILE_INCOMPLETE` before onboarding is finished, 403 `AGE_RESTRICTED` + " +
+    "`AGE_UNKNOWN` when an age-restricted event meets no age on file (a known age below the line has none). " +
+    "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`).",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -397,6 +402,16 @@ registry.registerPath({
               reason: z.string().optional(),
               shortfallMetres: z.number().nullable().optional(),
               graceEndsAt: z.string().nullable().optional(),
+              expiresAt: z
+                .string()
+                .datetime()
+                .nullable()
+                .optional()
+                .describe(
+                  "A venue Go Live's end, after this ping: a \"stay\" window moves on with each in-fence ping, " +
+                    "up to four hours or the venue's reset. Null at an event. A ping past the end checks you out " +
+                    "with `status: checked_out`, `reason: expired`."
+                ),
               nextPingInSeconds: z.number().optional(),
             })
           ),
@@ -415,7 +430,7 @@ registry.registerPath({
   summary: "RSVP to event",
   description:
     PARTICIPATION_GATE +
-    "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age; 404 for a draft " +
+    "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter); 404 for a draft " +
     "or a private event you are not on the list for (lib/event-access.ts).",
   security: bearerAuth,
   request: {
@@ -478,8 +493,8 @@ registry.registerPath({
   summary: "Favorite event",
   description:
     PARTICIPATION_GATE +
-    "Same answers as RSVP: 403 `AGE_RESTRICTED` on an age-restricted event for an under-age or " +
-    "unknown age; 404 for a draft or a private event you are not on the list for.",
+    "Same answers as RSVP: 403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age " +
+    "(`reasonCode` `AGE_UNKNOWN` for the latter); 404 for a draft or a private event you are not on the list for.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {
@@ -597,7 +612,12 @@ registry.registerPath({
   summary: "Like someone from this event",
   description:
     "A mutual like opens a conversation. The response never reveals whether the other person liked you first.\n\n" +
-    "`userId` must be the handle this event's deck or roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as an unknown person — 404 `User not found` — because a raw-id like would say whether that account is in this room. Your own id is 400.",
+    "`userId` must be the handle this event's deck or roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as an unknown person — 404 `User not found` — because a raw-id like would say whether that account is in this room. Your own id is 400." +
+    "\n\nWith `asCrewId` it is a **crew → person** like, on your crew's behalf (step 8): your crew must be here (two of you checked in; 403 otherwise) with " +
+    "\"Room for one more\" on and 6 or fewer active members (403). About the person, nothing is said: if they are not here now, not opted in " +
+    "to crews tonight, kept apart from anybody in the crew (a block or a closed conversation), or — when your crew is out for dating — not " +
+    "out for dating too, the answer is `{ liked: true, blend: null }`, exactly as for a like that stood, and nothing is stored. " +
+    "Answers `{ liked: true, blend }`: `blend` is the Blend room when they had liked your crew. Nothing is said in your crew chat: a line only for a like that stood would tell the crew what the answer hides.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -837,9 +857,13 @@ registry.registerPath({
     "A request is always filed against a post, and the recipient is read off " +
     "that post — so somebody who has not put themselves forward cannot be " +
     "asked at all. Same gates as posting: RSVP 'going', a complete profile, " +
-    "and room under both caps. Refused if they have already declined you on " +
-    "this post, if one of you has blocked the other, or if the doors have " +
-    "opened. A second pending request to the same post is a 409. A `message` " +
+    "and room under both caps. One ask per post, ever: any earlier ask — " +
+    "waiting, declined, withdrawn or accepted — is a 409 \"You have already " +
+    "asked — give them a moment\", the same sentence whatever became of it, so " +
+    "the refusal never tells the asker they were declined. A post by somebody " +
+    "blocked either way is the same 404 as a post that is gone. A `chat` post " +
+    "takes no requests (422); an offer at `spacesLeft: 0` is 409 \"That offer " +
+    "is full\". Closed once the doors open (403). A `message` " +
     "gets the post's moderation checks; a hit is a 422 and nothing is sent.",
   security: bearerAuth,
   request: {
@@ -870,8 +894,14 @@ registry.registerPath({
       },
     },
     ...standardErrors,
+    409: {
+      description:
+        "\"You have already asked — give them a moment\" (any earlier ask on this post, " +
+        "whatever became of it), or \"That offer is full\"",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
     422: {
-      description: "The message was refused by moderation; nothing sent",
+      description: "The message was refused by moderation, or the post is a `chat` post; nothing sent",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },
@@ -883,6 +913,12 @@ const boardRequest = z.object({
   message: z.string().nullable(),
   createdAt: z.string(),
   decidedAt: z.string().nullable(),
+  /**
+   * Still answerable: pending, its event not ended, its post not taken down.
+   * To the asker, also false once either of the two has blocked the other —
+   * their row then reads as an ask on a withdrawn post (`post.body` null).
+   */
+  live: z.boolean(),
   /** The pseudonym at that event, never the name. Accepting exchanges those. */
   counterpart: z.string(),
   event: z.object({ id: z.string(), title: z.string(), startTime: z.string() }),
@@ -902,7 +938,15 @@ registry.registerPath({
   description:
     "Not scoped to an event: a request is answered from a notification days " +
     "after the board was last opened. Pending first, then newest — a decided " +
-    "request is history and an undecided one is a person waiting.",
+    "request is history and an undecided one is a person waiting. A decline is " +
+    "never delivered: in `outgoing` a declined ask reads `status: \"pending\"`, " +
+    "`decidedAt: null`, live until it lapses with its event or post, and sorts " +
+    "with the pending ones — `declined` only ever appears in `incoming`. A " +
+    "declined ask the asker withdrew reads `withdrawn` to them and `declined` to " +
+    "the author. Asks from somebody blocked either way are left out of " +
+    "`incoming`; in `outgoing` an ask to them reads as an ask on a withdrawn " +
+    "post. Each direction lists live asks first, then settled, then lapsed, up " +
+    "to 50.",
   security: bearerAuth,
   responses: {
     200: {
@@ -922,6 +966,87 @@ registry.registerPath({
   },
 })
 
+// === Reporting and blocking from the board (SCRUM-322) ===
+
+const boardReportBody = {
+  body: {
+    content: {
+      "application/json": {
+        schema: z.object({
+          reason: z.enum(["harassment", "hate_speech", "inappropriate_content", "spam", "other"]),
+          description: z.string().max(500).optional(),
+        }),
+      },
+    },
+  },
+}
+const reported = {
+  description: "Report filed",
+  content: { "application/json": { schema: wrap(z.object({ reported: z.literal(true) })) } },
+}
+const blocked = {
+  description: "Blocked — the same transaction and response as POST /users/{userId}/block",
+  content: { "application/json": { schema: wrap(z.object({ blocked: z.literal(true) })) } },
+}
+const BY_POST =
+  "The board never gives the client a user id, so the author is resolved on the server " +
+  "and never returned. Allowed for anyone who can read this event's board (RSVP'd or " +
+  "favourited) or has an ask on the post — a withdrawn or removed post included. " +
+  "Anything else, including no such post, is 404. Your own post is 400."
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/board/{postId}/report",
+  tags: ["Mobile Events"],
+  summary: "Report a board post",
+  description:
+    BY_POST +
+    " Lands in the admin reports queue as \"Board · offer|seeking|chat\" (stored in " +
+    "`message_reports` as `message_type: \"board_post\"`). Rate limited per user.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string(), postId: z.string() }), ...boardReportBody },
+  responses: { 201: reported, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/events/{eventId}/board/{postId}/block",
+  tags: ["Mobile Events"],
+  summary: "Block a board post's author",
+  description: BY_POST + " Then exactly POST /users/{userId}/block for that author.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string(), postId: z.string() }) },
+  responses: { 200: blocked, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/board/requests/{requestId}/report",
+  tags: ["Mobile Events"],
+  summary: "Report a board ask",
+  description:
+    "Either of the ask's two people may report it; the report is about the other one, " +
+    "resolved on the server and never returned. Anyone else, or no such ask, is 404. Lands " +
+    "in the admin reports queue as \"Board ask\" (`message_type: \"board_request\"`). " +
+    "Rate limited per user.",
+  security: bearerAuth,
+  request: { params: z.object({ requestId: z.string() }), ...boardReportBody },
+  responses: { 201: reported, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/board/requests/{requestId}/block",
+  tags: ["Mobile Events"],
+  summary: "Block the other person on a board ask",
+  description:
+    "Either of the ask's two people may block the other, by the ask. Anyone else, or no " +
+    "such ask, is 404. Then exactly POST /users/{userId}/block for that person.",
+  security: bearerAuth,
+  request: { params: z.object({ requestId: z.string() }) },
+  responses: { 200: blocked, ...standardErrors },
+})
+
 registry.registerPath({
   method: "patch",
   path: "/api/mobile/board/requests/{requestId}",
@@ -934,7 +1059,12 @@ registry.registerPath({
     "opens a pseudonymous conversation scoped to the event, marked with its " +
     "board request so the client can tell it from a match. Still possible " +
     "after the doors open: a pending request holds a slot in the asker's cap, " +
-    "so an unanswerable one would consume it for ever.",
+    "so an unanswerable one would consume it for ever. Accepting an `offer` " +
+    "with a number of seats spends one atomically; the last seat goes to " +
+    "exactly one accept and the other is 409 \"That offer is full\" (the ask " +
+    "stays pending). Withdrawing succeeds on a pending or declined ask and " +
+    "again on a withdrawn one — a decline is never delivered to the asker, " +
+    "so withdrawing one cannot be the place it lands; only an accepted ask is 409.",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string() }),
@@ -962,5 +1092,13 @@ registry.registerPath({
       },
     },
     ...standardErrors,
+    409: {
+      description:
+        "Accept refused, the ask left pending: \"That request has already been answered\", " +
+        "\"That post was taken down\", \"That event has ended\", \"That offer is full\", or " +
+        "\"This request can no longer be accepted\" (a block either way or a closed pair — " +
+        "one answer for both). Withdraw: only an accepted ask is refused.",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
   },
 })

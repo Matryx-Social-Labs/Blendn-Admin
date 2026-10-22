@@ -12,8 +12,11 @@ import {
 } from "@/lib/api-response"
 import { blockedEitherWay, pairIsClosed } from "@/lib/conversations"
 import { db } from "@/lib/db"
+import { inRoomWhere } from "@/lib/event-kind"
 import { logger } from "@/lib/logger"
 import { likeAtEvent } from "@/lib/matches"
+import { isRefusal, refusalResponse } from "@/lib/crews/crews"
+import { likePersonAsCrew } from "@/lib/crews/like"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { announceRoomMatch } from "@/lib/room-match"
@@ -26,7 +29,11 @@ interface RouteParams {
 
 // User ids are cuid, not uuid — do not tighten this to z.string().uuid(). And
 // the deck sends room handles (`rh_…`, SCRUM-371), which are neither.
-const likeSchema = z.object({ userId: z.string().min(1) })
+const likeSchema = z.object({
+  userId: z.string().min(1),
+  /** Like them on your crew's behalf (crew → person, step 8): lib/crews/like.ts decides. */
+  asCrewId: z.string().uuid().optional(),
+})
 
 /**
  * Like someone who was in the room with you.
@@ -66,6 +73,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
+     * On a crew's behalf: a different like with its own guardrails — the
+     * person opted in to crews, the crew has room for one more and is 6 or
+     * fewer, dating only if both chose it, no block across any member — and
+     * its own outcome, a Blend rather than a conversation. One writer of
+     * `crew_likes` (lib/crews/like.ts).
+     */
+    if (parsed.data.asCrewId) {
+      if (!likedId) return notFoundResponse("User not found")
+      const outcome = await likePersonAsCrew(authUser.userId, eventId, parsed.data.asCrewId, likedId)
+      return isRefusal(outcome) ? refusalResponse(outcome) : successResponse(outcome)
+    }
+
+    /*
      * Both of you have to have actually been here.
      *
      * Without this the endpoint is a way to like any user id you can guess,
@@ -74,8 +94,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * from an event neither of them shared.
      */
     const [mine, theirs] = await Promise.all([
+      // Both in the room — at a venue day, both live there now (`inRoomWhere`).
       db.event_check_ins.findFirst({
-        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null } },
+        where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null }, ...inRoomWhere(authUser.userId) },
         select: { id: true },
       }),
       likedId && db.event_check_ins.findFirst({
@@ -83,6 +104,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           event_id: eventId,
           user_id: likedId,
           check_in_time: { not: null },
+          ...inRoomWhere(),
           // Staff are working. They are not in the match list, so they cannot be
           // liked through it either.
           kind: "attendee",

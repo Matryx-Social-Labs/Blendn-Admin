@@ -37,7 +37,8 @@ describe("visibleEventsWhere", () => {
   it("shows an admin everything that is not deleted, with no scoping at all", async () => {
     const where = await visibleEventsWhere({ id: "admin-1", role: "app_admin" })
 
-    expect(where).toEqual({ deleted_at: null })
+    // Venue days are nobody's to list, an admin's included (step 3).
+    expect(where).toEqual({ deleted_at: null, kind: "event" })
     // No `OR` — an admin must not be narrowed to what they happened to create.
     expect(where.OR).toBeUndefined()
     // And the membership lookup is skipped entirely, so an admin never pays for it.
@@ -51,6 +52,7 @@ describe("visibleEventsWhere", () => {
 
     expect(where).toEqual({
       deleted_at: null,
+      kind: "event",
       OR: [
         { organizer_org_id: { in: ["org-1", "org-2"] } },
         { organizer_id: "user-1", ...hostNotSuspended },

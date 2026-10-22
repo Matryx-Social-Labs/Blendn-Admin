@@ -167,6 +167,67 @@ export interface CityCount {
  * returns rows in no particular order, and without it two loads of the same
  * screen could show the same cities in different positions.
  */
+export interface BrowseCity extends CityCount {
+  /** Listed places (venues) in the city: what Places opens with. */
+  placeCount: number
+  centre: { latitude: number; longitude: number } | null
+}
+
+type PointRow = { city: string | null; latitude: number | null; longitude: number | null }
+
+/**
+ * Every city you can browse: one with events, or with listed places.
+ *
+ * The picker listed only cities with events, so a city whose venues were all
+ * seeded (no organiser has published there yet) could not be chosen, and its
+ * Places list could not be reached. Cities with events come first, busiest
+ * first, as before; then cities with places only, by how many. A city is one
+ * entry however its rows spell it (`cityKey`), under the events' spelling when
+ * it has events. The map centre is its events' when it has any, else its places'.
+ */
+export function browseCities(events: readonly PointRow[], places: readonly PointRow[]): BrowseCity[] {
+  const eventCentres = cityCentres(events)
+  const placeCentres = cityCentres(places)
+  const placeCounts = new Map(groupCities(places.map((r) => r.city)).map((c) => [cityKey(c.city), c]))
+  const withEvents = groupCities(events.map((r) => r.city)).map((c) => {
+    const key = cityKey(c.city)
+    return {
+      city: c.city,
+      eventCount: c.eventCount,
+      placeCount: placeCounts.get(key)?.eventCount ?? 0,
+      centre: eventCentres.get(key) ?? placeCentres.get(key) ?? null,
+    }
+  })
+  const listed = new Set(withEvents.map((c) => cityKey(c.city)))
+  // groupCities counts whatever it is given; here that count is places.
+  const placesOnly = [...placeCounts.values()]
+    .filter((c) => !listed.has(cityKey(c.city)))
+    .map((c) => ({ city: c.city, eventCount: 0, placeCount: c.eventCount, centre: placeCentres.get(cityKey(c.city)) ?? null }))
+  return [...withEvents, ...placesOnly]
+}
+
+/**
+ * Where to point the map for each city the picker lists: the mean of its
+ * events' points, keyed by `cityKey` like the counts. Events with no point, or
+ * the 0,0 an unset point reads as, are left out; a city with none has no
+ * centre and the app keeps its map where it is. A mean, not a stored point:
+ * a city's centre is where its events are, and moves with them.
+ */
+export function cityCentres(
+  rows: readonly { city: string | null; latitude: number | null; longitude: number | null }[]
+): Map<string, { latitude: number; longitude: number }> {
+  const sums = new Map<string, { lat: number; lon: number; n: number }>()
+  for (const row of rows) {
+    const key = cityKey(row.city)
+    if (!key || row.latitude === null || row.longitude === null) continue
+    if (row.latitude === 0 && row.longitude === 0) continue
+    const sum = sums.get(key) ?? { lat: 0, lon: 0, n: 0 }
+    sums.set(key, { lat: sum.lat + row.latitude, lon: sum.lon + row.longitude, n: sum.n + 1 })
+  }
+  const round = (x: number) => Math.round(x * 1e4) / 1e4
+  return new Map([...sums].map(([key, s]) => [key, { latitude: round(s.lat / s.n), longitude: round(s.lon / s.n) }]))
+}
+
 export function groupCities(cities: readonly (string | null)[]): CityCount[] {
   const buckets = new Map<string, { labels: Map<string, number>; count: number }>()
 

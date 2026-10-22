@@ -3,10 +3,9 @@
 import Link from "next/link"
 import { Suspense, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react"
-
+import { Callout } from "@/components/dashboard/kit"
+import { PublicFrame, PublicLockup } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 
 /**
  * Confirming the email address on an application.
@@ -60,45 +59,49 @@ function Verify() {
     }
   }, [token])
 
+  if (state === "working") return <Confirming />
+
   return (
-    <Card className="apply-card w-full max-w-lg rounded-3xl">
-      <CardContent className="space-y-5 px-8 py-10 text-center">
-        {state === "working" ? (
-          <p className="text-sm text-muted-foreground">Confirming your address...</p>
-        ) : (
-          <>
-            {state === "ok" ? (
-              <IconCircleCheck className="mx-auto size-12 text-primary" />
-            ) : (
-              <IconAlertTriangle className="mx-auto size-12 text-amber-500" />
-            )}
-            <h1 className="text-2xl font-bold text-foreground">
-              {state === "ok" ? "Email confirmed" : "That link didn't work"}
-            </h1>
-            <p className="text-sm leading-6 text-muted-foreground">{message}</p>
-            <Button asChild variant="outline" className="rounded-2xl">
-              <Link href={state === "ok" ? "/" : "/apply"}>
-                {state === "ok" ? "Back to Blend'n" : "Apply again"}
-              </Link>
-            </Button>
-          </>
-        )}
-      </CardContent>
-    </Card>
+    <Shell title={state === "ok" ? "Email confirmed" : "That link didn't work"}>
+      <Callout tone={state === "ok" ? "success" : "warning"} role="status">
+        {message}
+      </Callout>
+      <Button asChild variant="outline" className="w-fit rounded-2xl">
+        <Link href={state === "ok" ? "/" : "/apply"}>{state === "ok" ? "Back to Blend'n" : "Apply again"}</Link>
+      </Button>
+    </Shell>
+  )
+}
+
+function Shell({ title, children }: { title: string; children?: React.ReactNode }) {
+  return (
+    <PublicFrame width="narrow">
+      <div className="flex flex-col gap-5 px-8 py-10">
+        <PublicLockup />
+        <h1 className="text-2xl font-bold text-foreground">{title}</h1>
+        {children}
+      </div>
+    </PublicFrame>
+  )
+}
+
+function Confirming() {
+  return (
+    <Shell title="Confirming your address…">
+      <p className="text-sm text-muted-foreground">One moment.</p>
+    </Shell>
   )
 }
 
 export default function VerifyPage() {
   return (
-    // Same funnel, same theme. The confirmation link is the last step before
-    // approval, and letting it fall back to dark would break continuity at the
+    // Same funnel, same theme (PublicFrame): the confirmation link is the last
+    // step before approval, and a dark page here would break continuity at the
     // one moment someone is checking they did the right thing.
-    <main className="apply-light apply-gradient flex min-h-screen items-center justify-center px-6 py-10">
-      {/* useSearchParams needs a Suspense boundary or the whole route opts out
-          of static rendering and the build warns. */}
-      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
-        <Verify />
-      </Suspense>
-    </main>
+    // useSearchParams needs a Suspense boundary or the whole route opts out of
+    // static rendering and the build warns.
+    <Suspense fallback={<Confirming />}>
+      <Verify />
+    </Suspense>
   )
 }

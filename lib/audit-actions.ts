@@ -2,9 +2,11 @@
 
 import { Refusal } from "./refusal"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { currentUser } from "@/lib/current-user"
 import type { Prisma } from "@prisma/client"
 import { activeMembership } from "@/lib/org-membership"
+import { isUuid } from "@/lib/api-input"
+import { idForViewer } from "@/lib/room-handle"
 
 /**
  * Reading the audit log.
@@ -22,6 +24,17 @@ import { activeMembership } from "@/lib/org-membership"
  *     company's operations out of a shared table.
  */
 
+
+/**
+ * Audit actions that were a person's own choice about a venue — to be known
+ * there as a regular, or to hear no offers from it (step 12). Never shown
+ * outside the platform's admins (review H1); `regulars-never-listed.test.ts`
+ * holds that nothing writes them.
+ */
+const PERSONS_OWN_CHOICES: Prisma.audit_logsWhereInput[] = [
+  { action: { startsWith: "venue_regular." } },
+  { action: { in: ["venue_offer.mute", "venue_offer.unmute"] } },
+]
 export interface AuditEntry {
   id: string
   action: string
@@ -53,10 +66,11 @@ export interface AuditPage {
 const PAGE_SIZE = 100
 
 export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage> {
-  const session = await getAuth()
-  if (!session?.user) throw new Refusal("Unauthorized")
+  // The role the database holds now (step 18): an admin sees the platform's log, everyone else their organisations'.
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
 
-  const isAdmin = session.user.role === "app_admin"
+  const isAdmin = user.role === "app_admin"
 
   /*
    * The tenant scope is an invariant, not a default.
@@ -78,21 +92,29 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
   const and: Prisma.audit_logsWhereInput[] = []
 
   if (!isAdmin) {
-    // Scope to the actors who are members of the viewer's organisations. An
-    // org admin auditing their own company must not be able to read another
+    // An org admin auditing their own company must not be able to read another
     // company's suspensions out of the same table.
     const myOrgs = await db.organisation_members.findMany({
-      where: { user_id: session.user.id, ...activeMembership },
+      where: { user_id: user.id, ...activeMembership },
       select: { org_id: true, role: true },
     })
     const manageable = myOrgs.filter((m) => m.role === "owner" || m.role === "admin")
     if (manageable.length === 0) throw new Refusal("Forbidden")
 
-    const colleagues = await db.organisation_members.findMany({
-      where: { org_id: { in: manageable.map((m) => m.org_id) } },
-      select: { user_id: true },
-    })
-    and.push({ user_id: { in: colleagues.map((c) => c.user_id) } })
+    /*
+     * The rows that belong to these organisations (step 18, M3): `org_id`, the
+     * organisation whose data the action changed, written with the row
+     * (lib/audit-log.ts) and backfilled for the rows from before it. Whoever
+     * acted — a member, one who has since left, a Blend'n admin. The rule used
+     * to be "written by one of our members", which put a shared member's work
+     * for their other organisation in this log, and dropped the history of
+     * anyone who left. A row with no organisation is the platform's alone.
+     */
+    and.push({ org_id: { in: manageable.map((m) => m.org_id) } })
+    // A person's own choices about a venue are never an organisation's to read
+    // (step 12 review H1). Nothing writes them any more; any row from before
+    // stays the platform's.
+    and.push({ NOT: { OR: PERSONS_OWN_CHOICES } })
   }
 
   // The dropdown lists every action in scope, not only the filtered one (SCRUM-462).
@@ -129,17 +151,27 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
   const actors = actorIds.length
     ? await db.user.findMany({
         where: { id: { in: actorIds } },
-        select: { id: true, name: true, email: true },
+        select: { id: true, name: true, email: true, role: true },
       })
     : []
-  const actorMap = new Map(actors.map((a) => [a.id, a]))
+  /*
+   * A Blend'n admin's act on an organisation's data is in that organisation's
+   * log now (M3) — as the platform, not as a person: an organisation reads that
+   * Blend'n decided its claim, not a staff member's name and address.
+   */
+  const actorMap = new Map(
+    actors.map((a) => [
+      a.id,
+      !isAdmin && a.role === "app_admin" ? { id: "blendn", name: "Blend'n", email: "" } : { id: a.id, name: a.name, email: a.email },
+    ])
+  )
 
   return {
     entries: rows.map((r) => ({
       id: r.id,
       action: r.action,
       resource: r.resource,
-      resourceId: r.resource_id,
+      resourceId: isAdmin ? r.resource_id : hostResourceId(user.id, r),
       createdAt: r.created_at,
       actor: r.user_id ? (actorMap.get(r.user_id) ?? null) : null,
       details: r.details,
@@ -151,4 +183,24 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
     total,
     scopedToOrg: !isAdmin,
   }
+}
+
+/**
+ * A row's resource id as an organisation's owner or admin may see it.
+ *
+ * A chat member's row is keyed on the attendee's ACCOUNT id — the ban, mute
+ * and their reversals write it as `resource_id`. That id is the same in every
+ * room, so a host reading the log across several nights joined the people they
+ * had moderated into one history (SCRUM-517). They see this room's handle
+ * instead, the one the Chat tab showed them; the admin keeps the account id,
+ * and the stored row is unchanged, so this covers rows written before it too.
+ * Without the event to scope a handle, nothing.
+ */
+function hostResourceId(
+  viewerId: string,
+  row: { resource: string; resource_id: string | null; details: unknown }
+): string | null {
+  if (row.resource !== "chat_group_member" || !row.resource_id) return row.resource_id
+  const eventId = (row.details as { eventId?: unknown } | null)?.eventId
+  return typeof eventId === "string" && isUuid(eventId) ? idForViewer(viewerId, eventId, row.resource_id) : null
 }

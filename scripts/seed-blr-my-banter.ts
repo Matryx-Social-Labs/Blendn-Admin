@@ -4,6 +4,7 @@ import { openConversation, conversationPair } from "../lib/conversations"
 import { openSession } from "../lib/presence-sessions"
 import { environmentRefusal } from "./test-accounts"
 import { CROWD_DOMAIN } from "./seed-blr-crowd"
+import { realEventsWhere } from "../lib/event-kind"
 
 /**
  * Puts one real account into the Bengaluru scenario world, so the Banter tab —
@@ -165,7 +166,7 @@ async function main() {
     return
   }
   const events = new Map(
-    (await db.events.findMany({ where: { slug: { startsWith: "blr-" }, deleted_at: null }, select: { id: true, slug: true, title: true, latitude: true, longitude: true, start_time: true, end_time: true } })).map((e) => [e.slug, e])
+    (await db.events.findMany({ where: { slug: { startsWith: "blr-" }, deleted_at: null, ...realEventsWhere }, select: { id: true, slug: true, title: true, latitude: true, longitude: true, start_time: true, end_time: true } })).map((e) => [e.slug, e])
   )
   for (const slug of [LIVE, ...ATTENDED, ...GOING]) {
     if (!events.has(slug)) {

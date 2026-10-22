@@ -20,11 +20,12 @@ const mockDb = {
   user: { update: jest.fn().mockReturnValue({ op: "user.update" }) },
   profiles: { update: jest.fn() },
   user_interests: { deleteMany: jest.fn() },
+  this_or_that_answers: { deleteMany: jest.fn() },
   // Two open RSVPs on future events, read before the transaction; both go.
   event_rsvps: { findMany: jest.fn().mockResolvedValue([{ event_id: "ev-1" }, { event_id: "ev-2" }]), deleteMany: jest.fn() },
   event_match_preferences: { deleteMany: jest.fn() },
   // Memberships are marked left, never deleted: the pseudonym lives on the row.
-  chat_group_members: { updateMany: jest.fn() },
+  chat_group_members: { updateMany: jest.fn(() => ({ op: "chat_group_members.updateMany" })) },
   mobile_refresh_tokens: { deleteMany: jest.fn() },
   push_tokens: { deleteMany: jest.fn() },
   photo_checks: { deleteMany: jest.fn() },
@@ -32,7 +33,15 @@ const mockDb = {
   friendships: { deleteMany: jest.fn() },
   friend_requests: { deleteMany: jest.fn() },
   friend_invites: { deleteMany: jest.fn() },
+  // Blendn+ (step 11): who brought whom, and their entitlements (D-17).
+  referrals: { deleteMany: jest.fn() },
+  entitlements: { deleteMany: jest.fn() },
+  // Their crews: locked and left INSIDE the transaction (raw SQL, below), settled after.
+  crew_invites: { deleteMany: jest.fn() },
+  blend_reveals: { deleteMany: jest.fn() },
   product_events: { deleteMany: jest.fn() },
+  venue_regular_optins: { deleteMany: jest.fn() },
+  venue_offer_mutes: { deleteMany: jest.fn() },
   user_oauth_accounts: { deleteMany: jest.fn() },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },
@@ -44,12 +53,22 @@ const mockDb = {
   notifications: { deleteMany: jest.fn() },
   password_reset_tokens: { deleteMany: jest.fn() },
   message_requests: { updateMany: jest.fn() },
-  board_posts: { deleteMany: jest.fn() },
-  board_requests: { updateMany: jest.fn() },
+  board_posts: { deleteMany: jest.fn(), updateMany: jest.fn() },
+  // The rooms of their posts: read before the transaction, archived inside it (step 7, E1).
+  chat_groups: { findMany: jest.fn().mockResolvedValue([{ id: "room-1" }]), updateMany: jest.fn() },
+  // Their asks, read before the transaction to keep any with an open report.
+  board_requests: { updateMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+  message_reports: { findMany: jest.fn().mockResolvedValue([]) },
   private_conversations: { updateMany: jest.fn() },
   // Returns what it was given, so a test can find a statement in the batch.
   $executeRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ sql: strings.join("?"), values })),
-  $transaction: jest.fn().mockResolvedValue([]),
+  $queryRaw: jest.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ sql: strings.join("?"), values })),
+  // The batch answers each statement as Postgres would; the crew DELETE returns the crew it took them out of.
+  $transaction: jest.fn(async (ops: unknown) =>
+    Array.isArray(ops)
+      ? ops.map((op: { sql?: string }) => (op?.sql?.includes("RETURNING crew_id") ? [{ crew_id: "crew-1" }] : op))
+      : []
+  ),
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 
@@ -61,6 +80,10 @@ jest.mock("@/lib/mobile-auth", () => ({
 jest.mock("@/lib/account-blocklist", () => ({ blockAccountNow: (...a: unknown[]) => mockBlockNow(...a) }))
 const mockEvict = jest.fn()
 jest.mock("@/lib/socket-server", () => ({ evictUserSockets: (...a: unknown[]) => mockEvict(...a) }))
+const mockCloseRoom = jest.fn()
+jest.mock("@/lib/room-close", () => ({ closeRoomSockets: (...a: unknown[]) => mockCloseRoom(...a) }))
+const mockSettleCrews = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/crews/sweep", () => ({ settleCrewsAfterErasure: (...a: unknown[]) => mockSettleCrews(...a) }))
 const mockPromote = jest.fn().mockResolvedValue([])
 jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => mockPromote(...a) }))
 
@@ -139,6 +162,8 @@ describe("deleting an account scrubs the matching inputs", () => {
     // purpose, so nothing removes them unless this does.
     await del()
     expect(mockDb.user_interests.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // This-or-that answers hang off the kept profile row, so nothing cascades either.
+    expect(mockDb.this_or_that_answers.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
     // Where they were waiting is theirs too. It cascades on the foreign key as
     // well; asserted here so the deletion path stays a readable list of
     // everything it removes rather than a set of constraints to go and check.
@@ -151,6 +176,28 @@ describe("deleting an account scrubs the matching inputs", () => {
       where: { OR: [{ sender_id: USER }, { recipient_id: USER }] },
     })
     expect(mockDb.friend_invites.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    // Out of every referral either way, and their Blendn+ rows gone (D-17);
+    // the store's deliveries in payment_events stay (no personal data).
+    expect(mockDb.referrals.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ invitee_id: USER }, { inviter_id: USER }] },
+    })
+    expect(mockDb.entitlements.deleteMany).toHaveBeenCalledWith({ where: { subject_kind: "user", subject_id: USER } })
+    // Out of every crew, every crew invite either way gone; the crews are
+    // settled after the commit (one left alone dissolves, D-15).
+    expect(mockDb.crew_invites.deleteMany).toHaveBeenCalledWith({
+      where: { OR: [{ invited_user_id: USER }, { invited_by: USER, removed_at: null, declined_at: null }] },
+    })
+    // The crews are read INSIDE the erasure — the DELETE returns the rows it
+    // took — and locked before any room row is touched (crew row first).
+    const batch = mockDb.$transaction.mock.calls[0][0] as { sql?: string; values?: unknown[] }[]
+    const lock = batch.findIndex((op) => /FROM crews[\s\S]*FOR UPDATE/.test(op?.sql ?? ""))
+    const leave = batch.findIndex((op) => /DELETE FROM crew_members[\s\S]*RETURNING crew_id/.test(op?.sql ?? ""))
+    const rooms = batch.findIndex((op) => (op as { op?: string })?.op === "chat_group_members.updateMany")
+    expect(lock).toBeGreaterThanOrEqual(0)
+    expect(batch[leave].values).toEqual([USER])
+    expect(lock).toBeLessThan(rooms)
+    expect(mockSettleCrews).toHaveBeenCalledWith(["crew-1"])
+    expect(mockSettleCrews.mock.invocationCallOrder[0]).toBeGreaterThan(mockDb.$transaction.mock.invocationCallOrder[0])
     /*
      * DELETED, not scrubbed. A scrubbed row cannot be counted as a distinct
      * person, so nulling `user_id` would keep a record of when somebody was
@@ -242,7 +289,11 @@ describe("deleting an account scrubs the matching inputs", () => {
     await del()
     const batch = mockDb.$transaction.mock.calls[0][0] as Array<{ sql?: string; values?: unknown[] }>
     const at = batch.findIndex((op) => op?.sql?.includes("INSERT INTO deleted_account_records"))
-    expect(at).toBe(0)
+    // Second only to the person's RevenueCat lock (review M2): a purchase being
+    // granted finishes first and is erased with the rest.
+    expect(batch[0]?.sql).toContain("pg_advisory_xact_lock")
+    expect(batch[0]?.values).toEqual([`revenuecat:${USER}`])
+    expect(at).toBe(1)
     expect(batch.indexOf(mockDb.user.update.mock.results[0].value)).toBeGreaterThan(at)
 
     const [deletedAt, purgeAfter, userId] = batch[at].values as [Date, Date, string]
@@ -257,8 +308,28 @@ describe("deleting an account scrubs the matching inputs", () => {
     // `not: "hidden"`, which in Prisma would also skip every unmoderated post.
     await del()
     expect(mockDb.board_posts.deleteMany).toHaveBeenCalledWith({
-      where: { author_id: USER, moderation_status: null },
+      where: { author_id: USER, moderation_status: null, room: { is: null } },
     })
+  })
+
+  it("keeps a post that has a room, off the board and without its words, and archives the room (E1)", async () => {
+    // board_post_id is ON DELETE RESTRICT: the room is other people's
+    // conversation and kept evidence, so only a roomless post is deleted.
+    await del()
+    expect(mockDb.chat_groups.updateMany).toHaveBeenCalledWith({
+      where: { kind: "board_post", board_post: { author_id: USER }, status: { not: "archived" } },
+      data: { status: "archived" },
+    })
+    expect(mockDb.board_posts.updateMany).toHaveBeenCalledWith({
+      where: { author_id: USER, moderation_status: null, room: { isNot: null }, deleted_at: null },
+      data: { deleted_at: expect.any(Date) },
+    })
+    expect(mockDb.board_posts.updateMany).toHaveBeenCalledWith({
+      where: { author_id: USER, moderation_status: null, room: { isNot: null } },
+      data: { body: "" },
+    })
+    // And whoever was still in the room is taken out once it has committed.
+    expect(mockCloseRoom).toHaveBeenCalledWith("room-1")
   })
 
   it("refuses an unauthenticated caller", async () => {
@@ -287,10 +358,13 @@ describe("no field on the profile survives deletion unnoticed", () => {
     // behave, not who the person was. Their defaults are already harmless and
     // nothing reads them for a deleted account.
     push_enabled: "a setting, not an attribute of the person",
+    offers_from_places: "a setting, not an attribute of the person (step 12)",
+    offer_push_consent_at: "a setting and when it was given, not an attribute of the person (SCRUM-628)",
     show_online: "a setting, not an attribute of the person",
     read_receipts: "a setting, not an attribute of the person",
     share_location: "a setting, not an attribute of the person",
     friends_see_me_in_rooms: "a setting, not an attribute of the person — and the friendships it governs are deleted",
+    this_or_that: "the relation to this_or_that_answers, whose rows are deleted (`removes the this-or-that answers` above)",
   }
 
   function profileFields(): string[] {

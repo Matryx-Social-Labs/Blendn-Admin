@@ -2,51 +2,39 @@
 
 import { useRouter } from "next/navigation"
 
-import { IconCalendarEvent, IconPlus } from "@tabler/icons-react"
+import { IconCalendarEvent } from "@tabler/icons-react"
 import { toast } from "sonner"
 
 import { DataTable, type Column } from "@/components/dashboard/data-table"
+import { EventAttendance, EventDate, EventStatus } from "@/components/dashboard/event-row"
 import { EmptyState } from "@/components/dashboard/primitives"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { CurationState } from "@/lib/curation"
 import { bulkDeleteMessage } from "@/lib/dashboard-format"
+import type { EventRowData, EventRowTab } from "@/lib/event-row"
 import { logger } from "@/lib/logger"
 
-export interface EventRow {
-  id: string
-  title: string
-  status: string
+export interface EventRow extends EventRowData {
   startTime: string
-  /** Rendered server-side — see `whenLabel` in ./page.tsx. */
-  when: string
-  where: string | null
-  city: string | null
   host: string | null
-  /** Null when held back: a venue owner's view of another host's event (SCRUM-501). */
-  rsvps: number | null
-  arrivals: number | null
   curation: CurationState
-  checkInReady: boolean
 }
 
+const TABS: Array<{ key: EventRowTab; label: string; empty: string }> = [
+  { key: "upcoming", label: "Upcoming", empty: "Published events that have not ended appear here, live ones first." },
+  { key: "drafts", label: "Drafts", empty: "Drafts you start appear here until they are published." },
+  { key: "past", label: "Past", empty: "Events that have ended or were cancelled appear here." },
+]
+
 /**
- * The normal state is the quiet one.
- *
- * The first pass had `published: "default"`, which is the brand primary — so
- * fifteen of seventeen rows carried a filled orange pill and `draft`, the one
- * state that needs a decision, was the grey one. That is the hierarchy exactly
- * inverted: a badge on every row is not a badge, it is a background, and it was
- * outshouting the two markers that actually mean something.
+ * Soonest first while an event is ahead; most recent first once it is behind.
+ * A live event starts earliest of the upcoming ones, so it leads its tab.
  */
-// Words. Published is the ordinary case and reads as nothing; draft is the
-// one an organiser is looking for; cancelled is the one that changed what
-// happened. The only chip left in this column is the problem, not a state.
-const STATUS_TONE: Record<string, string> = {
-  published: "text-faint-foreground",
-  draft: "font-bold text-foreground",
-  cancelled: "font-bold text-destructive",
-  completed: "text-muted-foreground",
+function ordered(rows: EventRow[], tab: EventRowTab): EventRow[] {
+  const at = (r: EventRow) => Date.parse(r.startTime)
+  return rows
+    .filter((r) => r.tab === tab)
+    .sort((a, b) => (tab === "past" ? at(b) - at(a) : at(a) - at(b)))
 }
 
 export function EventsTable({
@@ -70,7 +58,8 @@ export function EventsTable({
    *
    * `DataTable`'s bulk bar already does this properly: nothing is destructive
    * until you have deliberately selected something, and the confirmation names
-   * the consequence with the selection still visible behind it.
+   * the consequence with the selection still visible behind it. It is the only
+   * place on the dashboard an event can be deleted, so the kit's list keeps it.
    */
   async function deleteEvents(ids: string[]) {
     const results = await Promise.allSettled(
@@ -96,181 +85,136 @@ export function EventsTable({
       key: "title",
       label: "Event",
       primary: true,
-      sortType: "string",
       render: (row) => (
-        <span className="flex flex-col gap-0.5">
-          <span className="font-medium">{row.title}</span>
-          <span className="text-[0.75rem] text-muted-foreground">
-            {/*
-              A curated event has no host, and naming one is the leak T83 fixed
-              on the mobile side: `organizer_id` on a curated row is the ADMIN
-              who curated it, so rendering it under the title reads as "Sagar
-              Kishore hosts this". Here that is merely wrong; on the client it
-              put a founder's real name and avatar on every curated event in a
-              city feed. Same column, same wrong inference, so it is named
-              rather than shown.
-            */}
-            {[row.where, row.curation === "curated_open" ? "Listed by us" : row.host]
-              .filter(Boolean)
-              .join(" · ") || "No venue set"}
+        <span className="flex min-w-0 items-center gap-3.5">
+          <EventDate row={row} />
+          <span className="flex min-w-0 flex-col gap-0.5 whitespace-normal">
+            <span className="font-medium">{row.title}</span>
+            <span className="text-[0.75rem] text-muted-foreground">
+              {/*
+                A curated event has no host, and naming one is the leak T83 fixed
+                on the mobile side: `organizer_id` on a curated row is the ADMIN
+                who curated it, so rendering it under the title reads as "Sagar
+                Kishore hosts this". Here that is merely wrong; on the client it
+                put a founder's real name and avatar on every curated event in a
+                city feed. Same column, same wrong inference, so it is named
+                rather than shown.
+              */}
+              {[row.when, row.where, row.curation === "curated_open" ? "Listed by us" : row.host]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+            {/* A narrow column hides the two cells beside this one; they come under the title instead. */}
+            <span className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 @2xl/main:hidden">
+              <EventStatus row={row} />
+              <span className="flex w-32">
+                <EventAttendance row={row} />
+              </span>
+            </span>
           </span>
         </span>
       ),
     },
     {
-      key: "startTime",
-      label: "When",
-      sortType: "date",
-      sortValue: (row) => new Date(row.startTime),
-      render: (row) => <span className="tabular-nums">{row.when}</span>,
-    },
-    {
       key: "status",
       label: "Status",
-      sortType: "string",
+      secondary: true,
       render: (row) => (
         <span className="flex flex-wrap items-center gap-x-1.5 text-[0.8125rem]">
-          <span className={STATUS_TONE[row.status] ?? "text-muted-foreground"}>{row.status}</span>
-          {row.curation === "curated_open" ? (
-            <span className="text-muted-foreground">· unclaimed</span>
-          ) : null}
-          {row.curation === "curated_claimed" ? (
-            <span className="text-muted-foreground">· claimed</span>
-          ) : null}
           {/*
-            The only badge here that is a problem rather than a state.
-
-            A published event with no coordinates and no fence 400s at the door,
-            and until `canPublish()` gained a caller nothing stopped one being
-            published. Those events exist; this is how you find them without
-            opening every row.
+            A word, not a chip: published is the ordinary case and reads quietly,
+            draft is the one waiting on someone, cancelled changed what happened.
+            The only badge left is the problem — "no fence": a published event
+            with no pin and no fence 400s at the door.
           */}
-          {!row.checkInReady && row.status === "published" ? (
-            <Badge variant="destructive" className="text-[0.6875rem]">
-              no fence
-            </Badge>
-          ) : null}
+          <EventStatus row={row} />
+          {row.curation === "curated_open" ? <span className="text-muted-foreground">· unclaimed</span> : null}
+          {row.curation === "curated_claimed" ? <span className="text-muted-foreground">· claimed</span> : null}
         </span>
       ),
     },
     {
-      key: "rsvps",
-      label: "RSVPs",
-      align: "right",
-      sortType: "number",
-      secondary: true,
-      render: (row) =>
-        row.rsvps === null ? (
-          <span className="text-faint-foreground">—</span>
-        ) : (
-          <span className="tabular-nums">{row.rsvps}</span>
-        ),
-    },
-    {
-      key: "arrivals",
-      label: "Arrivals",
-      align: "right",
-      sortType: "number",
       /*
-       * Replaces a `Capacity` column that rendered `events.current_capacity` —
-       * a counter with no application writer, so it read `0` on every row of
-       * every event ever created. A column of zeroes is not a neutral omission:
-       * it asserts that nobody came.
+       * Replaces separate RSVPs / Arrivals columns, and before them a
+       * `Capacity` column that rendered `events.current_capacity` — a counter
+       * with no application writer, so it read `0` on every row. Held back
+       * reads the same as nobody, deliberately: the mark must not tell a night
+       * of none from a night of four (SCRUM-501).
        */
-      // Held back reads the same as nobody, deliberately: the mark must not tell
-      // a night of none from a night of four (SCRUM-501).
-      render: (row) =>
-        !row.arrivals ? (
-          <span className="text-faint-foreground">—</span>
-        ) : (
-          <span className="tabular-nums">{row.arrivals}</span>
-        ),
+      key: "attendance",
+      label: "Attendance",
+      secondary: true,
+      render: (row) => (
+        <span className="flex w-36">
+          <EventAttendance row={row} />
+        </span>
+      ),
     },
   ]
 
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-[0.8125rem] text-muted-foreground">
-          {/*
-            The cap is stated rather than hidden. A list silently truncated at
-            200 reads as the whole platform — the same "no silent caps" rule the
-            backend applies to every export.
-          */}
-          {rows.length < total
-            ? `Showing the ${rows.length} most recent of ${total}`
-            : `${total} event${total === 1 ? "" : "s"}`}
-        </p>
-        {canCreate ? (
-          <Button onClick={() => router.push("/dashboard/events/new")} className="rounded-full">
-            <IconPlus className="size-4" />
-            Create event
-          </Button>
-        ) : null}
-      </div>
+  const counts = Object.fromEntries(TABS.map((t) => [t.key, rows.filter((r) => r.tab === t.key).length]))
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        sortable
-        search
-        searchPlaceholder="Search events…"
-        pagination
-        defaultPageSize={20}
-        defaultSort={{ key: "startTime", dir: "desc" }}
-        filters={[
-          {
-            key: "status",
-            label: "Status",
-            options: [
-              { value: "published", label: "Published" },
-              { value: "draft", label: "Draft" },
-              { value: "cancelled", label: "Cancelled" },
-              { value: "completed", label: "Completed" },
-            ],
-          },
-        ]}
-        rowHref={(row) => `/dashboard/events/${row.id}`}
-        selectable={canCreate}
-        bulkActions={
-          canCreate
-            ? [
-                {
-                  label: "Delete",
-                  tone: "destructive" as const,
-                  /*
-                   * What it does: the events leave the app, the lists and the
-                   * reports (all scoped on `deleted_at`). It said it deleted their
-                   * chat rooms and attendance records, and it deletes neither
-                   * (SCRUM-441).
-                   */
-                  confirm:
-                    "Removes {n} event(s) from the app, your lists and your reports. The dashboard can't bring them back.",
-                  onAction: (ids: string[]) => void deleteEvents(ids),
-                },
-              ]
-            : []
-        }
-        emptyState={
-          <EmptyState
-            icon={<IconCalendarEvent />}
-            title="No events yet"
-            description="Every event on the platform appears here once a host publishes one or an admin curates one."
-            action={
-              canCreate ? (
-                <Button
-                  onClick={() => router.push("/dashboard/events/new")}
-                  className="rounded-full"
-                >
-                  <IconPlus className="size-4" />
-                  Create event
-                </Button>
-              ) : undefined
+  return (
+    <Tabs defaultValue="upcoming" className="gap-4">
+      {/* 44px targets on a touch screen; the list grows to hold them. */}
+      <TabsList aria-label="Events by state" className="pointer-coarse:h-auto">
+        {TABS.map((tab) => (
+          <TabsTrigger key={tab.key} value={tab.key} className="px-3 tabular-nums pointer-coarse:h-11">
+            {tab.label} · {counts[tab.key]}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+
+      {TABS.map((tab) => (
+        <TabsContent key={tab.key} value={tab.key}>
+          <DataTable
+            label={`${tab.label} events`}
+            columns={columns}
+            rows={ordered(rows, tab.key)}
+            search
+            searchPlaceholder="Search events…"
+            pagination
+            defaultPageSize={20}
+            rowHref={(row) => `/dashboard/events/${row.id}`}
+            selectable={canCreate}
+            bulkActions={
+              canCreate
+                ? [
+                    {
+                      label: "Delete",
+                      tone: "destructive" as const,
+                      /*
+                       * What it does: the events leave the app, the lists and the
+                       * reports (all scoped on `deleted_at`). It said it deleted their
+                       * chat rooms and attendance records, and it deletes neither
+                       * (SCRUM-441).
+                       */
+                      confirm:
+                        "Removes {n} event(s) from the app, your lists and your reports. The dashboard can't bring them back.",
+                      onAction: (ids: string[]) => void deleteEvents(ids),
+                    },
+                  ]
+                : []
+            }
+            emptyState={
+              <EmptyState compact icon={<IconCalendarEvent />} title="Nothing here" description={tab.empty} />
+            }
+            footer={
+              <span>
+                {/*
+                  The cap is stated rather than hidden. A list silently truncated at
+                  200 reads as the whole platform — the same "no silent caps" rule the
+                  backend applies to every export.
+                */}
+                {rows.length < total
+                  ? `The ${rows.length} most recent of ${total} events · `
+                  : ""}
+                no fence: a published event with no pin or check-in area, which the door refuses
+              </span>
             }
           />
-        }
-      />
-
-    </div>
+        </TabsContent>
+      ))}
+    </Tabs>
   )
 }

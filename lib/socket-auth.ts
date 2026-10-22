@@ -1,6 +1,7 @@
 import { db } from "./db"
-import { roomReadDenial } from "./chat-window"
 import { actorFor } from "./org-membership"
+import { inRoomWhere } from "./event-kind"
+import { ownerDoor, roomReadDenialFor } from "./room-kind"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 
 /**
@@ -17,8 +18,11 @@ import { eventPermissionSelect, eventPermissions } from "./rbac"
  */
 
 /**
- * Chat rooms: the same read rule as every HTTP read of the room —
- * `roomReadDenial` in lib/chat-window.ts (SCRUM-205).
+ * Chat rooms: the same read rule as every HTTP read of the room, for every
+ * kind of room — `roomReadDenialFor` in lib/room-kind.ts, which is
+ * `roomReadDenial` (lib/chat-window.ts, SCRUM-205) for an event's room and the
+ * owner's rule for any other (F8). A member row alone never opens a room that
+ * is not an event's.
  */
 export async function canJoinChat(userId: string, chatGroupId: string): Promise<boolean> {
   const membership = await db.chat_group_members.findUnique({
@@ -27,10 +31,24 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
     },
     // A hidden event has no room (SCRUM-8): its organiser's suspension flips
     // it to `draft`, and a draft never legitimately has a joinable chat.
-    select: { status: true, left_at: true, chat_group: { select: { event: { select: { status: true, deleted_at: true } } } } },
+    // The event's `kind` and the row's `last_allowed_at`: a venue day's room
+    // takes only the people live in it now (`liveInVenueDay`), so an ended Go
+    // Live cannot rejoin. The room's own `kind` and owner: every other door (F8).
+    select: {
+      status: true,
+      left_at: true,
+      last_allowed_at: true,
+      chat_group: {
+        select: {
+          kind: true,
+          event: { select: { status: true, deleted_at: true, kind: true } },
+          ...ownerDoor(userId),
+        },
+      },
+    },
   })
   if (!membership) return false
-  return roomReadDenial(membership, membership.chat_group.event) === null
+  return roomReadDenialFor(membership.chat_group, membership, userId) === null
 }
 
 /**
@@ -84,6 +102,14 @@ export async function canJoinEvent(userId: string, eventId: string): Promise<boo
   if (!event) return false
   // A hidden event has no counter either (SCRUM-8) — see `canJoinChat`.
   if (event.status === "draft") return false
+  /*
+   * A venue day is `unlisted`, which would open its counter to anybody — and
+   * the counter carries an exact `hereCount`. Watching it change is how one
+   * arrival is read off a number (F14); the public face of a venue is the
+   * bucketed count on `GET /venues/:id` (D-19). Its counter is for the people
+   * live in it, who see the room anyway.
+   */
+  if (event.kind === "venue_day") return canJoinEventRoom(userId, eventId)
   if (event.visibility !== "private") return true
 
   /*
@@ -133,7 +159,9 @@ export async function canJoinEventRoom(userId: string, eventId: string): Promise
   const checkIn = await db.event_check_ins.findFirst({
     // `status` on the event, not the check-in: a hidden event's roster
     // closes with the rest of it (SCRUM-8).
-    where: { event_id: eventId, user_id: userId, check_in_time: { not: null }, event: { status: { not: "draft" } } },
+    // any-kind: one room by id, and being checked in is how anybody enters a venue day's.
+    // `inRoomWhere`: a venue day's roster is for the people live in it now.
+    where: { event_id: eventId, user_id: userId, check_in_time: { not: null }, event: { status: { not: "draft" } }, ...inRoomWhere(userId) },
     select: { id: true },
   })
   return checkIn !== null

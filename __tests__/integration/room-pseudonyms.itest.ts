@@ -316,10 +316,12 @@ describe("a room page carries every sender's pseudonym", () => {
      * The three tests above are the behavioural half — they fail if the id set
      * is built wrongly. This one fails if it stops being built at all.
      */
-    const routes = [
-      "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts",
-      "app/api/mobile/events/[eventId]/chat/route.ts",
-    ]
+    // The group route names its page through `namesInRoom` (lib/identity.ts,
+    // step 8: a crew's room names people by first name), so the scoped lookup
+    // is checked there, and the route is held to handing it the page's ids.
+    const routes = ["lib/identity.ts", "app/api/mobile/events/[eventId]/chat/route.ts"]
+    const groupRoute = readFileSync(join(__dirname, "..", "..", "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts"), "utf8")
+    expect(groupRoute).toMatch(/namesInRoom\(chatGroup, \[\.\.\.pseudonymFor\]\)/)
 
     const unscoped: string[] = []
     for (const rel of routes) {

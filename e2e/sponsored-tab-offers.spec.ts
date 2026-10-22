@@ -13,7 +13,8 @@ async function sponsoredTab(page: Page) {
   await page.goto("/dashboard/events", { waitUntil: "domcontentloaded" })
   const href = await page.getByRole("link", { name: /Sunset Sessions at The Humming Tree/ }).first().getAttribute("href")
   expect(href, "the seeded event is on the list").toBeTruthy()
-  await page.goto(`${href}/messaging`, { waitUntil: "domcontentloaded" })
+  // The composer is the event's Announcements & sponsors tab since step 15.
+  await page.goto(`${href}?tab=announcements`, { waitUntil: "domcontentloaded" })
   await page.getByRole("tab", { name: "Sponsored" }).click()
   return page.getByRole("tabpanel", { name: "Sponsored" })
 }

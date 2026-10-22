@@ -81,6 +81,7 @@ describe("the discovery feed cannot fan out geocodes", () => {
 
 describe("the presence sweeper is bounded, by room", () => {
   const src = code("lib/presence-sweeper.ts")
+  const rooms = src.slice(src.indexOf("async function sweepRooms"), src.indexOf("export const MAX_EXPIRIES_PER_SWEEP"))
 
   it("takes a bounded set of events rather than every open check-in", () => {
     /*
@@ -91,7 +92,10 @@ describe("the presence sweeper is bounded, by room", () => {
      */
     expect(src).toMatch(/MAX_EVENTS_PER_SWEEP = 200/)
     expect(src).toMatch(/groupBy\(\{\s*by: \["event_id"\]/)
-    expect(src).toMatch(/take: MAX_EVENTS_PER_SWEEP/)
+    // Each kind of room through the one bounded pass, each with its own cap (F5).
+    expect(src).toMatch(/sweepRooms\(realEventsWhere, MAX_EVENTS_PER_SWEEP, now\)/)
+    expect(src).toMatch(/sweepRooms\(venueDaysWhere, MAX_VENUE_DAYS_PER_SWEEP, now\)/)
+    expect(rooms).toMatch(/take: cap/)
     expect(src).toMatch(/event_id: \{ in: busiest\.map/)
   })
 
@@ -100,8 +104,11 @@ describe("the presence sweeper is bounded, by room", () => {
      * The mass-checkout guard reasons about the share of a room that is
      * leaving. A half-fetched event would compute that share against a partial
      * denominator and either trip on nothing or fail to trip on everything.
+     *
+     * Within the room pass. The venue-day expiry pass is bounded by rows on
+     * purpose: an expiry is a window's end, never counted by the guard (D-20).
      */
-    expect(src).not.toMatch(/findMany\(\{[\s\S]{0,200}status: "checked_in",[\s\S]{0,200}take:/)
+    expect(rooms).not.toMatch(/findMany\(\{[\s\S]{0,200}status: "checked_in",[\s\S]{0,200}take:/)
   })
 
   it("drains oldest first, so no room is starved", () => {

@@ -113,6 +113,7 @@ async function claimDue(now: Date, token: string): Promise<ClaimedCampaign[]> {
          AND (m."claim_token" IS NULL OR m."claimed_at" IS NULL OR m."claimed_at" < ${leaseCutoff})
          AND p."status" = 'approved'::"placement_status"
          AND e."deleted_at" IS NULL
+         AND e."kind" = 'event'
        ORDER BY m."next_send_at" ASC
        LIMIT ${BATCH}
        FOR UPDATE OF m SKIP LOCKED
@@ -217,6 +218,52 @@ async function recordFailure(
   })
 }
 
+/** Past the event's end by this much, no send can still be in flight (the scheduler stops at the end; a claim lasts 5 minutes). */
+const MATERIALISE_AFTER_MS = 2 * 60 * 60 * 1000
+/** Campaigns per pass: the sweep runs every minute, so a backlog drains without one long statement. */
+const MATERIALISE_BATCH = 200
+
+/**
+ * Store the reach of campaigns whose event has ended and empty their hashes
+ * (db H5; read by lib/sponsor-reach.ts). Here rather than beside the read
+ * because this file runs in the custom server, where a `server-only` module
+ * cannot load. One statement: every part of it reads the same snapshot, so
+ * the count is taken from the hashes before they are emptied. Idempotent — a
+ * stored campaign is never counted again — and safe beside a second worker
+ * (`SKIP LOCKED`). Returns how many campaigns were stored.
+ */
+export async function materialiseEndedReach(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - MATERIALISE_AFTER_MS)
+  // any-kind: a campaign's roster is emptied once its room has ended, whatever kind of room it ran in.
+  const rows = await db.$queryRaw<{ stored: number }[]>`
+    WITH ended AS (
+      SELECT m.id
+        FROM event_sponsored_messages m
+        JOIN events e ON e.id = m.event_id
+       WHERE m.reach_materialised_at IS NULL AND e.end_time < ${cutoff}
+       ORDER BY e.end_time
+       LIMIT ${MATERIALISE_BATCH}
+         FOR UPDATE OF m SKIP LOCKED
+    ), stored AS (
+      UPDATE event_sponsored_messages m
+         SET reach = (SELECT count(DISTINCT h)::int
+                        FROM sponsored_message_sends s, unnest(s.recipient_hashes) AS h
+                       WHERE s.sponsored_message_id = m.id),
+             reach_materialised_at = ${now}
+        FROM ended
+       WHERE m.id = ended.id
+      RETURNING m.id
+    ), emptied AS (
+      UPDATE sponsored_message_sends s
+         SET recipient_hashes = '{}'
+        FROM stored
+       WHERE s.sponsored_message_id = stored.id AND cardinality(s.recipient_hashes) > 0
+      RETURNING s.id
+    )
+    SELECT (SELECT count(*) FROM stored)::int AS stored, (SELECT count(*) FROM emptied)::int AS emptied`
+  return rows[0]?.stored ?? 0
+}
+
 export interface SponsoredSweepResult {
   claimed: number
   sent: number
@@ -259,6 +306,17 @@ export async function sweepSponsored(now: Date = new Date()): Promise<SponsoredS
     })
   }
 
+  // An ended campaign keeps its reach and loses its roster (db H5).
+  try {
+    const stored = await materialiseEndedReach(now)
+    if (stored > 0) logger.info("Stored the reach of ended campaigns", { count: stored })
+  } catch (error) {
+    // Housekeeping must never stop the sends; the next pass tries again.
+    logger.error("Could not store the reach of ended campaigns", {
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+
   const claimed = await claimDue(now, token)
   result.claimed = claimed.length
   if (claimed.length === 0) return result
@@ -292,6 +350,7 @@ async function sendOne(
       // A hidden or deleted event's room is closed to placements too (SCRUM-8, SCRUM-303).
       status: true,
       deleted_at: true,
+      kind: true,
       organizer_id: true,
       chat_group: { select: { id: true, status: true } },
     },
@@ -569,16 +628,6 @@ async function emit(
   }
 }
 
-/**
- * The first window for a campaign being switched on.
- *
- * `now`, not `now + interval`: the organiser flipped the switch because they
- * want it running. An interval of silence first reads as a broken control, which
- * is what `start()` having no leading edge produced.
- */
-export function firstWindow(now: Date = new Date()): Date {
-  return now
-}
 
 let timer: NodeJS.Timeout | null = null
 

@@ -1,4 +1,4 @@
-import { cityFrom, cityKey, extractAddress, fillFromSearch, groupCities } from "@/lib/address"
+import { browseCities, cityCentres, cityFrom, cityKey, extractAddress, fillFromSearch, groupCities } from "@/lib/address"
 
 /**
  * Reading a geocoder response.
@@ -221,5 +221,51 @@ describe("the venue wizard goes through fillFromSearch, and only its newest sear
     const search = read("../components/event-form/where-search.tsx")
     expect(search).toMatch(/const mine = \+\+seq\.current/)
     expect(search).toMatch(/if \(mine !== seq\.current\) return/)
+  })
+})
+
+describe("cityCentres", () => {
+  it("is the mean of a city's event points, folded on cityKey like the counts", () => {
+    const centres = cityCentres([
+      { city: "Bengaluru", latitude: 12.9, longitude: 77.5 },
+      { city: " bengaluru ", latitude: 13.1, longitude: 77.7 },
+      { city: "Mumbai", latitude: 19.0, longitude: 72.8 },
+    ])
+    expect(centres.get(cityKey("Bengaluru")!)).toEqual({ latitude: 13, longitude: 77.6 })
+    expect(centres.get(cityKey("Mumbai")!)).toEqual({ latitude: 19, longitude: 72.8 })
+  })
+
+  it("leaves out events with no point, or the 0,0 an unset point reads as, and gives a city with none no centre", () => {
+    const centres = cityCentres([
+      { city: "Pune", latitude: null, longitude: null },
+      { city: "Pune", latitude: 0, longitude: 0 },
+      { city: "Goa", latitude: 15.5, longitude: 73.8 },
+      { city: "Goa", latitude: 0, longitude: 0 },
+    ])
+    expect(centres.has(cityKey("Pune")!)).toBe(false)
+    expect(centres.get(cityKey("Goa")!)).toEqual({ latitude: 15.5, longitude: 73.8 })
+  })
+})
+
+describe("browseCities", () => {
+  const at = (city: string | null, latitude: number | null = 12.97, longitude: number | null = 77.59) => ({ city, latitude, longitude })
+
+  it("lists a city that has places but no events, after the cities with events, centred on its places", () => {
+    const events = [at("Bengaluru"), at("Bengaluru")]
+    const places = [at("Bengaluru"), at("Mumbai", 19.07, 72.87), at("Mumbai", 19.09, 72.89), at("Pune", 18.52, 73.85)]
+    expect(browseCities(events, places)).toEqual([
+      { city: "Bengaluru", eventCount: 2, placeCount: 1, centre: { latitude: 12.97, longitude: 77.59 } },
+      { city: "Mumbai", eventCount: 0, placeCount: 2, centre: { latitude: 19.08, longitude: 72.88 } },
+      { city: "Pune", eventCount: 0, placeCount: 1, centre: { latitude: 18.52, longitude: 73.85 } },
+    ])
+  })
+
+  it("folds a place's spelling into the event city's, and keeps the events' centre", () => {
+    const [row] = browseCities([at("Bengaluru", 12.97, 77.59)], [at(" bengaluru ", 13.0, 77.6)])
+    expect(row).toEqual({ city: "Bengaluru", eventCount: 1, placeCount: 1, centre: { latitude: 12.97, longitude: 77.59 } })
+  })
+
+  it("leaves out rows with no city", () => {
+    expect(browseCities([at(null)], [at(null), at("  ")])).toEqual([])
   })
 })

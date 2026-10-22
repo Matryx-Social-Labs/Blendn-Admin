@@ -17,7 +17,8 @@ jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
 import { authenticateDashboardSocket } from "@/lib/socket-ops-auth"
 
 const COOKIE = "next-auth.session-token=signed-session"
-const live = { id: "u1", email: "host@example.com", role: "organizer", suspended_at: null, deletedAt: null }
+const SIGNED_IN = Date.parse("2026-10-01T10:00:00Z")
+const live = { id: "u1", email: "host@example.com", role: "organizer", suspended_at: null, deletedAt: null, password_changed_at: null, sessions_revoked_at: null }
 
 beforeAll(() => {
   process.env.NEXTAUTH_SECRET = "test-secret-at-least-32-characters-long"
@@ -25,7 +26,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks()
-  mockDecode.mockResolvedValue({ sub: "u1" })
+  mockDecode.mockResolvedValue({ sub: "u1", signedInAt: SIGNED_IN })
 })
 
 it("lets a live dashboard account through, with the role read from the row", async () => {
@@ -48,4 +49,22 @@ it("refuses a deleted account whose cookie is still live", async () => {
 it("refuses a suspended account", async () => {
   mockFindUnique.mockResolvedValue({ ...live, suspended_at: new Date() })
   await expect(authenticateDashboardSocket(COOKIE)).resolves.toBeNull()
+})
+
+/*
+ * The pages' rule, at the handshake too (step 18 security review, M6): a
+ * cookie from before the password changed is somebody the owner locked out.
+ * The handshake gets the raw cookie, never re-minted, so a session from before
+ * `signedInAt` existed is judged by its iat.
+ */
+it("refuses a session that signed in before the password changed", async () => {
+  mockFindUnique.mockResolvedValue({ ...live, password_changed_at: new Date(SIGNED_IN + 1_000) })
+  await expect(authenticateDashboardSocket(COOKIE)).resolves.toBeNull()
+  mockDecode.mockResolvedValue({ sub: "u1", iat: SIGNED_IN / 1000 })
+  await expect(authenticateDashboardSocket(COOKIE)).resolves.toBeNull()
+})
+
+it("lets in a session that signed in after it", async () => {
+  mockFindUnique.mockResolvedValue({ ...live, password_changed_at: new Date(SIGNED_IN - 1_000) })
+  await expect(authenticateDashboardSocket(COOKIE)).resolves.toMatchObject({ userId: "u1" })
 })

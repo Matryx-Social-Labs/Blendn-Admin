@@ -7,13 +7,27 @@ import { Skeleton } from "@/components/ui/skeleton"
  * loading.tsx the route just shows nothing until the query returns. The shapes
  * mirror the real layout: tiles, divided rows, sections with a rule — and no
  * gutter, because `app/dashboard/layout.tsx` owns it. The old skeletons drew
- * cards, a boxed page header and a second `px-4 lg:px-6`, so every route
+ * cards, a boxed page header and a second gutter of their own, so every route
  * loaded into chrome the page then replaced.
  */
 
 /** The one line a page adds under the site header — a title or a sentence. */
 export function PageHeaderSkeleton() {
   return <Skeleton className="h-5 w-64" />
+}
+
+/**
+ * Where an owned header will be (`OWNED_HEADERS`): those routes get no header
+ * from the layout, so while the page loads this holds the 26px title's place
+ * and its sentence — the page does not jump when the record's name arrives.
+ */
+export function OwnedHeaderSkeleton() {
+  return (
+    <div aria-hidden className="flex flex-col gap-2">
+      <Skeleton className="h-[30px] w-72 max-w-full" />
+      <Skeleton className="h-4 w-96 max-w-full" />
+    </div>
+  )
 }
 
 export function StatCardsSkeleton({ count = 4 }: { count?: number }) {
@@ -43,19 +57,6 @@ export function TableSkeleton({ rows = 6, columns = 5 }: { rows?: number; column
           {Array.from({ length: columns }).map((_, c) => (
             <Skeleton key={c} className="h-4 flex-1" />
           ))}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-export function CardGridSkeleton({ count = 6 }: { count?: number }) {
-  return (
-    <div className="flex flex-col divide-y divide-border border-t border-border">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="flex flex-col gap-2 py-4">
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-3 w-1/2" />
         </div>
       ))}
     </div>

@@ -1,7 +1,7 @@
-import { Prisma } from "@prisma/client"
+import type { Prisma } from "@prisma/client"
 import { NextRequest } from "next/server"
 
-import { ageFrom } from "@/lib/age"
+import { ageFrom, isAdult, mayParticipate } from "@/lib/age"
 import {
   serverErrorResponse,
   successResponse,
@@ -14,8 +14,19 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
-import { likeLiteral } from "@/lib/like-literal"
 import { cityKey } from "@/lib/address"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { venuesTakenOver } from "@/lib/venue-visibility"
+import { paginationMeta } from "@/lib/pagination"
+import {
+  listedVenuesWhere,
+  liveBuckets,
+  liveVenueIds,
+  openTonightVenueIds,
+  upcomingEventsWhere,
+  venueTier,
+} from "@/lib/venue-listing"
+import { tonightHours } from "@/lib/venue-tonight"
 
 /**
  * The most venues a distance sort will pull into memory at once.
@@ -56,6 +67,29 @@ const DISTANCE_SORT_CEILING = 5000
  * As in the events feed, an **unknown** age hides nothing: most OAuth accounts
  * are created without one, and failing closed would empty the screen to punish
  * a missing field.
+ *
+ * ## A venue an event has taken over is not listed
+ *
+ * From an hour before a real event at it starts until that event ends, the
+ * place is the event's (plan v2 step 2): Places leaves the venue out, and the
+ * event's own card says "at <Venue>" instead. The rule is step 4's, written
+ * once in `lib/venue-visibility.ts` — the same one that refuses Go Live there
+ * with `EVENT_LIVE_HERE` — so the list, the venue page and the door cannot
+ * disagree. Per viewer: a 21+ night does not hide its venue from somebody it
+ * would turn away (D-3).
+ *
+ * ## A claimed venue its owner took off Blendn is not listed
+ *
+ * "Open on Blendn" (D-13): the owner of a claimed venue may switch it off, and
+ * then it leaves Places and the home map, which both read this list. Its events
+ * still show, and still say "at <Venue>". An unclaimed venue is always listed.
+ *
+ * ## `liveNow` is a bucket, never a number
+ *
+ * How many guests are live at each venue, exactly as the venue page says it
+ * (`lib/live-count.ts`): a bucket, steady for a minute, slow to fall, never
+ * counting the caller (D-19, F14). And only to somebody the venue page would
+ * answer — onboarded and a known adult; anyone else gets `null`.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -63,6 +97,9 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    // Every row carries a live count; the venue page's limit, for the same reason.
+    const limited = await rateLimit(request, userLimit("read", "venues", authUser.userId))
+    if (limited) return limited
 
     const parsed = venueQuerySchema.safeParse(
       Object.fromEntries(request.nextUrl.searchParams)
@@ -71,57 +108,50 @@ export async function GET(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { page, limit, search, city, lat, lon, radius, venueType, sortBy, sortOrder } =
+    const { page, limit, search, city, lat, lon, radius, venueType, venueTypes, area, order, sortBy, sortOrder } =
       parsed.data
+    // `venueType=a,b` and its spelling `venueTypes=a,b`, one set.
+    const types = [...new Set([...(venueType ?? []), ...(venueTypes ?? [])])]
 
     const viewer = await db.profiles.findUnique({
       where: { id: authUser.userId },
-      select: { age: true, date_of_birth: true },
+      select: { age: true, date_of_birth: true, onboarded: true },
     })
     // Derived, never the stored column — see lib/age.ts. A stored age is the
     // number that was true on the day they signed up.
     const viewerAge = ageFrom(viewer)
+    // Who is live where is told to the people who may go live there: the venue
+    // page's own gate (`personAtTheDoor` with no event). Everyone else gets null.
+    const mayCountLive = mayParticipate(viewer) && isAdult(viewerAge)
 
     /*
-     * The events that count, both for `upcomingEventCount` and for `nextEvent`.
-     *
-     * One object used in both places on purpose. When these were allowed to
-     * drift on the events side, a card could say "3 upcoming" and then headline
-     * an event that was not one of them.
+     * The events that count, both for `upcomingEventCount` and for `nextEvent`:
+     * one filter, written in lib/venue-listing.ts beside the summary's.
      */
-    const upcomingEventFilter = {
-      deleted_at: null,
-      status: "published" as const,
-      visibility: "public" as const,
-      end_time: { gte: new Date() },
-      ...(typeof viewerAge === "number"
-        ? { OR: [{ min_age: null }, { min_age: { lte: viewerAge } }] }
-        : {}),
-    }
+    const now = new Date()
+    const upcomingEventFilter = upcomingEventsWhere(typeof viewerAge === "number" ? viewerAge : null, now)
 
-    const where: Record<string, unknown> = {
-      deleted_at: null,
-      // `archived` is how a venue is retired without deleting the events that
-      // happened in it, so it must not appear in discovery.
-      status: "active",
-    }
+    const where = listedVenuesWhere(city)
 
     if (search) {
       where.OR = [
         { name: { contains: search, mode: "insensitive" } },
         { address: { contains: search, mode: "insensitive" } },
         { city: { contains: search, mode: "insensitive" } },
+        // The neighbourhood, so "Search places or areas" finds "Indiranagar" by name.
+        { area: { contains: search, mode: "insensitive" } },
       ]
     }
 
-    // Trimmed like the events filter, so the two agree on what a city is.
     const cityScope = cityKey(city)
-    if (cityScope) {
-      where.city = { equals: likeLiteral(cityScope), mode: "insensitive" }
+
+    if (types.length > 0) {
+      where.venue_type = { in: types }
     }
 
-    if (venueType) {
-      where.venue_type = venueType
+    // The neighbourhood, by its slug (`areaSlug`); venues with no area are in none.
+    if (area) {
+      where.area_slug = area
     }
 
     // A bounding box only when the caller asked for one. Sending coordinates
@@ -133,6 +163,10 @@ export async function GET(request: NextRequest) {
       where.longitude = { gte: bbox.minLon, lte: bbox.maxLon }
     }
 
+    // Last, so it is asked of exactly the venues the filters above chose.
+    const taken = await venuesTakenOver(now, where, { viewerAge })
+    if (taken.length > 0) where.id = { notIn: taken }
+
     const venueSelect = {
       id: true,
       name: true,
@@ -142,10 +176,18 @@ export async function GET(request: NextRequest) {
       longitude: true,
       capacity: true,
       venue_type: true,
+      area: true,
+      area_slug: true,
+      floors: true,
+      // What `tierOf` needs to say whether the venue is open tonight.
+      timezone: true,
+      day_reset_hour: true,
+      hours: true,
       _count: { select: { events: { where: upcomingEventFilter } } },
       events: {
         where: upcomingEventFilter,
-        orderBy: { start_time: "asc" },
+        // Id as the tiebreak, as the venue page's `upcoming`: card and page agree on which is next.
+        orderBy: [{ start_time: "asc" }, { id: "asc" }],
         take: 1,
         select: {
           id: true,
@@ -159,6 +201,18 @@ export async function GET(request: NextRequest) {
     } satisfies Prisma.venuesSelect
 
     type VenueRow = Prisma.venuesGetPayload<{ select: typeof venueSelect }>
+
+    /*
+     * `order=live`: three tiers — live now, then open tonight, then the rest —
+     * each in the chosen sort with the id as tiebreak, so a page boundary never
+     * repeats or skips a venue. Disjoint by construction (tonight excludes live).
+     */
+    // What the open-tonight read depends on besides time: the query's own scope and the viewer's age rule.
+    const tonightScope = JSON.stringify({ search, city: cityScope, types, area, lat, lon, radius, viewerAge, taken })
+    const liveTier = order === "live" && mayCountLive ? await liveVenueIds(where, authUser.userId, now) : new Set<string>()
+    const tonightTier =
+      order === "live" ? await openTonightVenueIds(where, upcomingEventFilter, now, liveTier, tonightScope) : new Set<string>()
+    const tiers = [[...liveTier], [...tonightTier]].filter((t) => t.length > 0)
 
     const shouldSortByDistance =
       sortBy === "distance" && lat !== undefined && lon !== undefined
@@ -176,7 +230,7 @@ export async function GET(request: NextRequest) {
       const lightweight = await db.venues.findMany({
         where,
         select: { id: true, latitude: true, longitude: true },
-        orderBy: { name: "asc" },
+        orderBy: [{ name: "asc" }, { id: "asc" }],
         take: DISTANCE_SORT_CEILING,
       })
 
@@ -200,13 +254,23 @@ export async function GET(request: NextRequest) {
         // "infinitely far"; they are unknown, and burying them under a `desc`
         // sort would put the least informative rows first.
         .sort((a, b) => {
-          if (a.distance === null) return 1
-          if (b.distance === null) return -1
+          if (a.distance === null || b.distance === null) {
+            if (a.distance === b.distance) return a.id < b.id ? -1 : 1
+            return a.distance === null ? 1 : -1
+          }
+          // Ties by id, so equal distances keep one order from page to page.
+          if (a.distance === b.distance) return a.id < b.id ? -1 : 1
           return sortOrder === "asc" ? a.distance - b.distance : b.distance - a.distance
         })
 
       totalCount = withDistance.length
-      const pageIds = withDistance.slice((page - 1) * limit, page * limit).map((v) => v.id)
+      const tierOf = (id: string) => {
+        const i = tiers.findIndex((t) => t.includes(id))
+        return i === -1 ? tiers.length : i
+      }
+      // Array sort is stable: the distance order holds inside each tier.
+      const ranked = tiers.length === 0 ? withDistance : [...withDistance].sort((a, b) => tierOf(a.id) - tierOf(b.id))
+      const pageIds = ranked.slice((page - 1) * limit, page * limit).map((v) => v.id)
 
       const pageVenues = await db.venues.findMany({
         where: { id: { in: pageIds } },
@@ -216,15 +280,18 @@ export async function GET(request: NextRequest) {
       const byId = new Map(pageVenues.map((v) => [v.id, v]))
       venues = pageIds.map((id) => byId.get(id)).filter((v): v is VenueRow => Boolean(v))
     } else {
-      venues = await db.venues.findMany({
-        where,
-        select: venueSelect,
-        orderBy: { name: sortOrder },
-        skip: (page - 1) * limit,
-        take: limit,
-      })
+      // `id` after the name: two venues with one name keep one order, so a page
+      // boundary between them never repeats or skips one.
+      const orderBy = [{ name: sortOrder }, { id: "asc" as const }]
+      const skip = (page - 1) * limit
+      venues =
+        tiers.length === 0
+          ? await db.venues.findMany({ where, select: venueSelect, orderBy, skip, take: limit })
+          : await tieredPage(tiers, (w, o) => db.venues.findMany({ where: { AND: [where, w] }, select: venueSelect, orderBy, ...o }), skip, limit)
       totalCount = await db.venues.count({ where })
     }
+
+    const liveNow = mayCountLive ? await liveBuckets(venues.map((v) => v.id), authUser.userId, now) : null
 
     const items = venues.map((venue) => {
       const next = venue.events[0]
@@ -248,10 +315,33 @@ export async function GET(request: NextRequest) {
         // The label the dashboard already shows, so the app never ships a
         // second copy of the vocabulary and never renders a raw `pub_bar`.
         venueTypeLabel: venueTypeLabel(venue.venue_type),
+        // The neighbourhood and its slug (the `area=` filter's value): `null` for both when unknown, never guessed.
+        area: venue.area,
+        areaSlug: venue.area_slug,
+        // The 3D map's height override: floors × 3.2 m (lib/venue-floors.ts). Null: the map's own.
+        floors: venue.floors,
         // Kilometres, or null when either side has no fix. The client formats
         // it — `formatDistance` there already owns km-versus-miles.
         distance,
+        // Tonight's opening from `venues.hours` in the venue's own zone, or null when none is given for its current day.
+        tonight: tonightHours(venue, now),
         upcomingEventCount: venue._count.events,
+        liveNow: liveNow ? (liveNow.get(venue.id) ?? "quiet") : null,
+        // `live`, `open` (open tonight) or `quiet`: the tier `order=live` ranks by. Under that order
+        // it is read from the very sets that ordered the page; otherwise by the same rule, per venue.
+        tier:
+          order === "live"
+            ? liveTier.has(venue.id)
+              ? "live"
+              : tonightTier.has(venue.id)
+                ? "open"
+                : "quiet"
+            : venueTier(
+                venue,
+                liveNow?.get(venue.id) ?? "quiet",
+                next?.start_time ?? null,
+                now
+              ),
         nextEvent: next
           ? {
               id: next.id,
@@ -267,16 +357,40 @@ export async function GET(request: NextRequest) {
 
     return successResponse({
       venues: items,
-      pagination: {
-        page,
-        limit,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit),
-        hasMore: page * limit < totalCount,
-      },
+      // `order` is echoed only when it was applied, so the app knows the server honoured it.
+      pagination: { ...paginationMeta(page, limit, totalCount), ...(order === "live" && { order: "live" as const }) },
     })
   } catch (error) {
     logger.error("List venues error", { error: String(error) })
     return serverErrorResponse("Failed to list venues")
   }
+}
+
+/**
+ * One page over disjoint tiers of venue ids followed by everyone else: each
+ * tier is a segment in sequence and the page is a window across them, so a
+ * page boundary never repeats or skips a venue. `read` is the venue query
+ * (already ordered, id as tiebreak) narrowed by `w`.
+ */
+async function tieredPage<T>(
+  tiers: string[][],
+  read: (w: Prisma.venuesWhereInput, o: { skip: number; take: number }) => Promise<T[]>,
+  skip: number,
+  limit: number
+): Promise<T[]> {
+  const segments = [
+    ...tiers.map((ids) => ({ w: { id: { in: ids } } as Prisma.venuesWhereInput, size: ids.length })),
+    { w: { id: { notIn: tiers.flat() } } as Prisma.venuesWhereInput, size: Infinity },
+  ]
+  const out: T[] = []
+  let offset = 0
+  for (const seg of segments) {
+    const wanted = limit - out.length
+    if (wanted <= 0) break
+    const segSkip = Math.max(0, skip - offset)
+    offset += seg.size
+    if (segSkip >= seg.size) continue
+    out.push(...(await read(seg.w, { skip: segSkip, take: Math.min(wanted, seg.size - segSkip) })))
+  }
+  return out
 }

@@ -67,11 +67,18 @@ export async function openConversation(
      * `private_conversations.origin_friendship`.
      */
     friendship?: boolean
-  }
+  },
+  /*
+   * Optional transaction client, as `closeConversation` takes one. The board's
+   * accept opens the conversation inside the transaction that claims the ask
+   * and spends the seat, so a failure here rolls all three back rather than
+   * leaving an accepted ask and a spent seat with no conversation behind them.
+   */
+  client: Pick<typeof db, "private_conversations"> = db
 ) {
   const [user1_id, user2_id] = conversationPair(a, b)
 
-  const existing = await db.private_conversations.findUnique({
+  const existing = await client.private_conversations.findUnique({
     where: { user1_id_user2_id: { user1_id, user2_id } },
     select: { id: true, closed_at: true },
   })
@@ -84,13 +91,13 @@ export async function openConversation(
      * an event keep the row they have: real names, no gating. They already know
      * each other, and retro-anonymising a live conversation would be absurd.
      */
-    return db.private_conversations.findUniqueOrThrow({
+    return client.private_conversations.findUniqueOrThrow({
       where: { user1_id_user2_id: { user1_id, user2_id } },
     })
   }
 
   const revealed = new Set(ctx?.revealed ?? [])
-  return db.private_conversations.upsert({
+  return client.private_conversations.upsert({
     where: { user1_id_user2_id: { user1_id, user2_id } },
     create: {
       user1_id,
@@ -159,6 +166,22 @@ export async function blockCounterparties(userId: string): Promise<string[]> {
     select: { blocker_id: true, blocked_id: true },
   })
   return [...new Set(rows.map((r) => (r.blocker_id === userId ? r.blocked_id : r.blocker_id)))]
+}
+
+/**
+ * Who this person must not share a room with, for the room's delivery, its
+ * history, its typing and its roster: everybody in a block with them, in every
+ * kind of room — and in a board post's room, everybody they closed a
+ * conversation with too (step 10 review H2). An unmatch is permanent, and a
+ * car of three is no place to undo it; the post's seating keeps such a pair
+ * apart (`seatBoardRoom`), this keeps an unmatch made after seating from
+ * putting them back in front of each other. A crew's and a Blend's rooms keep
+ * closed pairs out at their doors.
+ */
+export async function keptApartIn(userId: string, roomKind: string): Promise<string[]> {
+  if (roomKind !== "board_post") return blockCounterparties(userId)
+  const [blocked, closed] = await Promise.all([blockCounterparties(userId), closedPairKeys(userId)])
+  return [...new Set([...blocked, ...closed])]
 }
 
 /** Did these two leave each other? Checked in both directions, like a block. */
@@ -251,22 +274,44 @@ export async function mayConverse(a: string, b: string): Promise<boolean> {
  *
  * `check_in_time: not null` matters: an RSVP is not attendance, and someone who
  * merely intended to come was never in the room with anyone.
+ *
+ * At a venue's day the windows must have overlapped (below).
  */
 export async function haveSharedAnEvent(a: string, b: string): Promise<boolean> {
   const mine = await db.event_check_ins.findMany({
     where: { user_id: a, check_in_time: { not: null } },
-    select: { event_id: true },
+    select: { event_id: true, event: { select: { kind: true } } },
     distinct: ["event_id"],
   })
   if (mine.length === 0) return false
 
-  const overlap = await db.event_check_ins.findFirst({
-    where: {
-      user_id: b,
-      check_in_time: { not: null },
-      event_id: { in: mine.map((m) => m.event_id) },
-    },
-    select: { id: true },
-  })
-  return overlap !== null
+  const events = mine.filter((m) => m.event.kind !== "venue_day").map((m) => m.event_id)
+  const days = mine.filter((m) => m.event.kind === "venue_day").map((m) => m.event_id)
+
+  const overlap = events.length
+    ? await db.event_check_ins.findFirst({
+        where: { user_id: b, check_in_time: { not: null }, event_id: { in: events } },
+        select: { id: true },
+      })
+    : null
+  if (overlap) return true
+  if (days.length === 0) return false
+
+  /*
+   * A venue's day is not an evening: two people live there at noon and at
+   * midnight never met. So at a venue day, sharing the room means windows
+   * that overlapped — two presence sessions on the same day, each arriving
+   * before the other left (D-x4).
+   */
+  const met = await db.$queryRaw<{ one: number }[]>`
+    SELECT 1 AS one
+      FROM presence_sessions pa
+      JOIN presence_sessions pb ON pb.occurrence_id = pa.occurrence_id AND pb.user_id = ${b}
+     WHERE pa.user_id = ${a}
+       AND pa.event_id = ANY(${days}::uuid[])
+       AND pa.arrived_at < COALESCE(pb.departed_at, now())
+       AND pb.arrived_at < COALESCE(pa.departed_at, now())
+     LIMIT 1
+  `
+  return met.length > 0
 }

@@ -39,9 +39,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true },
+      select: { id: true, kind: true },
     })
-    if (!event) return notFoundResponse("Event not found")
+    // A venue day is not a night anybody rates (see POST).
+    if (!event || event.kind === "venue_day") return notFoundResponse("Event not found")
 
     const mine = await db.event_ratings.findUnique({
       where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
@@ -86,10 +87,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, status: true, start_time: true, end_time: true, occurrences: sessionOccurrencesSelect },
+      select: { id: true, kind: true, status: true, start_time: true, end_time: true, occurrences: sessionOccurrencesSelect },
     })
 
-    if (!event) {
+    // A venue day has no host to rate and no night to rate: its id is not an
+    // event here, as on every by-id attendee route (`attendeeEventAccess`).
+    if (!event || event.kind === "venue_day") {
       return notFoundResponse("Event not found")
     }
 

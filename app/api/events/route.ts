@@ -2,10 +2,11 @@ import { logger } from "@/lib/logger"
 import { errorResponse } from "@/lib/api-response"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuth } from "@/lib/auth"
-import { eventWriteSchema } from "@/lib/validations/event"
+import { eventWriteSchema, parseJsonField } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { resolveEventCity } from "@/lib/location"
-import { visibleEventsWhere } from "@/lib/event-visibility"
+import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
+import { liveCountBucket } from "@/lib/disclosure"
 import { db } from "@/lib/db"
 import { owningOrgFor } from "@/lib/event-ownership"
 import { canCreateEvents } from "@/lib/rbac"
@@ -17,16 +18,6 @@ import { syncOccurrences } from "@/lib/occurrences"
 import { auditLog } from "@/lib/audit-log"
 import { getOccupancies } from "@/lib/occupancy"
 import { readJson } from "@/lib/api-input"
-
-const parseJsonField = (value: unknown) => {
-  if (typeof value !== "string") return value
-  if (value.trim() === "") return undefined
-  try {
-    return JSON.parse(value)
-  } catch {
-    return undefined
-  }
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -47,7 +38,7 @@ export async function GET(req: NextRequest) {
      * screen asks the same question, and used to ask it through this route and
      * then answer it differently in its own actions. One module, one answer.
      */
-    const where = await visibleEventsWhere(session.user)
+    const { where, actor } = await visibleEventsScope(session.user)
 
     // Bounded so the payload can't grow without limit as events accumulate.
     // Response stays a plain array — callers can raise the window with ?limit.
@@ -67,8 +58,14 @@ export async function GET(req: NextRequest) {
     // grouped query for the whole page rather than one per row.
     const occupancies = await getOccupancies(events.map((e) => e.id))
 
+    // A venue reading a night it does not run gets the live count as a range
+    // (SCRUM-516), as on its Live tab.
+    const exact = (e: (typeof events)[number]) => session.user.role === "app_admin" || hostsEvent(actor, e)
     return NextResponse.json(
-      events.map((e) => ({ ...e, occupancy: occupancies.get(e.id)?.inside ?? 0 }))
+      events.map((e) => {
+        const inside = occupancies.get(e.id)?.inside ?? 0
+        return { ...e, occupancy: exact(e) ? inside : liveCountBucket(inside) }
+      })
     )
   } catch (error) {
     logger.error("Error fetching events", { error: error instanceof Error ? error.message : String(error) })
@@ -131,6 +128,7 @@ export async function POST(req: Request) {
       cover_image_url,
       external_link,
       is_featured,
+      crews_enabled,
       is_recurring,
       check_in_radius,
       full_description,
@@ -193,10 +191,8 @@ export async function POST(req: Request) {
       }
     }
 
+    // `description` is required above, so this is never empty.
     const resolvedFullDescription = full_description || description
-    if (!resolvedFullDescription) {
-      return errorResponse("Missing full description", 400)
-    }
 
     // Derived, never taken from the body — see lib/venue-link.ts.
     const venueLink = await resolveVenueLink(venue_id)
@@ -288,6 +284,8 @@ export async function POST(req: Request) {
         // The featured rail is the platform's, not the organiser's: any
         // organiser could put their own event on it. Ignored unless app_admin.
         ...(is_featured != null && session.user.role === "app_admin" && { is_featured }),
+        // The host's "Allow crews at this event". Null leaves it as it is.
+        ...(crews_enabled != null && { crews_enabled }),
         ...(is_recurring != null && { is_recurring }),
         ...(copiedFence
           ? {

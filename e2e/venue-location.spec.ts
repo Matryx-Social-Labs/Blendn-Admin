@@ -26,7 +26,10 @@ test.describe("a venue owner adds a venue: the outline arrives with the place", 
 
   test("search → the OSM outline, the default buffer every event starts with → saved → drawn on a direct load", async ({ page }) => {
     const name = `e2e Stadium ${Date.now()}`
-    await page.goto("/dashboard/venues/new")
+    // `networkidle`: dashboard pages stream behind a loading boundary, and for
+    // a moment after `load` the streamed copy still sits in a hidden <div>
+    // beside the swapped-in one — a strict locator sees two and fails.
+    await page.goto("/dashboard/venues/new", { waitUntil: "networkidle" })
     await page.getByLabel("Venue name").fill(name)
     await page.getByLabel("Search venue types").fill("stadium")
     await page.getByRole("button", { name: "Stadium", exact: true }).click()
@@ -75,7 +78,7 @@ test.describe("a venue owner adds a venue: the outline arrives with the place", 
     expect(row.latitude).toBeLessThan(12.99)
 
     // A direct load draws what was stored (the SCRUM-345 guard), and cites it.
-    await page.goto(`/dashboard/venues/${id}`)
+    await page.goto(`/dashboard/venues/${id}`, { waitUntil: "networkidle" })
     await expect(page.locator('[data-area-source="saved"]:visible')).toContainText("The venue's outline", { timeout: 30_000 })
     await expect(page.locator(".leaflet-container path.leaflet-interactive").first()).toBeAttached({ timeout: 15_000 })
   })
@@ -94,7 +97,7 @@ test.describe("a failed duplicate look-up does not switch the server's check off
       return route.continue()
     })
     const name = `e2e Duplicate ${Date.now()}`
-    await page.goto("/dashboard/venues/new")
+    await page.goto("/dashboard/venues/new", { waitUntil: "networkidle" })
     await page.getByLabel("Venue name").fill(name)
     await page.getByLabel("Search venue types").fill("stadium")
     await page.getByRole("button", { name: "Stadium", exact: true }).click()
@@ -129,7 +132,7 @@ test.describe("a building found late keeps the buffer changed meanwhile", () => 
         json: { ring: [[12.9794 - d, 77.6406 - d], [12.9794 - d, 77.6406 + d], [12.9794 + d, 77.6406 + d], [12.9794 + d, 77.6406 - d]] },
       })
     })
-    await page.goto("/dashboard/venues/new")
+    await page.goto("/dashboard/venues/new", { waitUntil: "networkidle" })
     await page.getByLabel("Venue name").fill(`e2e Late ${Date.now()}`)
     await page.getByLabel("Search venue types").fill("pub")
     await page.getByRole("button", { name: "Pub or bar", exact: true }).click()
@@ -168,7 +171,7 @@ test.describe("the organisation that added an unclaimed venue corrects it — th
     })
     made.push(mine.id, theirs.id)
 
-    await page.goto(`/dashboard/venues/${mine.id}`)
+    await page.goto(`/dashboard/venues/${mine.id}`, { waitUntil: "networkidle" })
     await expect(page.getByText("unclaimed — added by your organisation")).toBeVisible({ timeout: 30_000 })
     await expect(page.getByText("Events here", { exact: true })).toHaveCount(0)
     await expect(page.getByText("Ratings", { exact: true })).toHaveCount(0)
@@ -178,7 +181,7 @@ test.describe("the organisation that added an unclaimed venue corrects it — th
     await page.getByRole("button", { name: "Save" }).click()
     await expect.poll(async () => (await db.venues.findUniqueOrThrow({ where: { id: mine.id }, select: { name: true } })).name, { timeout: 15_000 }).toBe(`${mine.name} (corrected)`)
 
-    await page.goto(`/dashboard/venues/${theirs.id}`)
+    await page.goto(`/dashboard/venues/${theirs.id}`, { waitUntil: "networkidle" })
     await expect(page).not.toHaveURL(new RegExp(theirs.id))
   })
 })

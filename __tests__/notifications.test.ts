@@ -97,7 +97,7 @@ describe("the row is written even when no push goes out", () => {
      */
     const src = SENDER()
     const record = src.indexOf("await recordNotification(")
-    const lookup = src.indexOf("const pushTokens = await getUserPushTokens(userId)")
+    const lookup = src.indexOf("const pushTokens = await getUserPushTokens(userId, data)")
     expect(record).toBeGreaterThan(-1)
     expect(lookup).toBeGreaterThan(-1)
     expect(record).toBeLessThan(lookup)
@@ -112,7 +112,7 @@ describe("the row is written even when no push goes out", () => {
      */
     const src = SENDER()
     const record = src.indexOf("Failed to record bulk notifications")
-    const lookup = src.indexOf("const tokenMap = await getBulkUserPushTokens(userIds)")
+    const lookup = src.indexOf("const tokenMap = await getBulkUserPushTokens(userIds, data)")
     expect(record).toBeGreaterThan(-1)
     expect(record).toBeLessThan(lookup)
   })

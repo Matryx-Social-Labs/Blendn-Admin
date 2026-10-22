@@ -62,3 +62,6 @@ artifacts/
 
 # graphify knowledge graph — local tooling output, regenerated per machine
 graphify-out/
+
+# Venue-candidate runs (scripts/places): regenerated, never committed
+scripts/places/out/

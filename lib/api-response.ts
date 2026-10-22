@@ -7,6 +7,13 @@ export interface ApiResponse<T = unknown> {
   data?: T
   error?: string
   errorCode?: string
+  /**
+   * Why, for a client that knows how to read it, beside an `errorCode` that
+   * stays exactly what installed builds already match on (Flow 15):
+   * `ACCOUNT_*`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`,
+   * `PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`.
+   */
+  reasonCode?: string
   errors?: Array<{ field: string; message: string }>
 }
 
@@ -51,6 +58,56 @@ export const ErrorCode = {
    * is yours: check in again, or `DELETE /chat/groups/:id/leave` to rejoin.
    */
   LEFT_ROOM: "LEFT_ROOM",
+  /**
+   * A venue day's room, and your Go Live there has ended (`liveInVenueDay`).
+   * The remedy is yours: go live again.
+   */
+  NOT_LIVE: "NOT_LIVE",
+  /**
+   * Go Live refused because a real event is on at this venue, or starts within
+   * the hour: check in to that instead. The body carries its `eventId`.
+   */
+  EVENT_LIVE_HERE: "EVENT_LIVE_HERE",
+  /** "Stay" is Blendn+ once `PLUS_GATING` is on. */
+  PLUS_REQUIRED: "PLUS_REQUIRED",
+  /**
+   * Go Live at a venue nobody has drawn an area for. Not `OUT_OF_RANGE`: no
+   * position fixes it, so the app must not offer directions (step 5).
+   */
+  NO_CHECK_IN_AREA: "NO_CHECK_IN_AREA",
+  /**
+   * Go Live with a fix too vague to place anybody (`MAX_GPS_ACCURACY_METERS`).
+   * The remedy is a better fix where you stand, not walking anywhere.
+   */
+  GPS_TOO_VAGUE: "GPS_TOO_VAGUE",
+  /**
+   * "Let this venue know I'm a regular" at a venue nobody runs on Blendn yet:
+   * there is nobody to tell (step 12). Not `NOT_FOUND`: the venue is there.
+   */
+  VENUE_UNCLAIMED: "VENUE_UNCLAIMED",
+  /**
+   * Why an account was refused or a session ended (Flow 15). Where a response
+   * already carried an `errorCode` installed builds match on (`FORBIDDEN`,
+   * `AGE_RESTRICTED`, `NOT_FOUND`), that stays and these go in `reasonCode`
+   * beside it; where it carried only the default 401, the code is both.
+   */
+  ACCOUNT_SUSPENDED: "ACCOUNT_SUSPENDED",
+  /** An organiser, venue owner, sponsor or admin in the attendee app. */
+  ACCOUNT_STAFF: "ACCOUNT_STAFF",
+  /** The account was deleted. Never sent at sign-in with a password, which would confirm it existed. */
+  ACCOUNT_DELETED: "ACCOUNT_DELETED",
+  /** Refresh: every phone was signed out (Settings, or another device). */
+  SESSION_REVOKED_ELSEWHERE: "SESSION_REVOKED_ELSEWHERE",
+  /** Refresh: the password was reset or changed. */
+  PASSWORD_RESET: "PASSWORD_RESET",
+  /** 426, from `middleware.ts`: a build below `MOBILE_MIN_APP_VERSION`. */
+  UPDATE_REQUIRED: "UPDATE_REQUIRED",
+  /** 503, from `middleware.ts`: `MAINTENANCE_MODE` is on. Carries `retryAfter`. */
+  MAINTENANCE: "MAINTENANCE",
+  /** The age rule refused somebody whose age is not on file: the one case they can fix by adding it. */
+  AGE_UNKNOWN: "AGE_UNKNOWN",
+  /** Onboarding is unfinished, and no adult age on file stands in for it. */
+  PROFILE_INCOMPLETE: "PROFILE_INCOMPLETE",
 } as const
 
 /**
@@ -72,9 +129,6 @@ export function successResponse<T>(
 }
 
 /**
- * Create an error response
- */
-/**
  * The code a bare status stands for, when the caller named none (SCRUM-324).
  *
  * The documented envelope promises an `errorCode` on every error, and a bare
@@ -83,28 +137,24 @@ export function successResponse<T>(
  * 400 or 422 covers everything from a missing field to "only an offer has
  * spaces", and `VALIDATION_FAILED` promises field errors it would not carry.
  */
+const CODE_FOR_STATUS: Partial<Record<number, string>> = {
+  401: ErrorCode.UNAUTHORIZED,
+  403: ErrorCode.FORBIDDEN,
+  404: ErrorCode.NOT_FOUND,
+  409: ErrorCode.CONFLICT,
+  429: ErrorCode.RATE_LIMITED,
+}
+
 function defaultErrorCode(status: number): string | undefined {
-  if (status >= 500) return ErrorCode.SERVER_ERROR
-  switch (status) {
-    case 401:
-      return ErrorCode.UNAUTHORIZED
-    case 403:
-      return ErrorCode.FORBIDDEN
-    case 404:
-      return ErrorCode.NOT_FOUND
-    case 409:
-      return ErrorCode.CONFLICT
-    case 429:
-      return ErrorCode.RATE_LIMITED
-    default:
-      return undefined
-  }
+  return status >= 500 ? ErrorCode.SERVER_ERROR : CODE_FOR_STATUS[status]
 }
 
 export function errorResponse(
   message: string,
   status: number = 400,
-  errorCode?: string
+  errorCode?: string,
+  /** The reason, in `reasonCode`, when `errorCode` must stay what it was. */
+  reasonCode?: string
 ): NextResponse<ApiResponse> {
   const code = errorCode ?? defaultErrorCode(status)
   return NextResponse.json(
@@ -112,6 +162,7 @@ export function errorResponse(
       success: false,
       error: message,
       ...(code && { errorCode: code }),
+      ...(reasonCode && { reasonCode }),
     },
     { status }
   )
@@ -143,82 +194,9 @@ export function validationErrorResponse(
   )
 }
 
-/**
- * Create an unauthorized response
- */
-export function unauthorizedResponse(
-  message: string = "Unauthorized"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.UNAUTHORIZED,
-    },
-    { status: 401 }
-  )
-}
-
-/**
- * Create a forbidden response
- */
-export function forbiddenResponse(
-  message: string = "Forbidden"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.FORBIDDEN,
-    },
-    { status: 403 }
-  )
-}
-
-/**
- * Create a not found response
- */
-export function notFoundResponse(
-  message: string = "Not found"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.NOT_FOUND,
-    },
-    { status: 404 }
-  )
-}
-
-/**
- * Create a server error response
- */
-export function serverErrorResponse(
-  message: string = "Internal server error"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.SERVER_ERROR,
-    },
-    { status: 500 }
-  )
-}
-
-/**
- * Create a conflict response (e.g., duplicate resource)
- */
-export function conflictResponse(
-  message: string = "Resource already exists"
-): NextResponse<ApiResponse> {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      errorCode: ErrorCode.CONFLICT,
-    },
-    { status: 409 }
-  )
-}
+export const unauthorizedResponse = (message = "Unauthorized") => errorResponse(message, 401)
+export const forbiddenResponse = (message = "Forbidden") => errorResponse(message, 403)
+export const notFoundResponse = (message = "Not found") => errorResponse(message, 404)
+export const serverErrorResponse = (message = "Internal server error") => errorResponse(message, 500)
+/** e.g. a duplicate resource. */
+export const conflictResponse = (message = "Resource already exists") => errorResponse(message, 409)

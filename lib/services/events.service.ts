@@ -1,10 +1,12 @@
 import { Prisma } from "@prisma/client"
-import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { distinctAttendeeCounts, hereCounts } from "@/lib/attendee-counts"
 import { resolveEventCity, geocodeBudget, type GeocodeBudget } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
 import { eventHost } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
+import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
+import { featuredOf, featuredSeed, type Featured } from "@/lib/featured"
 
 export const eventListSelect = {
   id: true,
@@ -18,6 +20,8 @@ export const eventListSelect = {
   occurrences: sessionOccurrencesSelect,
   timezone: true,
   venue_name: true,
+  // The only fragment here that claims `venue`, so nothing can narrow it.
+  ...eventVenueSelect,
   address: true,
   city: true,
   state: true,
@@ -110,6 +114,9 @@ export const eventListSelect = {
     select: {
       favorites: true,
       ratings: true,
+      // One correlated count per row, on `event_rsvps(event_id, status, …)`;
+      // the page is at most PAGINATION.MAX_LIMIT rows.
+      rsvps: { where: { status: "going" } },
     },
   },
 } satisfies Prisma.eventsSelect
@@ -127,6 +134,8 @@ interface TransformContext {
   userLat?: number
   userLon?: number
   includeCheckins?: boolean
+  /** The day's rotation seed (`featuredSeed`); the rank of a featured event is its place in that order. */
+  featuredSeed?: string
   /**
    * How many reverse-geocodes this request may still make.
    *
@@ -147,7 +156,9 @@ interface TransformContext {
 async function transformEvent(
   event: EventListItem,
   ctx: TransformContext,
-  attended: Map<string, number>
+  attended: Map<string, number>,
+  here: Map<string, number>,
+  featured: Featured | null
 ) {
   return {
     id: event.id,
@@ -166,6 +177,13 @@ async function transformEvent(
     session: eventSession(event),
     timezone: event.timezone,
     venueName: event.venue_name,
+    /*
+     * The venue the card says it is at, `{ id, name }` or null (`eventVenue`):
+     * while a venue is taken over by this event, Places leaves the venue out
+     * and this card is where the place is still named. Null falls back to
+     * `venueName`, the organiser's free text.
+     */
+    venue: eventVenue(event),
     address: event.address,
     city: await resolveEventCity(event.city, event.latitude, event.longitude, ctx.geocodes),
     state: event.state,
@@ -204,6 +222,8 @@ async function transformEvent(
      */
     doorPolicy: event.door_policy,
     isFeatured: event.is_featured,
+    // `{ kind, rank, by }` or null (lib/featured.ts); `isFeatured` above is the same fact for builds before it.
+    featured,
     /*
      * Resolved, never passed through.
      *
@@ -234,9 +254,20 @@ async function transformEvent(
     claimUrl: event.curated_at && !event.claimed_at ? `${appUrl()}/claim/${event.id}` : null,
     categories: event.categories.map((c) => c.category),
     media: event.media,
+    // Came: everybody who checked in, left or not. Never "here now".
     checkInCount: attended.get(event.id) ?? 0,
+    /*
+     * Here now: the Room's number (`hereCountFor`) — checked in, not checked
+     * out, guests only. A live card's "14 here now" read `currentCapacity`,
+     * which is the attended count above, so it kept two people who had left.
+     */
+    hereCount: here.get(event.id) ?? 0,
     favoriteCount: event._count.favorites,
     ratingCount: event._count.ratings,
+    // The detail's `stats.rsvpCount`, the same number: RSVPs `going` only, never
+    // `waitlisted`, `maybe` or `not_going`. On the card so the Pulse need not
+    // fetch every event's detail to show it.
+    goingCount: event._count.rsvps,
     isFavorited: ctx.favoriteEventIds.has(event.id),
     userCheckin: ctx.includeCheckins
       ? ctx.userCheckinMap?.[event.id] || { status: "none" }
@@ -275,8 +306,12 @@ export async function transformEvents(
    * night went on and people checked out. The headline count on the feed fell
    * while the event was at its busiest.
    */
-  const attended = await distinctAttendeeCounts(events.map((e) => e.id))
+  const ids = events.map((e) => e.id)
+  const [attended, here] = await Promise.all([distinctAttendeeCounts(ids), hereCounts(ids)])
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
-  return Promise.all(events.map((event) => transformEvent(event, withBudget, attended)))
+  const featured = featuredOf(events, ctx.featuredSeed ?? featuredSeed(undefined, new Date()))
+  return Promise.all(
+    events.map((event) => transformEvent(event, withBudget, attended, here, featured.get(event.id) ?? null))
+  )
 }

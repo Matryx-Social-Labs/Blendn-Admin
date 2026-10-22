@@ -33,6 +33,7 @@ jest.mock("@/lib/db", () => ({
           venue_name: null,
           city: "Bengaluru",
           organizer_id: "u1",
+          kind: "event",
           organizer_org_id: mockOrg,
           venue: { name: "The Humming Tree", owner_org_id: "org-a", claimed_at: new Date("2026-01-01T00:00:00Z") },
           curated_by: null,
@@ -52,6 +53,9 @@ jest.mock("@/lib/connection-metrics", () => ({ getConnectionMetrics: jest.fn() }
 jest.mock("@/lib/event-overview", () => ({ getEventOverview: jest.fn() }))
 jest.mock("@/lib/check-in-refusals", () => ({ eventRefusals: jest.fn(), refusalSummary: jest.fn() }))
 jest.mock("@/components/dashboard/live-tab", () => ({ LiveTab: () => null }))
+// The Announcements & sponsors tab's; their actions reach the socket server.
+jest.mock("@/components/event-messaging", () => ({ EventMessaging: () => null }))
+jest.mock("@/components/event-sponsors", () => ({ EventSponsors: () => null }))
 // Needs a mounted app router; it is the venue link in the header, not the tab.
 jest.mock("@/app/dashboard/events/[id]/venue-link", () => ({ EventVenueLink: () => null }))
 

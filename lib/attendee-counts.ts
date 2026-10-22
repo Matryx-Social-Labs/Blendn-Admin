@@ -81,6 +81,9 @@ export async function distinctAttendeeCountsByDay(
   return new Map(rows.map((r) => [r.occurrence_id, Number(r.people)]))
 }
 
+/** Inside now, as `hereCountFor` says it — one predicate for the Room, the list and the detail. */
+const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspended_at: null } } as const
+
 /**
  * The Room's headline number: how many people are inside RIGHT NOW.
  *
@@ -97,21 +100,33 @@ export async function distinctAttendeeCountsByDay(
  * rule is "in the room, counted, not listed" (SCRUM-141), and a count names
  * nobody.
  *
- * Read by the socket emitters (`hereCount`) and `room-preview`, and nothing
- * else.
+ * Read by the socket emitters (`hereCount`), `room-preview`, and the events
+ * list and detail (`hereCount`, through `hereCounts`).
  */
 export async function hereCountFor(eventId: string): Promise<number> {
   const rows = await db.event_check_ins.findMany({
-    where: {
-      event_id: eventId,
-      status: "checked_in",
-      kind: "attendee",
-      user: { suspended_at: null },
-    },
+    where: { event_id: eventId, ...HERE_NOW },
     distinct: ["user_id"],
     select: { user_id: true },
   })
   return rows.length
+}
+
+/**
+ * `hereCountFor` for a page of events in one read: the events list's
+ * `hereCount`, so a card's "here now" is the Room's number and never the
+ * attended one (`checkInCount`), which keeps everyone who has left.
+ */
+export async function hereCounts(eventIds: readonly string[]): Promise<Map<string, number>> {
+  if (eventIds.length === 0) return new Map()
+  const rows = await db.event_check_ins.findMany({
+    where: { event_id: { in: [...eventIds] }, ...HERE_NOW },
+    distinct: ["event_id", "user_id"],
+    select: { event_id: true },
+  })
+  const counts = new Map<string, number>()
+  for (const { event_id } of rows) counts.set(event_id, (counts.get(event_id) ?? 0) + 1)
+  return counts
 }
 
 /**
@@ -120,8 +135,15 @@ export async function hereCountFor(eventId: string): Promise<number> {
  * LIMIT, so a profile said 3 above a list of 1, and a page whose newest event
  * was deleted came back short. Both queries below take this.
  */
+// any-kind: a person's own nights out, the places they went live at included and
+// labelled as places (D-6). The count and the list share it, so they agree.
 const LIVE_EVENT = Prisma.sql`
   AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.deleted_at IS NULL)
+`
+
+/** `LIVE_EVENT`, real events only: what anybody but the person sees of them. */
+const LIVE_REAL_EVENT = Prisma.sql`
+  AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.deleted_at IS NULL AND e.kind = 'event')
 `
 
 /**
@@ -131,14 +153,23 @@ const LIVE_EVENT = Prisma.sql`
  * only outing was a three-day conference was told they had attended three
  * events. It is rendered to the user as "events attended" on their own profile.
  */
-export async function distinctEventsAttended(userId: string): Promise<number> {
+export async function distinctEventsAttended(
+  userId: string,
+  /**
+   * Whether the places they went live at count (D-6). Yes for their own
+   * profile and `/me/attendance`, whose list includes them; never for anybody
+   * else's view of them — how many venue days somebody has is a trail of where
+   * they go out, for nothing a stranger needs (step 4 review).
+   */
+  opts: { places: boolean } = { places: false }
+): Promise<number> {
   const [row] = await db.$queryRaw<{ events: bigint }[]>`
     SELECT COUNT(DISTINCT event_id) AS events
     FROM event_check_ins
     WHERE user_id = ${userId}
       AND status::text IN (${Prisma.join(ATTENDED)})
       AND kind = 'attendee'
-      ${LIVE_EVENT}
+      ${opts.places ? LIVE_EVENT : LIVE_REAL_EVENT}
   `
   return Number(row?.events ?? 0)
 }

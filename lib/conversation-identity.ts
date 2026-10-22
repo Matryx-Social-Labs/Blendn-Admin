@@ -53,6 +53,15 @@ export interface ConversationIdentity {
 export const UNNAMED = "Someone"
 
 /**
+ * The first word of a display name: what the invite preview shows a person
+ * who has not signed in, and what a crew's room calls its members — never the
+ * full name (SCRUM-493). "Someone" stays "Someone".
+ */
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name
+}
+
+/**
  * What `subjectId` is called inside this conversation.
  *
  * `realName` is the caller's — it is only *returned* when this person has

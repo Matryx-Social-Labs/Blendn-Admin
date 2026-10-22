@@ -6,6 +6,7 @@ import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { identityForRef } from "@/lib/identity"
 import { ageFrom } from "@/lib/age"
+import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import {
@@ -14,6 +15,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
+import { SYSTEM_USER_ID } from "@/lib/event-kind"
 
 export async function GET(
   request: NextRequest,
@@ -38,6 +40,9 @@ export async function GET(
      * pseudonym they kept at another.
      */
     const { userId, room, identified } = await identityForRef(authUser.userId, ref)
+    // The owner of every venue day is not a person anyone can look at; its
+    // "events organised" would be a count of every venue day ever made.
+    if (userId === SYSTEM_USER_ID) return notFoundResponse("User not found")
 
     // Get the user's public profile
     const user = await db.user.findUnique({
@@ -63,6 +68,10 @@ export async function GET(
             photos: true,
             work_field: true,
             blur_photo: true,
+            languages: true,
+            home_state: true,
+            sun_sign: true,
+            sign_system: true,
           },
         },
         user_interests: {
@@ -183,6 +192,10 @@ export async function GET(
             bio: user.profile?.bio || null,
             occupation: user.profile?.occupation || null,
             education: user.profile?.education || null,
+            // Tier B (plan v2 §8.5): the whole set only once they are known to you.
+            languages: languageLabels(user.profile?.languages),
+            homeState: homeStateLabel(user.profile?.home_state),
+            sign: signLabel(user.profile?.sun_sign, user.profile?.sign_system),
           }
         : {
             /*
@@ -199,7 +212,9 @@ export async function GET(
       interests: user.user_interests.map((ui) => ui.category),
       memberSince: user.createdAt,
       stats: {
-        eventsAttended: await distinctEventsAttended(user.id),
+        // Your own count includes the places you went live at, as your list
+        // does; anybody else's view of you counts events only.
+        eventsAttended: await distinctEventsAttended(user.id, { places: isOwnProfile }),
         eventsFavorited: user._count.event_favorites,
         eventsOrganized: user._count.organized_events,
       },

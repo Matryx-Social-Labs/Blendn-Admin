@@ -4,8 +4,8 @@ import { isDeepStrictEqual } from "node:util"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
-import { auditLog } from "@/lib/audit-log"
+import { currentUser, requireAdmin } from "@/lib/current-user"
+import { auditInTx, auditLog } from "@/lib/audit-log"
 import { haversineDistanceMeters } from "@/lib/geo"
 import { fenceCentre, validateGeofence, type Geofence } from "@/lib/geofence"
 import { GEOFENCE_MESSAGES } from "@/lib/geofence-input"
@@ -35,10 +35,11 @@ function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }
 }
 import { VENUE_TYPES, venueTypeLabel } from "@/lib/venue-types"
 import { defaultVenueFence, nearbyVenues, type NearbyVenue } from "@/lib/venue-rules"
-import { type venue_type } from "@prisma/client"
+import { type Prisma, type venue_type } from "@prisma/client"
 import { homeOrgIdFor } from "@/lib/event-ownership"
 import { activeMembership } from "@/lib/org-membership"
 import { overUserLimit } from "@/lib/rate-limit"
+import { realEventsWhere } from "@/lib/event-kind"
 
 /**
  * Creating and claiming venues — the first write path this table has ever had.
@@ -69,10 +70,11 @@ import { overUserLimit } from "@/lib/rate-limit"
  * undoable.
  */
 
+/** The caller, with the role the database holds now (step 18): an admin's branch here touches any venue. */
 async function requireUser() {
-  const session = await getAuth()
-  if (!session?.user) throw new Refusal("Unauthorized")
-  return session.user
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
+  return user
 }
 
 /**
@@ -225,7 +227,19 @@ export interface UpdateVenueInput {
    */
   lat?: number
   lng?: number
+  /**
+   * How many floors the app's map draws the building with (owner, 2026-10-09).
+   * Null clears it. The owner's organisation or an admin only: the organisation
+   * that added an unclaimed venue corrects the place, not how it stands on the
+   * map.
+   */
+  floors?: number | null
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** The building's floors, as the CHECK `venues_floors_range` allows. */
+const MAX_FLOORS = 200
 
 /**
  * Load a live venue the caller is allowed to change, or throw.
@@ -243,6 +257,8 @@ async function venueForWrite(
   id: string,
   user: { id: string; role: string }
 ): Promise<{ id: string; name: string; owner_org_id: string | null }> {
+  // A server action's argument is whatever the client sent: not a uuid is not found, not a 500.
+  if (!UUID.test(id)) throw new Refusal("Venue not found")
   const venue = await db.venues.findUnique({
     where: { id, deleted_at: null },
     select: { id: true, name: true, owner_org_id: true, created_by_org_id: true },
@@ -283,6 +299,7 @@ const FORM_FIELD = {
   latitude: "lat",
   longitude: "lng",
   geofence: "geofence",
+  floors: "floors",
 } as const
 
 /** A polygon's corner count, "circle", or null for no outline. */
@@ -301,8 +318,16 @@ function fenceShape(value: unknown): number | "circle" | null {
  */
 export async function updateVenue(id: string, input: UpdateVenueInput): Promise<void> {
   const user = await requireUser()
-  await venueForWrite(id, user)
+  const writable = await venueForWrite(id, user)
   refuseUnknownVenueType(input.venueType)
+  if (input.floors !== undefined) {
+    if (user.role !== "app_admin" && !writable.owner_org_id) {
+      throw new Refusal("Only the venue's owner or an admin sets its floors.")
+    }
+    if (input.floors !== null && (!Number.isInteger(input.floors) || input.floors < 1 || input.floors > MAX_FLOORS)) {
+      throw new Refusal(`Floors is a whole number from 1 to ${MAX_FLOORS}, or empty.`)
+    }
+  }
 
   /*
    * Both or neither, checked before anything is written. Half a coordinate pair
@@ -335,6 +360,7 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
       latitude: true,
       longitude: true,
       geofence: true,
+      floors: true,
     },
   })
 
@@ -377,6 +403,7 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
       : {}),
     ...(geofence ? { geofence: geofence as object } : {}),
     ...(movingPin ? { latitude: input.lat, longitude: input.lng } : {}),
+    ...(input.floors !== undefined ? { floors: input.floors } : {}),
   }
   await db.venues.update({ where: { id }, data })
 
@@ -405,6 +432,61 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
   }
   revalidatePath("/dashboard/venues")
   revalidatePath(`/dashboard/venues/${id}`)
+}
+
+/**
+ * "Open on Blendn" (D-13): whether the app lists a claimed venue in Places and
+ * on its home map. Off, the venue leaves both; its events still show, and its
+ * page and Go Live are untouched (owner's definition, step 18).
+ *
+ * A claimed venue only — the opt-out is its owner's, and an unclaimed venue
+ * is always listed whatever the column says (`openOnBlendnWhere`). The owner's
+ * organisation or an admin, by the role the database holds now
+ * (`currentUser`), not the cookie's claim. The column and its audit row are
+ * one transaction: a switch nobody can account for is the failure PL-E04
+ * exists to catch. Setting what is already set writes nothing.
+ */
+export async function setVenueOpenOnBlendn(id: string, open: boolean): Promise<void> {
+  const user = await currentUser()
+  if (!user) throw new Refusal("Unauthorized")
+  // A server action's argument is whatever the client sent.
+  if (typeof open !== "boolean") throw new Refusal("Open on Blendn is on or off.")
+  const venue = await venueForWrite(id, user)
+  if (!venue.owner_org_id) {
+    throw new Refusal("Only a claimed venue can leave the app's Places. An unclaimed one is always listed.")
+  }
+  // Taking a venue out of the app is its organisation's owners' and admins'
+  // call, not every member's (step 18 security review, L2): staff run nights.
+  if (user.role !== "app_admin") {
+    const manager = await db.organisation_members.findFirst({
+      where: { user_id: user.id, org_id: venue.owner_org_id, role: { in: ["owner", "admin"] }, ...activeMembership },
+      select: { id: true },
+    })
+    if (!manager) throw new Refusal("Only the venue organisation's owners and admins can change this.")
+  }
+
+  const changed = await db.$transaction(async (tx) => {
+    // Conditional, so two clicks racing write one row and one audit entry.
+    const { count } = await tx.venues.updateMany({
+      where: { id, deleted_at: null, open_on_blendn: !open },
+      data: { open_on_blendn: open },
+    })
+    if (count === 0) return false
+    await auditInTx(tx, {
+      userId: user.id,
+      action: open ? "venue.opened_on_blendn" : "venue.closed_on_blendn",
+      resource: "venue",
+      resourceId: id,
+      details: { open_on_blendn: open },
+      orgId: venue.owner_org_id,
+    })
+    return true
+  })
+
+  if (changed) {
+    revalidatePath("/dashboard/venues")
+    revalidatePath(`/dashboard/venues/${id}`)
+  }
 }
 
 /**
@@ -452,7 +534,9 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
    * hides no row.
    */
   const upcoming = await db.events.count({
-    where: { venue_id: id, deleted_at: null, end_time: { gte: new Date() }, status: { not: "cancelled" } },
+    // Hosts' bookings. The venue's own live room for today is not one, and
+    // would make every venue anybody went live at today impossible to retire.
+    where: { venue_id: id, deleted_at: null, ...realEventsWhere, end_time: { gte: new Date() }, status: { not: "cancelled" } },
   })
   if (upcoming > 0) {
     throw new Refusal(
@@ -487,8 +571,7 @@ export async function retireVenue(id: string, reason?: string): Promise<void> {
  * catalogue rather than about one organisation.
  */
 export async function restoreVenue(id: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const { count } = await db.venues.updateMany({
     where: { id, deleted_at: { not: null } },
@@ -514,8 +597,7 @@ export async function restoreVenue(id: string): Promise<void> {
  * that is a dispute, and a dispute has a person in it.
  */
 export async function assignVenueOwner(venueId: string, orgId: string): Promise<void> {
-  const user = await requireUser()
-  if (user.role !== "app_admin") throw new Refusal("Forbidden")
+  const user = await requireAdmin()
 
   const venue = await db.venues.findUnique({
     where: { id: venueId, deleted_at: null },
@@ -532,7 +614,9 @@ export async function assignVenueOwner(venueId: string, orgId: string): Promise<
 
   await db.venues.update({
     where: { id: venueId },
-    data: { owner_org_id: orgId, claimed_at: new Date() },
+    // A new owner starts open on Blendn (step 18 security review, M5): the
+    // switch was the last owner's choice, and they could close it on the way out.
+    data: { owner_org_id: orgId, claimed_at: new Date(), open_on_blendn: true },
   })
 
   auditLog({
@@ -564,6 +648,37 @@ const SEARCH_STOPWORDS = new Set(["the", "and", "of", "at", "in", "on", "by", "a
 /** Read before ranking, so a name-sorted page of "Cafe …" rows cannot crowd the best match out. */
 const SEARCH_CANDIDATES = 50
 const SEARCH_RESULTS = 8
+
+/** What the venue picker reads (searchVenues, venueById), and how it reads it. */
+const venueOptionSelect = {
+  id: true,
+  name: true,
+  venue_type: true,
+  address: true,
+  city: true,
+  latitude: true,
+  longitude: true,
+  capacity: true,
+  geofence: true,
+  owner_org_id: true,
+} as const
+
+function toVenueOption(v: Prisma.venuesGetPayload<{ select: typeof venueOptionSelect }>): VenueOption {
+  return {
+    id: v.id,
+    name: v.name,
+    venueTypeLabel: venueTypeLabel(v.venue_type),
+    address: v.address,
+    city: v.city,
+    lat: v.latitude,
+    lng: v.longitude,
+    capacity: v.capacity,
+    geofence: v.geofence,
+    // Shown so an organiser knows the owner will see this event's operational
+    // side. Who that owner *is* stays hidden — that would be a customer list.
+    claimed: v.owner_org_id !== null,
+  }
+}
 
 /**
  * Venues an organiser can pick from when creating an event.
@@ -601,18 +716,7 @@ export async function searchVenues(query: string): Promise<VenueOption[]> {
         ...terms.map((w) => ({ name: { contains: w, mode: "insensitive" as const } })),
       ],
     },
-    select: {
-      id: true,
-      name: true,
-      venue_type: true,
-      address: true,
-      city: true,
-      latitude: true,
-      longitude: true,
-      capacity: true,
-      geofence: true,
-      owner_org_id: true,
-    },
+    select: venueOptionSelect,
     orderBy: { name: "asc" },
     take: SEARCH_CANDIDATES,
   })
@@ -629,20 +733,7 @@ export async function searchVenues(query: string): Promise<VenueOption[]> {
     .slice(0, SEARCH_RESULTS)
     .map(({ v }) => v)
 
-  return venues.map((v) => ({
-    id: v.id,
-    name: v.name,
-    venueTypeLabel: venueTypeLabel(v.venue_type),
-    address: v.address,
-    city: v.city,
-    lat: v.latitude,
-    lng: v.longitude,
-    capacity: v.capacity,
-    geofence: v.geofence,
-    // Shown so an organiser knows the owner will see this event's operational
-    // side. Who that owner *is* stays hidden — that would be a customer list.
-    claimed: v.owner_org_id !== null,
-  }))
+  return venues.map(toVenueOption)
 }
 
 /** Re-hydrate the picker when an existing event is opened for editing. */
@@ -650,30 +741,7 @@ export async function venueById(id: string): Promise<VenueOption | null> {
   await requireUser()
   const v = await db.venues.findUnique({
     where: { id, deleted_at: null },
-    select: {
-      id: true,
-      name: true,
-      venue_type: true,
-      address: true,
-      city: true,
-      latitude: true,
-      longitude: true,
-      capacity: true,
-      geofence: true,
-      owner_org_id: true,
-    },
+    select: venueOptionSelect,
   })
-  if (!v) return null
-  return {
-    id: v.id,
-    name: v.name,
-    venueTypeLabel: venueTypeLabel(v.venue_type),
-    address: v.address,
-    city: v.city,
-    lat: v.latitude,
-    lng: v.longitude,
-    capacity: v.capacity,
-    geofence: v.geofence,
-    claimed: v.owner_org_id !== null,
-  }
+  return v ? toVenueOption(v) : null
 }

@@ -79,6 +79,28 @@ railway run npx prisma migrate deploy
 
 Railway also runs this automatically on deploy, so you rarely need it by hand.
 
+#### A migration is a transaction only if it says so
+
+`prisma migrate deploy` sends a migration file **statement by statement,
+outside any transaction** (measured in the step 17 review: a `CREATE` followed
+by a failing statement left the table behind, and `SET LOCAL lock_timeout` set
+nothing). A file that fails half-way leaves its first statements applied and
+the deploy blocked on a migration Prisma marks failed. So a migration with more
+than one statement wraps itself:
+
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+-- … the statements …
+COMMIT;
+```
+
+The exception is `ALTER TYPE … ADD VALUE`, which goes in a file of its own: a
+value cannot be used in the transaction that added it. Migrations before
+2026-10-09 (step 16's included) say "Prisma runs a migration in one
+transaction"; that comment is wrong, and the files are left as they are,
+because editing an applied migration changes its checksum (the renamed migrations, below).
+
 #### The test accounts are written by the same step
 
 `railway.json`'s pre-deploy command is `npm run railway:predeploy`: the
@@ -316,6 +338,10 @@ so it is never related to session or login state.
 | `EMAIL_FOOTER_ADDRESS` | No | Registered office, shown in the email footer. Omitted entirely when unset — a made-up address in a compliance footer is worse than none. Set it before any bulk sending |
 | `CRON_SECRET` | Yes | Bearer token for `/api/cron/*`. The endpoint rejects everything when unset |
 | `SEED_PASSWORD` | Staging only | Password for the dashboard test accounts, set on every deploy by `scripts/test-accounts.ts`. Never on production — the step refuses there anyway |
+| `REDIS_URL` | With more than one replica | Shares rate limits and the Socket.io adapter across replicas. Without it a Go Live's end evicts sockets only on the replica that ran it (the per-emit filter still keeps the room from reaching them) |
+| `PLUS_GATING` | No | Where Blendn+ is gated and since when: comma-separated `<city>:<YYYY-MM-DD>` (the day gating goes on, midnight IST), `*:<date>` for everywhere; a city without a date is gated with no trial; `true` = everywhere, no trial. Cities match through one alias map (`Bangalore` is Bengaluru); a place with no city is gated once anything is. Unset or `false`: launch season everywhere. Setting it is the whole switch: the trial (accounts that existed and came out in the 90 days before the date) is granted by the server at their first gate (docs/IAP-SETUP.md) |
+| `REVENUECAT_WEBHOOK_SECRET` | For Blendn+ | 32+ characters, chosen by us (`openssl rand -hex 32`). The RevenueCat webhook's Authorization header is `Bearer <this>`. Unset: the webhook refuses everything and no store purchase grants Blendn+. Production grants only PRODUCTION purchases, every other environment only SANDBOX ones (`RAILWAY_ENVIRONMENT_NAME`). Setup: docs/IAP-SETUP.md |
+| `REVENUECAT_SECRET_KEY` | For Blendn+ transfers | RevenueCat's secret API key (`sk_…`). A `TRANSFER` moves only what RevenueCat's own record of the receiving account confirms; unset, transfers move nothing (`unreconciled`) — fail closed. Also deletes an erased account at RevenueCat. Never in the app |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |
 | `PORT` | No | Server port (Railway sets this) |

@@ -49,11 +49,8 @@ const ROOT = join(__dirname, "..")
  * chose, and an ordering nobody wrote down is an ordering somebody will change.
  */
 const ALLOWED: Record<string, string> = {
-  "app/dashboard/events/[id]/page.tsx": [
-    "curationSelect is spread FIRST and the duplicated keys (start_time,",
-    "end_time, organizer_org_id) are the identical `true` either way. The",
-    "ordering is what makes that safe rather than lucky, and the file says so.",
-  ].join(" "),
+  // Empty since step 15: the event page's select moved to `lib/event-page.ts`,
+  // which spreads `curationSelect` and does not name its keys again.
 }
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {

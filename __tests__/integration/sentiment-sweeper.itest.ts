@@ -1,4 +1,4 @@
-import { sweepSentiment } from "@/lib/sentiment-sweeper"
+import { MAX_MESSAGES_PER_SWEEP, sweepSentiment } from "@/lib/sentiment-sweeper"
 import { buildLiveSnapshot } from "@/lib/live-snapshot"
 import { deriveAlerts } from "@/lib/live-metrics"
 
@@ -230,5 +230,42 @@ describe("what it refuses to classify", () => {
     const after = await db.event_feedback.findUniqueOrThrow({ where: { id: row.id } })
     expect(after.source).toBe("human")
     expect(after.sentiment).toBe("positive")
+  })
+})
+
+describe("only event rooms are classified (step 7)", () => {
+  it("a board post's room never starves an event's: its messages are not selected at all", async () => {
+    /*
+     * What is classified is how people feel about an event (`event_feedback`
+     * has an `event_id`), and a board post's room has none — so its messages
+     * are never written back, and were they selected they would be selected
+     * first, oldest-first, on every pass for ever. More than a pass's worth,
+     * older than the event room's message: without `kind = 'event'` the event
+     * message never comes up.
+     */
+    const host = await makeUser("snt-board-host")
+    users.push(host)
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const post = await db.board_posts.create({ data: { event_id: eventId, author_id: host, kind: "chat", body: "board" } })
+    const boardRoom = await db.chat_groups.create({ data: { kind: "board_post", board_post_id: post.id, name: "board", status: "active" } })
+    const old = new Date(Date.now() - 24 * 60 * 60_000)
+    await db.chat_messages.createMany({
+      data: Array.from({ length: MAX_MESSAGES_PER_SWEEP + 1 }, (_, i) => ({
+        chat_group_id: boardRoom.id,
+        user_id: host,
+        content: `GOOD board ${i}`,
+        type: "text" as const,
+        created_at: old,
+      })),
+    })
+    const { eventId: roomEvent } = await roomWith(["BAD QUEUE at the door"])
+
+    for (let pass = 0; pass < 30; pass++) {
+      if ((await db.event_feedback.count({ where: { event_id: roomEvent } })) > 0) break
+      await sweepSentiment()
+    }
+    expect(await db.event_feedback.count({ where: { event_id: roomEvent } })).toBe(1)
+    expect(await db.event_feedback.count({ where: { message: { chat_group_id: boardRoom.id } } })).toBe(0)
   })
 })

@@ -35,6 +35,7 @@ export async function uniqueEventSlug(title: string, excludeEventId?: string): P
   const base = slugify(title, { lower: true, strict: true }) || "event"
 
   const rows = await db.events.findMany({
+    // any-kind: a slug is unique across every row, venue days included.
     where: {
       slug: { startsWith: base },
       ...(excludeEventId ? { id: { not: excludeEventId } } : {}),

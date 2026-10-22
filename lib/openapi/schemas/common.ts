@@ -9,12 +9,27 @@ export const SuccessResponseSchema = z
   })
   .openapi("SuccessResponse")
 
+/** The success envelope around one route's `data`. */
+export const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
+
+/** Security requirements, naming the schemes `registry.ts` registers. */
+export const bearerAuth = [{ BearerAuth: [] }]
+export const sessionAuth = [{ SessionAuth: [] }]
+
 // Standard error response
 export const ErrorResponseSchema = z
   .object({
     success: z.literal(false),
     error: z.string(),
     errorCode: z.string().optional(),
+    reasonCode: z
+      .string()
+      .optional()
+      .describe(
+        "Why, beside an `errorCode` that keeps the value installed builds match on: `ACCOUNT_SUSPENDED`, " +
+          "`ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, " +
+          "`PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`."
+      ),
   })
   .openapi("ErrorResponse")
 
@@ -105,44 +120,41 @@ registry.register("DeviceInfo", DeviceInfoSchema)
  * RSVP, favourite, board, check-in, and starting or sending a DM.
  */
 export const PARTICIPATION_GATE =
-  "403 `FORBIDDEN` \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
-  "profile has neither finished onboarding nor an adult age on file (SCRUM-331). "
+  "403 \"Finish setting up your profile first. Blend'n is for people 18 and over.\" when the " +
+  "profile has neither finished onboarding nor an adult age on file (SCRUM-331) — `errorCode` stays " +
+  "`FORBIDDEN`; the event, check-in and Go Live routes add `reasonCode` `PROFILE_INCOMPLETE`. "
+
+const errorBody = (description: string, schema: z.ZodTypeAny = ErrorResponseSchema) => ({
+  description,
+  content: { "application/json": { schema } },
+})
 
 export const standardErrors = {
-  400: {
-    description: "Validation error",
-    content: {
-      "application/json": { schema: ValidationErrorSchema },
-    },
-  },
-  401: {
-    description: "Unauthorized",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
-  403: {
-    description: "Forbidden",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
-  404: {
-    description: "Not found",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
-  429: {
-    description: "Rate limited",
-    content: {
-      "application/json": { schema: RateLimitErrorSchema },
-    },
-  },
-  500: {
-    description: "Internal server error",
-    content: {
-      "application/json": { schema: ErrorResponseSchema },
-    },
-  },
+  400: errorBody("Validation error", ValidationErrorSchema),
+  401: errorBody("Unauthorized"),
+  403: errorBody("Forbidden"),
+  404: errorBody("Not found"),
+  429: errorBody("Rate limited", RateLimitErrorSchema),
+  500: errorBody("Internal server error"),
 } as const
+
+/**
+ * A display-only line two people (or two crews) share — matching v2, plan v2
+ * §8 (`lib/overlaps.ts`). A sentence ready to print; `kind` picks the icon.
+ * Never scored. Tier B kinds (`language`, `home_state`, `sign`) only in rooms
+ * of eight or more before a reveal, one per card.
+ */
+export const OverlapSchema = z
+  .object({
+    kind: z.enum(["interest", "ipl", "this_or_that", "language", "home_state", "sign"]),
+    text: z.string().describe("e.g. \"Both CSK — in RCB country 💛\", \"You both picked filter coffee over chai\", \"Both from Kerala\""),
+  })
+  .openapi("Overlap")
+
+/** A badge earned by GPS check-ins, never typed or bought (plan v2 §8.6). */
+export const BadgeSchema = z
+  .object({
+    kind: z.enum(["regular_here", "shows_up", "nights_out", "nights_together"]),
+    label: z.string().describe("\"Regular here\", \"Shows up\", \"5+ nights this month\", \"6 nights out together\""),
+  })
+  .openapi("Badge")

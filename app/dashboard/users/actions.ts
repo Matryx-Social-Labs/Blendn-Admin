@@ -5,10 +5,11 @@ import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { normalizeLocationToCity } from "@/lib/location"
 import { revalidatePath } from "next/cache"
-import { getAuth } from "@/lib/auth"
+import { requireAdmin } from "@/lib/current-user"
 import { auditLog } from "@/lib/audit-log"
 import { ageFrom } from "@/lib/age"
 import type { user_role } from "@prisma/client"
+import { SYSTEM_USER_ID } from "@/lib/event-kind"
 
 export interface UserWithProfile {
   id: string
@@ -72,10 +73,7 @@ export async function getUsers(
   offset: number = 0
 ): Promise<{ users: UserWithProfile[]; total: number }> {
   try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Refusal("Forbidden")
-    }
+    await requireAdmin()
 
     /*
      * ANDed clauses, because two of them are ORs. `search` and `not-onboarded`
@@ -109,6 +107,8 @@ export async function getUsers(
     } else {
       clauses.push({ deletedAt: null })
     }
+    // The owner of every venue day is not somebody on the platform.
+    clauses.push({ id: { not: SYSTEM_USER_ID } })
 
     if (status === "onboarded") {
       clauses.push({ profile: { onboarded: true } })
@@ -203,10 +203,7 @@ export async function updateUser(
   }
 ) {
   try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Refusal("Forbidden")
-    }
+    const admin = await requireAdmin()
 
     // Only when sent: `normalizeLocationToCity(undefined)` is null, and a null
     // here would clear the column on a partial edit.
@@ -223,7 +220,8 @@ export async function updateUser(
         profile: { select: { phone: true, age: true, date_of_birth: true, location: true, onboarded: true } },
       },
     })
-    if (!before) throw new Refusal("User not found")
+    // Its address is the one thing that keeps anybody from signing in as it.
+    if (!before || id === SYSTEM_USER_ID) throw new Refusal("User not found")
 
     /*
      * Age is typed at sign-up and superseded by the birth date the moment one
@@ -308,13 +306,18 @@ export async function updateUser(
     note("age", before.profile?.age, data.profile?.age)
     note("location", before.profile?.location, normalizedLocation)
     note("onboarded", before.profile?.onboarded, data.profile?.onboarded)
-    auditLog({
-      userId: session.user.id,
-      action: "user.updated",
-      resource: "user",
-      resourceId: id,
-      details: { changed } as never,
-    })
+    // Nothing changed, no row: the dialog sends every field it shows and then the
+    // role, so a role-only save used to leave "user.updated {}" beside the real
+    // `user.role_changed` (SCRUM-614).
+    if (Object.keys(changed).length > 0) {
+      auditLog({
+        userId: admin.id,
+        action: "user.updated",
+        resource: "user",
+        resourceId: id,
+        details: { changed } as never,
+      })
+    }
 
     revalidatePath("/dashboard/users")
     return { success: true, user }
@@ -326,17 +329,14 @@ export async function updateUser(
 }
 
 export async function updateUserRole(id: string, role: user_role) {
-  const session = await getAuth()
-  if (!session?.user || session.user.role !== "app_admin") {
-    throw new Refusal("Forbidden")
-  }
-  const before = await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } })
+  const admin = await requireAdmin()
+  const before = id === SYSTEM_USER_ID ? null : await db.user.findUnique({ where: { id, deletedAt: null }, select: { role: true } })
   if (!before) throw new Refusal("User not found")
   await db.user.update({ where: { id, deletedAt: null }, data: { role } })
   // A role change is the canonical audited admin action (CLAUDE.md), and it
   // had no row: an attendee made an admin left nothing behind (SCRUM-131).
   auditLog({
-    userId: session.user.id,
+    userId: admin.id,
     action: "user.role_changed",
     resource: "user",
     resourceId: id,
@@ -397,13 +397,10 @@ export async function updateUserRole(id: string, role: user_role) {
  */
 export async function getUserStats() {
   try {
-    const session = await getAuth()
-    if (!session?.user || session.user.role !== "app_admin") {
-      throw new Refusal("Forbidden")
-    }
+    await requireAdmin()
 
     // "Accounts" means people on the platform; an erased row is not one.
-    const live = { deletedAt: null }
+    const live = { deletedAt: null, id: { not: SYSTEM_USER_ID } }
     const [total, onboarded, verified, suspended, deleted] = await Promise.all([
       db.user.count({ where: live }),
       db.profiles.count({ where: { onboarded: true, user: live } }),

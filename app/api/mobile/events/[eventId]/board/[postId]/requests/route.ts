@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { boardDenialMessage } from "@/lib/board"
+import { ALREADY_ASKED, BOARD_CLOSED, boardDenialMessage } from "@/lib/board"
 import { boardWriteDenial, checkBoardText } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
@@ -78,13 +78,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       select: { id: true, start_time: true },
     })
     if (!event) return notFoundResponse("Event not found")
-    if (event.start_time <= new Date()) {
-      return errorResponse("The board closes when the doors open — the room is open instead", 403)
-    }
+    if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
 
     const post = await db.board_posts.findFirst({
       where: { id: postId, event_id: eventId, deleted_at: null },
-      select: { id: true, author_id: true },
+      select: { id: true, author_id: true, kind: true, spaces_left: true },
     })
     if (!post) return notFoundResponse("That post is no longer on the board")
 
@@ -110,29 +108,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("That post is no longer on the board")
     }
 
+    // A chat post asks nothing of anybody, so there is nothing to ask to join.
+    if (post.kind === "chat") return errorResponse("A chat post doesn't take requests", 422)
+    // The board already shows it full; an ask on it could only be refused.
+    if (post.spaces_left === 0) return conflictResponse("That offer is full")
+
     const denial = await boardWriteDenial(eventId, user.userId)
     if (denial) return forbiddenResponse(boardDenialMessage(denial))
 
     /*
-     * They already said no to this.
+     * One ask per post, ever — whatever became of it.
      *
-     * The partial unique below only stops a *second pending* request, so
-     * without this a decline is followed by an identical ask a second later,
-     * for ever. The weekly cap bounds the total; this bounds the pestering of
-     * one person who has already answered.
-     *
-     * `withdrawn` is deliberately not included: withdrawing is the asker
-     * changing their own mind, and it has told the other person nothing.
+     * Refusing a re-ask only after a decline was a delivery of the decline:
+     * the one answer a second ask can be refused after is a no, so "you cannot
+     * ask again" told the asker what the other person decided. And refusing it
+     * after a decline but not after a withdrawal fails the same way one step
+     * later — a declined ask can be withdrawn, and the refusal on re-asking it
+     * would differ from a plain withdrawal's. So every earlier ask, pending,
+     * declined, withdrawn or accepted, answers with the same sentence the
+     * pending race below does.
      */
-    const refused = await db.board_requests.findFirst({
-      where: {
-        post_id: postId,
-        from_user_id: user.userId,
-        status: "declined",
-      },
+    const asked = await db.board_requests.findFirst({
+      where: { post_id: postId, from_user_id: user.userId },
       select: { id: true },
     })
-    if (refused) return conflictResponse("They have already answered this one")
+    if (asked) return conflictResponse(ALREADY_ASKED)
 
     /*
      * The message is read by one person the sender chose — riskier than a
@@ -158,11 +158,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
     } catch (error) {
       /*
-       * The partial unique `board_requests_one_pending_per_post`, doing its job:
-       * at most one pending request per direction per post. A double tap on a
-       * slow connection asks the same person the same question twice, which is
-       * exactly the pestering the caps exist to prevent, and a client retry is
-       * the ordinary way it happens rather than the exceptional one.
+       * The unique `(post_id, from_user_id)`, doing its job: one ask per post,
+       * ever. The read above answers the ordinary re-ask; this answers the one
+       * that raced it — a double tap on a slow connection, which is the
+       * ordinary way a client retry happens rather than the exceptional one.
        */
       if (
         error &&
@@ -170,7 +169,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         "code" in error &&
         (error as { code?: string }).code === "P2002"
       ) {
-        return conflictResponse("You have already asked — give them a moment")
+        return conflictResponse(ALREADY_ASKED)
       }
       throw error
     }

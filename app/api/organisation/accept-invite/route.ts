@@ -1,7 +1,7 @@
 import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { getAuth } from "@/lib/auth"
+import { currentUser } from "@/lib/current-user"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
@@ -37,8 +37,18 @@ export async function POST(req: NextRequest) {
   if (limited) return limited
 
   try {
-    const session = await getAuth()
-    if (!session?.user) {
+    /*
+     * The person, through `currentUser()`: the role the database holds and a
+     * session it has not ended (step 18 security review, L4). The address the
+     * invite is bound to is read from the row too — the session's email was
+     * minted at sign-in, and an address changed since then is not the one
+     * the invitation was sent to.
+     */
+    const caller = await currentUser()
+    const user = caller
+      ? { ...caller, email: (await db.user.findUniqueOrThrow({ where: { id: caller.id }, select: { email: true } })).email }
+      : null
+    if (!user) {
       return NextResponse.json(
         { success: false, error: "Sign in first, then open the invite link again.", needsSignIn: true },
         { status: 401 }
@@ -80,14 +90,14 @@ export async function POST(req: NextRequest) {
      * invite exists for; the token's state after that is bookkeeping.
      */
     const member = await db.organisation_members.findUnique({
-      where: { org_id_user_id: { org_id: invite.org_id, user_id: session.user.id } },
+      where: { org_id_user_id: { org_id: invite.org_id, user_id: user.id } },
       select: { id: true },
     })
     if (member) {
       return NextResponse.json({ success: true, orgName: invite.org.display_name, alreadyMember: true })
     }
 
-    const state = inviteState(invite, session.user.email ?? "")
+    const state = inviteState(invite, user.email)
     if (state !== "valid") {
       const message = {
         used: "This invite has already been used.",
@@ -116,19 +126,19 @@ export async function POST(req: NextRequest) {
       if (claimed.count === 0) throw new Error("ALREADY_ACCEPTED")
 
       await tx.organisation_members.create({
-        data: { org_id: invite.org_id, user_id: session.user.id, role: invite.role },
+        data: { org_id: invite.org_id, user_id: user.id, role: invite.role },
       })
 
       // An attendee accepting a host invite needs dashboard access, which is
       // gated on the User role rather than on membership. Only ever a promotion
       // out of `attendee` — an existing organizer is not demoted or changed.
-      if (session.user.role === "attendee") {
-        await tx.user.update({ where: { id: session.user.id }, data: { role: "organizer" } })
+      if (user.role === "attendee") {
+        await tx.user.update({ where: { id: user.id }, data: { role: "organizer" } })
       }
     })
 
     auditLog({
-      userId: session.user.id,
+      userId: user.id,
       action: "org.invite.accepted",
       resource: "organisation",
       resourceId: invite.org_id,
@@ -142,7 +152,7 @@ export async function POST(req: NextRequest) {
       role: invite.role,
       // The session's role claim is now stale if they were an attendee; the
       // client signs out and back in rather than us minting a new token here.
-      roleChanged: session.user.role === "attendee",
+      roleChanged: user.role === "attendee",
     })
   } catch (err) {
     if (err instanceof Error && err.message === "ALREADY_ACCEPTED") {

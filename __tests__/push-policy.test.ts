@@ -39,8 +39,10 @@ jest.mock("@/lib/db", () => ({
   },
 }))
 
+// keptApartIn: the room's kept-apart set (board rooms add closed pairs); blocks here.
 jest.mock("@/lib/conversations", () => ({
   blockCounterparties: (...a: unknown[]) => blocks(...a),
+  keptApartIn: (...a: unknown[]) => blocks(...a),
 }))
 
 jest.mock("@/lib/socket-server", () => ({ emitChatMessage: jest.fn() }))
@@ -77,6 +79,13 @@ import { resetMemoryStore } from "@/lib/rate-limit-store"
 
 const read = (...p: string[]) => readFileSync(join(__dirname, "..", ...p), "utf8")
 
+/** An event's room: `last_allowed_at` is read only in a venue day's (`liveInVenueDay`). */
+// The room's door reads its kind and owner too (step 7): an event room, published.
+const eventRoom = {
+  last_allowed_at: null,
+  chat_group: { kind: "event", event: { kind: "event", status: "published", deleted_at: null }, board_post: null },
+}
+
 beforeEach(() => {
   mockSent.length = 0
   resetMemoryStore()
@@ -86,7 +95,7 @@ beforeEach(() => {
   created.mockResolvedValue({})
   blocks.mockResolvedValue([])
   parentOf.mockResolvedValue({ user_id: "author" })
-  membershipOf.mockResolvedValue({ status: "active" })
+  membershipOf.mockResolvedValue({ status: "active", ...eventRoom })
 })
 
 describe("where each kind lands", () => {
@@ -138,10 +147,15 @@ describe("where each kind lands", () => {
     }
   })
 
+  it("a venue's offer is on its own channel, never collapsed: two offers are two things to use (SCRUM-628)", () => {
+    // A promotion, so a person can silence it without silencing their events.
+    expect(deliveryFor({ type: "venue_offer", offerId: "o1" })).toEqual({ channelId: "offers" })
+  })
+
   it("never names a channel the app does not create", () => {
     // Every kind in the enum, so a kind added later is checked too. The app
-    // creates these three (blendn `lib/notifications.ts`); `default` only
-    // carries a payload with no type.
+    // creates these (blendn `lib/notifications.ts`; `offers` with the offer
+    // consent, SCRUM-628); `default` only carries a payload with no type.
     const block = /enum notification_kind \{([^}]*)\}/.exec(read("prisma", "schema.prisma"))![1]
     const kinds = block
       .split("\n")
@@ -150,7 +164,7 @@ describe("where each kind lands", () => {
     expect(kinds.length).toBeGreaterThan(10)
     for (const type of kinds) {
       const { channelId } = deliveryFor({ type: type as never, eventId: "e", conversationId: "c", chatGroupId: "g" })
-      expect(["messages", "rooms", "events"]).toContain(channelId)
+      expect(["messages", "rooms", "events", "offers"]).toContain(channelId)
     }
     expect(deliveryFor(undefined).channelId).toBe("default")
   })
@@ -228,6 +242,7 @@ describe("messages live in their inbox, not the bell", () => {
       preview: "y",
       chatGroupId: "g1",
       senderHandle: "h",
+      room: { kind: "event" },
     })
     expect(created).not.toHaveBeenCalled()
   })
@@ -301,7 +316,7 @@ describe("a room pushes replies, and only to the person replied to", () => {
   const send = (parentId: string | null, senderId = "sender") =>
     deliverToRoom({
       chatGroupId: "g1",
-      eventId: "e1",
+      scope: "e1",
       groupName: "Friday at Toit",
       senderId,
       senderAnonName: "Cosmic Panda",
@@ -334,6 +349,36 @@ describe("a room pushes replies, and only to the person replied to", () => {
     })
     // SCRUM-371: a room never sends another person's real id.
     expect(mockSent[0].data).toMatchObject({ type: "group_message", chatGroupId: "g1", senderId: "handle-of-sender" })
+    // And says which kind of room the tap opens (step 9 review, H2).
+    expect(mockSent[0].data).toMatchObject({ kind: "event" })
+    expect(mockSent[0].data).not.toHaveProperty("crewId")
+    expect(mockSent[0].data).not.toHaveProperty("blendId")
+  })
+
+  it.each([
+    ["crew", { crew_id: "crew-1", blend_id: null }, { kind: "crew", crewId: "crew-1" }],
+    ["blend", { crew_id: null, blend_id: "blend-1" }, { kind: "blend", blendId: "blend-1" }],
+  ])("a reply in a %s room carries the room's kind and owner, so the tap opens that room", async (kind, owner, data) => {
+    // The door's owner rows: the recipient a member of the crew, on a side of the open Blend.
+    const door = {
+      board_post: null,
+      crew: { dissolved_at: null, members: [{ user_id: "author" }] },
+      blend: {
+        closes_at: new Date(Date.now() + 3_600_000),
+        closed_at: null,
+        b_user_id: null,
+        occurrence: { check_ins: [{ user_id: "author" }] },
+        a_crew: { dissolved_at: null, hidden_at: null, members: [{ user_id: "author", user: { blocked_users: [], blocked_by: [], conversations_as_user1: [], conversations_as_user2: [] } }] },
+        b_crew: { dissolved_at: null, hidden_at: null, members: [] },
+        b_user: null,
+      },
+    }
+    membershipOf.mockResolvedValue({ status: "active", last_allowed_at: null, chat_group: { kind, event: null, ...owner, ...door } })
+    await send("p1")
+    expect(mockSent).toHaveLength(1)
+    expect(mockSent[0].data).toMatchObject({ type: "group_message", chatGroupId: "g1", ...data })
+    // Only its own room's owner: a crew reply names no Blend, a Blend reply no crew.
+    expect(mockSent[0].data).not.toHaveProperty(kind === "crew" ? "blendId" : "crewId")
   })
 
   it("replying to yourself pushes nobody", async () => {
@@ -349,13 +394,24 @@ describe("a room pushes replies, and only to the person replied to", () => {
   })
 
   it.each(["left", "banned"])("never reaches an author who has %s", async (status) => {
-    membershipOf.mockResolvedValue({ status })
+    membershipOf.mockResolvedValue({ status, ...eventRoom })
     await send("p1")
     expect(mockSent).toHaveLength(0)
   })
 
+  it("never reaches an author whose Go Live at the venue has ended, and does while it is open", async () => {
+    // A venue day's room is the people live in it (`liveInVenueDay`, F6).
+    const venueDay = (until: number) => ({ status: "active", last_allowed_at: new Date(until), chat_group: { kind: "event", event: { kind: "venue_day", status: "published", deleted_at: null }, board_post: null } })
+    membershipOf.mockResolvedValue(venueDay(Date.now() - 60_000))
+    await send("p1")
+    expect(mockSent).toHaveLength(0)
+    membershipOf.mockResolvedValue(venueDay(Date.now() + 60_000))
+    await send("p2")
+    expect(mockSent).toHaveLength(1)
+  })
+
   it("still reaches a muted author: muted cannot post, and still reads", async () => {
-    membershipOf.mockResolvedValue({ status: "muted" })
+    membershipOf.mockResolvedValue({ status: "muted", ...eventRoom })
     await send("p1")
     expect(mockSent).toHaveLength(1)
   })

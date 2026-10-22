@@ -52,7 +52,8 @@ describe("my org is one rule (SCRUM-148)", () => {
     ;(db.organisation_members.findFirst as jest.Mock).mockResolvedValue({ org_id: "org-oldest" })
     expect(await homeOrgIdFor({ id: "u1", role: "organizer" })).toBe("org-oldest")
     const call = (db.organisation_members.findFirst as jest.Mock).mock.calls[0][0]
-    expect(call.orderBy).toEqual({ created_at: "asc" })
+    // Oldest first, then org_id on a tie (step 14 review).
+    expect(call.orderBy).toEqual([{ created_at: "asc" }, { org_id: "asc" }])
     expect(JSON.stringify(call.where)).toContain('"status":{"not":"suspended"}')
     expect(await homeOrgIdFor({ id: "admin", role: "app_admin" })).toBeNull()
   })

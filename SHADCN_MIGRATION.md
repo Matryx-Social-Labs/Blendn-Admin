@@ -13,7 +13,7 @@ Resume here each session: check off completed items, update "Current State" if i
 ## Current State (as of 2026-06-27, post project-wide sweep)
 
 - shadcn is already configured: `components.json` — style `new-york`, baseColor `neutral`, cssVariables on, icons via `lucide`.
-- Installed primitives in `components/ui/`: avatar, badge, breadcrumb, button, calendar, card, chart, checkbox, drawer, dropdown-menu, form, input, label, popover, select, separator, sheet, sidebar, skeleton, sonner, switch, table, tabs, textarea, toggle, toggle-group, tooltip.
+- Installed primitives in `components/ui/`: avatar, badge, button, calendar, card, chart, checkbox, dropdown-menu, form, input, label, popover, select, separator, sheet, sidebar, skeleton, sonner, switch, table, tabs, textarea, tooltip.
 - **Missing primitives** (not yet `npx shadcn add`-ed): `dialog`, `alert-dialog`, `command`, `pagination`, `scroll-area`, `slider`. `progress` and `radio-group` were installed during the `event-form.tsx` split (2026-06-27). Install on-demand per task, not all upfront.
 - `components/credential-modal.tsx` is already done right — uses `Sheet` from shadcn. Use it as the reference pattern for "this is what good looks like here."
 
@@ -93,7 +93,7 @@ User showed a screenshot of `/dashboard` (the investor/ops overview page) and as
 
 - **Shell** (`app/dashboard/layout.tsx`, `app-sidebar.tsx`, `site-header.tsx`, `nav-main.tsx`, `nav-user.tsx`, `brand-logo.tsx`) — done. `nav-secondary.tsx`/`nav-documents.tsx` needed no changes (already plain).
 - **Dashboard home** (`components/dashboard/report-overview.tsx`, `export-menu.tsx`) — done. Recharts trend colors switched from `var(--brand*)` to `var(--chart-1/2/3/4)`. Also fixed the one inconsistency flagged earlier (header preview tiles weren't wrapped in `Card`) while in there.
-- **Events** (`app/dashboard/events/**`, `components/events-table.tsx`, `components/event-form/**`, `event-editor.tsx`, `event-list.tsx`, `location-picker.tsx`, `event-messaging.tsx`) — only `events/page.tsx` and `events-table.tsx` needed changes; everything under `event-form/**` was already theme-token-clean from the earlier split.
+- **Events** (`app/dashboard/events/**`, `components/events-table.tsx`, `components/event-form/**`, `event-editor.tsx`, `location-picker.tsx`, `event-messaging.tsx`) — only `events/page.tsx` and `events-table.tsx` needed changes; everything under `event-form/**` was already theme-token-clean from the earlier split.
 - **People** (`organisers/**`, `venue-owners/**`, `users/**`, `role-users-table.tsx`, `credential-modal.tsx`, `user-events-table.tsx`) — done, including fixing the empty-state icon color (`text-brand` → `text-muted-foreground`, since `--brand` no longer exists) and matching `users/loading.tsx`'s skeleton styling to the restyled real page.
 - **Chat/Moderation** (`chatrooms/**`, `chat-feed.tsx`, `moderation-queue.tsx`) — only `chatrooms/page.tsx` needed changes; `chat-feed.tsx`/`moderation-queue.tsx` were already theme-token-clean.
 - **Public/login** (`app/page.tsx`, `app/login/page.tsx`) — done.

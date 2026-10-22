@@ -27,3 +27,13 @@ it("the hero reads came back by name, not the last stage", () => {
   const src = readFileSync(join(__dirname, "..", "components", "dashboard", "overview-admin.tsx"), "utf8")
   expect(src).toMatch(/const metStage = data\.funnel\.find\(\(stage\) => stage\.label === "came back"\)/)
 })
+
+it("never counts the system user that owns every venue day as somebody who signed up", async () => {
+  const { db } = jest.requireMock("@/lib/db") as { db: { $queryRaw: jest.Mock } }
+  db.$queryRaw.mockClear()
+  await loopClosure()
+  const [strings, ...values] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]]
+  const sql = strings.join("?")
+  expect(sql).toMatch(/u\.id <> \?/)
+  expect(values).toContain("blendn-system")
+})
