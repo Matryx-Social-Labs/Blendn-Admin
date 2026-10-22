@@ -4,12 +4,15 @@
  * lookup, so how long a like takes says nothing about whether the other person
  * liked back. Pinned by the order and the count of the queries, not by timing.
  */
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+
 const log: string[] = []
 const record = <T,>(name: string, result: T): jest.Mock => jest.fn(async () => (log.push(name), result))
 
 const mockDb: Record<string, unknown> & { $transaction: jest.Mock; event_likes: Record<string, jest.Mock>; friendships: Record<string, jest.Mock>; private_conversations: Record<string, jest.Mock>; friend_requests: Record<string, jest.Mock> } = {
   event_likes: { upsert: record("event_likes.upsert", {}), findUnique: record<unknown>("event_likes.findUnique", null) },
   friendships: { findUnique: record<unknown>("friendships.findUnique", null) },
+  ended_friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
   private_conversations: { findUnique: record<unknown>("private_conversations.findUnique", null) },
   friend_requests: { findFirst: record<unknown>("friend_requests.findFirst", null) },
   chat_group_members: { findMany: record("chat_group_members.findMany", []) },

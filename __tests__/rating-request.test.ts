@@ -12,6 +12,7 @@ const mockDb = {
   event_check_ins: { findMany: jest.fn() },
   private_conversations: { findMany: jest.fn() },
   friendships: { findMany: jest.fn(async () => []) },
+  ended_friendships: { findMany: jest.fn(async () => []) },
   blocked_users: { findMany: jest.fn() },
   event_ratings: { findMany: jest.fn() },
   notifications: { createMany: jest.fn() },

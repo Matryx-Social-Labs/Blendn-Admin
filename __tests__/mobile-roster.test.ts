@@ -22,6 +22,7 @@ const mockDb = {
   // friends who let friends recognise them in rooms. Empty unless a case sets it.
   private_conversations: { findMany: jest.fn() },
   friendships: { findMany: jest.fn() },
+  ended_friendships: { findMany: jest.fn(async () => []) },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))

@@ -1710,6 +1710,12 @@ already is: counted in the headcount, listed nowhere.
   (1-40 chars, a word prefix). `total` is every friend listed for you, never the
   page. No event, room or arrival time in the payload. 403 `NOT_CHECKED_IN` when
   you are not checked in. The socket event `room:friends { eventId }` says "refetch".
+- **An ended friendship keeps the pair apart for 24 hours** (table
+  `ended_friendships`, migration `20261023120000_ended_friendships`): an unfriend
+  is silent, and without this the ex-friend's stranger card would appear in the
+  other's deck at that moment. For 24 h the pair stay off each other's deck,
+  roster and arrivals, and the like/wave/message-request refusals above apply.
+  Re-friending deletes the row; a block writes none (it already hides both ways).
 - The helpers are `lib/room-people.ts` (`notStrangersTo`, `knownToEachOther`,
   `strangersApartBetween`); a guard test fails the build when a people surface
   does not use them.

@@ -21,6 +21,7 @@ const mockDb = {
   blocked_users: { findMany: jest.fn() },
   private_conversations: { findMany: jest.fn() },
   friendships: { findMany: jest.fn(), findFirst: jest.fn(async () => null) },
+  ended_friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 

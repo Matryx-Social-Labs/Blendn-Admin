@@ -119,6 +119,7 @@ afterAll(async () => {
   await db.message_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
   await db.friend_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
   await db.friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
+  await db.ended_friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.presence_sessions.deleteMany({ where: { event_id: { in: events } } })
   await cleanup(users, events)
@@ -320,5 +321,68 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     expect(copy(friend)).toHaveProperty("hereCount")
     expect(copy(stranger).userId).toBe(roomHandle(eventId, leaver.id))
     expect(copy(leaver).userId).toBe(leaver.id)
+  })
+})
+
+describe("an ended friendship keeps the pair apart for 24 hours (B4, D17)", () => {
+  it("after an unfriend the ex-friend is absent from the deck and the roster; with ended_at 25 h ago they are present; re-friending clears the row", async () => {
+    const eventId = await liveEvent()
+    const [viewer, ex, stranger] = [await person("fir-b4-v"), await person("fir-b4-x"), await person("fir-b4-s")]
+    for (const p of [viewer, ex, stranger]) await checkIn(eventId, p)
+    await befriend(viewer, ex)
+    const [hEx, hStranger] = [roomHandle(eventId, ex.id), roomHandle(eventId, stranger.id)]
+    expect(await deck(eventId, viewer)).not.toContain(hEx)
+
+    await unfriend(viewer.id, ex.id)
+    // Silent, and no stranger card at that moment: for either of them.
+    for (const [a, hOther] of [[viewer, hEx], [ex, roomHandle(eventId, viewer.id)]] as const) {
+      expect(await deck(eventId, a)).not.toContain(hOther)
+      const listed = ((await roster(eventId, a)).body.data.attendees as { userId: string }[]).map((r) => r.userId)
+      expect(listed).not.toContain(hOther)
+    }
+    expect(await deck(eventId, viewer)).toContain(hStranger)
+
+    // The write routes agree: a like is the inert 200, a wave the not-here 403.
+    const like = await call(likesRoute.POST, `/api/mobile/events/${eventId}/matches/likes`, viewer, { method: "POST", body: { userId: hEx }, params: { eventId } })
+    expect(like.body.data).toEqual({ mutual: false })
+    expect(await db.event_likes.count({ where: { liker_id: viewer.id, liked_id: ex.id } })).toBe(0)
+
+    // Past the window they are strangers again.
+    const [user1_id, user2_id] = conversationPair(viewer.id, ex.id)
+    await db.ended_friendships.update({ where: { user1_id_user2_id: { user1_id, user2_id } }, data: { ended_at: new Date(Date.now() - 25 * 3600_000) } })
+    expect(await deck(eventId, viewer)).toContain(hEx)
+
+    // Re-friending deletes the row; blocking writes none.
+    await unfriend(viewer.id, ex.id) // no friendship now: writes nothing new
+    expect(await db.ended_friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } } })).not.toBeNull() // the old one, untouched
+    expect(await requestFriend(viewer.id, ex.id)).toBe("requested")
+    expect(await requestFriend(ex.id, viewer.id)).toBe("friends")
+    expect(await db.ended_friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } } })).toBeNull()
+  })
+
+  it("an unfriend writes the row once per friendship and overwrites it later; a block writes none; deleting an account cascades it", async () => {
+    const [a, b, c] = [await person("fir-b4-a"), await person("fir-b4-b"), await person("fir-b4-c")]
+    await befriend(a, b)
+    await unfriend(a.id, b.id)
+    const [u1, u2] = conversationPair(a.id, b.id)
+    const first = await db.ended_friendships.findUniqueOrThrow({ where: { user1_id_user2_id: { user1_id: u1, user2_id: u2 } } })
+    await new Promise((r) => setTimeout(r, 30))
+    await befriend(a, b)
+    await unfriend(b.id, a.id)
+    const second = await db.ended_friendships.findUniqueOrThrow({ where: { user1_id_user2_id: { user1_id: u1, user2_id: u2 } } })
+    expect(second.ended_at.getTime()).toBeGreaterThan(first.ended_at.getTime())
+
+    await befriend(a, c)
+    await db.blocked_users.create({ data: { blocker_id: a.id, blocked_id: c.id } })
+    const { severFriendship } = await import("@/lib/friends")
+    await db.$transaction((tx) => severFriendship(a.id, c.id, tx))
+    const [c1, c2] = conversationPair(a.id, c.id)
+    expect(await db.ended_friendships.findUnique({ where: { user1_id_user2_id: { user1_id: c1, user2_id: c2 } } })).toBeNull()
+
+    // The foreign keys cascade: erasing an account takes its rows with it.
+    await db.user.delete({ where: { id: b.id } }).catch(() => undefined)
+    if (!(await db.user.findUnique({ where: { id: b.id } }))) {
+      expect(await db.ended_friendships.count({ where: { OR: [{ user1_id: b.id }, { user2_id: b.id }] } })).toBe(0)
+    }
   })
 })

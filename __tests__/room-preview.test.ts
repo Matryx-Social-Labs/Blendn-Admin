@@ -18,6 +18,7 @@ const mockDb = {
   categories: { findMany: jest.fn() },
   // Friends leave the count (lib/room-people.ts); none here.
   friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
+  ended_friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 

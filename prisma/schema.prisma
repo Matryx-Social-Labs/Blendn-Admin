@@ -127,6 +127,8 @@ model User {
   // Friends — see `friendships`
   friendships_as_user1     friendships[]     @relation("FriendshipUser1")
   friendships_as_user2     friendships[]     @relation("FriendshipUser2")
+  ended_friendships_as_user1 ended_friendships[] @relation("EndedFriendshipUser1")
+  ended_friendships_as_user2 ended_friendships[] @relation("EndedFriendshipUser2")
   sent_friend_requests     friend_requests[] @relation("FriendRequestSender")
   received_friend_requests friend_requests[] @relation("FriendRequestRecipient")
   friend_invite            friend_invites?
@@ -3354,6 +3356,23 @@ model friendships {
 
   @@unique([user1_id, user2_id])
   /// The unique index leads with `user1_id`; "my friends" asks both sides.
+  @@index([user2_id])
+}
+
+/// A friendship that ended in the last 24 hours: the pair keep each other off
+/// every people surface in a room for that long, as friends do
+/// (`lib/room-people.ts`), so an unfriend does not put the ex-friend's stranger
+/// card in front of the other at that moment. Written by `unfriend` (an upsert),
+/// deleted by `befriendIn`. Canonical pair order, like `friendships`.
+model ended_friendships {
+  user1_id String
+  user2_id String
+  ended_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user1 User @relation("EndedFriendshipUser1", fields: [user1_id], references: [id], onDelete: Cascade)
+  user2 User @relation("EndedFriendshipUser2", fields: [user2_id], references: [id], onDelete: Cascade)
+
+  @@id([user1_id, user2_id])
   @@index([user2_id])
 }
 

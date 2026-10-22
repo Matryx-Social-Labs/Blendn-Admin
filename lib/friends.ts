@@ -7,6 +7,7 @@ import { sendPushNotification } from "@/lib/push-notifications"
 import { UNNAMED, cameFromMatch, mayShowRealName } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
+import { recordEndedFriendship } from "@/lib/room-people"
 
 /**
  * Friends: two people who both said yes.
@@ -489,6 +490,9 @@ async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): P
   // strangers): an unfriend later must not resurrect a match from an old like,
   // and a friend never counts toward anyone's "liked you" ranking.
   if (connectable) {
+    // Friends again: nothing to keep apart any more.
+    const [user1_id, user2_id] = conversationPair(a, b)
+    await tx.ended_friendships.deleteMany({ where: { user1_id, user2_id } })
     await tx.event_likes.deleteMany({ where: { OR: [{ liker_id: a, liked_id: b }, { liker_id: b, liked_id: a }] } })
   }
   return connectable
@@ -667,7 +671,10 @@ export async function withdrawFriendRequest(requestId: string, senderId: string)
 export async function unfriend(a: string, b: string): Promise<void> {
   const [user1_id, user2_id] = conversationPair(a, b)
   await db.$transaction(async (tx) => {
-    await tx.friendships.deleteMany({ where: { user1_id, user2_id } })
+    const { count } = await tx.friendships.deleteMany({ where: { user1_id, user2_id } })
+    // Kept apart in every room for 24 h (B4): unfriending is silent, and the ex-friend's
+    // stranger card must not appear at that moment. Only when there WAS a friendship.
+    if (count > 0) await recordEndedFriendship(tx, a, b)
     await dropCrewInvitesBetween(tx, a, b)
   })
   // Each side's Friends here moves, for the events both are live in.

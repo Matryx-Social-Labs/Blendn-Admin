@@ -24,6 +24,7 @@ jest.mock("@/lib/db", () => ({
     events: { findUnique: async () => ({ kind: "event" }) },
     // Friends of the arriver are excluded and get no handle (lib/room-people.ts).
     friendships: { findMany: async () => [] },
+    ended_friendships: { findMany: async () => [] },
   },
 }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn(), accountBlockReason: jest.fn() }))
