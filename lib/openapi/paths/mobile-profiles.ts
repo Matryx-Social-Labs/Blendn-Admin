@@ -1,13 +1,13 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors, PaginationMetaSchema, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { standardErrors, PageOrCursorQuerySchema, PagedPaginationSchema, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   UpdateProfileRequestSchema,
   InterestCategoryIdsSchema,
   ProfileResponseSchema,
   InterestsResponseSchema,
 } from "@/lib/openapi/schemas/profile"
-import { EventSessionSchema } from "@/lib/openapi/schemas/event"
+import { ChangedAtSchema, ChangedFieldsSchema, EventSessionSchema } from "@/lib/openapi/schemas/event"
 
 // GET /api/mobile/profiles/{userId}
 registry.registerPath({
@@ -126,13 +126,12 @@ registry.registerPath({
     "predicate so the list and the number cannot disagree. Working an event as staff is not " +
     "attending it. Places you went live at are included, with `kind: venue_day`. Where Blendn+ is " +
     "gated (the city of your latest night) and you have none, the list stops at your latest 3 " +
-    "nights and `lockedCount` says how many more there are (Blendn+ unlocks them).",
+    "nights and `lockedCount` says how many more there are (Blendn+ unlocks them). A `venue_day` row also " +
+    "carries `stay_minutes`, `venue_id` and `venue_type`; every row carries `ratedAt`. Yours alone, like everything here. " +
+    "Page by `?page=` or by `?cursor=` (newest first, the event id breaking ties); `pagination.nextCursor` is on both.",
   security: bearerAuth,
   request: {
-    query: z.object({
-      page: z.coerce.number().int().min(1).optional(),
-      limit: z.coerce.number().int().min(1).optional(),
-    }),
+    query: PageOrCursorQuerySchema,
   },
   responses: {
     200: {
@@ -157,9 +156,31 @@ registry.registerPath({
                   venue_name: z.string().nullable(),
                   city: z.string().nullable(),
                   attendedAt: z.string().datetime(),
+                  stay_minutes: z
+                    .number()
+                    .int()
+                    .min(0)
+                    .nullable()
+                    .describe(
+                      "A `venue_day` visit's length: your presence sessions there, summed, in whole minutes. Null when unknown, and always null for an `event`."
+                    ),
+                  venue_id: z
+                    .string()
+                    .uuid()
+                    .nullable()
+                    .describe("A `venue_day` visit's venue, for its page. Always null for an `event`."),
+                  venue_type: z
+                    .string()
+                    .nullable()
+                    .describe("A `venue_day` visit's kind of place (`cafe`, `pub_bar`, ...), null when the venue has none. Always null for an `event`."),
+                  ratedAt: z
+                    .string()
+                    .datetime()
+                    .nullable()
+                    .describe("When you last rated this night (`GET /events/{eventId}/rating`'s `ratedAt`): yours alone, null if you have not, and always null for a `venue_day`."),
                 })
               ),
-              pagination: PaginationMetaSchema,
+              pagination: PagedPaginationSchema,
               lockedCount: z.number().int().min(0).describe("Older nights behind Blendn+. 0 when nothing is locked."),
             })
           ),
@@ -186,13 +207,12 @@ registry.registerPath({
     "RSVPs with status `going` or `waitlisted` for events that have not ended, soonest first. " +
     "Cancelled events are included with their status so the cancellation is seen; drafts and " +
     "deleted events are not. Event fields use the favourites route's names, plus `rsvpStatus` " +
-    "and `rsvpAt` (when the RSVP was made). `visibility` is `public`, `unlisted` or `private`, so a card can say an event is unlisted.",
+    "and `rsvpAt` (when the RSVP was made). `visibility` is `public`, `unlisted` or `private`, so a card can say an event is unlisted. " +
+    "`changedAt`/`changedFields` are `GET /events/:id`'s, so a row can say \"New time\". " +
+    "Page by `?page=` or by `?cursor=` (soonest first, the RSVP id breaking ties); `pagination.nextCursor` is on both.",
   security: bearerAuth,
   request: {
-    query: z.object({
-      page: z.coerce.number().int().min(1).optional(),
-      limit: z.coerce.number().int().min(1).optional(),
-    }),
+    query: PageOrCursorQuerySchema,
   },
   responses: {
     200: {
@@ -221,9 +241,11 @@ registry.registerPath({
                   longitude: z.number().nullable(),
                   rsvpStatus: z.enum(["going", "waitlisted"]),
                   rsvpAt: z.string().datetime(),
+                  changedAt: ChangedAtSchema,
+                  changedFields: ChangedFieldsSchema,
                 })
               ),
-              pagination: PaginationMetaSchema,
+              pagination: PagedPaginationSchema,
             })
           ),
         },

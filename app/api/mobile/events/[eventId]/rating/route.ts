@@ -116,7 +116,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       select: { id: true },
     })
     if (!checkIn) {
-      return errorResponse("You can rate an event you checked in to", 403, ErrorCode.FORBIDDEN)
+      return errorResponse("You can rate an event you checked in to", 403, ErrorCode.FORBIDDEN, "NOT_ATTENDED")
     }
     /*
      * Over when the run has ended, or earlier when the last day that went
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const over =
       event.end_time.getTime() <= now || session === null || session.endTime.getTime() <= now
     if (!over) {
-      return errorResponse("You can rate this event once it has ended", 403, ErrorCode.FORBIDDEN)
+      return errorResponse("You can rate this event once it has ended", 403, ErrorCode.FORBIDDEN, "NOT_ENDED")
     }
 
     // Create or update rating

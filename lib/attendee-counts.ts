@@ -192,7 +192,7 @@ export async function distinctEventsAttended(
  */
 export async function attendedEventIds(
   userId: string,
-  opts: { limit: number; skip: number }
+  opts: { limit: number; skip: number; after?: { at: Date; id: string } }
 ): Promise<Array<{ event_id: string; first_seen: Date }>> {
   return db.$queryRaw<Array<{ event_id: string; first_seen: Date }>>`
     SELECT event_id, first_seen FROM (
@@ -206,7 +206,8 @@ export async function attendedEventIds(
         ${LIVE_EVENT}
       ORDER BY event_id, COALESCE(check_in_time, created_at) ASC
     ) AS attended
-    ORDER BY first_seen DESC
+    ${opts.after ? Prisma.sql`WHERE (first_seen, event_id) < (${opts.after.at}::timestamptz, ${opts.after.id}::uuid)` : Prisma.empty}
+    ORDER BY first_seen DESC, event_id DESC
     LIMIT ${opts.limit} OFFSET ${opts.skip}
   `
 }

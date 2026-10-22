@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PageOrCursorQuerySchema, PaginationMetaSchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   UserPublicProfileSchema,
   UserFavoritesResponseSchema,
@@ -573,13 +573,11 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}/favorites",
   tags: ["Mobile Users"],
   summary: "Get user's favorite events",
-  description: "Each event carries `visibility` (`public`, `unlisted` or `private`), so a saved card can say an event is unlisted.",
+  description: "Each event carries `visibility` (`public`, `unlisted` or `private`), so a saved card can say an event is unlisted, and `changedAt`/`changedFields` (`GET /events/:id`'s), so it can say \"New time\". Page by `?page=` or by `?cursor=` (newest saved first, the id breaking ties); `pagination.nextCursor` is on both.",
   security: bearerAuth,
   request: {
     params: z.object({ userId: z.string().uuid() }),
-    query: z.object({
-      page: z.number().optional(),
-      limit: z.number().optional(),
+    query: PageOrCursorQuerySchema.extend({
       timeFilter: z.enum(["upcoming", "past"]).optional(),
       lat: z.number().optional(),
       lon: z.number().optional(),

@@ -3,6 +3,7 @@ import { firstName, UNNAMED } from "../conversation-identity"
 import { db } from "../db"
 import { idForViewer } from "../room-handle"
 import { friendIdsOf } from "../friends"
+import { keysetPage, NEWEST_FIRST, type Keyset, type ListPagination } from "../pagination"
 import { blocksBetween } from "./blocks"
 import { CREW_TAGS, openInviteWhere, type CrewTag } from "./crews"
 
@@ -122,8 +123,17 @@ function crewView(
   }
 }
 
-/** My crews, newest first, and the invites waiting for me. */
-export async function crewsOf(userId: string) {
+/** The most open invites one read looks at, newest first. Nobody has this many waiting; the cap is what keeps the read bounded. */
+export const INVITES_READ_CAP = 200
+
+/**
+ * My crews, newest first, and the invites waiting for me: the newest
+ * `INVITES_READ_CAP` of them, a page at a time (`invites` is the page, and
+ * `invitesPagination` says how many there are in all and where the next page
+ * starts). `totalCount` is the invites an accept would take, the list's own
+ * rule, so the number is never above what paging would show.
+ */
+export async function crewsOf(userId: string, invitesQuery: { limit: number; after: (Keyset & { at: Date }) | null }) {
   const [crews, invites] = await Promise.all([
     db.crews.findMany({
       where: { dissolved_at: null, members: { some: { user_id: userId } } },
@@ -134,6 +144,7 @@ export async function crewsOf(userId: string) {
       // Never a crew a moderator hid: the invitee is outside it (C12).
       where: { invited_user_id: userId, ...openInviteWhere(), crew: { dissolved_at: null, hidden_at: null } },
       select: {
+        id: true,
         created_at: true,
         invited_by: true,
         inviter: { select: { name: true, profile: { select: { name: true, photos: true } } } },
@@ -148,7 +159,8 @@ export async function crewsOf(userId: string) {
           },
         },
       },
-      orderBy: { created_at: "desc" },
+      orderBy: NEWEST_FIRST,
+      take: INVITES_READ_CAP,
     }),
   ])
   const [apart, friends, blockedByMe] = await Promise.all([
@@ -174,9 +186,18 @@ export async function crewsOf(userId: string) {
     const active = i.crew.members.map((m) => m.user_id)
     return active.includes(i.invited_by) && friends.has(i.invited_by) && !active.some((id) => apart.has(`${userId}|${id}`))
   })
+  const { limit, after } = invitesQuery
+  const rest = after ? acceptable.filter((i) => isAfter(i, after)) : acceptable
+  const page = keysetPage(rest.slice(0, limit + 1), limit, (i) => ({ at: i.created_at, id: i.id }))
   return {
     crews: crews.map((c) => crewView(userId, c, apart, friends, blockedByMe)),
-    invites: acceptable.map((i) => ({
+    invitesPagination: {
+      limit,
+      hasMore: page.hasMore,
+      nextCursor: page.nextCursor,
+      totalCount: acceptable.length,
+    } satisfies ListPagination,
+    invites: page.items.map((i) => ({
       crewId: i.crew.id,
       name: i.crew.name,
       bio: i.crew.bio,
@@ -191,6 +212,12 @@ export async function crewsOf(userId: string) {
       invitedAt: i.created_at,
     })),
   }
+}
+
+/** After `k` in `created_at DESC, id DESC` order, the same cut `createdBefore` makes in SQL. */
+const isAfter = (row: { created_at: Date; id: string }, k: Keyset & { at: Date }) => {
+  const at = k.at.getTime()
+  return row.created_at.getTime() < at || (row.created_at.getTime() === at && row.id < k.id)
 }
 
 /** One crew, for one of its members; null for anybody else. */

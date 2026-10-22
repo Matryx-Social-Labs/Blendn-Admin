@@ -51,11 +51,13 @@ registry.registerPath({
   tags,
   summary: "List my friends",
   description:
+    "`?q=` (1-40 characters, trimmed) keeps the friends a word of whose name starts with it, case-insensitively: the rule of `GET /events/{eventId}/friends-here`'s `q`; " +
+    "`count` and `pagination.totalCount` are then the filtered total, and it combines with `limit` and `cursor`. A longer `q` is 400. " +
     "Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, otherwise default 100, 1-100), with the count the Me tab shows: " +
     "`count` and `pagination.totalCount` are the whole list, not the page. Real names and photos: both people said yes. " +
     "A blocked person is left out of the query, so a page is full.",
   security: bearerAuth,
-  request: { query: ListQuerySchema },
+  request: { query: ListQuerySchema.extend({ q: z.string().max(40).optional().describe("A word-prefix search of the friends' names. 1-40 characters.") }) },
   responses: {
     200: {
       description: "Friends",

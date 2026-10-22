@@ -117,6 +117,29 @@ export const ListQuerySchema = z.object({
   cursor: z.string().optional().describe("The previous page's `pagination.nextCursor`. A cursor that is not ours is 400."),
 })
 
+/**
+ * `?page=&limit=&cursor=` on a list that pages both ways (`/me/rsvps`,
+ * `/me/attendance`, `/users/{userId}/favorites`): page numbers as installed
+ * builds send them, or a keyset `cursor`.
+ */
+export const PageOrCursorQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional().describe("Page number, as installed builds send it. Ignored when `cursor` is sent."),
+  limit: z.coerce.number().int().min(1).max(100).optional().describe("A page's size, 1-100; default 20. With none of `page`, `limit` and `cursor`: up to 200."),
+  cursor: z.string().optional().describe("The previous page's `pagination.nextCursor`: pages by keyset (the id breaks ties). A cursor that is not ours is 400."),
+})
+
+/** `pagination` of a list that pages both ways: the page block on `?page=`, the cursor block on `?cursor=`, `nextCursor` on both. */
+export const PagedPaginationSchema = z
+  .object({
+    page: z.number().int().optional().describe("Only on a `page` read."),
+    limit: z.number().int(),
+    totalCount: z.number().int().describe("The whole list, whatever the page."),
+    totalPages: z.number().int().optional().describe("Only on a `page` read."),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable().describe("Send as `?cursor=` for the next page. Opaque. Null on the last page."),
+  })
+  .openapi("PagedPagination")
+
 export const PaginationMetaSchema = z
   .object({
     page: z.number().int(),

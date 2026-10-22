@@ -1,12 +1,14 @@
 import { NextRequest } from "next/server"
 
-import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
+import { errorResponse, successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 import { db } from "@/lib/db"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { parsePagination, paginationMeta, paginationSkip } from "@/lib/pagination"
+import { keysetPage, pagedPagination, paginationSkip, parsePageOrCursor } from "@/lib/pagination"
+import { isUuid } from "@/lib/api-input"
 import { realEventsWhere } from "@/lib/event-kind"
+import { changeSelect, changeSummaryForResponse } from "@/lib/event-change"
 
 export const dynamic = "force-dynamic"
 
@@ -34,6 +36,11 @@ export const dynamic = "force-dynamic"
  * events stay, with their status, so the cancellation is seen rather than the
  * event silently disappearing; drafts and deleted events do not.
  *
+ * `?page=` and `?limit=` as before; `?cursor=` (the last page's
+ * `pagination.nextCursor`) pages by keyset on start time then id, and a cursor
+ * that is not ours is a 400. Neither of the three is an installed build that
+ * cannot page, and gets up to 200 (`LEGACY_PAGE`). `totalCount` is the list.
+ *
  * The event fields are the favourites route's names, so the app reads both
  * lists with one row builder.
  */
@@ -44,11 +51,9 @@ export async function GET(request: NextRequest) {
       return unauthorizedResponse("Authentication required")
     }
 
-    const { searchParams } = new URL(request.url)
-    const { page, limit } = parsePagination(
-      searchParams.get("page") ?? undefined,
-      searchParams.get("limit") ?? undefined
-    )
+    const query = parsePageOrCursor(new URL(request.url).searchParams, isUuid)
+    if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
+    const { limit } = query
 
     const where = {
       user_id: authUser.userId,
@@ -62,10 +67,22 @@ export async function GET(request: NextRequest) {
       },
     }
 
-    const [rsvps, totalCount] = await Promise.all([
+    // Soonest first, then by id: two events starting at the same minute never swap or repeat across a page.
+    const afterCursor =
+      query.mode === "cursor"
+        ? {
+            OR: [
+              { event: { start_time: { gt: query.after.at } } },
+              { event: { start_time: query.after.at }, id: { gt: query.after.id } },
+            ],
+          }
+        : null
+
+    const [rows, totalCount] = await Promise.all([
       db.event_rsvps.findMany({
-        where,
+        where: afterCursor ? { AND: [where, afterCursor] } : where,
         select: {
+          id: true,
           status: true,
           created_at: true,
           event: {
@@ -85,16 +102,19 @@ export async function GET(request: NextRequest) {
               city: true,
               latitude: true,
               longitude: true,
+              ...changeSelect,
               media: { orderBy: { order: "asc" }, take: 1 },
             },
           },
         },
-        orderBy: { event: { start_time: "asc" } },
-        skip: paginationSkip(page, limit),
-        take: limit,
+        orderBy: [{ event: { start_time: "asc" } }, { id: "asc" }],
+        skip: query.mode === "page" ? paginationSkip(query.page, limit) : 0,
+        take: limit + 1,
       }),
       db.event_rsvps.count({ where }),
     ])
+    const paged = keysetPage(rows, limit, (r) => ({ at: r.event.start_time, id: r.id }))
+    const rsvps = paged.items
 
     const events = rsvps.map(({ status, created_at, event }) => ({
       id: event.id,
@@ -114,13 +134,15 @@ export async function GET(request: NextRequest) {
       city: event.city,
       latitude: event.latitude,
       longitude: event.longitude,
+      // What moved under you while you were going: the event read's values, from the same helper.
+      ...changeSummaryForResponse(event),
       rsvpStatus: status,
       rsvpAt: created_at,
     }))
 
     return successResponse({
       events,
-      pagination: paginationMeta(page, limit, totalCount),
+      pagination: pagedPagination(query, totalCount, paged),
     })
   } catch (error) {
     logger.error("Get own RSVPs failed", {
