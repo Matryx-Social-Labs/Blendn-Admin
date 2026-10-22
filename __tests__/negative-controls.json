@@ -1981,6 +1981,12 @@
       "mutation": "M1534 every error read as gone.",
       "observed": "M1534: 4 of 6 failing. Reverted; 6 of 6.",
       "date": "2026-10-22"
+    },
+    "integration/mobile-gate.itest.ts": {
+      "guards": "SCRUM-746: the mobile gate through the real request chain (the matcher, then the real route handlers on a real database): MAINTENANCE_MODE answers a mobile request 503 MAINTENANCE with Retry-After and the route is never reached; /api/health keeps answering from the database and the dashboard keeps its own sign-in during maintenance; MOBILE_MIN_APP_VERSION answers a build below the minimum 426 UPDATE_REQUIRED without reaching the route, while a request naming no version, or a current one, reaches it (every installed build sends no header); the healthcheck is never asked its version.",
+      "mutation": "M1543 the gate not asked of mobile requests. M1544 maintenance ignored by the gate. M1545 the version comparison flipped (an old build passes). M1546 a request with no version header refused. M1547 the gate applied to every path with /api/health in the matcher.",
+      "observed": "M1543: 2 of 8 failing. M1544: 1 of 8 failing. M1545: 1 of 8 failing. M1546: 1 of 8 failing. M1547: 3 of 8 failing (health, dashboard, health-version). Each reverted; 8 of 8.",
+      "date": "2026-10-22"
     }
   },
   "grandfathered": [
