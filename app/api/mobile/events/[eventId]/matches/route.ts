@@ -6,12 +6,15 @@ import {
   successResponse,
   unauthorizedResponse,
   errorResponse,
+  ErrorCode,
 } from "@/lib/api-response"
+import { bannedRefusal } from "@/lib/chat-window"
 import { logger } from "@/lib/logger"
 import { matchesForEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
+import { eventRoomBan } from "@/lib/room-kind"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -37,6 +40,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
     const limit = boundedInt(request.nextUrl.searchParams.get("limit"), 50, 1, 100)
+
+    // The deck is the room's: a banned member gets the chat's answer (`eventRoomBan`).
+    const ban = await eventRoomBan(eventId, authUser.userId)
+    if (ban) return errorResponse(bannedRefusal(ban), 403, ErrorCode.USER_BANNED)
 
     const matches = await matchesForEvent(eventId, authUser.userId, limit)
     if (matches === null) {

@@ -10,6 +10,7 @@ import { tierBBudget } from "@/lib/matching"
 import { displayTraitsOf, expandInterests, interestParents, iplTeamIds, type TraitProfile } from "@/lib/matches"
 import { NO_TRAITS, personCard, traitHolders, viewerTierB } from "@/lib/overlaps"
 import { idForViewer, roomMemberFromRef } from "@/lib/room-handle"
+import { eventRoomBan } from "@/lib/room-kind"
 import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
 
 /**
@@ -36,6 +37,7 @@ import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
  *   (no like, wave or match between friends). A friend who lets friends see
  *   them belongs in a "Friends here" section, which the Recap does not have;
  *   one who does not is not shown to friends at all.
+ * - **Not for a viewer the room banned**: the chat's refusal, `USER_BANNED`.
  * - **Not anybody the room hides**: staff (working, not mingling), "Show
  *   online status" off (counted, not listed — SCRUM-141), a member a host
  *   banned from the room, a suspended or deleted account.
@@ -76,7 +78,11 @@ export type NightPeople =
   /** The room's chat has closed: the count, never the people. */
   | { open: false; total: number; people: []; nextCursor: null }
 
-export type NightPeopleOutcome = NightPeople | { refused: "not_found" | "not_attended" | "bad_cursor" }
+export type NightPeopleOutcome =
+  | NightPeople
+  | { refused: "not_found" | "not_attended" | "bad_cursor" }
+  /** Banned from the night's room: the chat's own answer (`bannedRefusal`). */
+  | { refused: "banned"; banned_by: string | null }
 
 /**
  * A person's first arrival, at the millisecond a JS Date can carry back as a
@@ -112,6 +118,9 @@ export async function nightPeople(
     select: { check_in_time: true },
   })
   if (!viewerCheckIn) return { refused: "not_attended" }
+  // A host's ban closes the room's people as it closes its chat.
+  const ban = await eventRoomBan(eventId, viewerId)
+  if (ban) return { refused: "banned", banned_by: ban.banned_by }
 
   const [blocked, closed, friends] = await Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId), friendIdsOf(viewerId)])
   const hidden = [...new Set([viewerId, ...blocked, ...closed, ...friends])]

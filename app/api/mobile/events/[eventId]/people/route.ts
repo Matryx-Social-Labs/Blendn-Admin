@@ -10,6 +10,7 @@ import {
   successResponse,
   unauthorizedResponse,
 } from "@/lib/api-response"
+import { bannedRefusal } from "@/lib/chat-window"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { nightPeople, NIGHT_PEOPLE_DEFAULT_LIMIT, NIGHT_PEOPLE_MAX_LIMIT } from "@/lib/night-people"
@@ -26,7 +27,7 @@ interface RouteParams {
  * and as what: `lib/night-people.ts`.
  *
  *   404  no such event, a draft, deleted, or a venue's live room
- *   403  you never checked in to it
+ *   403  you never checked in to it; `USER_BANNED` a host removed you from its room
  *   400  `INVALID_CURSOR` a cursor that is not a card from this room
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -49,6 +50,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if ("refused" in result) {
       if (result.refused === "not_found") return notFoundResponse("Event not found")
       if (result.refused === "not_attended") return forbiddenResponse("Check in to see who was here")
+      // The chat route's answer to a banned member, word for word.
+      if (result.refused === "banned") return errorResponse(bannedRefusal(result), 403, ErrorCode.USER_BANNED)
       return errorResponse("That list has moved on. Start again from the top.", 400, ErrorCode.INVALID_CURSOR)
     }
     return successResponse(result)

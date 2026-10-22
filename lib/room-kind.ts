@@ -483,6 +483,21 @@ export async function ownerRoster(chatGroupId: string): Promise<Set<string> | nu
 }
 
 /**
+ * This person's ban in an event's room, or null: the reads that are the room's
+ * without being its chat — the night's people, the match deck — refuse a
+ * banned member exactly as the chat does (`bannedRefusal`, `USER_BANNED`).
+ * A check-in alone let them in; the ban stopped their posts and served them
+ * the people (security review, SV6). No row is no ban: attendance is the door,
+ * and a member row is only made in the room.
+ */
+export async function eventRoomBan(eventId: string, userId: string): Promise<{ banned_by: string | null } | null> {
+  return db.chat_group_members.findFirst({
+    where: { user_id: userId, status: "banned", chat_group: { event_id: eventId } },
+    select: { banned_by: true },
+  })
+}
+
+/**
  * The scope a room's handles are minted in (`lib/room-handle.ts`): its event
  * for an event's room, so every handle an installed client holds still
  * resolves; its own id and kind for any other. Throws for an event room with

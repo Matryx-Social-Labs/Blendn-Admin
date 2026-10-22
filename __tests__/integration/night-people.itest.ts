@@ -21,8 +21,10 @@ import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
  * concert-sized night pages by cursor with a total.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+/* eslint-disable @typescript-eslint/no-require-imports */
 const peopleRoute = require("@/app/api/mobile/events/[eventId]/people/route") as typeof import("@/app/api/mobile/events/[eventId]/people/route")
+const matchesRoute = require("@/app/api/mobile/events/[eventId]/matches/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/route")
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
 const events: string[] = []
@@ -125,6 +127,52 @@ describe("GET /events/:id/people — who may ask", () => {
     const me = await person()
     await wasThere(day, me)
     expect((await people(day.id, me.token)).status).toBe(404)
+  })
+})
+
+describe("GET /events/:id/people — a member the room banned", () => {
+  const deck = async (eventId: string, token: string) => {
+    const res = await matchesRoute.GET(
+      new NextRequest(`http://localhost/api/mobile/events/${eventId}/matches`, { headers: { authorization: `Bearer ${token}` } }),
+      { params: Promise.resolve({ eventId }) }
+    )
+    return { status: res.status, json: await res.json() }
+  }
+
+  it("refuses them as the chat does, and the match deck too; lifted, both open again", async () => {
+    const n = await night()
+    const me = await person()
+    const other = await person()
+    await wasThere(n, me, { banned: true })
+    await wasThere(n, other)
+
+    const refused = { success: false, error: "The organiser has removed you from this room.", errorCode: "USER_BANNED" }
+    const people403 = await people(n.id, me.token)
+    expect(people403.status).toBe(403)
+    expect(people403.json).toMatchObject(refused)
+    const deck403 = await deck(n.id, me.token)
+    expect(deck403.status).toBe(403)
+    expect(deck403.json).toMatchObject(refused)
+
+    await db.chat_group_members.updateMany({ where: { chat_group_id: n.roomId, user_id: me.id }, data: { status: "active", banned_by: null } })
+    const lifted = await people(n.id, me.token)
+    expect(lifted.status).toBe(200)
+    expect((lifted.json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, other))
+    expect((await deck(n.id, me.token)).status).toBe(200)
+  })
+
+  it("lets in somebody who checked in and never joined the room: attendance is the door", async () => {
+    const n = await night()
+    const me = await person()
+    const other = await person()
+    await db.event_check_ins.create({
+      data: { event_id: n.id, occurrence_id: n.occurrenceId, user_id: me.id, status: "checked_out", check_in_time: new Date(Date.now() - 3 * 3_600_000) },
+    })
+    await wasThere(n, other)
+
+    const res = await people(n.id, me.token)
+    expect(res.status).toBe(200)
+    expect((res.json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, other))
   })
 })
 
