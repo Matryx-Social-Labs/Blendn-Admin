@@ -170,6 +170,13 @@ the new code in `errorCode` as well, and `reasonCode` repeats it.
 | `refresh`, a session a password reset or change ended | 401 | `PASSWORD_RESET` | `PASSWORD_RESET` | "Invalid or expired refresh token" |
 | `refresh`, a session `signout` with no token ended (every phone) | 401 | `SESSION_REVOKED_ELSEWHERE` | `SESSION_REVOKED_ELSEWHERE` | "Invalid or expired refresh token" |
 
+**One `errorCode` did change.** The deleted-account 401s (`google` / `apple`
+"Account not found", `refresh` for a deleted account) used to carry the default
+`UNAUTHORIZED` and now carry `ACCOUNT_DELETED`, and `session`'s 404 keeps
+`NOT_FOUND`. No installed build reads `UNAUTHORIZED` on these (checked against the
+app in the field: it matches `FORBIDDEN`, `AGE_RESTRICTED`, `NOT_FOUND` elsewhere,
+`RATE_LIMITED` and a few room codes), so nothing it does depends on the old value.
+
 `signin` with a password never says `ACCOUNT_DELETED`: it is the generic 401
 `UNAUTHORIZED` "Invalid email or password", so it still confirms nothing. A
 forged or expired refresh token learns no reason: `UNAUTHORIZED`, no `reasonCode`. Signing
@@ -249,8 +256,11 @@ beside `errorCode: "FORBIDDEN"` (onboarding unfinished and no adult age on file)
 and `reasonCode: "AGE_UNKNOWN"` beside `errorCode: "AGE_RESTRICTED"` (an age that is
 **not on file**; `GET /events/:eventId` never refused an unknown age, and still does
 not). On check-in, Go Live, RSVP, favourite/interest and the board. A known age
-below the line has no `reasonCode`. The messaging and friend routes are unchanged:
-`FORBIDDEN`, no `reasonCode`.
+below the line has no `reasonCode`. **`reasonCode` is on the event doors only**: the
+messaging and friend routes (conversations, message requests, friend requests and
+invites) answer the same unfinished-profile 403 with `FORBIDDEN` and no
+`reasonCode`, and the regulars opt-in answers `AGE_RESTRICTED` with none; nothing
+has been rolled out to them.
 
 
 ### Password reset

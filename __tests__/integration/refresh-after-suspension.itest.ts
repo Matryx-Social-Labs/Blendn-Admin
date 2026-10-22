@@ -34,7 +34,7 @@ const refresh = async (refreshToken: string) => {
       body: JSON.stringify({ refreshToken }),
     })
   )
-  return { status: res.status, body: (await res.json()) as { error?: string; data?: unknown } }
+  return { status: res.status, body: (await res.json()) as { error?: string; errorCode?: string; reasonCode?: string; data?: unknown } }
 }
 
 async function signedIn(label: string, role: "attendee" | "organizer" = "attendee") {
@@ -56,6 +56,8 @@ it("tells a suspended person why, with the token the suspension revoked", async 
   const res = await refresh(token)
   expect(res.status).toBe(403)
   expect(res.body.error).toBe(SUSPENDED_MESSAGE)
+  expect(res.body.errorCode).toBe("FORBIDDEN")
+  expect(res.body.reasonCode).toBe("ACCOUNT_SUSPENDED")
   expect(res.body.data).toBeUndefined()
 })
 
@@ -100,14 +102,22 @@ it("says nothing about an account to a token that is not ours or has expired", a
   users.push(admin)
   await db.$transaction((tx) => applySuspension(tx, userId, admin))
 
-  // Same claims, wrong key: whose account it names must not be revealed.
-  const forged = jwt.sign({ userId, email: "x@y.z", type: "refresh", jti: "f" }, "not-the-secret-not-the-secret-000")
-  expect((await refresh(forged)).status).toBe(401)
+  // Same claims, wrong key, and the jti of a row that really exists (the one the
+  // suspension revoked): whose account it names must not be revealed.
+  const real = await db.mobile_refresh_tokens.findFirstOrThrow({ where: { user_id: userId } })
+  const forged = jwt.sign({ userId, email: "x@y.z", type: "refresh", jti: real.id }, "not-the-secret-not-the-secret-000")
+  const forgedRes = await refresh(forged)
+  expect(forgedRes.status).toBe(401)
+  expect(forgedRes.body.errorCode).toBe("UNAUTHORIZED")
+  expect(forgedRes.body).not.toHaveProperty("reasonCode")
 
-  // Right key, expired: nothing either.
+  // Right key, expired, the same real jti: nothing either.
   const secret = process.env.MOBILE_JWT_SECRET as string
-  const expired = jwt.sign({ userId, email: "x@y.z", type: "refresh", jti: "e", exp: Math.floor(Date.now() / 1000) - 60 }, secret)
-  expect((await refresh(expired)).status).toBe(401)
+  const expired = jwt.sign({ userId, email: "x@y.z", type: "refresh", jti: real.id, exp: Math.floor(Date.now() / 1000) - 60 }, secret)
+  const expiredRes = await refresh(expired)
+  expect(expiredRes.status).toBe(401)
+  expect(expiredRes.body.errorCode).toBe("UNAUTHORIZED")
+  expect(expiredRes.body).not.toHaveProperty("reasonCode")
 })
 
 it("still refuses a live token of a suspended account with the sentence (the route's own check)", async () => {

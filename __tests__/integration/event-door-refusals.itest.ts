@@ -101,6 +101,8 @@ describe("the event door refuses, and records why", () => {
     expect(res.status).toBe(status)
     const json = await res.json()
     if (code) expect(json.errorCode).toBe(code)
+    // None of these is the person's to fix: no Flow 15 reasonCode on any of them (a known age under the line included).
+    expect(json).not.toHaveProperty("reasonCode")
     if (reason) expect(await refusals(eventId, p.id)).toEqual([reason])
     expect(await db.event_check_ins.count({ where: { event_id: eventId, user_id: p.id } })).toBe(0)
   })

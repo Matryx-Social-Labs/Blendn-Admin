@@ -59,9 +59,17 @@ function warnOnce(message: string): void {
   console.warn(`[mobile-gate] ${message}`)
 }
 
+const MAINTENANCE_OFF = new Set(["0", "false", "no", "off"])
+
 function maintenanceRefusal(env: MobileGateEnv): MobileGateRefusal | null {
   const mode = env.MAINTENANCE_MODE?.trim().toLowerCase()
-  if (mode !== "1" && mode !== "true") return null
+  if (mode !== "1" && mode !== "true") {
+    // A typo (`yes`, `on`) must not look like "off" without a word: the operator who set it wanted downtime.
+    if (mode && !MAINTENANCE_OFF.has(mode)) {
+      warnOnce(`MAINTENANCE_MODE="${env.MAINTENANCE_MODE}" is not 1 or true; maintenance is off`)
+    }
+    return null
+  }
 
   const configured = Number(env.MAINTENANCE_RETRY_AFTER_SECONDS)
   const retryAfter =

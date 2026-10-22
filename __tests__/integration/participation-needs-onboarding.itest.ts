@@ -70,9 +70,18 @@ const req = (url: string, token: string, method: string, body?: unknown) =>
 const eventParams = (eventId: string) => ({ params: Promise.resolve({ eventId }) })
 
 const SENTENCE = "Finish setting up your profile first. Blend'n is for people 18 and over."
-async function refused(res: Response) {
+/**
+ * The same 403 and sentence on every route. `errorCode` is FORBIDDEN on all of
+ * them; Flow 15's `reasonCode` PROFILE_INCOMPLETE is on the event doors only
+ * (`messaging: true` is the DM and friend routes, which carry none).
+ */
+async function refused(res: Response, { messaging = false } = {}) {
   expect(res.status).toBe(403)
-  expect(((await res.json()) as { error: string }).error).toBe(SENTENCE)
+  const body = (await res.json()) as { error: string; errorCode: string; reasonCode?: string }
+  expect(body.error).toBe(SENTENCE)
+  expect(body.errorCode).toBe("FORBIDDEN")
+  if (messaging) expect(body).not.toHaveProperty("reasonCode")
+  else expect(body.reasonCode).toBe("PROFILE_INCOMPLETE")
 }
 
 let eventId = ""
@@ -133,9 +142,10 @@ describe("an account that skipped onboarding with no age on file", () => {
   it("cannot start a conversation, send a request, or send a DM", async () => {
     const other = await person("pno-other", { onboarded: true, age: 30 })
 
-    await refused(await conversations.POST(req("/api/mobile/conversations", who.token, "POST", { otherUserId: other.id })))
+    await refused(await conversations.POST(req("/api/mobile/conversations", who.token, "POST", { otherUserId: other.id })), { messaging: true })
     await refused(
-      await requests.POST(req("/api/mobile/message-requests", who.token, "POST", { recipientId: other.id, message: "hello there" }))
+      await requests.POST(req("/api/mobile/message-requests", who.token, "POST", { recipientId: other.id, message: "hello there" })),
+      { messaging: true }
     )
     expect(await db.message_requests.count({ where: { sender_id: who.id } })).toBe(0)
 
@@ -146,7 +156,8 @@ describe("an account that skipped onboarding with no age on file", () => {
     await refused(
       await dm.POST(req(`/api/mobile/conversations/${convo.id}/messages`, who.token, "POST", { text: "hi" }), {
         params: Promise.resolve({ conversationId: convo.id }),
-      })
+      }),
+      { messaging: true }
     )
     expect(await db.private_messages.count({ where: { conversation_id: convo.id } })).toBe(0)
   })

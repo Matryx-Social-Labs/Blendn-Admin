@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server"
 
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server"
+
 import { mobileGateRefusal, parseAppVersion } from "@/lib/mobile-gate"
-import { middleware } from "@/middleware"
+import { config, middleware } from "@/middleware"
 
 /*
  * The two refusals every mobile request passes (Flow 15): a build the server no
@@ -94,6 +96,18 @@ describe("maintenance", () => {
     expect(refusal?.headers["Retry-After"]).toBe(String(seconds))
   })
 
+  it("is off, and says so once, for a value that is neither on nor a known off (a typo for downtime)", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      for (const mode of ["yes", "yes", "on"]) expect(mobileGateRefusal(null, { MAINTENANCE_MODE: mode })).toBeNull()
+      for (const mode of ["0", "false", "no", "off", ""]) expect(mobileGateRefusal(null, { MAINTENANCE_MODE: mode })).toBeNull()
+      // "yes" once, "on" once; the known offs and the empty string say nothing.
+      expect(warn).toHaveBeenCalledTimes(2)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it("is said before an update is asked for", () => {
     const refusal = mobileGateRefusal("1.0.0", { MAINTENANCE_MODE: "1", MOBILE_MIN_APP_VERSION: "9.0.0" })
     expect(refusal?.body.errorCode).toBe("MAINTENANCE")
@@ -139,14 +153,18 @@ describe("the middleware", () => {
       }
     )
 
-    it("does not ask a preflight, which cannot carry the header", async () => {
-      const res = await call("/api/mobile/events", {}, "OPTIONS")
-      expect(res.status).toBe(200)
+    it("does not judge a preflight, even one that names an old version", async () => {
+      for (const path of ["/api/mobile/events", "/api/mobile/v1/events"]) {
+        const res = await call(path, { "x-app-version": "0.0.1" }, "OPTIONS")
+        expect(res.status).toBe(200)
+      }
     })
 
     it("never asks the healthcheck or the dashboard", async () => {
       expect(passedThrough(await call("/api/health", { "x-app-version": "0.0.1" }))).toBe(true)
-      expect((await call("/dashboard", { "x-app-version": "0.0.1" })).status).not.toBe(426)
+      const dashboard = await call("/dashboard", { "x-app-version": "0.0.1" })
+      expect(dashboard.status).toBe(307)
+      expect(new URL(dashboard.headers.get("location")!).pathname).toBe("/login")
     })
   })
 
@@ -173,16 +191,54 @@ describe("the middleware", () => {
       expect(passedThrough(res)).toBe(true)
     })
 
-    it("exempts the dashboard and the sign-in page", async () => {
-      const dashboard = await call("/dashboard")
-      expect(dashboard.status).toBe(307)
-      expect(dashboard.headers.get("location")).toContain("/login")
+    it("exempts the dashboard, the root, the sign-in page and the internal API docs", async () => {
+      const toLogin = async (path: string) => {
+        const res = await call(path)
+        expect(res.status).toBe(307)
+        expect(new URL(res.headers.get("location")!).pathname).toBe("/login")
+      }
+      await toLogin("/dashboard")
+      await toLogin("/")
+      await toLogin("/api-docs")
       expect(passedThrough(await call("/login"))).toBe(true)
+      // Not 503: the docs answer an anonymous caller 404, as they do with maintenance off.
+      expect((await call("/api/docs")).status).toBe(404)
     })
 
     it("answers a preflight normally, so a browser can read the 503", async () => {
-      expect((await call("/api/mobile/events", {}, "OPTIONS")).status).toBe(200)
+      for (const path of ["/api/mobile/events", "/api/mobile/v1/x"]) {
+        expect((await call(path, {}, "OPTIONS")).status).toBe(200)
+      }
     })
+  })
+
+  it("fails open at the middleware for a minimum that is not a version and a mode that is not on", async () => {
+    process.env.MOBILE_MIN_APP_VERSION = "soon"
+    process.env.MAINTENANCE_MODE = "garbage"
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      expect(passedThrough(await call("/api/mobile/events", { "x-app-version": "0.0.1" }))).toBe(true)
+      // A versioned path is rewritten, not passed on.
+      const versioned = await call("/api/mobile/v1/events", { "x-app-version": "0.0.1" })
+      expect(versioned.status).toBe(200)
+      expect(versioned.headers.get("x-middleware-rewrite")).toContain("/api/mobile/events")
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  describe("which paths run the middleware at all (config.matcher)", () => {
+    const matches = (url: string) => unstable_doesMiddlewareMatch({ config, url: `http://localhost${url}` })
+
+    it.each(["/api/mobile/events", "/api/mobile/v1/auth/session", "/dashboard", "/dashboard/events", "/", "/login", "/api-docs", "/api/docs"])(
+      "runs for %s",
+      (path) => expect(matches(path)).toBe(true)
+    )
+
+    it.each(["/api/health", "/api/auth/session", "/api/leads", "/socket.io/"])(
+      "does not run for %s, so no gate can touch the healthcheck, NextAuth or the socket",
+      (path) => expect(matches(path)).toBe(false)
+    )
   })
 
   it("is off with nothing set", async () => {
