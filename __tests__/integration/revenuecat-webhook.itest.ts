@@ -437,6 +437,41 @@ describe("the Night Pass (NON_RENEWING_PURCHASE)", () => {
   })
 })
 
+describe("a refunded Night Pass stays refunded (SCRUM-736)", () => {
+  const passEvent = (type: string, txn: string, user: string, at: number, extra: Record<string, unknown> = {}) =>
+    rc(type, { txn, at, user, product: "blendn_night_pass", entitlements: null, expires: null, ...extra })
+
+  /** A pass bought at T0 and refunded 2 s later; returns where the refund left it. */
+  async function refundedPass(label: string) {
+    const user = await fresh(label)
+    const txn = newTxn()
+    await post(passEvent("NON_RENEWING_PURCHASE", txn, user, T0))
+    await post(passEvent("CANCELLATION", txn, user, T0 + 2000, { cancelReason: "CUSTOMER_SUPPORT" }))
+    const refundedAt = (await rowOf(txn)).expires_at!.getTime()
+    expect(refundedAt).toBe(T0 + 2000)
+    return { user, txn, refundedAt }
+  }
+
+  it.each([
+    ["a later CANCELLATION for another reason", "CANCELLATION", { cancelReason: "UNSUBSCRIBE" }],
+    ["a later EXPIRATION", "EXPIRATION", {}],
+    ["a later BILLING_ISSUE", "BILLING_ISSUE", {}],
+    ["the purchase delivered again under a new event id", "NON_RENEWING_PURCHASE", {}],
+  ])("is not given its 24 hours back by %s", async (_label, type, extra) => {
+    const { user, txn, refundedAt } = await refundedPass(`rc-refd-${type.toLowerCase()}`)
+    await post(passEvent(type, txn, user, T0 + 5000, extra))
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(refundedAt)
+    expect(await plusAt(user, T0 + 60_000)).toBe(false)
+  })
+
+  it("is given back by REFUND_REVERSED: the store undoing the refund is the one event that may", async () => {
+    const { user, txn } = await refundedPass("rc-refd-reversed")
+    await post(passEvent("REFUND_REVERSED", txn, user, T0 + 5000))
+    const row = await rowOf(txn)
+    expect(row.expires_at!.getTime() - row.starts_at.getTime()).toBe(86_400_000)
+  })
+})
+
 describe("refunds and expirations end access, never lengthen it (L1)", () => {
   it("an EXPIRATION carrying a later expiration_at_ms ends at the event, not later", async () => {
     const user = await fresh()

@@ -10,6 +10,7 @@ import {
   stopNotificationRetentionSweeper,
 } from "./notification-retention"
 import { startIssueSweeper, stopIssueSweeper } from "./event-issues"
+import { startPhotoModerationSweeper, stopPhotoModerationSweeper } from "./photo-sweeper"
 import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
 import { startReminderSweeper, stopReminderSweeper } from "./reminder-sweeper"
 import { startSentimentSweeper, stopSentimentSweeper } from "./sentiment-sweeper"
@@ -66,6 +67,8 @@ export function startBackgroundWork(): void {
    * since it was written and never been asked to.
    */
   startReminderSweeper()
+  // Photos the vendor could not look at the first time (SCRUM-732).
+  startPhotoModerationSweeper()
 
   logger.info("Background work started", {
     // Listed exhaustively: this said three while starting four, so the log
@@ -77,6 +80,7 @@ export function startBackgroundWork(): void {
       "sentiment",
       "issues",
       "reminders",
+      "photo-moderation",
     ],
   })
 }
@@ -95,4 +99,5 @@ export function stopBackgroundWork(): void {
   stopSentimentSweeper()
   stopIssueSweeper()
   stopReminderSweeper()
+  stopPhotoModerationSweeper()
 }

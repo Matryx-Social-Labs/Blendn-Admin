@@ -129,6 +129,50 @@ const BLUR_REFUSAL: Record<SealRefusal, PhotoRejection> = {
 }
 
 /**
+ * Pull a photo off the profile and out of the public bucket (SCRUM-479): the
+ * verdict, then the two profile writes, then the withdrawal. Shared by the
+ * vendor's "hide" and by the sweep's fail-closed rule for a URL that is not
+ * the person's own object (SCRUM-732).
+ */
+export async function pullPhoto(url: string, userId: string): Promise<void> {
+  await recordPhotoPulled(url, userId)
+  /*
+   * Against the row as it is now, locked. The read-then-write this
+   * replaces wrote back a list read before the write, so a photo the
+   * person added in between went with the pulled one. The blur is of the
+   * primary (SCRUM-476): a pulled primary takes its blur with it. `prior`
+   * is the locked row before the update, which is how the cleared blur
+   * comes back; an unlocked self-join reads the statement's snapshot and
+   * names the wrong blur when a save commits first (reproduced on PG 17).
+   * Not `old`, which PG 18 reserves in RETURNING.
+   * `User.image` in the same transaction, as the PUT writes both.
+   */
+  const row = await db.$transaction(async (tx) => {
+    const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null }[]>`
+      UPDATE profiles p
+         SET photos = array_remove(p.photos, ${url}),
+             blur_photo = CASE WHEN p.photos[1] = ${url} THEN NULL ELSE p.blur_photo END
+        FROM (SELECT id, photos, blur_photo FROM profiles WHERE id = ${userId} FOR UPDATE) prior
+       WHERE prior.id = p.id
+   RETURNING p.photos,
+             CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur
+    `
+    if (pulledRow) {
+      await tx.user.update({ where: { id: userId }, data: { image: pulledRow.photos[0] ?? null } })
+    }
+    return pulledRow
+  })
+  // The blur of a pulled photo is that photo, smaller: pulled with it.
+  if (row?.cleared_blur) await recordPhotoPulled(row.cleared_blur, userId)
+  await withdraw(url, userId)
+  if (row?.cleared_blur) await withdraw(row.cleared_blur, userId)
+  logger.warn("Profile photo removed after moderation", { userId })
+}
+
+/** These run in `after()` or the sweep, never under a person's request, so a vendor hiccup is retried before it counts (SCRUM-732). */
+const PHOTO_CHECK = { retries: 2 } as const
+
+/**
  * The vendor check, after the response. Pulls the photo if it fails.
  *
  * Runs inside `after()` from the profile PUT, so nobody is waiting on it.
@@ -142,40 +186,9 @@ const BLUR_REFUSAL: Record<SealRefusal, PhotoRejection> = {
  */
 export async function moderateProfilePhoto(url: string, userId: string): Promise<void> {
   try {
-    const check = await checkImageContent(url)
+    const check = await checkImageContent(url, PHOTO_CHECK)
     if (check.checked && check.result?.action === "hide") {
-      await recordPhotoPulled(url, userId)
-      /*
-       * Against the row as it is now, locked. The read-then-write this
-       * replaces wrote back a list read before the write, so a photo the
-       * person added in between went with the pulled one. The blur is of the
-       * primary (SCRUM-476): a pulled primary takes its blur with it. `prior`
-       * is the locked row before the update, which is how the cleared blur
-       * comes back; an unlocked self-join reads the statement's snapshot and
-       * names the wrong blur when a save commits first (reproduced on PG 17).
-       * Not `old`, which PG 18 reserves in RETURNING.
-       * `User.image` in the same transaction, as the PUT writes both.
-       */
-      const row = await db.$transaction(async (tx) => {
-        const [pulledRow] = await tx.$queryRaw<{ photos: string[]; cleared_blur: string | null }[]>`
-          UPDATE profiles p
-             SET photos = array_remove(p.photos, ${url}),
-                 blur_photo = CASE WHEN p.photos[1] = ${url} THEN NULL ELSE p.blur_photo END
-            FROM (SELECT id, photos, blur_photo FROM profiles WHERE id = ${userId} FOR UPDATE) prior
-           WHERE prior.id = p.id
-       RETURNING p.photos,
-                 CASE WHEN prior.photos[1] = ${url} THEN prior.blur_photo END AS cleared_blur
-        `
-        if (pulledRow) {
-          await tx.user.update({ where: { id: userId }, data: { image: pulledRow.photos[0] ?? null } })
-        }
-        return pulledRow
-      })
-      // The blur of a pulled photo is that photo, smaller: pulled with it.
-      if (row?.cleared_blur) await recordPhotoPulled(row.cleared_blur, userId)
-      await withdraw(url, userId)
-      if (row?.cleared_blur) await withdraw(row.cleared_blur, userId)
-      logger.warn("Profile photo removed after moderation", { userId })
+      await pullPhoto(url, userId)
       return
     }
     await recordPhotoCheck(url, userId, check.checked)
@@ -199,7 +212,7 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
  */
 export async function moderateBlurPhoto(url: string, userId: string): Promise<void> {
   try {
-    const check = await checkImageContent(url)
+    const check = await checkImageContent(url, PHOTO_CHECK)
     if (check.checked && check.result?.action === "hide") {
       await recordPhotoPulled(url, userId)
       await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
