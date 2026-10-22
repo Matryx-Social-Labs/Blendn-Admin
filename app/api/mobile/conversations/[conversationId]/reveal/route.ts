@@ -157,16 +157,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(`Add ${missing} to your profile first`, 400, "reveal_incomplete")
     }
 
-    await db.private_conversations.update({
+    const after = await db.private_conversations.update({
       where: { id: conversationId },
       data: isUser1 ? { user1_revealed: true } : { user2_revealed: true },
+      select: { user1_revealed: true, user2_revealed: true },
     })
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
     notifyReveal(themId, conversationId).catch(() => {})
     // Both sides have shown themselves now: a friend request held for this pair is delivered.
-    const bothRevealed = isUser1 ? conversation.user2_revealed : conversation.user1_revealed
-    if (bothRevealed) {
+    // Decided from the values the UPDATE returned, not from the read before it:
+    // two reveals at once each read "the other has not", and only the second
+    // UPDATE sees both. (The release itself announces only what it clears.)
+    if (after.user1_revealed && after.user2_revealed) {
       await releaseHeldRequests([authUser.userId, themId]).catch((error) =>
         logger.warn("Releasing held friend requests failed", { error: error instanceof Error ? error.message : String(error) })
       )

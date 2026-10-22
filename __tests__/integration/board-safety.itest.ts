@@ -574,7 +574,7 @@ describe("an offer's seats are spent by accepting (SCRUM-514)", () => {
     const post = await offer(author, 2)
     const requestId = await askedId(asker, post)
     await db.blocked_users.create({ data: { blocker_id: author.id, blocked_id: asker.id } })
-    expect((await answer(author, requestId, "accept")).status).toBe(409)
+    expect((await answer(author, requestId, "accept")).status).toBe(404)
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
   })
 
@@ -681,11 +681,12 @@ describe("a block reads as a withdrawn post to the asker (review #2)", () => {
     })
 
     const [a, b] = [await answer(author, viaBlock, "accept"), await answer(author, viaClose, "accept")]
-    expect(a.status).toBe(409)
+    // As for an ask the author was never shown (a 404), not a refusal that says why.
+    expect(a.status).toBe(404)
     expect(b.status).toBe(a.status)
     expect(await b.json()).toEqual(await a.json())
-    const rows = await db.board_requests.findMany({ where: { id: { in: [viaBlock, viaClose] } }, select: { status: true } })
-    expect(rows.map((r) => r.status)).toEqual(["pending", "pending"])
+    const rows = await db.board_requests.findMany({ where: { id: { in: [viaBlock, viaClose] } }, select: { status: true, silenced_at: true } })
+    expect(rows.map((r) => [r.status, r.silenced_at !== null])).toEqual([["declined", true], ["declined", true]])
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(3)
   })
 })
@@ -709,7 +710,7 @@ describe("accepting, end to end (BD-I02 through the route)", () => {
     expect(convo.user2_pseudonym).toBeTruthy()
   })
 
-  it("refuses a closed pair before the claim, leaving the ask and the seat", async () => {
+  it("answers a closed pair as an ask never shown, silencing it and leaving the seat", async () => {
     const author = await person("cp-author")
     const asker = await person("cp-asker")
     const post = await offer(author, 2)
@@ -719,9 +720,9 @@ describe("accepting, end to end (BD-I02 through the route)", () => {
       data: { user1_id: u1, user2_id: u2, closed_at: new Date(), closed_by: asker.id, closed_reason: "unmatch" },
     })
     const res = await answer(author, requestId, "accept")
-    expect(res.status).toBe(409)
-    expect((await res.json()).error).toBe("This request can no longer be accepted")
-    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("pending")
+    expect(res.status).toBe(404)
+    const row = await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })
+    expect([row.status, row.silenced_at !== null]).toEqual(["declined", true])
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
   })
 
@@ -735,12 +736,13 @@ describe("accepting, end to end (BD-I02 through the route)", () => {
       .mockRejectedValueOnce(new conversations.ConversationClosedError())
     try {
       const res = await answer(author, requestId, "accept")
-      expect(res.status).toBe(409)
-      expect((await res.json()).error).toBe("This request can no longer be accepted")
+      // As for an ask the author was never shown, and the ask is silenced for good.
+      expect(res.status).toBe(404)
     } finally {
       spy.mockRestore()
     }
-    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("pending")
+    const row = await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })
+    expect([row.status, row.silenced_at !== null]).toEqual(["declined", true])
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: post } })).spaces_left).toBe(2)
   })
 
@@ -908,4 +910,100 @@ describe("the requests page cannot be filled by history (review #6)", () => {
     expect(inc).toHaveLength(50)
     expect(inc.slice(0, 2).map((r) => r.id).sort()).toEqual([live, accepted].sort())
   })
+})
+
+/*
+ * Decided at ask time (third-review H1/H4, 2026-10-22).
+ *
+ * Between people who already have a link — a friendship, any conversation open
+ * OR closed, any friend request including a withdrawn or dismissed one
+ * (`pairIsLinked`) — an accepted ask could only open a second DM beside the one
+ * they have, or hand back one that ties the board's pseudonym to the name the
+ * other thread shows; and a refusal at accept time (a closed pair's 409) told the
+ * author that somebody they know had asked. So the ask is recorded as declined
+ * and silenced, the asker sees pending (what every silent decline looks like),
+ * the author sees nothing at all, and nothing is pushed.
+ */
+describe("an ask between people who already have a link is silent (H1/H4)", () => {
+  type Link = "friends" | "conversation" | "closed conversation" | "withdrawn request" | "dismissed request"
+
+  async function linkThem(kind: Link, a: Person, b: Person) {
+    const [user1_id, user2_id] = conversations.conversationPair(a.id, b.id)
+    if (kind === "friends") await db.friendships.create({ data: { user1_id, user2_id } })
+    if (kind === "conversation") await db.private_conversations.create({ data: { user1_id, user2_id } })
+    if (kind === "closed conversation") await db.private_conversations.create({ data: { user1_id, user2_id, closed_at: new Date(), closed_reason: "unmatch" } })
+    if (kind === "withdrawn request") await db.friend_requests.create({ data: { sender_id: a.id, recipient_id: b.id, withdrawn_at: new Date() } })
+    if (kind === "dismissed request") await db.friend_requests.create({ data: { sender_id: a.id, recipient_id: b.id, dismissed_at: new Date() } })
+  }
+
+  it.each(["friends", "conversation", "closed conversation", "withdrawn request", "dismissed request"] as Link[])(
+    "records an ask between people with %s as silently declined: pending to the asker, nothing to the author",
+    async (kind) => {
+      const author = await person(`lk-author-${kind.replace(/ /g, "")}`)
+      const asker = await person(`lk-asker-${kind.replace(/ /g, "")}`)
+      await linkThem(kind, author, asker)
+      const postId = await offer(author, 2)
+
+      const res = await ask(asker, postId)
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as { data: { id: string; status: string } }
+      // The asker is told exactly what a stranger's ask is told.
+      expect(body.data.status).toBe("pending")
+      const row = await db.board_requests.findUniqueOrThrow({ where: { id: body.data.id } })
+      expect([row.status, row.silenced_at !== null, row.decided_at !== null]).toEqual(["declined", true, true])
+
+      // The author: nothing listed, nothing pushed, nothing to answer.
+      expect((await list(author)).incoming.map((r) => r.id)).not.toContain(body.data.id)
+      await new Promise((r) => setTimeout(r, 300))
+      expect(await db.notifications.count({ where: { user_id: author.id, kind: "board_request" } })).toBe(0)
+      for (const action of ["accept", "decline"] as const) {
+        const answered = await answer(author, body.data.id, action)
+        expect(answered.status).toBe(404)
+      }
+      expect((await db.board_posts.findUniqueOrThrow({ where: { id: postId } })).spaces_left).toBe(2)
+      expect(await db.private_conversations.count({ where: { origin_board_request_id: body.data.id } })).toBe(0)
+
+      // The asker still has it, pending and live, and can withdraw it as any ask.
+      expect((await list(asker)).outgoing.find((r) => r.id === body.data.id)).toMatchObject({ status: "pending", live: true })
+      expect((await answer(asker, body.data.id, "withdraw")).status).toBe(200)
+    }
+  )
+
+  it("still gives a stranger's ask to the author, who can accept it into a pseudonymous DM", async () => {
+    const author = await person("lk-s-author")
+    const asker = await person("lk-s-asker")
+    const postId = await offer(author, 2)
+    const requestId = await askedId(asker, postId)
+    expect((await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })).silenced_at).toBeNull()
+    expect((await list(author)).incoming.map((r) => r.id)).toContain(requestId)
+
+    const accepted = await answer(author, requestId, "accept")
+    expect(accepted.status).toBe(200)
+    const { data } = (await accepted.json()) as { data: { conversationId: string } }
+    expect(data.conversationId).toEqual(expect.any(String))
+    const conversation = await db.private_conversations.findUniqueOrThrow({ where: { id: data.conversationId } })
+    expect(conversation.origin_board_request_id).toBe(requestId)
+  })
+
+  it.each(["friends", "closed conversation"] as Link[])(
+    "answers an accept as for an ask never shown when the pair became linked (%s) between ask and accept",
+    async (kind) => {
+      const author = await person(`lk-b-author-${kind.replace(/ /g, "")}`)
+      const asker = await person(`lk-b-asker-${kind.replace(/ /g, "")}`)
+      const postId = await offer(author, 2)
+      const requestId = await askedId(asker, postId)
+      expect((await list(author)).incoming.map((r) => r.id)).toContain(requestId)
+
+      await linkThem(kind, author, asker)
+      const unknown = await answer(author, "00000000-0000-4000-8000-000000000000", "accept")
+      const accepted = await answer(author, requestId, "accept")
+      // Not a 409 "can no longer be accepted": the same 404 an ask that was never theirs gets.
+      expect([accepted.status, await accepted.json()]).toEqual([unknown.status, await unknown.json()])
+      const row = await db.board_requests.findUniqueOrThrow({ where: { id: requestId } })
+      expect([row.status, row.silenced_at !== null]).toEqual(["declined", true])
+      expect((await db.board_posts.findUniqueOrThrow({ where: { id: postId } })).spaces_left).toBe(2)
+      expect((await list(author)).incoming.map((r) => r.id)).not.toContain(requestId)
+      expect((await list(asker)).outgoing.find((r) => r.id === requestId)).toMatchObject({ status: "pending" })
+    }
+  )
 })

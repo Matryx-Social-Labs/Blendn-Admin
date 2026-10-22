@@ -1512,15 +1512,33 @@ friends, `GET /friends/:id` has `conversationId: null` and `POST
 /friends/:id/conversation` answers `409` as for a closed pair (the app shows
 "The conversation didn't open. Try again."); they keep talking in the inbox.
 `friend_requests.held_at` (migration `20261022120000_friend_request_held`)
-records it.
+records it. A held request is shown only on a positive test — the pair's
+conversation is open AND both sides have revealed — so a closed conversation
+never releases anything, and an unmatch (or block) deletes what was held.
+Asking again after a withdrawal while the pair is still pseudonymous is held
+too. A released request is announced exactly once (the release clears `held_at`
+in one statement and only what it cleared is pushed) and carries no `via`: it
+may have come by invite link. Migration `20261022140000_pseudonym_and_held_backfills`
+repaired existing rows (a conversation with one null pseudonym becomes
+`Attendee`; requests between a pair still pseudonymous became held).
 
 `GET /events/:id/peer-ratings` lists the people you matched with **at that
 event** (conversations born of a mutual like there), each by the id the inbox
 shows for them: a handle until they reveal, their id after. `POST` takes that
 ref, or a handle from before they revealed; a raw id for somebody still a
-pseudonym is `403`. `POST /board/requests/:id` (accept) between people who are
-friends or already have any conversation takes the seat and returns
-`conversationId: null`.
+pseudonym is `403`.
+
+**A board ask between people who already have a link is silent.** The link is
+`pairIsLinked`: a friendship, any conversation (open or closed), or any friend
+request (including withdrawn and dismissed). The same question decides a
+mutual like (`mutual: false`, no match) and a board ask, so they cannot drift.
+`POST /events/:id/board/:postId/requests` for such a pair answers `201` and
+`status: "pending"` exactly as for a stranger, and records the ask as declined
+with `board_requests.silenced_at`: no push to the author, not in their lists,
+not answerable (`PATCH /board/requests/:id` is `404`), no seat taken. If the pair
+becomes linked between ask and accept, or has blocked, the accept (a `PATCH`) is
+that same `404` and the ask is silenced; there is no `409` for a closed pair any
+more. A real accept always returns the new `conversationId`.
 
 `POST /message-requests` to somebody you matched with who has not revealed to
 you answers the same synthetic `201` it gives a stranger, never the `409`: the
@@ -1555,7 +1573,10 @@ it renders before anything is opened.
 Conversations from an accepted **message request** have no pseudonym and show
 real names throughout, as they always have.
 
-Both also carry **`friend: { state, canAdd }`** — whether to offer "add as
+`GET /conversations/:id`, `GET /profiles/:id` and `GET /users/:id` (for somebody
+you may see, never yourself) carry **`friend: { state, canAdd }`**; the
+`GET /conversations` LIST does not (it is per row of an unpaginated list and no
+client reads it there) — whether to offer "add as
 friend". `canAdd` is true only for a match (not a message request or a board
 conversation) that is open, where **both** sides have revealed, and you are not
 friends or waiting on them. `state` is `none | requested | incoming | friends`

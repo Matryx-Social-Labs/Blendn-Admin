@@ -352,7 +352,7 @@ export async function boardPostAuthorFor(
   const { rsvp, favourited } = await entitlementFor(eventId, viewerId)
   if (rsvp !== null || favourited) return post.author_id
   const asked = await db.board_requests.findFirst({
-    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId }] },
+    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId, silenced_at: null }] },
     select: { id: true },
   })
   return asked ? post.author_id : null
@@ -413,10 +413,11 @@ export async function boardRequestCounterpart(
 ): Promise<string | null> {
   const r = await db.board_requests.findUnique({
     where: { id: requestId },
-    select: { from_user_id: true, to_user_id: true },
+    select: { from_user_id: true, to_user_id: true, silenced_at: true },
   })
   if (r?.from_user_id === viewerId) return r.to_user_id
-  if (r?.to_user_id === viewerId) return r.from_user_id
+  // An ask silenced at ask time does not exist for its author.
+  if (r?.to_user_id === viewerId && !r.silenced_at) return r.from_user_id
   return null
 }
 

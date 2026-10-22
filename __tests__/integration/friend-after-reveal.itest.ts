@@ -269,14 +269,15 @@ describe("POST /friends/requests { userId }", () => {
 })
 
 describe("the friend offer on conversations and profiles", () => {
-  it("walks none, requested, incoming, friends on the detail and the inbox", async () => {
+  it("walks none, requested, incoming, friends on the detail, and the inbox list carries none of it", async () => {
     const [ana, ben] = [await person("far-st-a", "Ana"), await person("far-st-b", "Ben")]
     const id = await converse(ana, ben)
     const seen = async (p: Person) => ({
       detail: (await detail(p, id)).body.data.friend,
-      inbox: (await inbox(p)).find((c) => c.id === id)?.friend,
+      // Not on the list: it is computed per row of an unpaginated list and no client reads it there.
+      inbox: Object.prototype.hasOwnProperty.call((await inbox(p)).find((c) => c.id === id) ?? {}, "friend"),
     })
-    const both = (friend: unknown) => ({ detail: friend, inbox: friend })
+    const both = (friend: unknown) => ({ detail: friend, inbox: false })
 
     expect(await seen(ana)).toEqual(both({ state: "none", canAdd: true }))
     await ask(ana, { userId: ben.id })
@@ -308,8 +309,6 @@ describe("the friend offer on conversations and profiles", () => {
     expect((await detail(ben, half)).body.data.friend).toEqual({ state: "none", canAdd: false })
     expect((await detail(ana, request)).body.data.friend).toEqual({ state: "none", canAdd: false })
     expect((await detail(ana, hidden)).body.data.friend).toEqual({ state: "none", canAdd: false })
-    const list = await inbox(ana)
-    expect(list.find((c) => c.id === hidden)?.friend).toEqual({ state: "none", canAdd: false })
   })
 
   it("rides on the profile of a revealed match, and on nobody else's", async () => {
@@ -558,10 +557,9 @@ describe("the offer drops for somebody who is gone or blocked", () => {
     const [blocked, deleted, fine] = [await converse(ana, ben), await converse(ana, dee), await converse(ana, cam)]
     await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: ben.id } })
     await db.user.update({ where: { id: dee.id }, data: { deletedAt: new Date() } })
-    const list = await inbox(ana)
-    const offer = (id: string) => list.find((c) => c.id === id)?.friend
-    expect(offer(fine)).toEqual({ state: "none", canAdd: true })
-    expect(offer(blocked)).toEqual({ state: "none", canAdd: false })
-    expect(offer(deleted)).toEqual({ state: "none", canAdd: false })
+    const offer = async (id: string) => (await detail(ana, id)).body.data.friend
+    expect(await offer(fine)).toEqual({ state: "none", canAdd: true })
+    expect(await offer(blocked)).toEqual({ state: "none", canAdd: false })
+    expect(await offer(deleted)).toEqual({ state: "none", canAdd: false })
   })
 })

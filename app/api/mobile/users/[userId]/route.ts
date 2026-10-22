@@ -4,6 +4,7 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
+import { friendOfferFor } from "@/lib/friend-offer"
 import { identityForRef } from "@/lib/identity"
 import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
@@ -231,6 +232,9 @@ export async function GET(
        * `conversationId: …` is the friend DM saying which pseudonym is them.
        */
       ...(identified && { connection: await connectionBetween(authUser.userId, userId) }),
+      // The same offer, under the same rule, as `GET /profiles/:id`: only for
+      // somebody else you may see, so the app needs no second read.
+      ...(identified && !isOwnProfile && { friend: await friendOfferFor(authUser.userId, userId) }),
     }
 
     return successResponse(publicProfile)

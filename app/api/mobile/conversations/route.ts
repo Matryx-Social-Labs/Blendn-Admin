@@ -6,7 +6,6 @@ import { ConversationClosedError, blockedEitherWay, mayConverse, openConversatio
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { db } from "@/lib/db"
-import { friendOffersFor } from "@/lib/friend-offer"
 import { idInConversation } from "@/lib/conversation-ref"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
@@ -109,8 +108,6 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const offers = await friendOffersFor(authUser.userId, conversations)
-
     // Format conversations for the mobile app
     const formattedConversations = conversations.map((conv) => {
       const otherUser = conv.user1_id === authUser.userId ? conv.user2 : conv.user1
@@ -147,8 +144,6 @@ export async function GET(request: NextRequest) {
           ? conv.user1_revealed
           : conv.user2_revealed,
         theyRevealed: otherRevealed,
-        /** Whether to offer "add as friend": a match, both revealed (lib/friend-offer.ts). */
-        friend: offers.get(conv.id),
         /** Whether they have asked you to reveal. There is no "declined". */
         revealRequested: conv.user1_id === authUser.userId
           ? conv.user1_reveal_requested

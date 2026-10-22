@@ -306,6 +306,9 @@ export const UserPublicProfileSchema = z
         "The `userId` path segment as sent — a room handle in, the same handle out — so the real id behind a handle is never echoed. Your own profile answers with your own id.",
     }),
     name: z.string(),
+    friend: FriendOfferSchema.optional().describe(
+      "Only on somebody else you may see (`identityVisible`), under the same rule as `GET /profiles/{userId}`; never your own or a card a room keeps anonymous."
+    ),
     image: z.string().nullable().optional(),
     photos: z.array(z.string()).optional(),
     age: z.number().nullable(),

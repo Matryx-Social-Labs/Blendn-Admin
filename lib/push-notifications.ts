@@ -632,14 +632,13 @@ export async function notifyBoardRequest(
 /** They said yes. There is a conversation now, and no decline to send back. */
 export async function notifyBoardRequestAccepted(
   recipientId: string,
-  /** Null when the pair already had a conversation or are friends: nothing new was opened. */
-  conversationId: string | null
+  conversationId: string
 ): Promise<boolean> {
   return sendPushNotification({
     userId: recipientId,
     title: "Your ask was accepted",
-    body: conversationId ? "You can message them now." : "They said yes.",
-    data: { type: "board_request_accepted", ...(conversationId && { conversationId }) },
+    body: "You can message them now.",
+    data: { type: "board_request_accepted", conversationId },
   })
 }
 

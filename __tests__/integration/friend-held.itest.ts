@@ -1,3 +1,5 @@
+import { readFileSync } from "fs"
+import { join } from "path"
 import { NextRequest } from "next/server"
 
 process.env.MOBILE_JWT_SECRET =
@@ -5,7 +7,7 @@ process.env.MOBILE_JWT_SECRET =
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
-import { friendState, lockPair } from "@/lib/friends"
+import { friendState, lockPair, releaseHeldRequests } from "@/lib/friends"
 import { likeAtEvent, revealConversationsFrom } from "@/lib/matches"
 import { roomHandle } from "@/lib/room-handle"
 
@@ -33,7 +35,8 @@ const revealRoute = require("@/app/api/mobile/conversations/[conversationId]/rev
 const leaveRoute = require("@/app/api/mobile/conversations/[conversationId]/leave/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/leave/route")
 const likesRoute = require("@/app/api/mobile/events/[eventId]/matches/likes/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/likes/route")
 const ratings = require("@/app/api/mobile/events/[eventId]/peer-ratings/route") as typeof import("@/app/api/mobile/events/[eventId]/peer-ratings/route")
-const boardDecide = require("@/app/api/mobile/board/requests/[requestId]/route") as typeof import("@/app/api/mobile/board/requests/[requestId]/route")
+const blockedList = require("@/app/api/mobile/users/blocked/route") as typeof import("@/app/api/mobile/users/blocked/route")
+const userCard = require("@/app/api/mobile/users/[userId]/route") as typeof import("@/app/api/mobile/users/[userId]/route")
 const inboxRoute = require("@/app/api/mobile/conversations/route") as typeof import("@/app/api/mobile/conversations/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -188,8 +191,8 @@ describe("a friend request between people who are still pseudonyms", () => {
     const [ana, ben] = [await person("fh-5a", "Ana"), await person("fh-5b", "Ben")]
     const id = await pseudonymousPair(ana, ben)
     await ask(ben, { token: await linkOf(ana) })
-    expect((await leave(ana, id)).status).toBe(200)
     const row = await db.friend_requests.findFirstOrThrow({ where: { sender_id: ben.id, recipient_id: ana.id } })
+    expect((await leave(ana, id)).status).toBe(200)
     expect((await accept(ana, row.id)).status).toBe(404)
     expect(await friendshipCount(ana)).toBe(0)
   })
@@ -240,6 +243,9 @@ describe("a pair who already know each other never match again (M2, L4)", () => 
     ["a pseudonymous one from another event", "pseudonymous"],
     ["a friend request waiting", "request"],
     ["a friendship and no conversation", "friendship"],
+    ["a closed conversation", "closed"],
+    ["a withdrawn friend request", "withdrawn"],
+    ["a dismissed friend request", "dismissed"],
   ])("answers a mutual like between people with %s as a like nobody returned", async (_n, kind) => {
     const [ana, ben, cam] = [await person(`fh-m-${kind}-a`, "Ana"), await person(`fh-m-${kind}-b`, "Ben"), await person(`fh-m-${kind}-c`, "Cam")]
     const eventId = await ended(ana, ben, cam)
@@ -247,12 +253,19 @@ describe("a pair who already know each other never match again (M2, L4)", () => 
     const [user1_id, user2_id] = conversationPair(ana.id, ben.id)
     if (kind === "conversation") await db.private_conversations.create({ data: { user1_id, user2_id } })
     if (kind === "pseudonymous") await pseudonymousPair(ana, ben)
+    if (kind === "closed") await db.private_conversations.create({ data: { user1_id, user2_id, closed_at: new Date(), closed_reason: "unmatch" } })
+    if (kind === "withdrawn") await db.friend_requests.create({ data: { sender_id: ana.id, recipient_id: ben.id, withdrawn_at: new Date() } })
+    if (kind === "dismissed") await db.friend_requests.create({ data: { sender_id: ana.id, recipient_id: ben.id, dismissed_at: new Date() } })
     if (kind === "friendship") await db.friendships.create({ data: { user1_id, user2_id } })
     if (kind === "request") await db.friend_requests.create({ data: { sender_id: ana.id, recipient_id: ben.id } })
 
     await like(ben, eventId, ana)
-    const answer = await like(ana, eventId, ben)
-    expect(answer).toEqual(control)
+    // The route turns a closed pair away earlier (404); the shared write path must hold the same line.
+    if (kind === "closed") {
+      expect(await likeAtEvent(eventId, ana.id, ben.id)).toEqual({ mutual: false })
+    } else {
+      expect(await like(ana, eventId, ben)).toEqual(control)
+    }
     const rows = await db.private_conversations.findMany({ where: { OR: [{ user1_id: ana.id, user2_id: ben.id }, { user1_id: ben.id, user2_id: ana.id }] } })
     expect(rows.every((r) => r.origin_event_id === null)).toBe(true)
   })
@@ -371,37 +384,130 @@ describe("who you may rate (H2)", () => {
   })
 })
 
-describe("a board accept between people who already know each other (M1)", () => {
-  async function ask_(pair: "friends" | "conversation" | "strangers") {
-    const [author, asker] = [await person(`fh-b-${pair}-a`, "Author"), await person(`fh-b-${pair}-s`, "Asker")]
-    const host = await makeUser("fh-bhost", "organizer")
-    users.push(host)
-    const eventId = await makeEvent(host)
-    events.push(eventId)
-    const post = await db.board_posts.create({ data: { event_id: eventId, author_id: author.id, kind: "offer", body: "two seats", spaces_left: 2 }, select: { id: true } })
-    const req = await db.board_requests.create({ data: { event_id: eventId, post_id: post.id, from_user_id: asker.id, to_user_id: author.id } })
-    if (pair === "friends") await friendsRow(author, asker)
-    if (pair === "conversation") {
-      const [user1_id, user2_id] = conversationPair(author.id, asker.id)
-      await db.private_conversations.create({ data: { user1_id, user2_id } })
-    }
-    const res = await call(boardDecide.PATCH as Handler, `/api/mobile/board/requests/${req.id}`, author, { method: "PATCH", body: { action: "accept" }, params: { requestId: req.id } })
-    return { res, postId: post.id, author, asker }
-  }
-
-  it.each(["friends", "conversation"] as const)("takes the seat and opens nothing for %s", async (pair) => {
-    const { res, postId } = await ask_(pair)
-    expect(res.status).toBe(200)
-    expect(res.body.data.status).toBe("accepted")
-    expect(res.body.data.conversationId).toBeNull()
-    expect((await db.board_posts.findUniqueOrThrow({ where: { id: postId } })).spaces_left).toBe(1)
+describe("held requests, the second look (third review)", () => {
+  it("P2: asking again after a withdrawal while still pseudonymous is held too", async () => {
+    const [ana, ben] = [await person("fh-p2a", "Ana"), await person("fh-p2b", "Ben")]
+    await pseudonymousPair(ana, ben)
+    await db.friend_requests.create({ data: { sender_id: ben.id, recipient_id: ana.id, withdrawn_at: new Date() } })
+    expect((await ask(ben, { token: await linkOf(ana) })).body.data).toEqual({ state: "requested" })
+    const row = await db.friend_requests.findFirstOrThrow({ where: { sender_id: ben.id, recipient_id: ana.id } })
+    expect([row.withdrawn_at, row.held_at !== null]).toEqual([null, true])
+    expect(await pushes(ana.id)).toEqual([])
+    expect(await incoming(ana)).toEqual([])
   })
 
-  it("still opens a pseudonymous DM between strangers", async () => {
-    const { res, author, asker } = await ask_("strangers")
-    expect(res.status).toBe(200)
-    const row = await db.private_conversations.findUniqueOrThrow({ where: { id: res.body.data.conversationId } })
-    expect(row.origin_board_request_id).not.toBeNull()
-    expect([row.user1_id, row.user2_id].sort()).toEqual([author.id, asker.id].sort())
+  it("P8: an unmatch deletes what was held, and a closed conversation never releases anything", async () => {
+    const [ana, ben, cam] = [await person("fh-p8a", "Ana"), await person("fh-p8b", "Ben"), await person("fh-p8c", "Cam")]
+    const id = await pseudonymousPair(ana, ben)
+    await ask(ben, { token: await linkOf(ana) })
+    expect((await leave(ana, id)).status).toBe(200)
+    expect(await db.friend_requests.count({ where: { sender_id: ben.id } })).toBe(0)
+    expect(await incoming(ana)).toEqual([])
+    expect(await friendState(ana.id, ben.id)).toBe("none")
+
+    // Closed some other way, both revealed: still nothing is shown, and nothing is released.
+    const other = await pseudonymousPair(ana, cam, { revealed: { a: true, b: true } })
+    const held = await db.friend_requests.create({ data: { sender_id: cam.id, recipient_id: ana.id, held_at: new Date() } })
+    await db.private_conversations.update({ where: { id: other }, data: { closed_at: new Date(), closed_reason: "unmatch" } })
+    expect(await incoming(ana)).toEqual([])
+    expect(await friendState(ana.id, cam.id)).toBe("none")
+    await releaseHeldRequests([ana.id, cam.id])
+    expect((await db.friend_requests.findUniqueOrThrow({ where: { id: held.id } })).held_at).not.toBeNull()
+    expect(await pushes(ana.id, 200)).toEqual([])
+  })
+
+  it("two reveals at the same moment push exactly once", async () => {
+    const [ana, ben] = [await person("fh-cc-a", "Ana"), await person("fh-cc-b", "Ben")]
+    const id = await pseudonymousPair(ana, ben)
+    await ask(ben, { token: await linkOf(ana) })
+    const [a, b] = await Promise.all([reveal(ana, id), reveal(ben, id)])
+    expect([a.status, b.status]).toEqual([200, 200])
+    expect((await incoming(ana)).length).toBe(1)
+    expect((await pushes(ana.id, 800)).length).toBe(1)
+  })
+
+  it("releases a whole batch at once, once each, and a released request carries no `via`", async () => {
+    const [ana, b1, b2, b3] = [await person("fh-bt-a", "Ana"), await person("fh-bt-1", "B1"), await person("fh-bt-2", "B2"), await person("fh-bt-3", "B3")]
+    const ids = [await pseudonymousPair(ana, b1), await pseudonymousPair(ana, b2), await pseudonymousPair(ana, b3)]
+    for (const b of [b1, b2, b3]) await ask(b, { token: await linkOf(ana) })
+    await db.private_conversations.updateMany({ where: { id: { in: ids } }, data: { user1_revealed: true, user2_revealed: true } })
+    await releaseHeldRequests([ana.id])
+    await releaseHeldRequests([ana.id]) // a second release announces nothing new
+    expect((await incoming(ana)).length).toBe(3)
+    const notes = await pushes(ana.id, 800)
+    expect(notes.length).toBe(3)
+    // A held request may have come by invite link: never "from your match".
+    for (const n of notes) expect(n.data).toMatchObject({ type: "friend_request" })
+    for (const n of notes) expect(n.data).not.toHaveProperty("via")
+  })
+})
+
+describe("friend on GET /users/:id (same rule as /profiles/:id)", () => {
+  const card = (as: Person, id: string) => call(userCard.GET as Handler, `/api/mobile/users/${id}`, as, { params: { userId: id } })
+
+  it("is there for somebody you may see, never for yourself or a stranger", async () => {
+    const [ana, ben, stranger] = [await person("fh-uc-a", "Ana"), await person("fh-uc-b", "Ben"), await person("fh-uc-s", "Sam")]
+    await pseudonymousPair(ana, ben, { revealed: { a: true, b: true } })
+    expect((await card(ana, ben.id)).body.data.friend).toEqual({ state: "none", canAdd: true })
+    await ask(ana, { userId: ben.id })
+    expect((await card(ana, ben.id)).body.data.friend).toEqual({ state: "requested", canAdd: false })
+    expect((await card(ana, ana.id)).body.data).not.toHaveProperty("friend")
+    expect((await card(ana, stranger.id)).body.data).not.toHaveProperty("friend")
+  })
+
+  it("is absent while the other person is a pseudonym to you", async () => {
+    const [ana, ben] = [await person("fh-ud-a", "Ana"), await person("fh-ud-b", "Ben")]
+    await pseudonymousPair(ana, ben)
+    expect((await card(ana, ben.id)).body.data).not.toHaveProperty("friend")
+  })
+})
+
+describe("the backfills and the blocked list never fall back to a real name (M2)", () => {
+  /** The statements of the migration, without its transaction wrapper. */
+  const backfill = () =>
+    readFileSync(join(process.cwd(), "prisma/migrations/20261022140000_pseudonym_and_held_backfills/migration.sql"), "utf8")
+      .split("\n")
+      .filter((l) => !l.startsWith("--") && !/^(BEGIN|COMMIT);|^SET LOCAL/.test(l))
+      .join("\n")
+      .split(";")
+      .map((q) => q.trim())
+      .filter(Boolean)
+
+  it("sets the one null pseudonym to Attendee, holds the requests of a pair still pseudonymous, and is idempotent", async () => {
+    const [ana, ben, cam, dee] = [await person("fh-bf-a", "Ana"), await person("fh-bf-b", "Ben"), await person("fh-bf-c", "Cam"), await person("fh-bf-d", "Dee")]
+    const [user1_id, user2_id] = conversationPair(ana.id, ben.id)
+    const half = await db.private_conversations.create({ data: { user1_id, user2_id, user1_pseudonym: "Otter" } })
+    const [c1, c2] = conversationPair(ana.id, cam.id)
+    const both = await db.private_conversations.create({ data: { user1_id: c1, user2_id: c2 } }) // never pseudonymous: untouched
+    const [d1, d2] = conversationPair(ana.id, dee.id)
+    const revealedPair = await db.private_conversations.create({ data: { user1_id: d1, user2_id: d2, user1_pseudonym: "A", user2_pseudonym: "B", user1_revealed: true, user2_revealed: true } })
+    const waiting = await db.friend_requests.create({ data: { sender_id: ben.id, recipient_id: ana.id } })
+    const plain = await db.friend_requests.create({ data: { sender_id: cam.id, recipient_id: ana.id } })
+    const revealedReq = await db.friend_requests.create({ data: { sender_id: dee.id, recipient_id: ana.id } })
+
+    for (let run = 0; run < 2; run++) for (const q of backfill()) await db.$executeRawUnsafe(q)
+
+    const after = await db.private_conversations.findUniqueOrThrow({ where: { id: half.id } })
+    expect([after.user1_pseudonym, after.user2_pseudonym].sort()).toEqual(["Attendee", "Otter"])
+    const untouched = await db.private_conversations.findUniqueOrThrow({ where: { id: both.id } })
+    expect([untouched.user1_pseudonym, untouched.user2_pseudonym]).toEqual([null, null])
+    expect((await db.friend_requests.findUniqueOrThrow({ where: { id: waiting.id } })).held_at).not.toBeNull()
+    expect((await db.friend_requests.findUniqueOrThrow({ where: { id: plain.id } })).held_at).toBeNull()
+    expect((await db.friend_requests.findUniqueOrThrow({ where: { id: revealedReq.id } })).held_at).toBeNull()
+    void revealedPair
+  })
+
+  it("names a blocked person in a pseudonymous pair by their pseudonym, or Attendee, never their real name", async () => {
+    const [ana, ben] = [await person("fh-bl-a", "Ana"), await person("fh-bl-b", "Benedict Realname")]
+    const [user1_id, user2_id] = conversationPair(ana.id, ben.id)
+    // Only Ana's side was named: Ben's pseudonym is the null the bug left behind.
+    await db.private_conversations.create({
+      data: { user1_id, user2_id, user1_pseudonym: user1_id === ana.id ? "Otter" : null, user2_pseudonym: user2_id === ana.id ? "Otter" : null },
+    })
+    await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: ben.id } })
+    const res = await call(blockedList.GET as Handler, "/api/mobile/users/blocked", ana)
+    const names = (res.body.data.users as { blocked_user_name: string | null }[]).map((u) => u.blocked_user_name)
+    expect(names).toEqual(["Attendee"])
+    expect(JSON.stringify(res.body)).not.toContain("Realname")
   })
 })

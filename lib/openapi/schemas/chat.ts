@@ -317,7 +317,6 @@ export const ConversationSchema = z
       ),
     youRevealed: z.boolean(),
     theyRevealed: z.boolean(),
-    friend: FriendOfferSchema,
     revealRequested: z.boolean(),
     lastMessage: z
       .object({

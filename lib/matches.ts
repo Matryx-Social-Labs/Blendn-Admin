@@ -1,5 +1,5 @@
-import { ConversationClosedError, closedPairKeys, conversationPair, openConversation } from "@/lib/conversations"
-import { friendIdsOf, lockPair, releaseHeldRequests } from "@/lib/friends"
+import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
+import { friendIdsOf, lockPair, pairIsLinked, releaseHeldRequests } from "@/lib/friends"
 import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
@@ -765,67 +765,56 @@ export async function likeAtEvent(
     update: {},
   })
 
-  const back = await db.event_likes.findUnique({
-    where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likedId, liked_id: likerId } },
-    select: { id: true },
-  })
-  if (!back) return { mutual: false }
-
   /*
-   * A closed pair can still reach here.
+   * Not a match when the pair already have anything between them
+   * (`pairIsLinked`: a friendship, any conversation open or closed, any friend
+   * request). Opening one would hand back the existing DM — its id on the
+   * like's response and on `room:match` says which card is the friend, or which
+   * real-name thread this is — and a second pseudonymous DM would link this
+   * event's pseudonyms to the first's. They already have somewhere to talk. The
+   * like is recorded and the answer is that of a like nobody returned.
    *
-   * `POST /matches/likes` refuses closed pairs before calling in, and closed
-   * pairs are hidden from the ranked list -- but this function is the shared
-   * write path, and defending the invariant where it lives beats trusting every
-   * present and future caller to have checked. `mutual: false` is the honest
-   * answer: the like is recorded, and there is no conversation to point at.
-   */
-  /*
-   * The pseudonyms and room-reveal state, snapshotted at the moment of the
-   * match.
+   * Everything from here is under the pair's lock (`lockPair`), so a request or
+   * an accept cannot land between the check and the write, and the linked check
+   * runs BEFORE the reciprocal-like lookup: a like that was returned and one that
+   * was not do the same work up to that point, so how long it takes says nothing
+   * about whether the other person liked back.
    *
-   * Both come from this event: the pseudonym because a DM outlives its event
-   * and the chat lifecycle sweeper deletes old groups, so a lookup would go
-   * null exactly when the history matters; the reveal because somebody already
-   * public in this room has nothing left to reveal to a person who saw their
-   * card, and pretending otherwise would be theatre.
+   * A closed pair is linked too, which is the invariant the old closed-pair
+   * guard defended: `POST /matches/likes` refuses closed pairs before calling in,
+   * but this is the shared write path.
    */
-  const [pseudonymRows, revealedRows] = await Promise.all([
-    db.chat_group_members.findMany({
-      where: { chat_group: { event_id: eventId }, user_id: { in: [likerId, likedId] } },
-      select: { user_id: true, anonymous_name: true },
-    }),
-    db.event_match_preferences.findMany({
-      where: { event_id: eventId, user_id: { in: [likerId, likedId] }, revealed: true },
-      select: { user_id: true },
-    }),
-  ])
-
   try {
-    /*
-     * Not a match when the pair already know each other — any conversation row,
-     * a friendship, or a friend request waiting. Opening one would hand back the
-     * existing DM (its id on the like's response and on `room:match` says which
-     * card is the friend, or which real-name thread this is), and a second
-     * pseudonymous DM would link this event's pseudonyms to the first's. They
-     * already have somewhere to talk. The like is recorded and the answer is
-     * that of a like nobody returned. Under the pair's lock, like every other
-     * writer of the pair's standing (`lockPair`), so a request or an accept
-     * cannot land between this check and the write.
-     */
-    const [user1_id, user2_id] = conversationPair(likerId, likedId)
-    const conversation = await db.$transaction(async (tx) => {
+    const opened = await db.$transaction(async (tx) => {
       await lockPair(tx, likerId, likedId)
-      const [friends, existing, request] = await Promise.all([
-        tx.friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
-        tx.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
-        tx.friend_requests.findFirst({
-          where: { withdrawn_at: null, OR: [{ sender_id: likerId, recipient_id: likedId }, { sender_id: likedId, recipient_id: likerId }] },
-          select: { id: true },
+      const linked = await pairIsLinked(tx, likerId, likedId)
+      const back = await tx.event_likes.findUnique({
+        where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likedId, liked_id: likerId } },
+        select: { id: true },
+      })
+      if (!back || linked) return null
+
+      /*
+       * The pseudonyms and room-reveal state, snapshotted at the moment of the
+       * match.
+       *
+       * Both come from this event: the pseudonym because a DM outlives its event
+       * and the chat lifecycle sweeper deletes old groups, so a lookup would go
+       * null exactly when the history matters; the reveal because somebody
+       * already public in this room has nothing left to reveal to a person who
+       * saw their card, and pretending otherwise would be theatre.
+       */
+      const [pseudonymRows, revealedRows] = await Promise.all([
+        tx.chat_group_members.findMany({
+          where: { chat_group: { event_id: eventId }, user_id: { in: [likerId, likedId] } },
+          select: { user_id: true, anonymous_name: true },
+        }),
+        tx.event_match_preferences.findMany({
+          where: { event_id: eventId, user_id: { in: [likerId, likedId] }, revealed: true },
+          select: { user_id: true },
         }),
       ])
-      if (friends || existing || request) return null
-      return openConversation(
+      const conversation = await openConversation(
         likerId,
         likedId,
         {
@@ -836,8 +825,10 @@ export async function likeAtEvent(
         },
         tx
       )
+      return { conversation, pseudonymRows }
     })
-    if (!conversation) return { mutual: false }
+    if (!opened) return { mutual: false }
+    const { conversation, pseudonymRows } = opened
     /*
      * Only the EARLIER liker gets the push.
      *

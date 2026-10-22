@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import { closeConversation } from "@/lib/conversations"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
-import { lockPair, severFriendship } from "@/lib/friends"
+import { eitherWay, lockPair, severFriendship } from "@/lib/friends"
 
 /**
  * One person leaves a conversation: an unmatch, or a block. The app's only door
@@ -29,6 +29,9 @@ export async function leaveConversationIn(
   await lockPair(tx, userId, otherId)
   // Idempotent, and scoped by `closed_at: null`, so a retry never rewrites who left or when.
   await closeConversation(conversationId, userId, action, tx)
+  // A friend request held for this pair dies with the match: a closed
+  // conversation never releases anything, so nothing may appear to the recipient.
+  await tx.friend_requests.deleteMany({ where: { ...eitherWay(userId, otherId), held_at: { not: null } } })
 
   if (action === "block") {
     await tx.blocked_users.upsert({

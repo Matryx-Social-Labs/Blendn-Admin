@@ -1064,7 +1064,8 @@ registry.registerPath({
     "exactly one accept and the other is 409 \"That offer is full\" (the ask " +
     "stays pending). Withdrawing succeeds on a pending or declined ask and " +
     "again on a withdrawn one — a decline is never delivered to the asker, " +
-    "so withdrawing one cannot be the place it lands; only an accepted ask is 409.",
+    "so withdrawing one cannot be the place it lands; only an accepted ask is 409. " +
+    "Between people who already have a link (a friendship, any conversation open or closed, any friend request) an ask is decided when it is MADE: recorded as declined and silenced, pending to the asker, never shown to the author and never pushed. If the pair becomes linked between ask and accept, the accept answers 404 exactly as for an ask the author was never shown, and so does a block — there is no 409 for a closed pair any more.",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string() }),
@@ -1078,7 +1079,7 @@ registry.registerPath({
   },
   responses: {
     200: {
-      description: "Answered. `conversationId` is present only on accept.",
+      description: "Answered. `conversationId` is present on accept, and is always the new pseudonymous conversation.",
       content: {
         "application/json": {
           schema: wrap(

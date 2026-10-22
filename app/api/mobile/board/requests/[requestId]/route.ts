@@ -5,12 +5,11 @@ import { z } from "zod"
 import { boardPseudonyms, isLiveRequest, liveRequest, seatBoardRoom } from "@/lib/board-access"
 import {
   blockCounterparties,
-  conversationPair,
   openConversation,
   ConversationClosedError,
 } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { lockPair } from "@/lib/friends"
+import { lockPair, pairIsLinked } from "@/lib/friends"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { notifyBoardRequestAccepted } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -34,13 +33,29 @@ interface RouteParams {
  * Thrown inside the accept transaction to roll everything in it back; the
  * message is the sentence the author is answered with.
  */
+class LinkedSinceAsk extends Error {}
+
+/**
+ * Silence an ask for good and answer as for one the author was never shown. One
+ * answer for every reason it cannot be accepted any more that is about the PAIR
+ * (a block, a link made since the ask, a closed conversation): a distinct refusal
+ * for each would tell the author something about somebody they know.
+ */
+async function hideAsk(requestId: string) {
+  const now = new Date()
+  await db.board_requests.updateMany({
+    where: { id: requestId, status: "pending" },
+    data: { status: "declined", decided_at: now, silenced_at: now },
+  })
+  return notFoundResponse("Request not found")
+}
+
 class AcceptRefused extends Error {}
 
 /*
  * One sentence, one status, for a block and a closed pair alike. A 403 for one
  * and a 409 for the other, around the same words, told the author which.
  */
-const CANNOT_ACCEPT = "This request can no longer be accepted"
 
 /**
  * Answering a board request: yes, no, or never mind.
@@ -97,6 +112,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         post_id: true,
         from_user_id: true,
         to_user_id: true,
+        silenced_at: true,
         event: { select: { end_time: true } },
         post: { select: { deleted_at: true, spaces_left: true, body: true } },
       },
@@ -114,6 +130,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const isRecipient = boardRequest.to_user_id === user.userId
     const isAsker = boardRequest.from_user_id === user.userId
     if (!isRecipient && !isAsker) return notFoundResponse("Request not found")
+    // An ask that was silenced at ask time (the pair already had a link) does not
+    // exist for its author: no list shows it, and an answer to it is a 404.
+    if (isRecipient && boardRequest.silenced_at) return notFoundResponse("Request not found")
     if (action === "withdraw") {
       if (!isAsker) return forbiddenResponse("Only the person who asked can withdraw it")
       return withdraw(requestId)
@@ -176,25 +195,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * at the one moment it is being tested.
      */
     const blocked = await blockCounterparties(user.userId)
-    if (blocked.includes(boardRequest.from_user_id)) return conflictResponse(CANNOT_ACCEPT)
-
-    /*
-     * A closed pair, checked before the claim rather than after.
-     *
-     * `openConversation` refuses a closed pair by throwing, and unmatching is
-     * permanent. Claiming first and discovering it second would leave the
-     * request marked accepted with no conversation behind it — a state nothing
-     * retries and no screen can explain.
-     */
-    const [user1_id, user2_id] = conversationPair(
-      boardRequest.from_user_id,
-      boardRequest.to_user_id
-    )
-    const existing = await db.private_conversations.findUnique({
-      where: { user1_id_user2_id: { user1_id, user2_id } },
-      select: { closed_at: true },
-    })
-    if (existing?.closed_at) return conflictResponse(CANNOT_ACCEPT)
+    // Answered as a closed or linked pair is: as for an ask the author was never shown.
+    if (blocked.includes(boardRequest.from_user_id)) return hideAsk(requestId)
 
     /*
      * Pseudonymous, and that is not decoration.
@@ -249,6 +251,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
          * asks, and two accepts at once must each see the other.
          */
         await tx.$executeRaw`SELECT 1 FROM board_posts WHERE id = ${boardRequest.post_id}::uuid FOR UPDATE`
+        /*
+         * Linked since the ask (a friendship, a conversation, a friend request):
+         * answered as for an ask the author was never shown — a 404 — and the
+         * ask is silenced below. Under the pair's lock, so a request or an accept
+         * landing now either comes first (and this sees it) or waits. Because
+         * every ask is decided at ask time and again here, there is never an
+         * existing conversation to hand back, and a closed pair is no longer a
+         * distinct refusal.
+         */
+        await lockPair(tx, boardRequest.from_user_id, boardRequest.to_user_id)
         const claim = await tx.board_requests.updateMany({
           where: { id: requestId, ...liveRequest(now) },
           data: { status: "accepted", decided_at: now },
@@ -261,6 +273,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           if (current?.status !== "pending") throw new AcceptRefused("That request has already been answered")
           throw new AcceptRefused(current.post.deleted_at ? "That post was taken down" : "That event has ended")
         }
+        // After the claim, so an accept that lost a race to another accept of the
+        // same ask is told "already answered" (the first one opened the DM the
+        // link check would now see); a linked pair rolls the claim back by throwing.
+        if (await pairIsLinked(tx, boardRequest.from_user_id, boardRequest.to_user_id)) throw new LinkedSinceAsk()
         if (takesASeat) {
           const seat = await tx.board_posts.updateMany({
             where: { id: boardRequest.post_id, deleted_at: null, spaces_left: { gt: 0 } },
@@ -268,28 +284,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           })
           if (seat.count === 0) throw new AcceptRefused("That offer is full")
         }
-        /*
-         * Between people who are friends, or who already have any conversation,
-         * the accept opens nothing: the seat is taken and the answer carries no
-         * conversation. Handing back the existing one would tie the board's
-         * pseudonym to the name the friend DM or the real-name thread shows, and
-         * a new pseudonymous DM beside a friend's would do the same. They already
-         * have where to talk. Under the pair's lock, as a friend request is.
-         */
-        await lockPair(tx, boardRequest.from_user_id, boardRequest.to_user_id)
-        const [pairA, pairB] = conversationPair(boardRequest.from_user_id, boardRequest.to_user_id)
-        const [friends, existing] = await Promise.all([
-          tx.friendships.findUnique({ where: { user1_id_user2_id: { user1_id: pairA, user2_id: pairB } }, select: { id: true } }),
-          tx.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id: pairA, user2_id: pairB } }, select: { id: true } }),
-        ])
-        const opened = friends || existing
-          ? null
-          : await openConversation(
-              boardRequest.from_user_id,
-              boardRequest.to_user_id,
-              { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId },
-              tx
-            )
+        const opened = await openConversation(
+          boardRequest.from_user_id,
+          boardRequest.to_user_id,
+          { eventId: boardRequest.event_id, pseudonyms, boardRequestId: requestId },
+          tx
+        )
         // The post's room, once a second asker is in (CR-I16, SCRUM-535).
         await seatBoardRoom(tx, {
           id: boardRequest.post_id,
@@ -301,11 +301,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       })
     } catch (error) {
       if (error instanceof AcceptRefused) return conflictResponse(error.message)
-      if (error instanceof ConversationClosedError) return conflictResponse(CANNOT_ACCEPT)
+      if (error instanceof LinkedSinceAsk || error instanceof ConversationClosedError) {
+        return hideAsk(requestId)
+      }
       throw error
     }
 
-    notifyBoardRequestAccepted(boardRequest.from_user_id, conversation?.id ?? null).catch((error) =>
+    notifyBoardRequestAccepted(boardRequest.from_user_id, conversation.id).catch((error) =>
       logger.warn("Board acceptance notification failed", {
         requestId,
         error: String(error),
@@ -315,8 +317,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       id: requestId,
       status: "accepted",
-      // Null when the pair are friends or already had a conversation: nothing was opened.
-      conversationId: conversation?.id ?? null,
+      conversationId: conversation.id,
     })
   } catch (error) {
     logger.error("Board request decision error", {

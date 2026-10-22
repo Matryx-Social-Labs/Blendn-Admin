@@ -77,16 +77,17 @@ export async function GET(request: NextRequest) {
      * cap bounds an asker's, and an author answers theirs.
      */
     const [liveIn, settledIn, lapsedIn, liveOut, settledOut, lapsedOut] = await Promise.all([
+      // An ask silenced at ask time (`silenced_at`) is never shown to its author.
       // An ask from somebody blocked either way is not shown: the block is the
       // answer, and accepting is refused on it anyway.
       db.board_requests.findMany({
-        where: { to_user_id: user.userId, from_user_id: { notIn: blockedIds }, ...liveRequest(now) },
+        where: { to_user_id: user.userId, silenced_at: null, from_user_id: { notIn: blockedIds }, ...liveRequest(now) },
         orderBy: newest,
         take: PAGE,
         select,
       }),
       db.board_requests.findMany({
-        where: { to_user_id: user.userId, from_user_id: { notIn: blockedIds }, status: { not: "pending" } },
+        where: { to_user_id: user.userId, silenced_at: null, from_user_id: { notIn: blockedIds }, status: { not: "pending" } },
         orderBy: [{ status: "asc" }, newest],
         take: PAGE,
         select,
@@ -94,6 +95,7 @@ export async function GET(request: NextRequest) {
       db.board_requests.findMany({
         where: {
           to_user_id: user.userId,
+          silenced_at: null,
           from_user_id: { notIn: blockedIds },
           status: "pending",
           // any-kind: this person's own asks, sorted by whether their night is over; any room's ends the same way.
