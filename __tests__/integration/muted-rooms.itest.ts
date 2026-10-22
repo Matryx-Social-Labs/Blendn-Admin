@@ -247,7 +247,11 @@ describe("GET /me/muted-rooms: paging", () => {
     const rooms = [await eventRoom(host, me, { prefs: MUTED }), await eventRoom(host, me, { prefs: MUTED })]
     const real = (await list(me, "?limit=1")).nextCursor as string
     expect(real).toEqual(expect.any(String))
-    for (const bad of ["x", "not-base64!!", Buffer.from("a|b").toString("base64url"), Buffer.from("2026-10-01T10:00:00.000Z|nope").toString("base64url"), `${real}A`, encodeURIComponent("%%")]) {
+    // The same bytes spelt another way (the last character's two spare bits flipped) is not a cursor it gave.
+    const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    const respelt = real.slice(0, -1) + ALPHABET[ALPHABET.indexOf(real.slice(-1)) ^ 1]
+    expect(Buffer.from(respelt, "base64url")).toEqual(Buffer.from(real, "base64url"))
+    for (const bad of ["x", "not-base64!!", Buffer.from("a|b").toString("base64url"), Buffer.from("2026-10-01T10:00:00.000Z|nope").toString("base64url"), respelt, encodeURIComponent("%%")]) {
       const res = await list(me, `?cursor=${bad}`)
       expect(res.status).toBe(400)
     }
