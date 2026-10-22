@@ -493,8 +493,9 @@ that does not know it.
 | `changedAt` | ISO string \| `null` | When the time, the venue or the status last moved under people who had heard of the event. `null` for an event that has not changed (almost all), and again when every change was put back |
 | `changedFields` | `("time" \| "venue" \| "cancelled")[]` | What moved, in that order. `[]` when nothing did. Derived on read, so a time moved and put back is no change |
 | `changedFrom` | `{ startTime?, endTime?, venueName?, address? } \| null` | What those were **before the first change still standing**, for the struck-through old time. Only fields that still differ appear; a cancel names none. The live values stay in `startTime`, `endTime`, `venueName` |
-| `days` | `{ date, startTime, endTime, cancelled }[]` | Every day of the run, in order (`date` is the local `YYYY-MM-DD`). One entry for a one-day event. A day called off is `cancelled: true`: draw it struck through |
-| `dayCount` | number | `days.length` |
+| `days` | `{ date, startTime, endTime, cancelled, cancelledAt }[]` | The days of the run, in order, at most 31 (`date` is the local `YYYY-MM-DD`). One entry for a one-day event. A day called off is `cancelled: true`: draw it struck through |
+| `dayCount` | number | How many days the whole run has; `days.length < dayCount` means more exist than were sent |
+| `daysFrom` | number | Which day of the run `days[0]` is, 1-based (1 unless the run is longer than the window) |
 | `dayNumber` | number \| `null` | The 1-based position of `session`'s day: "Day 2 of 3". `null` when every day is cancelled |
 
 `session`, `startTime`, `endTime` and the rest are exactly what they were.
@@ -966,6 +967,14 @@ went ahead (so it reads as ended); `null` when every day is cancelled. On a
 single-day event it equals `startTime`/`endTime`. Computed by `eventSession` in
 `lib/occurrences.ts`. The rating route's "once it has ended" uses the same
 window.
+
+**`days` is bounded** (the table above): at most 31 entries. Every day of an
+ordinary event; for a longer run the stretch starting two days before today's
+(`session`'s), so `dayCount`, the whole run, can exceed `days.length`, and
+`daysFrom` says which day of the run `days[0]` is (the same "Day 3" the check-in
+refusal below names). Each day also carries `cancelledAt` (when it was called
+off, else null) beside `cancelled`. `daysFrom` and `cancelledAt` are additive.
+Computed by `eventDays` in `lib/occurrences.ts`.
 
 **A check-in refused on the clock names the day** on a multi-day event:
 `Day 3 starts Tue, Sep 29, 12:45 AM.` (`EVENT_NOT_STARTED`), `Day 2 has been

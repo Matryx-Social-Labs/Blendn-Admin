@@ -1,5 +1,5 @@
 import { changeForResponse, changedFieldsOf, nextChange, parseChangedFrom, updateEventTracked, type TrackedEvent } from "@/lib/event-change"
-import { eventDays } from "@/lib/occurrences"
+import { eventDays, EVENT_DAYS_WINDOW } from "@/lib/occurrences"
 
 const mockTx = {
   $queryRaw: jest.fn(),
@@ -118,6 +118,37 @@ describe("eventDays", () => {
     expect(out.dayCount).toBe(3)
     expect(out.dayNumber).toBe(2)
     expect(out.days.map((d) => d.cancelled)).toEqual([false, false, true])
+    expect(out.days.map((d) => d.cancelledAt !== null)).toEqual([false, false, true])
+    expect(out.daysFrom).toBe(1)
+  })
+
+  describe("bounded (SV1)", () => {
+    const run = (n: number, cancelledFrom = n) =>
+      Array.from({ length: n }, (_, i) => slot(1 + i, -2 + (i - 100) * 24, 5 + (i - 100) * 24, i >= cancelledFrom))
+    const of = (occurrences: ReturnType<typeof run>) => eventDays({ start_time: occurrences[0].start_time, end_time: occurrences[occurrences.length - 1].end_time, occurrences }, NOW)
+
+    it("an ordinary run is whole", () => {
+      const out = of(run(101))
+      expect(out.days).toHaveLength(31)
+      expect(out.dayCount).toBe(101)
+    })
+
+    it("a long run is a window starting two days before today, with the whole count and where it starts", () => {
+      const out = of(run(365)) // today is the 101st day
+      expect(out.dayNumber).toBe(101)
+      expect(out.days).toHaveLength(EVENT_DAYS_WINDOW)
+      expect(out.dayCount).toBe(365)
+      expect(out.daysFrom).toBe(99)
+    })
+
+    it("clamps at the end of the run, and starts at day 1 when every day is cancelled", () => {
+      const late = of(run(110))
+      expect(late.daysFrom).toBe(110 - EVENT_DAYS_WINDOW + 1)
+      expect(late.days).toHaveLength(EVENT_DAYS_WINDOW)
+      const none = of(run(40, 0))
+      expect(none.dayNumber).toBeNull()
+      expect(none.daysFrom).toBe(1)
+    })
   })
 
   it("after the last held day it reads as that day; every day cancelled is none", () => {
