@@ -35,6 +35,7 @@ let suspendedOrg: string
 let venue: string
 let archivedVenue: string
 let optedOutVenue: string
+let floodedVenue: string
 let claimOrg: string
 const events: Record<string, string> = {}
 const ips = new Set<string>()
@@ -97,6 +98,7 @@ beforeAll(async () => {
   archivedVenue = (await db.venues.create({ data: { name: "Archived", status: "archived" } })).id
   optedOutVenue = (await db.venues.create({ data: { name: "Opted Out", owner_org_id: claimOrg, claimed_at: new Date(), open_on_blendn: false } })).id
 
+  floodedVenue = (await db.venues.create({ data: { name: "Flooded", area: AREA, city: "Bengaluru", geofence: { ...VENUE_FENCE, lat: 12.9, lng: 77.5 } } })).id
   await makeShareEvent("public")
   await makeShareEvent("public2", { start_time: new Date(Date.now() + 6 * HOUR), end_time: new Date(Date.now() + 8 * HOUR) })
   await makeShareEvent("unlisted", { visibility: "unlisted" })
@@ -119,8 +121,9 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  await db.events.deleteMany({ where: { venue_id: floodedVenue } })
   await db.events.deleteMany({ where: { id: { in: Object.values(events) } } })
-  await db.venues.deleteMany({ where: { id: { in: [venue, archivedVenue, optedOutVenue].filter(Boolean) } } })
+  await db.venues.deleteMany({ where: { id: { in: [venue, archivedVenue, optedOutVenue, floodedVenue].filter(Boolean) } } })
   await db.user.deleteMany({ where: { id: { in: [suspendedHost, goneHost].filter(Boolean) } } })
   await db.organisations.deleteMany({ where: { id: { in: [suspendedOrg, claimOrg].filter(Boolean) } } })
   await cleanup([user], [])
@@ -222,6 +225,50 @@ describe("GET /api/public/share/venues/:venueId", () => {
     const res = await readVenue(optedOutVenue)
     expect(res.status).toBe(200)
     expect((await res.json()).venue.indexable).toBe(false)
+  })
+})
+
+describe("a flood of links to a venue", () => {
+  const SPAM = 50
+  const genuine: string[] = []
+
+  beforeAll(async () => {
+    const now = Date.now()
+    // Fifty strangers' public events linked to the venue, located elsewhere, and all starting BEFORE the genuine ones.
+    await db.events.createMany({
+      data: Array.from({ length: SPAM }, (_, i) => ({
+        slug: testId(`share_spam${i}`),
+        title: `Spam ${i}`,
+        description: "x",
+        start_time: new Date(now + (1 + i / 100) * HOUR),
+        end_time: new Date(now + 3 * HOUR),
+        timezone: "Asia/Kolkata",
+        status: "published" as const,
+        organizer_id: user,
+        visibility: "public" as const,
+        venue_id: floodedVenue,
+        venue_link_status: "auto_linked" as const,
+        latitude: 13.5,
+        longitude: 77.0,
+      })),
+    })
+    // Two of the venue's own: one the owner confirmed, one unconfirmed but at the venue's own spot.
+    genuine.push(
+      await makeShareEvent("floodedConfirmed", { venue_id: floodedVenue, start_time: new Date(now + 20 * HOUR), end_time: new Date(now + 22 * HOUR) }),
+      await makeShareEvent("floodedNearby", { venue_id: floodedVenue, venue_link_status: "auto_linked", latitude: 12.9, longitude: 77.5, start_time: new Date(now + 21 * HOUR), end_time: new Date(now + 23 * HOUR) })
+    )
+  })
+
+  it("never pushes the venue's own events off its page, and shows no stranger's", async () => {
+    const { venue: body } = await (await readVenue(floodedVenue)).json()
+    expect(body.upcoming.map((e: { id: string }) => e.id)).toEqual(genuine)
+    expect(body.upcoming.map((e: { title: string }) => e.title).join()).not.toContain("Spam")
+  })
+
+  it("does the same for the venue's other events on an event's page", async () => {
+    const { event: own } = await (await readEvent(genuine[0])).json()
+    expect(own.venueUpcoming.map((e: { id: string }) => e.id)).toEqual([genuine[1]])
+    expect(JSON.stringify(own.venueUpcoming)).not.toContain("Spam")
   })
 })
 

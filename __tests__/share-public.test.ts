@@ -5,6 +5,7 @@ jest.mock("@/lib/logger", () => ({ logger: { error: jest.fn(), warn: jest.fn(), 
 const hit = jest.fn()
 jest.mock("@/lib/rate-limit-store", () => ({ hit: (...args: unknown[]) => hit(...args) }))
 
+import { atTheVenueWhere } from "@/lib/venue-visibility"
 import {
   publicCoverUrl,
   shareEventBody,
@@ -199,5 +200,38 @@ describe("serveShare", () => {
     const ok = await serveShare(req(), "x", async () => ({ available: true }))
     expect(ok.status).toBe(200)
     expect(ok.headers.get("cache-control")).toBe("public, s-maxage=60, stale-while-revalidate=60")
+  })
+})
+
+describe("atTheVenueWhere", () => {
+  type Box = { latitude: { gte: number; lte: number }; longitude: { gte: number; lte: number } }
+  const boxOf = (where: object) => (where as { OR: unknown[] }).OR[1] as Box
+
+  it("is a confirmed link, or a pin in a box around the venue's area and buffer", () => {
+    const where = atTheVenueWhere({ type: "circle", lat: 12.97, lng: 77.64, radius: 100, buffer: 50 })
+    expect((where as { OR: unknown[] }).OR[0]).toEqual({ venue_link_status: "confirmed" })
+    const box = boxOf(where)
+    // Around the centre, wider than radius + buffer (150 m is about 0.00135 degrees of latitude), and nowhere near 0.1 degrees.
+    expect(box.latitude.gte).toBeLessThan(12.97 - 0.00135)
+    expect(box.latitude.lte).toBeGreaterThan(12.97 + 0.00135)
+    expect(box.latitude.lte - box.latitude.gte).toBeLessThan(0.01)
+    expect(box.longitude.gte).toBeLessThan(77.64)
+    expect(box.longitude.lte).toBeGreaterThan(77.64)
+  })
+
+  it("covers a polygon's furthest corner", () => {
+    const ring: [number, number][] = [[12.97, 77.64], [12.97, 77.65], [12.98, 77.65], [12.98, 77.64]]
+    const box = boxOf(atTheVenueWhere({ type: "polygon", ring, buffer: 20 }))
+    for (const [lat, lng] of ring) {
+      expect(lat).toBeGreaterThanOrEqual(box.latitude.gte)
+      expect(lat).toBeLessThanOrEqual(box.latitude.lte)
+      expect(lng).toBeGreaterThanOrEqual(box.longitude.gte)
+      expect(lng).toBeLessThanOrEqual(box.longitude.lte)
+    }
+  })
+
+  it("is a confirmed link only for a venue with no area", () => {
+    expect(atTheVenueWhere(null)).toEqual({ venue_link_status: "confirmed" })
+    expect(atTheVenueWhere({ type: "circle", lat: 999, lng: 0, radius: 10, buffer: 0 })).toEqual({ venue_link_status: "confirmed" })
   })
 })

@@ -13,7 +13,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { publicBucketHosts } from "@/lib/tigris"
 import { venueTypeLabel } from "@/lib/venue-types"
-import { atTheVenue, eventArea, eventVenue, takeoverSelect } from "@/lib/venue-visibility"
+import { atTheVenue, atTheVenueWhere, eventArea, eventVenue, takeoverSelect } from "@/lib/venue-visibility"
 import { upcomingEventsWhere } from "@/lib/venue-listing"
 
 /**
@@ -208,29 +208,49 @@ const hostPersonActive = { organizer: { suspended_at: null, deletedAt: null } }
 /** How many candidates are read per event shown, because `atTheVenue` is judged in code and drops some. */
 const AT_VENUE_OVERFETCH = 4
 
+/** How many pages of candidates are read at most while looking for `take` events at the venue. */
+const AT_VENUE_MAX_PAGES = 5
+
 /**
  * The next public events at a venue, for a page that names it. Never an
  * unlisted, private, draft or suspended host's, and only events actually AT
- * the venue (`atTheVenue`: a confirmed link, or the event's own area at the
- * venue): any organiser can link any venue, and a stranger's event elsewhere
- * must not appear on its page.
+ * the venue: any organiser can link any venue, so the test is in the query
+ * (`atTheVenueWhere`: a confirmed link, or a pin inside the venue's box) and
+ * applied exactly (`atTheVenue`) on what comes back. Confirmed links first,
+ * and further pages while fewer than `take` match, so a pile of links cannot
+ * push the venue's own events off its page. The result is in time order.
+ * ponytail: `AT_VENUE_MAX_PAGES` pages is the ceiling; a venue with more
+ * in-box impostors than that shows fewer than `take` rather than reading on.
  */
 async function upcomingAt(venueId: string, venueGeofence: unknown, now: Date, take: number, exceptEventId?: string) {
-  const candidates = await db.events.findMany({
-    where: {
-      AND: [
-        upcomingEventsWhere(null, now),
-        hostNotSuspended,
-        hostPersonActive,
-        { venue_id: venueId, ...(exceptEventId ? { id: { not: exceptEventId } } : {}) },
-      ],
-      ...realEventsWhere,
-    },
-    orderBy: [{ start_time: "asc" }, { id: "asc" }],
-    take: take * AT_VENUE_OVERFETCH,
-    select: { ...upcomingSelect, ...takeoverSelect },
-  })
-  return candidates.filter((e) => atTheVenue(e, venueGeofence)).slice(0, take)
+  const pageSize = take * AT_VENUE_OVERFETCH
+  const where = {
+    AND: [
+      upcomingEventsWhere(null, now),
+      hostNotSuspended,
+      hostPersonActive,
+      atTheVenueWhere(venueGeofence),
+      { venue_id: venueId, ...(exceptEventId ? { id: { not: exceptEventId } } : {}) },
+    ],
+    ...realEventsWhere,
+  }
+  const readPage = (skip: number) =>
+    db.events.findMany({
+      where,
+      orderBy: [{ venue_link_status: { sort: "desc", nulls: "last" } }, { start_time: "asc" }, { id: "asc" }],
+      skip,
+      take: pageSize,
+      select: { ...upcomingSelect, ...takeoverSelect },
+    })
+  const found: Awaited<ReturnType<typeof readPage>> = []
+  for (let page = 0; page < AT_VENUE_MAX_PAGES && found.length < take; page++) {
+    const rows = await readPage(page * pageSize)
+    found.push(...rows.filter((e) => atTheVenue(e, venueGeofence)))
+    if (rows.length < pageSize) break
+  }
+  return found
+    .slice(0, take)
+    .sort((a, b) => a.start_time.getTime() - b.start_time.getTime() || a.id.localeCompare(b.id))
 }
 
 /** Null is "unavailable", whatever the reason. A throw is a failed read and is the caller's 503. */
