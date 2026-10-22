@@ -10,7 +10,7 @@ const mockDb = {
   user: { findUnique: jest.fn() },
   // Cancelling cascades to live check-ins (Fix #35) and their presence sessions
   // (SCRUM-490), in one transaction: the other tables these routes touch.
-  event_check_ins: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+  event_check_ins: { updateMany: jest.fn().mockResolvedValue({ count: 0 }), findMany: jest.fn().mockResolvedValue([]) },
   $executeRaw: jest.fn().mockResolvedValue(0),
   // The edit and its change record share a transaction (`updateEventTracked`): a callback, besides the array form.
   $queryRaw: jest.fn().mockResolvedValue([]),
