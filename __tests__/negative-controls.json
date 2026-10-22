@@ -1953,9 +1953,21 @@
       "date": "2026-10-22"
     },
     "integration/photo-moderation-sweep.itest.ts": {
-      "guards": "SCRUM-732: the sweep re-asks the vendor about photo_checks rows left unchecked (photo and blur, through moderateProfilePhoto/moderateBlurPhoto, with retries), pulls what the second look finds unsafe, leaves a still-failing row for the next pass, waits out the write's own check (SWEEP_SETTLE_MS), drops the row of an object that is gone, never sends the vendor a URL that is not the person's own object, reports what it settled; background.ts starts and stops it.",
-      "mutation": "M1521 the ownership gate dropped. M1522 the gone-object drop dropped. M1523 the settle window dropped. M1524 a blur routed as a photo. M1525 the photo path without retries. M1526 the sweeper not started in background.ts. M1527 `settled` counts the rows selected.",
-      "observed": "M1521: 1 of 8. M1522: 1 of 8. M1523: 1 of 8. M1524: 1 of 8. M1525: 1 of 8 (after asserting retries > 0, not just a number). M1526: photo-sweeper-started.test 1 of 2. M1527: 1 of 8. Each reverted; 8 of 8.",
+      "guards": "SCRUM-732: the sweep re-asks the vendor about photo_checks rows left unchecked (photo and blur, through moderateProfilePhoto/moderateBlurPhoto, with retries), pulls what the second look finds unsafe, leaves a still-failing row for the next pass, waits out the write's own check (SWEEP_SETTLE_MS), drops a row only for an object confirmed gone (objectPresence) that nothing on the profile points at, pulls a URL that is not the person's own object (fail closed, never sent to the vendor), stamps each attempt, takes the least recently attempted first and at most PER_USER_SLOTS a person so one pile cannot starve the queue, backs a row off after MAX_ATTEMPTS_PER_DAY_AFTER tries, reports what it settled.",
+      "mutation": "M1521 the ownership gate dropped (a foreign URL kept, not pulled). M1522 the confirmed-gone drop dropped. M1523 the settle window dropped. M1524 a blur routed as a photo. M1525 the photo path without retries. M1527 `settled` counts the rows selected. M1528 'could not tell' read as gone. M1529 a gone object's row dropped though the profile points at it. M1530 the per-person cap dropped. M1531 least-recently-attempted ordering dropped (oldest first). M1532 the attempt not stamped. M1533 the daily back-off dropped.",
+      "observed": "M1521: 1 of 14 failing. M1522: 1 of 14 failing. M1523: 1 of 14 failing. M1524: 1 of 14 failing. M1525: 1 of 14 failing (after asserting retries > 0, not just a number). M1527: 1 of 14 failing. M1528: 1 of 14 failing. M1529: 1 of 14 failing. M1530: 1 of 14 failing. M1531: 1 of 14 failing (after giving the rows distinct ages; with equal ages the heap order rotated them by accident). M1532: 2 of 14 failing. M1533: 1 of 14 failing. Each reverted; 14 of 14.",
+      "date": "2026-10-22"
+    },
+    "photo-sweeper-started.test.ts": {
+      "guards": "SCRUM-732: lib/background.ts starts the photo moderation sweeper and stops it on shutdown, and lib/photo-sweeper.ts imports by relative path because server.ts compiles with plain tsc.",
+      "mutation": "M1526 the sweeper not started in background.ts.",
+      "observed": "M1526: 1 of 2 failing (the start/stop test). Reverted; 2 of 2.",
+      "date": "2026-10-22"
+    },
+    "object-presence.test.ts": {
+      "guards": "SCRUM-732: objectPresence says 'gone' only for a confirmed 404 (NotFound); a 403, a 5xx and a network failure are 'unknown', so the sweep never deletes a record on a storage error.",
+      "mutation": "M1534 every error read as gone.",
+      "observed": "M1534: 4 of 6 failing. Reverted; 6 of 6.",
       "date": "2026-10-22"
     }
   },

@@ -38,8 +38,6 @@ export const SWEEP_INTERVAL_MS = 10 * 60 * 1000
 export const SWEEP_SETTLE_MS = 2 * 60 * 1000
 const BATCH_LIMIT = 25
 export const PER_USER_SLOTS = 3
-/** Candidates read per pass, from which the per-person cap is applied. */
-const POOL = BATCH_LIMIT * 8
 /** ~8 hours of passes. After this a row is a standing problem for an operator, not a retry. */
 export const MAX_ATTEMPTS_PER_DAY_AFTER = 48
 const BACKOFF_MS = 24 * 60 * 60 * 1000
@@ -52,29 +50,32 @@ export interface PhotoSweepResult {
 }
 
 export async function sweepUnmoderatedPhotos(now: Date = new Date()): Promise<PhotoSweepResult> {
-  const pool = await db.photo_checks.findMany({
-    where: {
-      checked: false,
-      created_at: { lt: new Date(now.getTime() - SWEEP_SETTLE_MS) },
-      OR: [
-        { attempts: { lt: MAX_ATTEMPTS_PER_DAY_AFTER } },
-        { last_attempted_at: null },
-        { last_attempted_at: { lt: new Date(now.getTime() - BACKOFF_MS) } },
-      ],
-    },
-    orderBy: [{ last_attempted_at: { sort: "asc", nulls: "first" } }, { created_at: "asc" }],
-    take: POOL,
-    select: { url: true, user_id: true },
-  })
-
-  const perUser = new Map<string, number>()
-  const rows = pool
-    .filter((r) => {
-      const n = perUser.get(r.user_id) ?? 0
-      perUser.set(r.user_id, n + 1)
-      return n < PER_USER_SLOTS
-    })
-    .slice(0, BATCH_LIMIT)
+  /*
+   * The per-person cap is in the query, not applied to what a read-ahead
+   * happened to return: with the cap after a LIMIT, one person with more rows
+   * than the window fills it and everyone behind them is starved again.
+   * Unchecked rows are the few the (checked, created_at) index finds, so the
+   * window runs over a small set.
+   */
+  const rows = await db.$queryRaw<{ url: string; user_id: string }[]>`
+    SELECT url, user_id
+      FROM (
+        SELECT url, user_id, last_attempted_at, created_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY user_id
+                 ORDER BY last_attempted_at ASC NULLS FIRST, created_at ASC
+               ) AS slot
+          FROM photo_checks
+         WHERE checked = false
+           AND created_at < ${new Date(now.getTime() - SWEEP_SETTLE_MS)}
+           AND (attempts < ${MAX_ATTEMPTS_PER_DAY_AFTER}
+                OR last_attempted_at IS NULL
+                OR last_attempted_at < ${new Date(now.getTime() - BACKOFF_MS)})
+      ) ranked
+     WHERE slot <= ${PER_USER_SLOTS}
+     ORDER BY last_attempted_at ASC NULLS FIRST, created_at ASC
+     LIMIT ${BATCH_LIMIT}
+  `
 
   for (const { url, user_id: userId } of rows) {
     try {

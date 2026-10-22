@@ -842,9 +842,8 @@ export async function headObject(key: string): Promise<ObjectFacts | null> {
  * a confirmed 404 is gone (SCRUM-732).
  */
 export async function objectPresence(key: string): Promise<"present" | "gone" | "unknown"> {
-  const client = getS3Client()
   try {
-    await client.send(new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }))
+    await getS3Client().send(new HeadObjectCommand({ Bucket: TIGRIS_BUCKET, Key: key }))
     return "present"
   } catch (error) {
     const e = error as { name?: string; $metadata?: { httpStatusCode?: number } }

@@ -56,6 +56,9 @@ async function person() {
 }
 const checkedOf = async (url: string) => (await db.photo_checks.findUnique({ where: { url } }))?.checked
 
+// Each test's rows are its own: a leftover pile would sit in front of the next test's queue.
+afterEach(() => db.photo_checks.deleteMany({ where: { user_id: { in: users } } }))
+
 beforeEach(() => {
   jest.clearAllMocks()
   ;(objectPresence as jest.Mock).mockResolvedValue("present")
@@ -168,13 +171,31 @@ describe("the unchecked-photo sweep", () => {
     expect(asked.length).toBeLessThanOrEqual(PER_USER_SLOTS)
   })
 
+  it("is not starved by a pile bigger than any pool the sweep could read: the cap is applied in the query", async () => {
+    const flooder = await person()
+    // Older than everything else, never attempted: ordered by age alone they would fill any read-ahead window.
+    const many = Array.from({ length: 300 }, (_, i) => urlOf(flooder.id, `flood-${i}-sealed`))
+    await db.photo_checks.createMany({
+      data: many.map((url, i) => ({ url, user_id: flooder.id, checked: false, created_at: new Date(OLD.getTime() - 10_000_000 + i) })),
+    })
+    const honest = await person()
+    ;(checkImageContent as jest.Mock).mockImplementation(async (url: string) =>
+      url.includes(`/${flooder.id}/`) ? { checked: false, reason: "error" } : CLEAN
+    )
+    await sweepUnmoderatedPhotos()
+    expect(await checkedOf(honest.photo)).toBe(true)
+    const asked = (checkImageContent as jest.Mock).mock.calls.filter(([url]) => String(url).includes(`/${flooder.id}/`))
+    expect(asked.length).toBeLessThanOrEqual(PER_USER_SLOTS)
+  })
+
   it("takes the least recently attempted first, so every row of a long queue gets its turn", async () => {
     const flooder = await person()
     // Four failing rows, one slot-set per pass: three passes must reach all of them.
     ;(checkImageContent as jest.Mock).mockResolvedValue({ checked: false, reason: "error" })
     const urls = Array.from({ length: PER_USER_SLOTS + 2 }, (_, i) => urlOf(flooder.id, `q-${i}-sealed`))
     await db.photo_checks.deleteMany({ where: { user_id: flooder.id } })
-    await db.photo_checks.createMany({ data: urls.map((url) => ({ url, user_id: flooder.id, checked: false, created_at: OLD })) })
+    // Distinct ages, so that ordering by age alone would pick the same three rows every pass.
+    await db.photo_checks.createMany({ data: urls.map((url, i) => ({ url, user_id: flooder.id, checked: false, created_at: new Date(OLD.getTime() + i * 1000) })) })
     await sweepUnmoderatedPhotos()
     await sweepUnmoderatedPhotos()
     const rows = await db.photo_checks.findMany({ where: { user_id: flooder.id } })
