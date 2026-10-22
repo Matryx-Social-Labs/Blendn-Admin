@@ -235,7 +235,9 @@ describe("accepting opens a conversation that can be told apart from a match", (
     const txn = src.slice(src.indexOf("db.$transaction(async (tx) => {"))
     expect(txn.length).toBeLessThan(src.length)
     const call = txn.slice(txn.indexOf("openConversation("))
-    expect(call.slice(0, call.indexOf("\n        )"))).toMatch(/,\s*tx\s*$/)
+    // The last argument of the call, the transaction's client (it may sit in a
+    // ternary: a pair who are friends or already talk get no new conversation).
+    expect(call).toMatch(/boardRequestId: requestId \},\s*tx\s*\)/)
   })
 
   it("lets a decision happen after doors", () => {

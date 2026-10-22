@@ -4,13 +4,13 @@ import { ageFrom } from "@/lib/age"
 import { chatClosesAt, eventHidesRoom } from "@/lib/chat-window"
 import { blockCounterparties, closedPairKeys } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { friendIdsOf } from "@/lib/friends"
 import { visibleInRoom } from "@/lib/identity"
 import { tierBBudget } from "@/lib/matching"
 import { displayTraitsOf, expandInterests, interestParents, iplTeamIds, type TraitProfile } from "@/lib/matches"
 import { NO_TRAITS, personCard, traitHolders, viewerTierB } from "@/lib/overlaps"
 import { idForViewer, roomMemberFromRef } from "@/lib/room-handle"
 import { eventRoomBan } from "@/lib/room-kind"
+import { notStrangersTo } from "@/lib/room-people"
 import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
 
 /**
@@ -123,16 +123,11 @@ export async function nightPeople(
   if (ban) return { refused: "banned", banned_by: ban.banned_by }
 
   /*
-   * Friends: every one, whatever their room setting — plans/friends-in-room.md
-   * D1, the "was here" row of its 4.2 table. Read with `friendIdsOf` because
-   * the plan's `notStrangersTo` (lib/room-people.ts, on top of
-   * feat/friend-after-reveal) is not on this branch; at the merge this becomes
-   * `notStrangersTo(viewerId)`, which adds friendships ended in the last 24 h (B4).
-   *
-   * TODO(#727): if #728 merges first, #727 adds lib/night-people.ts to its
-   * `PEOPLE_SURFACES` guard and swaps this read for `notStrangersTo` (review M4).
+   * Friends: every one, whatever their room setting, and anyone whose
+   * friendship ended in the last 24 hours — plans/friends-in-room.md D1 and
+   * B4, through the one helper every people surface asks (`notStrangersTo`).
    */
-  const [blocked, closed, friends] = await Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId), friendIdsOf(viewerId)])
+  const [blocked, closed, friends] = await Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId), notStrangersTo(viewerId)])
   const hidden = [...new Set([viewerId, ...blocked, ...closed, ...friends])]
 
   /*

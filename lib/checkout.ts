@@ -8,6 +8,7 @@ import { closeSession } from "./presence-sessions"
 import { logger } from "./logger"
 import { arrivalAnnounced } from "./arrivals-in-flight"
 import { emitEventCheckOut, evictFromVenueDay } from "./socket-server"
+import { notifyFriendsHere } from "./room-friends"
 
 /**
  * The one way someone stops being in the room.
@@ -87,6 +88,7 @@ export async function performCheckout(
       user_id: true,
       status: true,
       occurrence_id: true,
+      kind: true,
       event: { select: { kind: true } },
     },
   })
@@ -154,6 +156,9 @@ export async function performCheckout(
   // arrival's broadcast, never before it, or the roster keeps a ghost.
   await arrivalAnnounced(checkIn.event_id, checkIn.user_id)
   emitEventCheckOut(checkIn.event_id, checkIn.user_id)
+  // Their friends here move too (an opted-in friend leaves the list). Every
+  // checkout writer comes through here, the sweepers included.
+  if (checkIn.kind === "attendee") void notifyFriendsHere(checkIn.user_id, { eventIds: [checkIn.event_id] })
 
   logger.info("Checked out", {
     checkInId,

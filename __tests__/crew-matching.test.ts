@@ -104,20 +104,27 @@ describe("one writer (CR-G03)", () => {
 
   it("every writer of a block takes the pair out of the Blends that now refuse them", () => {
     const writers = SOURCES.filter((s) => /\bblocked_users\.(?:create|createMany|upsert)\(/.test(s.src))
-    // The control: the writers this was written against are still found.
-    expect(writers.map((w) => w.file).sort()).toEqual([
+    // The control: the writers this was written against are still found. A
+    // conversation's leave-and-block writes inside `leaveConversationIn`, so
+    // its two callers are the ones that evict.
+    expect(writers.map((w) => w.file)).toEqual(["lib/block-pair.ts"])
+    const doors = SOURCES.filter((s) => /\bblockPairIn\(/.test(s.src) && s.file !== "lib/block-pair.ts")
+    const callersOfLeave = SOURCES.filter((s) => /\bleaveConversationIn\(/.test(s.src) && s.file !== "lib/leave-conversation.ts")
+    expect(callersOfLeave.map((c) => c.file).sort()).toEqual([
       "app/api/mobile/conversations/[conversationId]/leave/route.ts",
-      "app/api/mobile/message-requests/[requestId]/respond/route.ts",
-      "app/api/mobile/users/[userId]/block/route.ts",
+      "app/api/mobile/conversations/[conversationId]/route.ts",
     ])
-    const silent = writers.filter((w) => !/\bevictBlockedFromBlends\(/.test(w.src)).map((w) => w.file)
+    // The doors that block through the helper, the leave route among them (through `leaveConversationIn`), all evict.
+    const evicting = [...doors.filter((d) => d.file !== "lib/leave-conversation.ts"), ...callersOfLeave]
+    const silent = evicting.filter((w) => !/\bevictBlockedFromBlends\(/.test(w.src)).map((w) => w.file)
     expect(silent).toEqual([])
   })
 
   it("asks the sides again for a block inside the transaction that writes the like (MUST)", () => {
     const like = SOURCES.find((s) => s.file === "lib/crews/like.ts")!.src
     const tx = like.slice(like.indexOf("db.$transaction(async (tx) =>"))
-    const recheck = tx.indexOf("blocksBetween(sides.a, sides.b, tx)")
+    // Blocks, closed pairs AND friendships (`strangersApartBetween`, lib/room-people.ts).
+    const recheck = tx.indexOf("strangersApartBetween(sides.a, sides.b, tx)")
     expect(recheck).toBeGreaterThan(0)
     expect(recheck).toBeLessThan(tx.indexOf("crew_likes.createMany("))
     // And both crews still standing and not hidden, under a share lock, so a

@@ -16,6 +16,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { ratablePeers } from "@/lib/trust"
+import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const banned = await roomBanRefusal(eventId, authUser.userId)
     if (banned) return banned
 
-    return successResponse({ userIds: await ratablePeers(eventId, authUser.userId) })
+    return successResponse({ userIds: (await ratablePeers(eventId, authUser.userId)).map((p) => p.ref) })
   } catch (error) {
     logger.error("Ratable peers error", {
       error: error instanceof Error ? error.message : String(error),
@@ -103,8 +104,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * excludes anyone you have already rated, so the unique constraint is a
      * backstop rather than the rule.
      */
-    const allowed = await ratablePeers(eventId, authUser.userId)
-    if (!allowed.includes(ratedId)) {
+    // By the ref the list showed: a conversation's handle until they revealed.
+    // A raw id for somebody still a pseudonym is not on it, so a rating cannot be
+    // used to ask whether an id is somebody you matched with.
+    // A handle from before they revealed still resolves (it names nobody a
+    // handle should not); a raw id is only ever the ref once they have.
+    const peers = await ratablePeers(eventId, authUser.userId)
+    const viaHandle = await userIdFromDmRef(authUser.userId, ratedId)
+    const target = peers.find((p) => p.ref === ratedId) ?? (viaHandle ? peers.find((p) => p.userId === viaHandle) : undefined)
+    if (!target) {
       return forbiddenResponse("You can only rate someone you connected with, after the event")
     }
 
@@ -115,7 +123,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       data: {
         event_id: eventId,
         rater_id: authUser.userId,
-        rated_id: ratedId,
+        rated_id: target.userId,
         rating,
         issue,
         ...(note !== undefined && { note }),
@@ -140,12 +148,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * Never throws. A failed insert must not cost somebody their rating, and
        * the log line stays as the backstop for exactly that case.
        */
-      logger.error("Harassment reported via peer rating", { eventId, ratedId })
+      logger.error("Harassment reported via peer rating", { eventId, ratedId: target.userId })
       await db.user_reports
         .create({
           data: {
             reporter_id: authUser.userId,
-            reported_id: ratedId,
+            reported_id: target.userId,
             reason: "harassment",
             description: `Reported via peer rating after event ${eventId}.`,
           },
@@ -153,7 +161,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         .catch((error) => {
           logger.error("Failed to escalate peer-rating harassment to the queue", {
             eventId,
-            ratedId,
+            ratedId: target.userId,
             error: String(error),
           })
         })

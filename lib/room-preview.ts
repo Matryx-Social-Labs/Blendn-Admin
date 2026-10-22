@@ -1,3 +1,4 @@
+import { notStrangersTo } from "@/lib/room-people"
 import { hereCountFor } from "@/lib/attendee-counts"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
@@ -43,8 +44,10 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
   const hereCount = await hereCountFor(eventId)
   if (hereCount < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
 
-  const [hidden, viewerInterests, inside] = await Promise.all([
+  const [hidden, friends, viewerInterests, inside] = await Promise.all([
     blockCounterparties(viewerId),
+    // Friends are never strangers (lib/room-people.ts): not in the count either.
+    notStrangersTo(viewerId),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
     db.event_check_ins.findMany({
       where: {
@@ -64,7 +67,7 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
   ])
 
   // One person per id: a multi-day event can hold more than one live row.
-  const hiddenSet = new Set(hidden)
+  const hiddenSet = new Set([...hidden, ...friends])
   const people = new Map<string, string[]>()
   for (const row of inside) {
     if (hiddenSet.has(row.user_id)) continue

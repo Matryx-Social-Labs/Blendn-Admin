@@ -18,6 +18,7 @@ import {
 import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
+import { friendOfferFor } from "@/lib/friend-offer"
 import { identityForRef } from "@/lib/identity"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { profileForSelfResponse } from "@/lib/self-profile"
@@ -39,6 +40,7 @@ import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
 import { homeStateLabel, languageLabels, signLabel, westernSignFor } from "@/lib/about-you"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
+import { notifyFriendsHere } from "@/lib/room-friends"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -232,6 +234,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       suggested_sun_sign: westernSignFor(p?.date_of_birth),
     }
 
+    // Only for somebody this viewer may see, and never for themselves: the
+    // offer to add a stranger as a friend would be a lookup (lib/friend-offer.ts).
+    const friend = identified && !isSelf ? await friendOfferFor(authUser.userId, userId) : undefined
     /*
      * Badges, when the person shows them (`show_badges`, on unless turned off) and
      * to whoever may see who they are: the owner, or an identified viewer. Earned
@@ -247,6 +252,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       name: identified ? user.name : "Attendee",
       ...(identified ? { image: user.image } : {}),
       createdAt: user.createdAt,
+      ...(friend && { friend }),
       profile: user.profile
         ? {
             /*
@@ -682,6 +688,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     // Update or create profile
+    // For `room:friends` below: was this person listed as "Friends here" before this save?
+    const switches = friends_see_me_in_rooms !== undefined || show_online !== undefined
+    const before = switches
+      ? await db.profiles.findUnique({ where: { id: userId }, select: { friends_see_me_in_rooms: true, show_online: true } })
+      : null
     await db.profiles.upsert({
       where: { id: userId },
       create: {
@@ -813,6 +824,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         updated_at: new Date(),
       },
     })
+
+    // Either switch moved a person into or out of their friends' "Friends here": tell the
+    // friends who are at the same event (and nobody when they were hidden both before and after).
+    if (switches) {
+      const was = before?.friends_see_me_in_rooms === true && before.show_online === true
+      const now = (friends_see_me_in_rooms ?? before?.friends_see_me_in_rooms) === true && (show_online ?? before?.show_online ?? true) === true
+      if (was || now) void notifyFriendsHere(userId, { force: true })
+    }
 
     // The blur this write replaced or cleared leaves storage once moderation has passed it (SCRUM-520).
     // `storedBlur` is set only to a freshly sealed URL or null, so it is never the old one.

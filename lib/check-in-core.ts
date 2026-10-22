@@ -7,6 +7,7 @@ import { db } from "@/lib/db"
 import { ADULTS_ONLY, ageFrom, FINISH_ONBOARDING, isAdult, mayParticipate, minAgeRefusal, stripDating } from "@/lib/age"
 import { closeSession, openSession, type ArrivalInput } from "@/lib/presence-sessions"
 import { emitEventCheckIn } from "@/lib/socket-server"
+import { notifyFriendsHere } from "@/lib/room-friends"
 import { evaluateCheckIn, type Geofence } from "@/lib/geofence"
 import { ErrorCode, errorResponse } from "@/lib/api-response"
 import { MAX_GPS_ACCURACY_METERS, type CheckinInput } from "@/lib/validations/event"
@@ -416,7 +417,7 @@ export async function seatAtTheDoor(input: SeatInput) {
     void trackArrival(
       eventId,
       userId,
-      announceArrival(eventId, userId, chatGroupId).catch((err) =>
+      announceArrival(eventId, userId, chatGroupId, kind).catch((err) =>
         logger.error("Announcing an arrival failed", {
           eventId,
           error: err instanceof Error ? err.message : String(err),
@@ -537,7 +538,7 @@ export async function openSeatSession(input: ArrivalInput) {
 }
 
 /** The arrival on the room's live roster: run by `seatAtTheDoor`, not awaited. */
-async function announceArrival(eventId: string, userId: string, chatGroupId: string): Promise<void> {
+async function announceArrival(eventId: string, userId: string, chatGroupId: string, kind: "attendee" | "staff"): Promise<void> {
   // Their pseudonym, and who they are for the recipients whose roster would name them.
   const [membership, arriver, blockedIds] = await Promise.all([
     db.chat_group_members.findUnique({
@@ -568,6 +569,10 @@ async function announceArrival(eventId: string, userId: string, chatGroupId: str
     blockedIds,
     arriver?.profile?.show_online !== false
   )
+  // An opted-in friend of the arriver's, here too, gets "your Friends here moved"
+  // (and only then: a hidden friend's arrival fires nothing).
+  // Staff are working, never in Friends here: their arrival fires nothing.
+  if (kind === "attendee") void notifyFriendsHere(userId, { eventIds: [eventId] })
 }
 
 /**

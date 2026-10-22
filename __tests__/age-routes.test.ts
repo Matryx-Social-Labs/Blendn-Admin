@@ -36,6 +36,8 @@ jest.mock("@/lib/location", () => ({
   normalizeLocationToCity: jest.fn().mockImplementation(async (l: string | null) => l),
 }))
 
+// The friend offer is covered in friend-after-reveal.itest.ts; this file is about ages.
+jest.mock("@/lib/friend-offer", () => ({ friendOfferFor: jest.fn().mockResolvedValue({ state: "none", canAdd: false }) }))
 jest.mock("@/lib/conversations", () => ({ blockedEitherWay: jest.fn().mockResolvedValue(false) }))
 // The badges and the owner's photo states are read through their own queries; this file is about the age and orientation gates.
 jest.mock("@/lib/profile-badges", () => ({ profileBadges: jest.fn().mockResolvedValue([]) }))

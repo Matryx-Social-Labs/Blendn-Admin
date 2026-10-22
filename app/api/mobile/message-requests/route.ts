@@ -6,6 +6,7 @@ import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
 import { identityForRef } from "@/lib/identity"
 import { userIdFromRef } from "@/lib/room-handle"
+import { knownToEachOther } from "@/lib/room-people"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal } from "@/lib/event-access"
@@ -174,7 +175,11 @@ export async function POST(request: NextRequest) {
         : existingRequest.status !== "declined"
           ? "This user has already sent you a request. Check your incoming requests."
           : null
-    const refusal = conflict ?? (existingConversation ? "You already have a conversation with this user" : null)
+    // A friend, with or without a DM yet, is "something already exists": the
+    // friend DM door is theirs (`POST /friends/:id/conversation`), and a real
+    // request to a friend would be a stranger's card in a room.
+    const friends = await knownToEachOther(authUser.userId, recipientId)
+    const refusal = conflict ?? (existingConversation || friends ? "You already have a conversation with this user" : null)
 
     if (refusal) {
       /*
@@ -204,6 +209,12 @@ export async function POST(request: NextRequest) {
        */
       // In the terms of the room the ref came from: a reveal, like or DM
       // elsewhere does not make this room's pseudonym someone you know.
+      //
+      // Deliberate (SCRUM-752): somebody you matched with who has not revealed
+      // to you is not "identified" either, so this is the synthetic 201 for them
+      // too — never the 409. The 409 would say "a request or a DM already
+      // exists" about an id the match's pseudonym is hiding. They are already in
+      // your inbox, where the conversation is.
       if ((await identityForRef(authUser.userId, ref)).identified) return conflictResponse(refusal)
       return successResponse(
         {

@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { rateLimit, userLimit, withReasonCode } from "@/lib/rate-limit"
 import { INVITE_TOKEN, friendState, mayConnect, personCard, personSelect } from "@/lib/friends"
 import {
   successResponse,
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const me = authUser.userId
 
     const limited = await rateLimit(request, userLimit("write", "friend-invite-open", me))
-    if (limited) return limited
+    if (limited) return withReasonCode(limited, ErrorCode.RATE_LIMITED)
 
     // The owner's name and photo are part of taking part; so is the gate (SCRUM-331).
     const unfinished = await participationRefusal(me)

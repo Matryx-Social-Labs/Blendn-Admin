@@ -7,8 +7,10 @@ import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymo
 import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { latestVisibleMessages } from "@/lib/inbox-preview"
 import { db } from "@/lib/db"
+import { idInConversation } from "@/lib/conversation-ref"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
+import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -141,7 +143,9 @@ export async function GET(request: NextRequest) {
       return {
         id: conv.id,
         otherUser: {
-          id: otherUser.id,
+          // The conversation's handle until they reveal: the account id beside a
+          // pseudonym is a join key to every surface that has the id and a name.
+          id: idInConversation(conv, authUser.userId, otherUser.id),
           name: displayNameInConversation(conv, otherUser.id, otherUser.name),
           image: otherRevealed ? otherUser.image : null,
         },
@@ -165,7 +169,7 @@ export async function GET(request: NextRequest) {
           ? {
               id: lastMessage.id,
               text: lastMessage.message_text,
-              senderId: lastMessage.sender_id,
+              senderId: idInConversation(conv, authUser.userId, lastMessage.sender_id),
               createdAt: lastMessage.created_at,
               /*
                * Withheld when the caller sent it and the other party has read
@@ -235,7 +239,9 @@ export async function POST(request: NextRequest) {
      * a handle with that DM's other side by name is how a roster would give
      * away which pseudonym is your friend.
      */
-    const otherUserId = await userIdFromRefIfIdentified(authUser.userId, parsed.data.otherUserId)
+    const otherUserId =
+      (await userIdFromDmRef(authUser.userId, parsed.data.otherUserId)) ??
+      (await userIdFromRefIfIdentified(authUser.userId, parsed.data.otherUserId))
 
     // Can't create conversation with yourself
     if (otherUserId === authUser.userId) {
@@ -301,7 +307,7 @@ export async function POST(request: NextRequest) {
     return successResponse({
       id: conversation.id,
       otherUser: {
-        id: conversationOtherUser.id,
+        id: idInConversation(conversation, authUser.userId, conversationOtherUser.id),
         name: displayNameInConversation(
           conversation,
           conversationOtherUser.id,

@@ -4,6 +4,7 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
+import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -36,7 +37,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.
-    const reportedId = userIdFromRef((await params).userId)
+    const ref = (await params).userId
+    // A direct conversation's handle names the other person in it.
+    const reportedId = (await userIdFromDmRef(authUser.userId, ref)) ?? userIdFromRef(ref)
 
     if (reportedId === authUser.userId) {
       return errorResponse("Cannot report yourself", 400)

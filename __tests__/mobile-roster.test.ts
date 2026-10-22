@@ -24,6 +24,7 @@ const mockDb = {
   friendships: { findMany: jest.fn() },
   // `eventRoomBan`: nobody here is banned from the room unless a case says so.
   chat_group_members: { findFirst: jest.fn().mockResolvedValue(null) },
+  ended_friendships: { findMany: jest.fn(async () => []) },
 }
 
 jest.mock("@/lib/db", () => ({ db: mockDb }))

@@ -7,6 +7,7 @@ import { NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { ownerDoor, ownerRoster, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
+import { notStrangersTo } from "@/lib/room-people"
 import { namesInRoom } from "@/lib/identity"
 import {
   successResponse,
@@ -88,7 +89,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * says "50 members" over 49 rows, which is its own quiet tell.
      */
     // In a board post's room, a closed conversation too (`keptApartIn`, step 10 review H2).
-    const hidden = await keptApartIn(authUser.userId, chatGroup.kind)
+    const apart = await keptApartIn(authUser.userId, chatGroup.kind)
+    /*
+     * An EVENT room's list applies the roster's rule (D24): friends are never
+     * strangers (`notStrangersTo`), and "Show online status" off is "counted, not
+     * listed" (SCRUM-141) — this list ignored it. Crews and Blends are unchanged:
+     * a crew's members ARE friends, and its room is named.
+     */
+    const friends = chatGroup.kind === "event" ? [...(await notStrangersTo(authUser.userId))] : []
+    const hidden = [...apart, ...friends]
     /*
      * In a room that is not an event's, only the people its owner admits: a
      * member row is not membership there (F8). Null for an event's room.
@@ -101,6 +110,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
       // Under AND, so it never replaces the block filter's `user_id` above.
       ...(admitted && { AND: [{ user_id: { in: [...admitted] } }] }),
+      // Show online status off: in the room, counted in the headcount, listed nowhere.
+      ...(chatGroup.kind === "event" && { user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] } }),
     }
 
     // Get total count

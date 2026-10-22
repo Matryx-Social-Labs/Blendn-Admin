@@ -17,6 +17,9 @@ const mockDb = {
   event_check_ins: { findFirst: jest.fn() },
   // `eventRoomBan`: nobody here is banned from the room unless a case says so.
   chat_group_members: { findFirst: jest.fn().mockResolvedValue(null) },
+  // Friends are inert for likes (lib/room-people.ts): none here.
+  friendships: { findFirst: jest.fn().mockResolvedValue(null) },
+  ended_friendships: { findFirst: jest.fn().mockResolvedValue(null) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
 

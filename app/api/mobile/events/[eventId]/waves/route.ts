@@ -20,6 +20,7 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { hit } from "@/lib/rate-limit-store"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
+import { knownToEachOther } from "@/lib/room-people"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { visibleInRoom } from "@/lib/identity"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -126,6 +127,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (await eventRoomBan(eventId, toUserId)) return notHere()
     if (await blockedEitherWay(fromUserId, toUserId)) return notHere()
     if (await pairIsClosed(fromUserId, toUserId)) return notHere()
+    // A friend is never a stranger to wave at: answered as somebody with "Show
+    // online status" off is, byte for byte (lib/room-people.ts).
+    if (await knownToEachOther(fromUserId, toUserId)) return notHere()
 
     /*
      * One wave per pair per ten minutes, in the shared rate-limit store (Redis

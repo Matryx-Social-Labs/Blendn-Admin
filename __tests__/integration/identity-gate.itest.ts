@@ -108,15 +108,14 @@ describe("identity is visible once someone has opted in", () => {
     expect(await maySeeIdentity(me, me)).toBe(true)
   })
 
-  it("on a mutual like at the same event", async () => {
+  it("not on a mutual like alone: the conversation it opens decides (SCRUM-752)", async () => {
     const eventId = await anEvent()
     const [me, them] = await Promise.all([guest("ig-j"), guest("ig-k")])
     await like(eventId, me, them)
     await like(eventId, them, me)
 
-    expect(await maySeeIdentity(me, them)).toBe(true)
-    // Symmetric: an exchange that only ran one way would be a trap.
-    expect(await maySeeIdentity(them, me)).toBe(true)
+    expect(await maySeeIdentity(me, them)).toBe(false)
+    expect(await maySeeIdentity(them, me)).toBe(false)
   })
 
   it("once a conversation exists", async () => {

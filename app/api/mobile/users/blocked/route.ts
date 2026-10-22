@@ -106,7 +106,8 @@ export async function GET(request: NextRequest) {
       if (knownAs.has(theirs)) continue // newest first
       const pseudonym = c.user1_id === theirs ? c.user1_pseudonym : c.user2_pseudonym
       const wasPseudonymous = c.user1_pseudonym !== null || c.user2_pseudonym !== null
-      knownAs.set(theirs, wasPseudonymous ? pseudonym : null)
+      // A pseudonymous pair never falls back to a real name, even for a side whose pseudonym is missing.
+      knownAs.set(theirs, wasPseudonymous ? (pseudonym ?? "Attendee") : null)
     }
 
     const users = blocks.map((b) => {

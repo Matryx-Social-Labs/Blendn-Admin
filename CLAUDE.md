@@ -175,6 +175,7 @@ migration SQL and therefore in every deployed environment:
 | `crew_likes_not_self` | a crew never likes itself |
 | `crew_likes_solo_is_the_liker` | a person's own like is theirs (`from_user_id = liked_by_user_id`) |
 | `blends_one_b` | a Blend's side B is a crew or one person (side A is always a crew) |
+| `ended_friendships_canonical_pair` | a friendship that ended is stored once, `user1_id < user2_id` in the `C` collation, like `friendships` — read by `lib/room-people.ts` for the 24 h an unfriend keeps the pair apart in rooms |
 | `blends_pair_order` | two crews in one order only (`a_crew_id < b_crew_id`, uuid order — no collation), so a pair is one Blend |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
 

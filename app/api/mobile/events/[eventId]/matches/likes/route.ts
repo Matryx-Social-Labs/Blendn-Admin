@@ -23,6 +23,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { announceRoomMatch } from "@/lib/room-match"
 import { roomMemberFromRef } from "@/lib/room-handle"
+import { knownToEachOther } from "@/lib/room-people"
 import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
@@ -145,6 +146,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (await pairIsClosed(authUser.userId, likedId)) {
       return notFoundResponse("User not found")
     }
+
+    /*
+     * A friend is never a stranger to like (the owner's rule, 2026-10-22): no
+     * row is written, so an unfriend later cannot resurrect a match from it, and
+     * the answer is that of a like nobody returned. `likeAtEvent` keeps its own
+     * in-lock check as the answer to a friendship landing mid-request.
+     */
+    if (await knownToEachOther(authUser.userId, likedId)) return successResponse({ mutual: false })
 
     const outcome = await likeAtEvent(eventId, authUser.userId, likedId)
 

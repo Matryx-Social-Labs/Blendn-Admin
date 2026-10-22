@@ -3,11 +3,11 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
-import { INVITE_TOKEN, mayConnect, personCard, personSelect, requestFriend } from "@/lib/friends"
+import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, releaseHeldRequests, requestFriend } from "@/lib/friends"
 import { identityForRef } from "@/lib/identity"
 import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { rateLimit, userLimit, withReasonCode } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
@@ -46,7 +46,14 @@ export async function GET(request: NextRequest) {
     if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
     const { limit, after } = query
 
-    const incomingWhere = { recipient_id: me, dismissed_at: null, withdrawn_at: null, sender: { deletedAt: null } }
+    /*
+     * A request held for a pseudonymous match is not delivered yet (`held_at`).
+     * Whatever has become deliverable since — both revealed, the conversation open
+     * — is released first (idempotent; one bounded read when nothing is held), so
+     * the page, the count and the cursor below are exact without a per-row filter.
+     */
+    await releaseHeldRequests([me]).catch(() => undefined)
+    const incomingWhere = { recipient_id: me, held_at: null, dismissed_at: null, withdrawn_at: null, sender: { deletedAt: null } }
     const outgoingWhere = { sender_id: me, withdrawn_at: null, recipient: { deletedAt: null } }
     const cursorFor = (which: "incoming" | "outgoing") => (list === which && after ? createdBefore(after) : {})
 
@@ -96,8 +103,8 @@ export async function GET(request: NextRequest) {
 
 /*
  * Exactly one way in. A token is somebody's invite link; a user id is only
- * accepted for a person you can already see (a match, a conversation, someone
- * public in your room) — never an arbitrary id, or this would be a lookup.
+ * accepted for a match where both of you have revealed (`revealedMatch`) —
+ * never an arbitrary id, or this would be a lookup.
  */
 const createSchema = z.union([
   z.object({ token: z.string().regex(INVITE_TOKEN) }).strict(),
@@ -110,6 +117,11 @@ const createSchema = z.union([
  *
  * `{ state: "requested" }`, or `{ state: "friends" }` when they had already
  * asked you. Every way a stranger could be refused answers with the same 404.
+ * The one addition: a 404 carries `reasonCode` `NOT_A_REVEALED_MATCH` when you
+ * are in an open match with that person, THEY have revealed to you, and you have
+ * not revealed back: you already know who they are, so it tells you nothing. For
+ * a person still a pseudonym to you (and for a room handle that keeps them
+ * anonymous) the 404 is plain — the code would say who the pseudonym is.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -118,7 +130,7 @@ export async function POST(request: NextRequest) {
     const me = authUser.userId
 
     const limited = await rateLimit(request, userLimit("write", "friend-request", me))
-    if (limited) return limited
+    if (limited) return withReasonCode(limited, ErrorCode.RATE_LIMITED)
 
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
     const unfinished = await participationRefusal(me)
@@ -131,6 +143,7 @@ export async function POST(request: NextRequest) {
     const gone = (reason: string) => errorResponse("Not found", 404, ErrorCode.NOT_FOUND, reason)
     let recipientId: string
     let connectable: boolean
+    let notYetRevealed = false
     if ("token" in parsed.data) {
       const invite = await db.friend_invites.findUnique({
         where: { token: parsed.data.token },
@@ -142,19 +155,33 @@ export async function POST(request: NextRequest) {
       if (!invite) return gone(ErrorCode.INVITE_UNAVAILABLE)
       recipientId = invite.user_id
     } else {
-      // A room handle works here too (SCRUM-371); the identity gate refuses
-      // anyone the room keeps a stranger — in that room's terms, so a reveal
-      // at another event does not make this room's pseudonym askable.
+      // The decision is the match (`revealedMatch`, lib/friends.ts). A room
+      // handle still resolves through `identityForRef`, and a handle the room
+      // keeps anonymous is refused as unknown even for a revealed match: a
+      // 200 there would say which pseudonym in that room is them.
+      // A conversation's handle (what the inbox gives for a match until they
+      // reveal) is not resolved here: it is only ever somebody the asker cannot
+      // name yet, so the answer would be the plain 404 anyway, and it is, as an
+      // id nobody has.
       const target = await identityForRef(me, parsed.data.userId)
       recipientId = target.userId
-      if (!target.identified) return gone(ErrorCode.PERSON_UNAVAILABLE)
-      connectable = await mayConnect(me, recipientId)
+      const { standing, askerSeesThem } = await matchStanding(me, recipientId)
+      const nameable = !target.room || target.identified
+      connectable = nameable && standing === "revealed"
+      // Only to somebody who can already name them, or the 404 says who a
+      // pseudonym is: "Otter" asked by a friend's id, or by a handle from a
+      // room where she is revealed, would come back "you matched her".
+      notYetRevealed = nameable && standing === "pending" && askerSeesThem
     }
 
     if (recipientId === me) return errorResponse("You can't add yourself", 400, undefined, ErrorCode.CANNOT_ADD_SELF)
+    // The one 404 that says why: a match that is not revealed on both sides (`NOT_A_REVEALED_MATCH`).
+    if (notYetRevealed) return errorResponse("Not found", 404, ErrorCode.NOT_FOUND, "NOT_A_REVEALED_MATCH")
     if (!connectable) return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)
 
-    const state = await requestFriend(me, recipientId)
+    const state = await requestFriend(me, recipientId, "token" in parsed.data ? undefined : "match")
+    // An unmatch or a block landed between the check above and the pair's lock.
+    if (state === "refused") return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)
     // Their invite link brought me: the first link a person uses is the one
     // that counts toward its owner's Blendn+ referral month (lib/plus.ts).
     if ("token" in parsed.data) await recordReferral(me, recipientId)

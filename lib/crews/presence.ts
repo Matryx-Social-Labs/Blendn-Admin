@@ -8,7 +8,8 @@ import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { isRoomMuted } from "../room-mute"
-import { blocksBetween, blocksExclude } from "./blocks"
+import { blocksExclude } from "./blocks"
+import { strangersApartBetween } from "../room-people"
 import { CREW_TAGS, CREWS_OFF, NO_CREW, NO_EVENT, type CrewRefusal, type CrewTag } from "./crews"
 import { crewBadges, nightsTogether, rankCrewsFor, type RankedCrew } from "./signals"
 import type { Badge, Overlap } from "../overlaps"
@@ -219,7 +220,9 @@ export async function crewsAtEvent(
   const others = crews.filter((c) => !present.get(c.id)?.includes(viewerId))
 
   const mySide = [...new Set([viewerId, ...mine.flatMap((c) => members.get(c.id) ?? [])])]
-  const blocked = await blocksBetween(mySide, [...new Set(others.flatMap((c) => members.get(c.id) ?? []))])
+  // Kept apart: blocks and closed pairs, AND friendships across the two sides (D18): a friend
+  // across would be a stranger to the other inside a pseudonymous crew room.
+  const blocked = await strangersApartBetween(mySide, [...new Set(others.flatMap((c) => members.get(c.id) ?? []))])
   let visible = others.filter((c) => !blocksExclude(mySide, members.get(c.id) ?? [], blocked))
 
   let viewerIntents: string[] = []

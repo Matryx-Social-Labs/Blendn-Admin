@@ -12,6 +12,7 @@ import { blockCounterparties } from "@/lib/conversations"
 import { normalizeLocationToCity } from "@/lib/location"
 import { idForViewer } from "@/lib/room-handle"
 import { visibleInRoom } from "@/lib/identity"
+import { notStrangersTo } from "@/lib/room-people"
 import {
   successResponse,
   unauthorizedResponse,
@@ -135,7 +136,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * would still list somebody you blocked. Both directions, and applied to the
      * count as well, so a filtered page never sits under an unfiltered total.
      */
-    const hidden = await blockCounterparties(authUser.userId)
+    // And friends, whatever their switch: two friends never meet as strangers
+    // (lib/room-people.ts). A friend who allows it is in "Friends here" instead.
+    const hidden = [...(await blockCounterparties(authUser.userId)), ...(await notStrangersTo(authUser.userId))]
 
     /*
      * "Show online status" off: in the room, counted, not listed (SCRUM-141).

@@ -35,6 +35,7 @@ afterAll(async () => {
   await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
   await db.blocked_users.deleteMany({ where: { OR: [{ blocker_id: { in: users } }, { blocked_id: { in: users } }] } })
   await db.friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
+  await db.ended_friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await cleanup(users, events)
   await db.venues.deleteMany({ where: { id: { in: venues } } })
   await closeDb()
@@ -269,6 +270,25 @@ describe("GET /events/:id/people — as the room shows them", () => {
     expect(((await people(n.id, b.token)).json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, other))
     // A stranger still sees both.
     expect(((await people(n.id, other.token)).json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, a, b))
+  })
+})
+
+describe("GET /events/:id/people — an ended friendship (friends-in-room B4)", () => {
+  it("keeps an ex-friend off the deck for 24 hours after the friendship ended, both ways, then lists them", async () => {
+    const n = await night()
+    const a = await person()
+    const b = await person()
+    const other = await person()
+    for (const p of [a, b, other]) await wasThere(n, p)
+    const [user1_id, user2_id] = conversationPair(a.id, b.id)
+    await db.ended_friendships.create({ data: { user1_id, user2_id, ended_at: new Date(Date.now() - 60 * 60_000) } })
+
+    expect(((await people(n.id, a.token)).json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, other))
+    expect(((await people(n.id, b.token)).json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, other))
+
+    // A day on, they are strangers again — and a stranger is a card.
+    await db.ended_friendships.updateMany({ where: { user1_id, user2_id }, data: { ended_at: new Date(Date.now() - 25 * 3_600_000) } })
+    expect(((await people(n.id, a.token)).json.data.people as Card[]).map((c) => c.userId)).toEqual(handles(n, b, other))
   })
 })
 

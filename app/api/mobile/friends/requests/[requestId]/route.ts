@@ -4,7 +4,7 @@ import { z } from "zod"
 import { acceptFriendRequest, dismissFriendRequest, withdrawFriendRequest } from "@/lib/friends"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { rateLimit, userLimit, withReasonCode } from "@/lib/rate-limit"
 import {
   successResponse,
   unauthorizedResponse,
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
     const limited = await rateLimit(request, userLimit("write", "friend-respond", authUser.userId))
-    if (limited) return limited
+    if (limited) return withReasonCode(limited, ErrorCode.RATE_LIMITED)
 
     const parsed = respondSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)

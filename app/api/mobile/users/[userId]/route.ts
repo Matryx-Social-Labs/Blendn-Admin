@@ -5,6 +5,8 @@ import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
+import { friendOfferFor } from "@/lib/friend-offer"
+import { profileBadges } from "@/lib/profile-badges"
 import { identityForRef } from "@/lib/identity"
 import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
@@ -76,6 +78,8 @@ export async function GET(
             home_state: true,
             sun_sign: true,
             sign_system: true,
+            show_badges: true,
+            shows_up_badge: true,
           },
         },
         user_interests: {
@@ -135,8 +139,9 @@ export async function GET(
      * pseudonyms into named faces. (They carry room handles now, SCRUM-371 —
      * this gate is what stops a handle being worth more than the room says.)
      *
-     * `identityForRef` is the gate: by raw id, matched, in a conversation, or
-     * they chose to be public in a room you were in; by a room handle, only
+     * `identityForRef` is the gate: by raw id, in a conversation that names
+     * them (a match counts once THEY have revealed to you: SCRUM-752), or they
+     * chose to be public in a room you were in; by a room handle, only
      * what that room shows (handled above). Co-presence alone is deliberately not
      * enough -- sharing a room is what lets you send a request, not consent to
      * be identified.
@@ -234,6 +239,15 @@ export async function GET(
        * `conversationId: …` is the friend DM saying which pseudonym is them.
        */
       ...(identified && { connection: await connectionBetween(authUser.userId, userId) }),
+      // The same offer, under the same rule, as `GET /profiles/:id`: only for
+      // somebody else you may see, so the app needs no second read.
+      ...(identified && !isOwnProfile && { friend: await friendOfferFor(authUser.userId, userId) }),
+      // Badges, under the rule `GET /profiles/:id` applies: the person shows them
+      // (`show_badges`, on unless turned off) and the viewer may see who they are.
+      // Earned from check-ins and derived here, never stored (lib/profile-badges.ts).
+      ...(identified && user.profile && user.profile.show_badges !== false
+        ? { badges: await profileBadges(userId, user.profile.shows_up_badge) }
+        : {}),
     }
 
     return successResponse(publicProfile)
