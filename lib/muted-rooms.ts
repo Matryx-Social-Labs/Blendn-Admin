@@ -27,10 +27,12 @@ import { mutedNowSql } from "./room-mute"
  * and for a crew's or Blend's the owner's door as it stands now. A room that
  * fails them is not listed and not counted, so the count and the list agree.
  *
- * Paged by a keyset on `(updated_at DESC, chat_group_id)`: `updated_at` is when
- * the member row last changed, and a mute writes it, so the room muted last
- * comes first. The cursor carries the timestamp as Postgres prints it, to the
- * microsecond; a millisecond Date would skip or repeat rows that tie.
+ * Paged by a keyset on `(muted_at DESC, chat_group_id)`: `muted_at` is when the
+ * person muted the room (`withMute`), so the room muted last comes first and
+ * nothing that merely touches the member row moves it: reading the room
+ * writes `updated_at` and used to float it to the top, and out of a page the
+ * client had already read. A mute from before `muted_at` falls back to
+ * `updated_at`. The cursor carries that key, an ISO time to the millisecond.
  */
 export const MUTED_ROOMS_DEFAULT_LIMIT = 50
 export const MUTED_ROOMS_MAX_LIMIT = 100
@@ -50,11 +52,11 @@ const WALK: WalkOptions = { batch: 200, maxExamined: 2000 }
 
 interface Candidate {
   id: string
-  /** `updated_at` as Postgres prints it, UTC, microseconds. */
+  /** The mute's sort key (`mutedAtSql`): an ISO time to the millisecond, UTC. */
   ts: string
 }
 
-const TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/
+const TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 export const encodeMutedCursor = (c: Candidate): string => Buffer.from(`${c.ts}|${c.id}`).toString("base64url")
 
@@ -64,19 +66,25 @@ export function decodeMutedCursor(raw: string): Candidate | null {
   return rest.length === 0 && TS.test(ts ?? "") && isUuid(id) && encodeMutedCursor({ ts, id }) === raw ? { ts, id } : null
 }
 
+/**
+ * When the person muted the room, as a string that sorts as time does: the
+ * `muted_at` the mute wrote, else (a mute from before it existed) the member
+ * row's `updated_at`, which a mute used to set and a read also moves.
+ */
+const mutedAtSql = Prisma.sql`COALESCE(m.notification_preferences->>'muted_at', to_char(m.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))`
+
 async function candidatesAfter(userId: string, now: Date, after: Candidate | null, take: number): Promise<Candidate[]> {
   const past = after
-    ? Prisma.sql`AND (m.updated_at < ${after.ts}::timestamptz OR (m.updated_at = ${after.ts}::timestamptz AND m.chat_group_id > ${after.id}::uuid))`
+    ? Prisma.sql`AND (${mutedAtSql} < ${after.ts} OR (${mutedAtSql} = ${after.ts} AND m.chat_group_id > ${after.id}::uuid))`
     : Prisma.empty
   return db.$queryRaw<Candidate[]>(Prisma.sql`
-    SELECT m.chat_group_id AS id,
-           to_char(m.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS ts
+    SELECT m.chat_group_id AS id, ${mutedAtSql} AS ts
     FROM chat_group_members m
     WHERE m.user_id = ${userId}
       AND m.status IN ('active', 'muted')
       AND ${mutedNowSql(now)}
       ${past}
-    ORDER BY m.updated_at DESC, m.chat_group_id ASC
+    ORDER BY ts DESC, m.chat_group_id ASC
     LIMIT ${take}
   `)
 }

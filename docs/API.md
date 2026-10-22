@@ -695,7 +695,9 @@ Settings › Notifications › Muted rooms. Answers
   suspended crewmate are not listed). Unread counts and previews follow your blocks, as
   on the chat list.
 - **Order and paging**: newest mute first, ties on the room id; a keyset on
-  `(updated_at DESC, chat_group_id)`, the cursor opaque. `limit` 1-100 (default 50; a
+  `(muted_at DESC, chat_group_id)` (`muted_at`: when you muted the room, written by `POST
+  /chat/groups/:id/mute`; reading or posting in the room does not move it; a mute from
+  before it falls back to the member row's last change), the cursor opaque. `limit` 1-100 (default 50; a
   non-number is the default, a number is clamped). A `cursor` an earlier answer did not
   give is a **400 `VALIDATION_FAILED`**. A page can hold fewer than `limit` rows with a
   `nextCursor` when the rooms between are not listed; stop when `nextCursor` is null.

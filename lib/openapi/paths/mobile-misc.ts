@@ -743,7 +743,7 @@ registry.registerPath({
   tags: ["Mobile Notifications"],
   summary: "The rooms you silenced",
   description:
-    "Settings › Notifications › Muted rooms, newest mute first. Each row is a `GET /chat/groups` row (`kind` is `event`, `crew` or `blend`; `mute` says until when), built by the same code. Listed: a mute in force now (not lapsed) in a room that list would show: live, through its owner's door (a dissolved crew, a closed Blend, a Blend across a block, a ban or a leave are not). Keyset-paged on the mute's time then the room id; `limit` 1-100 (default 50), and a `cursor` an earlier answer did not give is a 400. A page may be shorter than `limit` with a `nextCursor` when many rooms in a row are not listed. Rate-limited as a read.",
+    "Settings › Notifications › Muted rooms, newest mute first. Each row is a `GET /chat/groups` row (`kind` is `event`, `crew` or `blend`; `mute` says until when), built by the same code. Listed: a mute in force now (not lapsed) in a room that list would show: live, through its owner's door (a dissolved crew, a closed Blend, a Blend across a block, a ban or a leave are not). Keyset-paged on when you muted the room (reading it does not move it) then the room id; `limit` 1-100 (default 50), and a `cursor` an earlier answer did not give is a 400. A page may be shorter than `limit` with a `nextCursor` when many rooms in a row are not listed. Rate-limited as a read.",
   security: bearerAuth,
   request: { query: z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), cursor: z.string().optional() }) },
   responses: {

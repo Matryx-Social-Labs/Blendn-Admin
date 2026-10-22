@@ -56,6 +56,8 @@ async function eventRoom(
   return { eventId, roomId: room.id }
 }
 const MUTED = { muted: true, muted_until: null }
+/** A mute made at this time: what `withMute` writes, and what the list orders by. */
+const mutedAt = (iso: string) => ({ muted: true, muted_until: null, muted_at: iso })
 
 describe("GET /me/muted-rooms: which rooms", () => {
   it("lists the rooms you muted, newest mute first, each as the chat list's own row", async () => {
@@ -182,17 +184,16 @@ describe("GET /me/muted-rooms: a crew's or Blend's room follows its owner's door
 })
 
 describe("GET /me/muted-rooms: paging", () => {
-  const TIE = new Date("2026-10-01T10:00:00.000Z")
+  const TIE = "2026-10-01T10:00:00.000Z"
 
   it("breaks a tie on the room id, and never skips or repeats a row across pages", async () => {
     const host = await person("mr-page-host")
     const me = await person("mr-page")
     const rooms = []
-    for (let i = 0; i < 5; i++) rooms.push(await eventRoom(host, me, { prefs: MUTED, updatedAt: TIE }))
-    // Two rows a microsecond apart: a cursor that kept only milliseconds would repeat or skip one of them.
-    const [newer, older] = [await eventRoom(host, me, { prefs: MUTED }), await eventRoom(host, me, { prefs: MUTED })]
-    await db.$executeRaw`UPDATE chat_group_members SET updated_at = '2026-10-02 10:00:00.000002+00' WHERE chat_group_id = ${newer.roomId}::uuid AND user_id = ${me.id}`
-    await db.$executeRaw`UPDATE chat_group_members SET updated_at = '2026-10-02 10:00:00.000001+00' WHERE chat_group_id = ${older.roomId}::uuid AND user_id = ${me.id}`
+    for (let i = 0; i < 5; i++) rooms.push(await eventRoom(host, me, { prefs: mutedAt(TIE) }))
+    // Two mutes a millisecond apart: the newer is first, and a cursor between them neither skips nor repeats one.
+    const newer = await eventRoom(host, me, { prefs: mutedAt("2026-10-02T10:00:00.002Z") })
+    const older = await eventRoom(host, me, { prefs: mutedAt("2026-10-02T10:00:00.001Z") })
 
     const seen: string[] = []
     let cursor: string | null = null
@@ -212,12 +213,49 @@ describe("GET /me/muted-rooms: paging", () => {
     expect(pages).toBe(4)
   })
 
+  it("orders by when you muted it: reading the room later does not move it, across a two-page walk", async () => {
+    const host = await person("mr-read-host")
+    const me = await person("mr-read")
+    const a = await eventRoom(host, me)
+    const b = await eventRoom(host, me)
+    const aSaid = await person("mr-read-said")
+    await db.chat_group_members.create({ data: { chat_group_id: a.roomId, user_id: aSaid.id, anonymous_name: "Quiet Wren" } })
+    await db.chat_messages.create({ data: { chat_group_id: a.roomId, user_id: aSaid.id, content: "something to read" } })
+    expect((await muteViaRoute(me, a.roomId)).status).toBe(200)
+    expect((await muteViaRoute(me, b.roomId)).status).toBe(200)
+    const before = (await list(me, "?limit=1")).nextCursor as string
+    const mutedAtOf = async (roomId: string) =>
+      (await db.chat_group_members.findFirstOrThrow({ where: { chat_group_id: roomId, user_id: me.id } })).notification_preferences as { muted_at: string }
+
+    // Reading A's messages moves the member row (`updated_at`, `last_read_message_id`) and nothing about the mute.
+    const read = await api.read(me, a.roomId)
+    expect(read.status).toBe(200)
+    expect((await mutedAtOf(a.roomId)).muted_at < (await mutedAtOf(b.roomId)).muted_at).toBe(true)
+
+    expect(ids((await list(me)).rooms)).toEqual([b.roomId, a.roomId])
+    const first = await list(me, "?limit=1")
+    expect(ids(first.rooms)).toEqual([b.roomId])
+    expect(first.nextCursor).toBe(before) // the cursor B's page gave before the read is the one it gives after
+    const second = await list(me, `?limit=1&cursor=${first.nextCursor}`)
+    expect(ids(second.rooms)).toEqual([a.roomId])
+    expect(second.nextCursor).toBeNull()
+  })
+
+  it("orders a mute from before `muted_at` by the member row's last change", async () => {
+    const host = await person("mr-old-host")
+    const me = await person("mr-old")
+    const oldest = await eventRoom(host, me, { prefs: MUTED, updatedAt: new Date("2026-08-01T10:00:00.000Z") })
+    const newest = await eventRoom(host, me, { prefs: MUTED, updatedAt: new Date("2026-08-03T10:00:00.000Z") })
+    const stamped = await eventRoom(host, me, { prefs: mutedAt("2026-08-02T10:00:00.000Z") })
+    expect(ids((await list(me)).rooms)).toEqual([newest.roomId, stamped.roomId, oldest.roomId])
+  })
+
   it("does not answer a short or empty page while listed rooms remain behind rooms that are not listed", async () => {
     const host = await person("mr-hole-host")
     const me = await person("mr-hole")
-    const real = [await eventRoom(host, me, { prefs: MUTED, updatedAt: new Date("2026-09-01T10:00:00Z") }), await eventRoom(host, me, { prefs: MUTED, updatedAt: new Date("2026-09-01T09:00:00Z") })]
+    const real = [await eventRoom(host, me, { prefs: mutedAt("2026-09-01T10:00:00.000Z") }), await eventRoom(host, me, { prefs: mutedAt("2026-09-01T09:00:00.000Z") })]
     // Newer than both, and none of them listed: a page of the first `limit` candidates would be empty.
-    for (let i = 0; i < 4; i++) await eventRoom(host, me, { prefs: MUTED, room: "archived", updatedAt: new Date(`2026-09-02T10:0${i}:00Z`) })
+    for (let i = 0; i < 4; i++) await eventRoom(host, me, { prefs: mutedAt(`2026-09-02T10:0${i}:00.000Z`), room: "archived" })
     const first = await list(me, "?limit=2")
     expect(ids(first.rooms)).toEqual(real.map((r) => r.roomId))
     expect(first.nextCursor).toBeNull()
@@ -226,8 +264,8 @@ describe("GET /me/muted-rooms: paging", () => {
   it("walks on to a later batch when the first is all unlisted, and answers a cursor when it has examined as many as it may", async () => {
     const host = await person("mr-walk-host")
     const me = await person("mr-walk")
-    const listed = await eventRoom(host, me, { prefs: MUTED, updatedAt: new Date("2026-09-01T10:00:00Z") })
-    for (let i = 0; i < 5; i++) await eventRoom(host, me, { prefs: MUTED, room: "archived", updatedAt: new Date(`2026-09-02T10:0${i}:00Z`) })
+    const listed = await eventRoom(host, me, { prefs: mutedAt("2026-09-01T10:00:00.000Z") })
+    for (let i = 0; i < 5; i++) await eventRoom(host, me, { prefs: mutedAt(`2026-09-02T10:0${i}:00.000Z`), room: "archived" })
 
     // Batches of 2 over five unlisted rooms: the listed one is in the third batch and is still found.
     const found = await mutedRoomPage(me.id, 5, null, new Date(), { batch: 2, maxExamined: 100 })
@@ -315,7 +353,7 @@ describe("the partial index", () => {
   it("is built in a migration of its own that is one CONCURRENTLY statement", () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { readFileSync } = require("fs") as typeof import("fs")
-    const sql = readFileSync("prisma/migrations/20261022140000_chat_group_members_muted_idx/migration.sql", "utf8")
+    const sql = readFileSync("prisma/migrations/20261022170000_chat_group_members_muted_idx/migration.sql", "utf8")
     const statements = sql.replace(/--.*$/gm, "").split(";").map((s) => s.trim()).filter(Boolean)
     expect(statements).toHaveLength(1)
     expect(statements[0]).toMatch(/^CREATE INDEX CONCURRENTLY IF NOT EXISTS "chat_group_members_muted_idx" ON "chat_group_members" \("user_id"\) WHERE \(notification_preferences->>'muted'\) = 'true'$/)

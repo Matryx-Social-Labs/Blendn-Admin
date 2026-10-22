@@ -12,7 +12,12 @@ import { NOT_IN_THE_BELL } from "./push-notifications"
  * is open. A push sets it while the app is closed, so both must say the same.
  *
  * The bell's half is capped at `UNREAD_CAP` (`unreadCount` is capped there too,
- * so "999+" is all the app can say), which also bounds the count's cost.
+ * so "999+" is all the app can say). For ONE person the count itself stops there
+ * (`count` with `take`: the scan ends at the 1000th row). For several, a
+ * `groupBy` cannot stop early per group, so it counts every unread row of each
+ * and the cap is applied to its answer: bounded in statements, not in rows read
+ * (what bounds it is that a bulk send's recipients are read through
+ * `notifications (user_id, read_at)`, and that an unread backlog is rare).
  *
  * Two statements however many people are asked about: never one per user.
  */
@@ -23,12 +28,11 @@ export async function badgeCountsFor(userIds: readonly string[]): Promise<Map<st
   const counts = new Map<string, number>()
   if (ids.length === 0) return counts
 
+  const unreadBell = (user_id: string | { in: string[] }) => ({ user_id, read_at: null, kind: { notIn: NOT_IN_THE_BELL as never[] } })
   const [bell, threads] = await Promise.all([
-    db.notifications.groupBy({
-      by: ["user_id"],
-      where: { user_id: { in: ids }, read_at: null, kind: { notIn: NOT_IN_THE_BELL as never[] } },
-      _count: { _all: true },
-    }),
+    ids.length === 1
+      ? db.notifications.count({ where: unreadBell(ids[0]), take: UNREAD_CAP }).then((n) => [{ user_id: ids[0], _count: { _all: n } }])
+      : db.notifications.groupBy({ by: ["user_id"], where: unreadBell({ in: ids }), _count: { _all: true } }),
     // The unread-conversation count of `GET /notifications`, for everybody in one statement. `VISIBLE_DM` written out.
     db.$queryRaw<{ user_id: string; n: number }[]>(Prisma.sql`
       SELECT c.uid AS user_id, COUNT(*)::int AS n

@@ -181,6 +181,23 @@ describe("the cap", () => {
     expect(marked.unreadCount).toBe(CAP)
   })
 
+  it("a bulk send caps each recipient's bell count too, and one person's count stops reading at the cap", async () => {
+    const [a, b] = [await person("pb-capbulk-a"), await person("pb-capbulk-b")]
+    await seed(a, { unread: CAP + 5 })
+    await seed(b, { unread: 3 })
+    await sendBulkPushNotifications({ userIds: [a, b], title: "t", body: "b", data: { type: "announcement", eventId: "e1" } })
+    expect([badgeOf(a), badgeOf(b)]).toEqual([CAP, 4])
+
+    // One person: the count itself is `LIMIT`ed (the scan ends at the 1000th row); several: a groupBy, which cannot be.
+    mockSent.length = 0
+    const one = await statementsDuring(() => sendPushNotification({ userId: a, title: "t", body: "b", data: { type: "friend_request" } }))
+    expect(badgeOf(a)).toBe(CAP)
+    const bellCount = one.statements.filter((t) => /count/i.test(t) && /FROM "public"."notifications"/i.test(t) && /read_at/.test(t))
+    expect(bellCount).toHaveLength(1)
+    expect(bellCount[0]).toMatch(/LIMIT \$\d+/i)
+    expect(bellCount[0]).not.toMatch(/GROUP BY/i)
+  })
+
   it("counts exactly below it", async () => {
     const id = await person("pb-below")
     await seed(id, { unread: CAP - 1 })

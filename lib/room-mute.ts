@@ -62,12 +62,17 @@ export function isRoomMuted(prefs: Prisma.JsonValue | null | undefined, now: Dat
   return roomMuteState(prefs, now).muted
 }
 
-/** The column with the mute applied, every other key kept. */
+/**
+ * The column with the mute applied, every other key kept. `muted_at` is when
+ * the person muted it: the key "Muted rooms" orders by and pages on, so that
+ * reading the room (which touches the member row) never moves it in that list.
+ */
 export function withMute(
   prefs: Prisma.JsonValue | Prisma.InputJsonObject | null | undefined,
-  until: Date | null
+  until: Date | null,
+  now: Date
 ): Prisma.InputJsonObject {
-  return { ...asObject(prefs), muted: true, muted_until: until ? until.toISOString() : null }
+  return { ...asObject(prefs), muted: true, muted_until: until ? until.toISOString() : null, muted_at: now.toISOString() }
 }
 
 /** The column with the mute removed, every other key kept. */
@@ -77,6 +82,7 @@ export function withoutMute(
   const rest = { ...asObject(prefs) }
   delete rest.muted
   delete rest.muted_until
+  delete rest.muted_at
   return rest as Prisma.InputJsonObject
 }
 
