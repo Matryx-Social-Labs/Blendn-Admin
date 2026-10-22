@@ -28,7 +28,10 @@ export const ErrorResponseSchema = z
       .describe(
         "Why, beside an `errorCode` that keeps the value installed builds match on: `ACCOUNT_SUSPENDED`, " +
           "`ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, " +
-          "`PROFILE_INCOMPLETE`. Read `reasonCode ?? errorCode`."
+          "`PROFILE_INCOMPLETE`, and on events and friends: `AGE_RESTRICTED` (a known age below the line), " +
+          "`ORGANISER_SUSPENDED` (the event 404), `INVITE_UNAVAILABLE`, `PERSON_UNAVAILABLE`, " +
+          "`REQUEST_UNAVAILABLE` (one reason for every way something is out of reach), `CANNOT_ADD_SELF`. " +
+          "Read `reasonCode ?? errorCode`."
       ),
   })
   .openapi("ErrorResponse")

@@ -20,7 +20,8 @@ import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { getOccupancy } from "@/lib/occupancy"
-import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
+import { dayOccurrencesSelect, eventDays, eventSession } from "@/lib/occurrences"
+import { changeForResponse, recordEventChange } from "@/lib/event-change"
 import {
   successResponse,
   errorResponse,
@@ -98,7 +99,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         organizer_org: { select: { display_name: true } },
         details: true,
         // What `session` below is computed from. See `eventSession`.
-        occurrences: sessionOccurrencesSelect,
+        occurrences: dayOccurrencesSelect,
         categories: {
           include: {
             category: {
@@ -247,6 +248,17 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // cancelled — what the app judges "live" and "ended" by. Same field as
       // the list.
       session: eventSession(event),
+      /*
+       * The run's days and where today is in it (Flow 3 · 3.2): "Day 2 of 3" and
+       * the day strip, a cancelled day struck through. One entry for a one-day event.
+       */
+      ...eventDays(event),
+      /*
+       * "Changed while you're going" (Flow 3 · 3.1): when the time, the venue or
+       * the status last moved, which, and what the time and venue were before.
+       * null, [] and null for the event that has not changed, which is almost all.
+       */
+      ...changeForResponse(event),
       timezone: event.timezone,
       status: event.status,
       visibility: event.visibility,
@@ -412,6 +424,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         latitude: true,
         longitude: true,
         geofence: true,
+        // What `recordEventChange` reads the edit against (`start_time` is in the permission select).
+        end_time: true,
+        venue_name: true,
+        address: true,
+        changed_from: true,
         ...eventPermissionSelect,
       },
     })
@@ -498,6 +515,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       details: { title: updated.title, from: event.status, to: updated.status, via: "mobile" },
     })
 
+    // When it changed and what it was, for "changed while you're going" (lib/event-change.ts).
+    await recordEventChange(eventId, event, updated)
+
     /*
      * The same cascade the dashboard route runs (Fix #35). Cancelling here used
      * to leave every pending and checked_in row live, so a cancelled event
@@ -512,7 +532,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       //
       // No `notifyEventDetailsChanged` here: this route only accepts title,
       // description and status, and none of those is a fact anybody leaves the
-      // house for. Time and venue are dashboard-only edits.
+      // house for. Time and venue are dashboard-only edits. The people who are
+      // going are told with `event_changed`, the rest with `event_update`.
       await notifyEventCancelled(updated.id, updated.title)
     }
 

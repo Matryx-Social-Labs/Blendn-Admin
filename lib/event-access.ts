@@ -44,7 +44,7 @@ export const hostNotSuspended = {
  * board read is the beginning of being there.
  */
 export type EventAccessDenial =
-  | { kind: "not_found" }
+  | { kind: "not_found"; reason?: typeof ErrorCode.ORGANISER_SUSPENDED }
   | { kind: "age"; message: string; unknownAge: boolean }
   | { kind: "unfinished"; message: string }
 
@@ -60,7 +60,7 @@ export async function attendeeEventAccess(
 ): Promise<EventAccessDenial | null> {
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { status: true, visibility: true, min_age: true, kind: true },
+    select: { status: true, visibility: true, min_age: true, kind: true, pre_suspension_status: true },
   })
   /*
    * A venue day is not an event anybody opens, RSVPs to, saves or reads the
@@ -68,7 +68,11 @@ export async function attendeeEventAccess(
    * every rule below. Its one door is Go Live (`POST /venues/:id/live`), and
    * its room's own routes check being live (`liveInVenueDay`, `inRoomWhere`).
    */
-  if (!event || event.status === "draft" || event.kind === "venue_day") return { kind: "not_found" }
+  if (!event || event.status === "draft" || event.kind === "venue_day") {
+    // A draft that was published until its organisation was suspended says so; a draft nobody announced does not.
+    const suspended = event?.status === "draft" && event.kind !== "venue_day" && event.pre_suspension_status !== null
+    return suspended ? { kind: "not_found", reason: ErrorCode.ORGANISER_SUSPENDED } : { kind: "not_found" }
+  }
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
     return { kind: "not_found" }
   }
@@ -101,11 +105,24 @@ export async function participationRefusal(userId: string): Promise<string | nul
   return mayParticipate(profile) ? null : FINISH_ONBOARDING
 }
 
+/**
+ * The 403 for `participationRefusal`'s sentence: `FORBIDDEN` and the words as
+ * they always were, and `reasonCode: PROFILE_INCOMPLETE` beside them (Flow 15).
+ */
+export const unfinishedResponse = (sentence: string) =>
+  errorResponse(sentence, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
+
 /** The denial as the response every guarded route returns for it. */
 export function eventAccessResponse(denial: EventAccessDenial) {
   if (denial.kind === "age") {
-    return errorResponse(denial.message, 403, ErrorCode.AGE_RESTRICTED, denial.unknownAge ? ErrorCode.AGE_UNKNOWN : undefined)
+    return errorResponse(
+      denial.message,
+      403,
+      ErrorCode.AGE_RESTRICTED,
+      // Too young is the code it always was, said in the new field too, so the app reads one place.
+      denial.unknownAge ? ErrorCode.AGE_UNKNOWN : ErrorCode.AGE_RESTRICTED
+    )
   }
-  if (denial.kind === "unfinished") return errorResponse(denial.message, 403, ErrorCode.FORBIDDEN, ErrorCode.PROFILE_INCOMPLETE)
-  return notFoundResponse("Event not found")
+  if (denial.kind === "unfinished") return unfinishedResponse(denial.message)
+  return denial.reason ? errorResponse("Event not found", 404, ErrorCode.NOT_FOUND, denial.reason) : notFoundResponse("Event not found")
 }

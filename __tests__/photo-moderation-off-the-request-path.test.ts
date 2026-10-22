@@ -20,6 +20,7 @@ jest.mock("@/lib/moderation/openai-moderation", () => ({
 jest.mock("@/lib/photo-checks", () => ({
   recordPhotoCheck: jest.fn().mockResolvedValue(undefined),
   recordPhotoPulled: jest.fn().mockResolvedValue(undefined),
+  notePulledProfilePhoto: jest.fn().mockResolvedValue(undefined),
 }))
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }))
 jest.mock("@/lib/db", () => ({
@@ -33,7 +34,7 @@ jest.mock("@/lib/db", () => ({
 }))
 
 import { checkImageContent } from "@/lib/moderation/openai-moderation"
-import { recordPhotoCheck, recordPhotoPulled } from "@/lib/photo-checks"
+import { notePulledProfilePhoto, recordPhotoCheck, recordPhotoPulled } from "@/lib/photo-checks"
 import { ownedPhotoKey, sealUpload, withdrawFromPublic } from "@/lib/tigris"
 import { db } from "@/lib/db"
 import { checkProfilePhoto, MIN_PHOTO_BYTES, moderateProfilePhoto } from "@/lib/photos"
@@ -44,6 +45,7 @@ const seal = sealUpload as jest.Mock
 const vendor = checkImageContent as jest.Mock
 const record = recordPhotoCheck as jest.Mock
 const pulled = recordPhotoPulled as jest.Mock
+const noted = notePulledProfilePhoto as jest.Mock
 const withdraw = withdrawFromPublic as jest.Mock
 const pull = db.$queryRaw as unknown as jest.Mock
 const BLUR = "https://blendn-media.fly.storage.tigris.dev/profile/u1/3-c-sealed"
@@ -86,27 +88,30 @@ describe("moderateProfilePhoto (after the response)", () => {
   it("a hide verdict pulls the photo, re-mirrors the primary and withdraws it with its blur (SCRUM-479)", async () => {
     vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
     // The primary went, so the blur made from it goes too (SCRUM-476).
-    pull.mockResolvedValue([{ photos: ["https://cdn/b.jpg"], cleared_blur: BLUR }])
+    pull.mockResolvedValue([{ photos: ["https://cdn/b.jpg"], cleared_blur: BLUR, was_main: true }])
 
     await moderateProfilePhoto(URL, "u1")
 
     // One statement against this person's row, keyed on the pulled URL.
     const [, ...values] = pull.mock.calls[0]
-    expect(values).toEqual([URL, URL, "u1", URL])
+    expect(values).toEqual([URL, URL, "u1", URL, URL])
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { image: "https://cdn/b.jpg" } })
     expect(pulled.mock.calls).toEqual([[URL, "u1"], [BLUR, "u1"]])
+    // Its owner is told, and that it was the main one (`photo_states`).
+    expect(noted.mock.calls).toEqual([[URL, "u1", true]])
     expect(withdraw).toHaveBeenCalledTimes(2)
     expect(record).not.toHaveBeenCalled()
   })
 
   it("a hide verdict on a non-primary photo leaves User.image on the primary", async () => {
     vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
-    pull.mockResolvedValue([{ photos: ["https://cdn/a.jpg", "https://cdn/c.jpg"], cleared_blur: null }])
+    pull.mockResolvedValue([{ photos: ["https://cdn/a.jpg", "https://cdn/c.jpg"], cleared_blur: null, was_main: false }])
 
     await moderateProfilePhoto(URL, "u1")
 
     expect(db.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { image: "https://cdn/a.jpg" } })
     expect(pulled.mock.calls).toEqual([[URL, "u1"]])
+    expect(noted.mock.calls).toEqual([[URL, "u1", false]])
     expect(withdraw).toHaveBeenCalledTimes(1)
   })
 

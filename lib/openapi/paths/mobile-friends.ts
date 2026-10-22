@@ -15,7 +15,9 @@ const tags = ["Mobile Friends"]
 const SAME_404 =
   "Every refusal a stranger could reach — unknown, malformed or reset token, deleted account, a block either way, " +
   "a pair who left each other, a user id you have no relationship with — answers with the same 404, so nothing here " +
-  "tells anyone whether a person uses the app. "
+  "tells anyone whether a person uses the app. The same body carries `reasonCode` — `PERSON_UNAVAILABLE` (asking by `userId`), " +
+  "`INVITE_UNAVAILABLE` (a link) or `REQUEST_UNAVAILABLE` (answering a request) — which names what was asked for, never why it is out of reach. " +
+  "`errorCode` stays `NOT_FOUND`. "
 
 const PersonSchema = z
   .object({
@@ -240,7 +242,7 @@ registry.registerPath({
     SAME_404 +
     "Exactly one of `token` (somebody's invite link) or `userId` (only for someone you can already see: a match, " +
     "a conversation, someone public in your room; a room handle works too, SCRUM-371). Idempotent and cannot nag: asking again neither notifies again " +
-    "nor un-dismisses. `friends` when they had already asked you. 400 for your own link.",
+    "nor un-dismisses. `friends` when they had already asked you. 400 for yourself, `reasonCode` `CANNOT_ADD_SELF`.",
   security: bearerAuth,
   request: {
     body: {

@@ -91,7 +91,13 @@ it.each([
   arrange()
   const res = await call(token)
   expect(res.status).toBe(404)
-  expect(res.json).toEqual({ success: false, error: "This invite link doesn't work any more", errorCode: "NOT_FOUND" })
+  // One reason for every way a link fails, so a block and a reset link cannot be told apart.
+  expect(res.json).toEqual({
+    success: false,
+    error: "This invite link doesn't work any more",
+    errorCode: "NOT_FOUND",
+    reasonCode: "INVITE_UNAVAILABLE",
+  })
 })
 
 it("applies the block rule to a caller who is signed in", async () => {

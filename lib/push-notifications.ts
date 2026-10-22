@@ -14,7 +14,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -64,15 +64,18 @@ type SendBulkNotificationOptions = Omit<SendNotificationOptions, "userId"> & { u
  * moved to the side entrance" must survive "raffle at nine".
  */
 export function deliveryFor(
-  data?: NotificationData
+  data?: NotificationData,
+  channelSet?: number | null
 ): Pick<ExpoPushMessage, "channelId" | "threadId" | "collapseId" | "tag"> {
   if (!data) return { channelId: "default" }
+  if ((channelSet ?? 0) >= CHANNEL_SET_FLOW9) return deliveryForFlow9(data)
   switch (data.type) {
     case "private_message":
       return replaced("messages", data.conversationId && `dm:${data.conversationId}`)
     case "group_message":
       return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
     case "event_update":
+    case "event_changed":
       return replaced("events", data.eventId && `event:${data.eventId}`)
     // One per event, and a second could only ever say the same thing.
     case "rating_request":
@@ -90,6 +93,78 @@ export function deliveryFor(
     default:
       return { channelId: "messages" }
   }
+}
+
+/**
+ * The channel set that also has `people`, `crew` and `later` (Flow 9), as an
+ * install says on `POST /notifications/token` (`channelSet`). A token without it
+ * is a build that never created them, and a push naming one lands in
+ * "Miscellaneous", so it keeps the mapping above exactly as it was.
+ */
+export const CHANNEL_SET_FLOW9 = 2
+
+/**
+ * Flow 9's mapping: every kind on one of the channels people see in the phone's
+ * settings, which are also the rows of Settings > Notifications. `default` only
+ * for a kind that is none of them.
+ *
+ * - `messages`  a DM, a message request, a board ask
+ * - `rooms`     a reply in a room
+ * - `people`    a match, a reveal, a friend request, a friend accepted
+ * - `crew`      a crew invite, "We're here", a Blend
+ * - `events`    a change, a cancellation, an announcement, a place on the waitlist
+ * - `later`     "How was it?" (After the night)
+ * - `offers`    a venue's offer
+ * - `default`   a report you filed was acted on
+ */
+type Delivery = Pick<ExpoPushMessage, "channelId" | "threadId" | "collapseId" | "tag">
+
+function deliveryForFlow9(data: NotificationData): Delivery {
+  switch (data.type) {
+    case "private_message":
+      return replaced("messages", data.conversationId && `dm:${data.conversationId}`)
+    case "message_request":
+    case "message_request_response":
+    case "board_request":
+    case "board_request_accepted":
+      return { channelId: "messages" }
+    case "group_message":
+      return replaced("rooms", data.chatGroupId && `room:${data.chatGroupId}`)
+    case "match":
+    case "reveal_request":
+    case "reveal":
+    case "friend_request":
+    case "friend_accepted":
+      return { channelId: "people" }
+    case "crew_invite":
+    case "crew_here":
+    case "blend":
+      return { channelId: "crew" }
+    case "event_update":
+    case "event_changed":
+      return replaced("events", data.eventId && `event:${data.eventId}`)
+    case "announcement":
+    case "waitlist_promoted":
+      return data.eventId
+        ? { channelId: "events", threadId: `event:${data.eventId}` }
+        : { channelId: "events" }
+    case "rating_request":
+      return replaced("later", data.eventId && `rate:${data.eventId}`)
+    case "venue_offer":
+      return { channelId: "offers" }
+    default:
+      return { channelId: "default" }
+  }
+}
+
+/**
+ * What a build that predates a kind is sent in its place. `event_changed` is an
+ * `event_update` to it, which it opens on the event; every other new kind opens
+ * nothing there and is sent as itself.
+ */
+function payloadFor(data: NotificationData | undefined, channelSet: number | null): NotificationData | undefined {
+  if (data?.type === "event_changed" && (channelSet ?? 0) < CHANNEL_SET_FLOW9) return { ...data, type: "event_update" }
+  return data
 }
 
 function replaced(
@@ -180,21 +255,53 @@ const NOT_OPTED_OUT = {
 const consentFor = (data?: NotificationData) =>
   data?.type === "venue_offer" ? { user: { profile: { is: { offer_push_consent_at: { not: null } } } } } : {}
 
-async function getUserPushTokens(userId: string, data?: NotificationData): Promise<string[]> {
+/**
+ * The per-kind switches under the master (`profiles.push_people`, `push_crew`,
+ * `push_later`; Flow 9 · 9.6). They stop the push only: the bell row is written
+ * before any of this runs. Excludes the explicit off for the same reason
+ * `NOT_OPTED_OUT` does, so a person with no profile row keeps hearing.
+ * Offers have their own consent (`consentFor`); a DM, a room reply, an event's
+ * change and a report's outcome have no switch here — a room is muted, an event
+ * is the point of the app, and a report's outcome is a safety message.
+ */
+const SWITCH_FOR_KIND: Partial<Record<NotificationData["type"], "push_people" | "push_crew" | "push_later">> = {
+  match: "push_people",
+  reveal_request: "push_people",
+  reveal: "push_people",
+  friend_request: "push_people",
+  friend_accepted: "push_people",
+  crew_invite: "push_crew",
+  crew_here: "push_crew",
+  blend: "push_crew",
+  rating_request: "push_later",
+}
+
+const switchedOn = (data?: NotificationData) => {
+  const column = data?.type ? SWITCH_FOR_KIND[data.type] : undefined
+  return column ? { user: { NOT: { profile: { is: { [column]: false } } } } } : {}
+}
+
+/** A device to push to, and which Android channels it has (`CHANNEL_SET_FLOW9`). */
+interface PushTarget {
+  token: string
+  channelSet: number | null
+}
+
+async function getUserPushTokens(userId: string, data?: NotificationData): Promise<PushTarget[]> {
   const tokens = await db.push_tokens.findMany({
-    where: { user_id: userId, ...NOT_OPTED_OUT, ...consentFor(data) },
-    select: { token: true },
+    where: { user_id: userId, ...NOT_OPTED_OUT, ...consentFor(data), ...switchedOn(data) },
+    select: { token: true, channel_set: true },
     orderBy: { updated_at: "desc" },
     take: 5, // Limit to 5 most recent tokens per user
   })
 
-  return tokens.map((t) => t.token)
+  return tokens.map((t) => ({ token: t.token, channelSet: t.channel_set }))
 }
 
 /**
  * Get push tokens for multiple users
  */
-async function getBulkUserPushTokens(userIds: string[], data?: NotificationData): Promise<Map<string, string[]>> {
+async function getBulkUserPushTokens(userIds: string[], data?: NotificationData): Promise<Map<string, PushTarget[]>> {
   const tokens = await db.push_tokens.findMany({
     where: {
       user_id: { in: userIds },
@@ -203,17 +310,18 @@ async function getBulkUserPushTokens(userIds: string[], data?: NotificationData)
       // so a preference that works everywhere except here would look broken.
       ...NOT_OPTED_OUT,
       ...consentFor(data),
+      ...switchedOn(data),
     },
-    select: { user_id: true, token: true },
+    select: { user_id: true, token: true, channel_set: true },
     orderBy: { updated_at: "desc" },
   })
 
-  const tokenMap = new Map<string, string[]>()
+  const tokenMap = new Map<string, PushTarget[]>()
   for (const token of tokens) {
     const existing = tokenMap.get(token.user_id) || []
     if (existing.length < 5) {
       // Limit to 5 tokens per user
-      existing.push(token.token)
+      existing.push({ token: token.token, channelSet: token.channel_set })
       tokenMap.set(token.user_id, existing)
     }
   }
@@ -359,7 +467,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
 
     const messages: ExpoPushMessage[] = []
 
-    for (const pushToken of pushTokens) {
+    for (const { token: pushToken, channelSet } of pushTokens) {
       // Check if it's a valid Expo push token
       if (!Expo.isExpoPushToken(pushToken)) {
         // isExpoPushToken is a type guard, so pushToken narrows to never here.
@@ -374,10 +482,10 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
         sound,
         title,
         body,
-        data: data as Record<string, unknown>,
+        data: payloadFor(data, channelSet) as Record<string, unknown>,
         badge,
         priority: "high",
-        ...deliveryFor(data),
+        ...deliveryFor(payloadFor(data, channelSet), channelSet),
       })
     }
 
@@ -467,17 +575,18 @@ export async function sendBulkPushNotifications(
   const messages: ExpoPushMessage[] = []
 
   for (const [userId, pushTokens] of tokenMap) {
-    for (const pushToken of pushTokens) {
+    for (const { token: pushToken, channelSet } of pushTokens) {
       if (Expo.isExpoPushToken(pushToken)) {
+        const payload = payloadFor(data, channelSet)
         messages.push({
           to: pushToken,
           sound,
           title,
           body,
-          data: { ...data, userId } as Record<string, unknown>,
+          data: { ...payload, userId } as Record<string, unknown>,
           badge,
           priority: "high",
-          ...deliveryFor(data),
+          ...deliveryFor(payload, channelSet),
         })
       }
     }
@@ -787,5 +896,43 @@ export async function notifyEventUpdate(
       type: "event_update",
       eventId,
     },
+  })
+}
+
+/**
+ * Somebody's report led to action (a message or post taken down, an account
+ * suspended, a listing delisted, a crew hidden or dissolved). Says that and
+ * nothing else: not what, not whom, because a lock screen is read by others and
+ * the reported person is never told who reported them. A report that was
+ * dismissed sends nothing. Not toggleable: it is a safety message, and it has
+ * no switch under `push_enabled`.
+ */
+export async function notifyReportActioned(reporterId: string): Promise<boolean> {
+  return sendPushNotification({
+    userId: reporterId,
+    title: "We acted on your report",
+    body: "Thanks for telling us. We took action on it.",
+    data: { type: "report_actioned" },
+  })
+}
+
+/**
+ * The time, the venue or the status of an event the recipients are going to
+ * changed (Flow 3 · 3.1). `changed` is what moved: `time`, `venue`,
+ * `cancelled`, comma-joined. A build that predates the kind is sent an
+ * `event_update` in its place (`payloadFor`).
+ */
+export async function notifyEventChanged(
+  recipientIds: string[],
+  eventName: string,
+  message: string,
+  eventId: string,
+  changedFields: string
+): Promise<{ sent: number; failed: number }> {
+  return sendBulkPushNotifications({
+    userIds: recipientIds,
+    title: eventName,
+    body: message,
+    data: { type: "event_changed", eventId, changed: changedFields },
   })
 }
