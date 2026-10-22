@@ -61,6 +61,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
 import { syncOccurrences } from "../lib/occurrences"
 import { TEST_ACCOUNTS, TEST_ORG_NAMES } from "./test-accounts"
+import { leaveOtherRooms } from "./seed-one-room"
 
 const db = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -480,7 +481,7 @@ async function main() {
 
     const arrived = new Date(start.getTime() + person.arrivedAfterMin * 60 * 1000)
 
-    await leaveOtherRooms(id, occurrence.id, arrived)
+    await leaveOtherRooms(db, id, occurrence.id, arrived)
     await db.event_check_ins.upsert({
       where: { occurrence_id_user_id: { occurrence_id: occurrence.id, user_id: id } },
       // A re-seed is a fresh arrival: an old departure left on the row is read
@@ -583,14 +584,3 @@ main()
   .finally(async () => {
     await db.$disconnect()
   })
-
-/**
- * One open check-in per person (SCRUM-705): the database refuses a second
- * open row, so a person seeded into this room leaves any other, as the door
- * would make them.
- */
-async function leaveOtherRooms(userId: string, occurrenceId: string, at: Date) {
-  const others = { user_id: userId, occurrence_id: { not: occurrenceId } }
-  await db.event_check_ins.updateMany({ where: { ...others, status: "checked_in" }, data: { status: "checked_out", check_out_time: at } })
-  await db.presence_sessions.updateMany({ where: { ...others, departed_at: null }, data: { departed_at: at, departed_source: "switch" } })
-}
