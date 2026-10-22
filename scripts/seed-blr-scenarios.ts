@@ -1619,6 +1619,7 @@ async function seedSocial(
     const at = new Date(Math.min(arrive(i).getTime(), NOW.getTime() - 2 * MIN))
     const occ = occurrences.find((o) => NOW >= new Date(o.start_time.getTime() - 90 * MIN) && NOW <= o.end_time) ?? occurrenceAt(at)
     const checkInAt = at < occ.start_time ? occ.start_time : at
+    await leaveOtherRooms(user_id, occ.id, checkInAt)
     await db.event_check_ins.create({
       data: {
         event_id: eventId,
@@ -1777,3 +1778,14 @@ main()
     process.exitCode = 1
   })
   .finally(() => db.$disconnect())
+
+/**
+ * One open check-in per person (SCRUM-705): the database refuses a second
+ * open row, so a person seeded into this room leaves any other, as the door
+ * would make them.
+ */
+async function leaveOtherRooms(userId: string, occurrenceId: string, at: Date) {
+  const others = { user_id: userId, occurrence_id: { not: occurrenceId } }
+  await db.event_check_ins.updateMany({ where: { ...others, status: "checked_in" }, data: { status: "checked_out", check_out_time: at } })
+  await db.presence_sessions.updateMany({ where: { ...others, departed_at: null }, data: { departed_at: at, departed_source: "switch" } })
+}

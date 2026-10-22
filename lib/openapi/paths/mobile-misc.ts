@@ -17,7 +17,7 @@ import {
   ActiveCheckinSchema,
 } from "@/lib/openapi/schemas/profile"
 import { MessageResponseSchema } from "@/lib/openapi/schemas/auth"
-import { CheckinRequestSchema } from "@/lib/openapi/schemas/event"
+import { CheckinRequestSchema, LeftRoomSchema } from "@/lib/openapi/schemas/event"
 import { LIVE_COUNT_BUCKETS, type LiveCountBucket } from "@/lib/disclosure"
 
 /** The live-count buckets, from the one list the routes bucket with — never typed out twice. */
@@ -341,6 +341,7 @@ const GoLiveResponseSchema = z
     checkIn: z.object({ id: z.string().uuid(), status: z.string(), checkInTime: z.string().datetime() }),
     revealSuggestion: z.boolean(),
     intentNeeded: z.boolean(),
+    left: z.array(LeftRoomSchema).describe("The rooms this took you out of: \"You left {name}.\" Empty when extending."),
   })
   .openapi("GoLiveResponse")
 
@@ -942,6 +943,65 @@ registry.registerPath({
 })
 
 // === Active Checkins ===
+
+const PlaceInsideSchema = z
+  .object({
+    kind: z.enum(["event", "venue"]),
+    eventId: z.string().uuid().nullable().describe("The event; for a venue, today's room once somebody went live there, else null."),
+    venueId: z.string().uuid().nullable().describe("A venue's id (Go Live); null for an event."),
+    name: z.string(),
+    venueName: z.string().nullable(),
+    startTime: z.string().datetime().nullable().describe("The event's day; null for a venue."),
+    endTime: z.string().datetime().nullable(),
+    going: z.boolean().describe("Your RSVP is `going`."),
+    saved: z.boolean(),
+    checkedIn: z.boolean().describe("You are checked in here now."),
+  })
+  .openapi("PlaceInside")
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/checkins/inside",
+  tags: ["Mobile Checkins"],
+  summary: "Which places am I inside",
+  description:
+    "Every place whose door would admit you at this position, judged as the doors judge (SCRUM-704): the event's " +
+    "own fence or a venue's Go Live area, the accuracy allowance, the event's day (cancelled days and not-yet-open " +
+    "ones are out), onboarding, the age rule, a private event's guest list, and a venue a linked event has taken " +
+    "over (the event is listed instead). Light the disc and dock the pass from this alone. In the order the pass " +
+    "docks: an event you are going to or saved; events before venues; the event whose day started first; the " +
+    "nearest. At most 10, with `total`. No distance is returned: a venue's area is shown to nobody.\n\n" +
+    "`current` is the room you are in now (or null), so with a place that is not `checkedIn` the pass can say " +
+    "\"Checking in here takes you out of {current.name}.\" before the hold (SCRUM-635). A fix worse than 150 m " +
+    "places you nowhere (`places: []`), as the doors refuse it. POST so the position never sits in a logged URL. " +
+    "Rate limited per user (20 a minute).",
+  security: bearerAuth,
+  request: { body: { content: { "application/json": { schema: CheckinRequestSchema } } } },
+  responses: {
+    200: {
+      description: "Places inside",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              places: z.array(PlaceInsideSchema),
+              total: z.number().int(),
+              current: z
+                .object({
+                  eventId: z.string().uuid(),
+                  kind: z.enum(["event", "venue_day"]),
+                  venueId: z.string().uuid().nullable(),
+                  name: z.string(),
+                })
+                .nullable(),
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
 
 registry.registerPath({
   method: "get",

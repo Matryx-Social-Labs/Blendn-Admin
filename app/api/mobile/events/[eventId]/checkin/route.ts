@@ -195,6 +195,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // Why each: see `seatAtTheDoor` in lib/check-in-core.ts.
       revealSuggestion: seat.revealSuggestion,
       intentNeeded: seat.intentNeeded,
+      // The rooms this took them out of, for "You left {A}." (SCRUM-635).
+      left: seat.left,
       message: "Successfully checked in",
     })
   } catch (error) {

@@ -13,7 +13,7 @@ import { MAX_GPS_ACCURACY_METERS, type CheckinInput } from "@/lib/validations/ev
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { recordRefusal } from "@/lib/check-in-refusals"
 import { checkInKindFor } from "@/lib/checkin-kind"
-import { checkOutOfOtherEvents } from "@/lib/checkout"
+import { checkOutOfOtherEvents, type SwitchResult } from "@/lib/checkout"
 import { trackArrival } from "@/lib/arrivals-in-flight"
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
@@ -221,9 +221,10 @@ export async function seatAtTheDoor(input: SeatInput) {
 
   // You cannot be in two rooms. Goes through the shared checkout path so the
   // socket event and the chat cutoff cannot be forgotten here and remembered
-  // in the manual route.
+  // in the manual route. The database holds the rule (`ONE_OPEN_CHECK_IN`);
+  // `openCheckIn` below recovers when another door wins the race.
   // Beside the membership read below: neither waits on the other.
-  const leavingOthers = checkOutOfOtherEvents(userId, eventId, now)
+  const leavingOthers = checkOutOfOtherEvents(userId, { eventId, occurrenceId }, now)
 
   /*
    * Capacity does not gate check-in.
@@ -243,7 +244,7 @@ export async function seatAtTheDoor(input: SeatInput) {
   // dashboard role the mobile JWT does not carry. Passing a fabricated role
   // to get at the membership lookup would break the day `actorFor` starts
   // branching on it.
-  const [memberships] = await Promise.all([
+  const [memberships, switched] = await Promise.all([
     db.organisation_members.findMany({
       where: { user_id: userId, ...activeMembership },
       select: { org_id: true },
@@ -278,50 +279,57 @@ export async function seatAtTheDoor(input: SeatInput) {
    */
   const arrival = { last_seen_at: now, left_area_at: null, departure_prompted_at: null }
 
-  // Create or update check-in record
-  const checkIn = await db.event_check_ins.upsert({
-    where: {
-      occurrence_id_user_id: { occurrence_id: occurrenceId, user_id: userId },
-    },
-    create: {
-      event_id: eventId,
-      occurrence_id: occurrenceId,
-      user_id: userId,
-      kind,
-      status: "checked_in",
-      check_in_time: now,
-      latitude,
-      longitude,
-      ...arrival,
-      ...window,
-      /*
-       * `deviceInfo` is optional in the request schema, so it is `undefined`
-       * whenever a client omits it — and no static scan can see that. The
-       * source reads `device_info: deviceInfo`, which is indistinguishable
-       * from every other field; only `strictUndefinedChecks` at runtime
-       * catches it. That is the argument for the flag over the ratchet.
-       */
-      ...(deviceInfo !== undefined && { device_info: deviceInfo }),
-    },
-    update: {
-      status: "checked_in",
-      check_in_time: now,
-      /*
-       * Coming back after a check-out reuses the row (one per person per
-       * occurrence), and the old check-out timestamp stayed on it beside
-       * `checked_in`. The Banter tab's live section wants both `checked_in`
-       * and no `check_out_time`, so the room somebody had just walked back
-       * into was not listed as live. Found by leaving and returning.
-       */
-      check_out_time: null,
-      latitude,
-      longitude,
-      ...arrival,
-      ...window,
-      ...(deviceInfo !== undefined && { device_info: deviceInfo }),
-      updated_at: now,
-    },
-  })
+  // Create or update check-in record: the row, or — beaten to it by another
+  // door — out of that room too, and again (`openCheckIn`).
+  const { checkIn, left } = await openCheckIn(
+    userId,
+    { eventId, occurrenceId },
+    now,
+    switched,
+    {
+      where: {
+        occurrence_id_user_id: { occurrence_id: occurrenceId, user_id: userId },
+      },
+      create: {
+        event_id: eventId,
+        occurrence_id: occurrenceId,
+        user_id: userId,
+        kind,
+        status: "checked_in",
+        check_in_time: now,
+        latitude,
+        longitude,
+        ...arrival,
+        ...window,
+        /*
+         * `deviceInfo` is optional in the request schema, so it is `undefined`
+         * whenever a client omits it — and no static scan can see that. The
+         * source reads `device_info: deviceInfo`, which is indistinguishable
+         * from every other field; only `strictUndefinedChecks` at runtime
+         * catches it. That is the argument for the flag over the ratchet.
+         */
+        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
+      },
+      update: {
+        status: "checked_in",
+        check_in_time: now,
+        /*
+         * Coming back after a check-out reuses the row (one per person per
+         * occurrence), and the old check-out timestamp stayed on it beside
+         * `checked_in`. The Banter tab's live section wants both `checked_in`
+         * and no `check_out_time`, so the room somebody had just walked back
+         * into was not listed as live. Found by leaving and returning.
+         */
+        check_out_time: null,
+        latitude,
+        longitude,
+        ...arrival,
+        ...window,
+        ...(deviceInfo !== undefined && { device_info: deviceInfo }),
+        updated_at: now,
+      },
+    }
+  )
 
   /*
    * And open a presence session.
@@ -427,6 +435,13 @@ export async function seatAtTheDoor(input: SeatInput) {
     checkIn,
     chatGroupId,
     /*
+     * The rooms this check-in took them out of, named, so the app can say "You
+     * left {A}." — never a silent switch (SCRUM-635). Empty when they were in
+     * none, or only in one that had already ended (an expired Go Live, an
+     * earlier day of this event).
+     */
+    left,
+    /*
      * The suggestion, not the state.
      *
      * True when this person has `reveal_by_default` set — which used to mean
@@ -451,6 +466,46 @@ export async function seatAtTheDoor(input: SeatInput) {
      * in to a room you already answered for does not ask again.
      */
     intentNeeded: (profile?.intent_default ?? []).length === 0 && prefs.intent.length === 0,
+  }
+}
+
+/**
+ * The partial unique index that holds one open check-in per person (migration
+ * SQL only: `schema.prisma` cannot say `WHERE status = 'checked_in'`).
+ */
+export const ONE_OPEN_CHECK_IN = "event_check_ins_one_open_per_user"
+
+/** Doors racing for one person: each lost race costs one more switch. Three is two more than any phone sends. */
+const OPEN_CHECK_IN_ATTEMPTS = 3
+
+/**
+ * Write the check-in row, race-safe (SCRUM-705).
+ *
+ * The switch and the write are two statements, and two doors at once (the
+ * event's and Go Live, or two events) could each switch the other out before
+ * either wrote — both ended `checked_in`. The database now refuses the second
+ * open row by name (`ONE_OPEN_CHECK_IN`), and the loser switches out of the
+ * winner's room and writes again: last door wins, exactly one stays open, the
+ * same way `venueDayFor` recovers a lost race. Not one transaction: the switch
+ * emits to sockets and closes sessions, which a rollback could not take back.
+ */
+async function openCheckIn(
+  userId: string,
+  keep: { eventId: string; occurrenceId: string },
+  now: Date,
+  switched: SwitchResult[],
+  args: Prisma.event_check_insUpsertArgs
+) {
+  const all = [...switched]
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const checkIn = await db.event_check_ins.upsert(args)
+      return { checkIn, left: all.flatMap((s) => (s.left ? [s.left] : [])) }
+    } catch (error) {
+      if (attempt >= OPEN_CHECK_IN_ATTEMPTS || !violatedConstraint(error, ONE_OPEN_CHECK_IN)) throw error
+      logger.info("Check-in lost a race to another door; switching again", { userId, attempt })
+      all.push(...(await checkOutOfOtherEvents(userId, keep, now)))
+    }
   }
 }
 
