@@ -315,7 +315,8 @@
     ],
     "data": [
       "crews",
-      "invites"
+      "invites",
+      "invitesPagination"
     ]
   },
   "/api/mobile/blends": {

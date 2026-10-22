@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { FriendOfferSchema, PaginationMetaSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PagedPaginationSchema, UserRefParamSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -400,7 +400,7 @@ export const UserFavoritesResponseSchema = z
   .object({
     events: z.array(z.unknown()),
     timeFilter: z.string(),
-    pagination: PaginationMetaSchema,
+    pagination: PagedPaginationSchema,
   })
   .openapi("UserFavoritesResponse")
 

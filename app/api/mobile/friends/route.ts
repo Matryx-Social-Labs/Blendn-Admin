@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
 import { personCard, personSelect } from "@/lib/friends"
+import { friendNameWhere, parseFriendQuery } from "@/lib/friends-here"
 import { errorResponse, successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
 import {
   createdBefore,
@@ -22,6 +23,11 @@ import {
  * Real names and photos: both people said yes, and this is a friend surface,
  * not a room. A deleted account is dropped rather than shown as a husk.
  *
+ * `?q=` (1-40 characters, trimmed) keeps the friends a word of whose name starts
+ * with it, case-insensitively: the rule of `GET /events/:id/friends-here`'s `q`
+ * (`lib/friends-here.ts`). It combines with `limit` and `cursor`, and
+ * `pagination.totalCount` is then the filtered total (`count` too).
+ *
  * `?limit=` (default 100, at most 100) and `?cursor=` (the last page's
  * `pagination.nextCursor`). `count` is the whole list, not the page, and
  * `pagination.totalCount` is the same number: an installed client that reads
@@ -36,6 +42,10 @@ export async function GET(request: NextRequest) {
     const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE, LEGACY_PAGE)
     if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
     const { limit, after } = query
+    // `?q=`: the Room's friend search, over the same name (`friends-here`'s rule), 1-40 characters.
+    const q = parseFriendQuery(request.nextUrl.searchParams.get("q"))
+    if (q === "too_long") return errorResponse("That search is too long", 400)
+    const named = q ? friendNameWhere(q) : {}
 
     /*
      * A block severs the friendship under the pair's lock, so this should
@@ -47,8 +57,8 @@ export async function GET(request: NextRequest) {
     const blocked = await blockCounterparties(me)
     const mine = {
       OR: [
-        { user1_id: me, user2_id: { notIn: blocked }, user2: { deletedAt: null } },
-        { user2_id: me, user1_id: { notIn: blocked }, user1: { deletedAt: null } },
+        { user1_id: me, user2_id: { notIn: blocked }, user2: { deletedAt: null, ...named } },
+        { user2_id: me, user1_id: { notIn: blocked }, user1: { deletedAt: null, ...named } },
       ],
     }
 
