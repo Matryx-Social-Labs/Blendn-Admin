@@ -158,12 +158,21 @@ export function changeForResponse(
  * `changed_at` and `changed_from`.
  *
  * Every door that can move a published event's time, venue or status goes
- * through this. The record is a read-modify-write of `changed_from` (the first
- * value of a field wins), so reading it before the lock, as the first version
- * did, let two simultaneous edits both start from the same `changed_from` and
- * the later one drop the earlier's. The lock makes the second edit wait, read
- * what the first wrote, and add to it. Because the record is part of the edit's
- * transaction, an edit and its record stand or fall together.
+ * through this. The edit and its record stand or fall together: a failing
+ * record rolls the edit back, and a failing edit leaves no record.
+ *
+ * What the lock protects is the READ, and one case in particular: an edit that
+ * arrives while a publish (or any other write to the row) is still open. The
+ * record is judged against the row as it stood before the edit, and only a
+ * published event records one. Without the lock the edit reads the row first,
+ * still a draft, then waits at its UPDATE for the publish to commit, and
+ * compares against a draft: no record, for an event that is now live
+ * (`event-changed-scene.itest.ts`, "what the row lock protects").
+ *
+ * What it does NOT protect is two edits at once. Those were once feared to lose
+ * each other's `changed_from`; they do not, lock or no lock, because the UPDATE
+ * takes the row's own lock and returns the latest row, and the stale `before`
+ * and the first-value-wins rule recompute the same union.
  */
 export async function updateEventTracked(args: Prisma.eventsUpdateArgs) {
   const eventId = args.where.id

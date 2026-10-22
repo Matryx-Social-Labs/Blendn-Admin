@@ -525,7 +525,8 @@ before. A build that does not know the kind is sent `event_update` in its push
 | Event is age-restricted and the viewer's known age is below it | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | Taking part (RSVP, save, board, check-in) in one with no age on file | 403 | `AGE_RESTRICTED` | `AGE_UNKNOWN` |
 | Taking part with an unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
-| The event was live and its organisation was suspended | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
+| The event was live and its organisation was suspended, and you are going (or maybe, or waitlisted) or are of the organisation | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
+| The same event, and you are a stranger or said `not_going` (public or private alike) | 404 | `NOT_FOUND` | none |
 | A draft nobody published, a private event you are not on, a deleted one | 404 | `NOT_FOUND` | none |
 
 Viewing an age-restricted event with no age on file still opens (OAuth accounts

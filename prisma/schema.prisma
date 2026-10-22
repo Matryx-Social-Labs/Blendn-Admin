@@ -1284,7 +1284,7 @@ model push_tokens {
   /// `deliveryFor`). Null is every build before Flow 9: it has `default`,
   /// `messages`, `events`, `rooms` and (later) `offers`, and a push naming any
   /// other channel lands in "Miscellaneous". 2 is the build that also created
-  /// `people`, `crew` and `later`, and knows `event_changed` and
+  /// `matches`, `crew` and `after-the-night`, and knows `event_changed` and
   /// `report_actioned`. The app says so when it registers its token.
   channel_set Int?    @db.SmallInt
   created_at DateTime @default(now()) @db.Timestamptz(6)
