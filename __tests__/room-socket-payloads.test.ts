@@ -25,6 +25,9 @@ jest.mock("@/lib/db", () => ({
     // Friends of the arriver are excluded and get no handle (lib/room-people.ts).
     friendships: { findMany: async () => [] },
     ended_friendships: { findMany: async () => [] },
+    // The leaver's switch (show_online) and blocks decide whether their departure names them.
+    profiles: { findUnique: async () => ({ show_online: true }) },
+    blocked_users: { findMany: async () => [] },
   },
 }))
 jest.mock("@/lib/mobile-auth", () => ({ verifyAccessToken: jest.fn(), accountBlockReason: jest.fn() }))

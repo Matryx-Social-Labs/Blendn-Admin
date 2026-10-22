@@ -94,6 +94,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * that would not clear. Marked read, not deleted: the row is the record
        * that it was sent.
        */
+      // board-visibility: marks the blocker's own bell rows read; a silenced ask never wrote one, so there is nothing to leak.
       await tx.$executeRaw`
         UPDATE "notifications" SET "read_at" = now()
         WHERE "user_id" = ${authUser.userId}

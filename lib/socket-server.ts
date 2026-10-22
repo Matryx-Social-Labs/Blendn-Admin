@@ -7,7 +7,7 @@ import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
 import { notStrangersTo } from "./room-people"
 import { idInConversation } from "./conversation-handle"
-import { keptApartIn } from "./conversations"
+import { blockCounterparties, keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
@@ -1394,8 +1394,17 @@ export function emitEventCheckIn(
    * — a friend knows which pseudonym is theirs, so the handle beside a chat line
    * timed to this arrival would name it. The count still moves. An opted-in
    * friend gets `room:friends` instead (Friends here), by real id.
+   *
+   * The counter room's copy names the arriver (their handle) ONLY to the arriver
+   * themself and to a viewer whose roster would show this arrival: the arriver is
+   * listed (show-online on), and the viewer is neither their friend nor in a block
+   * with them. For everybody else the copy is the bare count, byte for byte: a
+   * handle on the copy of an arriver the roster hides would name that hidden person
+   * to the whole room, and a friend's copy lacking it while a show-online-off
+   * stranger's has it would tell a friend which of the two arrivals was a friend.
    */
   return notStrangersTo(userId).then((friends) => sendWithHereCount(eventId, (hereCount) => {
+    const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !excludeUserIds.includes(viewer))
     /*
      * Two rooms, because two audiences want different things.
      *
@@ -1415,7 +1424,7 @@ export function emitEventCheckIn(
     return Promise.all([
       emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkin", (idFor, _recognises, viewer) => ({
         eventId,
-        ...(friends.has(viewer) ? {} : { userId: idFor(userId) }),
+        ...(shown(viewer) ? { userId: idFor(userId) } : {}),
         checkInTime,
         hereCount,
       })),
@@ -1458,18 +1467,24 @@ export function emitEventCheckOut(eventId: string, userId: string): void {
   if (!io) return
 
   const checkOutTime = new Date().toISOString()
-  // As an arrival: a friend's copy carries the count and no handle (D23).
-  void notStrangersTo(userId)
-    .then((friends) =>
-      sendWithHereCount(eventId, (hereCount) =>
+  // As an arrival: the handle only to the leaver and to a viewer whose roster showed them (D23, H1).
+  void Promise.all([
+    notStrangersTo(userId),
+    blockCounterparties(userId),
+    db.profiles.findUnique({ where: { id: userId }, select: { show_online: true } }),
+  ])
+    .then(([friends, blocked, profile]) => {
+      const listed = profile?.show_online !== false
+      const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !blocked.includes(viewer))
+      return sendWithHereCount(eventId, (hereCount) =>
         emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor, _recognises, viewer) => ({
           eventId,
-          ...(friends.has(viewer) ? {} : { userId: idFor(userId) }),
+          ...(shown(viewer) ? { userId: idFor(userId) } : {}),
           checkOutTime,
           hereCount,
         }))
       )
-    )
+    })
     .catch((error: unknown) => logger.warn("Check-out emit failed", { eventId, error: error instanceof Error ? error.message : String(error) }))
 }
 

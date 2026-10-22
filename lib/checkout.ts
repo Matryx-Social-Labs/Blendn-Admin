@@ -88,6 +88,7 @@ export async function performCheckout(
       user_id: true,
       status: true,
       occurrence_id: true,
+      kind: true,
       event: { select: { kind: true } },
     },
   })
@@ -157,7 +158,7 @@ export async function performCheckout(
   emitEventCheckOut(checkIn.event_id, checkIn.user_id)
   // Their friends here move too (an opted-in friend leaves the list). Every
   // checkout writer comes through here, the sweepers included.
-  void notifyFriendsHere(checkIn.user_id, { eventIds: [checkIn.event_id] })
+  if (checkIn.kind === "attendee") void notifyFriendsHere(checkIn.user_id, { eventIds: [checkIn.event_id] })
 
   logger.info("Checked out", {
     checkInId,

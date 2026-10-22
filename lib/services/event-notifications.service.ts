@@ -13,6 +13,7 @@ import { db } from "../db"
 import { notifyEventChanged, notifyEventUpdate, reasonOf, sendBulkPushNotifications } from "../push-notifications"
 import type { rsvp_status } from "@prisma/client"
 import { realEventsWhere } from "../event-kind"
+import { ENDED_FRIENDSHIP_HOURS } from "../room-people"
 
 /**
  * Who hears about a change to an event.
@@ -350,7 +351,7 @@ export async function rateRequestAudience(
   const attendees = checkIns.map((c) => c.user_id)
   if (attendees.length === 0) return { withPeers: [], eventOnly: [] }
 
-  const [matches, blocks, rated, friendships] = await Promise.all([
+  const [matches, blocks, rated, friendships, endedFriendships] = await Promise.all([
     // Who matched at this event: a conversation born of a mutual like here
     // (`cameFromMatch`: a pseudonym snapshotted, not a board post's). The same
     // rule as `ratablePeers`, so what the push promises is what the list holds.
@@ -371,8 +372,14 @@ export async function rateRequestAudience(
       where: { event_id: eventId, user_id: { in: attendees } },
       select: { user_id: true },
     }),
+    // Only a friendship between two attendees can matter here, and the same 24 h of an ended one
+    // `ratablePeers` honours (`notStrangersTo`), so the push promises what the list holds.
     db.friendships.findMany({
-      where: { OR: [{ user1_id: { in: attendees } }, { user2_id: { in: attendees } }] },
+      where: { user1_id: { in: attendees }, user2_id: { in: attendees } },
+      select: { user1_id: true, user2_id: true },
+    }),
+    db.ended_friendships.findMany({
+      where: { user1_id: { in: attendees }, user2_id: { in: attendees }, ended_at: { gt: new Date(Date.now() - ENDED_FRIENDSHIP_HOURS * 3600_000) } },
       select: { user1_id: true, user2_id: true },
     }),
   ])
@@ -380,7 +387,7 @@ export async function rateRequestAudience(
   const pair = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`)
   const blocked = new Set(blocks.map((b) => pair(b.blocker_id, b.blocked_id)))
   // Friends are never rated as strangers: a friendship is kept apart like a block here.
-  for (const f of friendships) blocked.add(pair(f.user1_id, f.user2_id))
+  for (const f of [...friendships, ...endedFriendships]) blocked.add(pair(f.user1_id, f.user2_id))
   const hasPeer = new Set<string>()
   for (const m of matches) {
     if (blocked.has(pair(m.user1_id, m.user2_id))) continue

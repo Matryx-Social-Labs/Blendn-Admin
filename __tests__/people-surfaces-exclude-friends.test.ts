@@ -1,4 +1,4 @@
-import { readFileSync } from "fs"
+import { readFileSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 
 /**
@@ -46,5 +46,38 @@ describe("every people surface in a room asks lib/room-people.ts", () => {
   it("has every listed surface reference the helper", () => {
     const missing = PEOPLE_SURFACES.filter((file) => !REFERENCES.test(read(file)))
     expect(missing).toEqual([])
+  })
+})
+
+/**
+ * The other half, as a SCAN so a surface nobody listed is caught too: reading a
+ * person's friends with `friendIdsOf` (the friendships alone) from anywhere but the
+ * friend code and the crews (whose membership REQUIRES a friendship) misses the
+ * 24 h of an ended friendship that `notStrangersTo` carries. A people surface calls
+ * `notStrangersTo`; a deliberate friends-only read says `// friends-only: why`.
+ */
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name)
+    if (statSync(path).isDirectory()) return name === "node_modules" ? [] : sources(path)
+    return /\.tsx?$/.test(name) ? [path] : []
+  })
+}
+
+describe("no people surface reads friends without the 24 h of an ended friendship", () => {
+  const ALLOWED = /^(lib\/friends\.ts|lib\/room-people\.ts|lib\/crews\/|app\/api\/mobile\/friends\/)/
+  const offenders = () =>
+    [...sources(join(ROOT, "app")), ...sources(join(ROOT, "lib"))]
+      .map((f) => ({ file: f.slice(ROOT.length + 1), src: readFileSync(f, "utf8") }))
+      .filter(({ file, src }) => !ALLOWED.test(file) && /\bfriendIdsOf\(/.test(src) && !/\/\/ friends-only:/.test(src))
+      .map((r) => r.file)
+
+  it("finds the crews' reads, so the scan matches something", () => {
+    const crew = readFileSync(join(ROOT, "lib/crews/crews.ts"), "utf8")
+    expect(/\bfriendIdsOf\(/.test(crew)).toBe(true)
+  })
+
+  it("lists no file outside the friend code and the crews that calls friendIdsOf", () => {
+    expect(offenders()).toEqual([])
   })
 })

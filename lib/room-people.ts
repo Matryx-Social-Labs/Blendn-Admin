@@ -31,6 +31,20 @@ const endedSince = () => new Date(Date.now() - ENDED_FRIENDSHIP_HOURS * 3600_000
 type BlockReader = Pick<Prisma.TransactionClient, "blocked_users" | "private_conversations">
 
 /**
+ * `viewerId`'s friends and nothing else: the friendships half of `notStrangersTo`,
+ * without the 24 h of an ended one. For "Friends here" and the signals that
+ * carry it: an ex-friend is kept off the STRANGER surfaces for a day, but is not a
+ * friend, so they are not listed there and are never told it moved.
+ */
+export async function friendsOf(viewerId: string, client: Pick<Prisma.TransactionClient, "friendships"> = db): Promise<Set<string>> {
+  const rows = await client.friendships.findMany({
+    where: { OR: [{ user1_id: viewerId }, { user2_id: viewerId }] },
+    select: { user1_id: true, user2_id: true },
+  })
+  return new Set(rows.map((r) => (r.user1_id === viewerId ? r.user2_id : r.user1_id)))
+}
+
+/**
  * Everyone who must never appear to `viewerId` as a stranger: their friends, and
  * anyone whose friendship ended in the last 24 hours (B4: an unfriend must not
  * put the ex-friend's stranger card in front of the other at that moment).

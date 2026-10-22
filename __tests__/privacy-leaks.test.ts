@@ -70,8 +70,9 @@ describe("B3 — the socket roster is for people in the room", () => {
     // And not even the id: each watcher reads a handle unless it is their own
     // check-in (SCRUM-371) — a real id here was the same harvest by account.
     expect(open![0]).toContain("userId: idFor(userId)")
-    // A friend of the arriver gets the count and no handle at all (D23).
-    expect(open![0]).toContain("friends.has(viewer) ? {} : { userId: idFor(userId) }")
+    // The handle goes only to the arriver and to a viewer whose roster would show them: not a friend, not blocked, the arriver listed (H1).
+    expect(open![0]).toContain("shown(viewer) ? { userId: idFor(userId) } : {}")
+    expect(src).toContain("viewer === userId || (listed && !friends.has(viewer) && !excludeUserIds.includes(viewer))")
 
     // The `.except(...)` keeps the arriver's block counterparties off it (SCRUM-338).
     const roster = /io\.in\(`event:room:\$\{eventId\}`\)\.except\([^\n]*\),\s*eventId,\s*"event:room:checkin",\s*\(idFor, recognises\) => \{[\s\S]*?identity \? userId : undefined\s*\)/.exec(src)

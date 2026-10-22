@@ -169,6 +169,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         await lockPair(tx, user.userId, post.author_id)
         silenced = await pairIsLinked(tx, user.userId, post.author_id)
         const now = new Date()
+        // board-visibility: a write, not a read: this is where an ask is silenced.
         return tx.board_requests.create({
           data: {
             event_id: eventId,

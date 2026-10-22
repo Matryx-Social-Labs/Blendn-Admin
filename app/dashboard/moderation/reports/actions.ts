@@ -238,6 +238,7 @@ export async function getReportQueue(status: report_status = "pending") {
           },
         })
       : [],
+    // board-visibility: a moderator reads the reported ask whoever it was silenced for; this is not an author's view.
     boardRequestIds.length
       ? db.board_requests.findMany({
           where: { id: { in: boardRequestIds } },

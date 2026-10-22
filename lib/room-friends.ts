@@ -3,7 +3,7 @@
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
 import { logger } from "./logger"
-import { notStrangersTo } from "./room-people"
+import { friendsOf } from "./room-people"
 
 /**
  * `room:friends`: "your Friends here changed, refetch". Content-free (`{ eventId }`)
@@ -57,7 +57,7 @@ export async function notifyFriendsHere(subjectId: string, opts: { eventIds?: re
     // A checkout: the subject is already out, so the events are the caller's.
     const eventIds = opts.eventIds ? [...opts.eventIds] : events
     if (eventIds.length === 0) return
-    const friends = [...(await notStrangersTo(subjectId))]
+    const friends = [...(await friendsOf(subjectId))]
     if (friends.length === 0) return
     const viewers = await db.event_check_ins.findMany({
       where: { user_id: { in: friends }, event_id: { in: eventIds }, status: "checked_in", ...inRoomWhere() },
@@ -72,14 +72,19 @@ export async function notifyFriendsHere(subjectId: string, opts: { eventIds?: re
 }
 
 /**
- * A friendship made or ended between two people: each tells the other, for the
- * events both are live in, that their Friends here moved. After the commit.
+ * A friendship made or ended between two people: each is told, for the events both
+ * are live in, that their Friends here moved, but only if the OTHER is listable for
+ * them (a hidden friend's friendship changing signals nothing). After the commit.
  */
 export async function notifyFriendshipChanged(a: string, b: string): Promise<void> {
   try {
-    const [mine, theirs] = await Promise.all([liveEventsOf(a), liveEventsOf(b)])
+    const [mine, theirs, aListable, bListable] = await Promise.all([liveEventsOf(a), liveEventsOf(b), listable(a), listable(b)])
+    // `a`'s Friends here moves only if `b` is listable for them, and the other way round: a hidden
+    // friend's friendship changing must tell nobody anything (neither is a signal about a stranger).
+    const tell = [...(bListable ? [a] : []), ...(aListable ? [b] : [])]
+    if (tell.length === 0) return
     const shared = mine.filter((e) => theirs.includes(e))
-    for (const eventId of shared) await emitRoomFriends([a, b], eventId)
+    for (const eventId of shared) await emitRoomFriends(tell, eventId)
   } catch (error) {
     logger.warn("room:friends signal failed", { error: error instanceof Error ? error.message : String(error) })
   }

@@ -2,7 +2,7 @@ import { db } from "@/lib/db"
 import { conversationPair } from "@/lib/conversations"
 import { holdingPair, matchSelect, personCard, personSelect } from "@/lib/friends"
 import { inRoomWhere } from "@/lib/event-kind"
-import { notStrangersTo } from "@/lib/room-people"
+import { friendsOf } from "@/lib/room-people"
 
 /**
  * "Friends here": the viewer's friends at this event who let friends see them,
@@ -72,7 +72,8 @@ export async function friendsHere(
   viewerId: string,
   opts: { order: FriendsHereOrder; limit: number; cursor?: string; q?: string }
 ): Promise<FriendsHerePage> {
-  const friendIds = [...(await notStrangersTo(viewerId))]
+  // Friends only: an ex-friend of the last 24 h is off the stranger surfaces, but is not listed here.
+  const friendIds = [...(await friendsOf(viewerId))]
   if (friendIds.length === 0) return { friends: [], total: 0, nextCursor: null }
 
   const checkIns = await db.event_check_ins.findMany({
@@ -103,14 +104,15 @@ export async function friendsHere(
     where: { OR: pairs.map(([user1_id, user2_id]) => ({ user1_id, user2_id })) },
     select: { last_message_at: true, ...matchSelect },
   })
-  const talkedAt = new Map<string, { at: number; holding: boolean }>()
+  const talkedAt = new Map<string, { at: number; holding: boolean; closed: boolean }>()
   for (const c of conversations) {
     const other = c.user1_id === viewerId ? c.user2_id : c.user1_id
-    talkedAt.set(other, { at: c.last_message_at?.getTime() ?? 0, holding: holdingPair(c) })
+    talkedAt.set(other, { at: c.last_message_at?.getTime() ?? 0, holding: holdingPair(c), closed: c.closed_at !== null })
   }
 
   let rows: Row[] = present
-    .filter((id) => !talkedAt.get(id)?.holding)
+    // A closed DM (an unmatch) or a pseudonymous one: Message would be a 409.
+    .filter((id) => !talkedAt.get(id)?.holding && !talkedAt.get(id)?.closed)
     .map((id) => {
       const c = latest.get(id)!
       return { card: personCard(c.user), talkedAt: talkedAt.get(id)?.at ?? 0, arrivedAt: c.check_in_time?.getTime() ?? 0 }

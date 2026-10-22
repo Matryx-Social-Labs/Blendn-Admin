@@ -8,6 +8,7 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
 import { db as appDb } from "@/lib/db"
 import { friendsHere } from "@/lib/friends-here"
+import { requestFriend, unfriend } from "@/lib/friends"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
 
@@ -357,3 +358,101 @@ describe("room:friends (the signal) and who it reaches", () => {
     expect(rooms).toEqual(expect.arrayContaining([`user:${a.id}`, `user:${b.id}`]))
   })
 })
+
+describe("the second look (final review): who a friendship change is told to, and what an ex is", () => {
+  const emitted: { rooms: string[]; event: string; payload: unknown }[] = []
+  const shared = globalThis as { __blendnSocketIo?: unknown }
+  beforeEach(() => {
+    emitted.length = 0
+    const chain = (rooms: string[]): Record<string, unknown> => ({
+      to: (r: string | string[]) => chain([...rooms, ...(Array.isArray(r) ? r : [r])]),
+      emit: (event: string, payload: unknown) => void emitted.push({ rooms, event, payload }),
+      except: () => chain(rooms),
+      fetchSockets: async () => [],
+    })
+    shared.__blendnSocketIo = { to: (r: string | string[]) => chain(Array.isArray(r) ? r : [r]), in: () => chain([]) }
+  })
+  afterEach(() => void (shared.__blendnSocketIo = undefined))
+  const signalsTo = (p: Person) => emitted.filter((e) => e.event === "room:friends" && e.rooms.includes(`user:${p.id}`)).length
+  const settle = () => new Promise((r) => setTimeout(r, 600))
+
+  it("H2: unfriending or befriending a hidden friend signals nobody; a listable one signals only the person who sees them", async () => {
+    const { eventId, occurrence } = await room()
+    const [viewer, hidden, listed] = [await person("fh-h2v", { optedIn: false }), await person("fh-h2h", { optedIn: false }), await person("fh-h2l")]
+    for (const p of [viewer, hidden, listed]) await here(eventId, occurrence, p)
+
+    // Two hidden people: nothing, either way round.
+    expect(await requestFriend(viewer.id, hidden.id)).toBe("requested")
+    expect(await requestFriend(hidden.id, viewer.id)).toBe("friends")
+    await unfriend(viewer.id, hidden.id)
+    await settle()
+    expect(emitted.filter((e) => e.event === "room:friends")).toEqual([])
+
+    // A listable friend: the one who can see them is told; the listable one is not (the viewer is hidden from them).
+    await requestFriend(viewer.id, listed.id)
+    await requestFriend(listed.id, viewer.id)
+    await settle()
+    expect(signalsTo(viewer)).toBe(1)
+    expect(signalsTo(listed)).toBe(0)
+  })
+
+  it("H3: after an unfriend /friends-here is empty for both, and the ex is never told again", async () => {
+    const { eventId, occurrence } = await room()
+    const [a, b] = [await person("fh-h3a"), await person("fh-h3b")]
+    for (const p of [a, b]) await here(eventId, occurrence, p)
+    await friends(a, b)
+    expect((await list(eventId, a)).body.data.total).toBe(1)
+    expect((await list(eventId, b)).body.data.total).toBe(1)
+
+    await unfriend(a.id, b.id)
+    // The 24 h of an ended friendship keep them off the stranger surfaces; they are not friends here.
+    expect((await list(eventId, a)).body.data).toEqual({ friends: [], total: 0, nextCursor: null })
+    expect((await list(eventId, b)).body.data).toEqual({ friends: [], total: 0, nextCursor: null })
+
+    emitted.length = 0
+    const { notifyFriendsHere } = await import("@/lib/room-friends")
+    await notifyFriendsHere(b.id, { force: true })
+    await notifyFriendsHere(a.id, { force: true })
+    expect(emitted.filter((e) => e.event === "room:friends")).toEqual([])
+  })
+
+  it("L2: a friend whose DM is closed is not listed", async () => {
+    const { eventId, occurrence } = await room()
+    const [viewer, closed, open] = [await person("fh-l2v"), await person("fh-l2c"), await person("fh-l2o")]
+    for (const p of [viewer, closed, open]) await here(eventId, occurrence, p)
+    await friends(viewer, closed)
+    await friends(viewer, open)
+    const [user1_id, user2_id] = conversationPair(viewer.id, closed.id)
+    await db.private_conversations.create({ data: { user1_id, user2_id, origin_friendship: true, closed_at: new Date(), closed_reason: "unmatch" } })
+    expect((await list(eventId, viewer)).body.data.friends.map((f: { userId: string }) => f.userId)).toEqual([open.id])
+  })
+
+  it("L1 (wiring): a staff check-in is never signalled, in or out", async () => {
+    const { eventId, occurrence } = await liveRoom()
+    const [viewer, staff] = [await person("fh-l1v"), await person("fh-l1s")]
+    await here(eventId, occurrence, viewer)
+    await friends(viewer, staff)
+    await db.event_check_ins.create({ data: { user_id: staff.id, event_id: eventId, occurrence_id: occurrence, check_in_time: new Date(), status: "checked_in", kind: "staff" } })
+    const { notifyFriendsHere } = await import("@/lib/room-friends")
+    // The wiring: both writers skip a non-attendee, so nothing ever reaches this helper for staff.
+    const { readFileSync } = await import("fs")
+    expect(readFileSync("lib/check-in-core.ts", "utf8")).toMatch(/kind === "attendee"\) void notifyFriendsHere/)
+    expect(readFileSync("lib/checkout.ts", "utf8")).toMatch(/checkIn\.kind === "attendee"\) void notifyFriendsHere/)
+    void notifyFriendsHere
+    expect(emitted.filter((e) => e.event === "room:friends")).toEqual([])
+  })
+
+  it("M1: the rating push leaves out an ex-friend of the last 24 h, as the list does", async () => {
+    const { rateRequestAudience } = await import("@/lib/services/event-notifications.service")
+    const { eventId, occurrence } = await room()
+    await db.events.update({ where: { id: eventId }, data: { start_time: new Date(Date.now() - 4 * 3600_000), end_time: new Date(Date.now() - 3600_000) } })
+    const [a, b] = [await person("fh-m1a"), await person("fh-m1b")]
+    for (const p of [a, b]) await here(eventId, occurrence, p)
+    const [user1_id, user2_id] = conversationPair(a.id, b.id)
+    await db.private_conversations.create({ data: { user1_id, user2_id, origin_event_id: eventId, user1_pseudonym: "O", user2_pseudonym: "H", user1_revealed: true, user2_revealed: true } })
+    expect((await rateRequestAudience(eventId)).withPeers.sort()).toEqual([a.id, b.id].sort())
+    await db.ended_friendships.create({ data: { user1_id, user2_id } })
+    expect((await rateRequestAudience(eventId)).withPeers).toEqual([])
+  })
+})
+

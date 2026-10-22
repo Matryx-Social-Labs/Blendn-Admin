@@ -308,7 +308,7 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     expect(to(arriver, "event:checkin")[0].payload.userId).toBe(arriver.id)
   })
 
-  it("a departure: the friend's copy carries the count and no handle, a stranger's carries the handle", async () => {
+  it("a departure: a friend's copy is the bare count; a stranger's carries the handle only if the roster showed them; the leaver sees their own id", async () => {
     const eventId = await liveEvent()
     const [leaver, friend, stranger] = [await person("fir-o-a"), await person("fir-o-f"), await person("fir-o-s")]
     for (const p of [leaver, friend, stranger]) await checkIn(eventId, p)
@@ -321,6 +321,56 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     expect(copy(friend)).toHaveProperty("hereCount")
     expect(copy(stranger).userId).toBe(roomHandle(eventId, leaver.id))
     expect(copy(leaver).userId).toBe(leaver.id)
+  })
+
+  /** The copy a viewer got, minus the time (the only thing that differs between two emits). */
+  const copyFor = (viewer: Person, event: string) => {
+    const { checkInTime: _a, checkOutTime: _b, ...rest } = emitted.find((e) => e.to === viewer.id && e.event === event)!.payload
+    return rest
+  }
+
+  it("H1: the counter-room copy of a hidden friend is byte-equal to that of a show-online-off stranger, and a listed stranger's is the only one with a handle", async () => {
+    const eventId = await liveEvent()
+    const [viewer, hiddenFriend, quiet, loud, blockedBy] = [
+      await person("fir-h-v"),
+      await person("fir-h-f"),
+      await person("fir-h-q", { showOnline: false }),
+      await person("fir-h-l"),
+      await person("fir-h-b"),
+    ]
+    for (const p of [viewer, hiddenFriend, quiet, loud, blockedBy]) await checkIn(eventId, p)
+    await befriend(viewer, hiddenFriend)
+    await db.blocked_users.create({ data: { blocker_id: blockedBy.id, blocked_id: viewer.id } })
+    const rooms = (p: Person) => ({ userId: p.id, rooms: [`event:${eventId}`, `event:room:${eventId}`, `user:${p.id}`] })
+
+    const arrive = async (arriver: Person, listed: boolean, excluded: string[] = []) => {
+      emitted.length = 0
+      await install([viewer, arriver].map(rooms))
+      await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "A", image: null }, excluded, listed)
+      return copyFor(viewer, "event:checkin")
+    }
+    const friendsCopy = await arrive(hiddenFriend, true)
+    const quietCopy = await arrive(quiet, false)
+    expect(friendsCopy).toEqual(quietCopy)
+    expect(friendsCopy).not.toHaveProperty("userId")
+    // A listed stranger is the one copy that names the arriver; a block, either way, takes it away.
+    expect((await arrive(loud, true)).userId).toBe(roomHandle(eventId, loud.id))
+    expect(await arrive(blockedBy, true, [viewer.id])).toEqual(quietCopy)
+    expect(await arrive(blockedBy, true, [viewer.id])).not.toHaveProperty("userId")
+
+    // The departure agrees, reading the leaver's switch and blocks from the database.
+    const leave = async (leaver: Person) => {
+      emitted.length = 0
+      await install([viewer, leaver].map(rooms))
+      emitEventCheckOut(eventId, leaver.id)
+      for (let i = 0; i < 40 && !emitted.some((e) => e.to === viewer.id && e.event === "event:checkout"); i++) await new Promise((r) => setTimeout(r, 50))
+      return copyFor(viewer, "event:checkout")
+    }
+    const [fLeft, qLeft, lLeft, bLeft] = [await leave(hiddenFriend), await leave(quiet), await leave(loud), await leave(blockedBy)]
+    expect(fLeft).toEqual(qLeft)
+    expect(fLeft).not.toHaveProperty("userId")
+    expect(lLeft.userId).toBe(roomHandle(eventId, loud.id))
+    expect(bLeft).toEqual(qLeft)
   })
 })
 
