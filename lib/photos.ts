@@ -174,10 +174,22 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
       })
       // The blur of a pulled photo is that photo, smaller: pulled with it.
       if (row?.cleared_blur) await recordPhotoPulled(row.cleared_blur, userId)
-      // Its owner is told, on `photo_states`, for a while (lib/photo-checks.ts).
-      if (row) await notePulledProfilePhoto(url, userId, row.was_main === true)
       await withdraw(url, userId)
       if (row?.cleared_blur) await withdraw(row.cleared_blur, userId)
+      /*
+       * Last, and on its own: telling the owner (`photo_states`, lib/photo-checks.ts)
+       * is a courtesy, and it ran BEFORE the withdrawals once, so a failed write
+       * left the photo off the profile and still in the public bucket. A failure
+       * here costs the owner the notice, and nothing else.
+       */
+      if (row) {
+        await notePulledProfilePhoto(url, userId, row.was_main === true).catch((error: unknown) => {
+          logger.warn("Could not record that a photo was pulled for its owner's notice", {
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        })
+      }
       logger.warn("Profile photo removed after moderation", { userId })
       return
     }

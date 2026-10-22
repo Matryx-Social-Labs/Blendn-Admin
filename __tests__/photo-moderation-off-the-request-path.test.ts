@@ -115,6 +115,22 @@ describe("moderateProfilePhoto (after the response)", () => {
     expect(withdraw).toHaveBeenCalledTimes(1)
   })
 
+  it("a notice that cannot be written still withdraws both copies from the public bucket, and resolves", async () => {
+    vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
+    pull.mockResolvedValue([{ photos: [], cleared_blur: BLUR, was_main: true }])
+    noted.mockRejectedValueOnce(new Error("deadlock detected"))
+
+    await expect(moderateProfilePhoto(URL, "u1")).resolves.toBeUndefined()
+
+    expect(withdraw).toHaveBeenCalledTimes(2)
+    // Said once, as a warning: not the "left in place" error, because nothing was.
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Could not record that a photo was pulled for its owner's notice",
+      expect.objectContaining({ userId: "u1", error: "deadlock detected" })
+    )
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
   it("a withdrawal that fails does not keep the blur's from running, and says the copy is still public", async () => {
     vendor.mockResolvedValue({ checked: true, result: { action: "hide" } })
     pull.mockResolvedValue([{ photos: [], cleared_blur: BLUR }])
