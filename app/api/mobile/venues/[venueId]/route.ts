@@ -144,6 +144,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         claimed,
         capacity: venue.capacity,
         dayResetHour: venue.day_reset_hour,
+        // The IANA zone the day (and `hours`) are read in: with `dayResetHour` it is all the phone needs, so it never derives either from `dayEndsAt`.
+        timezone: venue.timezone,
         hours: venueHours(venue.hours),
         description: venue.description,
         amenities: venue.amenity_links.map((l) => l.amenity.name),

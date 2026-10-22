@@ -14,7 +14,7 @@ import { blockCounterparties } from "./conversations"
 import { db } from "./db"
 import { tellAuthorPostTakenDown } from "./board-takedown"
 import { closePostRooms } from "./room-close"
-import { blocksBetween } from "./crews/blocks"
+import { strangersApartBetween } from "./room-people"
 import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
@@ -120,6 +120,24 @@ export function outstandingAsk(now: Date = new Date(), blocked: readonly string[
     to_user_id: { notIn: [...blocked] },
   }
 }
+
+/**
+ * An ask the pair's link silenced at ask time (`board_requests.silenced_at`) does
+ * not exist for its author: no list, no count, no badge, no push. This is the one
+ * `where` every author-facing read of `board_requests` spreads, so a new reader
+ * cannot forget it (`board-request-visibility.test.ts` pins that they all do).
+ */
+export const VISIBLE_TO_AUTHOR = { silenced_at: null } as const
+
+/**
+ * The asks a viewer may be told about when only a COUNT is shown (a post's
+ * `requestCount`, shown to everybody browsing): the unsilenced ones, plus the
+ * viewer's OWN asks, silenced or not. Without the first a silenced ask moves the
+ * author's (and everyone's) count with nothing to show for it, naming a linked
+ * pair; without the second the asker's own count would stay put after they asked,
+ * which is the same oracle read from the other side.
+ */
+export const visibleBoardRequests = (viewerId: string) => ({ OR: [VISIBLE_TO_AUTHOR, { from_user_id: viewerId }] })
 
 /** The row as its asker may see it. Only ever applied to the asker's own rows. */
 export function asTheAskerSees<
@@ -357,7 +375,7 @@ export async function boardPostAuthorFor(
   const { rsvp, favourited } = await entitlementFor(eventId, viewerId)
   if (rsvp !== null || favourited) return post.author_id
   const asked = await db.board_requests.findFirst({
-    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId }] },
+    where: { post_id: postId, OR: [{ from_user_id: viewerId }, { to_user_id: viewerId, ...VISIBLE_TO_AUTHOR }] },
     select: { id: true },
   })
   return asked ? post.author_id : null
@@ -418,10 +436,11 @@ export async function boardRequestCounterpart(
 ): Promise<string | null> {
   const r = await db.board_requests.findUnique({
     where: { id: requestId },
-    select: { from_user_id: true, to_user_id: true },
+    select: { from_user_id: true, to_user_id: true, silenced_at: true },
   })
   if (r?.from_user_id === viewerId) return r.to_user_id
-  if (r?.to_user_id === viewerId) return r.from_user_id
+  // An ask silenced at ask time does not exist for its author.
+  if (r?.to_user_id === viewerId && !r.silenced_at) return r.from_user_id
   return null
 }
 
@@ -476,7 +495,8 @@ export async function seatBoardRoom(
   })
   const people = [post.author_id, ...accepted.map((a) => a.from_user_id)]
   const [apart, existing] = await Promise.all([
-    blocksBetween(people, people, tx),
+    // Friends across the seats are kept apart too (the board room is pseudonymous).
+    strangersApartBetween(people, people, tx),
     tx.chat_groups.findUnique({
       where: { board_post_id: post.id },
       select: { id: true, members: { select: { user_id: true, anonymous_name: true } } },

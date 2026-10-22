@@ -3,9 +3,10 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { BOARD_CLOSED, boardDenialMessage, mayReadBoard } from "@/lib/board"
-import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged } from "@/lib/board-access"
+import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged, visibleBoardRequests } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
+import { notStrangersTo } from "@/lib/room-people"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -66,7 +67,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Both directions, as the ask already is: somebody who blocked you, or whom
     // you blocked, is not on your board.
-    const blocked = await blockCounterparties(user.userId)
+    // And friends (the owner's rule): a board author is a pseudonym, and a friend must never meet a friend as one.
+    const blocked = [...(await blockCounterparties(user.userId)), ...(await notStrangersTo(user.userId))]
 
     /*
      * Live posts only, newest first, a page at a time (`?limit=` default 100, `?cursor=`), and the author as a pseudonym.
@@ -95,7 +97,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         spaces_left: true,
         created_at: true,
         author_id: true,
-        _count: { select: { requests: true } },
+        // Not the silenced ones, except your own: see `visibleBoardRequests`.
+        _count: { select: { requests: { where: visibleBoardRequests(user.userId) } } },
       },
     }),
     ])

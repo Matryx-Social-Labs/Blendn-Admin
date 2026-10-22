@@ -10,7 +10,9 @@
 const mockDb = {
   events: { findMany: jest.fn(), updateMany: jest.fn() },
   event_check_ins: { findMany: jest.fn() },
-  event_likes: { findMany: jest.fn() },
+  private_conversations: { findMany: jest.fn() },
+  friendships: { findMany: jest.fn(async () => []) },
+  ended_friendships: { findMany: jest.fn(async () => []) },
   blocked_users: { findMany: jest.fn() },
   event_ratings: { findMany: jest.fn() },
   notifications: { createManyAndReturn: jest.fn() },
@@ -46,17 +48,15 @@ import {
 const EVENT = { id: "e0000000-0000-4000-8000-000000000001", title: "Friday at Toit" }
 const NOW = new Date("2026-09-28T22:05:00Z")
 
-/** A, B liked each other; C and D liked each other but C blocked D; E came alone; F opted out of push. */
+/** A, B matched here; C and D matched but C blocked D; E came alone; F opted out of push. */
 function world() {
   mockDb.events.findMany.mockResolvedValue([EVENT])
   mockDb.events.updateMany.mockResolvedValue({ count: 1 })
   mockDb.event_check_ins.findMany.mockResolvedValue(["A", "B", "C", "D", "E", "F"].map((user_id) => ({ user_id })))
-  mockDb.event_likes.findMany.mockResolvedValue([
-    { liker_id: "A", liked_id: "B" },
-    { liker_id: "B", liked_id: "A" },
-    { liker_id: "C", liked_id: "D" },
-    { liker_id: "D", liked_id: "C" },
-    { liker_id: "E", liked_id: "A" }, // one-way: not a connection
+  // Conversations born of a match at this event (the same rule as `ratablePeers`).
+  mockDb.private_conversations.findMany.mockResolvedValue([
+    { user1_id: "A", user2_id: "B" },
+    { user1_id: "C", user2_id: "D" },
   ])
   mockDb.blocked_users.findMany.mockResolvedValue([{ blocker_id: "C", blocked_id: "D" }])
   mockDb.event_ratings.findMany.mockResolvedValue([])

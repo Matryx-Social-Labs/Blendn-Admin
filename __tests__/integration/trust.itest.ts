@@ -1,3 +1,4 @@
+import { conversationPair } from "@/lib/conversations"
 import { MIN_RATINGS, ratablePeers, trustSignalsFor } from "@/lib/trust"
 
 import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
@@ -35,12 +36,33 @@ async function guest(label: string) {
 const like = (eventId: string, a: string, b: string) =>
   db.event_likes.create({ data: { event_id: eventId, liker_id: a, liked_id: b } })
 
+/**
+ * A match made at this event: the mutual like and the conversation it opened,
+ * revealed on both sides so the ref a rating names is the plain id (an
+ * unrevealed match is a handle: dm-handle / friend-held itests).
+ */
 async function connect(eventId: string, a: string, b: string) {
   await like(eventId, a, b)
   await like(eventId, b, a)
+  const [user1_id, user2_id] = conversationPair(a, b)
+  await db.private_conversations.create({
+    data: {
+      user1_id,
+      user2_id,
+      origin_event_id: eventId,
+      user1_pseudonym: "Otter",
+      user2_pseudonym: "Heron",
+      user1_revealed: true,
+      user2_revealed: true,
+    },
+  })
 }
 
+/** Who a person may rate, as the ids the list names. */
+const peers = async (eventId: string, raterId: string) => (await ratablePeers(eventId, raterId)).map((p) => p.ref)
+
 afterAll(async () => {
+  await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.blocked_users.deleteMany({ where: { blocker_id: { in: users } } })
   await cleanup(users, events)
   await closeDb()
@@ -67,8 +89,8 @@ describe("who you may rate", () => {
     ])
     await connect(eventId, me, matched)
 
-    expect(await ratablePeers(eventId, me)).toEqual([matched])
-    expect(await ratablePeers(eventId, me)).not.toContain(stranger)
+    expect(await peers(eventId, me)).toEqual([matched])
+    expect(await peers(eventId, me)).not.toContain(stranger)
   })
 
   it("not someone who never liked you back", async () => {
@@ -77,7 +99,7 @@ describe("who you may rate", () => {
     const [me, them] = await Promise.all([guest("tr-d"), guest("tr-e")])
     await like(eventId, me, them)
 
-    expect(await ratablePeers(eventId, me)).toEqual([])
+    expect(await peers(eventId, me)).toEqual([])
   })
 
   it("nobody until the event has ended", async () => {
@@ -90,7 +112,7 @@ describe("who you may rate", () => {
     const [me, them] = await Promise.all([guest("tr-f"), guest("tr-g")])
     await connect(eventId, me, them)
 
-    expect(await ratablePeers(eventId, me)).toEqual([])
+    expect(await peers(eventId, me)).toEqual([])
   })
 
   it("drops off the list once rated", async () => {
@@ -101,7 +123,7 @@ describe("who you may rate", () => {
     await db.peer_ratings.create({
       data: { event_id: eventId, rater_id: me, rated_id: them, rating: 5 },
     })
-    expect(await ratablePeers(eventId, me)).toEqual([])
+    expect(await peers(eventId, me)).toEqual([])
   })
 
   it("not someone you blocked, nor someone who blocked you (SCRUM-304)", async () => {
@@ -113,11 +135,11 @@ describe("who you may rate", () => {
     const [blocker, blocked, friend] = await Promise.all([guest("tr-j"), guest("tr-k"), guest("tr-l")])
     await connect(eventId, blocker, blocked)
     await connect(eventId, blocker, friend)
-    expect(await ratablePeers(eventId, blocked)).toEqual([blocker]) // connected, so ratable — until:
+    expect(await peers(eventId, blocked)).toEqual([blocker]) // connected, so ratable — until:
 
     await db.blocked_users.create({ data: { blocker_id: blocker, blocked_id: blocked } })
-    expect(await ratablePeers(eventId, blocked)).toEqual([])
-    expect(await ratablePeers(eventId, blocker)).toEqual([friend])
+    expect(await peers(eventId, blocked)).toEqual([])
+    expect(await peers(eventId, blocker)).toEqual([friend])
   })
 })
 

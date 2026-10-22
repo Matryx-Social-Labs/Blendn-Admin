@@ -603,6 +603,7 @@
         "latitude",
         "longitude",
         "name",
+        "timezone",
         "upcoming",
         "upcomingNextCursor",
         "upcomingTotal",

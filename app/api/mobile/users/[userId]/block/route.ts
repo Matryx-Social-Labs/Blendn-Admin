@@ -1,13 +1,14 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
-import { closeConversation, conversationPair } from "@/lib/conversations"
-import { lockPair, severFriendship } from "@/lib/friends"
+import { blockPairIn } from "@/lib/block-pair"
+import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { blockIdFromRef, openRoomHandle, userIdFromRef } from "@/lib/room-handle"
 import { ownerAdmits } from "@/lib/room-kind"
+import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { isUuid } from "@/lib/api-input"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -24,7 +25,7 @@ interface RouteParams {
 
 /**
  * Who a block names. A raw id or an event room's handle as `userIdFromRef`
- * reads them. A handle from a room that is not an event's — a Blend, a crew's
+ * reads them; a direct conversation's handle names the other person in it. A handle from a room that is not an event's — a Blend, a crew's
  * chat, a board post's room — names somebody only to a caller that room's
  * door lets in now: blocking somebody from inside a Blend is the one thing a
  * Blend handle may do outside the Blend, and only for the people in it. For
@@ -34,6 +35,8 @@ interface RouteParams {
 async function blockTargetFromRef(viewerId: string, ref: string): Promise<string> {
   const opened = openRoomHandle(ref)
   if (!opened || typeof opened.scope === "string") return userIdFromRef(ref)
+  // A conversation's handle: the other person of a DM you are in, whether or not they have revealed.
+  if (opened.scope.kind === "dm") return (await userIdFromDmRef(viewerId, ref)) ?? ref
   return (await ownerAdmits(opened.scope.groupId, [viewerId]))?.has(viewerId) ? opened.userId : ref
 }
 
@@ -79,54 +82,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * Every statement is idempotent, so a retry after a partial network failure
      * converges rather than compounding.
      */
-    const [user1_id, user2_id] = conversationPair(authUser.userId, targetId)
-
     const closedConversationId = await db.$transaction(async (tx) => {
-      // The pair's friend lock first, so an accept in flight either finishes
-      // before this block (and is severed below) or sees it (see lib/friends.ts).
-      await lockPair(tx, authUser.userId, targetId)
-
-      await tx.blocked_users.upsert({
-        where: {
-          blocker_id_blocked_id: {
-            blocker_id: authUser.userId,
-            blocked_id: targetId,
-          },
-        },
-        create: {
-          blocker_id: authUser.userId,
-          blocked_id: targetId,
-        },
-        update: {},
-      })
-
-      /*
-       * Cancel pending requests in BOTH directions.
-       *
-       * This cancelled only inbound ones, and the accept handler never re-checked
-       * blocks -- so A could request B, block B, and B could then accept, creating
-       * a `private_conversations` row between two blocked people. Sends were
-       * refused afterwards, but both ended up with a permanent dead thread, and
-       * `mayConverse` returns true forever once a row exists.
-       */
-      await tx.message_requests.updateMany({
-        where: {
-          status: "pending",
-          OR: [
-            { sender_id: targetId, recipient_id: authUser.userId },
-            { sender_id: authUser.userId, recipient_id: targetId },
-          ],
-        },
-        data: { status: "blocked" },
-      })
-
-      /*
-       * And the friendship, with any friend request either way. A block that
-       * left it standing would keep the blocked person on the blocker's
-       * friends list, one tap from a DM. Not restored by unblocking: being
-       * friends again is a new yes from both people.
-       */
-      await severFriendship(authUser.userId, targetId, tx)
+      // The block itself, whichever door: the lock, the row, the requests, the
+      // friendship, and the conversation (lib/block-pair.ts).
+      const closedId = await blockPairIn(tx, authUser.userId, targetId)
 
       /*
        * And the bell. Their board asks leave the blocker's list at once (hidden
@@ -135,6 +94,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * that would not clear. Marked read, not deleted: the row is the record
        * that it was sent.
        */
+      // board-visibility: marks the blocker's own bell rows read; a silenced ask never wrote one, so there is nothing to leak.
       await tx.$executeRaw`
         UPDATE "notifications" SET "read_at" = now()
         WHERE "user_id" = ${authUser.userId}
@@ -145,27 +105,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             WHERE "from_user_id" = ${targetId} AND "to_user_id" = ${authUser.userId}
           )`
 
-      /*
-       * Close the conversation, if there is one.
-       *
-       * Blocking left the thread sitting in both inboxes with its history fully
-       * readable -- so "block" removed the ability to send and nothing else. A
-       * block that leaves the conversation open is not what anyone means by it.
-       *
-       * Block implies unmatch, and unmatch is permanent: unblocking restores
-       * profile visibility, never the match — and not a new request either,
-       * since a closed pair answers "not found" to one (message-requests
-       * route, SCRUM-113; the app's sheet says "you won't see each other in
-       * rooms again"). Driven 2026-09-18: unblock, ask → 404 (SCRUM-165).
-       */
-      const conversation = await tx.private_conversations.findUnique({
-        where: { user1_id_user2_id: { user1_id, user2_id } },
-        select: { id: true, closed_at: true },
-      })
-      if (!conversation || conversation.closed_at) return null
-
-      await closeConversation(conversation.id, authUser.userId, "block", tx)
-      return conversation.id
+      return closedId
     })
 
     /*
@@ -176,6 +116,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (closedConversationId) {
       closeConversationRoom(closedConversationId)
     }
+    // A friend who was listed in Friends here is not any more (a block severs the friendship).
+    void notifyFriendshipChanged(authUser.userId, targetId)
     // Out of any Blend room that now refuses them: the pair is hidden from each
     // other there, and the Blend goes on for everyone else (D-9).
     await evictBlockedFromBlends(authUser.userId, targetId)

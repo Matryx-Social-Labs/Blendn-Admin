@@ -9,6 +9,27 @@ export const SuccessResponseSchema = z
   })
   .openapi("SuccessResponse")
 
+/**
+ * Whether to offer "add as friend" for a person you are looking at. Present on a
+ * DM (detail and inbox) and on `GET /profiles/{userId}` for somebody you may see;
+ * never on a stranger. See lib/friend-offer.ts.
+ */
+export const FriendOfferSchema = z
+  .object({
+    state: z
+      .enum(["none", "requested", "incoming", "friends"])
+      .describe("From your side. `incoming`: they asked you. Always `none` while their name is still a pseudonym to you."),
+    canAdd: z
+      .boolean()
+      .describe(
+        "Show the add button. True only when you matched and BOTH of you have revealed, the conversation is open, " +
+          "nobody has blocked anybody, the account exists, and `state` is `none` or `incoming` (adding somebody who asked you " +
+          "accepts). False for `requested` and `friends`, and for every pair that is not a revealed match. " +
+          "Call `POST /friends/requests` with `{ userId }`."
+      ),
+  })
+  .openapi("FriendOffer")
+
 /** The success envelope around one route's `data`. */
 export const wrap = (schema: z.ZodTypeAny) => z.object({ success: z.literal(true), data: schema })
 
@@ -31,6 +52,7 @@ export const ErrorResponseSchema = z
           "`PROFILE_INCOMPLETE`, and on events and friends: `AGE_RESTRICTED` (a known age below the line), " +
           "`ORGANISER_SUSPENDED` (an event hidden by its organisation's suspension, on every route that refuses it), `INVITE_UNAVAILABLE`, `PERSON_UNAVAILABLE`, " +
           "`REQUEST_UNAVAILABLE` (one reason for every way something is out of reach), `CANNOT_ADD_SELF`. " +
+          "`NOT_A_REVEALED_MATCH` (404 on `POST /friends/requests`), `RATE_LIMITED` (429 on the friend routes, with `retryAfter`). " +
           "Read `reasonCode ?? errorCode`."
       ),
     retryAfter: z

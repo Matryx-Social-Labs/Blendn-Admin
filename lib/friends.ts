@@ -1,11 +1,13 @@
 import { randomBytes } from "crypto"
-import type { Prisma } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
-import { blockedEitherWay, conversationPair, pairIsClosed } from "@/lib/conversations"
+import { conversationPair } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
-import { UNNAMED } from "@/lib/conversation-identity"
+import { UNNAMED, cameFromMatch, mayShowRealName } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
+import { notifyFriendshipChanged } from "@/lib/room-friends"
+import { recordEndedFriendship } from "@/lib/room-people"
 
 /**
  * Friends: two people who both said yes.
@@ -15,7 +17,7 @@ import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
  * **Nobody can be looked up.** There is no search, and nothing in this module
  * takes a name, a phone number, an email or a handle. A request reaches
  * somebody only through their invite link — which they chose to hand out — or
- * a person the asker can already see under `maySeeIdentityFor`. Every refusal
+ * a match where both people have revealed (`revealedMatch`). Every refusal
  * a stranger could reach answers exactly like a link that never existed, and
  * costs the same work, so timing cannot tell them apart either.
  *
@@ -108,7 +110,7 @@ function pairWhere(a: string, b: string) {
   return { user1_id_user2_id: { user1_id, user2_id } }
 }
 
-const eitherWay = (a: string, b: string) => ({
+export const eitherWay = (a: string, b: string) => ({
   OR: [
     { sender_id: a, recipient_id: b },
     { sender_id: b, recipient_id: a },
@@ -128,6 +130,34 @@ const eitherWay = (a: string, b: string) => ({
 export async function lockPair(tx: Prisma.TransactionClient, a: string, b: string): Promise<void> {
   const [user1_id, user2_id] = conversationPair(a, b)
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`friends:${user1_id}:${user2_id}`}, 0))`
+}
+
+/** What `pairIsLinked` reads: a transaction client, or `db`. */
+type LinkReader = Pick<Prisma.TransactionClient, "friendships" | "private_conversations" | "friend_requests">
+
+/**
+ * Do these two people already have anything between them?
+ *
+ * True when ANY of these holds: a friendship; any conversation row, open OR
+ * closed; any friend request, including a withdrawn or a dismissed one. The one
+ * question every surface that would CREATE a link between two people asks first
+ * — the mutual like, the board ask and accept — so they cannot drift apart:
+ * a new link would hand back the old one (its id says which card is the friend)
+ * or tie a second pseudonym to the first. A closed conversation counts because
+ * leaving is permanent, and a withdrawn request because it is a record that they
+ * met.
+ *
+ * Read it under the pair's lock (`lockPair`) when it decides a write, with the
+ * transaction's client. Always three queries, whatever the answer.
+ */
+export async function pairIsLinked(client: LinkReader, a: string, b: string): Promise<boolean> {
+  const [user1_id, user2_id] = conversationPair(a, b)
+  const [friendship, conversation, request] = await Promise.all([
+    client.friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
+    client.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
+    client.friend_requests.findFirst({ where: eitherWay(a, b), select: { id: true } }),
+  ])
+  return friendship !== null || conversation !== null || request !== null
 }
 
 export async function areFriends(a: string, b: string): Promise<boolean> {
@@ -161,13 +191,56 @@ export async function friendState(viewerId: string, otherId: string): Promise<Fr
     areFriends(viewerId, otherId),
     db.friend_requests.findMany({
       where: { ...eitherWay(viewerId, otherId), withdrawn_at: null },
-      select: { sender_id: true },
+      select: { sender_id: true, held_at: true },
     }),
   ])
   if (friends) return "friends"
   if (requests.some((r) => r.sender_id === viewerId)) return "requested"
-  if (requests.length > 0) return "incoming"
+  // Theirs, held: the recipient is not told until the conversation is open and
+  // both have revealed (a POSITIVE test: a closed one never releases).
+  const [user1_id, user2_id] = conversationPair(viewerId, otherId)
+  const released = requests.some((r) => r.held_at !== null)
+    ? heldMayShow(await db.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: matchSelect }))
+    : false
+  if (requests.some((r) => r.held_at === null || released)) return "incoming"
   return "none"
+}
+
+/** What `readPair` needs: the transaction client or `db`. */
+type PairReader = Pick<Prisma.TransactionClient, "user" | "blocked_users" | "private_conversations">
+
+/**
+ * The three facts every friend decision about a pair rests on, read together:
+ * the other account is alive, nobody has blocked anybody, and the pair's
+ * conversation (if any) is still open. Takes the client so a request can re-ask
+ * it inside the pair's lock (`requestFriend`).
+ *
+ * **Always the same three queries**, whatever the answer — even for the
+ * caller themselves, which is what a route passes when a link resolved to
+ * nobody. A refusal that returned early would be faster than one that looked,
+ * and "this link was reset" would be distinguishable by its timing from "the
+ * person behind it blocked you".
+ */
+async function readPair(client: PairReader, askerId: string, otherId: string) {
+  const [user1_id, user2_id] = conversationPair(askerId, otherId)
+  const [other, blocked, conversation] = await Promise.all([
+    client.user.findUnique({ where: { id: otherId, deletedAt: null }, select: { id: true } }),
+    client.blocked_users.findFirst({
+      where: {
+        OR: [
+          { blocker_id: askerId, blocked_id: otherId },
+          { blocker_id: otherId, blocked_id: askerId },
+        ],
+      },
+      select: { id: true },
+    }),
+    client.private_conversations.findUnique({
+      where: { user1_id_user2_id: { user1_id, user2_id } },
+      select: matchSelect,
+    }),
+  ])
+  const connectable = askerId !== otherId && other !== null && blocked === null && conversation?.closed_at == null
+  return { connectable, conversation }
 }
 
 /**
@@ -177,20 +250,132 @@ export async function friendState(viewerId: string, otherId: string): Promise<Fr
  * that does not exist: a deleted account, a block in either direction, or a
  * pair who left each other (unmatch is permanent, as it is for message
  * requests). Callers answer all of them with the same 404.
- *
- * **Always the same three queries**, whatever the answer — even for the
- * caller themselves, which is what a route passes when a link resolved to
- * nobody. A refusal that returned early would be faster than one that looked,
- * and "this link was reset" would be distinguishable by its timing from "the
- * person behind it blocked you".
  */
 export async function mayConnect(askerId: string, otherId: string): Promise<boolean> {
-  const [other, blocked, closed] = await Promise.all([
-    db.user.findUnique({ where: { id: otherId, deletedAt: null }, select: { id: true } }),
-    blockedEitherWay(askerId, otherId),
-    pairIsClosed(askerId, otherId),
+  return (await readPair(db, askerId, otherId)).connectable
+}
+
+/**
+ * `readPair(...).connectable` for many pairs at once, in three queries: both
+ * accounts alive, no block either way, the pair's conversation (if any) not
+ * closed. The batched form of the same rule, so a release of held requests
+ * cannot disagree with the single-pair paths (`requestFriend`, `befriendIn`).
+ * Returns the keys (`a|b`, the canonical pair order) of the pairs that may still
+ * be connected.
+ */
+export async function connectablePairs(client: PairReader, pairs: readonly (readonly [string, string])[]): Promise<Set<string>> {
+  if (pairs.length === 0) return new Set()
+  const people = [...new Set(pairs.flat())]
+  const [dead, blocks, conversations] = await Promise.all([
+    client.user.findMany({ where: { id: { in: people }, deletedAt: { not: null } }, select: { id: true } }),
+    client.blocked_users.findMany({
+      where: { OR: pairs.map(([a, b]) => ({ OR: [{ blocker_id: a, blocked_id: b }, { blocker_id: b, blocked_id: a }] })) },
+      select: { blocker_id: true, blocked_id: true },
+    }),
+    client.private_conversations.findMany({
+      where: { closed_at: { not: null }, OR: pairs.map(([user1_id, user2_id]) => ({ user1_id, user2_id })) },
+      select: { user1_id: true, user2_id: true },
+    }),
   ])
-  return askerId !== otherId && other !== null && !blocked && !closed
+  const gone = new Set(dead.map((u) => u.id))
+  const blocked = new Set(blocks.map((b) => conversationPair(b.blocker_id, b.blocked_id).join("|")))
+  const closed = new Set(conversations.map((c) => `${c.user1_id}|${c.user2_id}`))
+  return new Set(
+    pairs
+      .map(([a, b]) => conversationPair(a, b))
+      .filter(([a, b]) => !gone.has(a) && !gone.has(b) && !blocked.has(`${a}|${b}`) && !closed.has(`${a}|${b}`))
+      .map((p) => p.join("|"))
+  )
+}
+
+/** What the match rule reads of a conversation. */
+export const matchSelect = {
+  user1_id: true,
+  user2_id: true,
+  user1_pseudonym: true,
+  user2_pseudonym: true,
+  user1_revealed: true,
+  user2_revealed: true,
+  origin_board_request_id: true,
+  closed_at: true,
+} as const
+
+type MatchFacts = {
+  user1_pseudonym: string | null
+  user2_pseudonym: string | null
+  user1_revealed: boolean
+  user2_revealed: boolean
+  origin_board_request_id: string | null
+  closed_at: Date | null
+}
+
+/** An open conversation that came from a match: the pair that liked each other. */
+const isOpenMatch = (c: MatchFacts) => c.closed_at === null && cameFromMatch(c)
+
+/**
+ * A pair whose conversation is a pseudonymous one (a match, a board post) that
+ * is still open and not revealed on both sides.
+ *
+ * Friendship would name each to the other on every friend surface, and the DM
+ * the friends list offers is that conversation — still "Heron". So a request
+ * between such a pair is held (`friend_requests.held_at`), and a friend card
+ * offers no DM for it.
+ */
+export const holdingPair = (c: MatchFacts | null | undefined): boolean =>
+  !!c && c.closed_at === null && (c.user1_pseudonym !== null || c.user2_pseudonym !== null) && !(c.user1_revealed && c.user2_revealed)
+
+/**
+ * A held request may be shown to its recipient only on a positive test: the
+ * pair's conversation is open AND both sides have revealed. Anything else — a
+ * closed conversation above all, but also a missing one — keeps it hidden, so an
+ * unmatch never releases what it was holding.
+ */
+export const heldMayShow = (c: (MatchFacts & { closed_at: Date | null }) | null | undefined): boolean =>
+  !!c && c.closed_at === null && c.user1_revealed && c.user2_revealed
+
+/**
+ * The conversation half of `revealedMatch`. Pure, so the conversation list can
+ * apply the same rule to rows it already holds without asking again.
+ */
+export const isRevealedMatch = (c: MatchFacts) => isOpenMatch(c) && c.user1_revealed && c.user2_revealed
+
+/** Where a pair stands on the match rule, from the asker's side. */
+export interface MatchStanding {
+  /**
+   * - `revealed`: an open match, both sides have shown their names, and nothing
+   *   (a block, a deleted account, an unmatch) stands between them.
+   * - `pending`: the same, but a side has not revealed yet.
+   * - `none`: anything else.
+   */
+  standing: "revealed" | "pending" | "none"
+  /**
+   * The asker may already see who the other is: they revealed to them
+   * (`mayShowRealName`). Only then is saying "you matched but not both
+   * revealed" no news — for a pseudonym the asker cannot name, it would say who
+   * the pseudonym is (an id found elsewhere, a friend's, a room handle).
+   */
+  askerSeesThem: boolean
+}
+
+/** Three queries, whatever the answer: see `readPair`. */
+export async function matchStanding(askerId: string, otherId: string): Promise<MatchStanding> {
+  const { connectable, conversation } = await readPair(db, askerId, otherId)
+  if (!connectable || !conversation || !isOpenMatch(conversation)) return { standing: "none", askerSeesThem: false }
+  return isRevealedMatch(conversation)
+    ? { standing: "revealed", askerSeesThem: true }
+    : { standing: "pending", askerSeesThem: mayShowRealName(conversation, otherId) }
+}
+
+/**
+ * May `me` add `other` as a friend because they matched and both revealed?
+ *
+ * The owner's rule (2026-10-22): "if users have matched and they have revealed
+ * themselves we can then give an option to add as friend." Nothing else lets a
+ * request go by user id — not a room-level reveal, not `friends_see_me_in_rooms`,
+ * not an accepted message request, which is not a match.
+ */
+export async function revealedMatch(me: string, other: string): Promise<boolean> {
+  return (await matchStanding(me, other)).standing === "revealed"
 }
 
 /**
@@ -203,12 +388,30 @@ export async function mayConnect(askerId: string, otherId: string): Promise<bool
  *   withdrawing — finds the same row, notifies nobody, and leaves a "Not now"
  *   in place.
  *
- * Eligibility (`mayConnect`, and how the asker found this person) is the
- * caller's; this records the answer under the pair's lock.
+ * How the asker found this person is the caller's to decide. Whether the pair
+ * can still be connected (not blocked, not closed, not deleted — and for
+ * `via: "match"`, still a match both revealed in) is asked again here under the
+ * pair's lock, because an unmatch or a block between the caller's check and this
+ * write would otherwise let the request through. `"refused"` is that answer.
  */
-export async function requestFriend(senderId: string, recipientId: string): Promise<"friends" | "requested"> {
+export async function requestFriend(
+  senderId: string,
+  recipientId: string,
+  via?: "match"
+): Promise<"friends" | "requested" | "refused"> {
   const outcome = await db.$transaction(async (tx) => {
     await lockPair(tx, senderId, recipientId)
+
+    // The caller checked before taking the lock; an unmatch or a block holds the
+    // same lock, so what it did is visible now and the answer can be re-asked.
+    const { connectable, conversation } = await readPair(tx, senderId, recipientId)
+    if (!connectable || (via === "match" && !(conversation && isRevealedMatch(conversation)))) {
+      return { state: "refused" as const }
+    }
+
+    // A pair still pseudonymous to each other is not befriended yet: the
+    // request is recorded and held, and delivered once both have revealed.
+    const holding = holdingPair(conversation)
 
     const [friends, theirs, mine] = await Promise.all([
       tx.friendships.findUnique({ where: pairWhere(senderId, recipientId), select: { id: true } }),
@@ -218,52 +421,63 @@ export async function requestFriend(senderId: string, recipientId: string): Prom
       }),
       tx.friend_requests.findUnique({
         where: { sender_id_recipient_id: { sender_id: senderId, recipient_id: recipientId } },
-        select: { id: true, withdrawn_at: true },
+        select: { id: true, withdrawn_at: true, held_at: true },
       }),
     ])
     if (friends) return { state: "friends" as const }
 
-    if (theirs && !theirs.withdrawn_at) {
+    if (theirs && !theirs.withdrawn_at && !holding) {
       const made = await befriendIn(tx, senderId, recipientId)
       return made ? { state: "friends" as const, accepted: true } : { state: "requested" as const }
     }
 
     if (mine) {
-      if (mine.withdrawn_at) {
-        await tx.friend_requests.update({ where: { id: mine.id }, data: { withdrawn_at: null } })
+      // Asking again after a withdrawal while the pair is still pseudonymous is
+      // held too, like the first ask: a request that comes back must not be
+      // delivered to somebody the asker is only a pseudonym to.
+      const hold = holding && mine.held_at === null
+      if (mine.withdrawn_at || hold) {
+        await tx.friend_requests.update({
+          where: { id: mine.id },
+          data: { withdrawn_at: null, ...(hold && { held_at: new Date() }) },
+        })
       }
+      // Held once, and the reveal that releases it is what delivers it
+      // (`releaseHeldRequests`); here it is simply still waiting.
       return { state: "requested" as const }
     }
 
     const created = await tx.friend_requests.create({
-      data: { sender_id: senderId, recipient_id: recipientId },
+      data: { sender_id: senderId, recipient_id: recipientId, ...(holding && { held_at: new Date() }) },
       select: { id: true },
     })
-    return { state: "requested" as const, requestId: created.id }
+    return holding ? { state: "requested" as const } : { state: "requested" as const, requestId: created.id }
   })
 
   // After the commit: a push is not a database write and cannot be rolled back.
-  if ("requestId" in outcome && outcome.requestId) notifyFriendRequest(recipientId, outcome.requestId)
-  if ("accepted" in outcome && outcome.accepted) notifyFriendAccepted(recipientId)
+  if ("requestId" in outcome && outcome.requestId) notifyFriendRequest(recipientId, outcome.requestId, via)
+  if ("accepted" in outcome && outcome.accepted) {
+    notifyFriendAccepted(recipientId)
+    void notifyFriendshipChanged(senderId, recipientId)
+  }
   return outcome.state
 }
 
 /**
  * Write the friendship and clear every request between the pair, inside the
- * caller's locked transaction — after checking, under that lock, that neither
- * has blocked the other. False (and the requests cleared) if one has.
+ * caller's locked transaction — after checking, under that lock, that the pair
+ * can still be connected (`readPair`: alive, not blocked, not closed). False
+ * (and the requests cleared) if not.
  */
 async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): Promise<boolean> {
-  const blocked = await tx.blocked_users.findFirst({
-    where: {
-      OR: [
-        { blocker_id: a, blocked_id: b },
-        { blocker_id: b, blocked_id: a },
-      ],
-    },
-    select: { id: true },
-  })
-  if (!blocked) {
+  // The whole eligibility question, not only a block: an unmatch, a deleted
+  // account or a block that landed after the accept's first check. Both an
+  // accept and the auto-accept of a request that was waiting come through here.
+  const { connectable, conversation } = await readPair(tx, a, b)
+  // Still pseudonymous to each other: nothing is made, and nothing is cleared,
+  // so the request waits for the reveal (`releaseHeldRequests`).
+  if (connectable && holdingPair(conversation)) return false
+  if (connectable) {
     const [user1_id, user2_id] = conversationPair(a, b)
     await tx.friendships.upsert({
       where: { user1_id_user2_id: { user1_id, user2_id } },
@@ -272,7 +486,16 @@ async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): P
     })
   }
   await tx.friend_requests.deleteMany({ where: eitherWay(a, b) })
-  return !blocked
+  // Likes between them go inert for good (the owner's rule: friends are never
+  // strangers): an unfriend later must not resurrect a match from an old like,
+  // and a friend never counts toward anyone's "liked you" ranking.
+  if (connectable) {
+    // Friends again: nothing to keep apart any more.
+    const [user1_id, user2_id] = conversationPair(a, b)
+    await tx.ended_friendships.deleteMany({ where: { user1_id, user2_id } })
+    await tx.event_likes.deleteMany({ where: { OR: [{ liker_id: a, liked_id: b }, { liker_id: b, liked_id: a }] } })
+  }
+  return connectable
 }
 
 /**
@@ -300,8 +523,103 @@ export async function acceptFriendRequest(requestId: string, recipientId: string
     })
     return still ? befriendIn(tx, recipientId, request.sender_id) : false
   })
-  if (made) notifyFriendAccepted(request.sender_id)
+  if (made) {
+    notifyFriendAccepted(request.sender_id)
+    void notifyFriendshipChanged(recipientId, request.sender_id)
+  }
   return made
+}
+
+/** At most this many held requests are looked at per release: a reveal never scans a table. */
+const HELD_RELEASE_BATCH = 200
+
+/**
+ * Requests held for these people, released now that they may be: the pair's
+ * conversation is open and both have revealed. Delivered at that moment — the
+ * push goes out from here, not at the next read — and two people who had each
+ * asked are made friends.
+ *
+ * One transaction for the whole batch, not one per pair: the pairs' locks are
+ * taken in order (so two releases cannot deadlock), the conversations are read in
+ * one query, and the held rows are cleared by one `UPDATE … RETURNING`. Only the
+ * rows that statement actually cleared are announced, so two reveals landing at
+ * once push exactly once.
+ *
+ * Called by the two writers of a reveal (`POST /conversations/:id/reveal`, and a
+ * reveal in a room carrying into its DMs). A request this misses is still
+ * delivered by reads (the requests list releases first; `friendState` tests it), only without the push.
+ */
+export async function releaseHeldRequests(userIds: readonly string[]): Promise<void> {
+  if (userIds.length === 0) return
+  const ids = [...userIds]
+  const held = await db.friend_requests.findMany({
+    where: { held_at: { not: null }, withdrawn_at: null, OR: [{ sender_id: { in: ids } }, { recipient_id: { in: ids } }] },
+    select: { sender_id: true, recipient_id: true },
+    take: HELD_RELEASE_BATCH,
+  })
+  if (held.length === 0) return
+  const pairs = [...new Map(held.map((r) => [conversationPair(r.sender_id, r.recipient_id).join("|"), conversationPair(r.sender_id, r.recipient_id)])).values()].sort(
+    (x, y) => (x.join("|") < y.join("|") ? -1 : 1)
+  )
+
+  const outcome = await db.$transaction(async (tx) => {
+    for (const [a, b] of pairs) await lockPair(tx, a, b)
+    const conversations = await tx.private_conversations.findMany({
+      where: { OR: pairs.map(([user1_id, user2_id]) => ({ user1_id, user2_id })) },
+      select: matchSelect,
+    })
+    const open = new Set(conversations.filter(heldMayShow).map((c) => `${c.user1_id}|${c.user2_id}`))
+    // Open and both revealed AND still connectable: a block or a deleted account
+    // since the request was held keeps it held (and unreleased) for good.
+    const alive = await connectablePairs(tx, pairs)
+    const releasable = pairs.filter(([a, b]) => open.has(`${a}|${b}`) && alive.has(`${a}|${b}`))
+    if (releasable.length === 0) return { requests: [], friends: [] as [string, string][] }
+
+    const candidates = await tx.friend_requests.findMany({
+      where: { held_at: { not: null }, withdrawn_at: null, OR: releasable.map(([a, b]) => eitherWay(a, b)) },
+      select: { id: true },
+    })
+    if (candidates.length === 0) return { requests: [], friends: [] as [string, string][] }
+    const released = await tx.$queryRaw<{ id: string; sender_id: string; recipient_id: string; dismissed_at: Date | null }[]>`
+      UPDATE "friend_requests" SET "held_at" = NULL
+      WHERE "held_at" IS NOT NULL AND "id" IN (${Prisma.join(candidates.map((c) => Prisma.sql`${c.id}::uuid`))})
+      RETURNING "id", "sender_id", "recipient_id", "dismissed_at"`
+    if (released.length === 0) return { requests: [], friends: [] as [string, string][] }
+
+    // A pair with a live request each way — this one, and the one that was
+    // waiting — is two people who both said yes.
+    const releasedPairs = [...new Map(released.map((r) => [conversationPair(r.sender_id, r.recipient_id).join("|"), conversationPair(r.sender_id, r.recipient_id)])).values()]
+    const live = await tx.friend_requests.findMany({
+      where: { withdrawn_at: null, OR: releasedPairs.map(([a, b]) => eitherWay(a, b)) },
+      select: { sender_id: true, recipient_id: true },
+    })
+    const senders = new Map<string, Set<string>>()
+    for (const r of live) {
+      const key = conversationPair(r.sender_id, r.recipient_id).join("|")
+      senders.set(key, (senders.get(key) ?? new Set()).add(r.sender_id))
+    }
+    const mutual = releasedPairs.filter(([a, b]) => (senders.get(`${a}|${b}`)?.size ?? 0) > 1)
+    if (mutual.length > 0) {
+      await tx.friendships.createMany({ data: mutual.map(([user1_id, user2_id]) => ({ user1_id, user2_id })), skipDuplicates: true })
+      // Likes between friends are inert for good (see `befriendIn`).
+      await tx.event_likes.deleteMany({ where: { OR: mutual.flatMap(([a, b]) => [{ liker_id: a, liked_id: b }, { liker_id: b, liked_id: a }]) } })
+      await tx.friend_requests.deleteMany({ where: { OR: mutual.map(([a, b]) => eitherWay(a, b)) } })
+    }
+    const mutualKeys = new Set(mutual.map((p) => p.join("|")))
+    return {
+      requests: released.filter((r) => !mutualKeys.has(conversationPair(r.sender_id, r.recipient_id).join("|"))),
+      friends: mutual,
+    }
+  })
+
+  // After the commit, and nothing here carries `via`: a held request may have
+  // come by invite link, so "from your match" is not something to say.
+  for (const [a, b] of outcome.friends) {
+    notifyFriendAccepted(a)
+    notifyFriendAccepted(b)
+    void notifyFriendshipChanged(a, b)
+  }
+  for (const r of outcome.requests) if (!r.dismissed_at) notifyFriendRequest(r.recipient_id, r.id)
 }
 
 /**
@@ -337,9 +655,14 @@ export async function withdrawFriendRequest(requestId: string, senderId: string)
 export async function unfriend(a: string, b: string): Promise<void> {
   const [user1_id, user2_id] = conversationPair(a, b)
   await db.$transaction(async (tx) => {
-    await tx.friendships.deleteMany({ where: { user1_id, user2_id } })
+    const { count } = await tx.friendships.deleteMany({ where: { user1_id, user2_id } })
+    // Kept apart in every room for 24 h (B4): unfriending is silent, and the ex-friend's
+    // stranger card must not appear at that moment. Only when there WAS a friendship.
+    if (count > 0) await recordEndedFriendship(tx, a, b)
     await dropCrewInvitesBetween(tx, a, b)
   })
+  // Each side's Friends here moves, for the events both are live in.
+  void notifyFriendshipChanged(a, b)
 }
 
 /**
@@ -369,12 +692,13 @@ export async function severFriendship(
  * Fire-and-forget like every other sender, but logged: a broken push pipeline
  * must not be invisible.
  */
-function notifyFriendRequest(recipientId: string, requestId: string): void {
+function notifyFriendRequest(recipientId: string, requestId: string, via?: "match"): void {
   sendPushNotification({
     userId: recipientId,
     title: "New friend request",
     body: "Someone wants to be friends. Open Blend'n to see who.",
-    data: { type: "friend_request", requestId },
+    // `via` lets the app say "from your match". Never an event or a room.
+    data: { type: "friend_request", requestId, ...(via && { via }) },
   }).catch((err: unknown) => logPushFailure("friend request", err))
 }
 

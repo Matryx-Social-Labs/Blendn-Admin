@@ -8,6 +8,7 @@ import { Expo, ExpoPushMessage, ExpoPushTicket } from "expo-server-sdk"
 import { db } from "./db"
 import { hit } from "./rate-limit-store"
 import { isRoomMuted } from "./room-mute"
+import { badgeCountsFor } from "./badge-count"
 
 // Create a new Expo SDK client
 const expo = new Expo()
@@ -494,8 +495,22 @@ async function recordNotification(
 const withRowId = (data: NotificationData | undefined, id: string | null | undefined): NotificationData | undefined =>
   data && id ? { ...data, notificationId: id } : data
 
+/**
+ * The icon's number for these people, as `GET /notifications` serves it
+ * (`lib/badge-count.ts`), so a push sets it while the app is closed. A badge
+ * that cannot be counted is a push without one, never a push that is not sent.
+ */
+async function badgesFor(userIds: string[]): Promise<Map<string, number>> {
+  try {
+    return await badgeCountsFor(userIds)
+  } catch (error) {
+    logger.warn("Could not count the badge for a push", { error: error instanceof Error ? error.message : String(error) })
+    return new Map()
+  }
+}
+
 export async function sendPushNotification(options: SendNotificationOptions): Promise<boolean> {
-  const { userId, title, body, data, badge, sound = "default" } = options
+  const { userId, title, body, data, sound = "default" } = options
 
   // First, and outside the try: the centre records what was *sent*, not what
   // was successfully delivered. See `recordNotification`.
@@ -509,6 +524,8 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
       return false
     }
 
+    // After the bell row above, so the notification being sent is in the count.
+    const badge = options.badge ?? (await badgesFor([userId])).get(userId)
     const messages: ExpoPushMessage[] = []
 
     for (const { token: pushToken, channelSet } of pushTokens) {
@@ -627,7 +644,7 @@ async function recordBulk(
 export async function sendBulkPushNotifications(
   options: SendBulkNotificationOptions
 ): Promise<{ sent: number; failed: number }> {
-  const { userIds, title, body, data, badge, sound = "default" } = options
+  const { userIds, title, body, data, sound = "default" } = options
 
   /*
    * Every recipient gets a row, not just the ones with a device.
@@ -650,6 +667,8 @@ export async function sendBulkPushNotifications(
       : new Map<string, string>()
 
   const tokenMap = await getBulkUserPushTokens(userIds, data)
+  // One count for everybody with a device, after their rows are in; never a query per person.
+  const badges = options.badge === undefined && tokenMap.size > 0 ? await badgesFor([...tokenMap.keys()]) : new Map<string, number>()
   const messages: ExpoPushMessage[] = []
 
   for (const [userId, pushTokens] of tokenMap) {
@@ -662,7 +681,7 @@ export async function sendBulkPushNotifications(
           title,
           body,
           data: { ...withRowId(payload, rowIds.get(userId)), userId } as Record<string, unknown>,
-          badge,
+          badge: options.badge ?? badges.get(userId),
           priority: "high",
           ...deliveryFor(payload, channelSet),
         })

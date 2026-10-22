@@ -3,7 +3,9 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { ALREADY_ASKED, BOARD_CLOSED, boardDenialMessage } from "@/lib/board"
-import { boardWriteDenial, checkBoardText } from "@/lib/board-access"
+import { asTheAskerSees, boardWriteDenial, checkBoardText } from "@/lib/board-access"
+import { lockPair, pairIsLinked } from "@/lib/friends"
+import { knownToEachOther } from "@/lib/room-people"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
@@ -104,7 +106,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * decision, which is the one thing a block should not leak.
      */
     const blocked = await blockCounterparties(user.userId)
-    if (blocked.includes(post.author_id)) {
+    // A friend's post is not on your board, and an ask to it is answered as a taken-down
+    // post: the blocked author's answer (the owner's rule, D19).
+    if (blocked.includes(post.author_id) || (await knownToEachOther(user.userId, post.author_id))) {
       return notFoundResponse("That post is no longer on the board")
     }
 
@@ -144,17 +148,39 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (verdict.refusal) return errorResponse(verdict.refusal, 422)
     }
 
+    /*
+     * Decided HERE, at ask time, not at accept time.
+     *
+     * Between people who already have a link (`pairIsLinked`: a friendship, any
+     * conversation open or closed, any friend request) an accepted ask could only
+     * either open a second DM beside the one they have, or answer with a
+     * conversation that ties the board's pseudonym to the name the other thread
+     * shows — and a refusal at accept time (a closed pair's 409) tells the author
+     * that somebody they know asked. So the ask is recorded as declined and
+     * silenced: to the asker it is pending until it lapses, exactly what a silent
+     * decline looks like (`asTheAskerSees`); to the author it does not exist — no
+     * push, not in their lists, not answerable. Under the pair's lock, as every
+     * other writer of the pair's standing.
+     */
     let created
+    let silenced = false
     try {
-      created = await db.board_requests.create({
-        data: {
-          event_id: eventId,
-          post_id: postId,
-          from_user_id: user.userId,
-          to_user_id: post.author_id,
-          ...(message && { message }),
-        },
-        select: { id: true, status: true, created_at: true },
+      created = await db.$transaction(async (tx) => {
+        await lockPair(tx, user.userId, post.author_id)
+        silenced = await pairIsLinked(tx, user.userId, post.author_id)
+        const now = new Date()
+        // board-visibility: a write, not a read: this is where an ask is silenced.
+        return tx.board_requests.create({
+          data: {
+            event_id: eventId,
+            post_id: postId,
+            from_user_id: user.userId,
+            to_user_id: post.author_id,
+            ...(message && { message }),
+            ...(silenced && { status: "declined" as const, decided_at: now, silenced_at: now }),
+          },
+          select: { id: true, status: true, decided_at: true, asker_withdrawn_at: true, created_at: true },
+        })
       })
     } catch (error) {
       /*
@@ -174,16 +200,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       throw error
     }
 
-    // Fire and forget: a push that fails must not fail the ask.
-    notifyBoardRequest(post.author_id, eventId, created.id).catch((error) =>
-      logger.warn("Board request notification failed", {
-        requestId: created.id,
-        error: String(error),
-      })
-    )
+    // Fire and forget: a push that fails must not fail the ask. None at all for a
+    // silenced one: the author is never told.
+    if (!silenced) {
+      notifyBoardRequest(post.author_id, eventId, created.id).catch((error) =>
+        logger.warn("Board request notification failed", {
+          requestId: created.id,
+          error: String(error),
+        })
+      )
+    }
 
+    // As the asker sees it: a silent decline is pending.
+    const seen = asTheAskerSees(created)
     return successResponse(
-      { id: created.id, status: created.status, createdAt: created.created_at },
+      { id: created.id, status: seen.status, createdAt: created.created_at },
       201
     )
   } catch (error) {

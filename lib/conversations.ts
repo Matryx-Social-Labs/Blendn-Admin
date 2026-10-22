@@ -21,6 +21,9 @@ export function conversationPair(a: string, b: string): [string, string] {
 }
 
 /** Thrown when a mutual like or accepted request lands on a closed pair. */
+/** What a side is called when the room that made the match never named them. */
+export const PSEUDONYM_FALLBACK = "Attendee"
+
 export class ConversationClosedError extends Error {
   constructor() {
     super("This conversation was closed and cannot be reopened")
@@ -105,8 +108,11 @@ export async function openConversation(
       origin_event_id: ctx?.eventId ?? null,
       origin_board_request_id: ctx?.boardRequestId ?? null,
       origin_friendship: ctx?.friendship ?? false,
-      user1_pseudonym: ctx?.pseudonyms?.[user1_id] ?? null,
-      user2_pseudonym: ctx?.pseudonyms?.[user2_id] ?? null,
+      // A conversation that came with pseudonyms is pseudonymous on BOTH sides: a
+      // side the caller had none for is "Attendee", never null, because a null
+      // pseudonym reads as "never was pseudonymous" and shows the real name.
+      user1_pseudonym: ctx?.pseudonyms ? (ctx.pseudonyms[user1_id] ?? PSEUDONYM_FALLBACK) : null,
+      user2_pseudonym: ctx?.pseudonyms ? (ctx.pseudonyms[user2_id] ?? PSEUDONYM_FALLBACK) : null,
       // Someone already public in the room has nothing left to reveal to a
       // person who saw their card. Seeding this true is what makes the
       // asymmetric case honest rather than theatre.

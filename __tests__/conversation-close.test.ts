@@ -295,8 +295,13 @@ describe("maySeeIdentity after leaving", () => {
      * broken intersection, a fold that never adds anyone — would pass all five
      * of them and fail only this one.
      */
-    given({ likedByViewer: true, likedViewer: true })
+    given({ conversation: "open" })
     expect(await maySeeIdentity(A, B)).toBe(true)
+  })
+
+  it("does not let a mutual like alone identify anyone: the conversation decides (SCRUM-752)", async () => {
+    given({ likedByViewer: true, likedViewer: true })
+    expect(await maySeeIdentity(A, B)).toBe(false)
   })
 
   it("stops showing an identity once the pair has left each other", async () => {
@@ -324,6 +329,18 @@ describe("maySeeIdentity after leaving", () => {
     expect(await maySeeIdentity(A, B)).toBe(true)
   })
 
+  it("keeps a matched pseudonym from identifying them until they reveal", async () => {
+    given({ conversation: "open" })
+    mockDb.private_conversations.findMany.mockResolvedValue([
+      { user1_id: A, user2_id: B, closed_at: null, origin_friendship: false, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: false },
+    ])
+    expect(await maySeeIdentity(A, B)).toBe(false)
+    mockDb.private_conversations.findMany.mockResolvedValue([
+      { user1_id: A, user2_id: B, closed_at: null, origin_friendship: false, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: false, user2_revealed: true },
+    ])
+    expect(await maySeeIdentity(A, B)).toBe(true)
+  })
+
   it("always lets you see yourself", async () => {
     expect(await maySeeIdentity(A, A)).toBe(true)
   })
@@ -341,28 +358,6 @@ describe("maySeeIdentity after leaving", () => {
 
     given({ likedByViewer: true, likedViewer: true, conversation: "open" })
     expect(await maySeeIdentity(A, B)).toBe(true)
-  })
-
-  it("needs the like to be mutual AND at the same event", async () => {
-    /*
-     * The half a set-based intersection can get wrong that a correlated
-     * subquery could not. `maySeeIdentityFor` fetches both directions and
-     * intersects on `(event_id, other)`; an implementation that intersected on
-     * the person alone would call two one-way likes at two different events a
-     * match.
-     */
-    given({ likedByViewer: true })
-    expect(await maySeeIdentity(A, B)).toBe(false)
-
-    given({ likedViewer: true })
-    expect(await maySeeIdentity(A, B)).toBe(false)
-
-    mockDb.event_likes.findMany.mockImplementation(async (args: { where: Record<string, unknown> }) =>
-      typeof args.where.liker_id === "string"
-        ? [{ event_id: "event-1", liked_id: B }]
-        : [{ event_id: "event-2", liker_id: B }]
-    )
-    expect(await maySeeIdentity(A, B)).toBe(false)
   })
 
   it("lets a block override a mutual like with no conversation", async () => {

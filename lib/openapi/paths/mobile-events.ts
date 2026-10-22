@@ -38,6 +38,46 @@ import {
 import { EventChatResponseSchema, SendMessageRequestSchema, ChatMessageSchema } from "@/lib/openapi/schemas/chat"
 
 // GET /api/mobile/events
+const FriendHereSchema = z.object({
+  userId: z.string().describe("The friend's REAL id (a friend surface, never a room handle). Open the DM with `POST /friends/{userId}/conversation`."),
+  name: z.string(),
+  photo: z.string().nullable(),
+})
+
+// GET /api/mobile/events/{eventId}/friends-here
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/friends-here",
+  tags: ["Mobile Events"],
+  summary: "Friends here",
+  description:
+    "Your friends checked in at this event who turned on \"Friends can see I'm here\" (and \"Show online status\"), by real id. Not reciprocal: it is the friend's consent. " +
+    "Staff, suspended, checked-out and still-pseudonymous (a match not revealed on both sides) friends are not listed. Friends are on no stranger surface (deck, roster, arrivals, waves, likes). " +
+    "`order=recent` (default): the friend you last talked to first, then the newest arrival; `limit` defaults to 8, max 50. `order=name`: A-Z with `cursor` (`nextCursor`) and `q` (1-40 chars, a word prefix) for See all. " +
+    "`total` is every friend listed for you here, not this page. No event, room or arrival time is in the payload. 403 `NOT_CHECKED_IN` when you are not checked in; 400 for a bad cursor or an over-long `q`.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    query: z.object({
+      order: z.enum(["recent", "name"]).optional(),
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+      cursor: z.string().optional(),
+      q: z.string().max(40).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Friends here",
+      content: {
+        "application/json": {
+          schema: wrap(z.object({ friends: z.array(FriendHereSchema), total: z.number().int(), nextCursor: z.string().nullable() })),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
 registry.registerPath({
   method: "get",
   path: "/api/mobile/events/{eventId}/board",
@@ -710,7 +750,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Who you can still rate for this event",
   description:
-    "Only people you connected with (a mutual like), and only once the event has ended. Empty is the common case.",
+    "Only people you matched with at this event (a conversation born of a mutual like there), and only once the event has ended. Each is the id the inbox shows for them: a conversation handle until they reveal to you, their id after. Empty is the common case.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {
@@ -725,7 +765,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Rate someone you met",
   description:
-    "Never visible to the person rated, and no endpoint returns it to them. A harassment report goes to moderation on its own and is never averaged into a score.",
+    "`userId` is the ref the list gave (a handle from before they revealed still works; a raw id for somebody still a pseudonym is 403). Never visible to the person rated, and no endpoint returns it to them. A harassment report goes to moderation on its own and is never averaged into a score.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -1083,7 +1123,8 @@ registry.registerPath({
     "exactly one accept and the other is 409 \"That offer is full\" (the ask " +
     "stays pending). Withdrawing succeeds on a pending or declined ask and " +
     "again on a withdrawn one — a decline is never delivered to the asker, " +
-    "so withdrawing one cannot be the place it lands; only an accepted ask is 409.",
+    "so withdrawing one cannot be the place it lands; only an accepted ask is 409. " +
+    "Between people who already have a link (a friendship, any conversation open or closed, any friend request) an ask is decided when it is MADE: recorded as declined and silenced, pending to the asker, never shown to the author and never pushed. If the pair becomes linked between ask and accept, the accept answers 404 exactly as for an ask the author was never shown, and so does a block — there is no 409 for a closed pair any more.",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string() }),
@@ -1097,7 +1138,7 @@ registry.registerPath({
   },
   responses: {
     200: {
-      description: "Answered. `conversationId` is present only on accept.",
+      description: "Answered. `conversationId` is present on accept, and is always the new pseudonymous conversation.",
       content: {
         "application/json": {
           schema: wrap(

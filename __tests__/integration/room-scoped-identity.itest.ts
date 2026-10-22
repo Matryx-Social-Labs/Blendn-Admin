@@ -316,13 +316,26 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect((await ask(hA)).status).toBe(409)
   })
 
-  it("a friend request by C's handle is refused as a stranger's; by A's it is not", async () => {
+  it("a friend request by any handle is refused as a stranger's until they are a revealed match; then C's still is", async () => {
     const ask = (ref: string) =>
       call(friendRequestsRoute.POST, "/api/mobile/friends/requests", viewer, { method: "POST", body: { userId: ref } })
-    const [toHer, toStranger] = [await ask(hC), await ask(hStrangerC)]
-    expect(toHer).toEqual(toStranger)
-    expect(toHer.status).toBe(404)
+    // A room-level reveal and a mutual like are not a match both revealed in.
+    const [toHerAtA, toHerAtC, toStranger] = [await ask(hA), await ask(hC), await ask(hStrangerC)]
+    expect(toHerAtA).toEqual(toStranger)
+    expect(toHerAtC).toEqual(toStranger)
+    expect(toStranger.status).toBe(404)
+
+    const [user1_id, user2_id] = [viewer.id, tanvi.id].sort()
+    await db.private_conversations.create({
+      data: { user1_id, user2_id, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
+    })
+    // C keeps her anonymous: a 200 there would say which pseudonym in C is her.
+    expect(await ask(hC)).toEqual(toStranger)
     expect((await ask(hA)).status).toBe(200)
+
+    // Leave the room as the next test expects it.
+    await db.friend_requests.deleteMany({ where: { sender_id: viewer.id, recipient_id: tanvi.id } })
+    await db.private_conversations.deleteMany({ where: { user1_id, user2_id } })
   })
 
   it("once friends, A's handle opens the friend route and C's does not", async () => {
@@ -335,18 +348,20 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect((await get(hA)).status).toBe(200)
   })
 
-  it("and as a friend she stays in C's deck, as the stranger C shows", async () => {
+  it("and as a friend she is in no deck: C's, as in every room (friends are never strangers)", async () => {
     /*
-     * The deck drops friends the viewer can recognise. Asked unscoped, the
-     * reveal at A made her recognisable at C, so she alone left C's deck —
-     * "on the roster, not in the deck" picked out which pseudonym was the
-     * friend. Asked in C's terms she is a stranger there, and stays.
+     * This used to pin that she STAYED in C's deck as the stranger C shows,
+     * because dropping only the card the viewer could recognise picked out the
+     * friend ("on the roster, not in the deck"). The owner's rule moved: every
+     * friend leaves every stranger surface (lib/room-people.ts), the roster
+     * included, so there is no pseudonym left to pick out. A stranger's card
+     * stays.
      */
     const deck = await call(matchesRoute.GET, `/api/mobile/events/${C}/matches`, viewer, { params: { eventId: C } })
     expect(deck.status).toBe(200)
-    expect((deck.body.data.matches as { userId: string }[]).map((m) => m.userId)).toEqual(
-      expect.arrayContaining([hC, hStrangerC])
-    )
+    const refs = (deck.body.data.matches as { userId: string }[]).map((m) => m.userId)
+    expect(refs).toContain(hStrangerC)
+    expect(refs).not.toContain(hC)
   })
 
   it("a handle for a room the viewer was never in names nobody, revealed or not", async () => {

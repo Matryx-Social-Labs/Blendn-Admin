@@ -41,6 +41,7 @@ afterAll(async () => {
   await db.event_reports.deleteMany({ where: { user_id: { in: users } } })
   await db.blocked_users.deleteMany({ where: { blocker_id: { in: users } } })
   await db.peer_ratings.deleteMany({ where: { rater_id: { in: users } } })
+  await db.private_conversations.deleteMany({ where: { origin_event_id: { in: events } } })
   await db.event_likes.deleteMany({ where: { event_id: { in: events } } })
   await cleanup(users, events)
   await closeDb()
@@ -106,6 +107,10 @@ it("rates a connected peer with no note and writes the row", async () => {
       { event_id: eventId, liker_id: them.id, liked_id: me.id },
     ],
   })
+  const [c1, c2] = [me.id, them.id].sort()
+  await db.private_conversations.create({
+    data: { user1_id: c1, user2_id: c2, origin_event_id: eventId, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
+  })
 
   const res = await ratingRoute.POST(
     post(`/api/mobile/events/${eventId}/peer-ratings`, me.token, { userId: them.id, rating: 4 }),
@@ -133,6 +138,10 @@ it("refuses a rating across a block, as for someone never connected with (SCRUM-
       { event_id: eventId, liker_id: blocker.id, liked_id: blocked.id },
       { event_id: eventId, liker_id: blocked.id, liked_id: blocker.id },
     ],
+  })
+  const [c1, c2] = [blocker.id, blocked.id].sort()
+  await db.private_conversations.create({
+    data: { user1_id: c1, user2_id: c2, origin_event_id: eventId, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
   })
   await db.blocked_users.create({ data: { blocker_id: blocker.id, blocked_id: blocked.id } })
 
