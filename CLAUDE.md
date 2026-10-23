@@ -75,6 +75,7 @@ npm run db:push             # Schema without a migration. NOT equivalent to db:m
 npm run db:migrate          # Apply migrations. Use this to build a local database
 npm run db:migrate          # Apply migrations (prisma migrate deploy)
 npm run db:seed             # Seed database
+npm run seed:qa-scale       # Data at scale for the large-data drives (dry run; --apply, --remove, --grant-plus <qa.* email>). Staging or localhost only
 ```
 
 Use `npm run dev`, not `dev:next`, when working on anything touching chat/sockets — `server.ts` is the actual entrypoint that wires up Socket.io and is also what runs in production.
