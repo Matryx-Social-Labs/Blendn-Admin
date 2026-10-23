@@ -74,8 +74,8 @@ describe("revealing in the room carries into DMs from that room", () => {
     // Nobody to reveal to. Also keeps a closed row from being rewritten by a
     // later room action.
     expect(propagate).toMatch(/origin_event_id: eventId[\s\S]{0,200}closed_at: null/)
-    // On both sides' updates, not one.
-    expect(propagate.match(/closed_at: null/g)).toHaveLength(2)
+    // On the read that decides who is told, and on both sides' updates, not one.
+    expect(propagate.match(/closed_at: null/g)).toHaveLength(3)
   })
 })
 

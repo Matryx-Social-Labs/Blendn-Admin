@@ -83,6 +83,12 @@ export interface ServerToClientEvents {
    * `user:{id}` only.
    */
   "live:ended": (data: { eventId: string; reason: string }) => void
+  /**
+   * Somebody in one of your DMs showed who they are (or both have now): re-read
+   * `GET /conversations/:id`. Content-free: the id you already hold, no name or
+   * photo. To the other participant's `user:{id}` room only.
+   */
+  "private:revealed": (data: { conversationId: string }) => void
   // Event-related
   /**
    * A check-in happened. Deliberately carries no name.
