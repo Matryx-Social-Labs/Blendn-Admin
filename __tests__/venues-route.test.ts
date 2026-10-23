@@ -69,6 +69,8 @@ const venueRow = (over: Record<string, unknown> = {}) => ({
       cover_image_url: "https://cdn.example/cover.jpg",
       start_time: new Date("2026-09-01T18:00:00.000Z"),
       end_time: new Date("2026-09-01T23:00:00.000Z"),
+      // Not the venue's zone: the card's time is read where the event is.
+      timezone: "America/New_York",
     },
   ],
   ...over,
@@ -154,6 +156,13 @@ describe("GET /api/mobile/venues", () => {
     expect(where.latitude).toEqual(
       expect.objectContaining({ gte: expect.any(Number), lte: expect.any(Number) })
     )
+  })
+
+  it("selects the event's own zone with the headline event and sends it as nextEvent.timezone", async () => {
+    const res = await GET(req())
+    // In the same nested read as the rest of the card, so no query per venue.
+    expect(selectArg().events.select.timezone).toBe(true)
+    expect((await res.json()).data.venues[0].nextEvent.timezone).toBe("America/New_York")
   })
 
   it("labels the venue type rather than shipping the raw enum", async () => {

@@ -32,10 +32,10 @@ const afterStart = (k: Keyset) => {
   return { OR: [{ start_time: { gt: at } }, { start_time: at, id: { gt: k.id } }] }
 }
 
-const eventSelect = { id: true, title: true, slug: true, cover_image_url: true, start_time: true, end_time: true } as const
+const eventSelect = { id: true, title: true, slug: true, cover_image_url: true, start_time: true, end_time: true, timezone: true } as const
 
 export interface UpcomingPage {
-  events: { id: string; title: string; slug: string; coverImageUrl: string | null; startTime: Date; endTime: Date }[]
+  events: { id: string; title: string; slug: string; coverImageUrl: string | null; startTime: Date; endTime: Date; timezone: string }[]
   /** All of them, whatever page this is. */
   total: number
   /** Resume here; null on the last page. */
@@ -77,6 +77,8 @@ export async function venueUpcoming(
       coverImageUrl: e.cover_image_url,
       startTime: e.start_time,
       endTime: e.end_time,
+      // The event's IANA zone (`events.timezone`), so the app formats `startTime` where the event is.
+      timezone: e.timezone,
     })),
     total,
     nextCursor: hasMore && last ? encodeKeyset(last.start_time, last.id) : null,

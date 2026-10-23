@@ -623,6 +623,91 @@
         "stayUntil",
         "venueDayId",
         "youAreLive"
+      ],
+      "venue.upcoming[]": [
+        "coverImageUrl",
+        "endTime",
+        "id",
+        "slug",
+        "startTime",
+        "timezone",
+        "title"
+      ],
+      "tonight": [
+        "coverImageUrl",
+        "endTime",
+        "id",
+        "slug",
+        "startTime",
+        "timezone",
+        "title"
+      ]
+    }
+  },
+  "/api/mobile/venues/:venueId/upcoming": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "events",
+      "pagination"
+    ],
+    "nested": {
+      "events[]": [
+        "coverImageUrl",
+        "endTime",
+        "id",
+        "slug",
+        "startTime",
+        "timezone",
+        "title"
+      ],
+      "pagination": [
+        "hasMore",
+        "limit",
+        "nextCursor",
+        "totalCount"
+      ]
+    }
+  },
+  "/api/mobile/me/attendance": {
+    "status": 200,
+    "envelope": [
+      "data",
+      "success"
+    ],
+    "data": [
+      "events",
+      "lockedCount",
+      "pagination"
+    ],
+    "nested": {
+      "events[]": [
+        "attendedAt",
+        "city",
+        "cover_image_url",
+        "end_time",
+        "id",
+        "kind",
+        "ratedAt",
+        "slug",
+        "start_time",
+        "stay_minutes",
+        "timezone",
+        "title",
+        "venue_id",
+        "venue_name",
+        "venue_type"
+      ],
+      "pagination": [
+        "hasMore",
+        "limit",
+        "nextCursor",
+        "page",
+        "totalCount",
+        "totalPages"
       ]
     }
   }

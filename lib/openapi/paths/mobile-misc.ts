@@ -98,6 +98,7 @@ const VenueListItemSchema = z
         coverImageUrl: z.string().nullable(),
         startTime: z.string().datetime(),
         endTime: z.string().datetime(),
+        timezone: z.string().describe("The event's IANA zone (`events.timezone`, as `GET /events/{eventId}` sends it). Format `startTime`/`endTime` in it. Additive: absent from an older server."),
       })
       .nullable()
       .describe(
@@ -260,6 +261,7 @@ const VenueDetailSchema = z
             coverImageUrl: z.string().nullable(),
             startTime: z.string().datetime(),
             endTime: z.string().datetime(),
+            timezone: z.string().describe("The event's IANA zone (`events.timezone`, as `GET /events/{eventId}` sends it). Format `startTime`/`endTime` in it. Additive: absent from an older server."),
           })
         )
         .describe("Its next public events, soonest first (id as tiebreak), at most 5: published, public, not ended, link not disputed by the venue, within your age; never its own live rooms."),
@@ -297,6 +299,7 @@ const VenueDetailSchema = z
         coverImageUrl: z.string().nullable(),
         startTime: z.string().datetime(),
         endTime: z.string().datetime(),
+        timezone: z.string().describe("The event's IANA zone (`events.timezone`, as `GET /events/{eventId}` sends it). Format `startTime`/`endTime` in it. Additive: absent from an older server."),
       })
       .nullable()
       .describe("The next public event here before the venue's day resets, age-filtered for you."),
@@ -355,6 +358,7 @@ registry.registerPath({
                   coverImageUrl: z.string().nullable(),
                   startTime: z.string().datetime(),
                   endTime: z.string().datetime(),
+                  timezone: z.string().describe("The event's IANA zone (`events.timezone`, as `GET /events/{eventId}` sends it). Format `startTime`/`endTime` in it. Additive: absent from an older server."),
                 })
               ),
               pagination: ListPaginationSchema,

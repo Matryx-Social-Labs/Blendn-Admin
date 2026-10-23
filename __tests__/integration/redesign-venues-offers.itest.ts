@@ -184,6 +184,8 @@ describe("GET /venues/:id carries the venue page's facts", () => {
       coverImageUrl: null,
       startTime: expect.any(String),
       endTime: expect.any(String),
+      // The event's own zone (`eventAt` leaves the fixture's UTC), so the app formats `startTime` where it is.
+      timezone: "UTC",
     })
     // The same events the Places card counts for this venue.
     const card = (await body(await get(list, `/api/mobile/venues?search=${TOKEN}%20Upcoming`))).data.venues[0]

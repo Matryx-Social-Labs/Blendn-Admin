@@ -116,7 +116,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       tonight
         ? db.events.findUnique({
             where: { id: tonight.id },
-            select: { id: true, title: true, slug: true, cover_image_url: true, start_time: true, end_time: true },
+            select: { id: true, title: true, slug: true, cover_image_url: true, start_time: true, end_time: true, timezone: true },
           })
         : null,
     ])
@@ -176,6 +176,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             coverImageUrl: tonightRow.cover_image_url,
             startTime: tonightRow.start_time,
             endTime: tonightRow.end_time,
+            // The event's IANA zone (`events.timezone`), as `GET /events/:id` sends it.
+            timezone: tonightRow.timezone,
           }
         : null,
     })

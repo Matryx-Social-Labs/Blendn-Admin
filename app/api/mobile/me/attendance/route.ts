@@ -95,6 +95,8 @@ export async function GET(request: NextRequest) {
             cover_image_url: true,
             start_time: true,
             end_time: true,
+            // The event's own IANA zone, for the app to format `start_time` in: `GET /events/:id`'s `timezone`.
+            timezone: true,
             venue_name: true,
             city: true,
             venue_id: true,
