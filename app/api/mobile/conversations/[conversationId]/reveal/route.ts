@@ -5,6 +5,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { notifyReveal, notifyRevealRequest } from "@/lib/push-notifications"
 import { releaseHeldRequests } from "@/lib/friends"
+import { emitPrivateRevealed } from "@/lib/private-revealed"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
   successResponse,
@@ -165,6 +166,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
     notifyReveal(themId, conversationId).catch(() => {})
+    // Their open DM re-reads now rather than on the next push they may never get.
+    // Once both have revealed the same event goes to both: the friend offer is possible.
+    emitPrivateRevealed(
+      conversationId,
+      after.user1_revealed && after.user2_revealed ? [authUser.userId, themId] : [themId]
+    )
     // Both sides have shown themselves now: a friend request held for this pair is delivered.
     // Decided from the values the UPDATE returned, not from the read before it:
     // two reveals at once each read "the other has not", and only the second

@@ -2025,7 +2025,11 @@ account id also carries a name, so the id beside a pseudonym was a join key.
 `private:message` is sent per recipient (their copy names the sender by the
 handle; the sender's devices get their own id); `private:typing` and
 `private:read` go to the other person alone while the sender is a pseudonym to
-them. A mutual like between two people who already know each other — any
+them. `private:revealed { conversationId }` goes to the other
+person's `user:{id}` room when somebody reveals in a DM (the route, or a room
+reveal carrying into it), and to both once both have revealed; nothing but the
+id, so the app re-reads the conversation, and nothing at all for a closed pair.
+A mutual like between two people who already know each other — any
 conversation between them, a friendship, or a friend request waiting — is not a
 match: the like is recorded and answers exactly as a like nobody returned
 (`mutual: false`, no `room:match`), under the pair's lock. Opening one would

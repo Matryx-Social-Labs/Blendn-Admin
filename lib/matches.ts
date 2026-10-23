@@ -5,6 +5,7 @@ import { exposuresFor, recordImpressions } from "./exposure"
 import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
 import { notifyMatch } from "@/lib/push-notifications"
+import { emitPrivateRevealed } from "@/lib/private-revealed"
 import {
   effectiveIntents,
   rankMatches,
@@ -865,6 +866,18 @@ export async function likeAtEvent(
 export async function revealConversationsFrom(eventId: string, userIds: readonly string[]): Promise<void> {
   if (userIds.length === 0) return
   const ids = [...userIds]
+  // Read first: updateMany does not say which rows it moved, and only those are told.
+  const pending = await db.private_conversations.findMany({
+    where: {
+      origin_event_id: eventId,
+      closed_at: null,
+      OR: [
+        { user1_id: { in: ids }, user1_revealed: false },
+        { user2_id: { in: ids }, user2_revealed: false },
+      ],
+    },
+    select: { id: true, user1_id: true, user2_id: true, user1_revealed: true, user2_revealed: true },
+  })
   await Promise.all([
     db.private_conversations.updateMany({
       where: { origin_event_id: eventId, user1_id: { in: ids }, user1_revealed: false, closed_at: null },
@@ -875,6 +888,14 @@ export async function revealConversationsFrom(eventId: string, userIds: readonly
       data: { user2_revealed: true },
     }),
   ])
+  for (const c of pending) {
+    const flipped1 = !c.user1_revealed && ids.includes(c.user1_id)
+    const flipped2 = !c.user2_revealed && ids.includes(c.user2_id)
+    const bothNow = (c.user1_revealed || flipped1) && (c.user2_revealed || flipped2)
+    // The other side of each flip; both sides once the pair is mutual (the friend offer opens).
+    const told = bothNow ? [c.user1_id, c.user2_id] : [...(flipped1 ? [c.user2_id] : []), ...(flipped2 ? [c.user1_id] : [])]
+    emitPrivateRevealed(c.id, told)
+  }
   // A friend request held for one of these pairs may be deliverable now. Never
   // allowed to fail the reveal that caused it: a request this misses is still
   // delivered by the next read.
