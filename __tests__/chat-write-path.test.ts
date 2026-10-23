@@ -37,8 +37,12 @@ describe("C6 — GET and POST agree about who may write", () => {
      * to create the room too, so an RSVP'd user who opened the chat and then
      * sent the first message got 404 on the send, for the room they were
      * looking at.
+     *
+     * A fifth: the POST's window gate asks it for a room that has not opened
+     * yet, to tell an entitled caller when (`NOT_OPEN_YET`) and everybody else
+     * what it always said. It only reads.
      */
-    expect((src.match(/await resolveEntitlement\(eventId, authUser\.userId\)/g) ?? []).length).toBe(4)
+    expect((src.match(/await resolveEntitlement\(eventId, authUser\.userId\)/g) ?? []).length).toBe(5)
     expect((src.match(/entitlementAdmits\(entitlement, window\)/g) ?? []).length).toBe(2)
   })
 
