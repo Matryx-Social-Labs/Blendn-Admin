@@ -187,8 +187,18 @@ test.describe("mobile API contract", () => {
       "/api/mobile/checkins/active": { url: "/api/mobile/checkins/active", pin: ["checkIns[]"] },
       // The Places list, one row down: `tier` is what `order=live` ranks by; `area`/`areaSlug` and `tonight` are home panes C4/C6.
       "/api/mobile/venues": { url: "/api/mobile/venues", pin: ["venues[]", "pagination"] },
-      // Go Live's venue (PL-C02): `venue` must never grow a `geofence`.
-      "/api/mobile/venues/:venueId": { url: `/api/mobile/venues/${live!.venue_id}`, pin: ["venue", "live"] },
+      // Go Live's venue (PL-C02): `venue` must never grow a `geofence`. `tonight` and `upcoming[]` carry the event's `timezone`.
+      "/api/mobile/venues/:venueId": {
+        url: `/api/mobile/venues/${live!.venue_id}`,
+        pin: ["venue", "venue.upcoming[]", "live", "tonight"],
+      },
+      // "See all" for the venue page: the same item shape as `venue.upcoming[]`, `timezone` included.
+      "/api/mobile/venues/:venueId/upcoming": {
+        url: `/api/mobile/venues/${live!.venue_id}/upcoming`,
+        pin: ["events[]", "pagination"],
+      },
+      // Nights out: each row carries the event's own `timezone`.
+      "/api/mobile/me/attendance": { url: "/api/mobile/me/attendance", pin: ["events[]", "pagination"] },
     }
 
     const token = signAccessToken(user!.id, user!.email)
