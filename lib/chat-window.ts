@@ -101,6 +101,12 @@ export function eventHidesRoom(event: { status?: string; deleted_at: Date | null
   return event.status === "draft" || event.deleted_at !== null
 }
 
+/** When an event's pre-event room opens; null when the start is unknown (no floor). */
+export function chatOpensAt(event: { start_time?: Date | null }): Date | null {
+  if (!event.start_time) return null
+  return new Date(event.start_time.getTime() - PRE_EVENT_CHAT_HOURS * 60 * 60 * 1000)
+}
+
 export function chatWindowState(
   event: { start_time?: Date | null; end_time: Date; status?: event_status; deleted_at: Date | null; kind: event_kind },
   group: { status: chat_group_status },
@@ -128,12 +134,8 @@ export function chatWindowState(
    * a silent tightening is the worse failure, because it looks like the chat is
    * broken rather than like a rule.
    */
-  if (event.start_time) {
-    const opensAt = new Date(
-      event.start_time.getTime() - PRE_EVENT_CHAT_HOURS * 60 * 60 * 1000
-    )
-    if (now < opensAt) return { open: false, reason: "not_open_yet" }
-  }
+  const opensAt = chatOpensAt(event)
+  if (opensAt && now < opensAt) return { open: false, reason: "not_open_yet" }
 
   return { open: true }
 }

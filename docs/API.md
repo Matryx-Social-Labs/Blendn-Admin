@@ -1765,6 +1765,22 @@ back as a single `NOT_CHECKED_IN` covering several unrelated situations, so the
 app either showed the wrong reason or let someone type a paragraph and then threw
 it away. `closesAt` lets the room show an honest countdown.
 
+**Before the room opens.** An event's room opens 24 hours before it starts. A
+person entitled to it (RSVP `going`, or the event saved) who asks earlier — `GET`
+or `POST /events/:eventId/chat` — gets a refusal that says when, so the app can
+count down; it writes nothing (no membership):
+
+```json
+403 { "success": false, "error": "This chat opens 24 hours before the event starts.",
+      "errorCode": "CHAT_CLOSED", "reasonCode": "NOT_OPEN_YET",
+      "opensAt": "2026-08-15T18:00:00.000Z", "chatGroupId": "…" }
+```
+
+`opensAt` is the event's start minus 24 hours. `chatGroupId` is present only if the
+room row already exists. Somebody **not** entitled gets the generic 403
+(`FORBIDDEN`, no `opensAt`, no `chatGroupId`), so the start of an event they have
+no stake in is not readable from here. Read `reasonCode ?? errorCode`.
+
 **Write access is attendance, not presence.** A `chat_group_members` row means
 you were physically at the event; checking out does not revoke it. See
 `mayWriteToRoom` in `lib/chat-window.ts`.

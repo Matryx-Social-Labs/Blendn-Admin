@@ -20,6 +20,7 @@ import {
 } from "@/lib/api-response"
 import {
   chatClosesAt,
+  chatOpensAt,
   chatClosedMessage,
   chatWindowState,
   entitlementAdmits,
@@ -85,6 +86,27 @@ async function resolveEntitlement(
   })
 }
 
+/**
+ * The refusal for somebody entitled to a room that has not opened yet: the same
+ * 403 `CHAT_CLOSED` the other closed rooms give, plus when it opens so the app
+ * can count down. Only ever built for an entitled person -- anyone else keeps the
+ * generic refusal, so `opensAt` is not a way to read an event's start. Writes
+ * nothing: no membership, no room.
+ */
+function notOpenYetResponse(event: { start_time?: Date | null }, chatGroupId: string | null) {
+  return NextResponse.json(
+    {
+      success: false,
+      error: chatClosedMessage("not_open_yet"),
+      errorCode: ErrorCode.CHAT_CLOSED,
+      reasonCode: "NOT_OPEN_YET",
+      opensAt: chatOpensAt(event)?.toISOString() ?? null,
+      ...(chatGroupId && { chatGroupId }),
+    },
+    { status: 403 }
+  )
+}
+
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { eventId } = await params
@@ -114,6 +136,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } } },
     })
 
+    const roomPreExisted = !!chatGroup
     if (!chatGroup) {
       /*
        * The room is created lazily, and only by somebody entitled to be in it.
@@ -225,6 +248,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       const window = chatWindowState(roomEvent, chatGroup)
 
       if (!entitlementAdmits(entitlement, window)) {
+        if (entitlement && !window.open && window.reason === "not_open_yet") {
+          return notOpenYetResponse(roomEvent, roomPreExisted ? chatGroup.id : null)
+        }
         // Says which of the two things is missing, because they have different
         // remedies: turn up, or come back tomorrow.
         return forbiddenResponse(
@@ -515,6 +541,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       include: { event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } } },
     })
 
+    const roomPreExisted = !!chatGroup
     if (!chatGroup) {
       /*
        * The same entitlement the GET twin uses to create the room lazily.
@@ -563,6 +590,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     const window = chatWindowState(roomEvent, chatGroup)
     if (!window.open) {
+      // Not open yet is the one closed state with a way forward: an entitled person learns when (see notOpenYetResponse).
+      if (window.reason === "not_open_yet" && (await resolveEntitlement(eventId, authUser.userId))) {
+        return notOpenYetResponse(roomEvent, roomPreExisted ? chatGroup.id : null)
+      }
       // A hidden event is the suspended organisation's, to the people with a stake in it: the same reasonCode the event's page gives.
       const { reason } = window.reason === "hidden" ? await suspensionReasonFor(authUser.userId, eventId) : {}
       return errorResponse(chatClosedMessage(window.reason), 403, ErrorCode.FORBIDDEN, reason)
