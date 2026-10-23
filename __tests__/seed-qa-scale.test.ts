@@ -1,4 +1,5 @@
 import { execFileSync } from "child_process"
+import { readFileSync } from "fs"
 import { join } from "path"
 
 import {
@@ -26,6 +27,8 @@ import {
   crowdRows,
   eventRows,
   historyRows,
+  roomMemberId,
+  roomMemberRows,
   roomRows,
   socialRows,
 } from "../scripts/seed-qa-scale-rows"
@@ -280,6 +283,55 @@ describe("the rooms", () => {
   })
 })
 
+describe("the rooms' chat members", () => {
+  const { checkIns } = roomRows(layout, targets, NOW, big, second)
+  const people = checkIns.filter((c) => c.occurrence_id === big.occurrenceId).map((c) => c.user_id)
+  // Few handles on purpose, so most people collide and are re-rolled.
+  const handle = (userId: string, attempt: number) => `Handle ${(userId.length * 7 + attempt + userId.charCodeAt(userId.length - 1)) % 600}`
+
+  it("seats all 483 in the big room, each once, each with a handle nobody else in the room has", () => {
+    const rows = roomMemberRows("group", big.eventId, people, handle)
+    expect(rows).toHaveLength(483)
+    expect(duplicates(rows.map((r) => r.user_id))).toEqual([])
+    expect(duplicates(rows.map((r) => r.anonymous_name))).toEqual([])
+    expect(duplicates(rows.map((r) => r.id))).toEqual([])
+  })
+
+  it("keeps clear of the handles already in the room, and is the same on a re-run", () => {
+    const taken = new Set(["Handle 1", "Handle 2", "Handle 3"])
+    const rows = roomMemberRows("group", big.eventId, people, handle, taken)
+    expect(rows.some((r) => taken.has(r.anonymous_name as string))).toBe(false)
+    expect(roomMemberRows("group", big.eventId, people, handle, taken)).toEqual(rows)
+  })
+
+  it("derives the id from the room's event and the person, so --remove can find a target's row", () => {
+    const [row] = roomMemberRows("group", big.eventId, ["target0"], handle)
+    expect(row.id).toBe(roomMemberId(big.eventId, "target0"))
+    expect(roomMemberId(big.eventId, "target0")).not.toBe(roomMemberId(second.eventId, "target0"))
+  })
+
+  /**
+   * The seed cannot call `seatInRoom` (it pulls in push and sockets), so the row it writes is pinned to the
+   * create in its source: if the door starts writing another column or another value, this fails.
+   */
+  it("is the row the check-in door creates", () => {
+    const source = readFileSync(join(__dirname, "..", "lib", "check-in-core.ts"), "utf8")
+    const create = source.slice(source.indexOf("db.chat_group_members.create({"))
+    const data = create.slice(create.indexOf("data: {") + 7, create.indexOf("},"))
+    const fields = Object.fromEntries(
+      [...data.matchAll(/^\s*(\w+)(?::\s*([^,\n]+))?,?$/gm)].map((m) => [m[1], (m[2] ?? m[1]).trim()])
+    )
+    const [row] = roomMemberRows("group", big.eventId, ["target0"], handle)
+    const { id: _id, ...written } = row
+    expect(Object.keys(fields).sort()).toEqual(Object.keys(written).sort())
+    expect(fields.role).toBe(JSON.stringify(written.role))
+    expect(fields.status).toBe(JSON.stringify(written.status))
+    expect(fields.last_allowed_at).toBe("cutOff")
+    expect(written.last_allowed_at).toBeNull()
+    expect(source).toMatch(/data: \{ member_count: \{ increment: 1 \} \}/)
+  })
+})
+
 describe("the board", () => {
   it("is past the 100-post page, by people in the room, newest distinct", () => {
     const posts = boardRows(layout, big, NOW)
@@ -287,6 +339,20 @@ describe("the board", () => {
     expect(BOARD_POSTS).toBeGreaterThan(100)
     expect(duplicates(posts.map((p) => p.body))).toEqual([])
     expect(posts.every((p) => p.event_id === big.eventId && (p.author_id as string).startsWith(ID_PREFIX))).toBe(true)
+  })
+
+  /** The seed picks its board event by this clock, so it must be the route's. */
+  it("is open until doors: the route's clock, which the seed's pick uses", () => {
+    const route = readFileSync(join(__dirname, "..", "app", "api", "mobile", "events", "[eventId]", "board", "route.ts"), "utf8")
+    expect(route.match(/if \(event\.start_time <= new Date\(\)\) return errorResponse\(BOARD_CLOSED, 403\)/g)).toHaveLength(2)
+    const seed = readFileSync(join(__dirname, "..", "scripts", "seed-qa-scale.ts"), "utf8")
+    expect(seed).toMatch(/start_time: \{ gt: now \}/)
+  })
+
+  it("is on an upcoming seeded night, which is always ahead of now", () => {
+    const soon = eventRows(NOW, "host", "system").specs.filter((s) => s.slug.startsWith("qa-scale-soon-"))
+    expect(soon.length).toBeGreaterThan(0)
+    expect(soon.every((s) => s.start.getTime() > NOW.getTime())).toBe(true)
   })
 })
 

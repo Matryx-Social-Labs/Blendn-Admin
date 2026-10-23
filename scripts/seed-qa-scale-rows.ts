@@ -430,7 +430,45 @@ export function roomRows(layout: Layout, targets: readonly Target[], now: Date, 
   return { checkIns, sessions }
 }
 
-export function boardRows(layout: Layout, big: LiveRoom, now: Date) {
+/**
+ * Who is in an event's chat room, as `lib/check-in-core.ts` `seatInRoom` leaves them: the same
+ * `chat_group_members` row a real check-in creates (a member, active, no Go Live cut-off, a handle).
+ * The id is derived from the event and the person, so `--remove` can find a target's row among
+ * rows that are not ours, and a re-run meets the row it made.
+ *
+ * `handle(userId, attempt)` is the pseudonym derivation, injected so this stays free of the library
+ * (which opens a database client): attempt 0 is the person's own, the next ones are the retries a
+ * collision with `taken` (the handles already in the room) calls for.
+ */
+export function roomMemberRows(
+  chatGroupId: string,
+  eventId: string,
+  userIds: readonly string[],
+  handle: (userId: string, attempt: number) => string,
+  taken: ReadonlySet<string> = new Set()
+) {
+  const used = new Set(taken)
+  return userIds.map((userId): Prisma.chat_group_membersCreateManyInput => {
+    let attempt = 0
+    let anonymous_name = handle(userId, attempt)
+    while (used.has(anonymous_name)) anonymous_name = handle(userId, ++attempt)
+    used.add(anonymous_name)
+    return {
+      id: roomMemberId(eventId, userId),
+      chat_group_id: chatGroupId,
+      user_id: userId,
+      role: "member",
+      status: "active",
+      last_allowed_at: null,
+      anonymous_name,
+    }
+  })
+}
+
+export const roomMemberId = (eventId: string, userId: string) => uuidFor(`member:${eventId}:${userId}`)
+
+/** The posts of the board: on an event whose doors have not opened, because the board closes at doors. */
+export function boardRows(layout: Layout, big: Pick<LiveRoom, "eventId">, now: Date) {
   const posts: Prisma.board_postsCreateManyInput[] = []
   for (let i = 0; i < BOARD_POSTS; i++) {
     const [kind, body] = BOARD_LINES[i % BOARD_LINES.length]
