@@ -200,6 +200,7 @@ async function readBack(targets: readonly Target[], now: Date) {
   say(`  open QA check-ins        ${rooms.map((r) => `${r._count._all} in ${r.event_id.slice(0, 8)}`).join(", ") || "none"}`)
 
   // Chat members of the rooms those check-ins are in: the crowd's rows plus the targets' own.
+  // any-kind: read-back by room, whatever the event's kind; a venue day's room is listed by its slug too
   const roomMembers = await db.$queryRaw<{ slug: string; members: bigint; member_count: number }[]>`
     SELECT e.slug, count(m.id) AS members, g.member_count
       FROM chat_groups g
@@ -210,6 +211,7 @@ async function readBack(targets: readonly Target[], now: Date) {
   say(`  room chat members        ${roomMembers.map((r) => `${r.members} in ${r.slug} (member_count ${r.member_count})`).join(", ") || "none"}`)
 
   const boards = await db.board_posts.groupBy({ by: ["event_id"], where: { author_id: { startsWith: ID_PREFIX }, deleted_at: null }, _count: { _all: true } })
+  // any-kind: the events the seed's own posts sit on, looked up by id for the read-back line
   const boardEvents = await db.events.findMany({ where: { id: { in: boards.map((b) => b.event_id) } }, select: { id: true, slug: true, title: true, start_time: true } })
   for (const b of boards) {
     const event = boardEvents.find((e) => e.id === b.event_id)
