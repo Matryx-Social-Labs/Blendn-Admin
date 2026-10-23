@@ -196,6 +196,7 @@ export async function GET(request: NextRequest) {
           cover_image_url: true,
           start_time: true,
           end_time: true,
+          timezone: true,
         },
       },
     } satisfies Prisma.venuesSelect
@@ -350,6 +351,8 @@ export async function GET(request: NextRequest) {
               coverImageUrl: next.cover_image_url,
               startTime: next.start_time,
               endTime: next.end_time,
+              // The event's IANA zone (`events.timezone`), as `GET /events/:id` sends it.
+              timezone: next.timezone,
             }
           : null,
       }

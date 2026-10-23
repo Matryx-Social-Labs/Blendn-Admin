@@ -412,12 +412,14 @@ GET /api/mobile/me/attendance?page=1&limit=20
   "events": [
     { "id": "…", "kind": "event", "slug": "…", "title": "Design Week",
       "cover_image_url": null, "start_time": "…", "end_time": "…",
+      "timezone": "Asia/Kolkata",
       "venue_name": "The Humming Tree", "city": "Bengaluru",
       "attendedAt": "2026-08-14T18:04:00.000Z",
       "stay_minutes": null, "venue_id": null, "venue_type": null,
       "ratedAt": "2026-08-15T09:30:00.000Z" },
     { "id": "…", "kind": "venue_day", "slug": "…", "title": "Venue day · …",
       "cover_image_url": null, "start_time": "…", "end_time": "…",
+      "timezone": "Asia/Kolkata",
       "venue_name": "Third Wave Coffee", "city": "Bengaluru",
       "attendedAt": "2026-09-28T16:20:00.000Z",
       "stay_minutes": 95, "venue_id": "…", "venue_type": "cafe", "ratedAt": null }
@@ -425,6 +427,13 @@ GET /api/mobile/me/attendance?page=1&limit=20
   "pagination": { "page": 1, "limit": 20, "totalCount": 7, "totalPages": 1, "hasMore": false, "nextCursor": null }
 } }
 ```
+
+Every row carries `timezone`, the event's own IANA zone (`events.timezone`, as
+`GET /events/:eventId` sends it): format `start_time` and `end_time` in it, not
+in the phone's zone. The same field is on the other event items that show a
+time: `nextEvent` on `GET /venues`, and `tonight` and each `upcoming` item on
+`GET /venues/:venueId` and `GET /venues/:venueId/upcoming`. Additive; an older
+server omits it, so fall back to the venue's or the phone's zone when absent.
 
 Three things are worth knowing before building against it.
 
@@ -1245,7 +1254,8 @@ vocabulary, meaning exactly what it means there.
   "tier": "open",
   "nextEvent": {
     "id": "…", "title": "Friday session", "slug": "friday-session",
-    "coverImageUrl": "https://…", "startTime": "…", "endTime": "…"
+    "coverImageUrl": "https://…", "startTime": "…", "endTime": "…",
+    "timezone": "America/New_York"
   }
 }], "pagination": { "…": "…" } } }
 ```
@@ -1376,14 +1386,14 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
              "hours": [{ "day": 5, "open": "17:00", "close": "01:00" }],
              "description": null, "amenities": ["Live Music", "Outdoor Seating"],
              "upcoming": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
-                            "startTime": "…", "endTime": "…" }],
+                            "startTime": "…", "endTime": "…", "timezone": "Asia/Kolkata" }],
              "upcomingTotal": 12, "upcomingNextCursor": "eyJ0Ijoi…" },
   "live": { "open": true, "closedReason": null, "eventId": null,
             "liveNow": "quiet",
             "youAreLive": true, "expiresAt": "2026-10-02T21:20:00.000Z", "stay": false, "stayUntil": null,
             "venueDayId": "…", "chatGroupId": "…" },
   "tonight": { "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
-               "startTime": "…", "endTime": "…" },
+               "startTime": "…", "endTime": "…", "timezone": "Asia/Kolkata" },
   "claim": { "url": "https://dashboard.blendn.app/claim/venue/…" }
 } }
 ```
@@ -1401,7 +1411,7 @@ deleted venue; 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) for a profile
 | `venue.upcoming` | Its next public events, at most 5, soonest first: the Places card's filter (published, public, not ended, link not disputed by the venue, within your age) — never its own live rooms |
 | `venue.claimed` | False: the app may offer "Own this place? Claim it" |
 | `claim` | `{ url }` for an unclaimed venue: the public claim page (`/claim/venue/:venueId`) on the dashboard host, built for the environment the app talks to — open it as given. Null once claimed. As `claim` on `GET /events/:eventId` |
-| `tonight` | The next public event here before the venue's day resets (06:00 local by default), age-filtered for you, or null |
+| `tonight` | The next public event here before the venue's day resets (06:00 local by default), age-filtered for you, or null. Like each `upcoming` item it carries the event's own IANA `timezone` (`events.timezone`), which can differ from `venue.timezone` |
 
 **Not on it:** the check-in area (no payload draws the boundary), and who is
 live. People are the venue day's roster and grid
@@ -1424,7 +1434,7 @@ gates and 404 as `GET /venues/:venueId`.
 ```json
 { "success": true, "data": {
   "events": [{ "id": "…", "title": "Friday session", "slug": "…", "coverImageUrl": null,
-               "startTime": "…", "endTime": "…" }],
+               "startTime": "…", "endTime": "…", "timezone": "Asia/Kolkata" }],
   "pagination": { "limit": 20, "hasMore": true, "nextCursor": "eyJ0Ijoi…", "totalCount": 12 } } }
 ```
 

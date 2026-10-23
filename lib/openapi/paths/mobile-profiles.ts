@@ -153,6 +153,7 @@ registry.registerPath({
                   cover_image_url: z.string().nullable(),
                   start_time: z.string().datetime(),
                   end_time: z.string().datetime(),
+                  timezone: z.string().describe("The event's IANA zone (`events.timezone`, as `GET /events/{eventId}` sends it). Format `startTime`/`endTime` in it. Additive: absent from an older server."),
                   venue_name: z.string().nullable(),
                   city: z.string().nullable(),
                   attendedAt: z.string().datetime(),
