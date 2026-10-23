@@ -81,8 +81,11 @@ export async function distinctAttendeeCountsByDay(
   return new Map(rows.map((r) => [r.occurrence_id, Number(r.people)]))
 }
 
-/** Inside now, as `hereCountFor` says it — one predicate for the Room, the list and the detail. */
-const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspended_at: null } } as const
+/**
+ * Inside now, as `hereCountFor` says it — one predicate for the Room, the list
+ * and the detail, and for the room's people (`GET /chat/groups/:id/participants`).
+ */
+export const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspended_at: null } } as const
 
 /**
  * The Room's headline number: how many people are inside RIGHT NOW.
@@ -92,41 +95,46 @@ const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspended_at:
  * `GET /events/:id` still serves it as `checkInCount`. The Room is the other
  * question: who is here now, so a checkout has to make this go down.
  *
- * `checked_in` only, distinct people (a multi-day run can hold more than one
- * live row per person), attendees only (staff are working, as everywhere
- * else), and no suspended account — suspension bans the chat membership but
- * leaves the check-in row, and a person who cannot enter the room should not
- * be counted in it. "Show online status" off is still counted: the roster's
- * rule is "in the room, counted, not listed" (SCRUM-141), and a count names
- * nobody.
+ * `checked_in` only, attendees only (staff are working, as everywhere else),
+ * and no suspended account — suspension bans the chat membership but leaves
+ * the check-in row, and a person who cannot enter the room should not be
+ * counted in it. "Show online status" off is still counted: the roster's rule
+ * is "in the room, counted, not listed" (SCRUM-141), and a count names nobody.
  *
- * Read by the socket emitters (`hereCount`), `room-preview`, and the events
- * list and detail (`hereCount`, through `hereCounts`).
+ * NOT a chat room's membership. A member row outlives the check-in (checkout
+ * and expiry close the window, `last_allowed_at`, and leave the row `active` so
+ * the room stays in the Banter as a past room), so a count of members is
+ * everybody who was ever in and has not pressed Leave. `GET /chat/groups`
+ * served that as "N in the room" and said 515 over a room of 483 (RC drive 3).
+ *
+ * A COUNT in the database, never the rows: this runs on every arrival and
+ * departure (the socket emitters), and a concert room is thousands of rows. One
+ * row per person without a DISTINCT, because a person holds at most one
+ * `checked_in` row anywhere (`event_check_ins_one_open_per_user`, SCRUM-705) —
+ * a multi-day run's other days are closed rows. Served by
+ * `event_check_ins(event_id, status)`.
+ *
+ * Read by the socket emitters (`hereCount`), `room-preview`, the events list
+ * and detail, and the Banter's room rows (`hereCount`, through `hereCounts`).
  */
 export async function hereCountFor(eventId: string): Promise<number> {
-  const rows = await db.event_check_ins.findMany({
-    where: { event_id: eventId, ...HERE_NOW },
-    distinct: ["user_id"],
-    select: { user_id: true },
-  })
-  return rows.length
+  return db.event_check_ins.count({ where: { event_id: eventId, ...HERE_NOW } })
 }
 
 /**
  * `hereCountFor` for a page of events in one read: the events list's
  * `hereCount`, so a card's "here now" is the Room's number and never the
- * attended one (`checkInCount`), which keeps everyone who has left.
+ * attended one (`checkInCount`), which keeps everyone who has left. A GROUP BY,
+ * one row per event, for the reason above.
  */
 export async function hereCounts(eventIds: readonly string[]): Promise<Map<string, number>> {
   if (eventIds.length === 0) return new Map()
-  const rows = await db.event_check_ins.findMany({
+  const rows = await db.event_check_ins.groupBy({
+    by: ["event_id"],
     where: { event_id: { in: [...eventIds] }, ...HERE_NOW },
-    distinct: ["event_id", "user_id"],
-    select: { event_id: true },
+    _count: { _all: true },
   })
-  const counts = new Map<string, number>()
-  for (const { event_id } of rows) counts.set(event_id, (counts.get(event_id) ?? 0) + 1)
-  return counts
+  return new Map(rows.map((r) => [r.event_id, r._count._all]))
 }
 
 /**

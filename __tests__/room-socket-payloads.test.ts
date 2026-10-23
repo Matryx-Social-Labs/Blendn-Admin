@@ -14,11 +14,11 @@
  * failures: a key missing on the wire, or a payload reaching the wrong room.
  */
 process.env.NEXTAUTH_SECRET = "room-socket-payloads-secret-32-characters"
-const mockFindMany = jest.fn()
+const mockCount = jest.fn()
 const mockChatGroup = jest.fn()
 jest.mock("@/lib/db", () => ({
   db: {
-    event_check_ins: { findMany: (...a: unknown[]) => mockFindMany(...a) },
+    event_check_ins: { count: (...a: unknown[]) => mockCount(...a) },
     chat_groups: { findUnique: (...a: unknown[]) => mockChatGroup(...a) },
     // The emitter asks a room's kind: a venue day's goes only to the people live in it.
     events: { findUnique: async () => ({ kind: "event" }) },
@@ -91,11 +91,9 @@ afterAll(async () => {
   await new Promise<void>((resolve) => io.close(() => resolve()))
 })
 
-const people = (n: number) => Array.from({ length: n }, (_, i) => ({ user_id: `u${i}` }))
-
 beforeEach(() => {
-  mockFindMany.mockReset()
-  mockFindMany.mockResolvedValue(people(7))
+  mockCount.mockReset()
+  mockCount.mockResolvedValue(7)
   mockChatGroup.mockReset()
   mockChatGroup.mockResolvedValue({ id: CHAT, kind: "event", event_id: EVENT })
 })
@@ -122,21 +120,20 @@ describe("hereCount", () => {
 
   it("counts distinct people inside NOW, so a checkout brings it down", async () => {
     const watcher = await listen("probe", [`event:${EVENT}`])
-    mockFindMany.mockResolvedValue(people(6))
+    mockCount.mockResolvedValue(6)
     emitEventCheckOut(EVENT, "leaver")
     await settle()
 
     expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ hereCount: 6 })])
     // Not `distinctAttendeeCounts` (which keeps checked_out): live rows only.
-    expect(mockFindMany).toHaveBeenCalledWith({
+    // A count in the database (one open check-in per person, SCRUM-705), never the rows.
+    expect(mockCount).toHaveBeenCalledWith({
       where: { event_id: EVENT, status: "checked_in", kind: "attendee", user: { suspended_at: null } },
-      distinct: ["user_id"],
-      select: { user_id: true },
     })
   })
 
   it("a failed count still delivers the check-in, without a number, and throws nothing", async () => {
-    mockFindMany.mockRejectedValue(new Error("db down"))
+    mockCount.mockRejectedValue(new Error("db down"))
     const watcher = await listen("watcher-2", [`event:${EVENT}`])
 
     expect(() => emitEventCheckIn(EVENT, "arriver-2", "Quiet Otter")).not.toThrow()

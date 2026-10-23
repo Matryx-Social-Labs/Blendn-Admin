@@ -796,7 +796,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
-| GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case, the row as selected — or null. `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
+| GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
 | POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). `left` names the rooms it took you out of (see "One room at a time, and the switch") |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
@@ -1592,7 +1592,12 @@ people its owner admits, an asker in a block with the author is out, writes
 stop 12 hours after the event ends (`CHAT_CLOSED`), and a withdrawn or
 taken-down post closes the room (404). To block or report somebody there, use
 the board's own routes (by post or by ask): the user routes read a board
-room's handle as an unknown id. In a crew's room people are named by **first
+room's handle as an unknown id. In an event's room the roster (`/participants`) lists the
+people **in the room now** — checked in to its event, as `hereCount` counts
+them — and its hosts (`admin`, `moderator`) whether or not they are; a member
+who checked out or whose window expired is not listed. Its `totalCount` is the
+people listed, not the headcount: "show online status" off and friends are
+counted in `hereCount` and listed nowhere here. In a crew's room people are named by **first
 name** (history, live messages, typing, roster, reply push) — they are there
 because a friend invited them and they said yes — and a member who leaves or is
 removed is out of the room at once, their row kept `left` for the history.
@@ -1775,9 +1780,18 @@ once it ends the room leaves the list — its last message and counts are not
 readable from outside a room you can no longer open. Its row's `event.kind` is
 `venue_day` (an event's room says `event`): name it by the row's `name`, which
 is the place, not by `event.title` ("Venue day · ‹place› · ‹date›", bookkeeping).
-`event.venueId` is the place ("Go live again" opens it). Its `memberCount` is
-**null**: an exact count of a venue's room, moving as people go live and
-expire, is the differencing the venue's bucket exists to stop (D-19).
+`event.venueId` is the place ("Go live again" opens it). Its `hereCount` and
+`memberCount` are **null**: an exact count of a venue's room, moving as people
+go live and expire, is the differencing the venue's bucket exists to stop (D-19).
+
+An event's room carries `hereCount`: how many are **in the room now**, the
+Room's own number — checked in, attendees, not suspended (`hereCountFor`, the
+same figure as `room-preview`, the events list, `GET /events/:id`'s
+`stats.hereCount` and the sockets' `hereCount`). Never the room's members: a
+member row outlives the check-in (a checkout or an expiry leaves it `active`),
+so a count of members was everybody ever in who had not pressed Leave.
+`memberCount` is the same number under its old name, for the apps installed
+before `hereCount`.
 
 Each group carries `isCheckedIn` — the caller is `checked_in` to that event with
 no `check_out_time`, so the room is live for them right now. The app lifts those

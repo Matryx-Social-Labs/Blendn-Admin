@@ -212,6 +212,7 @@
     "nested": {
       "groups[]": [
         "event",
+        "hereCount",
         "id",
         "isCheckedIn",
         "kind",

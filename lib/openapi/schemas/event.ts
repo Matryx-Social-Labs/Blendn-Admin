@@ -379,7 +379,7 @@ export const EventDetailSchema = z
         id: z.string().uuid(),
         name: z.string(),
         status: z.enum(["active", "archived", "locked"]),
-        member_count: z.number().int(),
+        member_count: z.number().int().openapi({ description: "`stats.hereCount`: in the room now. Not the column of that name, which only ever went up." }),
       })
       .nullable(),
     stats: EventStatsSchema,

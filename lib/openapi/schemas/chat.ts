@@ -149,10 +149,17 @@ export const ChatGroupSchema = z
     kind: z.literal("event").describe("Always `event` (a venue day's room is one too). Crew and Blend rooms are in `rooms`."),
     name: z.string(),
     type: z.string(),
+    hereCount: z
+      .number()
+      .int()
+      .nullable()
+      .describe(
+        "In the room now: checked in to its event (attendees, not suspended), the Room's own number (`hereCountFor`). Never the room's members, whose rows outlive the check-in. Null for a venue day's room: an exact count there is a differencing channel (D-19)."
+      ),
     memberCount: z
       .number()
       .nullable()
-      .describe("Members of an event's room. Null for a venue day's room: an exact count there is a differencing channel (D-19)."),
+      .describe("`hereCount` under its old name, for the apps installed before it. Null for a venue day's room."),
     unreadCount: z.number().describe("Messages you can see and have not read: none from somebody in a block with you."),
     mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable(),
