@@ -2162,6 +2162,12 @@
       "mutation": "V1 the board list's count back to a bare `requests: true` (caught by both the guard and the itest). V2 the viewer's own asks dropped from visibleBoardRequests. V3 VISIBLE_TO_AUTHOR emptied. W1 VISIBLE_TO_AUTHOR dropped from the bell decoration's read in lib/notification-display.ts.",
       "observed": "V1: 1 failing in board-request-visibility and 1 in board-safety. V2: 1 failing (the asker's own count). V3: 5 failing (the author's lists and the silent-ask cases). Each reverted; 3 of 3 and 49 of 49. W1: 1 failing (the scan names the file). Reverted; 5 of 5.",
       "date": "2026-10-22"
+    },
+    "seed-qa-scale.test.ts": {
+      "guards": "The scale seed's room members and board: the chat_group_members row it writes for each room check-in is pinned to the create in seatInRoom (lib/check-in-core.ts) -- the same columns, role and status, a null cut-off -- and the seed's board event is picked by the board route's own clock (start_time <= now is BOARD_CLOSED, twice) with start_time > now.",
+      "mutation": "M2104 seatInRoom's chat_group_members create gains a column (left_at). M2105 the board route's closing clock changed from <= to <. M2106 the seed's board-event pick changed from start_time > now to >=.",
+      "observed": "M2104: 1 of 46 failing (the row the check-in door creates). M2105: 1 of 46 (the route's clock). M2106: 1 of 46 (the seed's pick). Each reverted; 46 of 46.",
+      "date": "2026-10-23"
     }
   },
   "grandfathered": [
