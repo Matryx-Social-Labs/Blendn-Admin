@@ -201,10 +201,22 @@ export async function updateEventTracked(args: Prisma.eventsUpdateArgs) {
     })
     const updated = await tx.events.update(args)
     const next = nextChange(before.changed_from, before, updated)
-    if (!next) return updated
+    /*
+     * A reminder is claimed once, by `reminded_at IS NULL`
+     * (`sendEventReminders`). An event whose start moved is a new night as far
+     * as that claim goes: left set, a rescheduled event is never reminded at
+     * its new time. Reset whatever the status, so a draft moved before it is
+     * published again is reminded too. This is the one door that writes
+     * `start_time` on an existing event.
+     */
+    const startMoved = before.start_time.getTime() !== updated.start_time.getTime()
+    if (!next && !startMoved) return updated
     return tx.events.update({
       where: { id: eventId },
-      data: { changed_at: next.changed_at, changed_from: next.changed_from ?? Prisma.DbNull },
+      data: {
+        ...(next && { changed_at: next.changed_at, changed_from: next.changed_from ?? Prisma.DbNull }),
+        ...(startMoved && { reminded_at: null }),
+      },
     })
   })
 }
