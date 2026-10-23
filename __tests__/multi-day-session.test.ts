@@ -91,7 +91,7 @@ describe("the rest of a multi-day run", () => {
     if (verdict.ok) throw new Error("expected a refusal")
     expect(verdict).toMatchObject({ reason: "too_early", occurrence: { id: "day2" } })
     expect(closedDoorMessage(verdict.reason, verdict.occurrence, FESTIVAL, TZ, now)).toEqual({
-      message: "Day 2 starts Mon, Sep 28, 12:45 AM.",
+      message: "Day 2 starts Mon 28 Sep, 12:45 AM.",
       ended: false,
     })
   })
@@ -104,7 +104,7 @@ describe("the rest of a multi-day run", () => {
     const verdict = pickOccurrence(run, now)
     if (verdict.ok) throw new Error("expected a refusal")
     expect(closedDoorMessage(verdict.reason, verdict.occurrence, run, TZ, now)).toEqual({
-      message: "Day 2 has been cancelled. Day 3 starts Tue, Sep 29, 12:45 AM.",
+      message: "Day 2 has been cancelled. Day 3 starts Tue 29 Sep, 12:45 AM.",
       ended: false,
     })
 

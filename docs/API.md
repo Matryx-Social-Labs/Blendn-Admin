@@ -1138,7 +1138,7 @@ off, else null) beside `cancelled`. `daysFrom` and `cancelledAt` are additive.
 Computed by `eventDays` in `lib/occurrences.ts`.
 
 **A check-in refused on the clock names the day** on a multi-day event:
-`Day 3 starts Tue, Sep 29, 12:45 AM.` (`EVENT_NOT_STARTED`), `Day 2 has been
+`Day 3 starts Tue 29 Sep, 12:45 AM.` (`EVENT_NOT_STARTED`), `Day 2 has been
 cancelled. Day 3 starts …` (`EVENT_NOT_STARTED`), or `Day 3 of 3 has been
 cancelled, so the event is over.` (`EVENT_ENDED`), in the event's timezone. A
 day still to come that is cancelled is skipped when finding the next one.
