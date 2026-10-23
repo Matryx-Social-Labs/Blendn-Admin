@@ -245,6 +245,62 @@ test.describe("mobile API contract", () => {
     ).toEqual(previous)
   })
 
+  test("a room that has not opened tells an entitled caller when, in the same envelope", async ({
+    baseURL,
+  }) => {
+    /*
+     * The one 403 here with a body the client reads rather than prints: the
+     * countdown ("The room opens in 2 d 4 h") is `opensAt`. The recording above
+     * is of 200s only, so this pins the refusal's own keys. The event is made
+     * for the test and removed after; the caller saves it, which entitles them
+     * without an RSVP row to explain.
+     */
+    const db = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL, max: 1 }),
+    })
+    const user = await db.user.findUnique({
+      where: { email: "ananya.b@blendn.app" },
+      select: { id: true, email: true },
+    })
+    expect(user, "the QA seed must have run — this is a seeded attendee").toBeTruthy()
+
+    const start = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+    const event = await db.events.create({
+      data: {
+        slug: `contract-not-open-${Date.now()}`,
+        title: "Contract: room not open yet",
+        description: "created by mobile-contract.spec and removed after it",
+        start_time: start,
+        end_time: new Date(start.getTime() + 2 * 60 * 60 * 1000),
+        timezone: "UTC",
+        status: "published",
+        organizer_id: user!.id,
+        visibility: "unlisted",
+      },
+    })
+    const ctx = await playwrightRequest.newContext({
+      baseURL,
+      extraHTTPHeaders: { Authorization: `Bearer ${signAccessToken(user!.id, user!.email)}` },
+    })
+    try {
+      await db.event_favorites.create({ data: { event_id: event.id, user_id: user!.id } })
+      const res = await ctx.get(`/api/mobile/events/${event.id}/chat`)
+      const body = await res.json()
+
+      expect(res.status()).toBe(403)
+      expect(Object.keys(body).sort()).toEqual(["error", "errorCode", "opensAt", "reasonCode", "success"].sort())
+      expect(body).toMatchObject({ success: false, errorCode: "CHAT_CLOSED", reasonCode: "NOT_OPEN_YET" })
+      expect(body.opensAt).toBe(new Date(start.getTime() - 24 * 60 * 60 * 1000).toISOString())
+    } finally {
+      await ctx.dispose()
+      await db.chat_group_members.deleteMany({ where: { chat_group: { event_id: event.id } } })
+      await db.chat_groups.deleteMany({ where: { event_id: event.id } })
+      await db.event_favorites.deleteMany({ where: { event_id: event.id } })
+      await db.events.deleteMany({ where: { id: event.id } })
+      await db.$disconnect()
+    }
+  })
+
   test("an unauthenticated caller is refused, in the same envelope", async ({ request }) => {
     /*
      * The negative half. Without it the recording above would look identical

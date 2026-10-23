@@ -868,12 +868,27 @@ registry.registerPath({
 })
 
 // GET /api/mobile/events/{eventId}/chat
+const RoomNotOpenYetSchema = z
+  .object({
+    success: z.literal(false),
+    error: z.string().describe("\"This chat opens 24 hours before the event starts.\""),
+    errorCode: z.literal("CHAT_CLOSED"),
+    reasonCode: z.literal("NOT_OPEN_YET"),
+    opensAt: z.string().datetime().nullable().describe("When the room opens: the event's start minus 24 hours."),
+    chatGroupId: z.string().uuid().optional().describe("Only when the room already exists. Reading it does not join you."),
+  })
+  .openapi("RoomNotOpenYet")
+
+const NOT_OPEN_YET_NOTE =
+  " Somebody entitled (RSVP going, or saved) who asks before the room opens gets 403 `CHAT_CLOSED` with `reasonCode` `NOT_OPEN_YET` and `opensAt` (ISO 8601), " +
+  "plus `chatGroupId` when the room already exists; nothing is written, no membership. Somebody not entitled gets the generic 403 without `opensAt`."
+
 registry.registerPath({
   method: "get",
   path: "/api/mobile/events/{eventId}/chat",
   tags: ["Mobile Events"],
   summary: "Get event chat messages (must be checked in)",
-  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP inside the pre-event window); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404. Somebody who left the room themselves is NOT rejoined: 403 `LEFT_ROOM` with `chatGroupId` in the body (rejoin with `DELETE /chat/groups/{chatGroupId}/leave`, or by checking in). `mute` is your own mute of the room's pushes.",
+  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP inside the pre-event window); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404. Somebody who left the room themselves is NOT rejoined: 403 `LEFT_ROOM` with `chatGroupId` in the body (rejoin with `DELETE /chat/groups/{chatGroupId}/leave`, or by checking in). `mute` is your own mute of the room's pushes." + NOT_OPEN_YET_NOTE,
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -887,6 +902,7 @@ registry.registerPath({
   responses: {
     200: { description: "Chat messages", content: { "application/json": { schema: wrap(EventChatResponseSchema) } } },
     ...standardErrors,
+    403: { description: "Forbidden; or, with `reasonCode` `NOT_OPEN_YET`, the room has not opened yet", content: { "application/json": { schema: RoomNotOpenYetSchema } } },
   },
 })
 
@@ -904,6 +920,8 @@ registry.registerPath({
     "If caught, response has `moderation_hidden: true`, `content: null`. Message is never broadcast.",
     "",
     "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429)",
+    "",
+    NOT_OPEN_YET_NOTE.trim(),
   ].join("\n"),
   security: bearerAuth,
   request: {
