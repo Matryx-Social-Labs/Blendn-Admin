@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
+import { preferredPseudonymFor, pseudonymSchemeFor, type PseudonymScheme } from "../lib/anonymous-names"
 import { realEventsWhere, SYSTEM_USER_ID } from "../lib/event-kind"
 import PORTRAITS from "./seed-blr-portraits.json"
 import { environmentRefusal } from "./test-accounts"
@@ -24,6 +25,8 @@ import {
   crowdRows,
   eventRows,
   historyRows,
+  roomMemberId,
+  roomMemberRows,
   roomRows,
   socialRows,
   venueRow,
@@ -43,6 +46,23 @@ import {
  *   DATABASE_URL=... npx tsx scripts/seed-qa-scale.ts --remove             # everything it made, and the comp
  *
  *   --event <slug> --second-event <slug>   pick the two live events (default: the first two live ones)
+ *   --board-event <slug>                   pick the event the board posts go on (default: the first
+ *                                          qa-scale-soon-NN whose doors have not opened)
+ *
+ * ## The rooms' chat, and the board
+ *
+ * A check-in alone does not put anybody in the room's chat: the door
+ * (`seatInRoom`, lib/check-in-core.ts) also writes a `chat_group_members` row
+ * with a handle. So every room check-in here gets the same row, and the room
+ * (`chat_groups`) is made when the event has none, as `createRoom` makes it.
+ * The big room then holds 483 chat members (3 targets + 180 friends + 300
+ * strangers). `seatInRoom` itself cannot be called from a script (it pulls in
+ * the push and socket modules), so `__tests__/seed-qa-scale.test.ts` pins this
+ * to its source.
+ *
+ * The board closes at doors (the board route: `start_time <= now` is
+ * BOARD_CLOSED, read and write), so its 120 posts go on an event that has not
+ * started and the targets are going to, not in the live room.
  *
  * ## Who it touches
  *
@@ -179,6 +199,25 @@ async function readBack(targets: readonly Target[], now: Date) {
   const rooms = await db.event_check_ins.groupBy({ by: ["event_id"], where: { status: "checked_in", ...tagged }, _count: { _all: true } })
   say(`  open QA check-ins        ${rooms.map((r) => `${r._count._all} in ${r.event_id.slice(0, 8)}`).join(", ") || "none"}`)
 
+  // Chat members of the rooms those check-ins are in: the crowd's rows plus the targets' own.
+  const roomMembers = await db.$queryRaw<{ slug: string; members: bigint; member_count: number }[]>`
+    SELECT e.slug, count(m.id) AS members, g.member_count
+      FROM chat_groups g
+      JOIN events e ON e.id = g.event_id
+      JOIN chat_group_members m ON m.chat_group_id = g.id
+     WHERE m.user_id LIKE ${`${ID_PREFIX}%`} OR m.user_id = ANY(${targets.map((t) => t.id)}::text[])
+     GROUP BY e.slug, g.member_count ORDER BY e.slug`
+  say(`  room chat members        ${roomMembers.map((r) => `${r.members} in ${r.slug} (member_count ${r.member_count})`).join(", ") || "none"}`)
+
+  const boards = await db.board_posts.groupBy({ by: ["event_id"], where: { author_id: { startsWith: ID_PREFIX }, deleted_at: null }, _count: { _all: true } })
+  const boardEvents = await db.events.findMany({ where: { id: { in: boards.map((b) => b.event_id) } }, select: { id: true, slug: true, title: true, start_time: true } })
+  for (const b of boards) {
+    const event = boardEvents.find((e) => e.id === b.event_id)
+    // The board route's own clock: closed once start_time <= now.
+    const open = !!event && event.start_time > now
+    say(`  board posts              ${b._count._all} on ${event?.slug} (${event?.title}): board ${open ? `OPEN, doors ${event?.start_time.toISOString()}` : "CLOSED"}`)
+  }
+
   for (const target of targets) {
     const friendRows = await db.friendships.findMany({
       where: { OR: [{ user1_id: target.id }, { user2_id: target.id }] },
@@ -287,7 +326,90 @@ async function apply(targets: Target[], now: Date) {
   await put("room sessions", rooms.sessions, CHUNK, (data) => db.presence_sessions.createMany({ data, skipDuplicates: true }))
   await refreshRooms(rooms.checkIns.map((c) => c.id as string), rooms.sessions.map((s) => s.id as string), now)
 
-  await put("board posts", boardRows(layout, big, now), CHUNK, (data) => db.board_posts.createMany({ data, skipDuplicates: true }))
+  await seatRoomMembers(rooms.checkIns, [bigLive, secondLive])
+
+  const board = await boardEvent(now)
+  say(`  board:       ${board.slug}  (${board.title}), doors ${board.start.toISOString()}`)
+  // An earlier run put the posts on a live room, where the board is closed: move them, they are ours (qascale_ authors, no room).
+  const moved = await db.board_posts.deleteMany({ where: { author_id: { startsWith: ID_PREFIX }, event_id: { not: board.eventId }, room: { is: null } } })
+  if (moved.count) say(`  board posts              ${moved.count} taken off other events`)
+  await ensureRoom(board.eventId, board.title)
+  await put("board posts", boardRows(layout, board, now), CHUNK, (data) => db.board_posts.createMany({ data, skipDuplicates: true }))
+}
+
+/**
+ * The event the board posts go on: the board is open while `start_time > now`
+ * (the board route, read and write), and the targets are going to every
+ * qa-scale-soon-NN, so the first of those whose doors are ahead. A named one
+ * must pass the same test.
+ */
+async function boardEvent(now: Date) {
+  const named = valueOf("--board-event")
+  const found = await db.events.findFirst({
+    where: {
+      ...realEventsWhere,
+      deleted_at: null,
+      status: "published",
+      start_time: { gt: now },
+      slug: named ?? { startsWith: `${EVENT_SLUG_PREFIX}soon-` },
+    },
+    orderBy: [{ start_time: "asc" }, { slug: "asc" }],
+    select: { id: true, slug: true, title: true, start_time: true },
+  })
+  if (!found) {
+    throw new Error(
+      `No event to put the board on: ${named ? `${named} is not a published event whose doors are still ahead` : "every qa-scale-soon-NN has started"}. ` +
+        "The board closes at doors; `--remove` then `--apply` re-dates the seeded events."
+    )
+  }
+  return { eventId: found.id, slug: found.slug, title: found.title, start: found.start_time }
+}
+
+/** The room, made as `createRoom` (lib/check-in-core.ts) makes an event's: found, or created. */
+async function ensureRoom(eventId: string, title: string): Promise<string> {
+  const have = await db.chat_groups.findUnique({ where: { event_id: eventId }, select: { id: true } })
+  if (have) return have.id
+  const eventTitle = title || "Event"
+  const made = await db.chat_groups.create({
+    data: { event_id: eventId, name: `${eventTitle} Chat`, description: `Chat for ${eventTitle}`, status: "active", member_count: 0 },
+    select: { id: true },
+  })
+  return made.id
+}
+
+/**
+ * Everyone checked in to a live room is in its chat, with a handle, as a real
+ * check-in leaves them. Idempotent: a person already in the room (this seed's
+ * row, or a real one) is left alone, except that a `left` member is brought
+ * back, which is what a check-in does. A ban or a mute stays.
+ */
+async function seatRoomMembers(checkIns: readonly { event_id: string; user_id: string }[], lives: readonly Live[]) {
+  for (const live of lives) {
+    const people = [...new Set(checkIns.filter((c) => c.event_id === live.eventId).map((c) => c.user_id))].sort()
+    const chatGroupId = await ensureRoom(live.eventId, live.title)
+    const there = await db.chat_group_members.findMany({ where: { chat_group_id: chatGroupId }, select: { user_id: true, anonymous_name: true } })
+    const already = new Set(there.map((m) => m.user_id))
+    const taken = new Set(there.flatMap((m) => (m.anonymous_name ? [m.anonymous_name] : [])))
+    // Keyed handles need the server secret; without it (a script run) the unkeyed derivation is still a valid one.
+    const scheme: PseudonymScheme = process.env.NEXTAUTH_SECRET ? await pseudonymSchemeFor(live.eventId, db) : "legacy"
+    const handle = (userId: string, attempt: number) => preferredPseudonymFor(live.eventId, attempt ? `${userId}#${attempt}` : userId, scheme)
+
+    const rows = roomMemberRows(chatGroupId, live.eventId, people.filter((id) => !already.has(id)), handle, taken)
+    await put(`chat members (${live.slug.slice(0, 8)})`, rows, CHUNK, (data) => db.chat_group_members.createMany({ data, skipDuplicates: true }))
+    await db.chat_group_members.updateMany({
+      where: { chat_group_id: chatGroupId, user_id: { in: people }, status: "left" },
+      data: { status: "active", left_at: null, updated_at: new Date() },
+    })
+    await recountMembers([chatGroupId])
+  }
+}
+
+/** `member_count` is one per membership row (the door increments on each new one): set it from the rows rather than adding to it. */
+async function recountMembers(chatGroupIds: readonly string[]) {
+  if (!chatGroupIds.length) return
+  await db.$executeRaw`
+    UPDATE chat_groups g SET member_count = (SELECT count(*) FROM chat_group_members m WHERE m.chat_group_id = g.id)
+     WHERE g.id = ANY(${chatGroupIds}::uuid[])`
 }
 
 /**
@@ -369,6 +491,11 @@ async function remove(targets: Target[]) {
        WHERE ps.user_id = c.user_id AND ps.occurrence_id = c.occurrence_id
          AND c.user_id = ANY(${targetIds}::text[]) AND c.device_info->>'qaScale' = 'true'`
   }
+  // The rooms they were in, and the targets' own chat memberships there (the crowd's go with the crowd): ids derived, so only ours.
+  const roomEventIds = (await db.event_check_ins.findMany({ where: tagged, distinct: ["event_id"], select: { event_id: true } })).map((c) => c.event_id)
+  const memberIds = roomEventIds.flatMap((eventId) => targetIds.map((userId) => roomMemberId(eventId, userId)))
+  const targetMembers = await db.chat_group_members.deleteMany({ where: { id: { in: memberIds } } })
+  say(`  target chat members      ${targetMembers.count} removed`)
   const checkIns = await db.event_check_ins.deleteMany({ where: tagged })
   say(`  tagged check-ins         ${checkIns.count} removed`)
 
@@ -385,7 +512,10 @@ async function remove(targets: Target[]) {
 
   const userIds = await crowdUserIds()
   for (const ids of slices(userIds, REMOVE_USERS_AT_A_TIME)) await db.user.deleteMany({ where: { id: { in: ids } } })
-  say(`  crowd users              ${userIds.length} removed (their friendships, requests, DMs, check-ins, RSVPs and posts with them)`)
+  say(`  crowd users              ${userIds.length} removed (their friendships, requests, DMs, check-ins, RSVPs, chat memberships and posts with them)`)
+  const rooms = await db.chat_groups.findMany({ where: { event_id: { in: roomEventIds } }, select: { id: true } })
+  await recountMembers(rooms.map((r) => r.id))
+  say(`  rooms                    ${rooms.length} member counts reset (a room the seed made stays, empty)`)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -441,9 +571,9 @@ async function main() {
     const c = plannedCounts(targets.length)
     say(`Would write, for ${targets.length} target${targets.length === 1 ? "" : "s"}:`)
     say(`  ${c.crowdUsers} crowd users (qa.scale.NNNN@blendn.app, ids ${ID_PREFIX}NNNN), ${PER_TARGET.friends} friends each`)
-    say(`  rooms: each target and ${PER_TARGET.bigRoomFriends} friends, plus ${ROOM_STRANGERS} strangers, in the first live event; ${PER_TARGET.secondRoomFriends} friends each in the second`)
+    say(`  rooms: each target and ${PER_TARGET.bigRoomFriends} friends, plus ${ROOM_STRANGERS} strangers, in the first live event; ${PER_TARGET.secondRoomFriends} friends each in the second; every one of them a chat member of that room`)
     say(`  banter: ${PER_TARGET.friendDms} friend DMs + ${PER_TARGET.ratedNights * PER_TARGET.matchesPerNight} matches to rate + ${PER_TARGET.messageRequests} message requests each; ${PER_TARGET.friendRequests} friend requests each`)
-    say(`  going: ${PER_TARGET.goingEvents} coming up at one venue, ${PER_TARGET.pastNights} past nights attended, ${PER_TARGET.visits} visits; ${c.boardPosts} board posts`)
+    say(`  going: ${PER_TARGET.goingEvents} coming up at one venue, ${PER_TARGET.pastNights} past nights attended, ${PER_TARGET.visits} visits; ${c.boardPosts} board posts on an event whose doors are ahead`)
     const live = await liveEvents(now)
     say(live.length >= 2 ? `\nRooms would go in: ${live[0].slug} (big) and ${live[1].slug}` : `\n!  ${live.length} live event(s): --apply needs two`)
     for (const email of PLUS_EMAILS) say(`  Blendn+ comp for ${email}`)
