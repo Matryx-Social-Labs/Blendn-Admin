@@ -7,14 +7,14 @@ process.env.MOBILE_JWT_SECRET = "test-secret-at-least-32-characters-long!!"
  * that matter are the ones that keep an aggregate from naming someone: the
  * floor, and the roster's exclusions (blocks, "show online" off, suspended).
  *
- * `event_check_ins.findMany` answers two questions here: the headcount
- * (`hereCountFor`, the call with `distinct`) and the visible pool.
+ * The headcount is `event_check_ins.count` (`hereCountFor`); the visible pool
+ * is `event_check_ins.findMany`.
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 const mockDb = {
   user_interests: { findMany: jest.fn() },
-  event_check_ins: { findMany: jest.fn() },
+  event_check_ins: { findMany: jest.fn(), count: jest.fn() },
   categories: { findMany: jest.fn() },
   // Friends leave the count (lib/room-people.ts); none here.
   friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
@@ -52,8 +52,7 @@ const person = (id: string, interests: string[]) => ({
 
 let here = 6
 let pool: ReturnType<typeof person>[] = []
-const poolCalls = () =>
-  mockDb.event_check_ins.findMany.mock.calls.filter(([args]) => !("distinct" in args))
+const poolCalls = () => mockDb.event_check_ins.findMany.mock.calls
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -74,9 +73,8 @@ beforeEach(() => {
     person("p3", ["running"]),
     person("p4", []),
   ]
-  mockDb.event_check_ins.findMany.mockImplementation(async (args: { distinct?: unknown }) =>
-    args.distinct ? Array.from({ length: here }, (_, i) => ({ user_id: `h${i}` })) : pool
-  )
+  mockDb.event_check_ins.count.mockImplementation(async () => here)
+  mockDb.event_check_ins.findMany.mockImplementation(async () => pool)
 })
 
 it("returns hereCount and how many inside share an interest", async () => {

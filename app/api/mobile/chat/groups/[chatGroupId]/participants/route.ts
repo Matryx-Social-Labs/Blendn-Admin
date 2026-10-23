@@ -19,6 +19,7 @@ import {
 } from "@/lib/api-response"
 import { isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
+import { HERE_NOW } from "@/lib/attendee-counts"
 
 interface RouteParams {
   params: Promise<{ chatGroupId: string }>
@@ -104,12 +105,23 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      */
     const admitted = await ownerRoster(chatGroupId)
 
+    /*
+     * An event's room lists who is IN it: checked in now (`HERE_NOW`, the
+     * headcount's own predicate), and its hosts whether or not they are.
+     * A member row outlives the check-in — checkout and expiry close the
+     * window and leave the row `active` — so the list said "In the room" over everybody
+     * who had ever been in (RC drive 3: 450 listed from 515 members, 483 here).
+     */
+    const insideNow =
+      chatGroup.kind === "event" && chatGroup.event_id
+        ? [{ OR: [{ role: { not: "member" as const } }, { user: { event_check_ins: { some: { event_id: chatGroup.event_id, ...HERE_NOW } } } }] }]
+        : []
     const visibleMembers = {
       chat_group_id: chatGroupId,
       status: "active" as const,
       ...(hidden.length > 0 && { user_id: { notIn: hidden } }),
-      // Under AND, so it never replaces the block filter's `user_id` above.
-      ...(admitted && { AND: [{ user_id: { in: [...admitted] } }] }),
+      // Under AND, so neither replaces the block filter's `user_id` above.
+      AND: [...(admitted ? [{ user_id: { in: [...admitted] } }] : []), ...insideNow],
       // Show online status off: in the room, counted in the headcount, listed nowhere.
       ...(chatGroup.kind === "event" && { user: { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] } }),
     }

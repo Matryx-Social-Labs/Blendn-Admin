@@ -150,7 +150,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             id: true,
             name: true,
             status: true,
-            member_count: true,
           },
         },
         _count: {
@@ -351,7 +350,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         description: m.description,
         order: m.order,
       })),
-      chatGroup: event.chat_group,
+      /*
+       * `member_count` is the Room's number, inside now, as every surface says
+       * it. The column of that name only ever went up (one per membership,
+       * nothing took one off on a leave, a checkout or an expiry), so it is
+       * not read anywhere.
+       */
+      chatGroup: event.chat_group && { ...event.chat_group, member_count: hereNow },
       stats: {
         checkInCount: attendedCounts.get(eventId) ?? 0,
         hereCount: hereNow,

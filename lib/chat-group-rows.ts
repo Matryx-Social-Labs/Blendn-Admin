@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client"
+import { hereCounts } from "@/lib/attendee-counts"
 import { db } from "@/lib/db"
 import { inRoomWhere, realEventsWhere } from "@/lib/event-kind"
 import { namesInRoom } from "@/lib/identity"
@@ -79,12 +80,7 @@ export const eventMemberArgs = (unreadMessages: Prisma.chat_messagesWhereInput) 
               status: true,
             },
           },
-          _count: {
-            select: {
-              messages: { where: unreadMessages },
-              members: { where: { status: "active" } },
-            },
-          },
+          _count: { select: { messages: { where: unreadMessages } } },
         },
       },
     },
@@ -270,6 +266,14 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
     : []
   const checkedInEventIds = new Set(activeCheckIns.map((c) => c.event_id))
 
+  /*
+   * 5. How many are in each room: inside now (`hereCounts`), the Room's own
+   * number, one GROUP BY for the page. Never the room's members — a member row
+   * outlives the check-in, so that counted everybody who had ever been in.
+   * A venue day's room says no count at all (below).
+   */
+  const here = await hereCounts(memberships.filter((m) => m.chat_group.event.kind !== "venue_day").map((m) => m.chat_group.event.id))
+
   // Build final response
   /*
    * Who wrote last in each crew and Blend room, named as that room names
@@ -319,9 +323,11 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
       /*
        * Never for a venue's room: an exact count that moves as people go live
        * and expire is the differencing the venue's bucket exists to stop
-       * (D-19, F14) — and it counts members whose windows have ended.
+       * (D-19, F14).
        */
-      memberCount: venueDay ? null : membership.chat_group._count.members,
+      hereCount: venueDay ? null : here.get(membership.chat_group.event.id) ?? 0,
+      /** `hereCount` under its old name, for the apps installed before it: every one of them prints it as "N in the room". */
+      memberCount: venueDay ? null : here.get(membership.chat_group.event.id) ?? 0,
       unreadCount,
       /** Whether you silenced this room's pushes, and until when (`lib/room-mute.ts`). */
       mute: roomMuteState(membership.notification_preferences),
