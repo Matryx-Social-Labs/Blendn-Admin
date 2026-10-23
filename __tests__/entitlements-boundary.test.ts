@@ -26,6 +26,7 @@ import { stripComments } from "./support/strip-comments"
  */
 
 const ROOT = join(__dirname, "..")
+const QA_SCALE_SEED = "scripts/seed-qa-scale.ts"
 const SEARCH = ["app", "components", "lib", "scripts"]
 
 function walk(dir: string): string[] {
@@ -105,8 +106,19 @@ describe("entitlements are read and written in one place", () => {
     expect(rels).toContain("lib/revenuecat-webhook.ts")
   })
 
-  it("only lib/entitlements.ts touches the table", () => {
-    expect(files.filter((f) => touchesTable(f.code)).map((f) => f.rel)).toEqual(["lib/entitlements.ts"])
+  it("only lib/entitlements.ts touches the table, and the QA scale seed for its throwaway comp", () => {
+    expect(files.filter((f) => touchesTable(f.code)).map((f) => f.rel)).toEqual(["lib/entitlements.ts", QA_SCALE_SEED])
+  })
+
+  it("the QA scale seed writes a comp for a throwaway and nothing paid: source grant, its own reference, only qa.* addresses", () => {
+    // lib/entitlements.ts cannot load under tsx (`server-only`), so the seed writes the one row the Users-page
+    // grant writes (`grantEntitlement`) itself; this pins it to that row and to the throwaways.
+    const code = files.find((f) => f.rel === QA_SCALE_SEED)?.code ?? ""
+    expect(code).toMatch(/source:\s*"grant"/)
+    expect(code).toContain("PLUS_REF_PREFIX")
+    expect(code).toMatch(/plusCompRefusal\(email\)[\s\S]{0,80}if \(refusal\) throw/)
+    expect(code).not.toMatch(/source:\s*["'](razorpay|apple|google)["']/)
+    expect(code).not.toMatch(/product:\s*["'](?!plus["'])/)
   })
 
   it("a paid entitlement is written by the webhook and nothing else", () => {

@@ -386,11 +386,19 @@ describe("the scanner", () => {
  * creates events creates the default kind, and the event write schemas never
  * carry `kind` from a request.
  */
+/*
+ * The one seed that writes past venue days: `scripts/seed-qa-scale-rows.ts` backfills the visits a person's
+ * history lists ("visit rows") on days that are over, which `venueDayFor` (today only) cannot make. Local and
+ * staging only (`environmentRefusal` in its entry point), and the same shape the migration's CHECK holds:
+ * unlisted, owned by the system user, no organisation. Any other file is still an offender.
+ */
+const VENUE_DAY_SEED_WRITER = "scripts/seed-qa-scale-rows.ts"
+
 describe("venue days have one writer", () => {
-  it("no file but lib/venue-day.ts and lib/event-kind.ts names the venue_day kind as a value", () => {
+  it("no file but lib/venue-day.ts and lib/event-kind.ts (and the scale seed's rows) names the venue_day kind as a value", () => {
     const offenders = [...SEARCH.flatMap((d) => sourceFiles(join(ROOT, d))), join(ROOT, "server.ts")]
       .map((abs) => [abs.slice(ROOT.length + 1), blankComments(readFileSync(abs, "utf8"))] as const)
-      .filter(([rel]) => rel !== "lib/venue-day.ts" && rel !== "lib/event-kind.ts")
+      .filter(([rel]) => rel !== "lib/venue-day.ts" && rel !== "lib/event-kind.ts" && rel !== VENUE_DAY_SEED_WRITER)
       .filter(([, src]) => /\bkind\s*:\s*["']venue_day["']/.test(src))
       .map(([rel]) => rel)
     expect(offenders).toEqual([])
