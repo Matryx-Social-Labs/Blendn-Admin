@@ -48,6 +48,7 @@ const READERS: Record<string, string> = {
   "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts#GET":
     "sender names: a null event names a broadcast 'Organiser', never a person (roomSenderName)",
   "app/api/mobile/chat/groups/[chatGroupId]/messages/route.ts#POST": "the quoted reply's sender name, as GET",
+  "app/api/mobile/chat/groups/[chatGroupId]/participants/route.ts#GET": "an event room's list is the people checked in to its event now; a room with no event lists by its owner (`ownerRoster`)",
   "app/api/mobile/chat/groups/[chatGroupId]/report/route.ts#POST": "a room report is filed against an event; a room of any other kind is refused",
   "app/api/mobile/events/[eventId]/chat/route.ts#GET": "the room is found by its event; without it, no room",
   "app/api/mobile/events/[eventId]/chat/route.ts#POST": "the room is found by its event; without it, no room",
