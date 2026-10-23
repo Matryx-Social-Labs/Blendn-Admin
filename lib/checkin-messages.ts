@@ -1,3 +1,5 @@
+import { mobileWhen } from "@/lib/mobile-datetime"
+
 /**
  * What a refused check-in says, when the distance stops being walkable.
  *
@@ -77,7 +79,7 @@ export function closedDoorMessage(
   const dayOf = (s: { startTime: Date }) =>
     slots.findIndex((x) => x.startTime.getTime() === s.startTime.getTime()) + 1
   const next = slots.find((s) => !s.cancelledAt && s.startTime > now)
-  const starts = (s: { startTime: Date }) => `Day ${dayOf(s)} starts ${whenIn(s.startTime, timezone)}.`
+  const starts = (s: { startTime: Date }) => `Day ${dayOf(s)} starts ${mobileWhen(s.startTime, timezone)}.`
 
   if (reason === "too_early") {
     // Before the first day, "not started" is still the truth.
@@ -101,20 +103,4 @@ export function closedDoorMessage(
   }
 
   return { message: "Event has already ended", ended: true }
-}
-
-/** "Tue, Sep 29, 12:45 AM" in the event's timezone, falling back to UTC. */
-function whenIn(at: Date, timezone: string): string {
-  const options: Intl.DateTimeFormatOptions = {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }
-  try {
-    return new Intl.DateTimeFormat("en-US", { ...options, timeZone: timezone }).format(at)
-  } catch {
-    return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" }).format(at)
-  }
 }
