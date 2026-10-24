@@ -8,7 +8,7 @@ import { displayNameInConversation, mayShowRealName } from "./conversation-ident
 import { notStrangersTo } from "./room-people"
 import { idInConversation } from "./conversation-handle"
 import { blockCounterparties, keptApartIn } from "./conversations"
-import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
+import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUseConversation } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
@@ -485,6 +485,54 @@ export async function guardJoin(
   socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
 }
 
+/** How long a socket reuses what it read of its own membership in an event's room, between keystroke bursts. */
+const TYPING_MEMBERSHIP_TTL_MS = 5_000
+const typingMemberships = new WeakMap<object, Map<string, { at: number; membership: TypingMembership }>>()
+
+async function readTypingMembership(userId: string, chatGroupId: string) {
+  return db.chat_group_members.findUnique({
+    where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
+    select: {
+      anonymous_name: true,
+      status: true,
+      last_allowed_at: true,
+      chat_group: {
+        select: {
+          id: true,
+          kind: true,
+          event_id: true,
+          event: { select: { status: true, deleted_at: true, kind: true } },
+        },
+      },
+    },
+  })
+}
+type TypingMembership = NonNullable<Awaited<ReturnType<typeof readTypingMembership>>>
+
+/**
+ * The typist's own membership row, three statements a read and one per keystroke
+ * burst. Remembered for a few seconds per socket, and only for an event's room
+ * (no owner's door to re-ask) while that socket is still IN the room: a ban or a
+ * leave evicts it (`emitChatMemberBanned`, `emitChatMemberLeft`), so the next tick
+ * goes back to the database and is refused. What the row decides is who may type
+ * under which name; who it is shown to (blocks) is still asked every time.
+ */
+async function typingMembership(socket: AuthenticatedSocket, chatGroupId: string): Promise<TypingMembership | null> {
+  const remembered = typingMemberships.get(socket)?.get(chatGroupId)
+  if (remembered && Date.now() - remembered.at < TYPING_MEMBERSHIP_TTL_MS && socket.rooms?.has(`chat:${chatGroupId}`)) {
+    return remembered.membership
+  }
+  const membership = await readTypingMembership(socket.data.userId, chatGroupId)
+  const perRoom = typingMemberships.get(socket) ?? new Map()
+  if (membership?.status === "active" && membership.chat_group.kind === "event" && membership.chat_group.event?.kind === "event") {
+    perRoom.set(chatGroupId, { at: Date.now(), membership })
+    typingMemberships.set(socket, perRoom)
+  } else {
+    perRoom.delete(chatGroupId)
+  }
+  return membership
+}
+
 /**
  * Broadcast a typing indicator to a chat room, under the sender's anonymous name.
  *
@@ -497,28 +545,7 @@ export async function emitChatTyping(
   isTyping: boolean
 ): Promise<void> {
   try {
-    const membership = await db.chat_group_members.findUnique({
-      where: {
-        chat_group_id_user_id: {
-          chat_group_id: chatGroupId,
-          user_id: socket.data.userId,
-        },
-      },
-      select: {
-        anonymous_name: true,
-        status: true,
-        last_allowed_at: true,
-        chat_group: {
-          select: {
-            id: true,
-            kind: true,
-            event_id: true,
-            event: { select: { status: true, deleted_at: true, kind: true } },
-          },
-        },
-      },
-    })
-
+    const membership = await typingMembership(socket, chatGroupId)
     if (!membership || membership.status !== "active") return
     // The room's door, for every kind: a member row whose owner no longer
     // admits them (a board post's ask that is not accepted) types to nobody.
@@ -581,6 +608,18 @@ const sidesSelect = {
 const otherOf = (c: { user1_id: string; user2_id: string }, userId: string) => (c.user1_id === userId ? c.user2_id : c.user1_id)
 
 /**
+ * The conversation's sides if `userId` may use it (`canJoinConversation`'s rule),
+ * else null: the gate and the naming read, one statement where they were two.
+ */
+async function openConversationOf(userId: string, conversationId: string) {
+  const conversation = await db.private_conversations.findUnique({
+    where: { id: conversationId },
+    select: { ...sidesSelect, closed_at: true },
+  })
+  return mayUseConversation(conversation, userId) ? conversation : null
+}
+
+/**
  * Broadcast a typing indicator into a private conversation.
  *
  * `socket.to(room)` broadcasts to a room the sender does not have to be in, so
@@ -594,8 +633,6 @@ export async function emitPrivateTyping(
   isTyping: boolean
 ): Promise<void> {
   try {
-    if (!(await canJoinConversation(socket.data.userId, conversationId))) return
-
     /*
      * Resolved through the conversation, not read straight off the profile.
      *
@@ -609,17 +646,7 @@ export async function emitPrivateTyping(
      * has revealed, so nothing visible changes for existing conversations.
      */
     const [conversation, profile] = await Promise.all([
-      db.private_conversations.findUnique({
-        where: { id: conversationId },
-        select: {
-          user1_id: true,
-          user2_id: true,
-          user1_pseudonym: true,
-          user2_pseudonym: true,
-          user1_revealed: true,
-          user2_revealed: true,
-        },
-      }),
+      openConversationOf(socket.data.userId, conversationId),
       db.profiles.findUnique({
         where: { id: socket.data.userId },
         select: { name: true },
@@ -671,7 +698,8 @@ export async function emitPrivateRead(
   messageIds: string[]
 ): Promise<void> {
   try {
-    if (!(await canJoinConversation(socket.data.userId, conversationId))) return
+    const sides = await openConversationOf(socket.data.userId, conversationId)
+    if (!sides) return
 
     /*
      * Persist, then decide whether to say so. This function did neither.
@@ -720,8 +748,7 @@ export async function emitPrivateRead(
       return
     }
 
-    const sides = await db.private_conversations.findUnique({ where: { id: conversationId }, select: sidesSelect })
-    if (sides && !mayShowRealName(sides, socket.data.userId)) {
+    if (!mayShowRealName(sides, socket.data.userId)) {
       socket.nsp.to(`user:${otherOf(sides, socket.data.userId)}`).emit("private:read", {
         conversationId,
         messageIds: ids,
