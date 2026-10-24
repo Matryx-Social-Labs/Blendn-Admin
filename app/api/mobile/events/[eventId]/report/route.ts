@@ -12,7 +12,7 @@ import {
   serverErrorResponse,
   errorResponse,
 } from "@/lib/api-response"
-import { readJson, isUuid } from "@/lib/api-input"
+import { readJson, isUuid, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -44,8 +44,8 @@ interface RouteParams {
  * what bounds abuse.
  */
 const reportEventSchema = z.object({
-  reason: z.string().min(1, "Reason is required"),
-  description: z.string().max(2000).optional(),
+  reason: z.string().min(1, "Reason is required").max(REPORT_REASON_MAX),
+  description: z.string().max(REPORT_DESCRIPTION_MAX).optional(),
 })
 
 // POST /api/mobile/events/[eventId]/report — Report an event
@@ -56,7 +56,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return unauthorizedResponse("Authentication required")
     }
 
-    const limited = await rateLimit(request, userLimit("safety", "report-event", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("safety", "report-event", authUser.userId))) ??
+      (await rateLimit(request, userLimit("reportDay", "report-event-day", authUser.userId)))
     if (limited) return limited
 
     const { eventId } = await params
