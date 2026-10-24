@@ -23,6 +23,7 @@ import {
   forbiddenResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
+import { preSaveCheck } from "@/lib/moderation"
 import { boundedInt } from "@/lib/pagination"
 
 const createRequestSchema = z.object({
@@ -70,6 +71,16 @@ export async function POST(request: NextRequest) {
     // A room handle or a raw id (SCRUM-371). `ref` is what the response
     // echoes, so a handle never comes back as the real id behind it.
     const { recipientId: ref, message } = parsed.data
+    /*
+     * The one channel the recipient never opted into, and it had no text check
+     * at all (API M1). The same deterministic pre-save check a room message
+     * gets (keyword + contact details; no model, as for a DM): refused here,
+     * before a row, a push or a socket event exists. It does not depend on the
+     * recipient, so it says nothing about who they are.
+     */
+    if (preSaveCheck(message)) {
+      return errorResponse("That message can't be sent. Take out contact details and offensive language, and try again.", 400)
+    }
     const recipientId = userIdFromRef(ref)
     // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
     const banned = await refRoomBanRefusal(ref, authUser.userId)
