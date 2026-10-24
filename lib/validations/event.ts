@@ -5,8 +5,12 @@ export const eventQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 
-  // Search
-  search: z.string().optional(),
+  /**
+   * Search: trimmed, at least 2 characters (review M3). One letter matches most
+   * of the catalogue by substring, which is a scan to rank, not a search; the
+   * route answers it as a 400 with `reasonCode: SEARCH_TOO_SHORT`.
+   */
+  search: z.string().trim().min(2, "Search for at least 2 characters.").max(100, "A search is at most 100 characters.").optional(),
 
   /**
    * Where to browse. The one thing that scopes a page of discovery.

@@ -214,7 +214,9 @@ export function spamBlockedResponse(message: string, retryAfter?: number): NextR
  * Create a validation error response from Zod errors
  */
 export function validationErrorResponse(
-  error: ZodError
+  error: ZodError,
+  /** The reason, in `reasonCode`, for a caller that branches on one field's refusal. `errorCode` stays VALIDATION_FAILED. */
+  reasonCode?: string
 ): NextResponse<ApiResponse> {
   // `.issues` not `.errors`: ZodError.errors is removed in zod 4, and both
   // exist on the zod 3 we're on today. Every mobile route funnels validation
@@ -230,6 +232,7 @@ export function validationErrorResponse(
       success: false,
       error: "Validation failed",
       errorCode: ErrorCode.VALIDATION_FAILED,
+      ...(reasonCode && { reasonCode }),
       errors,
     },
     { status: 400 }

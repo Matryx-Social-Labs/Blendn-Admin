@@ -36,6 +36,15 @@ import { FEATURED_MAX, featuredSeed, rotated } from "@/lib/featured"
  * result, so this only bounds what gets sorted.
  */
 const DISTANCE_SORT_CEILING = 5000
+/**
+ * The most matches a search ranks in memory (S-6, review M3). A 2+ character
+ * search in one city matches tens of events, so this is a backstop, not
+ * tuning: past it the ranking would rank a truncated set and the count would
+ * stop at the ceiling, so the search falls back to date order with the true
+ * count, and says so in the log. Lower than the distance sort's because each
+ * row here carries three text columns, not two numbers.
+ */
+const SEARCH_RANK_CEILING = 500
 
 // Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<
@@ -81,7 +90,8 @@ export async function GET(request: NextRequest) {
     const searchParams = Object.fromEntries(request.nextUrl.searchParams)
     const parsed = eventQuerySchema.safeParse(searchParams)
     if (!parsed.success) {
-      return validationErrorResponse(parsed.error)
+      const searchRefused = parsed.error.issues.some((i) => i.path[0] === "search")
+      return validationErrorResponse(parsed.error, searchRefused ? "SEARCH_TOO_SHORT" : undefined)
     }
 
     // The Pulse's search box calls this route with `search=`, not
@@ -320,6 +330,16 @@ export async function GET(request: NextRequest) {
       const orderBy: Prisma.eventsOrderByWithRelationInput = shouldSortByDistance
         ? { start_time: "asc" }
         : { [sortBy]: sortOrder }
+      /*
+       * The page in `orderBy`, and the count beside it. Both at once: `count`
+       * needs only `where`, so awaiting the page first added a full sequential
+       * round trip to every cache miss on the discovery feed.
+       */
+      const datePage = () =>
+        Promise.all([
+          db.events.findMany({ where, select: eventListSelect, orderBy, skip: (page - 1) * pageSize, take: pageSize }),
+          db.events.count({ where }),
+        ])
 
       if (featured) {
         /*
@@ -357,12 +377,18 @@ export async function GET(request: NextRequest) {
           where,
           select: { id: true, title: true, venue_name: true, city: true },
           orderBy: [{ start_time: sortOrder }, { id: "asc" }],
-          take: DISTANCE_SORT_CEILING,
+          take: SEARCH_RANK_CEILING + 1,
         })
-        // `sort` is stable, so the date order holds within a tier.
-        const ranked = [...matches].sort((a, b) => searchTier(a, search!) - searchTier(b, search!))
-        totalCount = ranked.length
-        events = await hydrateInOrder(ranked.slice((page - 1) * pageSize, page * pageSize).map((e) => e.id))
+        if (matches.length > SEARCH_RANK_CEILING) {
+          // Never a ranked truncation nor a capped count: date order, the true total.
+          logger.warn("Search ranking hit its ceiling; this search is in date order", { ceiling: SEARCH_RANK_CEILING, city: city ?? null })
+          ;[events, totalCount] = await datePage()
+        } else {
+          // `sort` is stable, so the date order holds within a tier. Under the ceiling, `matches` is every match.
+          const ranked = [...matches].sort((a, b) => searchTier(a, search!) - searchTier(b, search!))
+          totalCount = ranked.length
+          events = await hydrateInOrder(ranked.slice((page - 1) * pageSize, page * pageSize).map((e) => e.id))
+        }
       } else if (shouldSortByDistance) {
         /*
          * Fetch only id + coordinates to sort by distance in-memory, avoiding
@@ -425,21 +451,8 @@ export async function GET(request: NextRequest) {
 
         events = await hydrateInOrder(pageIds)
       } else {
-        /*
-         * Both at once. `count` needs only `where`, so awaiting the page first
-         * added a full sequential round trip to every cache miss on the
-         * discovery feed — the highest-traffic read in the product.
-         */
-        ;[events, totalCount] = await Promise.all([
-          db.events.findMany({
-            where,
-            select: eventListSelect,
-            orderBy,
-            skip: (page - 1) * pageSize,
-            take: pageSize,
-          }),
-          db.events.count({ where }),
-        ])
+        // The discovery feed, the highest-traffic read in the product: `datePage`.
+        ;[events, totalCount] = await datePage()
       }
 
       setCache(cacheKey, {

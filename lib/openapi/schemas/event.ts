@@ -15,8 +15,10 @@ export const EventQuerySchema = z
     limit: z.number().int().min(1).max(100).default(20),
     search: z
       .string()
+      .min(2)
+      .max(100)
       .optional()
-      .describe("Matches title, description, venue or city. With the default sortBy=start_time, ranked title, venue, city, then description; by start time within each."),
+      .describe("Matches title, description, venue or city. Trimmed; under 2 characters is 400 with reasonCode SEARCH_TOO_SHORT. With the default sortBy=start_time, ranked title, venue, city, then description; by start time within each; past 500 matches, date order with the true totalCount."),
     city: z
       .string()
       .min(1)

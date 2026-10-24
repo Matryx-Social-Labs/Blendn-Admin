@@ -370,3 +370,53 @@ describe("GET /events?search= ranks by where the word is (S-6)", () => {
     expect(p1.total).toBe(4)
   })
 })
+
+describe("GET /events?search= bounds (review M3)", () => {
+  const ask = (auth: string, q: string) =>
+    listRoute.GET(new NextRequest(`http://localhost/api/mobile/events?${q}`, { headers: { authorization: `Bearer ${auth}` } }))
+
+  it("refuses a search under 2 characters after trimming: 400, VALIDATION_FAILED, reasonCode SEARCH_TOO_SHORT", async () => {
+    const v = await viewer("dv_short")
+    for (const q of ["search=c", "search=%20%20", "search=%20c%20"]) {
+      const res = await ask(v.token, q)
+      const body = await res.json()
+      expect([res.status, body.errorCode, body.reasonCode]).toEqual([400, "VALIDATION_FAILED", "SEARCH_TOO_SHORT"])
+    }
+    expect((await ask(v.token, "search=co")).status).toBe(200)
+  })
+
+  it("past the ranking ceiling, a search is in date order with the true count, never a capped one", async () => {
+    const t = nextToken()
+    const v = await viewer("dv_ceiling")
+    const slugPrefix = testId("dvc")
+    const now = Date.now()
+    // 501 matches by description, the earliest first; then one by title, starting last.
+    await db.events.createMany({
+      data: Array.from({ length: 501 }, (_, i) => ({
+        slug: `${slugPrefix}-${i}`,
+        title: "A night out",
+        description: `${t} somewhere`,
+        start_time: new Date(now + (i + 1) * 60_000),
+        end_time: new Date(now + 3 * HOUR + (i + 1) * 60_000),
+        timezone: "UTC",
+        status: "published" as const,
+        visibility: "public" as const,
+        organizer_id: organiser,
+      })),
+    })
+    const byTitle = await db.events.create({
+      data: { slug: `${slugPrefix}-title`, title: `${t} by title`, description: "x", start_time: new Date(now + 10 * HOUR), end_time: new Date(now + 12 * HOUR), timezone: "UTC", status: "published", visibility: "public", organizer_id: organiser },
+    })
+    try {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+      const body = await (await ask(v.token, `limit=5&search=${t}`)).json()
+      expect(body.data.pagination.totalCount).toBe(502)
+      // Date order: the title match, starting last, is not first.
+      expect(body.data.events[0].id).not.toBe(byTitle.id)
+      expect(warn.mock.calls.flat().join(" ")).toContain("Search ranking hit its ceiling")
+      warn.mockRestore()
+    } finally {
+      await db.events.deleteMany({ where: { slug: { startsWith: slugPrefix } } })
+    }
+  })
+})
