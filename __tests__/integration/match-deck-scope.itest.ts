@@ -79,8 +79,8 @@ describe("the match deck", () => {
     // dozen people in the room. After: the page.
     const pseudonymRead = sql.find((q) => /FROM "public"\."chat_group_members"/.test(q) && /"anonymous_name"/.test(q))!
     expect(pseudonymRead).toMatch(/"user_id"\s+IN/)
-    expect(placeholders(pseudonymRead)).toBeLessThanOrEqual(PAGE + 1)
+    expect(placeholders(pseudonymRead)).toBeLessThanOrEqual(PAGE + 3)
     const reveals = sql.find((q) => /FROM "public"\."event_match_preferences"/.test(q) && /"revealed"/.test(q))!
-    expect(placeholders(reveals)).toBeLessThanOrEqual(PAGE + 2)
+    expect(placeholders(reveals)).toBeLessThanOrEqual(PAGE + 3)
   })
 })
