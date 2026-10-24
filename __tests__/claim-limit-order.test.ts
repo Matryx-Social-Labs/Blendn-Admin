@@ -20,5 +20,14 @@ it("stops counting against the event once the caller's address is over its own l
   expect(outcomes.slice(0, 10).every((o) => o === null)).toBe(true)
   expect(outcomes.slice(10).every((o) => o !== null)).toBe(true)
   // ...and only the ten that passed were held against the event.
-  expect(await peek(`rl:claim:event:${target.id}`)).toBe(10)
+  expect(await peek(`rl:claim:event:${target.id}:${ip}`)).toBe(10)
+})
+
+it("does not let several networks together drain an event's claims", async () => {
+  const shared = { kind: "event" as const, id: `event-many-${run}` }
+  // Three networks, ten claims each: one event, thirty claims in the hour. Each network is inside its own limits.
+  for (const net of [1, 2, 3]) {
+    ip = `198.51.${100 + Math.floor(Math.random() * 100)}.${net}`
+    for (let i = 0; i < 10; i++) expect(await overClaimLimit(`many-${run}-${net}-${i}@x.test`, shared)).toBeNull()
+  }
 })

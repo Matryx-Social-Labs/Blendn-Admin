@@ -3,17 +3,31 @@ import { NextAuthOptions, getServerSession, User } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
-import { refuseOverSigninLimits, settleSigninSuccess, signinKeys } from "./dashboard-signin-limits"
+import { cookies } from "next/headers"
+import { DUMMY_HASH, MAX_EMAIL_LENGTH, refuseOverSigninLimits, settleSigninSuccess, signinKeys } from "./dashboard-signin-limits"
+import { KNOWN_DEVICE_MAX_AGE_SECONDS, isKnownDevice, knownDeviceCookie } from "./known-device"
+import { logger } from "./logger"
 import { APP_ONLY_SIGNIN, canAccessDashboard } from "./rbac"
 import { SessionEnded, isRevoked, provenAt } from "./session-revocation"
 import type { user_role } from "@prisma/client"
 
-/*
- * A real cost-12 hash of nothing anyone knows. An unknown email is compared
- * against it so the response takes as long as a known one (audit L1: 0.25 s vs
- * 0.64 s named the accounts that exist).
- */
-const DUMMY_HASH = "$2b$12$O.tIGjDT8kuGET3q.N9fd.iBNLaB2NnxO7PopJJfIp.ozxgF47CE2"
+/** Sets the known-device cookie on this response (a route handler's `cookies()` is merged into it). */
+async function rememberDevice(email: string): Promise<void> {
+  const cookie = knownDeviceCookie(email)
+  if (!cookie) return
+  try {
+    ;(await cookies()).set(cookie.name, cookie.value, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: KNOWN_DEVICE_MAX_AGE_SECONDS,
+    })
+  } catch (error) {
+    // Outside a request there is nothing to set it on; the sign-in itself stands.
+    logger.warn("Could not set the known-device cookie", { error: error instanceof Error ? error.message : String(error) })
+  }
+}
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db),
@@ -35,15 +49,19 @@ export const authOptions: NextAuthOptions = {
 
         // Stored lowercase (SCRUM-328), so the lookup is too.
         const email = credentials.email.trim().toLowerCase()
+        // Before it becomes a limiter key.
+        if (email.length > MAX_EMAIL_LENGTH) return null
         const keys = signinKeys(email, req?.headers)
-        await refuseOverSigninLimits(keys)
+        const knownDevice = isKnownDevice(email, req?.headers?.cookie)
+        await refuseOverSigninLimits(keys, knownDevice)
         const user = await db.user.findUnique({ where: { email } })
 
         const isValid = await bcrypt.compare(credentials.password, user?.password ?? DUMMY_HASH)
         if (!user?.password || !isValid) {
           return null
         }
-        await settleSigninSuccess(keys)
+        await settleSigninSuccess(keys, knownDevice)
+        await rememberDevice(email)
 
         /*
          * A suspended or deleted account cannot sign in.

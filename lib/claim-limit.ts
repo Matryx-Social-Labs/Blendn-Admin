@@ -47,7 +47,8 @@ export async function overClaimLimit(email: string, target: ClaimTarget): Promis
   // bucket they hit tells them which one to vary.
   const REFUSAL = "You have filed several claims recently. Give us a little time to read them."
   if (byEmail.count > CLAIM_LIMITS.perEmailPerHour || byIp.count > CLAIM_LIMITS.perIpPerHour) return REFUSAL
-  const byTarget = await hit(`rl:claim:${target.kind}:${target.id}`, HOUR_MS)
+  // Per (target, network): a shared event-wide count is one several networks drain between them.
+  const byTarget = await hit(`rl:claim:${target.kind}:${target.id}:${ip}`, HOUR_MS)
   if (byTarget.count > CLAIM_LIMITS.perTargetPerHour) return REFUSAL
   return null
 }

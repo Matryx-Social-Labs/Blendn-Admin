@@ -27,6 +27,16 @@ import { SIGNIN_ACCOUNT_LOCKED, SIGNIN_RATE_LIMITED } from "./rbac"
  * could not clear it without scanning keys.
  */
 const FAIL_CLOSED = { failClosed: true } as const
+
+/** The longest address that can exist (RFC 5321). Longer is refused before it becomes a Redis key. */
+export const MAX_EMAIL_LENGTH = 254
+
+/*
+ * A real cost-12 hash of nothing anyone knows. An unknown email is compared
+ * against it so the response takes as long as a known one (audit L1: 0.25 s vs
+ * 0.64 s named the accounts that exist). Both sign-in doors use it.
+ */
+export const DUMMY_HASH = "$2b$12$O.tIGjDT8kuGET3q.N9fd.iBNLaB2NnxO7PopJJfIp.ozxgF47CE2"
 const PREFIX = "rl:auth:dashboard-signin"
 
 export interface SigninKeys {
@@ -42,16 +52,17 @@ export function signinKeys(email: string, headers: Record<string, unknown> | und
   return { network: `${PREFIX}:${network}`, account: `${PREFIX}:acct:${email}`, accountDay: `${PREFIX}:acct-day:${email}` }
 }
 
+/** The two per-email keys; the mobile door has no network key of its own here (it keeps its per-IP limit). */
+export const emailKeysFor = (email: string) => ({ account: `${PREFIX}:acct:${email}`, accountDay: `${PREFIX}:acct-day:${email}` })
+
 /**
- * Before the password is read: reserve a place in every window, and throw when
- * any is over its cap. Reserve-then-settle, not check-then-count: N parallel
- * guesses all reading "under the cap" before any counted would each get a
- * bcrypt, so the increment is the check. The network goes first and alone, so
- * an attacker's refused attempts from one address never spend the email's.
+ * Reserve a place in both per-email windows and throw SIGNIN_ACCOUNT_LOCKED when
+ * either is over. Reserve-then-settle, not check-then-count: N parallel guesses
+ * all reading "under the cap" before any counted would each get a bcrypt, so
+ * the increment is the check. Shared by the dashboard and the mobile sign-in,
+ * so a wrong password at either door is held against the same address.
  */
-export async function refuseOverSigninLimits(keys: SigninKeys): Promise<void> {
-  const byNetwork = await hit(keys.network, RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN, FAIL_CLOSED)
-  if (byNetwork.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN) throw new Error(SIGNIN_RATE_LIMITED)
+export async function refuseOverEmailLimits(keys: Pick<SigninKeys, "account" | "accountDay">): Promise<void> {
   const [recent, today] = await Promise.all([
     hit(keys.account, RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN, FAIL_CLOSED),
     hit(keys.accountDay, RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN_ACCOUNT_DAY, FAIL_CLOSED),
@@ -62,11 +73,23 @@ export async function refuseOverSigninLimits(keys: SigninKeys): Promise<void> {
 }
 
 /**
+ * Before the password is read: the network window, then (unless this browser is
+ * a known device for the email) the per-email windows. The network goes first and
+ * alone, so an attacker's refused attempts from one address never spend the email's.
+ */
+export async function refuseOverSigninLimits(keys: SigninKeys, knownDevice = false): Promise<void> {
+  const byNetwork = await hit(keys.network, RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN, FAIL_CLOSED)
+  if (byNetwork.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN) throw new Error(SIGNIN_RATE_LIMITED)
+  if (!knownDevice) await refuseOverEmailLimits(keys)
+}
+
+/**
  * The right password: give the email's two reservations back, so only wrong
  * passwords stay counted. Releases, never clears -- a victim signing in does
- * not reset a spray that is still going.
+ * not reset a spray that is still going. A known device reserved nothing.
  */
-export async function settleSigninSuccess(keys: SigninKeys): Promise<void> {
+export async function settleSigninSuccess(keys: Pick<SigninKeys, "account" | "accountDay">, knownDevice = false): Promise<void> {
+  if (knownDevice) return
   await Promise.all([release(keys.account), release(keys.accountDay)])
 }
 

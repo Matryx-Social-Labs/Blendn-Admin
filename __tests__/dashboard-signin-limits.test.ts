@@ -10,6 +10,10 @@
  */
 import type { NextAuthOptions } from "next-auth"
 
+process.env.NEXTAUTH_SECRET = "test-nextauth-secret-at-least-32-characters"
+const mockCookieSet = jest.fn()
+jest.mock("next/headers", () => ({ cookies: async () => ({ set: (...a: unknown[]) => mockCookieSet(...a) }) }))
+
 jest.mock("@auth/prisma-adapter", () => ({ PrismaAdapter: () => ({}) }))
 const mockFindUnique = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) } } }))
@@ -18,9 +22,11 @@ jest.mock("bcryptjs", () => ({ compare: (...a: [string, string]) => mockCompare(
 
 import { authOptions } from "@/lib/auth"
 import { clearSigninCounters } from "@/lib/dashboard-signin-limits"
+import { knownDeviceCookie } from "@/lib/known-device"
 import { SIGNIN_ACCOUNT_LOCKED, SIGNIN_RATE_LIMITED } from "@/lib/rbac"
 
 type Req = { headers: Record<string, string> }
+const withCookie = (r: Req, c: { name: string; value: string }): Req => ({ headers: { ...r.headers, cookie: `${c.name}=${c.value}` } })
 type Authorize = (c: Record<string, string>, req?: Req) => Promise<unknown>
 const authorize = (
   authOptions as NextAuthOptions & { providers: { options: { authorize: Authorize } }[] }
@@ -38,6 +44,7 @@ const operator = (email: string) => ({
 })
 
 beforeEach(() => {
+  mockCookieSet.mockReset()
   mockFindUnique.mockReset()
   mockCompare.mockClear()
 })
@@ -178,4 +185,65 @@ describe("timing", () => {
     expect(mockCompare).toHaveBeenCalledTimes(1)
     expect(mockCompare).toHaveBeenCalledWith(expect.any(String), expect.stringMatching(COST_12_HASH))
   })
+})
+
+describe("a known device", () => {
+  const locked = async (label: string) => {
+    const email = `${fresh(label)}@x.test`
+    asVictim(email)
+    await spray(email, 20)
+    await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
+    return email
+  }
+
+  it("is given a signed cookie by a successful sign-in, and by nothing else", async () => {
+    const email = `${fresh("issue")}@x.test`
+    asVictim(email)
+    await authorize({ email, password: "wrong" }, lone())
+    expect(mockCookieSet).not.toHaveBeenCalled()
+    await authorize({ email, password: PASSWORD }, lone())
+    expect(mockCookieSet).toHaveBeenCalledWith(
+      expect.stringMatching(/^blendn_kd_/),
+      expect.any(String),
+      expect.objectContaining({ httpOnly: true, sameSite: "lax", path: "/", maxAge: 90 * 24 * 60 * 60 })
+    )
+  })
+
+  it("signs in while its email is over the per-email cap", async () => {
+    const email = `${fresh("known")}@x.test`
+    asVictim(email)
+    const cookie = knownDeviceCookie(email)!
+    await spray(email, 20)
+    await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
+    await expect(authorize({ email, password: PASSWORD }, withCookie(lone(), cookie))).resolves.toMatchObject({ id: "u1" })
+  })
+
+  it("is still held to the network limit", async () => {
+    const email = `${fresh("knownnet")}@x.test`
+    asVictim(email)
+    const cookie = knownDeviceCookie(email)!
+    const same = withCookie(lone(), cookie)
+    for (let i = 0; i < 5; i++) await authorize({ email, password: "wrong" }, same)
+    await expect(authorize({ email, password: PASSWORD }, same)).rejects.toThrow(SIGNIN_RATE_LIMITED)
+  })
+
+  it("does not let another email's cookie, a forged one, or an expired one past the cap", async () => {
+    const email = await locked("forge")
+    const other = knownDeviceCookie(`${fresh("other")}@x.test`)!
+    // The right name for this email, someone else's proof.
+    const nameForEmail = knownDeviceCookie(email)!.name
+    const forged = { name: nameForEmail, value: `${Date.now()}.${"A".repeat(43)}` }
+    const swapped = { name: nameForEmail, value: other.value }
+    const stale = knownDeviceCookie(email, Date.now() - 91 * 24 * 60 * 60 * 1000)!
+    const future = knownDeviceCookie(email, Date.now() + 60 * 60 * 1000)!
+    for (const c of [other, forged, swapped, stale, future]) {
+      await expect(authorize({ email, password: PASSWORD }, withCookie(lone(), c))).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
+    }
+  })
+})
+
+it("refuses an email longer than 254 characters before it becomes a limiter key", async () => {
+  mockFindUnique.mockResolvedValue(null)
+  await expect(authorize({ email: `${"a".repeat(250)}@x.test`, password: "x" }, lone())).resolves.toBeNull()
+  expect(mockFindUnique).not.toHaveBeenCalled()
 })
