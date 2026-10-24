@@ -48,6 +48,7 @@ const feed = require("@/app/api/mobile/notifications/route") as typeof import("@
 const users: string[] = []
 const events: string[] = []
 const crews: string[] = []
+const blendsMade: { blend: string; room: string }[] = []
 const tokenOf = (id: string) => signAccessToken(id, `${id}@itest.invalid`)
 
 async function person(label: string, photo?: string) {
@@ -62,7 +63,7 @@ interface Row {
   kind: string
   data: Record<string, unknown> | null
   open?: boolean
-  display: { title?: string; visual?: Record<string, unknown> }
+  display: { title?: string; context?: string; visual?: Record<string, unknown> }
 }
 
 /** What a build that knows `event_changed` declares on every request; an installed build declares nothing. */
@@ -84,6 +85,9 @@ afterAll(async () => {
   await db.board_requests.deleteMany({ where: { event_id: { in: events } } })
   await db.board_posts.deleteMany({ where: { event_id: { in: events } } })
   await db.message_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
+  await db.chat_group_members.deleteMany({ where: { chat_group_id: { in: blendsMade.map((b) => b.room) } } })
+  await db.chat_groups.deleteMany({ where: { id: { in: blendsMade.map((b) => b.room) } } })
+  await db.blends.deleteMany({ where: { id: { in: blendsMade.map((b) => b.blend) } } })
   await db.crew_members.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crew_invites.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crews.deleteMany({ where: { id: { in: crews } } })
@@ -131,7 +135,7 @@ describe("friend_request rows", () => {
 })
 
 describe("crew rows", () => {
-  it("an invite is open until it is declined; a crew's emblem is its id and no text", async () => {
+  it("an invite is open until it is declined; it shows the crew's emblem and names the crew that asked (S-2)", async () => {
     const owner = await person("nf-owner")
     const me = await person("nf-invitee")
     const crew = await db.crews.create({ data: { name: "Nebula", created_by: owner, emblem_seed: "seed-nebula" } as never })
@@ -141,8 +145,7 @@ describe("crew rows", () => {
 
     const open = await rowOf(me, "crew_invite")
     expect(open.open).toBe(true)
-    expect(open.display).toEqual({ visual: { type: "emblem", seed: "seed-nebula" } })
-    expect(JSON.stringify(open)).not.toContain("Nebula")
+    expect(open.display).toEqual({ context: "Nebula", visual: { type: "emblem", seed: "seed-nebula" } })
 
     await db.crew_invites.update({ where: { id: invite.id }, data: { declined_at: new Date() } })
     expect((await rowOf(me, "crew_invite")).open).toBe(false)
@@ -150,7 +153,7 @@ describe("crew rows", () => {
 })
 
 describe("match rows", () => {
-  it("show the other side's room pseudonym, never a name or a photo", async () => {
+  it("show and name the other side by its room pseudonym, never a name or a photo (S-2)", async () => {
     const me = await person("nf-m1")
     const them = await person("nf-m2", "https://cdn.test/profile/m/2.jpg")
     const [user1_id, user2_id] = [me, them].sort()
@@ -159,8 +162,9 @@ describe("match rows", () => {
     })
     await sendPushNotification({ userId: me, title: "t", body: "b", data: { type: "match", conversationId: convo.id } })
     const row = await rowOf(me, "match")
-    expect(row.display).toEqual({ visual: { type: "creature", pseudonym: "Amber Fox" } })
+    expect(row.display).toEqual({ context: "Amber Fox", visual: { type: "creature", pseudonym: "Amber Fox" } })
     expect(JSON.stringify(row)).not.toContain("m/2.jpg")
+    expect(JSON.stringify(row)).not.toContain("Person nf-m2")
     await db.private_conversations.delete({ where: { id: convo.id } })
   })
 })
@@ -341,7 +345,7 @@ describe("open: what is still the reader's to answer", () => {
     const joined = await rowOf(me, "crew_invite")
     expect(joined.open).toBe(false)
     // Still the crew's emblem: closing the question does not lose the picture.
-    expect(joined.display).toEqual({ visual: { type: "emblem", seed: "seed-joined" } })
+    expect(joined.display).toEqual({ context: "Joined", visual: { type: "emblem", seed: "seed-joined" } })
 
     await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: crew.id, user_id: me } } })
     await db.crew_invites.update({ where: { id: invite.id }, data: { removed_at: new Date() } })
@@ -349,8 +353,56 @@ describe("open: what is still the reader's to answer", () => {
   })
 })
 
+describe("blend rows name the other side (S-2)", () => {
+  /** Crews A and B (in the uuid order `blends_pair_order` wants) at one event, a Blend between them, and its room. */
+  async function blendOf(label: string, o: { solo?: boolean } = {}) {
+    const host = await person(`${label}-host`)
+    const [aMember, bMember, solo, stranger] = [await person(`${label}-a`), await person(`${label}-b`), await person(`${label}-solo`), await person(`${label}-x`)]
+    const eventId = await makeEvent(host)
+    events.push(eventId)
+    const occurrence = await db.event_occurrences.findFirstOrThrow({ where: { event_id: eventId }, select: { id: true } })
+    const [idA, idB] = [randomUUID(), randomUUID()].sort()
+    for (const [id, name, member] of [[idA, "Night Owls", aMember], [idB, "Early Birds", bMember]] as const) {
+      await db.crews.create({ data: { id, name, created_by: member, emblem_seed: `seed-${id}` } })
+      crews.push(id)
+      await db.crew_members.create({ data: { crew_id: id, user_id: member, consented_reveal_at: new Date() } })
+    }
+    const blend = await db.blends.create({
+      data: {
+        occurrence_id: occurrence.id,
+        a_crew_id: idA,
+        ...(o.solo ? { b_user_id: solo } : { b_crew_id: idB }),
+        closes_at: new Date(Date.now() + 12 * 3_600_000),
+      },
+    })
+    const room = await db.chat_groups.create({
+      data: { kind: "blend", blend_id: blend.id, name: "Night Owls × Early Birds", members: { createMany: { data: [aMember, o.solo ? solo : bMember].map((user_id) => ({ user_id })) } } },
+    })
+    blendsMade.push({ blend: blend.id, room: room.id })
+    for (const id of [aMember, bMember, solo, stranger]) await notify(id, "blend", { blendId: blend.id, chatGroupId: room.id })
+    return { aMember, bMember, solo, stranger, blendId: blend.id }
+  }
+
+  it("each side is told the other crew's name; a stranger handed the id is told nothing", async () => {
+    const b = await blendOf("nf-bl")
+    expect((await rowOf(b.aMember, "blend")).display).toEqual({ context: "Early Birds", visual: { type: "emblem", seed: b.blendId } })
+    expect((await rowOf(b.bMember, "blend")).display).toEqual({ context: "Night Owls", visual: { type: "emblem", seed: b.blendId } })
+    const stranger = await rowOf(b.stranger, "blend")
+    expect(stranger.display).toEqual({ visual: { type: "emblem", seed: b.blendId } })
+    expect(JSON.stringify(stranger)).not.toMatch(/Night Owls|Early Birds/)
+  })
+
+  it("a solo side B is told crew A's name; crew A is told no name for one person", async () => {
+    const b = await blendOf("nf-bls", { solo: true })
+    expect((await rowOf(b.solo, "blend")).display.context).toBe("Night Owls")
+    const a = await rowOf(b.aMember, "blend")
+    expect(a.display).not.toHaveProperty("context")
+    expect(JSON.stringify(a)).not.toContain("Person nf-bls-solo")
+  })
+})
+
 describe("emblems and tiles for the other kinds", () => {
-  it("crew_here draws the crew's emblem seed; blend draws its own id; neither carries text", async () => {
+  it("crew_here draws the crew's emblem seed; blend draws its own id; a Blend the reader is not in names nothing", async () => {
     const owner = await person("nf-em-owner")
     const me = await person("nf-em-me")
     const crew = await db.crews.create({ data: { name: "Secret Name", created_by: owner, emblem_seed: "seed-here" } })

@@ -659,16 +659,22 @@ event's change and a report's outcome have no switch here. Stored as
     `visual` `{ type: "photo", uri }`, the asker exactly as `GET /friends/requests`
     shows them to the same person.
   - `match`: `visual` `{ type: "creature", pseudonym }`, the other side's room
-    pseudonym. Never a name or a photo.
+    pseudonym, and `context` the same pseudonym. Never a name or a photo.
   - `crew_invite`, `crew_here`: `visual` `{ type: "emblem", seed }`, the crew's
-    `emblem_seed`; `blend`: the Blend's id as the seed. No crew name (it is
-    user-typed text).
+    `emblem_seed`; `blend`: the Blend's id as the seed.
+  - `context` (S-2, 2026-10-24) names the counterpart by the name the reader
+    already sees it by, so rows of one kind can be told apart: a `match`'s
+    pseudonym; a `blend`'s other crew (the Blend room is named "A × B", so both
+    are on the reader's screen already; when the other side is one person, who
+    is "+ 1" there, no `context`); a `crew_invite`'s crew ("‹crew› asked you").
+    Only a member of one side of the Blend, or its solo person, is told it. The
+    lock-screen push stays nameless.
   - `event_update`, `event_changed`, `announcement`, `waitlist_promoted`,
     `rating_request`: `visual` `{ type: "event", cover, badge, cancelled }`
     (`badge` `clock`, `map-pin` for a venue change, `megaphone`, `star`;
     `cancelled` when the event is cancelled or the reason is).
-  - **Not sent:** `stack` (nothing aggregates rows yet) and `context` (the app
-    already writes "{event} · {when}"). A row the server cannot resolve (the request
+  - **Not sent:** `stack` (nothing aggregates rows yet), and `context` on event
+    rows (the app already writes "{event} · {when}"). A row the server cannot resolve (the request
     is gone, the event deleted) carries no `display`: draw the kind's own tile.
 - **`open`**, for `friend_request`, `crew_invite`, `message_request` and
   `board_request`: whether it is still the reader's to answer. `false` once it is
