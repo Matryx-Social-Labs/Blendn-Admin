@@ -164,6 +164,7 @@ export type NightsWhen = { ended: boolean; now: Date }
 
 function endedClause(when?: NightsWhen) {
   if (!when) return Prisma.empty
+  // any-kind: narrows the caller's own predicate by the clock, and a person's places stay among their nights (D-6).
   return when.ended
     ? Prisma.sql`AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.end_time < ${when.now})`
     : Prisma.sql`AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.end_time >= ${when.now})`
