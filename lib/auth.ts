@@ -3,9 +3,37 @@ import { NextAuthOptions, getServerSession, User } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
-import { APP_ONLY_SIGNIN, canAccessDashboard } from "./rbac"
+import { clientIpFrom } from "./client-ip"
+import { RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW } from "./constants"
+import { hit } from "./rate-limit-store"
+import { APP_ONLY_SIGNIN, SIGNIN_RATE_LIMITED, canAccessDashboard } from "./rbac"
 import { SessionEnded, isRevoked, provenAt } from "./session-revocation"
 import type { user_role } from "@prisma/client"
+
+/*
+ * A real cost-12 hash of nothing anyone knows. An unknown email is compared
+ * against it so the response takes as long as a known one (audit L1: 0.25 s vs
+ * 0.64 s named the accounts that exist).
+ */
+const DUMMY_HASH = "$2b$12$O.tIGjDT8kuGET3q.N9fd.iBNLaB2NnxO7PopJJfIp.ozxgF47CE2"
+
+/*
+ * Both sign-in limits, counted here because authorize() is the one place every
+ * request path to a password check reaches. They used to match the raw URL in
+ * the route and a percent-encoded `%63redentials` walked around them (WEB H1).
+ * The account key is the typed email, whether or not it exists, so the cap is
+ * no oracle. An attempt counts whether the password is right or not: past the
+ * cap a correct password is refused too. Throws, never returns, so the form
+ * can say "wait" rather than "wrong password".
+ */
+async function refuseOverSigninLimits(email: string, headers: Record<string, unknown> | undefined): Promise<void> {
+  const ip = clientIpFrom({ get: (name) => (typeof headers?.[name] === "string" ? (headers[name] as string) : null) })
+  const windowMs = RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN
+  const byNetwork = await hit(`rl:auth:dashboard-signin:${ip}`, windowMs)
+  if (byNetwork.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN) throw new Error(SIGNIN_RATE_LIMITED)
+  const byAccount = await hit(`rl:auth:dashboard-signin:acct:${email}`, windowMs)
+  if (byAccount.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN_ACCOUNT) throw new Error(SIGNIN_RATE_LIMITED)
+}
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db),
@@ -20,22 +48,18 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) {
           return null
         }
 
         // Stored lowercase (SCRUM-328), so the lookup is too.
-        const user = await db.user.findUnique({
-          where: { email: credentials.email.trim().toLowerCase() },
-        })
+        const email = credentials.email.trim().toLowerCase()
+        await refuseOverSigninLimits(email, req?.headers)
+        const user = await db.user.findUnique({ where: { email } })
 
-        if (!user || !user.password) {
-          return null
-        }
-
-        const isValid = await bcrypt.compare(credentials.password, user.password)
-        if (!isValid) {
+        const isValid = await bcrypt.compare(credentials.password, user?.password ?? DUMMY_HASH)
+        if (!user?.password || !isValid) {
           return null
         }
 

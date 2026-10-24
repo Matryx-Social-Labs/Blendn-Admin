@@ -1066,10 +1066,16 @@
       "date": "2026-09-21"
     },
     "dashboard-signin-limit-runs-in-node.test.ts": {
-      "guards": "POST /api/auth/callback/credentials is rate limited in the NextAuth route (Node runtime, Redis-backed) before NextAuth sees the password, and middleware.ts no longer carries the limiter — on the Edge runtime it let five of six attempts through (SCRUM-194)",
-      "mutation": "In app/api/auth/[...nextauth]/route.ts, `if (limited && false) return limited`.",
-      "observed": "1 failing: returns the limiter's 429 and never reaches NextAuth — expected 429, received 302.",
-      "date": "2026-09-21"
+      "guards": "the NextAuth route does not match on the request path and middleware.ts does not carry the sign-in limiter (Edge cannot load Redis, SCRUM-194; a path match is walked around by %63redentials, audit WEB H1); authorize() counts both limits before it reads the password",
+      "mutation": "Append `req.nextUrl.pathname === \"/api/auth/callback/credentials\"` to app/api/auth/[...nextauth]/route.ts.",
+      "observed": "1 failing: the NextAuth route does not match on the request path.",
+      "date": "2026-10-25"
+    },
+    "dashboard-signin-limits.test.ts": {
+      "guards": "authorize() refuses the sixth attempt from one network and the eleventh on one email (case-folded, from many networks, existing or not) with SIGNIN_RATE_LIMITED even for the right password, and compares against a cost-12 dummy hash when the account is missing or has no password (audit WEB H1/M5/L1)",
+      "mutation": "M1: `byAccount.count > ...` -> `false`. M2: `user?.password ?? DUMMY_HASH` -> `user?.password ?? \"\"`.",
+      "observed": "M1: 3 failing of 7 (per-account trio). M2: 2 failing of 7 (both timing tests). Red before the fix: 6 of 7 failed.",
+      "date": "2026-10-25"
     },
     "client-ip.test.ts": {
       "guards": "clientIpFrom returns the client as Railway's edge presents it — x-real-ip first (edge-set, not client-settable), else the FIRST x-forwarded-for hop — and ignores x-envoy-external-address / cf-connecting-ip, which the edge passes through as sent; the previous last-hop reader keyed every per-network limit and audit row on Railway's own edge node (SCRUM-195)",

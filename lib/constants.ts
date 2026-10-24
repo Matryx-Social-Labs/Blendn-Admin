@@ -20,6 +20,8 @@ export const RATE_LIMIT_MAX_REQUESTS = {
   REFRESH: 20,
   BATCH: 30,
   DASHBOARD_SIGNIN: 5,
+  // Per email, from however many networks — password spraying (audit 2026-10-24, WEB M5).
+  DASHBOARD_SIGNIN_ACCOUNT: 10,
   // Announcements and sponsored messages broadcast to every attendee.
   ORGANISER_BROADCAST: 10,
   PRIVATE_MESSAGE: 30,

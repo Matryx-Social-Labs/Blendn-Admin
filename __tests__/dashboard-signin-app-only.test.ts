@@ -19,10 +19,13 @@ jest.mock("bcryptjs", () => ({ compare: async (given: string, stored: string) =>
 import { authOptions } from "@/lib/auth"
 import { APP_ONLY_SIGNIN } from "@/lib/rbac"
 
-type Authorize = (c: Record<string, string>) => Promise<unknown>
-const authorize = (
+type Authorize = (c: Record<string, string>, req?: { headers: Record<string, string> }) => Promise<unknown>
+const rawAuthorize = (
   authOptions as NextAuthOptions & { providers: { options: { authorize: Authorize } }[] }
 ).providers[0].options.authorize
+// Each call is its own network: the sign-in limits are not what this file is about.
+let hop = 0
+const authorize = (c: Record<string, string>) => rawAuthorize(c, { headers: { "x-real-ip": `10.0.0.${++hop}` } })
 
 const PASSWORD = "the-right-one"
 function account(role: string, extra: Record<string, unknown> = {}) {

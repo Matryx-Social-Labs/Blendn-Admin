@@ -16,6 +16,9 @@ export function canAccessDashboard(role: user_role): boolean {
  */
 export const APP_ONLY_SIGNIN = "AppOnlyAccount"
 
+/** authorize() refuses a sign-in over its per-network or per-account limit with this; the form turns it into a sentence. */
+export const SIGNIN_RATE_LIMITED = "SigninRateLimited"
+
 export function canSendSystemMessages(role: user_role): boolean {
   return role === "app_admin"
 }

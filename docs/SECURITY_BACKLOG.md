@@ -192,6 +192,10 @@ Two things deliberately left as they are, with reasons:
 
 ## Closed
 
+### 2026-10-25 — auth sweep from the 2026-10-24 audit (`fix/security-auth`)
+
+**WEB H1 + M5 + L1 · HIGH · dashboard sign-in limits, per account, off the URL, timing padded.** The per-IP limit matched the raw path, so `/api/auth/callback/%63redentials` (same catch-all, segment decoded by Next) was unlimited, and nothing was per account. Both limits now live in `authorize()` (`lib/auth.ts`), which every path reaches: 5 per network (as before) and 10 per email per 15 minutes (case-folded, counted whether or not the account exists; past the cap the right password is refused too, with `SIGNIN_RATE_LIMITED`, which `/login` turns into a sentence). The route wrapper is gone. An unknown or password-less account is compared against a cost-12 dummy hash. Tests: `__tests__/dashboard-signin-limits.test.ts`, `__tests__/dashboard-signin-limit-runs-in-node.test.ts`. A deliberate cost: anyone can lock one operator out for 15 minutes by spraying their email (the mobile route already trades the same way).
+
 ### 2026-09-28 — a friend could read which pseudonym was you (SCRUM-371)
 
 **HIGH · fixed on `feat/room-handles`**

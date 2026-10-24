@@ -9,7 +9,7 @@ import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { APP_ONLY_SIGNIN, canAccessDashboard } from "@/lib/rbac"
+import { APP_ONLY_SIGNIN, SIGNIN_RATE_LIMITED, canAccessDashboard } from "@/lib/rbac"
 import { safeRedirect } from "@/lib/safe-redirect"
 
 /**
@@ -80,6 +80,10 @@ function SignInForm() {
       }
       // The password was right and the account is an attendee's: no session
       // was made, so say so instead of reappearing blank (SCRUM-172).
+      if (result?.error === SIGNIN_RATE_LIMITED) {
+        setError(RATE_LIMITED)
+        return
+      }
       if (result?.error === APP_ONLY_SIGNIN) {
         setError(APP_ONLY)
         return
@@ -199,7 +203,7 @@ const APP_ONLY = (
 )
 
 const RATE_LIMITED =
-  "Too many sign-in attempts from this network. Wait fifteen minutes and try again."
+  "Too many sign-in attempts from this network or on this account. Wait fifteen minutes and try again."
 
 export default function LoginPage() {
   return <SignInForm />
