@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
      * recipient, so it says nothing about who they are.
      */
     if (preSaveCheck(message)) {
-      return errorResponse("That message can't be sent. Take out contact details and offensive language, and try again.", 400)
+      return errorResponse("That message can’t be sent. Take out contact details and offensive language, and try again.", 400)
     }
     const recipientId = userIdFromRef(ref)
     // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).

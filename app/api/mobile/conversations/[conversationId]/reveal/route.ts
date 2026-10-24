@@ -123,8 +123,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
       // Only the call that flips the flag notifies: a repeat is a no-op, not
       // another push at someone who cannot decline (API M4).
+      const unasked = isUser1 ? "user2_reveal_requested" : "user1_reveal_requested"
       const { count } = await db.private_conversations.updateMany({
-        where: { id: conversationId, ...(isUser1 ? { user2_reveal_requested: false } : { user1_reveal_requested: false }) },
+        where: { id: conversationId, [unasked]: false },
         data: isUser1 ? { user2_reveal_requested: true } : { user1_reveal_requested: true },
       })
 
@@ -165,7 +166,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const mine = isUser1 ? "user1_revealed" : "user2_revealed"
     const { count } = await db.private_conversations.updateMany({
       where: { id: conversationId, [mine]: false },
-      data: { [mine]: true },
+      data: isUser1 ? { user1_revealed: true } : { user2_revealed: true },
     })
     const after = await db.private_conversations.findUniqueOrThrow({
       where: { id: conversationId },

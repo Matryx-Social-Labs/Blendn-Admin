@@ -64,7 +64,7 @@ it.each(["call me on 9876543210 tonight", "add me on instagram @someone_else"])(
     const { a, b } = await pairInARoom()
     const res = await ask(a.token, b.id, text)
     expect(res.status).toBe(400)
-    expect(await res.json()).toMatchObject({ error: expect.stringContaining("can't be sent") })
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("can’t be sent") })
     expect(await db.message_requests.count({ where: { sender_id: a.id } })).toBe(0)
   }
 )
