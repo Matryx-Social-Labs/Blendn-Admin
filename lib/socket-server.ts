@@ -11,7 +11,7 @@ import { blockCounterpartiesMany, keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
-import { buildLiveSnapshot } from "./live-snapshot"
+import { buildLiveSnapshot, type HeldEvent } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
@@ -382,6 +382,8 @@ export function startOpsBroadcast(eventId: string): void {
    */
   let stopped = false
   const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
+  // The event and its days, read once a minute rather than every pass (`HeldEvent`).
+  const held: { current?: HeldEvent } = {}
 
   const tick = async (): Promise<void> => {
     try {
@@ -396,7 +398,7 @@ export function startOpsBroadcast(eventId: string): void {
         stopOpsBroadcast(eventId)
         return
       }
-      const snapshot = await buildLiveSnapshot(eventId)
+      const snapshot = await buildLiveSnapshot(eventId, held)
       if (snapshot) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, snapshot))
     } catch (error) {
       // A failed pass must not kill the loop or the process — the next one may

@@ -59,7 +59,8 @@ describe("I6 — leaving_early fired permanently from day two", () => {
      * one.
      */
     const src = code("lib/live-snapshot.ts")
-    expect(src).toMatch(/const slot = await resolveOccurrence\(eventId, now\)/)
+    expect(src).toMatch(/const slot = pickOccurrence\(slots, now\)/)
+    expect(src).toMatch(/resolveOccurrence\(eventId, now\)/)
 
     /*
      * The scoping moved rather than went away. The four `...today` spreads are

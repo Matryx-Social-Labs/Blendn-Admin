@@ -3,9 +3,8 @@
 // alias verbatim into the require() and fails at boot.
 import { db } from "./db"
 import { logger } from "./logger"
-import { buildLiveSnapshot } from "./live-snapshot"
+import { readLiveSnapshot } from "./live-snapshot"
 import { deriveAlerts, type LiveAlert } from "./live-metrics"
-import { resolveOccurrence } from "./occurrences"
 import { realEventsWhere } from "./event-kind"
 
 /**
@@ -78,17 +77,10 @@ export async function recordIssuesFor(eventId: string, now: Date = new Date()): 
   stillOpen: number
   resolved: number
 }> {
-  const snapshot = await buildLiveSnapshot(eventId)
-  if (!snapshot) return { opened: 0, stillOpen: 0, resolved: 0 }
-
-  const event = await db.events.findUnique({
-    where: { id: eventId },
-    select: { start_time: true, end_time: true },
-  })
-  if (!event) return { opened: 0, stillOpen: 0, resolved: 0 }
-
-  const slot = await resolveOccurrence(eventId, now)
-  const occurrenceId = slot.occurrence?.id ?? null
+  // The snapshot's own reads of the event and its day, not a second set of them.
+  const read = await readLiveSnapshot(eventId)
+  if (!read) return { opened: 0, stillOpen: 0, resolved: 0 }
+  const { snapshot, event, occurrenceId } = read
 
   const alerts: LiveAlert[] = deriveAlerts(snapshot, {
     scheduledEnd: event.end_time,

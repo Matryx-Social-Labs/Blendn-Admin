@@ -7,7 +7,7 @@ import { db } from "./db"
 import { occupancyFrom } from "./occupancy"
 import { headcount } from "./presence-sessions"
 import { escalates } from "./sentiment/taxonomy"
-import { resolveOccurrence } from "./occurrences"
+import { pickOccurrence, resolveOccurrence, type OccurrenceSlot } from "./occurrences"
 
 import { deriveAlerts, type LiveFigures, type LiveSnapshot } from "./live-metrics"
 
@@ -31,15 +31,32 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
+/** What a snapshot reads about the event itself, and what the issue sweep needs of it afterwards. */
+interface EventRead {
+  id: string
+  start_time: Date
+  end_time: Date
+  max_capacity: number | null
+  chat_group: { id: string } | null
+}
+
 /**
- * Compute one snapshot.
- *
- * Read directly rather than kept in memory: a counter held in the process is
- * wrong after any restart, and wrong in a way nobody notices until an alert
- * fails to fire. The queries are all indexed and scoped to one event.
+ * The event and its days, held by a loop that builds a snapshot every few
+ * seconds. Nothing in it moves during a night except an organiser's edit, and
+ * that is picked up within `HELD_EVENT_MS`; re-reading it every five seconds
+ * was two sequential waves out of four.
  */
-export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot | null> {
-  const now = new Date()
+export interface HeldEvent {
+  readAt: number
+  event: EventRead
+  slots: OccurrenceSlot[]
+}
+
+export const HELD_EVENT_MS = 60_000
+
+/** The event and its days: from `held` while it is fresh, else read (and `held` refreshed). */
+async function eventAndSlots(eventId: string, now: Date, held?: { current?: HeldEvent }): Promise<{ event: EventRead; slots: OccurrenceSlot[] } | null> {
+  if (held?.current && now.getTime() - held.current.readAt < HELD_EVENT_MS) return held.current
   const event = await db.events.findFirst({
     where: { id: eventId, deleted_at: null },
     select: {
@@ -53,6 +70,34 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     },
   })
   if (!event) return null
+  const { slots } = await resolveOccurrence(eventId, now)
+  if (held) held.current = { readAt: now.getTime(), event, slots }
+  return { event, slots }
+}
+
+/**
+ * Compute one snapshot.
+ *
+ * Read directly rather than kept in memory: a counter held in the process is
+ * wrong after any restart, and wrong in a way nobody notices until an alert
+ * fails to fire. The queries are all indexed and scoped to one event.
+ *
+ * `held` is the event and its days a loop keeps between ticks (`HeldEvent`);
+ * leave it out for a snapshot that must read them fresh.
+ */
+export async function buildLiveSnapshot(eventId: string, held?: { current?: HeldEvent }): Promise<LiveSnapshot | null> {
+  return (await readLiveSnapshot(eventId, held))?.snapshot ?? null
+}
+
+/** `buildLiveSnapshot`, and the event and day it read: the issue sweep needs both and must not read them twice. */
+export async function readLiveSnapshot(
+  eventId: string,
+  held?: { current?: HeldEvent }
+): Promise<{ snapshot: LiveSnapshot; event: { start_time: Date; end_time: Date }; occurrenceId: string | null } | null> {
+  const now = new Date()
+  const read = await eventAndSlots(eventId, now, held)
+  if (!read) return null
+  const { event, slots } = read
 
   const tenMinutesAgo = new Date(now.getTime() - 10 * MINUTE)
   const thirtyMinutesAgo = new Date(now.getTime() - 30 * MINUTE)
@@ -87,13 +132,12 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
    * Falls back to event-wide when nothing resolves, which is identical for a
    * single-day event and is the honest answer for an event between days.
    */
-  const slot = await resolveOccurrence(eventId, now)
+  const slot = pickOccurrence(slots, now)
 
   const [
     live,
     arrivalBuckets,
-    recentMessages,
-    activeChatters,
+    [chat],
     openFlags,
     feedback,
   ] = await Promise.all([
@@ -140,28 +184,22 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     GROUP BY 1
     ORDER BY 1
     `,
+    /*
+     * Counted in the database: the last ten minutes' messages and the distinct
+     * senders of the last thirty. The senders used to be a `distinct` findMany,
+     * which Prisma applies in JS -- every message row of the window shipped to
+     * be de-duplicated, ~3,000 a tick in a busy room.
+     * `(chat_group_id, created_at)` serves both.
+     */
     chatGroupId
-      ? db.chat_messages.count({
-          where: {
-            chat_group_id: chatGroupId,
-            deleted_at: null,
-            created_at: { gte: tenMinutesAgo },
-          },
-        })
-      : Promise.resolve(0),
-    chatGroupId
-      ? db.chat_messages
-          .findMany({
-            where: {
-              chat_group_id: chatGroupId,
-              deleted_at: null,
-              created_at: { gte: thirtyMinutesAgo },
-            },
-            select: { user_id: true },
-            distinct: ["user_id"],
-          })
-          .then((rows) => rows.length)
-      : Promise.resolve(0),
+      ? db.$queryRaw<Array<{ recent: bigint; chatters: bigint }>>`
+          SELECT COUNT(*) FILTER (WHERE created_at >= ${tenMinutesAgo}) AS recent,
+                 COUNT(DISTINCT user_id) AS chatters
+            FROM chat_messages
+           WHERE chat_group_id = ${chatGroupId}::uuid
+             AND deleted_at IS NULL
+             AND created_at >= ${thirtyMinutesAgo}`
+      : Promise.resolve([{ recent: BigInt(0), chatters: BigInt(0) }]),
     chatGroupId
       ? db.moderation_flags.count({ where: { chat_group_id: chatGroupId, status: "pending" } })
       : Promise.resolve(0),
@@ -279,8 +317,8 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
     overCapacity: occupancy.overCapacity,
     checkInRate10m,
     medianRate10m: median(buckets),
-    messagesPerMinute: Math.round((recentMessages / 10) * 10) / 10,
-    activeChatters30m: activeChatters,
+    messagesPerMinute: Math.round((Number(chat.recent) / 10) * 10) / 10,
+    activeChatters30m: Number(chat.chatters),
     openFlags,
     sentiment,
     categories: Array.from(categoryCounts.entries())
@@ -294,9 +332,13 @@ export async function buildLiveSnapshot(eventId: string): Promise<LiveSnapshot |
    * derived from a range would fire on the wrong side of every threshold.
    */
   return {
-    ...figures,
-    view: "host",
-    alerts: deriveAlerts(figures, { scheduledEnd: event.end_time, scheduledStart: event.start_time, now }),
+    snapshot: {
+      ...figures,
+      view: "host",
+      alerts: deriveAlerts(figures, { scheduledEnd: event.end_time, scheduledStart: event.start_time, now }),
+    },
+    event: { start_time: event.start_time, end_time: event.end_time },
+    occurrenceId: slot.occurrence?.id ?? null,
   }
 }
 
