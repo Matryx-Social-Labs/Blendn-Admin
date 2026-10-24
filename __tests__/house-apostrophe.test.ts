@@ -23,7 +23,8 @@ import path from "path"
 import ts from "typescript"
 
 const ROOT = path.join(__dirname, "..")
-const TYPEWRITER = /[A-Za-z}]'[A-Za-z]|[A-Za-z](&#39;|&#x27;|&apos;)[A-Za-z]/
+// Between letters ("It's"), or a plural possessive ("hosts' events": an s, the apostrophe, then a gap or the end).
+const TYPEWRITER = /[A-Za-z}]'[A-Za-z]|[A-Za-z](&#39;|&#x27;|&apos;)[A-Za-z]|[A-Za-z]s'(?=[\s.,;:!?]|$)/
 
 const walk = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -128,12 +129,13 @@ it("only a marked array of strings is a matcher: not a marked single string, an 
       "// See house-apostrophe: matcher, which this is not",
       'export const MENTIONED = ["ain\'t"]',
       'export const SHOWN = "It\'s a Blend"',
+      'export const PLURAL = "other hosts\' events"',
     ].join("\n")
   )
   try {
     const lines = (at: string[]) => at.map((a) => a.split(":").pop())
-    // Flagged: the marked single string (4), the array inside a marked object (7), the mention (12), the copy (13).
-    expect(lines(typewriterApostrophes([file]))).toEqual(["4", "7", "12", "13"])
+    // Flagged: the marked single string (4), the array inside a marked object (7), the mention (12), the copy (13), the plural possessive (14).
+    expect(lines(typewriterApostrophes([file]))).toEqual(["4", "7", "12", "13", "14"])
     // The markers found, and the mention is not one.
     expect(lines(markerComments([file]))).toEqual(["1", "3", "5", "8"])
   } finally {

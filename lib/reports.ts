@@ -53,7 +53,7 @@ export const REPORTS: ReportDef[] = [
     label: "Events",
     description: "Every event in the window with capacity, RSVPs and attendance.",
     venueDescription:
-      "Your own events, and other hosts' at your venues since your claim, with their counts under 5 held back.",
+      "Your own events, and other hosts’ at your venues since your claim, with their counts under 5 held back.",
     roles: ["app_admin", "organizer", "venue_owner"],
   },
   {
@@ -73,7 +73,7 @@ export const REPORTS: ReportDef[] = [
     key: "venue-check-ins",
     label: "Venue check-ins",
     description:
-      "Guests per day at other hosts' events at your venues, since your claim. Under 5 is held back, and left blank.",
+      "Guests per day at other hosts’ events at your venues, since your claim. Under 5 is held back, and left blank.",
     /*
      * A venue sees aggregates, never people (SCRUM-501). The events it runs
      * itself are in Check-ins, as for any organiser; this is everybody else's
