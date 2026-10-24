@@ -17,7 +17,7 @@ const pushTokenSchema = z.object({
   token: z.string().min(1, "Token is required"),
   // zod 4 replaced the `errorMap` param with `error`.
   platform: z.enum(["ios", "android"], {
-    error: "Platform must be 'ios' or 'android'",
+    error: "Platform must be “ios” or “android”",
   }),
   /**
    * Which Android channels this install created (`CHANNEL_SET_FLOW9` in
