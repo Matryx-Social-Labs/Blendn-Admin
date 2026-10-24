@@ -250,7 +250,7 @@ describe("the venue check-ins export is counts, never people (F5)", () => {
   it("says which events each check-ins download holds", () => {
     const shown = Object.fromEntries(reportsFor("venue_owner").map((r) => [r.key, r.description]))
     expect(shown["check-ins"]).toMatch(/your organisation runs/)
-    expect(shown["venue-check-ins"]).toMatch(/other hosts' events at your venues, since your claim/)
+    expect(shown["venue-check-ins"]).toMatch(/other hosts’ events at your venues, since your claim/)
     expect(reportsFor("organizer").find((r) => r.key === "check-ins")?.description).toBe(
       "Individual GPS-validated check-ins, one row each."
     )
