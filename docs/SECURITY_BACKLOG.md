@@ -192,6 +192,58 @@ Two things deliberately left as they are, with reasons:
 
 ## Closed
 
+### 2026-10-25 — API abuse sweep (audit `security-api.md`: M1, M2, M3, M4, M6, M8, two of L10)
+
+**MEDIUM · fixed on `fix/security-abuse`**
+
+Each has a test that failed before the fix.
+
+- **M2, a mute lifted by leaving.** `POST /chat/groups/:id/leave` writes `left`;
+  check-in kept `muted` only while the row still said `muted`. The mute is
+  `muted_at` (it outlives the status), so the rejoin write in
+  `lib/check-in-core.ts` now restores `muted` when `muted_at` is set. Bans were
+  already kept (`banned_by`). `mute-survives-leave.itest.ts`.
+- **M3, a push token on two accounts.** Registering a token now deletes it from
+  every other user in the same transaction as the upsert
+  (`notifications/token/route.ts`). `push-token-one-owner.itest.ts`.
+- **M4, a push on every reveal call.** Ask and give flip their flag with a
+  conditional `updateMany`; only the call that changed the row pushes and emits,
+  so a repeat, or three in parallel, sends one. The route already had the
+  `write` limit (30/min); the repeat was the amplifier. `reveal-push-once.itest.ts`.
+- **M8, reports.** `reason` is capped at 200 characters and `description` at 2000
+  on the message, user, event, room and conversation-leave reports
+  (`REPORT_*_MAX` in `lib/api-input.ts`). All of them, and the offer report,
+  now share the `reportDay` allowance (30 a day, the existing policy); the
+  conversation leave applies it only when it carries a `report`.
+  `report-caps.itest.ts`, and `report-routes-daily-cap.test.ts` keeps new report
+  routes on it.
+- **M6, upload size.** The presigned-url route takes an optional `size`; when
+  sent it is signed into the URL as `content-length` (the storage refuses any
+  other length) and a size above the folder ceiling is `400`.
+  `upload-size-signed.test.ts`.
+- **M1, message-request text.** The text now goes through `preSaveCheck` (keyword
+  and contact details, no model, as for a DM) before anything is stored or
+  pushed; a hit is `400`. `message-request-moderated.itest.ts`.
+- **L10.** Sign-out revokes a refresh token only if the caller owns it; the chat
+  `before` cursor is looked up in its own room only.
+  `signout-and-cursor-scoping.itest.ts`.
+
+**Still open, on purpose:**
+
+- **M6, the cap is opt-in.** An installed client that does not send `size` still
+  gets an unbound URL. Make `size` required once the app ships sending it; until
+  then the bound is `sealUpload` at attach time. A hard bound for any client
+  needs a presigned POST with a `content-length-range` policy (new client
+  upload path, and Tigris POST-policy support unverified).
+- **M6, orphans.** Raw uploads that are never attached are not swept, and a
+  `profile/` raw object is world-readable until then. A sweep needs a list of
+  attached keys to diff against, or a bucket lifecycle rule on the raw prefixes
+  (infrastructure, not this repo). Not done here.
+- **M1, a hit is a refusal, not a stored hidden row.** `message_requests` has no
+  moderation column and this fix adds no migration, so there is no evidence row
+  for a report to rest on. Add one if a hidden-but-stored shape is wanted.
+- **M8, the `reportDay` number is 30, not 50.** The existing policy was reused.
+
 ### 2026-09-28 — a friend could read which pseudonym was you (SCRUM-371)
 
 **HIGH · fixed on `feat/room-handles`**
