@@ -7,7 +7,7 @@
 const mockDb = {
   profiles: { findUnique: jest.fn() },
   venues: { findMany: jest.fn(), count: jest.fn() },
-  events: { findMany: jest.fn() },
+  events: { findMany: jest.fn(), groupBy: jest.fn() },
   event_check_ins: { findMany: jest.fn() },
 }
 const mockLimit = jest.fn()
@@ -43,7 +43,6 @@ const VENUE = {
   timezone: "Asia/Kolkata",
   day_reset_hour: 6,
   hours: null,
-  _count: { events: 0 },
   events: [],
 }
 const ADULT = { age: 30, date_of_birth: null, onboarded: true }
@@ -65,6 +64,7 @@ beforeEach(() => {
   mockDb.venues.findMany.mockResolvedValue([VENUE])
   mockDb.venues.count.mockResolvedValue(1)
   mockDb.events.findMany.mockResolvedValue([])
+  mockDb.events.groupBy.mockResolvedValue([])
   mockDb.event_check_ins.findMany.mockResolvedValue([])
 })
 
