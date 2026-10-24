@@ -3,9 +3,9 @@ import { NextAuthOptions, getServerSession, User } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
-import { clientIpFrom } from "./client-ip"
+import { clientNetworkFrom } from "./client-ip"
 import { RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW } from "./constants"
-import { hit } from "./rate-limit-store"
+import { forget, hit } from "./rate-limit-store"
 import { APP_ONLY_SIGNIN, SIGNIN_RATE_LIMITED, canAccessDashboard } from "./rbac"
 import { SessionEnded, isRevoked, provenAt } from "./session-revocation"
 import type { user_role } from "@prisma/client"
@@ -21,17 +21,32 @@ const DUMMY_HASH = "$2b$12$O.tIGjDT8kuGET3q.N9fd.iBNLaB2NnxO7PopJJfIp.ozxgF47CE2
  * Both sign-in limits, counted here because authorize() is the one place every
  * request path to a password check reaches. They used to match the raw URL in
  * the route and a percent-encoded `%63redentials` walked around them (WEB H1).
- * The account key is the typed email, whether or not it exists, so the cap is
- * no oracle. An attempt counts whether the password is right or not: past the
- * cap a correct password is refused too. Throws, never returns, so the form
- * can say "wait" rather than "wrong password".
+ *
+ * - Per network (the /64 for IPv6): 5 attempts in 15 minutes, as before.
+ * - Per email, across every network: 50 wrong passwords in 15 minutes. Counted
+ *   before the password is read so parallel guesses cannot all slip under it,
+ *   and cleared by a correct password, so only FAILURES accumulate. The ceiling
+ *   is high because anyone can spend it against a name; a person on their own
+ *   network is held to the network limit first, so an attacker elsewhere has to
+ *   bring ten networks to lock an operator out.
+ *
+ * The account key is the typed email whether or not it exists, so the cap is no
+ * oracle. Past either cap the right password is refused too. Both are
+ * fail-closed where Redis is configured. Throws, never returns null, so the
+ * form can say "wait" rather than "wrong password".
  */
-async function refuseOverSigninLimits(email: string, headers: Record<string, unknown> | undefined): Promise<void> {
-  const ip = clientIpFrom({ get: (name) => (typeof headers?.[name] === "string" ? (headers[name] as string) : null) })
+const signinKeys = (email: string, headers: Record<string, unknown> | undefined) => ({
+  network: `rl:auth:dashboard-signin:${clientNetworkFrom({
+    get: (name) => (typeof headers?.[name] === "string" ? (headers[name] as string) : null),
+  })}`,
+  account: `rl:auth:dashboard-signin:acct:${email}`,
+})
+
+async function refuseOverSigninLimits(keys: { network: string; account: string }): Promise<void> {
   const windowMs = RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN
-  const byNetwork = await hit(`rl:auth:dashboard-signin:${ip}`, windowMs)
+  const byNetwork = await hit(keys.network, windowMs, { failClosed: true })
   if (byNetwork.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN) throw new Error(SIGNIN_RATE_LIMITED)
-  const byAccount = await hit(`rl:auth:dashboard-signin:acct:${email}`, windowMs)
+  const byAccount = await hit(keys.account, windowMs, { failClosed: true })
   if (byAccount.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN_ACCOUNT) throw new Error(SIGNIN_RATE_LIMITED)
 }
 
@@ -55,13 +70,16 @@ export const authOptions: NextAuthOptions = {
 
         // Stored lowercase (SCRUM-328), so the lookup is too.
         const email = credentials.email.trim().toLowerCase()
-        await refuseOverSigninLimits(email, req?.headers)
+        const keys = signinKeys(email, req?.headers)
+        await refuseOverSigninLimits(keys)
         const user = await db.user.findUnique({ where: { email } })
 
         const isValid = await bcrypt.compare(credentials.password, user?.password ?? DUMMY_HASH)
         if (!user?.password || !isValid) {
           return null
         }
+        // Proved who they are: the wrong guesses before it are not held against them.
+        await forget(keys.account)
 
         /*
          * A suspended or deleted account cannot sign in.

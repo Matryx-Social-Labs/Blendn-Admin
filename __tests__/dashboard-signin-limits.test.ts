@@ -53,21 +53,43 @@ describe("per network", () => {
   })
 })
 
-describe("per account", () => {
-  it("refuses the eleventh attempt on one email from ten different addresses, even with the right password", async () => {
+/** `count` wrong passwords on one email, each from a network of its own. */
+async function spray(email: string, count: number) {
+  for (let i = 0; i < count; i++) {
+    await expect(authorize({ email, password: "wrong" }, from(`10.${100 + (n % 100)}.${Math.floor(n / 250)}.${++n % 250}`))).resolves.toBeNull()
+  }
+}
+
+describe("per account, across networks", () => {
+  it("refuses the 51st wrong password on one email, even the right one, from a fresh network", async () => {
     const email = `${fresh("victim")}@x.test`
     mockFindUnique.mockResolvedValue(operator(email))
-    for (let i = 0; i < 10; i++) {
-      await expect(authorize({ email, password: "wrong" }, from(`10.2.${n}.${++n}`))).resolves.toBeNull()
-    }
+    await spray(email, 50)
     await expect(authorize({ email, password: PASSWORD }, from(`10.3.0.${++n}`))).rejects.toThrow(SIGNIN_RATE_LIMITED)
+  })
+
+  it("does not lock the victim out of their own network below that ceiling", async () => {
+    const email = `${fresh("below")}@x.test`
+    mockFindUnique.mockResolvedValue(operator(email))
+    await spray(email, 40)
+    await expect(authorize({ email, password: PASSWORD }, from(`10.3.1.${++n}`))).resolves.toMatchObject({ id: "u1" })
+  })
+
+  it("clears the account's count on a correct password", async () => {
+    const email = `${fresh("clears")}@x.test`
+    mockFindUnique.mockResolvedValue(operator(email))
+    await spray(email, 49)
+    await expect(authorize({ email, password: PASSWORD }, from(`10.3.2.${++n}`))).resolves.toMatchObject({ id: "u1" })
+    // Without the clear, the next guess is the 51st.
+    await spray(email, 49)
+    await expect(authorize({ email, password: PASSWORD }, from(`10.3.3.${++n}`))).resolves.toMatchObject({ id: "u1" })
   })
 
   it("counts the email case-insensitively and trimmed", async () => {
     const email = `${fresh("case")}@x.test`
     mockFindUnique.mockResolvedValue(operator(email))
-    for (let i = 0; i < 10; i++) {
-      await authorize({ email: i % 2 ? ` ${email.toUpperCase()} ` : email, password: "wrong" }, from(`10.4.${n}.${++n}`))
+    for (let i = 0; i < 50; i++) {
+      await authorize({ email: i % 2 ? ` ${email.toUpperCase()} ` : email, password: "wrong" }, from(`10.4.${n}.${++n % 250}`))
     }
     await expect(authorize({ email, password: PASSWORD }, from(`10.5.0.${++n}`))).rejects.toThrow(SIGNIN_RATE_LIMITED)
   })
@@ -75,8 +97,19 @@ describe("per account", () => {
   it("is not an oracle: an address with no account hits the same cap", async () => {
     const email = `${fresh("ghost")}@x.test`
     mockFindUnique.mockResolvedValue(null)
-    for (let i = 0; i < 10; i++) await authorize({ email, password: "wrong" }, from(`10.6.${n}.${++n}`))
+    await spray(email, 50)
     await expect(authorize({ email, password: "wrong" }, from(`10.7.0.${++n}`))).rejects.toThrow(SIGNIN_RATE_LIMITED)
+  })
+})
+
+describe("the network is the /64 for IPv6", () => {
+  it("shares one bucket across addresses inside a /64", async () => {
+    mockFindUnique.mockResolvedValue(null)
+    const prefix = `2001:db8:a:${(++n + 4096).toString(16)}`
+    for (let i = 0; i < 5; i++) {
+      await authorize({ email: `${fresh("v6")}@x.test`, password: "wrong" }, from(`${prefix}::${i + 1}`))
+    }
+    await expect(authorize({ email: `${fresh("v6")}@x.test`, password: "wrong" }, from(`${prefix}:ffff:1:2:3`))).rejects.toThrow(SIGNIN_RATE_LIMITED)
   })
 })
 
