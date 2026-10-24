@@ -121,13 +121,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return errorResponse("They have already revealed", 400)
       }
 
-      await db.private_conversations.update({
-        where: { id: conversationId },
+      // Only the call that flips the flag notifies: a repeat is a no-op, not
+      // another push at someone who cannot decline (API M4).
+      const { count } = await db.private_conversations.updateMany({
+        where: { id: conversationId, ...(isUser1 ? { user2_reveal_requested: false } : { user1_reveal_requested: false }) },
         data: isUser1 ? { user2_reveal_requested: true } : { user1_reveal_requested: true },
       })
 
       const themId = isUser1 ? conversation.user2_id : conversation.user1_id
-      notifyRevealRequest(themId, conversationId).catch(() => {})
+      if (count === 1) notifyRevealRequest(themId, conversationId).catch(() => {})
 
       return successResponse({ requested: true })
     }
@@ -165,13 +167,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     })
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
-    notifyReveal(themId, conversationId).catch(() => {})
-    // Their open DM re-reads now rather than on the next push they may never get.
-    // Once both have revealed the same event goes to both: the friend offer is possible.
-    emitPrivateRevealed(
-      conversationId,
-      after.user1_revealed && after.user2_revealed ? [authUser.userId, themId] : [themId]
-    )
+    // A repeat reveal changes nothing, so it tells nobody (API M4).
+    const changed = !(isUser1 ? conversation.user1_revealed : conversation.user2_revealed)
+    if (changed) {
+      notifyReveal(themId, conversationId).catch(() => {})
+      // Their open DM re-reads now rather than on the next push they may never get.
+      // Once both have revealed the same event goes to both: the friend offer is possible.
+      emitPrivateRevealed(
+        conversationId,
+        after.user1_revealed && after.user2_revealed ? [authUser.userId, themId] : [themId]
+      )
+    }
     // Both sides have shown themselves now: a friend request held for this pair is delivered.
     // Decided from the values the UPDATE returned, not from the read before it:
     // two reveals at once each read "the other has not", and only the second
