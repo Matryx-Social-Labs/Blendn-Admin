@@ -65,7 +65,11 @@ const events: string[] = []
 const as = (id: string, role: "venue_owner" | "app_admin" = "venue_owner") => mockGetAuth.mockResolvedValue({ user: { id, role, signedInAt: Date.now() } })
 const yearsAgo = (years: number) => new Date(Date.now() - (years * 365.25 + 30) * DAY)
 
-async function person(label: string, o: { age?: number | null; first?: string; fresh?: boolean } = {}) {
+/**
+ * A fixture person who said yes to "Offers from places", unless `asMade`: then
+ * the profile keeps what a new account gets, which is no (S-5).
+ */
+async function person(label: string, o: { age?: number | null; first?: string; fresh?: boolean; asMade?: boolean } = {}) {
   const id = await makeUser(testId(label))
   users.push(id)
   // Accounts under 30 days old are never in an audience (M4): fixtures are two months old unless said.
@@ -74,7 +78,12 @@ async function person(label: string, o: { age?: number | null; first?: string; f
   const age = o.age === undefined ? 30 : o.age
   await db.profiles.update({
     where: { id },
-    data: { name: `${o.first ?? "Test"} ${label}`, date_of_birth: age === null ? null : yearsAgo(age), age: null },
+    data: {
+      name: `${o.first ?? "Test"} ${label}`,
+      date_of_birth: age === null ? null : yearsAgo(age),
+      age: null,
+      ...(!o.asMade && { offers_from_places: true }),
+    },
   })
   return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
 }
@@ -583,6 +592,21 @@ describe("review pass 2", () => {
     await meOffersRoute.PUT(req("/api/mobile/me/offers", R[0].token, "PUT", { enabled: true }))
     expect((await actions.sendOffer({ venueId: G, text: "Third try", days: 7 })).reached).toBe("5–9")
     expect(await db.audit_logs.count({ where: { user_id: R[0].id } })).toBe(0)
+  })
+
+  it("a new account has offers from places off, and is in no audience until it turns them on (S-5)", async () => {
+    const S = await venue(orgA)
+    await pro(S)
+    for (let i = 0; i < 4; i++) await regular(S, R[i].id)
+    const newcomer = await person("rg_asmade", { asMade: true })
+    await regular(S, newcomer.id)
+    expect((await meOffersRoute.GET(req("/api/mobile/me/offers", newcomer.token))).status).toBe(200)
+    expect((await (await meOffersRoute.GET(req("/api/mobile/me/offers", newcomer.token))).json()).data).toEqual({ enabled: false, pushes: false })
+    expect((await db.profiles.findUniqueOrThrow({ where: { id: newcomer.id }, select: { offers_from_places: true } })).offers_from_places).toBe(false)
+    as(owner)
+    expect(await refusal(actions.sendOffer({ venueId: S, text: "Before the yes", days: 7 }))).toMatch(/^Fewer than 5 regulars/)
+    await meOffersRoute.PUT(req("/api/mobile/me/offers", newcomer.token, "PUT", { enabled: true }))
+    expect((await actions.sendOffer({ venueId: S, text: "After the yes", days: 7 })).reached).toBe("5–9")
   })
 
   it("offer pushes are off until the person says yes, only a real boolean says it, and the yes keeps its time (SCRUM-628)", async () => {

@@ -256,7 +256,7 @@ export async function setRegularPrefs(
 }
 
 export interface OfferSettings {
-  /** "Offers from places": the one switch for every venue (review M6). On unless turned off; off, no offer reaches them. */
+  /** "Offers from places": the one switch for every venue (review M6). Off until turned on (S-5); off, no offer reaches them. */
   enabled: boolean
   /** Offer pushes (SCRUM-628): off until they say yes in the app. Off, offers still arrive, with no push. */
   pushes: boolean
@@ -266,7 +266,7 @@ const settingsSelect = { offers_from_places: true, offer_push_consent_at: true }
 
 export async function offerSettings(userId: string): Promise<OfferSettings> {
   const profile = await db.profiles.findUnique({ where: { id: userId }, select: settingsSelect })
-  return { enabled: profile?.offers_from_places ?? true, pushes: Boolean(profile?.offer_push_consent_at) }
+  return { enabled: profile?.offers_from_places ?? false, pushes: Boolean(profile?.offer_push_consent_at) }
 }
 
 /**

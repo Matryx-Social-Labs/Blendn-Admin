@@ -113,7 +113,7 @@ const adultSql = Prisma.sql`
  *
  * Regulars (above), less anyone who could not or should not get it: a
  * deleted or suspended account, an account under 30 days old, anyone not
- * known to be an adult, anyone who turned "Offers from places" off or muted
+ * known to be an adult, anyone without "Offers from places" on (off by default, S-5) or who muted
  * this venue's offers, and the venue's own people (members of its
  * organisation are its staff, not its guests).
  */
@@ -128,7 +128,7 @@ export function audienceSql(v: RegularsVenue, now: Date = new Date()): Prisma.Sq
        AND u."deletedAt" IS NULL
        AND u.suspended_at IS NULL
        AND u."createdAt" <= ${now}::timestamptz - make_interval(days => ${MIN_ACCOUNT_AGE_DAYS})
-       AND p.offers_from_places IS DISTINCT FROM false
+       AND p.offers_from_places = true
        AND ${adultSql}
        AND NOT EXISTS (SELECT 1 FROM venue_offer_mutes m WHERE m.venue_id = ${v.id}::uuid AND m.user_id = n.user_id)
        AND NOT EXISTS (SELECT 1 FROM organisation_members om WHERE om.org_id = ${v.owner_org_id}::uuid AND om.user_id = n.user_id)`

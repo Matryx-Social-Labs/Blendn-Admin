@@ -3996,7 +3996,7 @@ A venue on Venue Pro can send an offer — "First drink on the house, Thu–Sun
 before 10" — to its **regulars**: people who came on 3 or more nights in the
 last 30, counted from the venue's claim on (a host's event there or its own
 live room; staff never count; accounts under 30 days old and anyone with
-"Offers from places" off never are). The venue picks the words; we pick who,
+"Offers from places" not on never are; it is off by default). The venue picks the words; we pick who,
 and the venue never learns who. It is told how many each offer reached as a
 band (5–9, 10–24, 25–49, 50+), and how many were opened and redeemed only as
 totals across its offers, published once a week, each held back when it or
@@ -4063,10 +4063,12 @@ without an adult age on file. 404 for no such venue.
 
 ### GET / PUT /me/offers — "Offers from places" and offer notifications
 
-`{ "enabled": true, "pushes": false }`.
+`{ "enabled": false, "pushes": false }` for an account made since S-5.
 
 - `enabled` — one switch for every venue: off, no venue's offer reaches you.
-  On unless turned off.
+  **Off until turned on** (S-5, 2026-10-24: promotional consent is opt-in;
+  `profiles.offers_from_places` defaults false). Accounts made before then
+  keep the `true` they were given; changing that is a product decision.
 - `pushes` — offer notifications. **Off until you say yes** (SCRUM-628), for
   every account: ask in context, the first time an offer exists for the
   person, never in onboarding. Off, offers still arrive with no push. The yes

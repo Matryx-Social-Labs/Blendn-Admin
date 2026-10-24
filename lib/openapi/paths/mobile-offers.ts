@@ -149,7 +149,7 @@ registry.registerPath({
 
 const OffersSettingSchema = z
   .object({
-    enabled: z.boolean().describe("\"Offers from places\": off, no venue's offer reaches you. On unless turned off."),
+    enabled: z.boolean().describe("\"Offers from places\": off, no venue's offer reaches you. Off until turned on (S-5: promotional consent is opt-in; accounts made before 2026-10-24 keep the on they were given)."),
     pushes: z
       .boolean()
       .describe(

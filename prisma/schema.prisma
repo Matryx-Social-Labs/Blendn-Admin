@@ -374,9 +374,10 @@ model profiles {
   push_crew      Boolean  @default(true)
   /// "After the night": rating_request.
   push_night     Boolean  @default(true)
-  /// "Offers from places" (step 12): off, no venue's offer reaches them. On by
-  /// default (the coordinator's default, flagged to the owner).
-  offers_from_places Boolean @default(true)
+  /// "Offers from places" (step 12): off, no venue's offer reaches them. Off
+  /// by default since S-5 (2026-10-24, D21): promotional consent is opt-in.
+  /// Rows made before then keep the true they were given (a product call).
+  offers_from_places Boolean @default(false)
   /// When they said yes to offer pushes; null is no (SCRUM-628). A venue's
   /// offer is a promotion, and App Store guideline 4.5.4 allows a promotional
   /// push only to someone who opted in through the app — so nobody has one
