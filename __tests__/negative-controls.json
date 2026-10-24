@@ -2086,13 +2086,13 @@
       "date": "2026-10-24"
     },
     "house-apostrophe.test.ts": {
-      "guards": "S-3, S-4 (2026-10-24): no string or template literal in lib/ or app/api/mobile/ (OpenAPI, log calls, thrown Errors and tagged SQL excepted) carries a typewriter apostrophe between letters, nor its HTML entity; the house apostrophe is the curly one, as the app has it.",
-      "mutation": "M2111 the Blend push title in lib/crews/like.ts set back to a typewriter apostrophe.",
-      "observed": "M2111: 1 failing, naming lib/crews/like.ts:366. Restored; 1 of 1.",
+      "guards": "S-3, S-4 (2026-10-24): no string or template literal in lib/ or app/api/mobile/ (OpenAPI, log calls, thrown Errors and tagged SQL excepted) carries a typewriter apostrophe between letters, nor its HTML entity; the house apostrophe is the curly one, as the app has it. Review LOW: only an array of strings whose own declaration or property begins with a `house-apostrophe: matcher` comment is exempt (not a single string, an enclosing object, or a mention); every marker line in lib/ and app/api/mobile/ is pinned in MARKED.",
+      "mutation": "M2111 the Blend push title in lib/crews/like.ts set back to a typewriter apostrophe. M2124 a marked matcher list added to lib/this-or-that.ts without adding it to MARKED.",
+      "observed": "M2111: 1 failing, naming lib/crews/like.ts:366. Restored; 1 of 1. M2124: 1 failing, naming lib/this-or-that.ts:71 (a first, token-scanner version of the pin passed this control and was replaced by the line match). Restored; 3 of 3.",
       "date": "2026-10-24"
     },
     "room-status-on-open.itest.ts": {
-      "guards": "S-12 (2026-10-24): GET /events/:eventId/chat carries the room's own status, `locked` for every member of a locked room (a muted one included, whose write.reason is the mute), `active` once reopened.",
+      "guards": "S-12 (2026-10-24): GET /events/:eventId/chat carries the room's own status, `locked` for every member of a locked room (a muted one included, whose write.reason is the mute), `active` once reopened. Review LOW: only an array of strings whose own declaration or property begins with a `house-apostrophe: matcher` comment is exempt (not a single string, an enclosing object, or a mention); every marker line in lib/ and app/api/mobile/ is pinned in MARKED.",
       "mutation": "M2115 status hard-coded to \"active\".",
       "observed": "M2115: 1 failing. Restored; 1 of 1.",
       "date": "2026-10-24"
