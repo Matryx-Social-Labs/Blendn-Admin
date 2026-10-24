@@ -14,7 +14,7 @@ import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from
 import { buildLiveSnapshot } from "./live-snapshot"
 import { hereCountFor } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
-import { ownerDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
+import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
 import { readableUrl } from "./tigris"
 import { isUuid } from "./api-input"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
@@ -514,7 +514,6 @@ export async function emitChatTyping(
             kind: true,
             event_id: true,
             event: { select: { status: true, deleted_at: true, kind: true } },
-            ...ownerDoor(socket.data.userId),
           },
         },
       },
@@ -523,9 +522,11 @@ export async function emitChatTyping(
     if (!membership || membership.status !== "active") return
     // The room's door, for every kind: a member row whose owner no longer
     // admits them (a board post's ask that is not accepted) types to nobody.
-    if (roomOwnerDenial(membership.chat_group, socket.data.userId)) return
+    // …read for this room's kind alone (`withOwnerDoor`).
+    const room = await withOwnerDoor(chatGroupId, socket.data.userId, membership.chat_group)
+    if (roomOwnerDenial(room, socket.data.userId)) return
     // A venue day's room is the people live in it: an ended Go Live types into nothing.
-    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
+    if (room.event && !liveInVenueDay(room.event, membership)) return
 
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
@@ -688,6 +689,12 @@ export async function emitPrivateRead(
     if (ids.length === 0) return
 
     const theirs = { id: { in: ids }, conversation_id: conversationId, sender_id: { not: socket.data.userId } }
+    // The reader's setting is independent of the writes below, so it is read beside them.
+    const readerPending = db.profiles.findUnique({
+      where: { id: socket.data.userId },
+      select: { read_receipts: true },
+    })
+    readerPending.catch(() => undefined) // awaited below; marked handled in case a write throws first
     // A read counts as delivered (SCRUM-408): the ones not delivered yet, named for the off branch below.
     const undelivered = (
       await db.private_messages.findMany({ where: { ...theirs, delivered_at: null }, select: { id: true } })
@@ -702,10 +709,7 @@ export async function emitPrivateRead(
      * read receipts off still clears their own unread badge; they simply do
      * not tell the sender.
      */
-    const reader = await db.profiles.findUnique({
-      where: { id: socket.data.userId },
-      select: { read_receipts: true },
-    })
+    const reader = await readerPending
     if (reader?.read_receipts === false) {
       // Delivery is not private (it goes out whatever the setting): the sender
       // still sees ✓✓ for what this read delivered. With receipts on, the
@@ -887,7 +891,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const pubClient = createClient({ url: redisUrl })
         const subClient = pubClient.duplicate()
         await Promise.all([pubClient.connect(), subClient.connect()])
-        io?.adapter(createAdapter(pubClient, subClient))
+        /*
+         * `requestsTimeout` is how long a cross-replica request (`fetchSockets`,
+         * `serverSideEmit` acks) waits for every other replica to answer. The
+         * default is 5 s: with two or more replicas one slow replica holds every
+         * `fetchSockets` for up to 5 s, and when it times out the call rejects
+         * and that socket delivery is dropped. 1 s is far above a healthy
+         * round trip over the Redis in the same region and bounds both.
+         */
+        io?.adapter(createAdapter(pubClient, subClient, { requestsTimeout: 1000 }))
         logger.info("Socket.io Redis adapter attached")
       } catch (error) {
         // Falling back to in-memory is correct at one replica and wrong at

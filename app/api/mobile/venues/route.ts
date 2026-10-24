@@ -27,15 +27,7 @@ import {
   venueTier,
 } from "@/lib/venue-listing"
 import { tonightHours } from "@/lib/venue-tonight"
-
-/**
- * The most venues a distance sort will pull into memory at once.
- *
- * Same shape and the same reasoning as `DISTANCE_SORT_CEILING` in the events
- * route: this bounds what gets *sorted*, not what gets returned, and it is
- * sized to be unreachable and to say so in the log if it ever is not.
- */
-const DISTANCE_SORT_CEILING = 5000
+import { DISTANCE_SORT_CEILING, distanceCandidates } from "@/lib/venue-distance"
 
 /**
  * Hotspots — the venue-shaped twin of The Pulse.
@@ -97,8 +89,19 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
-    // Every row carries a live count; the venue page's limit, for the same reason.
-    const limited = await rateLimit(request, userLimit("read", "venues", authUser.userId))
+    /*
+     * The limit and the viewer's profile are independent, so they go out
+     * together: a Singapore round trip each, in series, for every list (staging
+     * p50 58 ms). A refused request wastes one primary-key read.
+     */
+    const [limited, viewer] = await Promise.all([
+      // Every row carries a live count; the venue page's limit, for the same reason.
+      rateLimit(request, userLimit("read", "venues", authUser.userId)),
+      db.profiles.findUnique({
+        where: { id: authUser.userId },
+        select: { age: true, date_of_birth: true, onboarded: true },
+      }),
+    ])
     if (limited) return limited
 
     const parsed = venueQuerySchema.safeParse(
@@ -113,10 +116,6 @@ export async function GET(request: NextRequest) {
     // `venueType=a,b` and its spelling `venueTypes=a,b`, one set.
     const types = [...new Set([...(venueType ?? []), ...(venueTypes ?? [])])]
 
-    const viewer = await db.profiles.findUnique({
-      where: { id: authUser.userId },
-      select: { age: true, date_of_birth: true, onboarded: true },
-    })
     // Derived, never the stored column — see lib/age.ts. A stored age is the
     // number that was true on the day they signed up.
     const viewerAge = ageFrom(viewer)
@@ -228,14 +227,16 @@ export async function GET(request: NextRequest) {
        * same reason: the relation count and the nested next-event are far too
        * expensive to fetch for rows that will be thrown away.
        */
-      const lightweight = await db.venues.findMany({
+      const { rows: lightweight, truncated } = await distanceCandidates(
         where,
-        select: { id: true, latitude: true, longitude: true },
-        orderBy: [{ name: "asc" }, { id: "asc" }],
-        take: DISTANCE_SORT_CEILING,
-      })
+        lat,
+        lon,
+        sortOrder === "asc",
+        page * limit,
+        DISTANCE_SORT_CEILING
+      )
 
-      if (lightweight.length === DISTANCE_SORT_CEILING) {
+      if (truncated) {
         logger.warn("Venue distance sort hit its ceiling; results are truncated", {
           ceiling: DISTANCE_SORT_CEILING,
           city: city ?? null,
@@ -285,11 +286,13 @@ export async function GET(request: NextRequest) {
       // boundary between them never repeats or skips one.
       const orderBy = [{ name: sortOrder }, { id: "asc" as const }]
       const skip = (page - 1) * limit
-      venues =
+      // The total does not depend on the page, so it is asked beside it.
+      const count = db.venues.count({ where })
+      const pageRead =
         tiers.length === 0
-          ? await db.venues.findMany({ where, select: venueSelect, orderBy, skip, take: limit })
-          : await tieredPage(tiers, (w, o) => db.venues.findMany({ where: { AND: [where, w] }, select: venueSelect, orderBy, ...o }), skip, limit)
-      totalCount = await db.venues.count({ where })
+          ? db.venues.findMany({ where, select: venueSelect, orderBy, skip, take: limit })
+          : tieredPage(tiers, (w, o) => db.venues.findMany({ where: { AND: [where, w] }, select: venueSelect, orderBy, ...o }), skip, limit)
+      ;[venues, totalCount] = await Promise.all([pageRead, count])
     }
 
     const liveNow = mayCountLive ? await liveBuckets(venues.map((v) => v.id), authUser.userId, now) : null

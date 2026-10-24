@@ -59,12 +59,23 @@ const POOL_MAX = Number(process.env.DATABASE_POOL_MAX ?? 20)
  */
 let pool: Pool | null = null
 
+/**
+ * How long an idle connection stays open. pg-pool's default is 10 s, so on a
+ * quiet server every connection had closed before the next request, which then
+ * paid SCRAM sign-in and a new Postgres backend for each of the 8–12 queries it
+ * runs at once: 35–60 ms on staging for the first request after any pause
+ * (chat/groups 145 ms cold vs 84 ms warm, 2026-10-18). With few users that
+ * first request is the ordinary one. TCP keepalive notices a connection the
+ * network dropped while it sat idle.
+ */
+const POOL_IDLE_MS = 5 * 60_000
+
 function createClient(): PrismaClient {
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set")
   }
-  pool = new Pool({ connectionString, max: POOL_MAX })
+  pool = new Pool({ connectionString, max: POOL_MAX, idleTimeoutMillis: POOL_IDLE_MS, keepAlive: true })
   return new PrismaClient({ adapter: new PrismaPg(pool) })
 }
 

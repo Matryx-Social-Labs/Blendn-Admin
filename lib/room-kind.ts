@@ -82,21 +82,16 @@ function boardPostSelect(viewerIds: string[]) {
   }
 }
 
-/**
- * The board post behind a room, as its door reads it for one caller. Put it in
- * the room's select. The rows it reads carry the caller's id, and
- * `roomOwnerDenial` checks them against the id it is asked about: a door built
- * for one person never admits another.
+/*
+ * What the board-post door reads (`boardPostSelect`) carries the caller's id on
+ * every viewer-specific row, and `roomOwnerDenial` checks them against the id
+ * it is asked about: a door built for one person never admits another.
  */
-export function boardPostDoor(viewerId: string) {
-  return boardPostSelect([viewerId])
-}
-
 interface BoardPostOwner {
   author_id: string
   deleted_at: Date | null
   event: { status: string; deleted_at: Date | null; end_time: Date }
-  /** Accepted asks, by asker (`boardPostDoor`: the caller's only). */
+  /** Accepted asks, by asker (`boardPostSelect`: the caller's only). */
   requests: { from_user_id: string }[]
   author: { blocked_users: { blocked_id: string }[]; blocked_by: { blocker_id: string }[] }
 }
@@ -219,19 +214,76 @@ interface BlendOwner {
 }
 
 /**
- * Every owner's door for one caller, to spread into a room's select: whatever
- * the room's kind, the row its door needs is read, and a kind added without
- * one fails closed (`roomOwnerDenial` reads a missing owner as "hidden").
+ * The door rows for ONE kind of room, for one caller: `{}` for an event's room,
+ * which has no owner to ask. Not all three kinds' doors at once: Prisma 7 runs
+ * every `include` level as its own statement even under a null parent, so
+ * selecting every kind on every room lookup made an event room 34 statements
+ * (6.6 ms locally, against 2.5 ms with the kind read first). A kind added
+ * without an arm fails the `never` below at compile time, and a door that was
+ * not selected is read by `roomOwnerDenial` as hidden, never as open.
  */
-export function ownerDoor(viewerId: string) {
-  return { board_post: boardPostDoor(viewerId), crew: crewDoor(viewerId), blend: blendDoor(viewerId) }
+export function ownerDoorFor(kind: chat_group_kind, viewerId: string): Prisma.chat_groupsSelect {
+  return doorSelect(kind, [viewerId])
+}
+
+function doorSelect(kind: chat_group_kind, viewerIds: string[]): Prisma.chat_groupsSelect {
+  switch (kind) {
+    case "event":
+      return {}
+    case "board_post":
+      return { board_post: boardPostSelect(viewerIds) }
+    case "crew":
+      return { crew: crewSelect(viewerIds) }
+    case "blend":
+      return { blend: blendSelect(viewerIds) }
+    default: {
+      const unknown: never = kind
+      void unknown
+      return {}
+    }
+  }
+}
+
+interface OwnerDoors {
+  board_post: BoardPostOwner | null
+  crew: CrewOwner | null
+  blend: BlendOwner | null
+}
+
+/**
+ * A room the caller already read (with its `kind`), plus the door its kind
+ * asks of its owner, for this caller. An event's room costs nothing more; any
+ * other pays one read of its own owner's rows. If that read finds no room the
+ * door stays unread and `roomOwnerDenial` refuses it.
+ */
+export async function withOwnerDoor<R extends { kind: chat_group_kind }>(
+  chatGroupId: string,
+  viewerId: string,
+  room: R
+): Promise<R & Partial<OwnerDoors>>
+export async function withOwnerDoor<R extends { kind: chat_group_kind }>(
+  chatGroupId: string,
+  viewerId: string,
+  room: R | null
+): Promise<(R & Partial<OwnerDoors>) | null>
+export async function withOwnerDoor<R extends { kind: chat_group_kind }>(
+  chatGroupId: string,
+  viewerId: string,
+  room: R | null
+): Promise<(R & Partial<OwnerDoors>) | null> {
+  if (!room || room.kind === "event") return room
+  const door = (await db.chat_groups.findUnique({
+    where: { id: chatGroupId },
+    select: ownerDoorFor(room.kind, viewerId),
+  })) as Partial<OwnerDoors> | null
+  return { ...room, ...door }
 }
 
 interface RoomOwners<E> {
   kind: chat_group_kind
   event: E | null
-  board_post: BoardPostOwner | null
-  /** Optional so an older select fails closed rather than failing to compile into an open door. */
+  /** Optional, all three: a door that was not read fails closed rather than failing to compile into an open one. */
+  board_post?: BoardPostOwner | null
   crew?: CrewOwner | null
   blend?: BlendOwner | null
 }
@@ -312,7 +364,7 @@ export function roomOwnerDenial(
     case "event":
       return !room.event || eventHidesRoom(room.event) ? "hidden" : null
     case "board_post":
-      return boardPostDenial(room.board_post, userId)
+      return boardPostDenial(room.board_post ?? null, userId)
     case "crew":
       return crewDenial(room.crew, userId)
     case "blend":
@@ -411,12 +463,13 @@ export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
  * cannot disagree with the door.
  */
 export async function ownerAdmits(chatGroupId: string, candidates: string[]): Promise<Set<string> | null> {
-  const room = await db.chat_groups.findUnique({
-    where: { id: chatGroupId },
-    select: { kind: true, board_post: boardPostSelect(candidates), crew: crewSelect(candidates), blend: blendSelect(candidates) },
-  })
-  if (!room) return new Set()
-  if (room.kind === "event") return null
+  // The kind first: an event's room has no owner, and selecting every kind's rows to learn that was 34 statements.
+  const found = await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: { kind: true } })
+  if (!found) return new Set()
+  if (found.kind === "event") return null
+  const rows = (await db.chat_groups.findUnique({ where: { id: chatGroupId }, select: doorSelect(found.kind, candidates) })) as Partial<OwnerDoors> | null
+  if (!rows) return new Set()
+  const room = { kind: found.kind, board_post: rows.board_post ?? null, crew: rows.crew ?? null, blend: rows.blend ?? null }
   if (room.kind === "crew") return new Set(candidates.filter((id) => crewDenial(room.crew, id) === null))
   if (room.kind === "blend") return new Set(candidates.filter((id) => blendDenial(room.blend, id) === null))
   const post = room.board_post

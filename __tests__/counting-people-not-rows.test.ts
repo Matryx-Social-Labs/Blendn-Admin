@@ -193,9 +193,13 @@ describe("occupancy asks which day it is", () => {
      * day-one attendee counted as inside on day three — stopped being
      * something you can produce by forgetting a spread.
      */
+    // The scope is made once, from the resolved slot (`currentSlot`), and both
+    // readers — the full occupancy and the inside-only count — pass that scope.
     expect(src).toMatch(
-      /headcount\(slot\.occurrence \? \{ occurrenceId: slot\.occurrence\.id \} : \{ eventId \}\)/
+      /scope: slot\.occurrence \? \{ occurrenceId: slot\.occurrence\.id \} : \{ eventId \}/
     )
+    expect((src.match(/headcount\(scope\)/g) ?? []).length).toBe(2)
+    expect(src).not.toMatch(/headcount\(\{/)
 
     /*
      * And "inside" is no longer read from a mutable status at all. That column

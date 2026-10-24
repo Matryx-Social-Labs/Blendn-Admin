@@ -1,9 +1,9 @@
 // Relative imports throughout — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
-import type { board_request_status, Prisma } from "@prisma/client"
+import { Prisma, type board_request_status } from "@prisma/client"
 
 import { ageFrom } from "./age"
-import { preferredPseudonymFor, pseudonymSchemeFor } from "./anonymous-names"
+import { preferredPseudonymFor, pseudonymSchemeAt, pseudonymSchemeFor } from "./anonymous-names"
 import {
   mayPostToBoard,
   type BoardEntitlement,
@@ -271,6 +271,38 @@ export async function boardPseudonyms(
 
   const scheme = await pseudonymSchemeFor(eventId, client)
   return new Map(ids.map((id) => [id, roomName.get(id) ?? preferredPseudonymFor(eventId, id, scheme)]))
+}
+
+/**
+ * `boardPseudonyms` for several events at once: `userIds` and `createdAt` per
+ * event id, one read of the rooms' members for all of them.
+ *
+ * The board's request list resolved each event on its own: a members read, then
+ * a `findUnique` on the event for nothing but its `created_at` (to pick the
+ * scheme), in sequence per event. The caller selected `created_at` with its
+ * rows, so that lookup is gone; the members read is one `IN` across the events
+ * and the users asked about, and a row is used only for the pair that asked
+ * (a member at event A is not named at event B). A handle stays per event.
+ */
+export async function boardPseudonymsAcross(
+  events: ReadonlyMap<string, { createdAt: Date; userIds: ReadonlySet<string> }>
+): Promise<Map<string, Map<string, string>>> {
+  const out = new Map<string, Map<string, string>>()
+  if (events.size === 0) return out
+  // Raw, for one statement: Prisma reads a nested `chat_group` select as a second query.
+  const members = await db.$queryRaw<{ event_id: string; user_id: string; anonymous_name: string | null }[]>`
+    SELECT g.event_id, m.user_id, m.anonymous_name
+    FROM chat_group_members m
+    JOIN chat_groups g ON g.id = m.chat_group_id
+    WHERE g.event_id IN (${Prisma.join([...events.keys()])})
+      AND m.user_id IN (${Prisma.join([...new Set([...events.values()].flatMap((e) => [...e.userIds]))])})
+  `
+  const roomName = new Map(members.filter((m) => m.anonymous_name).map((m) => [`${m.event_id}:${m.user_id}`, m.anonymous_name as string]))
+  for (const [eventId, { createdAt, userIds }] of events) {
+    const scheme = pseudonymSchemeAt(createdAt)
+    out.set(eventId, new Map([...userIds].map((id) => [id, roomName.get(`${eventId}:${id}`) ?? preferredPseudonymFor(eventId, id, scheme)])))
+  }
+  return out
 }
 
 /** What refused board text is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */

@@ -1,0 +1,160 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`the chat list's response is what the snapshot says, for a world with every branch in it 1`] = `
+{
+  "groups": [
+    {
+      "event": {
+        "coverImageUrl": null,
+        "id": "id3",
+        "kind": "event",
+        "status": "published",
+        "venueId": null,
+      },
+      "id": "id1",
+      "isCheckedIn": true,
+      "kind": "event",
+      "lastMessage": {
+        "content": "line at 21",
+        "createdAt": "2026-01-01T10:21:00.000Z",
+        "id": "id2",
+        "user": {
+          "id": "<handle>",
+          "name": "Heron A3",
+        },
+      },
+      "lastMessageAt": "2026-01-01T10:21:00.000Z",
+      "memberCount": 1,
+      "membership": {
+        "role": "member",
+        "status": "muted",
+      },
+      "mute": {
+        "muted": true,
+        "until": null,
+      },
+      "name": "room",
+      "status": "locked",
+      "type": "event",
+      "unreadCount": 2,
+    },
+    {
+      "event": {
+        "coverImageUrl": null,
+        "id": "id6",
+        "kind": "event",
+        "status": "published",
+        "venueId": null,
+      },
+      "id": "id4",
+      "isCheckedIn": true,
+      "kind": "event",
+      "lastMessage": {
+        "content": "[image]",
+        "createdAt": "2026-01-01T10:07:00.000Z",
+        "id": "id5",
+        "user": {
+          "id": "<handle>",
+          "name": "Heron A",
+        },
+      },
+      "lastMessageAt": "2026-01-01T10:08:00.000Z",
+      "memberCount": 4,
+      "membership": {
+        "role": "member",
+        "status": "active",
+      },
+      "mute": {
+        "muted": false,
+        "until": null,
+      },
+      "name": "room",
+      "status": "active",
+      "type": "event",
+      "unreadCount": 2,
+    },
+    {
+      "event": {
+        "coverImageUrl": null,
+        "id": "id8",
+        "kind": "event",
+        "status": "published",
+        "venueId": null,
+      },
+      "id": "id7",
+      "isCheckedIn": true,
+      "kind": "event",
+      "lastMessage": null,
+      "lastMessageAt": "2026-01-01T09:30:00.000Z",
+      "memberCount": 1,
+      "membership": {
+        "role": "member",
+        "status": "active",
+      },
+      "mute": {
+        "muted": false,
+        "until": null,
+      },
+      "name": "room",
+      "status": "active",
+      "type": "event",
+      "unreadCount": 0,
+    },
+  ],
+  "pagination": {
+    "hasMore": false,
+    "limit": 50,
+    "page": 1,
+    "totalCount": 3,
+    "totalPages": 1,
+  },
+  "rooms": [
+    {
+      "blendId": null,
+      "crewId": "id10",
+      "id": "id9",
+      "kind": "crew",
+      "lastMessage": {
+        "content": "line at 31",
+        "createdAt": "2026-01-01T10:31:00.000Z",
+        "id": "id11",
+        "user": {
+          "id": "<handle>",
+          "name": "Asha",
+        },
+      },
+      "lastMessageAt": "2026-01-01T10:31:00.000Z",
+      "membership": {
+        "role": "member",
+        "status": "active",
+      },
+      "mute": {
+        "muted": false,
+        "until": null,
+      },
+      "name": "Saturday Lot",
+      "status": "active",
+      "unreadCount": 2,
+    },
+    {
+      "blendId": null,
+      "crewId": "id13",
+      "id": "id12",
+      "kind": "crew",
+      "lastMessage": null,
+      "lastMessageAt": null,
+      "membership": {
+        "role": "member",
+        "status": "active",
+      },
+      "mute": {
+        "muted": false,
+        "until": null,
+      },
+      "name": "Quiet Corner",
+      "status": "active",
+      "unreadCount": 0,
+    },
+  ],
+}
+`;

@@ -120,6 +120,28 @@ function capacityForNow(
   return slot.occurrence?.capacity ?? eventCapacity
 }
 
+/** Staff included: `occupancyFrom` subtracts them for the fill figure, and fire safety counts bodies. */
+const insideOf = (live: { insideGuests: number; insideStaff: number }) => live.insideGuests + live.insideStaff
+
+/**
+ * `getOccupancy(eventId).inside` and nothing else: who is in the building now.
+ *
+ * `getOccupancy` also reads the event for its capacity and every attendee's
+ * check-in row for `uniqueAttendance`. A caller that shows only the headcount
+ * (the event detail) paid for both, after waiting on a query of its own. This
+ * is the same slot and the same `headcount`, so the two cannot disagree.
+ */
+export async function getInsideCount(eventId: string): Promise<number> {
+  const { scope } = await currentSlot(eventId)
+  return insideOf(await headcount(scope))
+}
+
+/** Which day it is, once, and the scope its counts are read in. The only `resolveOccurrence` here. */
+async function currentSlot(eventId: string) {
+  const slot = await resolveOccurrence(eventId)
+  return { slot, scope: slot.occurrence ? { occurrenceId: slot.occurrence.id } : { eventId } }
+}
+
 export async function getOccupancy(eventId: string): Promise<Occupancy> {
   /*
    * Resolved once, and used for the counts as well as the capacity.
@@ -142,7 +164,7 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
    * has one occurrence and the scope is identical, and an event between days
    * should report what is in the building rather than zero.
    */
-  const slot = await resolveOccurrence(eventId)
+  const { slot, scope } = await currentSlot(eventId)
 
   /*
    * Two stores, one line between them, and it is worth stating because the
@@ -165,7 +187,7 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
       where: { id: eventId },
       select: { max_capacity: true },
     }),
-    headcount(slot.occurrence ? { occurrenceId: slot.occurrence.id } : { eventId }),
+    headcount(scope),
     db.event_check_ins.findMany({
       where: { event_id: eventId, kind: "attendee", check_in_time: { not: null } },
       distinct: ["user_id"],
@@ -174,9 +196,7 @@ export async function getOccupancy(eventId: string): Promise<Occupancy> {
   ])
 
   return occupancyFrom({
-    // Staff included: `occupancyFrom` subtracts them for the fill figure, and
-    // fire safety counts bodies.
-    inside: live.insideGuests + live.insideStaff,
+    inside: insideOf(live),
     staffInside: live.insideStaff,
     /*
      * Deliberately NOT scoped to today. "Inside" is a question about right now;

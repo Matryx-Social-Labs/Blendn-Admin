@@ -1648,6 +1648,10 @@ model private_messages {
   replies      private_messages[]    @relation("DmReplies")
 
   @@index([conversation_id])
+  /// A thread read newest-first and the first unread are both "this conversation,
+  /// by time": the plain `(conversation_id)` index above reads the whole thread and
+  /// sorts it, and `(created_at)` alone walks every DM on the platform.
+  @@index([conversation_id, created_at])
   @@index([sender_id])
   @@index([created_at])
   @@index([reply_to_id])
