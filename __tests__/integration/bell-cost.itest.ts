@@ -90,8 +90,13 @@ afterAll(async () => {
   await closeDb()
 }, 120_000)
 
-/** The most statements one poll can send: the page, eight decoration reads (nine for crews and their members), two relation loads for a friend request's sender, two counts. */
-const MOST_STATEMENTS = 13
+/**
+ * The most statements one poll can send: the page, eight decoration reads (nine for crews and their members), two relation
+ * loads for a friend request's sender, two counts, and since S-2 (2026-10-24) two more for `display.context`: the Blend
+ * rooms the page names (the room's door asked over them, set-based) and the reader's blocks for match rows. Each once per
+ * page, never per row: the 10-row and 50-row pages below still cost the same.
+ */
+const MOST_STATEMENTS = 15
 
 it("a 50-row page costs the statements a 10-row page does, once each, and no more than the cap", async () => {
   const small = await person("bc-small")
