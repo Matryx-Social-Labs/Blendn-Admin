@@ -1,6 +1,7 @@
 import { logger } from "../logger"
 import type { ModerationResult, OpenAIModerationCategory } from "./types"
 import { AUTO_HIDE_THRESHOLD, FLAG_THRESHOLD } from "./config"
+import { breakerIsOpen, recordTextFailure, recordTextSuccess } from "./text-breaker"
 
 const OPENAI_MODERATION_URL = "https://api.openai.com/v1/moderations"
 
@@ -105,11 +106,36 @@ const abortedByTimeout = (error: unknown) =>
   error instanceof Error && error.name === "TimeoutError"
 
 export async function checkTextContent(content: string): Promise<ModerationCheck> {
+  const [check] = await textVerdicts([content])
+  return check
+}
+
+/**
+ * The batch form for the re-check sweeper: one `ModerationCheck` per input, in
+ * order, scored exactly as the single call is. The endpoint takes an array.
+ * A chunk that fails answers "did not look" for each of its inputs.
+ */
+export async function checkTextContents(contents: string[]): Promise<ModerationCheck[]> {
+  const out: ModerationCheck[] = []
+  for (let i = 0; i < contents.length; i += TEXT_BATCH_SIZE) {
+    out.push(...(await textVerdicts(contents.slice(i, i + TEXT_BATCH_SIZE))))
+  }
+  return out
+}
+
+/** ponytail: the documented input-array ceiling was not checked; 32 is well under any limit seen. Raise it if throughput needs. */
+export const TEXT_BATCH_SIZE = 32
+
+/** One vendor call for `inputs` (at most a chunk), behind the breaker. */
+async function textVerdicts(inputs: string[]): Promise<ModerationCheck[]> {
+  const all = (check: ModerationCheck) => inputs.map(() => check)
+  if (inputs.length === 0) return []
   const apiKey = getApiKey()
   if (!apiKey) {
     logger.debug("OpenAI API key not configured, skipping text moderation")
-    return notChecked("no_key")
+    return all(notChecked("no_key"))
   }
+  if (breakerIsOpen()) return all(notChecked("error"))
 
   try {
     const response = await fetch(OPENAI_MODERATION_URL, {
@@ -121,7 +147,7 @@ export async function checkTextContent(content: string): Promise<ModerationCheck
       },
       body: JSON.stringify({
         model: "omni-moderation-latest",
-        input: content,
+        input: inputs.length === 1 ? inputs[0] : inputs,
       }),
     })
 
@@ -130,24 +156,27 @@ export async function checkTextContent(content: string): Promise<ModerationCheck
         status: response.status,
         statusText: response.statusText,
       })
-      return notChecked("error")
+      recordTextFailure()
+      return all(notChecked("error"))
     }
 
     const data = await response.json()
-    const result = data.results?.[0]
-    if (!result) return notChecked("error")
-
-    return {
-      checked: true,
-      result: evaluateScores(
-        result.category_scores as OpenAIModerationCategory,
-        result.flagged as boolean,
-        "openai_text"
-      ),
+    const results = data.results
+    // A short reply cannot be matched to its inputs: no guessing.
+    if (!Array.isArray(results) || results.length !== inputs.length) {
+      recordTextFailure()
+      return all(notChecked("error"))
     }
+
+    recordTextSuccess()
+    return results.map((result: { category_scores: OpenAIModerationCategory; flagged: boolean }) => ({
+      checked: true as const,
+      result: evaluateScores(result.category_scores, result.flagged, "openai_text"),
+    }))
   } catch (error) {
     logger.error("OpenAI Moderation API call failed", { error: String(error) })
-    return notChecked(abortedByTimeout(error) ? "timeout" : "error")
+    recordTextFailure()
+    return all(notChecked(abortedByTimeout(error) ? "timeout" : "error"))
   }
 }
 
