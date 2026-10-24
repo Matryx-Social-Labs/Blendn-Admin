@@ -1,0 +1,11 @@
+-- The retention sweep (`pruneProductEvents`, lib/notification-retention.ts) asks for
+-- `occurred_at < cutoff` every six hours, and no index leads with `occurred_at`:
+-- both existing ones lead with `name` / `user_id`, so it read the whole table to
+-- find a few thousand old rows (1M rows: a 137 ms scan, growing with the table).
+-- BRIN, not btree: rows arrive in time order, so a block range summary says which
+-- blocks can hold anything old, at a few kB and next to no cost on the insert path.
+--
+-- CONCURRENTLY, so ONE statement and no BEGIN/COMMIT (`__tests__/migration-tx.test.ts`).
+-- A failed build leaves an INVALID index of this name; a NEW forward migration
+-- drops and rebuilds it, never SQL by hand.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "product_events_occurred_at_idx" ON "product_events" USING BRIN ("occurred_at")

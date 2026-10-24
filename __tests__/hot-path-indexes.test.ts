@@ -80,7 +80,25 @@ const REQUIRED: Array<{ model: string; index: string; sqlName: string; why: stri
     sqlName: "event_check_ins_check_in_time_idx",
     why: "the polled health probe asks who checked in ANYWHERE in seven days, and every other index on this column starts with event_id",
   },
+  {
+    model: "product_events",
+    index: "@@index([occurred_at], type: Brin)",
+    sqlName: "product_events_occurred_at_idx",
+    why: "the retention sweep asks for occurred_at < cutoff, and both other indexes lead with name / user_id",
+  },
 ]
+
+describe("the refresh-token sweep has an index for its revoked half", () => {
+  it("is a partial index in migration SQL (schema.prisma cannot say it), one statement, CONCURRENTLY", () => {
+    const sql = readFileSync(join(ROOT, "prisma", "migrations", "20261025100200_refresh_tokens_revoked_sweep_idx", "migration.sql"), "utf8")
+    expect(sql.replace(/--.*$/gm, "").trim()).toBe(
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS "mobile_refresh_tokens_revoked_sweep_idx" ON "mobile_refresh_tokens" ("revoked_at") WHERE "revoked_reason" IS NULL AND "revoked_at" IS NOT NULL'
+    )
+    // `cleanupExpiredTokens` must keep asking exactly what the partial index holds, or the planner cannot use it.
+    const sweep = readFileSync(join(ROOT, "lib", "mobile-auth.ts"), "utf8")
+    expect(sweep).toMatch(/\{ revoked_at: \{ lt: revokedBefore \}, revoked_reason: null \}/)
+  })
+})
 
 describe("the datamodel declares the hot-path indexes", () => {
   for (const { model: m, index, why } of REQUIRED) {

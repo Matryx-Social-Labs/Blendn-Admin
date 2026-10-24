@@ -1236,6 +1236,8 @@ model mobile_refresh_tokens {
 
   @@index([user_id])
   @@index([expires_at])
+  /// Also, in migration SQL only: `mobile_refresh_tokens_revoked_sweep_idx`, a partial index
+  /// (revoked_at) WHERE revoked_reason IS NULL AND revoked_at IS NOT NULL, for `cleanupExpiredTokens`.
 }
 
 /// This-or-that answers (plan v2 §8.3). One per person per question; the
@@ -4104,6 +4106,8 @@ model product_events {
   @@index([name, occurred_at])
   /// One person's activity, for cohorts and retention curves.
   @@index([user_id, occurred_at])
+  /// The retention sweep's `occurred_at < cutoff`: BRIN, rows arrive in time order.
+  @@index([occurred_at], type: Brin)
 }
 
 /// A link sent to a role address, proving control of the mailbox.
