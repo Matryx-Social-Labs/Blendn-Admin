@@ -1,6 +1,6 @@
-import { logger } from "@/lib/logger"
-import { db } from "@/lib/db"
-import { emitChatMessageHidden, emitChatMemberMuted } from "@/lib/socket-server"
+import { logger } from "../logger"
+import { db } from "../db"
+import { emitChatMessageHidden, emitChatMemberMuted } from "../socket-server"
 import { AUTO_MUTE_HIDDEN_COUNT, AUTO_MUTE_WINDOW_MS } from "./config"
 import type { ModerationResult } from "./types"
 
@@ -279,4 +279,4 @@ export function mutedRefusal(membership: { muted_by: string | null }): string {
 
 // Lives with the room's read rule, which a poll read needs without this
 // module's socket imports (SCRUM-298); re-exported for its existing callers.
-export { bannedRefusal } from "@/lib/chat-window"
+export { bannedRefusal } from "../chat-window"

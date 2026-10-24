@@ -41,6 +41,7 @@ import { idForViewer } from "@/lib/room-handle"
 import { roomMuteState } from "@/lib/room-mute"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
+import { discardAndRefuse, refuseBigRoomWhileDown, verdictForBigRoom } from "@/lib/moderation/degraded-room"
 import { readJson, isUuid } from "@/lib/api-input"
 import { createRoom } from "@/lib/check-in-core"
 import { paginationMeta } from "@/lib/pagination"
@@ -821,6 +822,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * because a hide below returns without reading them, and are awaited where
      * they are used.
      */
+    /*
+     * OpenAI is known to be down and this is a big room: refuse before writing
+     * anything (moderation-degraded policy; `lib/moderation/degraded-room.ts`).
+     */
+    const roomEventId = eventId
+    const refusedWhileDown = await refuseBigRoomWhileDown(roomEventId)
+    if (refusedWhileDown) return refusedWhileDown
+
     const pendingText = checkTextContent(content)
     const blocked = keptApartIn(authUser.userId, "event")
     const senderMembershipPending = db.chat_group_members.findUnique({
@@ -884,12 +893,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * Four facts in one value, and the code below then wrote
        * `moderation_status: "clean"` for all of them.
        */
-      const openaiCheck = await Promise.race([
+      const raced = await Promise.race([
         pendingText,
         new Promise<ModerationCheck>((resolve) => {
           timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
         }),
       ]).finally(() => clearTimeout(timeoutHandle))
+      /*
+       * No verdict in a big room: wait for the call in flight, and if it still
+       * has none, take the row back and refuse. Nothing has been emitted.
+       */
+      const openaiCheck = await verdictForBigRoom(roomEventId, raced, pendingText)
+      if (!openaiCheck) return discardAndRefuse(message.id)
       examinedInline = openaiCheck.checked
       const openaiResult = openaiCheck.checked ? openaiCheck.result : null
       if (openaiResult && openaiResult.action === "hide") {

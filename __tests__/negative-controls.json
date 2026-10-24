@@ -2031,6 +2031,12 @@
       "observed": "M1526: 1 of 2 failing (the start/stop test). Reverted; 2 of 2.",
       "date": "2026-10-22"
     },
+    "moderation-recheck-started.test.ts": {
+      "guards": "Moderation-degraded policy: lib/background.ts starts the room-message re-check sweeper and stops it on shutdown, names it in the start-up log, and the files it reaches import by relative path because server.ts compiles with plain tsc.",
+      "mutation": "M1694 the sweeper not started in background.ts (the start line commented out).",
+      "observed": "M1694: 1 of 3 failing (the start/stop test). Reverted; 3 of 3.",
+      "date": "2026-10-25"
+    },
     "object-presence.test.ts": {
       "guards": "SCRUM-732: objectPresence says 'gone' only for a confirmed 404 (NotFound); a 403, a 5xx and a network failure are 'unknown', so the sweep never deletes a record on a storage error.",
       "mutation": "M1534 every error read as gone.",

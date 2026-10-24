@@ -61,7 +61,7 @@ export const ErrorResponseSchema = z
       .optional()
       .describe(
         "Seconds to wait before trying again (also the `Retry-After` header), on a 429 `RATE_LIMITED`, on a 429 `SPAM_BLOCKED` for a burst " +
-          "(absent when waiting would not help, as for too many links), and on the 503 `MAINTENANCE`."
+          "(absent when waiting would not help, as for too many links), on the 503 `MAINTENANCE`, and on the 503 `MODERATION_UNAVAILABLE`."
       ),
   })
   .openapi("ErrorResponse")
@@ -224,6 +224,14 @@ export const standardErrors = {
   429: errorBody("Rate limited", RateLimitErrorSchema),
   500: errorBody("Internal server error"),
 } as const
+
+/** The 503 a big room's send can answer while the moderation vendor is down (both send routes). */
+export const moderationUnavailableError = errorBody("Moderation unavailable in a busy room; nothing was written")
+
+export const MODERATION_UNAVAILABLE_NOTE =
+  "**While OpenAI moderation is down:** a room with more than 200 people inside refuses the send instead of delivering an unchecked line — " +
+  "`503 MODERATION_UNAVAILABLE` with `retryAfter: 5` (also `Retry-After`) and the sentence \"This room is busy and messages can’t be checked right now. Try again in a few seconds.\" " +
+  "Nothing is written or emitted; resend the same `clientId`. Rooms of 200 or fewer, and every non-event room, still deliver and are re-checked within a minute of the vendor's return."
 
 /**
  * A display-only line two people (or two crews) share — matching v2, plan v2

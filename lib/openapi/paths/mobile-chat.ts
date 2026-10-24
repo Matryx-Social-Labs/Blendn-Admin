@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
+import { MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 import {
   SendMessageRequestSchema,
   ChatMessageSchema,
@@ -109,7 +109,9 @@ registry.registerPath({
     "If moderation catches the message, the response has `moderation_hidden: true` and `content: null`.",
     "The message is never broadcast to other users via socket.",
     "",
-    "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429)",
+    "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429), `MODERATION_UNAVAILABLE` (503)",
+    "",
+    MODERATION_UNAVAILABLE_NOTE,
   ].join("\n"),
   security: bearerAuth,
   request: {
@@ -118,6 +120,7 @@ registry.registerPath({
   },
   responses: {
     201: { description: "Message sent (check `moderation_hidden` — if true, content was blocked)", content: { "application/json": { schema: wrap(ChatMessageSchema) } } },
+    503: moderationUnavailableError,
     ...standardErrors,
   },
 })
