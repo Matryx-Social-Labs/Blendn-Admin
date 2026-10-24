@@ -125,8 +125,9 @@ registry.registerPath({
     "`lockedCount` is the figure shown as `stats.eventsAttended` on a profile — they share one " +
     "predicate so the list and the number cannot disagree. Working an event as staff is not " +
     "attending it. Places you went live at are included, with `kind: venue_day`. Where Blendn+ is " +
-    "gated (the city of your latest night) and you have none, the list stops at your latest 3 " +
-    "nights and `lockedCount` says how many more there are (Blendn+ unlocks them). A `venue_day` row also " +
+    "gated (the city of your latest night) and you have none, the list is every night still running " +
+    "plus your latest 3 ended nights (`end_time` before now), and `lockedCount` is how many ended nights " +
+    "are older (Blendn+ unlocks them); a night still running is never locked and never one of the 3. A `venue_day` row also " +
     "carries `stay_minutes`, `venue_id` and `venue_type`; every row carries `ratedAt`. Yours alone, like everything here. " +
     "Page by `?page=` or by `?cursor=` (newest first, the event id breaking ties); `pagination.nextCursor` is on both.",
   security: bearerAuth,
@@ -182,7 +183,7 @@ registry.registerPath({
                 })
               ),
               pagination: PagedPaginationSchema,
-              lockedCount: z.number().int().min(0).describe("Older nights behind Blendn+. 0 when nothing is locked."),
+              lockedCount: z.number().int().min(0).describe("Ended nights older than your latest 3 ended ones, behind Blendn+. 0 when nothing is locked."),
             })
           ),
         },

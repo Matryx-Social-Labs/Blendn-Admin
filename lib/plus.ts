@@ -3,7 +3,7 @@ import "server-only"
 import { auditInTx } from "./audit-log"
 import { Prisma } from "@prisma/client"
 
-import { attendedEventIds } from "./attendee-counts"
+import { attendedEventIds, distinctEventsAttended } from "./attendee-counts"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
 import { addMonths, grantPlusOnce, hasEntitlement, plusGrantsSince, plusNotEnded } from "./entitlements"
@@ -286,16 +286,40 @@ export async function plusGatedForPerson(userId: string): Promise<boolean> {
 }
 
 /**
- * How many of this person's nights are locked behind Plus: those beyond the
- * latest `FREE_HISTORY_NIGHTS`, when Plus is gated in the city of their latest
- * night and they have none. 0 otherwise.
+ * How many of this person's nights are locked behind Plus: the ENDED nights
+ * beyond the latest `FREE_HISTORY_NIGHTS` ended ones, when Plus is gated in
+ * the city of their latest night and they have none. 0 otherwise.
+ *
+ * Ended only (S-1): the free slots used to be the latest 3 by check-in, which
+ * on a night out are the nights still running. The app lists only ended
+ * nights, so a free account saw no rows under "48 nights". A night still
+ * running is tonight: always listed (`freeNights`), never locked, never a slot.
  */
-export async function lockedNights(userId: string, totalNights: number, now: Date = new Date()): Promise<number> {
-  if (totalNights <= PLUS.FREE_HISTORY_NIGHTS || !plusGatedAnywhere()) return 0
+export async function lockedNights(userId: string, now: Date = new Date()): Promise<number> {
+  if (!plusGatedAnywhere()) return 0
+  const ended = await distinctEventsAttended(userId, { places: true, when: { ended: true, now } })
+  if (ended <= PLUS.FREE_HISTORY_NIGHTS) return 0
   const [latest] = await attendedEventIds(userId, { limit: 1, skip: 0 })
   if (!latest) return 0
   const event = await db.events.findUnique({ where: { id: latest.event_id }, select: { city: true } })
-  return (await plusRequired(userId, event?.city ?? null, now)) ? totalNights - PLUS.FREE_HISTORY_NIGHTS : 0
+  return (await plusRequired(userId, event?.city ?? null, now)) ? ended - PLUS.FREE_HISTORY_NIGHTS : 0
+}
+
+/**
+ * The nights a person whose history is locked still sees, newest first in the
+ * list's order: every night still running, and the latest
+ * `FREE_HISTORY_NIGHTS` ended ones. `lockedNights` counts the ended rest, so
+ * this plus that is every night `distinctEventsAttended` counts. `open` bounds
+ * the read of the running ones (the caller knows how many there are).
+ */
+export async function freeNights(userId: string, open: number, now: Date = new Date()) {
+  const [running, ended] = await Promise.all([
+    open > 0 ? attendedEventIds(userId, { limit: open, skip: 0, when: { ended: false, now } }) : [],
+    attendedEventIds(userId, { limit: PLUS.FREE_HISTORY_NIGHTS, skip: 0, when: { ended: true, now } }),
+  ])
+  return [...running, ...ended].sort(
+    (a, b) => b.first_seen.getTime() - a.first_seen.getTime() || (a.event_id < b.event_id ? 1 : a.event_id > b.event_id ? -1 : 0)
+  )
 }
 
 /**

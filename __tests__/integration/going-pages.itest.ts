@@ -241,15 +241,16 @@ describe("GET /me/attendance: cursor, ratedAt, venue_type", () => {
   it("where Plus gates, the cursor pages the free nights and stops at them", async () => {
     process.env.PLUS_GATING = "Bengaluru"
     try {
+      // Today's venue day is still running: listed, and not one of the 3 free ended slots (S-1).
       const locked = await body(await get(routes.attendance, "/api/mobile/me/attendance?limit=2", me))
-      expect(locked.json.data.lockedCount).toBe(3)
-      expect(locked.json.data.pagination).toMatchObject({ totalCount: 3, hasMore: true })
+      expect(locked.json.data.lockedCount).toBe(2)
+      expect(locked.json.data.pagination).toMatchObject({ totalCount: 4, hasMore: true })
       const { seen, sizes } = await walk(
         async (c) => body(await get(routes.attendance, `/api/mobile/me/attendance?limit=2${c ? `&cursor=${c}` : ""}`, me)),
         (d) => d.events.map((e: { id: string }) => e.id)
       )
-      expect(seen).toEqual(ids.slice(0, 3))
-      expect(sizes).toEqual([2, 1])
+      expect(seen).toEqual(ids.slice(0, 4))
+      expect(sizes).toEqual([2, 2])
     } finally {
       delete process.env.PLUS_GATING
     }

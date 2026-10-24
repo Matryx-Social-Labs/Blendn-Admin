@@ -8,7 +8,7 @@ import { stayMinutesByEvent } from "@/lib/presence-sessions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { keysetPage, pagedPagination, paginationSkip, parsePageOrCursor, type PagedQuery } from "@/lib/pagination"
 import { isUuid } from "@/lib/api-input"
-import { lockedNights } from "@/lib/plus"
+import { freeNights, lockedNights, PLUS } from "@/lib/plus"
 
 export const dynamic = "force-dynamic"
 
@@ -46,9 +46,13 @@ export const dynamic = "force-dynamic"
  *
  * ## The free nights and the rest (Blendn+, step 11)
  *
- * Where Blendn+ is gated, a person without it sees their latest
- * `PLUS.FREE_HISTORY_NIGHTS` (3) and `lockedCount` says how many more there
- * are; the pages stop at the third. The count on the profile stays the true
+ * Where Blendn+ is gated, a person without it sees every night still running
+ * and their latest `PLUS.FREE_HISTORY_NIGHTS` (3) ENDED nights, and
+ * `lockedCount` is how many ended nights are older than those; the pages stop
+ * there. `pagination.totalCount + lockedCount` is always the profile's count.
+ * The free slots were once the latest 3 by check-in, which on a night out are
+ * the nights still running; the app lists only ended ones, so a free account
+ * saw none under "48 nights" (S-1). The count on the profile stays the true
  * one — how many nights is theirs to know; the list of where is the Plus part.
  */
 export async function GET(request: NextRequest) {
@@ -63,13 +67,16 @@ export async function GET(request: NextRequest) {
     const { limit } = query
 
     const skip = query.mode === "page" ? paginationSkip(query.page, limit) : 0
+    const now = new Date()
     const totalCount = await distinctEventsAttended(authUser.userId, { places: true })
-    const lockedCount = await lockedNights(authUser.userId, totalCount)
+    const lockedCount = await lockedNights(authUser.userId, now)
+    // Always `totalCount - lockedCount`: what is listed and what is locked add up to the profile's count.
     const visible = totalCount - lockedCount
-    // Where Plus gates, `visible` is the free few: read just those and page them here, the cursor included.
+    // Where Plus gates, `visible` is the free few (the nights still running and
+    // the latest 3 ended): read just those and page them here, the cursor included.
     const read =
       lockedCount > 0
-        ? afterThePosition(await attendedEventIds(authUser.userId, { limit: visible, skip: 0 }), query)
+        ? afterThePosition(await freeNights(authUser.userId, visible - PLUS.FREE_HISTORY_NIGHTS, now), query)
         : await attendedEventIds(authUser.userId, {
             limit: limit + 1,
             skip,

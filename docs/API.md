@@ -453,12 +453,18 @@ on the profile, by construction: the list and the count share one predicate, so
 they cannot disagree. Working an event as staff is not attending it, and
 appears in neither.
 
-**Your latest 3 nights are free; the rest are Blendn+** where it is gated (the
-city of your latest night). This list is what "night history" means for
-Blendn+; a room's own messages follow the room's rules, not Plus. Without Plus there, `events` stops at the third,
-the pages stop with it (`totalCount` is 3), and `lockedCount` says how many more
-there are — show "‹n› more nights with Blendn+". `lockedCount` is 0 whenever
-nothing is hidden.
+**Your latest 3 ended nights are free; the older ended ones are Blendn+** where
+it is gated (the city of your latest night). This list is what "night history"
+means for Blendn+; a room's own messages follow the room's rules, not Plus.
+"Ended" is `end_time < now`, the app's own "past". Without Plus there, `events`
+is every night still running (tonight, never locked, never one of the 3) and
+your latest 3 ended nights, newest first; the pages stop there (`totalCount` is
+that number), and `lockedCount` is how many ended nights are older — show
+"‹n› more nights with Blendn+". `lockedCount` is 0 whenever nothing is hidden,
+including while 3 or fewer of your nights have ended. `totalCount +
+lockedCount` stays `stats.eventsAttended`. (Before S-1, 2026-10-24, the 3 free
+slots were the latest by check-in, so on a night out they were the nights still
+running and the app, which lists only ended ones, showed none.)
 
 An event the platform has since deleted is in neither the list nor the count,
 so every page is full and `totalCount` is the number of events listed
@@ -1737,8 +1743,9 @@ a page edge neither repeats nor loses a row that shares an instant: RSVPs by
 start time then RSVP id, saves newest first then id, nights newest first then
 event id. A cursor that is not ours, or does not name a row id, is `400`. With
 none of `page`, `limit` and `cursor` (an installed build), up to 200. Where
-Blendn+ gates `/me/attendance`, the cursor pages the free nights and stops at
-them (`lockedCount`, `totalCount` as before).
+Blendn+ gates `/me/attendance`, the cursor pages the free nights (those still
+running and the latest 3 ended) and stops at them (`lockedCount`, `totalCount`
+as before).
 
 ### GET /conversations
 Each conversation carries **`fromMatch`** — it opened from a mutual like rather
