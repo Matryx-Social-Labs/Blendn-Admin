@@ -903,7 +903,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * No verdict in a big room: wait for the call in flight, and if it still
        * has none, take the row back and refuse. Nothing has been emitted.
        */
-      const openaiCheck = await verdictForBigRoom(roomEventId, raced, pendingText)
+      const openaiCheck = await verdictForBigRoom(roomEventId, message.id, raced, pendingText)
       if (!openaiCheck) return discardAndRefuse(message.id)
       examinedInline = openaiCheck.checked
       const openaiResult = openaiCheck.checked ? openaiCheck.result : null

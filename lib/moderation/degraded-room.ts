@@ -43,16 +43,32 @@ export async function refuseBigRoomWhileDown(eventId: string | null): Promise<Re
  * A missing key is configuration, not an outage, and a checked answer is an
  * answer. Otherwise a big room keeps waiting for the call already in flight
  * (it has its own 8 s deadline); a small room carries on as before.
+ *
+ * While it waits the row is soft-deleted (`deleted_at`), which is what every
+ * room reader already excludes (history, last-message previews, unread and
+ * total counts), so nobody else can read a line that has not been checked. A
+ * hide verdict leaves it that way (`hideMessage` follows); any other verdict
+ * puts it back before the caller emits. If it cannot be put back, refuse.
  */
 export async function verdictForBigRoom(
   eventId: string | null,
+  messageId: string,
   check: ModerationCheck,
   pendingText: Promise<ModerationCheck>
 ): Promise<ModerationCheck | null> {
   if (check.checked || check.reason === "no_key") return check
   if (!(await isBigRoom(eventId))) return check
+  await db.chat_messages.update({ where: { id: messageId }, data: { deleted_at: new Date() } })
   const settled = await pendingText
-  return settled.checked ? settled : null
+  if (!settled.checked) return null
+  if (settled.result?.action === "hide") return settled
+  try {
+    await db.chat_messages.update({ where: { id: messageId }, data: { deleted_at: null } })
+  } catch (error) {
+    logger.error("Could not release a held message in a big room", { messageId, error: String(error) })
+    return null
+  }
+  return settled
 }
 
 /**

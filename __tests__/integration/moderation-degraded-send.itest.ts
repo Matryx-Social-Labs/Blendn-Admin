@@ -29,6 +29,7 @@ jest.mock("@/lib/socket-server", () => ({
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { BREAKER_FAILURES_TO_OPEN, recordTextFailure, recordTextSuccess } from "@/lib/moderation/text-breaker"
+import { lastMessagesOf } from "@/lib/chat-list"
 import { db, closeDb, makeUser, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -151,6 +152,36 @@ describe.each(["group", "event"] as const)("%s route", (which) => {
     expect(res.status).toBe(201)
     expect(emitted).toEqual(["slow but fine"])
     expect(await rows(r)).toBe(1)
+  })
+
+  it("while a big room waits for the verdict, other members cannot read the line; after a clean one they can, and it is emitted once", async () => {
+    const r = await liveRoom()
+    mockHere.mockResolvedValue(BIG)
+    mockCheckText.mockImplementation(() => new Promise((ok) => setTimeout(() => ok({ checked: true, result: null }), 1800)))
+    // A second member, who reads the room while the first one's line is held.
+    const otherId = await makeUser(testId("rs_o"))
+    users.push(otherId)
+    const other = await db.user.findUniqueOrThrow({ where: { id: otherId }, select: { email: true } })
+    await db.chat_group_members.create({ data: { chat_group_id: r.groupId, user_id: otherId, anonymous_name: `Pseudo ${testId("o")}` } })
+    const otherToken = signAccessToken(otherId, other.email)
+    const readersSee = async () => {
+      const history = await groupRoute.GET(
+        new NextRequest(`http://localhost/api/mobile/chat/groups/${r.groupId}/messages`, { headers: { authorization: `Bearer ${otherToken}` } }),
+        { params: Promise.resolve({ chatGroupId: r.groupId }) }
+      )
+      const served = ((await history.json()) as { data: { messages: { content: string | null }[] } }).data.messages
+      const previews = await lastMessagesOf([r.groupId], [])
+      return served.some((m) => m.content === "held line") || previews.some((p) => p.content === "held line")
+    }
+
+    const sending = send(which, r, "held line")
+    await new Promise((resolve) => setTimeout(resolve, 1400)) // past the 1 s race, inside the wait
+    expect(await readersSee()).toBe(false)
+    expect(emitted).toEqual([])
+
+    expect((await sending).status).toBe(201)
+    expect(await readersSee()).toBe(true)
+    expect(emitted).toEqual(["held line"])
   })
 
   it("a big room whose slow call answers with a hide hides it and emits nothing", async () => {
