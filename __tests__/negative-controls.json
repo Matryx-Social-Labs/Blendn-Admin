@@ -1083,6 +1083,18 @@
       "observed": "Red before the fix, 2 of 2 failing: the serialised result contained the bcrypt hash.",
       "date": "2026-10-25"
     },
+    "integration/limiters-authorize-first.itest.ts": {
+      "guards": "cancelVenuePro spends a bucket keyed on the caller, not the venue's own startVenueProCheckout bucket, and sendOffer checks the sender's role before it spends the owner's offer-send bucket (audit WEB M3 + L5)",
+      "mutation": "M1: payable(`venue-cancel:${user.id}:${id}`) -> payable(`venue:${id}`) in cancelVenuePro. M2: move the overLimit(`offer-send:...`) block above the maySendVenueOffers check in sendOffer.",
+      "observed": "Red before the fix, 2 of 2 failing: the victim's cancel met \"Too many tries in a minute\"; staff's ninth send met \"Too many tries\" instead of the role refusal.",
+      "date": "2026-10-25"
+    },
+    "claim-limit-order.test.ts": {
+      "guards": "overClaimLimit counts the event's window only for a caller who passed their own email and address windows, so a flooder over their own limit cannot burn the event's 20 an hour (audit WEB L5)",
+      "mutation": "In lib/claim-limit.ts hit the target window together with the email and address windows again.",
+      "observed": "1 failing: expected the event bucket at 10, received 14. The anonymous-claim bucket can still be burned by 2+ addresses each under their own limit; that is the cap's purpose and is left.",
+      "date": "2026-10-25"
+    },
     "dashboard-signin-limits.test.ts": {
       "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and 50 wrong passwords per email across networks (case-folded, existing or not), refuses the right password past either, clears the email's count on a correct one, leaves a victim on their own network alone below the ceiling, and compares against a cost-12 dummy hash when the account is missing or has no password (audit WEB H1/M5/L1)",
       "mutation": "M1: comment out `await forget(keys.account)`. M2: clientNetworkFrom -> clientIpFrom in lib/auth.ts. M3: `byAccount.count > ...` -> `false`. M4: `user?.password ?? DUMMY_HASH` -> `user?.password ?? \"\"`.",
