@@ -12,7 +12,7 @@ import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUs
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
 import { buildLiveSnapshot } from "./live-snapshot"
-import { hereCountFor } from "./attendee-counts"
+import { hereCountCoalesced } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
 import { readableUrl } from "./tigris"
@@ -1387,7 +1387,7 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
 function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): Promise<void> {
-  return hereCountFor(eventId)
+  return hereCountCoalesced(eventId)
     .catch((error: unknown) => {
       logger.warn("hereCount lookup failed; emitting without it", {
         eventId,

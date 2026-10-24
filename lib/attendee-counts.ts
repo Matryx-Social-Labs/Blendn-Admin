@@ -121,6 +121,36 @@ export async function hereCountFor(eventId: string): Promise<number> {
   return db.event_check_ins.count({ where: { event_id: eventId, ...HERE_NOW } })
 }
 
+type CountRead = { running: Promise<number>; next: Promise<number> | null }
+const countsInFlight = new Map<string, CountRead>()
+
+/**
+ * `hereCountFor` for the socket emitters, where a doors-open minute is dozens of
+ * arrivals at once: calls that overlap share reads instead of making one each.
+ * Never stale: a call joins only a read that STARTS after it was made, so the
+ * count includes the write its caller just committed. At most two reads per
+ * round however many callers (the one running, and one for everybody who came
+ * while it ran).
+ */
+export function hereCountCoalesced(eventId: string): Promise<number> {
+  const inFlight = countsInFlight.get(eventId)
+  if (!inFlight) return readHereCount(eventId)
+  return (inFlight.next ??= inFlight.running.then(
+    () => readHereCount(eventId),
+    () => readHereCount(eventId)
+  ))
+}
+
+function readHereCount(eventId: string): Promise<number> {
+  const read: CountRead = { running: hereCountFor(eventId), next: null }
+  countsInFlight.set(eventId, read)
+  const settled = () => {
+    if (countsInFlight.get(eventId) === read) countsInFlight.delete(eventId)
+  }
+  read.running.then(settled, settled)
+  return read.running
+}
+
 /**
  * `hereCountFor` for a page of events in one read: the events list's
  * `hereCount`, so a card's "here now" is the Room's number and never the
