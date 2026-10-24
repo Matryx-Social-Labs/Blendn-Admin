@@ -68,7 +68,7 @@ describe("a crew and its invites", () => {
     expect((await apart(owner)).apart).toBe(false)
   })
 
-  it("`invitedByPhoto` is the inviter's first photo, for exactly the invites whose sender's name is shown", async () => {
+  it("`invitedByPhoto` is the inviter’s first photo, for exactly the invites whose sender’s name is shown", async () => {
     const owner = await person("ph-o", "Zara Photo Khan")
     const guest = await person("ph-g")
     await befriend(owner, guest)
@@ -167,7 +167,7 @@ describe("`crewRevealed` is a fact about the tap, never about who consented", ()
   })
 })
 
-describe("reporting a person in a crew's or Blend's room by handle", () => {
+describe("reporting a person in a crew’s or Blend’s room by handle", () => {
   const report = (as: Person, groupId: string, handle: string, body: Record<string, unknown> = { reason: "harassment", description: "rude" }) =>
     call(reportMember.POST, `/api/mobile/chat/groups/${groupId}/members/${handle}/report`, as, {
       method: "POST",
@@ -186,7 +186,7 @@ describe("reporting a person in a crew's or Blend's room by handle", () => {
     expect(done).toMatchObject({ status: 201, body: { data: { reported: true } } })
     const row = await db.user_reports.findFirstOrThrow({ where: { reporter_id: b1.id } })
     expect([a1.id, a2.id]).toContain(row.reported_id)
-    expect(row.description).toBe("In a Blend's room. rude")
+    expect(row.description).toBe("In a Blend’s room. rude")
 
     // A crew's room: a crewmate by the crew's handle.
     const crew = (await api.detail(a1, w.A.crewId)).body.data
@@ -199,7 +199,7 @@ describe("reporting a person in a crew's or Blend's room by handle", () => {
     expect(await db.user_reports.count({ where: { reporter_id: a3.id } })).toBe(0)
   })
 
-  it("refuses yourself, another room's handle, a forged one and a room that is not a crew's or Blend's", async () => {
+  it("refuses yourself, another room’s handle, a forged one and a room that is not a crew’s or Blend’s", async () => {
     const w = await blended("rep2")
     const [a1] = w.a
     const [b1] = w.b

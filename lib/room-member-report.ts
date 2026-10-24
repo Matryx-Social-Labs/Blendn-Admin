@@ -43,7 +43,7 @@ export async function reportRoomMember(
   })
   if (!inRoom) return "not_found"
 
-  const where = room.group.kind === "crew" ? "In a crew's room." : "In a Blend's room."
+  const where = room.group.kind === "crew" ? "In a crew’s room." : "In a Blend’s room."
   await db.user_reports.create({
     data: {
       reporter_id: reporterId,

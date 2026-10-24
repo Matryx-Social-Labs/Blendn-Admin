@@ -107,6 +107,11 @@ describe("crew ↔ crew: any present member likes for the crew; mutual is one Bl
     // The crew chat says who liked, for the crew: transparency, not a vote.
     const line = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: w.A.roomId, type: "system" }, select: { user_id: true, content: true } })
     expect(line).toEqual({ user_id: a2.id, content: "liked Crew Five for the crew" })
+    // The chat list previews it as the room's line, not a2's (S-7): `type` says so, for the liker too.
+    for (const p of [a1, a2]) {
+      const crewRow = (await api.chatGroups(p)).body.data.rooms.find((r: { id: string }) => r.id === w.A.roomId)
+      expect(crewRow.lastMessage).toMatchObject({ type: "system", content: "liked Crew Five for the crew" })
+    }
     // Nobody on the other side learns of it: no bell row, and their card says nothing.
     expect(await db.notifications.count({ where: { user_id: { in: [b1.id, b2.id, b3.id] } , kind: "blend" } })).toBe(0)
     const theirCard = (await api.atEvent(b1, w.eventId)).body.data.crews.find((c: { crewId: string }) => c.crewId === w.A.crewId)
@@ -673,7 +678,7 @@ describe("crew and Blend rooms in the chat list (step 9 review, S5)", () => {
     // Its last line, named as the room names people: the Blend's handle and pseudonym, as its history has them.
     expect((await api.send(a1, w.roomId, "list me")).status).toBe(201)
     const line = (await api.read(b1, w.roomId)).body.data.messages.find((m: { content: string }) => m.content === "list me")
-    expect(pick(await rooms(b1), w.roomId)?.lastMessage).toMatchObject({ content: "list me", user: { id: line.user.id, name: line.user.name } })
+    expect(pick(await rooms(b1), w.roomId)?.lastMessage).toMatchObject({ content: "list me", type: "text", user: { id: line.user.id, name: line.user.name } })
     expect(line.user.id).toMatch(/^rh_/)
 
     // A block across the sides: the pair do not list the Blend; everyone else does, and the crew chats stay.

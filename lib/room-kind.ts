@@ -457,6 +457,89 @@ export async function blendAdmitsMany(roomIds: readonly string[], candidates: re
 }
 
 /**
+ * The rooms of these Blends whose door admits `viewerId` now, with each
+ * room's name: the bell's `display.context` for a `blend` row (S-2).
+ *
+ * The same rule as the room (`blendDenial`), fed by flat set-based reads
+ * rather than `blendSelect`'s nested one, which Prisma sends relation by
+ * relation (about 25 statements for one Blend on the bell, review M1). The
+ * reads: the Blends with their rooms, their crews, the crews' members still
+ * here, the reader's check-ins at the occurrences, the solo people. `apart` is
+ * everybody kept apart from the reader (a block either way, or a closed
+ * conversation: `blocksBetween`'s rule from the reader's side), which the
+ * caller reads once for every door on the page.
+ */
+export async function admittingBlendRooms(
+  blendIds: readonly string[],
+  viewerId: string,
+  apart: ReadonlySet<string> | Promise<ReadonlySet<string>>
+): Promise<Array<{ id: string; name: string; blendId: string }>> {
+  if (blendIds.length === 0) return []
+  const blends = await db.blends.findMany({
+    where: { id: { in: [...blendIds] } },
+    select: {
+      id: true,
+      closes_at: true,
+      closed_at: true,
+      b_user_id: true,
+      occurrence_id: true,
+      a_crew_id: true,
+      b_crew_id: true,
+      room: { select: { id: true, name: true } },
+    },
+  })
+  const withRooms = blends.filter((b) => b.room)
+  if (withRooms.length === 0) return []
+  const crewIds = [...new Set(withRooms.flatMap((b) => [b.a_crew_id, ...(b.b_crew_id ? [b.b_crew_id] : [])]))]
+  const soloIds = [...new Set(withRooms.flatMap((b) => (b.b_user_id ? [b.b_user_id] : [])))]
+  const [crews, members, checkIns, solos, keptApart] = await Promise.all([
+    db.crews.findMany({ where: { id: { in: crewIds } }, select: { id: true, dissolved_at: true, hidden_at: true } }),
+    // As `blendSideSelect` reads them: members whose account is still here.
+    db.crew_members.findMany({
+      where: { crew_id: { in: crewIds }, user: { suspended_at: null, deletedAt: null } },
+      select: { crew_id: true, user_id: true },
+    }),
+    db.event_check_ins.findMany({
+      where: { occurrence_id: { in: [...new Set(withRooms.map((b) => b.occurrence_id))] }, user_id: viewerId, check_in_time: { not: null } },
+      select: { occurrence_id: true },
+    }),
+    soloIds.length ? db.user.findMany({ where: { id: { in: soloIds } }, select: { id: true, suspended_at: true, deletedAt: true } }) : [],
+    apart,
+  ])
+  // A person's blocks with the reader, in the shape `blendDenial` reads: one entry when kept apart, none otherwise.
+  const blocksOf = (id: string): Blocks => ({
+    blocked_users: keptApart.has(id) ? [{ blocked_id: viewerId }] : [],
+    blocked_by: [],
+    conversations_as_user1: [],
+    conversations_as_user2: [],
+  })
+  const crewOf = new Map(crews.map((c) => [c.id, c]))
+  const side = (crewId: string | null): BlendSide | null => {
+    const crew = crewId ? crewOf.get(crewId) : undefined
+    if (!crew) return null
+    const people = members.filter((m) => m.crew_id === crew.id)
+    return { dissolved_at: crew.dissolved_at, hidden_at: crew.hidden_at, members: people.map((m) => ({ user_id: m.user_id, user: blocksOf(m.user_id) })) }
+  }
+  const here = new Set(checkIns.map((c) => c.occurrence_id))
+  const soloOf = new Map(solos.map((u) => [u.id, u]))
+  return withRooms.flatMap((b) => {
+    const a = side(b.a_crew_id)
+    if (!a) return []
+    const solo = b.b_user_id ? soloOf.get(b.b_user_id) : undefined
+    const owner: BlendOwner = {
+      closes_at: b.closes_at,
+      closed_at: b.closed_at,
+      b_user_id: b.b_user_id,
+      occurrence: { check_ins: here.has(b.occurrence_id) ? [{ user_id: viewerId }] : [] },
+      a_crew: a,
+      b_crew: side(b.b_crew_id),
+      b_user: solo ? { suspended_at: solo.suspended_at, deletedAt: solo.deletedAt, ...blocksOf(solo.id) } : null,
+    }
+    return blendDenial(owner, viewerId) === null ? [{ id: b.room!.id, name: b.room!.name, blendId: b.id }] : []
+  })
+}
+
+/**
  * Everybody a room that is not an event's admits, for its roster: a board
  * post's author and the accepted askers, a crew's members, a Blend's snapshot
  * of the people here when it matched. Null for an event's room.

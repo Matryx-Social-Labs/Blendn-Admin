@@ -183,7 +183,7 @@ afterAll(async () => {
 })
 
 describe("starting a subscription", () => {
-  it("an owner starts one: our record, Razorpay's id, expire_by, and no entitlement", async () => {
+  it("an owner starts one: our record, Razorpay’s id, expire_by, and no entitlement", async () => {
     as(owner, "organizer")
     const out = await actions.startAnalyticsCheckout("monthly")
     expect(out).toMatchObject({ kind: "subscription", keyId: "rzp_test_itestkey" })
@@ -257,7 +257,7 @@ describe("starting a subscription", () => {
   it("Razorpay failing: one sentence, nothing saved", async () => {
     as(owner, "organizer")
     failNext = true
-    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Razorpay didn't accept that just now")
+    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Razorpay didn’t accept that just now")
     expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
   })
 
@@ -307,10 +307,10 @@ describe("an Event Pass", () => {
     expect(calls).toHaveLength(0)
   })
 
-  it("refuses another organisation's event, and a malformed id, before calling Razorpay", async () => {
+  it("refuses another organisation’s event, and a malformed id, before calling Razorpay", async () => {
     as(owner, "organizer")
-    await expect(actions.startEventPassCheckout(otherEventId)).rejects.toThrow(/isn't one of your organisation's/)
-    await expect(actions.startEventPassCheckout("not-a-uuid")).rejects.toThrow(/isn't one of your organisation's/)
+    await expect(actions.startEventPassCheckout(otherEventId)).rejects.toThrow(/isn’t one of your organisation’s/)
+    await expect(actions.startEventPassCheckout("not-a-uuid")).rejects.toThrow(/isn’t one of your organisation’s/)
     expect(calls.filter((c) => c.url.endsWith("/orders"))).toHaveLength(0)
   })
 })
@@ -318,9 +318,9 @@ describe("an Event Pass", () => {
 describe("who may buy (G7)", () => {
   it.each([
     ["staff", () => as(staff, "organizer"), /owner or admin/],
-    ["a venue owner who owns an organisation", () => as(venueOwner, "venue_owner"), /organiser's organisation/],
-    ["the owner of a suspended organisation", () => as(suspendedOwner, "organizer"), /organiser's organisation/],
-    ["a platform admin", () => as(admin, "app_admin"), /organiser's organisation/],
+    ["a venue owner who owns an organisation", () => as(venueOwner, "venue_owner"), /organiser’s organisation/],
+    ["the owner of a suspended organisation", () => as(suspendedOwner, "organizer"), /organiser’s organisation/],
+    ["a platform admin", () => as(admin, "app_admin"), /organiser’s organisation/],
   ])("refuses %s on every action, with no call out and no row", async (_label, sign, sentence) => {
     sign()
     await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(sentence)
@@ -333,18 +333,18 @@ describe("who may buy (G7)", () => {
   it("with no keys, or a live key outside production, refuses with one sentence and never calls out", async () => {
     as(owner, "organizer")
     delete process.env.RAZORPAY_KEY_ID
-    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Payments aren't switched on here yet.")
+    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Payments aren’t switched on here yet.")
     process.env.RAZORPAY_KEY_ID = "rzp_live_itestkey"
-    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Payments aren't switched on here yet.")
+    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Payments aren’t switched on here yet.")
     process.env.RAZORPAY_KEY_ID = "rzp_test_itestkey"
     delete process.env.RAZORPAY_WEBHOOK_SECRET
-    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Payments aren't switched on here yet.")
+    await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Payments aren’t switched on here yet.")
     expect(calls).toHaveLength(0)
   })
 })
 
 describe("cancelling", () => {
-  it("an org admin cancels a running subscription at the cycle's end, and the entitlement waits for the webhook", async () => {
+  it("an org admin cancels a running subscription at the cycle’s end, and the entitlement waits for the webhook", async () => {
     as(owner, "organizer")
     const out = await actions.startAnalyticsCheckout("monthly")
     await db.billing_checkouts.updateMany({ where: { provider_ref: out.subscriptionId }, data: { status: "active" } })
@@ -400,7 +400,7 @@ describe("admin grants (G8)", () => {
     as(admin, "app_admin")
     await actions.grantAnalytics(orgId, 1, "A grant beside the paid row")
     const grant = await db.entitlements.findFirstOrThrow({ where: { subject_id: orgId, source: "grant" } })
-    await expect(actions.revokePaidEntitlement(orgId, grant.id, "Trying to revoke a grant")).rejects.toThrow(/isn't a paid one/)
+    await expect(actions.revokePaidEntitlement(orgId, grant.id, "Trying to revoke a grant")).rejects.toThrow(/isn’t a paid one/)
     await actions.revokePaidEntitlement(orgId, paid.id, "Refunded by bank transfer, ticket 42")
     expect((await db.entitlements.findUniqueOrThrow({ where: { id: paid.id } })).expires_at!.getTime()).toBeLessThanOrEqual(Date.now())
     expect(await audited({ resource_id: orgId, action: "entitlement.revoked" }, 1)).toBe(1)
@@ -447,13 +447,13 @@ describe("when one side fails (scan 3)", () => {
       const t0 = new Date()
       as(owner, "organizer")
       failNext = true
-      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Razorpay didn't accept that just now")
+      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Razorpay didn’t accept that just now")
       expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
       expect(await auditsSince(t0, "billing.checkout.started")).toBe(0)
       expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
     })
 
-    it("the database refuses after Razorpay made it: no row, and Razorpay's subscription is cancelled and logged", async () => {
+    it("the database refuses after Razorpay made it: no row, and Razorpay’s subscription is cancelled and logged", async () => {
       const t0 = new Date()
       as(owner, "organizer")
       await refusing("billing_checkouts", "INSERT", `NEW.org_id::text = '${orgId}'`, () =>
@@ -483,13 +483,13 @@ describe("when one side fails (scan 3)", () => {
       const t0 = new Date()
       as(owner, "organizer")
       failNext = true
-      await expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("Razorpay didn't accept that just now")
+      await expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("Razorpay didn’t accept that just now")
       expect(await db.billing_checkouts.count({ where: { org_id: orgId } })).toBe(0)
       expect(await auditsSince(t0, "billing.checkout.started")).toBe(0)
       expect(await db.entitlements.count({ where: { subject_id: orgId } })).toBe(0)
     })
 
-    it("the database refuses after Razorpay made the order: no row, the orphan's id logged, nothing granted", async () => {
+    it("the database refuses after Razorpay made the order: no row, the orphan’s id logged, nothing granted", async () => {
       as(owner, "organizer")
       await refusing("billing_checkouts", "INSERT", `NEW.org_id::text = '${orgId}'`, () =>
         expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("Nothing was started")
@@ -515,7 +515,7 @@ describe("when one side fails (scan 3)", () => {
       expect(logged("providerRef", ref)).toBe(true)
     })
 
-    it("the database refuses after Razorpay cancelled: refused, logged with the id, and Razorpay's webhook settles it", async () => {
+    it("the database refuses after Razorpay cancelled: refused, logged with the id, and Razorpay’s webhook settles it", async () => {
       const { ref, ent } = await running()
       const t0 = new Date()
       as(owner, "organizer")
@@ -582,7 +582,7 @@ describe("when one side fails (scan 3)", () => {
     })
   })
 
-  describe("the role is the database's, not the session's (review LOW 18)", () => {
+  describe("the role is the database’s, not the session’s (review LOW 18)", () => {
     it("a session claiming app_admin for an organiser grants nothing", async () => {
       as(owner, "app_admin")
       await expect(actions.grantAnalytics(orgId, 6, "A stale or forged admin claim")).rejects.toThrow("Forbidden")
@@ -595,7 +595,7 @@ describe("when one side fails (scan 3)", () => {
       await db.organisation_members.create({ data: { org_id: orgId, user_id: demoted, role: "owner" } })
       await db.user.update({ where: { id: demoted }, data: { role: "attendee" } })
       as(demoted, "organizer")
-      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/organiser's organisation/)
+      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/organiser’s organisation/)
       await db.user.update({ where: { id: demoted }, data: { role: "organizer", suspended_at: new Date() } })
       await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Unauthorized")
       expect(calls).toHaveLength(0)

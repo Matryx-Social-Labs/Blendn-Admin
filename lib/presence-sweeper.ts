@@ -419,7 +419,7 @@ async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: num
     if (fresh.length === 0) continue
     await sendBulkPushNotifications({
       userIds: fresh,
-      title: "Blend'n",
+      title: "Blend’n",
       body: TAKEOVER_PUSH_BODY,
       data: { type: "event_update", eventId: event.id },
     }).catch((error) =>

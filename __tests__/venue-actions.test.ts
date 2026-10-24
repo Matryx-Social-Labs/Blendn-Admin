@@ -223,7 +223,7 @@ describe("createVenue", () => {
     ] as [number, number][] }
     await expect(
       createVenue({ name: "Toit", venueType: "brewery", lat: LAT, lng: LNG, geofence: far })
-    ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
+    ).rejects.toThrow(/check-in area is \d+ m from the venue’s pin/i)
     expect(mockDb.venues.create).not.toHaveBeenCalled()
 
     // 60 m off is a fence drawn around the building, not somewhere else.
@@ -413,7 +413,7 @@ describe("correcting the pin", () => {
       geofence: { type: "circle", lat: LAT, lng: LNG, radius: 30, buffer: 20 },
     })
     await expect(updateVenue("11111111-1111-4111-8111-111111111111", { lat: 19.076, lng: 72.877 })).rejects.toThrow(
-      /check-in area is \d+ m from the venue's pin/i
+      /check-in area is \d+ m from the venue’s pin/i
     )
     expect(mockDb.venues.update).not.toHaveBeenCalled()
 
@@ -435,7 +435,7 @@ describe("correcting the pin", () => {
       mockDb.venues.update.mockClear()
       await expect(
         updateVenue("11111111-1111-4111-8111-111111111111", { lat: 19.076, lng: 72.877, geofence: circleAt(LAT, LNG) })
-      ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
+      ).rejects.toThrow(/check-in area is \d+ m from the venue’s pin/i)
       expect(mockDb.venues.update).not.toHaveBeenCalled()
     })
 
@@ -452,7 +452,7 @@ describe("correcting the pin", () => {
       mockDb.venues.findUniqueOrThrow.mockResolvedValue({ latitude: LAT, longitude: LNG })
       await expect(
         updateVenue("11111111-1111-4111-8111-111111111111", { name: "Toit Brewpub", geofence: circleAt(LAT + 0.011, LNG) })
-      ).rejects.toThrow(/check-in area is \d+ m from the venue's pin/i)
+      ).rejects.toThrow(/check-in area is \d+ m from the venue’s pin/i)
       expect(mockDb.venues.update).not.toHaveBeenCalled()
     })
 

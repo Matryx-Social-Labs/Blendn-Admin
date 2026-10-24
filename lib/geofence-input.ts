@@ -109,7 +109,7 @@ export function canPublish(event: {
     return {
       ok: false,
       reason:
-        "Set the event's location on the map before publishing — GPS check-in needs somewhere to check against.",
+        "Set the event’s location on the map before publishing — GPS check-in needs somewhere to check against.",
     }
   }
   return { ok: true }

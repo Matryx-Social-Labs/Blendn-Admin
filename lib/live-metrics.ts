@@ -199,7 +199,7 @@ export function deriveAlerts(
       kind: "over_capacity",
       severity: "critical",
       title: "Over stated capacity",
-      body: `${snapshot.guestsInside} guests against capacity ${snapshot.capacity} — ${snapshot.guestsInside - snapshot.capacity} over. Staff aren't counted toward fill; ${snapshot.inside} bodies are in the room.`,
+      body: `${snapshot.guestsInside} guests against capacity ${snapshot.capacity} — ${snapshot.guestsInside - snapshot.capacity} over. Staff aren’t counted toward fill; ${snapshot.inside} bodies are in the room.`,
     })
   } else if (snapshot.fillPct !== null && snapshot.fillPct >= 90) {
     alerts.push({
@@ -273,7 +273,7 @@ export function deriveAlerts(
       kind: "room_died",
       severity: "warning",
       title: "Room has gone quiet",
-      body: `${snapshot.inside} people inside and nobody has posted in 30 minutes. The chatroom is the introduction — a silent room means it isn't happening.`,
+      body: `${snapshot.inside} people inside and nobody has posted in 30 minutes. The chatroom is the introduction — a silent room means it isn’t happening.`,
     })
   }
 
@@ -296,8 +296,8 @@ export function deriveAlerts(
  */
 const FOR_THE_VENUE: Record<LiveAlertKind, string | null> = {
   safety: "Safety messages in chat. Routed to moderation regardless of sentiment.",
-  entry_backing_up: "Arrivals well above tonight's usual pace, with entry-queue complaints in chat.",
-  over_capacity: "More guests than the event's stated capacity.",
+  entry_backing_up: "Arrivals well above tonight’s usual pace, with entry-queue complaints in chat.",
+  over_capacity: "More guests than the event’s stated capacity.",
   approaching_capacity: null,
   leaving_early: null,
   mood_sliding: "Most of the recent classified messages are negative.",

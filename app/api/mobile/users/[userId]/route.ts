@@ -4,6 +4,7 @@ import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
+import { mayShowRealName } from "@/lib/conversation-identity"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { profileBadges } from "@/lib/profile-badges"
@@ -261,17 +262,33 @@ export async function GET(
  * The viewer's open conversation with `otherId`, and any pending message
  * request between them, from the viewer's side. A closed conversation is not
  * one you can open, so it reads as none.
+ *
+ * `youRevealed` / `theyRevealed` are that open conversation's, exactly as
+ * `GET /conversations/:id` sends them (`theyRevealed` is `mayShowRealName`,
+ * so a never-pseudonymous conversation reads true), so the profile's
+ * one-sided copy and the thread agree. Both false with no open conversation.
+ * Only ever sent where `connection` is: to a viewer who may already see who
+ * this is.
  */
 async function connectionBetween(
   viewerId: string,
   otherId: string
-): Promise<{ conversationId: string | null; request: "sent" | "received" | null }> {
-  if (viewerId === otherId) return { conversationId: null, request: null }
+): Promise<{ conversationId: string | null; request: "sent" | "received" | null; youRevealed: boolean; theyRevealed: boolean }> {
+  if (viewerId === otherId) return { conversationId: null, request: null, youRevealed: false, theyRevealed: false }
   const [user1_id, user2_id] = conversationPair(viewerId, otherId)
   const [conversation, pending] = await Promise.all([
     db.private_conversations.findUnique({
       where: { user1_id_user2_id: { user1_id, user2_id } },
-      select: { id: true, closed_at: true },
+      select: {
+        id: true,
+        closed_at: true,
+        user1_id: true,
+        user2_id: true,
+        user1_pseudonym: true,
+        user2_pseudonym: true,
+        user1_revealed: true,
+        user2_revealed: true,
+      },
     }),
     db.message_requests.findFirst({
       where: {
@@ -284,8 +301,11 @@ async function connectionBetween(
       select: { sender_id: true },
     }),
   ])
+  const open = conversation && !conversation.closed_at ? conversation : null
   return {
-    conversationId: conversation && !conversation.closed_at ? conversation.id : null,
+    conversationId: open?.id ?? null,
     request: pending ? (pending.sender_id === viewerId ? "sent" : "received") : null,
+    youRevealed: open ? (open.user1_id === viewerId ? open.user1_revealed : open.user2_revealed) : false,
+    theyRevealed: open ? mayShowRealName(open, otherId) : false,
   }
 }

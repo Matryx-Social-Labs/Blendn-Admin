@@ -13,7 +13,11 @@ export const EventQuerySchema = z
   .object({
     page: z.number().int().min(1).default(1),
     limit: z.number().int().min(1).max(100).default(20),
-    search: z.string().optional(),
+    search: z
+      .string()
+      .max(100)
+      .optional()
+      .describe("Matches title, description, venue or city. Trimmed; empty is no search; over 100 characters is 400 with reasonCode SEARCH_TOO_LONG. One character is filtered in date order. From 2, with the default sortBy=start_time, ranked title, venue, city, then description; by start time within each; past 500 matches, date order with the true totalCount."),
     city: z
       .string()
       .min(1)
@@ -172,6 +176,14 @@ const EventCategorySchema = z.object({
   name: z.string(),
   slug: z.string(),
   description: z.string().nullable(),
+  icon: z.string().nullable(),
+})
+
+/** A row's categories on the person's own lists (`/me/rsvps`, `/me/attendance`), as `GET /users/{userId}/favorites` sends them: the app draws the row's category plate from `slug`. */
+export const RowCategorySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  slug: z.string(),
   icon: z.string().nullable(),
 })
 

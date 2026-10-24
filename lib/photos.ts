@@ -120,7 +120,7 @@ const PHOTO_REFUSAL: Record<SealRefusal, PhotoRejection> = {
   missing: { ok: false, code: "too_small", message: "That photo did not finish uploading. Try again." },
   too_small: { ok: false, code: "too_small", message: "That looks like a blank image. Pick a photo of yourself." },
   too_large: { ok: false, code: "too_large", message: "That photo is too large. Pick one under 10 MB." },
-  wrong_type: { ok: false, code: "wrong_type", message: "That file isn't a photo. Pick a JPEG, PNG or WebP." },
+  wrong_type: { ok: false, code: "wrong_type", message: "That file isn’t a photo. Pick a JPEG, PNG or WebP." },
 }
 
 const BLUR_REFUSAL: Record<SealRefusal, PhotoRejection> = {

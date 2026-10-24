@@ -143,7 +143,7 @@ export const dashboardNav: DashboardNavItem[] = [
   },
   {
     title: "Attendees",
-    description: "Who comes back, who doesn't show. Labels only, never names.",
+    description: "Who comes back, who doesn’t show. Labels only, never names.",
     url: "/dashboard/attendees",
     icon: IconUsers,
     allowedRoles: ["organizer"],
@@ -241,7 +241,7 @@ export const dashboardNav: DashboardNavItem[] = [
      */
     title: "Claims",
     description:
-      "Ownership requests for events, venues and brands. Approving one hands over an attendee list, a building, or a brand's reporting.",
+      "Ownership requests for events, venues and brands. Approving one hands over an attendee list, a building, or a brand’s reporting.",
     url: "/dashboard/claims",
     icon: IconFileCheck,
     allowedRoles: ["app_admin"],

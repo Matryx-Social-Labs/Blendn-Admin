@@ -150,10 +150,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       gpsAccuracy,
       userId,
       record: existing && existingOccurrence ? { eventId: existing.id, occurrenceId: existingOccurrence.id } : null,
-      noFenceMessage: "This place has no check-in area yet, so you can't go live here.",
+      noFenceMessage: "This place has no check-in area yet, so you can’t go live here.",
       noFenceCode: ErrorCode.NO_CHECK_IN_AREA,
       // Never the distance: a venue's area is nobody's to map by asking (D-x6).
-      outsideMessage: `You're not at ${venue.name} yet.`,
+      outsideMessage: `You’re not at ${venue.name} yet.`,
     })
     if (refused) return refused
 

@@ -206,7 +206,7 @@ beforeAll(async () => {
         kind: "over_capacity",
         severity: "critical",
         title: "Over stated capacity",
-        body: "14 guests against capacity 11 — 3 over. Staff aren't counted toward fill; 14 bodies are in the room.",
+        body: "14 guests against capacity 11 — 3 over. Staff aren’t counted toward fill; 14 bodies are in the room.",
       },
     ],
   })
@@ -262,7 +262,7 @@ describe("the ops socket", () => {
     const [venueView] = (await watch(venueOwner, three)).snapshots
     expect(venueView).toMatchObject({ view: "venue", overCapacity: true, capacity: 2 })
     expect(venueView.alerts).toEqual([
-      { kind: "over_capacity", severity: "critical", title: "Over stated capacity", body: "More guests than the event's stated capacity." },
+      { kind: "over_capacity", severity: "critical", title: "Over stated capacity", body: "More guests than the event’s stated capacity." },
     ])
   })
 
@@ -372,7 +372,7 @@ describe("the ops socket", () => {
   })
 })
 
-describe("the event page's payload", () => {
+describe("the event page’s payload", () => {
   type Issues = { issues: Array<{ kind: string; body: string }> }
 
   it("hands the Live tab the logged issue without its figures for the venue, with them for the organiser", async () => {
@@ -380,14 +380,14 @@ describe("the event page's payload", () => {
     const [venueTab] = find<Issues>(await eventPage(twelve, "live"), LiveTab)
     // Leaving early is not sent at all: it flips at an exact share of arrivals.
     expect(venueTab.issues).toEqual([
-      expect.objectContaining({ kind: "over_capacity", body: "More guests than the event's stated capacity." }),
+      expect.objectContaining({ kind: "over_capacity", body: "More guests than the event’s stated capacity." }),
     ])
     expect(JSON.stringify(venueTab)).not.toMatch(/\b(3|4|11|14|16|97) /)
 
     as(host, "organizer")
     const [hostTab] = find<Issues>(await eventPage(twelve, "live"), LiveTab)
     expect(hostTab.issues.map((i) => i.body).sort()).toEqual([
-      "14 guests against capacity 11 — 3 over. Staff aren't counted toward fill; 14 bodies are in the room.",
+      "14 guests against capacity 11 — 3 over. Staff aren’t counted toward fill; 14 bodies are in the room.",
       "4 of 16 have checked out with 97 minutes still to run.",
     ])
   })
@@ -398,7 +398,7 @@ describe("the event page's payload", () => {
     ever: p.overview.tiles.find((t) => t.label === "Ever checked in")?.value,
   })
 
-  it("gives the Overview's live counts as ranges to the venue and exactly to the organiser", async () => {
+  it("gives the Overview’s live counts as ranges to the venue and exactly to the organiser", async () => {
     as(venueOwner, "venue_owner")
     expect(live(find<OverviewProps>(await eventPage(three), Overview)[0])).toEqual({ now: "Under 5", ever: "Under 5" })
     expect(live(find<OverviewProps>(await eventPage(twelve), Overview)[0])).toEqual({ now: "10–19", ever: "10–19" })
@@ -408,7 +408,7 @@ describe("the event page's payload", () => {
     expect(live(find<OverviewProps>(await eventPage(twelve), Overview)[0])).toEqual({ now: "12", ever: "12" })
   })
 
-  it("gives the Attendees tab's count as a range while the night runs", async () => {
+  it("gives the Attendees tab’s count as a range while the night runs", async () => {
     as(venueOwner, "venue_owner")
     const [count] = find<{ came: unknown }>(await eventPage(twelve, "attendees"), EventAttendeesCount)
     expect(count.came).toBe("10-19")
@@ -416,7 +416,7 @@ describe("the event page's payload", () => {
   })
 })
 
-describe("the venue's lists", () => {
+describe("the venue’s lists", () => {
   type Panel = { occupancy: { inside: unknown; fillPct: unknown; rooms: Array<{ eventId: string; inside: unknown }> } }
 
   it("ranges the rooms another host runs in the building, and prints no total they would add up to", async () => {

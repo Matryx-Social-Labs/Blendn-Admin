@@ -696,7 +696,7 @@ function notifyFriendRequest(recipientId: string, requestId: string, via?: "matc
   sendPushNotification({
     userId: recipientId,
     title: "New friend request",
-    body: "Someone wants to be friends. Open Blend'n to see who.",
+    body: "Someone wants to be friends. Open Blend’n to see who.",
     // `via` lets the app say "from your match". Never an event or a room.
     data: { type: "friend_request", requestId, ...(via && { via }) },
   }).catch((err: unknown) => logPushFailure("friend request", err))
@@ -706,7 +706,7 @@ function notifyFriendAccepted(recipientId: string): void {
   sendPushNotification({
     userId: recipientId,
     title: "Friend request accepted",
-    body: "You're friends now.",
+    body: "You’re friends now.",
     data: { type: "friend_accepted" },
   }).catch((err: unknown) => logPushFailure("friend accepted", err))
 }

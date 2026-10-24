@@ -126,7 +126,7 @@ describe("POST /venues/:id/live", () => {
     expect(await db.event_check_ins.count({ where: { event_id: first.json.data.venueDayId, user_id: me.id } })).toBe(1)
   })
 
-  it("keeps the first stay's four-hour cap when stay is chosen again (D-x5)", async () => {
+  it("keeps the first stay’s four-hour cap when stay is chosen again (D-x5)", async () => {
     const v = await venue()
     const me = await person()
     const first = await goLive(me.token, v, { stay: true })
@@ -141,7 +141,7 @@ describe("POST /venues/:id/live", () => {
     expect(cap.getTime() - Date.now()).toBeLessThan(61 * 60_000)
   })
 
-  it("ends a window at the venue's reset (D-4)", async () => {
+  it("ends a window at the venue’s reset (D-4)", async () => {
     // A venue whose day resets at the top of the next UTC hour; more than five
     // minutes away, so this is today's room and not tomorrow's.
     const nowUtc = new Date()
@@ -153,7 +153,7 @@ describe("POST /venues/:id/live", () => {
     expect(json.data.expiresAt).toBe(day.end_time.toISOString())
   })
 
-  it("is staff work for the venue's own organisation, as at an event there (decision)", async () => {
+  it("is staff work for the venue’s own organisation, as at an event there (decision)", async () => {
     const org = await db.organisations.create({ data: { display_name: testId("gl_org"), kind: "company", status: "verified" } })
     world.orgs.push(org.id)
     const v = await venue({ ownerOrg: org.id })
@@ -178,7 +178,7 @@ describe("POST /venues/:id/live", () => {
     expect(await db.events.count({ where: { venue_id: v, kind: "venue_day" } })).toBe(0)
   })
 
-  it("tells a vague fix, no area and outside apart by code (step 5), and keeps the event door's code", async () => {
+  it("tells a vague fix, no area and outside apart by code (step 5), and keeps the event door’s code", async () => {
     const v = await venue()
     const me = await person()
     const vague = await goLive(me.token, v, { minutes: 20, deviceInfo: { gpsAccuracy: 400 } })
@@ -212,7 +212,7 @@ describe("POST /venues/:id/live", () => {
      * An exact sentence cannot carry a distance, and has no such name.
      */
     const { name } = await db.venues.findUniqueOrThrow({ where: { id: v }, select: { name: true } })
-    expect(first.json.error).toBe(`You're not at ${name} yet.`)
+    expect(first.json.error).toBe(`You’re not at ${name} yet.`)
     expect(await db.events.count({ where: { venue_id: v, kind: "venue_day" } })).toBe(0)
 
     // Once the day exists, the refusal is recorded against it, and nowhere else.
@@ -443,7 +443,7 @@ describe("muted, banned and left, at both doors", () => {
     expect((await member(group.id, me.id)).status).toBe("muted")
   })
 
-  it("keeps a ban a person pressed, and the room's roster, grid and waves stay shut", async () => {
+  it("keeps a ban a person pressed, and the room’s roster, grid and waves stay shut", async () => {
     const { v, me, dayId, groupId } = await liveRoom()
     await db.chat_group_members.update({
       where: { chat_group_id_user_id: { chat_group_id: groupId, user_id: me.id } },
@@ -471,7 +471,7 @@ describe("muted, banned and left, at both doors", () => {
   })
 })
 
-describe("by-id attendee routes refuse a venue day's id", () => {
+describe("by-id attendee routes refuse a venue day’s id", () => {
   it("as if it did not exist", async () => {
     const v = await venue()
     const me = await person()
@@ -498,8 +498,8 @@ describe("by-id attendee routes refuse a venue day's id", () => {
   })
 })
 
-describe("the venue's room is for the people live in it (F6, F7, D-5)", () => {
-  it("is listed as a place's room: kind venue_day, its venue, named for the place, no exact count (step 5)", async () => {
+describe("the venue’s room is for the people live in it (F6, F7, D-5)", () => {
+  it("is listed as a place’s room: kind venue_day, its venue, named for the place, no exact count (step 5)", async () => {
     type Row = { id: string; name: string; memberCount: unknown; event: { id: string; kind: string; title: string; venueId: string | null } }
     const me = await person()
     // An event's room first: its row keeps an exact count and names no venue.
@@ -684,7 +684,7 @@ describe("GET /venues/:id (PL-I18, D-19, D-x2)", () => {
     expect(JSON.parse((await venueDetail(me.token, v)).text).data.live.liveNow).toBe("quiet")
   })
 
-  it("never counts the venue's staff as people here", async () => {
+  it("never counts the venue’s staff as people here", async () => {
     const org = await db.organisations.create({ data: { display_name: testId("gl_staff_org"), kind: "company", status: "verified" } })
     world.orgs.push(org.id)
     const v = await venue({ ownerOrg: org.id })
@@ -746,7 +746,7 @@ describe("GET /venues/:id (PL-I18, D-19, D-x2)", () => {
 })
 
 describe("what others see, and erasure", () => {
-  it("labels a venue day as a place in /me/attendance, and keeps it out of anybody else's count (D-6)", async () => {
+  it("labels a venue day as a place in /me/attendance, and keeps it out of anybody else’s count (D-6)", async () => {
     const v = await venue()
     const me = await person()
     const viewer = await person()
@@ -777,7 +777,7 @@ describe("what others see, and erasure", () => {
     expect((await maySeeIdentityFor(a.id, [b.id])).has(b.id)).toBe(false)
   })
 
-  it("erases a deleted account's Go Live as it does an event's (PL-I22)", async () => {
+  it("erases a deleted account’s Go Live as it does an event’s (PL-I22)", async () => {
     const v = await venue()
     const me = await person()
     const { json } = await goLive(me.token, v)

@@ -27,7 +27,7 @@ describe("a Razorpay call that fails", () => {
     const err = await failure()
     expect(err).toBeInstanceOf(RazorpayError)
     expect(err.status).toBe(406)
-    expect(err.message).toMatch(/refused this server's IP/)
+    expect(err.message).toMatch(/refused this server’s IP/)
     expect(err.message).toContain("awselb/2.0")
   })
 

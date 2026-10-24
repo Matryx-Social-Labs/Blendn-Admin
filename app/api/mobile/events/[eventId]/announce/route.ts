@@ -232,7 +232,7 @@ export async function POST(
          * a user message can never occupy that shape, so the label cannot be
          * forged by somebody choosing a convincing pseudonym.
          */
-        userName: kind === "system" ? "Blend'n" : author,
+        userName: kind === "system" ? "Blend’n" : author,
         /*
          * No photograph either. A broadcast is the organisation speaking, and
          * this shipped the individual's avatar into the pseudonymous room

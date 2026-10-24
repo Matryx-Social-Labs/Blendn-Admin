@@ -113,7 +113,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // A chat post asks nothing of anybody, so there is nothing to ask to join.
-    if (post.kind === "chat") return errorResponse("A chat post doesn't take requests", 422)
+    if (post.kind === "chat") return errorResponse("A chat post doesn’t take requests", 422)
     // The board already shows it full; an ask on it could only be refused.
     if (post.spaces_left === 0) return conflictResponse("That offer is full")
 

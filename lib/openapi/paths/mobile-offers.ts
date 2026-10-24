@@ -149,12 +149,15 @@ registry.registerPath({
 
 const OffersSettingSchema = z
   .object({
-    enabled: z.boolean().describe("\"Offers from places\": off, no venue's offer reaches you. On unless turned off."),
+    enabled: z.boolean().describe("\"Offers from places\": off, no venue's offer reaches you. Off until turned on (S-5: promotional consent is opt-in; accounts made before 2026-10-24 keep the on they were given)."),
     pushes: z
       .boolean()
       .describe(
         "Offer notifications (SCRUM-628, App Store 4.5.4): off until the person says yes in the app. Off, offers still arrive with no push. Independent of `enabled`."
       ),
+    regulars: z
+      .object({ active: z.boolean() })
+      .describe("Whether the regulars feature is on anywhere for this person. False everywhere until a venue can switch it on (deferred); show \"Offers from places\" only when true. Additive."),
   })
   .openapi("OffersSetting")
 

@@ -175,7 +175,7 @@ describe("the per-kind push switches", () => {
     expect((await getProfile(me, me)).json.data.profile.push_enabled).toBe(true)
   })
 
-  it("a person with no profile row reads the defaults, and a PUT creates the row (the upsert's create path)", async () => {
+  it("a person with no profile row reads the defaults, and a PUT creates the row (the upsert’s create path)", async () => {
     const id = await makeUser(testId("pf-sw-noprofile"))
     users.push(id)
     const token = tokenOf(id)
@@ -203,7 +203,7 @@ describe("the per-kind push switches", () => {
     expect((await prefsRoute.GET(new NextRequest("http://localhost/api/mobile/me/notification-preferences"))).status).toBe(401)
   })
 
-  it("a switch stops its kind's push and nothing else; the bell still fills", async () => {
+  it("a switch stops its kind’s push and nothing else; the bell still fills", async () => {
     const me = await person("pf-gate")
     await withToken(me)
     await db.profiles.update({ where: { id: me }, data: { push_crew: false, push_night: false } })
@@ -229,7 +229,7 @@ describe("the per-kind push switches", () => {
     )
   })
 
-  it("matches off stops every kind it covers, the board's included, and nothing outside it", async () => {
+  it("matches off stops every kind it covers, the board’s included, and nothing outside it", async () => {
     const me = await person("pf-gate-matches")
     await withToken(me)
     await db.profiles.update({ where: { id: me }, data: { push_matches: false } })
@@ -320,7 +320,7 @@ describe("friends: reasons that never say why somebody is out of reach", () => {
     const res = await post(me, { userId: me })
     expect(res.status).toBe(400)
     const json = await body(res)
-    expect(json).toMatchObject({ success: false, error: "You can't add yourself", reasonCode: "CANNOT_ADD_SELF" })
+    expect(json).toMatchObject({ success: false, error: "You can’t add yourself", reasonCode: "CANNOT_ADD_SELF" })
     expect(json).not.toHaveProperty("errorCode")
   })
 
@@ -364,7 +364,7 @@ describe("friends: reasons that never say why somebody is out of reach", () => {
     expect(landing.status).toBe(404)
     expect(await body(landing)).toEqual({
       success: false,
-      error: "This invite link doesn't work any more",
+      error: "This invite link doesn’t work any more",
       errorCode: "NOT_FOUND",
       reasonCode: "INVITE_UNAVAILABLE",
     })
@@ -377,7 +377,7 @@ describe("friends: reasons that never say why somebody is out of reach", () => {
     expect((await body(preview)).reasonCode).toBe("INVITE_UNAVAILABLE")
   })
 
-  it("a request that is gone, never was or is somebody else's: REQUEST_UNAVAILABLE, and an unfinished profile cannot accept", async () => {
+  it("a request that is gone, never was or is somebody else’s: REQUEST_UNAVAILABLE, and an unfinished profile cannot accept", async () => {
     const me = await person("fr-resp")
     const gone = "123e4567-e89b-42d3-a456-426614174000"
     for (const id of [gone, "not-a-uuid"]) {
@@ -472,9 +472,9 @@ describe("friends: out of reach is one answer, whatever the reason", () => {
     expect(await answer(await askWith(me, { userId: target }))).toEqual(reference)
   })
 
-  it("an unfinished profile is told so on the friend's conversation route and on opening a link, FORBIDDEN beside PROFILE_INCOMPLETE", async () => {
+  it("an unfinished profile is told so on the friend’s conversation route and on opening a link, FORBIDDEN beside PROFILE_INCOMPLETE", async () => {
     const unfinished = await person("nr-unfinished", { onboarded: false })
-    const sentence = "Finish setting up your profile first. Blend'n is for people 18 and over."
+    const sentence = "Finish setting up your profile first. Blend’n is for people 18 and over."
     const expected = { status: 403, body: { success: false, error: sentence, errorCode: "FORBIDDEN", reasonCode: "PROFILE_INCOMPLETE" } }
 
     const convo = await answer(

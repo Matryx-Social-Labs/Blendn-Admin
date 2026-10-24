@@ -125,7 +125,7 @@ export function accountBlockReason(
 
 /** What a suspended account is told, in the app, at every entry point. */
 export const SUSPENDED_MESSAGE =
-  "This account has been suspended. Contact support@blendn.app if you think that's a mistake."
+  "This account has been suspended. Contact support@blendn.app if you think that’s a mistake."
 
 /** What a staff account is told, in the app, at every entry point. */
 export const STAFF_MESSAGE =

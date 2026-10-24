@@ -331,6 +331,27 @@ describe("a friend's profile", () => {
     expect(await friendProfile(cam, ana.id)).toEqual(nobody)
   })
 
+  it("carries the about line and badges, as GET /users/:id sends them to somebody who may see who this is", async () => {
+    const [ana, ben] = [await person("fr-ab-a", "Ana"), await person("fr-ab-b", "Ben")]
+    await befriend(ana, ben)
+    await db.profiles.update({
+      where: { id: ben.id },
+      data: { work_field: "software", expertise: ["software_frontend"], languages: ["kannada_learning"], home_state: "assam", show_badges: true },
+    })
+    const shown = (await friendProfile(ana, ben.id)).body.data
+    expect(shown).toMatchObject({
+      work_field: "software",
+      expertise: ["Frontend"],
+      languages: ["Learning Kannada"],
+      homeState: "Assam",
+      sign: null,
+      badges: expect.any(Array),
+    })
+    // Badges off: absent, as on the profile.
+    await db.profiles.update({ where: { id: ben.id }, data: { show_badges: false } })
+    expect((await friendProfile(ana, ben.id)).body.data).not.toHaveProperty("badges")
+  })
+
   it("unfriending is silent and leaves the DM alone", async () => {
     const [ana, ben] = [await person("fr-un-a", "Ana"), await person("fr-un-b", "Ben")]
     await befriend(ana, ben)

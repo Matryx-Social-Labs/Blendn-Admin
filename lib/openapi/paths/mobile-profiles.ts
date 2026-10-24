@@ -7,7 +7,7 @@ import {
   ProfileResponseSchema,
   InterestsResponseSchema,
 } from "@/lib/openapi/schemas/profile"
-import { ChangedAtSchema, ChangedFieldsSchema, EventSessionSchema } from "@/lib/openapi/schemas/event"
+import { ChangedAtSchema, ChangedFieldsSchema, EventSessionSchema, RowCategorySchema } from "@/lib/openapi/schemas/event"
 
 // GET /api/mobile/profiles/{userId}
 registry.registerPath({
@@ -77,6 +77,10 @@ registry.registerPath({
   path: "/api/mobile/profiles/{userId}/interests",
   tags: ["Mobile Profiles"],
   summary: "Add interests",
+  description:
+    "Adds categories to your interests, at most 10 held (`TOO_MANY_INTERESTS`). Leaves only: a category with children is a group " +
+    "heading and is refused with 400 VALIDATION_FAILED (a `categoryIds` field error) and `reasonCode: CATEGORY_IS_A_GROUP`, storing nothing. A top-level category with no " +
+    "children is its own option. An unknown id is 404.",
   security: bearerAuth,
   request: {
     params: z.object({ userId: z.string().uuid() }),
@@ -125,8 +129,9 @@ registry.registerPath({
     "`lockedCount` is the figure shown as `stats.eventsAttended` on a profile — they share one " +
     "predicate so the list and the number cannot disagree. Working an event as staff is not " +
     "attending it. Places you went live at are included, with `kind: venue_day`. Where Blendn+ is " +
-    "gated (the city of your latest night) and you have none, the list stops at your latest 3 " +
-    "nights and `lockedCount` says how many more there are (Blendn+ unlocks them). A `venue_day` row also " +
+    "gated (the city of your latest night) and you have none, the list is every night still running " +
+    "plus your latest 3 ended nights (`end_time` before now), and `lockedCount` is how many ended nights " +
+    "are older (Blendn+ unlocks them); a night still running is never locked and never one of the 3. A `venue_day` row also " +
     "carries `stay_minutes`, `venue_id` and `venue_type`; every row carries `ratedAt`. Yours alone, like everything here. " +
     "Page by `?page=` or by `?cursor=` (newest first, the event id breaking ties); `pagination.nextCursor` is on both.",
   security: bearerAuth,
@@ -179,10 +184,11 @@ registry.registerPath({
                     .datetime()
                     .nullable()
                     .describe("When you last rated this night (`GET /events/{eventId}/rating`'s `ratedAt`): yours alone, null if you have not, and always null for a `venue_day`."),
+                  categories: z.array(RowCategorySchema).describe("The event's categories, as the favourites list sends them (empty for a `venue_day`). Additive."),
                 })
               ),
               pagination: PagedPaginationSchema,
-              lockedCount: z.number().int().min(0).describe("Older nights behind Blendn+. 0 when nothing is locked."),
+              lockedCount: z.number().int().min(0).describe("Ended nights older than your latest 3 ended ones, behind Blendn+. 0 when nothing is locked."),
             })
           ),
         },
@@ -242,6 +248,7 @@ registry.registerPath({
                   longitude: z.number().nullable(),
                   rsvpStatus: z.enum(["going", "waitlisted"]),
                   rsvpAt: z.string().datetime(),
+                  categories: z.array(RowCategorySchema).describe("The event's categories, as the favourites list sends them. Additive."),
                   changedAt: ChangedAtSchema,
                   changedFields: ChangedFieldsSchema,
                 })

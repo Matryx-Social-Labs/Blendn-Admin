@@ -123,6 +123,57 @@ function crewView(
   }
 }
 
+/** The crew's members the invite door reads: everybody still here (not suspended, not deleted). */
+const ACTIVE_MEMBERS = { where: { user: { suspended_at: null, deletedAt: null } }, select: { user_id: true } } as const
+
+/**
+ * Would the accept take this invite (`acceptCrewInvite`, step 9 review H4)?
+ * Whoever sent it is still in the crew and still the invitee's friend, and
+ * nobody in it is kept apart from them (`apart`: `blocksBetween` keys). The
+ * one rule for every surface that shows an invite: the Crews screen lists
+ * only these, and the bell names only these (S-2 review H1). One the accept
+ * would refuse is shown nowhere, or it tells the invitee a block is there.
+ * The invite's own state (open, not lapsed) and the crew's (not dissolved,
+ * not hidden) are the read's `where`: `openInviteWhere()` and `crew`.
+ */
+export function inviteAcceptable(
+  userId: string,
+  invite: { invited_by: string; crew: { members: { user_id: string }[] } },
+  apart: Set<string>,
+  friends: Set<string>
+): boolean {
+  const active = invite.crew.members.map((m) => m.user_id)
+  return active.includes(invite.invited_by) && friends.has(invite.invited_by) && !active.some((id) => apart.has(`${userId}|${id}`))
+}
+
+/**
+ * The crews among `crewIds` with an invite to `userId` the Crews screen would
+ * list now: open and not lapsed, the crew standing, and `inviteAcceptable`.
+ * Set-based: one read of the invites, then the blocks and the friends once.
+ * `apart`, when the caller already holds it, is everybody kept apart from
+ * `userId` (a block either way or a closed conversation, `blocksBetween`'s
+ * rule from their side), so the blocks are not read a second time.
+ */
+export async function acceptableInviteCrewIds(
+  userId: string,
+  crewIds: readonly string[],
+  now: Date = new Date(),
+  apart?: ReadonlySet<string> | Promise<ReadonlySet<string>>
+): Promise<Set<string>> {
+  if (crewIds.length === 0) return new Set()
+  const invites = await db.crew_invites.findMany({
+    where: { invited_user_id: userId, crew_id: { in: [...crewIds] }, ...openInviteWhere(now), crew: { dissolved_at: null, hidden_at: null } },
+    select: { crew_id: true, invited_by: true, crew: { select: { members: ACTIVE_MEMBERS } } },
+  })
+  if (invites.length === 0) return new Set()
+  const people = [...new Set(invites.flatMap((i) => [i.invited_by, ...i.crew.members.map((m) => m.user_id)]))]
+  const [pairs, friends] = await Promise.all([
+    apart ? Promise.resolve(apart).then((ids) => new Set([...ids].map((id) => `${userId}|${id}`))) : blocksBetween([userId], people),
+    friendIdsOf(userId).then((ids) => new Set(ids)),
+  ])
+  return new Set(invites.filter((i) => inviteAcceptable(userId, i, pairs, friends)).map((i) => i.crew_id))
+}
+
 /** The most open invites one read looks at, newest first. Nobody has this many waiting; the cap is what keeps the read bounded. */
 export const INVITES_READ_CAP = 200
 
@@ -155,7 +206,7 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
             bio: true,
             emblem_seed: true,
             tags: true,
-            members: { where: { user: { suspended_at: null, deletedAt: null } }, select: { user_id: true } },
+            members: ACTIVE_MEMBERS,
           },
         },
       },
@@ -176,16 +227,8 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
     friendIdsOf(userId).then((ids) => new Set(ids)),
     blockedByViewer(userId, crews),
   ])
-  /*
-   * Only an invite the accept would take (`acceptCrewInvite`, step 9 review
-   * H4): whoever sent it still in the crew and still your friend, and nobody
-   * in it kept apart from you. One the accept would refuse is not on the
-   * screen — listed and then refused, it told you a block was there.
-   */
-  const acceptable = invites.filter((i) => {
-    const active = i.crew.members.map((m) => m.user_id)
-    return active.includes(i.invited_by) && friends.has(i.invited_by) && !active.some((id) => apart.has(`${userId}|${id}`))
-  })
+  // Only an invite the accept would take (`inviteAcceptable`): listed and then refused, it told you a block was there.
+  const acceptable = invites.filter((i) => inviteAcceptable(userId, i, apart, friends))
   const { limit, after } = invitesQuery
   const rest = after ? acceptable.filter((i) => isAfter(i, after)) : acceptable
   const page = keysetPage(rest.slice(0, limit + 1), limit, (i) => ({ at: i.created_at, id: i.id }))

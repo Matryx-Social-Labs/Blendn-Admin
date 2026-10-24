@@ -126,7 +126,7 @@ afterAll(async () => {
   await closeDb()
 })
 
-it("A pays for Venue Pro, the venue passes to B: B reads that it ended, never A's money; A reads all of its own", async () => {
+it("A pays for Venue Pro, the venue passes to B: B reads that it ended, never A’s money; A reads all of its own", async () => {
   const venue = await db.venues.create({
     data: { name: `${tag} venue`, city: "Bengaluru", latitude: 12.97, longitude: 77.6, owner_org_id: orgA, claimed_at: new Date(Date.now() - 86_400_000) },
   })
@@ -183,7 +183,7 @@ it("a venue taken by a dispute: the previous owner reads that it went, and nothi
   })
 
   as(admin, "app_admin")
-  await decideVenueClaim(claim.id, "approve", "Lease and trade licence are B's")
+  await decideVenueClaim(claim.id, "approve", "Lease and trade licence are B’s")
   expect((await db.venues.findUniqueOrThrow({ where: { id: venue.id } })).owner_org_id).toBe(orgB)
 
   // Read back: the row, as written.
@@ -195,14 +195,14 @@ it("a venue taken by a dispute: the previous owner reads that it went, and nothi
   const aboutIt = a.rows.filter((r) => r.resourceId === venue.id)
   expect(aboutIt.map((r) => r.action)).toEqual(["venue.ownership_ended"])
   expect(aboutIt[0].details).toEqual({ venue: `${tag} disputed`, note: "Transferred to another organisation after a claim was upheld" })
-  expect(aboutIt[0].actor).toEqual({ id: "blendn", name: "Blend'n", email: "" })
+  expect(aboutIt[0].actor).toEqual({ id: "blendn", name: "Blend’n", email: "" })
   for (const secret of [orgB, ownerB, claim.id, gstin, evidence.trade, "Lease and trade licence"]) expect(a.text).not.toContain(secret)
 
   // And it is the previous owner's alone.
   expect((await logOf(ownerB)).rows.some((r) => r.action === "venue.ownership_ended")).toBe(false)
 })
 
-it("a sponsor's charge is in the brand's log and the platform's, never the host's", async () => {
+it("a sponsor’s charge is in the brand’s log and the platform’s, never the host’s", async () => {
   const host = await org("Money Host")
   const brandOrg = await org("Money Brand")
   const hostOwner = await makeUser("money_host", "organizer")
@@ -233,7 +233,7 @@ it("a sponsor's charge is in the brand's log and the platform's, never the host'
   expect((await getAuditLog({ action: `${tag}.charge.priced` })).total).toBe(1)
 })
 
-it("the backfill gives a transferred venue's old rows the organisation of their time, never its owner today", async () => {
+it("the backfill gives a transferred venue’s old rows the organisation of their time, never its owner today", async () => {
   const venue = await db.venues.create({
     data: { name: `${tag} history`, city: "Bengaluru", latitude: 12.97, longitude: 77.6, owner_org_id: orgB, claimed_at: new Date(Date.now() - 86_400_000) },
   })

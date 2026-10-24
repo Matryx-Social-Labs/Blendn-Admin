@@ -18,7 +18,7 @@ export interface RouteContent {
 const CLAIMS: RouteContent = {
   title: "Claims",
   description:
-    "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand's reporting. Oldest first.",
+    "Somebody wants ownership of an event, a venue or a brand. Approving hands over an attendee list, a building or a brand’s reporting. Oldest first.",
 }
 
 export const routeContent: Record<string, RouteContent> = {
@@ -63,7 +63,7 @@ export const routeContent: Record<string, RouteContent> = {
   },
   "/dashboard/attendees": {
     title: "Attendees",
-    description: "Who comes back, who doesn't show. Labels only, never names.",
+    description: "Who comes back, who doesn’t show. Labels only, never names.",
   },
   /*
    * "Venues", not "My venues": this route serves two roles. An owner sees their
@@ -99,7 +99,7 @@ export const routeContent: Record<string, RouteContent> = {
   },
   "/dashboard/sponsor-claims": {
     title: "Brand claims",
-    description: "Ownership requests. Approving one hands over a brand's name and its reporting.",
+    description: "Ownership requests. Approving one hands over a brand’s name and its reporting.",
   },
   "/dashboard/placements": {
     title: "Placements",
@@ -162,7 +162,7 @@ export const routeContent: Record<string, RouteContent> = {
   },
   "/dashboard/plan": {
     title: "Plan",
-    description: "Running events on Blend'n is free. Analytics is for knowing which nights worked, and why.",
+    description: "Running events on Blend’n is free. Analytics is for knowing which nights worked, and why.",
   },
   "/dashboard/settings": {
     title: "Settings",

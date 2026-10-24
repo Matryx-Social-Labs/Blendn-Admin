@@ -94,7 +94,7 @@ beforeEach(() => {
   mockDb.friendships.findFirst.mockResolvedValue(null)
 })
 
-it("sends, and emits room:wave to the recipient with the sender's pseudonym", async () => {
+it("sends, and emits room:wave to the recipient with the sender’s pseudonym", async () => {
   const res = await wave()
   expect(res.status).toBe(200)
   expect(await res.json()).toEqual({ success: true, data: { sent: true } })
@@ -155,7 +155,7 @@ it.each([
   expect(res.status).toBe(403)
   expect(await res.json()).toEqual({
     success: false,
-    error: "They're not in the room right now",
+    error: "They’re not in the room right now",
     errorCode: "RECIPIENT_NOT_HERE",
   })
   expect(mockEmitWave).not.toHaveBeenCalled()
@@ -200,7 +200,7 @@ describe("room handles (SCRUM-371)", () => {
     return { status: res.status, body: await res.json() }
   }
 
-  it("takes this room's handle and waves at the person behind it", async () => {
+  it("takes this room’s handle and waves at the person behind it", async () => {
     expect((await wave(inRoom(THEM))).status).toBe(200)
     expect(mockEmitWave).toHaveBeenCalledWith(THEM, expect.objectContaining({ fromUserId: ME }))
   })

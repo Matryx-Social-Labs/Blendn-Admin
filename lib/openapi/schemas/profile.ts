@@ -388,6 +388,10 @@ export const UserPublicProfileSchema = z
           .enum(["sent", "received"])
           .nullable()
           .describe("A pending message request between you, from the caller's side."),
+        youRevealed: z.boolean().describe("Whether you revealed in your open conversation, as `GET /conversations/{id}` sends it. False with none. Additive."),
+        theyRevealed: z
+          .boolean()
+          .describe("Whether they revealed (or the conversation was never pseudonymous), as `GET /conversations/{id}` sends it. False with none. Additive."),
       })
       .optional()
       .describe(

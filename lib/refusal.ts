@@ -74,7 +74,15 @@ const REFUSAL_DIGEST = "refusal:"
 export class Refusal extends Error {
   readonly digest: string
 
-  constructor(message: string) {
+  /**
+   * `reasonCode`: why, for a caller that branches on it (as the mobile API's
+   * `reasonCode`). The sentence is still the only thing the digest carries to
+   * the screen, so a refusal with one reads exactly as one without.
+   */
+  constructor(
+    message: string,
+    readonly reasonCode?: string
+  ) {
     super(message)
     this.name = "Refusal"
     this.digest = REFUSAL_DIGEST + message

@@ -159,9 +159,9 @@ describe("an unclaimed venue is always listed", () => {
     await db.venues.update({ where: { id }, data: { created_by_org_id: creatorOrg } })
 
     as(admin, "app_admin")
-    await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Only a claimed venue can leave the app's Places")
+    await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Only a claimed venue can leave the app’s Places")
     as(creatorUser, "organizer")
-    await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Only a claimed venue can leave the app's Places")
+    await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Only a claimed venue can leave the app’s Places")
 
     expect(await openOf(id)).toBe(true)
     expect(await auditFor(id)).toHaveLength(0)
@@ -169,7 +169,7 @@ describe("an unclaimed venue is always listed", () => {
 })
 
 describe("who may switch it", () => {
-  it("refuses another organisation's venue owner, and writes nothing", async () => {
+  it("refuses another organisation’s venue owner, and writes nothing", async () => {
     const id = await named("not-theirs", { ownerOrg })
     as(otherUser, "venue_owner")
     await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Forbidden")
@@ -177,7 +177,7 @@ describe("who may switch it", () => {
     expect(await auditFor(id)).toHaveLength(0)
   })
 
-  it("reads the role from the database, not the session's claim", async () => {
+  it("reads the role from the database, not the session’s claim", async () => {
     const id = await named("claimed-admin", { ownerOrg })
     // The cookie says app_admin; the row says organizer, with no membership.
     as(creatorUser, "app_admin")
@@ -229,7 +229,7 @@ describe("a new owner starts open (security review M5)", () => {
   })
 })
 
-describe("only the organisation's owners and admins switch it (security review L2)", () => {
+describe("only the organisation’s owners and admins switch it (security review L2)", () => {
   it("refuses staff, and lets an admin of the organisation", async () => {
     const id = await named("staffed", { ownerOrg })
     const staff = await makeUser(testId("ob_staff"), "organizer")
@@ -243,7 +243,7 @@ describe("only the organisation's owners and admins switch it (security review L
     })
 
     as(staff, "venue_owner")
-    await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Only the venue organisation's owners and admins can change this.")
+    await expect(setVenueOpenOnBlendn(id, false)).rejects.toThrow("Only the venue organisation’s owners and admins can change this.")
     expect(await openOf(id)).toBe(true)
 
     as(orgAdmin, "venue_owner")

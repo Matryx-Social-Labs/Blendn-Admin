@@ -45,7 +45,7 @@ describe("checkBoardText", () => {
 
   it("refuses what OpenAI refuses inside the bound", async () => {
     mockCheck.mockResolvedValue(HIDE)
-    await expect(checkBoardText("anyone going?")).resolves.toEqual({ refusal: "This can't go on the board.", unchecked: false })
+    await expect(checkBoardText("anyone going?")).resolves.toEqual({ refusal: "This can’t go on the board.", unchecked: false })
   })
 })
 

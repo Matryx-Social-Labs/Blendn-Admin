@@ -208,16 +208,16 @@ export async function sendEmail(opts: {
 export function onboardingVerifyEmail(name: string, link: string, orgName = "your organisation") {
   return {
     html: onboardingVerifyHtml(name, orgName, link),
-    subject: "Confirm your email — Blend'n host application",
+    subject: "Confirm your email — Blend’n host application",
     text: [
       `Hi ${name},`,
       "",
-      "Confirm this address to finish your Blend'n host application:",
+      "Confirm this address to finish your Blend’n host application:",
       link,
       "",
-      "The link expires in 24 hours. Once confirmed, our team reviews your application — you'll hear back by email.",
+      "The link expires in 24 hours. Once confirmed, our team reviews your application — you’ll hear back by email.",
       "",
-      "If you didn't apply, ignore this message. No account has been created.",
+      "If you didn’t apply, ignore this message. No account has been created.",
     ].join("\n"),
   }
 }
@@ -230,15 +230,15 @@ export function inviteEmail(
 ) {
   return {
     html: inviteHtml(orgName, inviterName, link, roleLabel),
-    subject: `${inviterName} invited you to ${orgName} on Blend'n`,
+    subject: `${inviterName} invited you to ${orgName} on Blend’n`,
     text: [
-      `${inviterName} has invited you to join ${orgName} on Blend'n.`,
+      `${inviterName} has invited you to join ${orgName} on Blend’n.`,
       "",
       link,
       "",
       "The link expires in 7 days and works only for this email address.",
       "",
-      "If you weren't expecting this, ignore it — nothing happens until you accept.",
+      "If you weren’t expecting this, ignore it — nothing happens until you accept.",
     ].join("\n"),
   }
 }
@@ -250,11 +250,11 @@ export function inviteEmail(
 export function approvedEmail(name: string, orgName: string, email: string, setPasswordLink: string | null) {
   return {
     html: approvedHtml(name, orgName, email, setPasswordLink),
-    subject: "Your Blend'n host account is ready",
+    subject: "Your Blend’n host account is ready",
     text: [
       `Hi ${name},`,
       "",
-      `${orgName} has been approved. You can sign in to the Blend'n dashboard now:`,
+      `${orgName} has been approved. You can sign in to the Blend’n dashboard now:`,
       `${appUrl()}/login`,
       "",
       `Email: ${email}`,
@@ -276,11 +276,11 @@ export function approvedEmail(name: string, orgName: string, email: string, setP
 export function declinedEmail(name: string, reason: string) {
   return {
     html: declinedHtml(name, reason),
-    subject: "About your Blend'n host application",
+    subject: "About your Blend’n host application",
     text: [
       `Hi ${name},`,
       "",
-      "We're not able to approve your host application at the moment.",
+      "We’re not able to approve your host application at the moment.",
       "",
       reason,
       "",
@@ -305,7 +305,7 @@ export function claimDecisionEmail(
       "",
       approved
         ? `Your claim on ${what} has been approved. It now belongs to your organisation.`
-        : `We're not able to approve your claim on ${what}.`,
+        : `We’re not able to approve your claim on ${what}.`,
       ...(reason ? ["", reason] : []),
       ...(link ? ["", link] : []),
       "",
@@ -324,16 +324,16 @@ export function claimDecisionEmail(
 export function applyAgainEmail(kind: "account" | "pending", signInLink: string) {
   return {
     html: applyAgainHtml(kind, signInLink),
-    subject: kind === "account" ? "You already have a Blend'n host account" : "We already have your Blend'n application",
+    subject: kind === "account" ? "You already have a Blend’n host account" : "We already have your Blend’n application",
     text: [
       "Hi,",
       "",
       kind === "account"
-        ? "Somebody applied to host on Blend'n with this address, and it already has a host account. Sign in instead:"
-        : "Somebody applied to host on Blend'n with this address, and we already have an application from it. A person is reviewing it, usually within two working days — you don't need to apply again.",
+        ? "Somebody applied to host on Blend’n with this address, and it already has a host account. Sign in instead:"
+        : "Somebody applied to host on Blend’n with this address, and we already have an application from it. A person is reviewing it, usually within two working days — you don’t need to apply again.",
       ...(kind === "account" ? [signInLink] : []),
       "",
-      "Didn't apply? Ignore this email. Nothing has changed on your account.",
+      "Didn’t apply? Ignore this email. Nothing has changed on your account.",
     ].join("\n"),
   }
 }
@@ -341,16 +341,16 @@ export function applyAgainEmail(kind: "account" | "pending", signInLink: string)
 export function passwordResetEmail(name: string, link: string) {
   return {
     html: passwordResetHtml(name, link),
-    subject: "Reset your Blend'n password",
+    subject: "Reset your Blend’n password",
     text: [
       `Hi ${name},`,
       "",
-      "Someone asked to reset the password on your Blend'n account. Set a new one here:",
+      "Someone asked to reset the password on your Blend’n account. Set a new one here:",
       link,
       "",
       "The link expires in one hour and can only be used once.",
       "",
-      "Didn't ask for this? Ignore this email — your password has not changed.",
+      "Didn’t ask for this? Ignore this email — your password has not changed.",
     ].join("\n"),
   }
 }
@@ -358,16 +358,16 @@ export function passwordResetEmail(name: string, link: string) {
 export function domainVerifyEmail(domain: string, link: string) {
   return {
     html: domainVerifyHtml(domain, link),
-    subject: `Verify ${domain} for Blend'n`,
+    subject: `Verify ${domain} for Blend’n`,
     text: [
-      `Someone has asked to verify ${domain} for an organisation on Blend'n.`,
+      `Someone has asked to verify ${domain} for an organisation on Blend’n.`,
       "",
       "If that was you or someone at your organisation, confirm here:",
       link,
       "",
       "The link expires in 24 hours.",
       "",
-      "If this wasn't expected, ignore it — the domain will not be verified.",
+      "If this wasn’t expected, ignore it — the domain will not be verified.",
     ].join("\n"),
   }
 }

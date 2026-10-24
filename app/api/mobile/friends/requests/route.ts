@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
       notYetRevealed = nameable && standing === "pending" && askerSeesThem
     }
 
-    if (recipientId === me) return errorResponse("You can't add yourself", 400, undefined, ErrorCode.CANNOT_ADD_SELF)
+    if (recipientId === me) return errorResponse("You can’t add yourself", 400, undefined, ErrorCode.CANNOT_ADD_SELF)
     // The one 404 that says why: a match that is not revealed on both sides (`NOT_A_REVEALED_MATCH`).
     if (notYetRevealed) return errorResponse("Not found", 404, ErrorCode.NOT_FOUND, "NOT_A_REVEALED_MATCH")
     if (!connectable) return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)

@@ -97,7 +97,7 @@ afterAll(async () => {
   await closeDb()
 })
 
-it("a shared member's work is in the log of the organisation it was for, and only that one", async () => {
+it("a shared member’s work is in the log of the organisation it was for, and only that one", async () => {
   expect((await act(shared, venueB, "shared-on-B")).org_id).toBe(orgB)
   expect((await act(shared, venueA, "shared-on-A")).org_id).toBe(orgA)
 
@@ -110,7 +110,7 @@ it("a shared member's work is in the log of the organisation it was for, and onl
   expect(b.has("shared-on-A")).toBe(false)
 })
 
-it("a member who has left keeps their history in the organisation's log", async () => {
+it("a member who has left keeps their history in the organisation’s log", async () => {
   await act(leaver, venueA, "leaver-before-leaving")
   await db.organisation_members.deleteMany({ where: { org_id: orgA, user_id: leaver } })
 
@@ -120,13 +120,13 @@ it("a member who has left keeps their history in the organisation's log", async 
   expect((await seenBy(ownerB)).has("leaver-before-leaving")).toBe(false)
 })
 
-it("an admin's act on B's data is in B's log, as Blend'n, and not in A's", async () => {
+it("an admin’s act on B’s data is in B’s log, as Blend’n, and not in A’s", async () => {
   expect((await act(admin, venueB, "admin-on-B")).org_id).toBe(orgB)
 
   const b = await seenBy(ownerB)
   expect(b.has("admin-on-B")).toBe(true)
   // The platform, not a staff member's name and address.
-  expect(b.get("admin-on-B")?.actor).toEqual({ id: "blendn", name: "Blend'n", email: "" })
+  expect(b.get("admin-on-B")?.actor).toEqual({ id: "blendn", name: "Blend’n", email: "" })
   expect((await seenBy(ownerA)).has("admin-on-B")).toBe(false)
 
   // The platform reads everything, with the person.
@@ -156,7 +156,7 @@ describe("a person acting as themselves", () => {
   afterAll(() => db.audit_logs.deleteMany({ where: { details: { path: ["tag"], equals: tag } } }))
 
   it.each(["venue_offer.mute", "venue_regular.optin", "venue_offer.unmute", "venue_regular.optout"])(
-    "%s at a venue is seen by neither the venue's organisation nor the person's employer",
+    "%s at a venue is seen by neither the venue’s organisation nor the person’s employer",
     async (action) => {
       // ownerB works for B; the venue is A's.
       const row = await personal(ownerB, action)
@@ -173,7 +173,7 @@ describe("a person acting as themselves", () => {
     expect(await sees(ownerA, row.id)).toBe(false)
   })
 
-  it("a row about A's venue by someone who does not act for A is not A's", async () => {
+  it("a row about A’s venue by someone who does not act for A is not A’s", async () => {
     const attendee = await makeUser("aos_attendee", "attendee")
     users.push(attendee)
     expect((await act(attendee, venueA, "attendee-on-A")).org_id).toBeNull()
@@ -184,7 +184,7 @@ describe("a person acting as themselves", () => {
   })
 })
 
-describe("a row about an organisation's data that cannot say which organisation", () => {
+describe("a row about an organisation’s data that cannot say which organisation", () => {
   it("is a failed write in tests", async () => {
     await expect(
       db.$transaction((tx) => auditInTx(tx, { userId: shared, action: `${tag}.no-id`, resource: "venue" }))
@@ -192,7 +192,7 @@ describe("a row about an organisation's data that cannot say which organisation"
     expect(await db.audit_logs.count({ where: { action: `${tag}.no-id` } })).toBe(0)
   })
 
-  it("is written in production as the platform's alone, never into an organisation's log", async () => {
+  it("is written in production as the platform’s alone, never into an organisation’s log", async () => {
     const env = process.env as Record<string, string | undefined>
     const was = env.NODE_ENV
     env.NODE_ENV = "production"

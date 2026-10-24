@@ -69,7 +69,7 @@ const req = (url: string, token: string, method: string, body?: unknown) =>
   })
 const eventParams = (eventId: string) => ({ params: Promise.resolve({ eventId }) })
 
-const SENTENCE = "Finish setting up your profile first. Blend'n is for people 18 and over."
+const SENTENCE = "Finish setting up your profile first. Blend’n is for people 18 and over."
 /**
  * The same 403 and sentence on every route. `errorCode` is FORBIDDEN on all of
  * them. Flow 15's `reasonCode: PROFILE_INCOMPLETE` rides on the event doors and on

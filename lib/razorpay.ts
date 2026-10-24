@@ -74,7 +74,7 @@ const errorBody = z.object({ error: z.object({ description: z.string().optional(
  */
 function withoutDescription(res: Response, json: unknown): string {
   if (res.status === 406 && json === null) {
-    return `Razorpay's edge refused this server's IP (406, empty body, server ${res.headers.get("server") ?? "unknown"}): check the service's static outbound IPs`
+    return `Razorpay’s edge refused this server’s IP (406, empty body, server ${res.headers.get("server") ?? "unknown"}): check the service’s static outbound IPs`
   }
   return `Razorpay answered ${res.status}`
 }
@@ -160,7 +160,7 @@ export async function createPlan(plan: BillingPlan): Promise<RazorpayPlan> {
     period: plan.period,
     interval: 1,
     item: {
-      name: `Blend'n ${plan.label}`,
+      name: `Blend’n ${plan.label}`,
       amount: chargeMinor(plan),
       currency: "INR",
       description: "Includes 18% GST",

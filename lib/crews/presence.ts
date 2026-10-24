@@ -315,7 +315,7 @@ export async function crewsAtEvent(
 /* "We're here"                                                               */
 /* -------------------------------------------------------------------------- */
 
-const NOT_IN: CrewRefusal = { refusal: "Check in first — \"We're here\" is for when you're in.", status: 403 }
+const NOT_IN: CrewRefusal = { refusal: "Check in first — \"We’re here\" is for when you’re in.", status: 403 }
 
 /**
  * "We're here" (§6): a line in the crew chat, and a push to every other
@@ -375,7 +375,7 @@ export async function crewHere(
         type: "system",
         // No name in the words: the room names the sender (`namesInRoom`), and
         // stored text outlives an account erasure where a name must not.
-        content: "We're here 👋",
+        content: "We’re here 👋",
         metadata: { kind: "crew_here", eventId: event.id, occurrenceId },
       },
     })

@@ -5,8 +5,19 @@ export const eventQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 
-  // Search
-  search: z.string().optional(),
+  /**
+   * Search: trimmed, at most 100 characters (over is a 400 with `reasonCode:
+   * SEARCH_TOO_LONG`). No minimum: every installed app sends the term as typed
+   * after a pause and shows any error as "Couldn't load events.", so a first
+   * letter must answer (review N1). One character is served in date order, not
+   * ranked (the route's `SEARCH_RANK_MIN`); empty, or only spaces, is no search.
+   */
+  search: z
+    .string()
+    .trim()
+    .max(100, "A search is at most 100 characters.")
+    .transform((s) => s || undefined)
+    .optional(),
 
   /**
    * Where to browse. The one thing that scopes a page of discovery.
@@ -211,7 +222,7 @@ export const eventWriteSchema = z
     // rows that have it; nothing new may be written with it.
     visibility: z
       .enum(["public", "unlisted"], {
-        message: "Private events aren't available yet — use unlisted, which hides the event and opens it by link.",
+        message: "Private events aren’t available yet — use unlisted, which hides the event and opens it by link.",
       })
       .nullish(),
     max_capacity: z.number().int().nullish(),

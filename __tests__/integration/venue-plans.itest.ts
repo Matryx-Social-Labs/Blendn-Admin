@@ -274,7 +274,7 @@ describe("no charge before four weeks of venue-day data", () => {
     await expect(actions.startVenueProCheckout(empty, "monthly")).rejects.toThrow("four weeks after people first go live")
   })
 
-  it("past four weeks: a purchase for that venue, at the table's price, and no entitlement yet", async () => {
+  it("past four weeks: a purchase for that venue, at the table’s price, and no entitlement yet", async () => {
     const v = await venue("vp-buy")
     await liveSince(v, 35)
     as(owner, "venue_owner")
@@ -292,8 +292,8 @@ describe("no charge before four weeks of venue-day data", () => {
   })
 
   it.each([
-    ["staff of the venue's organisation", () => staff, "venue_owner", "Only an owner or admin"],
-    ["another organisation's owner", () => stranger, "venue_owner", "isn't one of your organisation's"],
+    ["staff of the venue’s organisation", () => staff, "venue_owner", "Only an owner or admin"],
+    ["another organisation’s owner", () => stranger, "venue_owner", "isn’t one of your organisation’s"],
     ["an organiser of the same organisation", () => organiser, "organizer", "Only an owner or admin"],
   ] as const)("refuses %s", async (_label, who, role, sentence) => {
     const v = await venue("vp-refuse")
@@ -313,7 +313,7 @@ describe("no charge before four weeks of venue-day data", () => {
   })
 })
 
-describe("the webhook settles a venue's Venue Pro onto the venue (MN-I05)", () => {
+describe("the webhook settles a venue’s Venue Pro onto the venue (MN-I05)", () => {
   function post(body: unknown) {
     const raw = JSON.stringify(body)
     return route.POST(
@@ -423,7 +423,7 @@ describe("a venue changing hands (review M7)", () => {
     })
   })
 
-  it("an approved dispute stops the previous owner's Venue Pro; only the payer sees or cancels its mandate", async () => {
+  it("an approved dispute stops the previous owner’s Venue Pro; only the payer sees or cancels its mandate", async () => {
     const v = await venue("vp-transfer", { org: payerOrg })
     const ref = `sub_${randomUUID().slice(0, 12)}`
     await db.billing_checkouts.create({
@@ -585,7 +585,7 @@ describe("a venue changing hands (review M7)", () => {
     expect(calls.some((c) => c.url.endsWith(`/subscriptions/${ref}/cancel`))).toBe(true)
   })
 
-  it("cancelling is the payer's: the new owner finds nothing of theirs to cancel", async () => {
+  it("cancelling is the payer’s: the new owner finds nothing of theirs to cancel", async () => {
     const v = await venue("vp-cancel", { org: newOrg })
     const ref = `sub_${randomUUID().slice(0, 12)}`
     await db.billing_checkouts.create({
@@ -599,7 +599,7 @@ describe("a venue changing hands (review M7)", () => {
     expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })).cancel_at_cycle_end).toBe(true)
   })
 
-  describe("the previous owner's unpaid checkout is never the new owner's", () => {
+  describe("the previous owner’s unpaid checkout is never the new owner’s", () => {
     /**
      * The payer opens a Venue Pro checkout it never pays, then the venue is
      * approved to the new owner while Razorpay refuses the transfer's cancel
@@ -623,7 +623,7 @@ describe("a venue changing hands (review M7)", () => {
     }
     const rowOf = (ref: string) => db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: ref } })
 
-    it("org A starts Venue Pro, the venue moves to B, B starts: B gets a ref of its own, A's row is expired and cancelled at Razorpay first", async () => {
+    it("org A starts Venue Pro, the venue moves to B, B starts: B gets a ref of its own, A’s row is expired and cancelled at Razorpay first", async () => {
       const { v, unpaid } = await unpaidThenTransferred("vp-resume")
       const out = await actions.startVenueProCheckout(v, "monthly")
 
@@ -641,7 +641,7 @@ describe("a venue changing hands (review M7)", () => {
       expect((await actions.startVenueProCheckout(v, "monthly")).subscriptionId).toBe(out.subscriptionId)
     })
 
-    it("Razorpay refusing that cancel changes nothing for B: still a new ref, A's row still expired, and the failure is logged with the ref", async () => {
+    it("Razorpay refusing that cancel changes nothing for B: still a new ref, A’s row still expired, and the failure is logged with the ref", async () => {
       const warn = jest.spyOn(logger, "warn").mockImplementation(() => undefined)
       try {
         const { v, unpaid } = await unpaidThenTransferred("vp-resume-refused")
@@ -671,7 +671,7 @@ describe("founding grants (admin)", () => {
     expect(await hasEntitlement({ kind: "venue", id: v }, "venue_pro")).toBe(false)
   })
 
-  it("limits an admin's money actions, refusals included (30 a minute)", async () => {
+  it("limits an admin’s money actions, refusals included (30 a minute)", async () => {
     const v = await venue("vp-rate")
     as(admin, "app_admin")
     for (let i = 0; i < 30; i++) {
@@ -816,7 +816,7 @@ describe("insights by plan", () => {
     expect((view.recent.regulars.visitors ?? 0) - shown.reduce((a, b) => a + b, 0)).toBe(0)
   })
 
-  it("ends at the start of the venue's current day: nobody who came in today moves a figure (review M9)", async () => {
+  it("ends at the start of the venue’s current day: nobody who came in today moves a figure (review M9)", async () => {
     const today = await venue("vp-today", { claimedDaysAgo: 40 })
     // A fixed "now", six hours into a venue day that has ended: a wall clock just past 06:00 UTC
     // would put "a minute after the day began" in the future.
@@ -837,13 +837,13 @@ describe("insights by plan", () => {
     expect((await venueInsights(few))!.preClaim).toEqual({ nights: null, people: null, since: null })
   })
 
-  it("is nobody's for an unclaimed venue", async () => {
+  it("is nobody’s for an unclaimed venue", async () => {
     expect(await venueInsights(await venue("vp-nobody", { org: null }))).toBeNull()
   })
 })
 
-describe("the venue owner's Plan page", () => {
-  it("lists the organisation's venues with their plan and readiness, and who may buy", async () => {
+describe("the venue owner’s Plan page", () => {
+  it("lists the organisation’s venues with their plan and readiness, and who may buy", async () => {
     const v = await venue("vp-page")
     await liveSince(v, 10)
     const page = await venuePlanPage({ id: owner, role: "venue_owner" })
@@ -869,7 +869,7 @@ describe("the venue owner's Plan page", () => {
 /* ------------------------------------------------------------------ */
 /* REVIEW GAP TESTS                                                    */
 /* ------------------------------------------------------------------ */
-describe("GAP insights: the venue's own clock (IST)", () => {
+describe("GAP insights: the venue’s own clock (IST)", () => {
   async function guestsAt(venueId: string, at: Date, n: number, kind: "attendee" | "staff" = "attendee") {
     const id = await makeEvent(owner)
     events.push(id)

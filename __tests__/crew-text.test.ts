@@ -55,7 +55,7 @@ describe("ordinary crews pass", () => {
     expect(findProfileContactInfo(text)).toEqual([])
   })
 
-  it("is stricter than the room's reading, never looser", () => {
+  it("is stricter than the room’s reading, never looser", () => {
     // Whatever a room would hide, a card refuses.
     for (const text of ["9876543210", "insta: priya", "t.me/priya"]) {
       expect(findContactInfo(text).length).toBeGreaterThan(0)
@@ -69,12 +69,12 @@ describe("ordinary crews pass", () => {
 
 describe("the refusal a writer is given", () => {
   it("names the contact detail, so the fix is theirs to make", async () => {
-    expect(await crewTextRefusal("bio", "dm us @thelot")).toMatch(/social media handle.*contact details can't go on it/)
+    expect(await crewTextRefusal("bio", "dm us @thelot")).toMatch(/social media handle.*contact details can’t go on it/)
     expect(await crewTextRefusal("name", "Lot 98450 12345")).toMatch(/phone number/)
   })
 
   it("says nothing about the filter for a banned word", async () => {
-    expect(await crewTextRefusal("name", "retard squad")).toBe("This can't be a crew's name.")
+    expect(await crewTextRefusal("name", "retard squad")).toBe("This can’t be a crew’s name.")
   })
 
   it("lets an ordinary name through, and a duplicate one — names are not unique", async () => {
@@ -83,7 +83,7 @@ describe("the refusal a writer is given", () => {
   })
 })
 
-describe("a crew's shape (CR-U01)", () => {
+describe("a crew’s shape (CR-U01)", () => {
   const base = { revealConsent: true as const, inviteUserIds: [] }
 
   it("a name is 2–32 characters, counted as a person counts them", () => {

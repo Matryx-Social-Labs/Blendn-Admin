@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { refRoomBanRefusal } from "@/lib/room-ban"
 import { NextRequest } from "next/server"
+import { ZodError } from "zod"
 import { db } from "@/lib/db"
 import { blockedEitherWay } from "@/lib/conversations"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Users can only update their own interests
     if (authUser.userId !== userId) {
-      return forbiddenResponse("Cannot update another user's interests")
+      return forbiddenResponse("Cannot update another user’s interests")
     }
 
     const body = await readJson(request)
@@ -172,21 +173,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
-     * Existence, and deliberately nothing about which *level* was sent.
+     * Existence, and the level: a leaf, never a group.
      *
      * An earlier draft of Stage 2 wanted this to reject leaves, on the reading
      * that interests were becoming the 13 parents. That reading lost: parents
      * group the picker, leaves are what gets stored, and the ranking expands
-     * leaf → parent at read time. So a leaf is the *correct* thing to write and
-     * there is no wrong level to reject — only a category that does not exist.
+     * leaf → parent at read time. This used to stop there and accept a parent
+     * too, so a write that sent one stored "Arts & Culture" as an interest and
+     * Me and Profile showed the heading (S-9, qa.rc.a on staging, 2026-10-23).
+     * A category with children is a heading; a childless one is its own option,
+     * as the app's picker offers it.
      */
     const existingCategories = await db.categories.findMany({
       where: { id: { in: categoryIds } },
-      select: { id: true, parent_id: true },
+      select: { id: true, _count: { select: { children: true } } },
     })
 
     if (existingCategories.length !== categoryIds.length) {
       return notFoundResponse("One or more categories not found")
+    }
+    if (existingCategories.some((c) => c._count.children > 0)) {
+      // VALIDATION_FAILED with the field's error, the documented shape for a bad body; the reason beside it.
+      const issue = { code: "custom" as const, path: ["categoryIds"], message: "Pick an interest inside a group, not the group itself.", input: categoryIds }
+      return validationErrorResponse(new ZodError([issue]), "CATEGORY_IS_A_GROUP")
     }
 
     // Add interests (skip duplicates)
@@ -220,7 +229,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     // Users can only update their own interests
     if (authUser.userId !== userId) {
-      return forbiddenResponse("Cannot update another user's interests")
+      return forbiddenResponse("Cannot update another user’s interests")
     }
 
     const body = await readJson(request)

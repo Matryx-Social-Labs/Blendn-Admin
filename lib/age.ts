@@ -40,7 +40,7 @@ export const DATING_MIN_AGE = 18
 export const ACCOUNT_MIN_AGE = 18
 
 /** What a person under `ACCOUNT_MIN_AGE`, or with no age yet, is told. */
-export const ADULTS_ONLY = `Blend'n is for people ${ACCOUNT_MIN_AGE} and over.`
+export const ADULTS_ONLY = `Blend’n is for people ${ACCOUNT_MIN_AGE} and over.`
 
 /** Whether this age may hold a new account. Unknown is a no. */
 export function isAdult(age: number | null | undefined): boolean {
@@ -138,7 +138,7 @@ export function orientationAgeRefusal(
   if (mayDate(age)) return null
   return age == null
     ? "Add your age to your profile first."
-    : `Orientation and who you're interested in are for ${DATING_MIN_AGE}+ only.`
+    : `Orientation and who you’re interested in are for ${DATING_MIN_AGE}+ only.`
 }
 
 /**

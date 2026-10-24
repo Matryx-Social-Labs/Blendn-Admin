@@ -91,7 +91,7 @@ describe("the event door refuses, and records why", () => {
     ["an event with no area and no pin", { fenced: false }, INSIDE, 400, "OUT_OF_RANGE", "no_geofence"],
     ["before doors", { startsIn: 3, endsIn: 6 }, INSIDE, 400, "EVENT_NOT_STARTED", "too_early"],
     ["after the window", { startsIn: -8, endsIn: -5 }, INSIDE, 400, "EVENT_ENDED", "too_late"],
-    ["today's day called off", { days: [{ startsIn: -1, endsIn: 2, cancelled: true }] }, INSIDE, 400, null, "day_cancelled"],
+    ["today’s day called off", { days: [{ startsIn: -1, endsIn: 2, cancelled: true }] }, INSIDE, 400, null, "day_cancelled"],
     ["an unpublished event", { status: "draft" as const }, INSIDE, 400, null, null],
     ["an event too old for them", { minAge: 21 }, INSIDE, 403, "AGE_RESTRICTED", "under_age"],
   ] as const)("%s", async (_label, spec, body, status, code, reason) => {
@@ -130,7 +130,7 @@ describe("the event door says which refusal the person can fix (Flow 15)", () =>
     expect(await res.json()).toMatchObject({
       errorCode: "FORBIDDEN",
       reasonCode: "PROFILE_INCOMPLETE",
-      error: "Finish setting up your profile first. Blend'n is for people 18 and over.",
+      error: "Finish setting up your profile first. Blend’n is for people 18 and over.",
     })
   })
 })
@@ -149,7 +149,7 @@ describe("the event door lets in", () => {
     expect(data.intentNeeded).toBe(true)
   })
 
-  it("checks a multi-day event's guest in to today's day, not the first", async () => {
+  it("checks a multi-day event’s guest in to today’s day, not the first", async () => {
     const eventId = await event({ days: [{ startsIn: -26, endsIn: -22 }, { startsIn: -1, endsIn: 3 }] })
     const today = await db.event_occurrences.findFirstOrThrow({ where: { event_id: eventId }, orderBy: { start_time: "desc" } })
     const p = await person("door")
