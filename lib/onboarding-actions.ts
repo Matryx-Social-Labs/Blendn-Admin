@@ -285,9 +285,7 @@ export async function approveOnboardingRequest(
           // A confirmed account keeps its password — overwriting it would lock them out of the
           // mobile app mid-session to hand them a credential they did not ask for. A taken-over
           // one gets a password nobody knows, and the link below.
-          data: takeOver
-            ? { role: request.requested_role, password: hashed, emailVerified: new Date() }
-            : { role: request.requested_role },
+          data: { role: request.requested_role, ...(takeOver && { password: hashed, emailVerified: new Date() }) },
           select: { id: true },
         })
       : await tx.user.create({

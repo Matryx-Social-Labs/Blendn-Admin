@@ -303,7 +303,7 @@ export async function updateUser(
     // `deletedAt: null` in the where: an erased account cannot be edited back
     // into existence. The row menu is hidden for those rows, but a server
     // action is callable without a menu. P2025 surfaces as the generic error.
-    const user = await db.user.update({
+    await db.user.update({
       where: { id, deletedAt: null },
       data: updateData,
       // Nothing is read back: the row carries the password hash and the birth date.
