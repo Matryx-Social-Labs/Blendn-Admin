@@ -38,6 +38,7 @@ jest.mock("@/lib/notification-display", () => {
 
 import { randomUUID } from "crypto"
 import { signAccessToken } from "@/lib/mobile-auth"
+import { conversationPair } from "@/lib/conversations"
 import { notifyEventChanged, notifyEventUpdate, sendBulkPushNotifications, sendPushNotification } from "@/lib/push-notifications"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 import { req } from "./go-live-world"
@@ -56,6 +57,20 @@ async function person(label: string, photo?: string) {
   users.push(id)
   await db.profiles.upsert({ where: { id }, create: { id, name: `Person ${label}`, onboarded: true, ...(photo && { photos: [photo] }) }, update: {} })
   return id
+}
+
+/**
+ * A crew `owner` runs, with an open invite from them to `invitee`, the way the app makes one: the inviter a member and
+ * the invitee's friend (`inviteAcceptable`). An invite from anybody else is one the Crews screen never lists.
+ */
+async function crewInviting(owner: string, invitee: string, name: string, seed: string) {
+  const crew = await db.crews.create({ data: { name, created_by: owner, emblem_seed: seed } })
+  crews.push(crew.id)
+  await db.crew_members.create({ data: { crew_id: crew.id, user_id: owner, role: "owner", consented_reveal_at: new Date() } })
+  const [user1_id, user2_id] = conversationPair(owner, invitee)
+  await db.friendships.create({ data: { user1_id, user2_id } })
+  const invite = await db.crew_invites.create({ data: { crew_id: crew.id, invited_user_id: invitee, invited_by: owner } })
+  return { crew, invite }
 }
 
 interface Row {
@@ -90,6 +105,7 @@ afterAll(async () => {
   await db.blends.deleteMany({ where: { id: { in: blendsMade.map((b) => b.blend) } } })
   await db.event_check_ins.deleteMany({ where: { user_id: { in: users } } })
   await db.blocked_users.deleteMany({ where: { OR: [{ blocker_id: { in: users } }, { blocked_id: { in: users } }] } })
+  await db.friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.crew_members.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crew_invites.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crews.deleteMany({ where: { id: { in: crews } } })
@@ -140,9 +156,7 @@ describe("crew rows", () => {
   it("an invite is open until it is declined; it shows the crew's emblem and names the crew that asked (S-2)", async () => {
     const owner = await person("nf-owner")
     const me = await person("nf-invitee")
-    const crew = await db.crews.create({ data: { name: "Nebula", created_by: owner, emblem_seed: "seed-nebula" } as never })
-    crews.push(crew.id)
-    const invite = await db.crew_invites.create({ data: { crew_id: crew.id, invited_user_id: me, invited_by: owner } })
+    const { crew, invite } = await crewInviting(owner, me, "Nebula", "seed-nebula")
     await sendPushNotification({ userId: me, title: "t", body: "b", data: { type: "crew_invite", crewId: crew.id } })
 
     const open = await rowOf(me, "crew_invite")
@@ -160,9 +174,7 @@ describe("crew rows", () => {
     const owner = await person("nf-cs-owner")
     const left = await person("nf-cs-left")
     const invitee = await person("nf-cs-inv")
-    const crew = await db.crews.create({ data: { name: "Old Name", created_by: owner, emblem_seed: "seed-cs" } })
-    crews.push(crew.id)
-    await db.crew_invites.create({ data: { crew_id: crew.id, invited_user_id: invitee, invited_by: owner } })
+    const { crew } = await crewInviting(owner, invitee, "Old Name", "seed-cs")
     for (const id of [left, invitee]) await notify(id, "crew_invite", { crewId: crew.id })
 
     // A member (joining spends the invite) is told the name...
@@ -181,6 +193,52 @@ describe("crew rows", () => {
     expect((await rowOf(invitee, "crew_invite")).display).not.toHaveProperty("context")
     await db.crews.update({ where: { id: crew.id }, data: { hidden_at: null, dissolved_at: new Date() } })
     expect((await rowOf(invitee, "crew_invite")).display).not.toHaveProperty("context")
+  })
+})
+
+describe("a crew invite is named only where the Crews screen would list it (S-2 review H1)", () => {
+  const nameless = (seed: string) => ({ visual: { type: "emblem", seed } })
+
+  it("a member who blocked the invitee, or whom the invitee blocked: not open, not named", async () => {
+    for (const [label, way] of [["nf-h1-b1", "member"], ["nf-h1-b2", "invitee"]] as const) {
+      const owner = await person(`${label}-owner`)
+      const member = await person(`${label}-member`)
+      const me = await person(`${label}-me`)
+      const { crew } = await crewInviting(owner, me, "Blockers", `seed-${label}`)
+      await db.crew_members.create({ data: { crew_id: crew.id, user_id: member, consented_reveal_at: new Date() } })
+      await notify(me, "crew_invite", { crewId: crew.id })
+      expect((await rowOf(me, "crew_invite")).display.context).toBe("Blockers")
+
+      await db.blocked_users.create({ data: way === "member" ? { blocker_id: member, blocked_id: me } : { blocker_id: me, blocked_id: member } })
+      const row = await rowOf(me, "crew_invite")
+      expect([row.open, row.display]).toEqual([false, nameless(`seed-${label}`)])
+      expect(JSON.stringify(row)).not.toContain("Blockers")
+    }
+  })
+
+  it("an invite past its time: not open, not named", async () => {
+    const owner = await person("nf-h1-exp-owner")
+    const me = await person("nf-h1-exp-me")
+    const { crew, invite } = await crewInviting(owner, me, "Lapsed", "seed-lapsed")
+    await db.crew_invites.update({ where: { id: invite.id }, data: { created_at: new Date(Date.now() - 15 * 24 * 3_600_000) } })
+    await notify(me, "crew_invite", { crewId: crew.id })
+    const row = await rowOf(me, "crew_invite")
+    expect([row.open, row.display]).toEqual([false, nameless("seed-lapsed")])
+  })
+
+  it("an inviter who unfriended the invitee, or left the crew: not open, not named", async () => {
+    const owner = await person("nf-h1-uf-owner")
+    const me = await person("nf-h1-uf-me")
+    const { crew } = await crewInviting(owner, me, "Unfriended", "seed-unfriended")
+    await notify(me, "crew_invite", { crewId: crew.id })
+    expect((await rowOf(me, "crew_invite")).open).toBe(true)
+    const [user1_id, user2_id] = conversationPair(owner, me)
+    await db.friendships.deleteMany({ where: { user1_id, user2_id } })
+    expect([(await rowOf(me, "crew_invite")).open, (await rowOf(me, "crew_invite")).display]).toEqual([false, nameless("seed-unfriended")])
+
+    await db.friendships.create({ data: { user1_id, user2_id } })
+    await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: crew.id, user_id: owner } } })
+    expect((await rowOf(me, "crew_invite")).display).toEqual(nameless("seed-unfriended"))
   })
 })
 
@@ -389,9 +447,7 @@ describe("open: what is still the reader's to answer", () => {
   it("crew_invite: closed when the reader has already joined, or has declined", async () => {
     const owner = await person("nf-ci-owner")
     const me = await person("nf-ci-me")
-    const crew = await db.crews.create({ data: { name: "Joined", created_by: owner, emblem_seed: "seed-joined" } })
-    crews.push(crew.id)
-    const invite = await db.crew_invites.create({ data: { crew_id: crew.id, invited_user_id: me, invited_by: owner } })
+    const { crew, invite } = await crewInviting(owner, me, "Joined", "seed-joined")
     await notify(me, "crew_invite", { crewId: crew.id })
     expect((await rowOf(me, "crew_invite")).open).toBe(true)
 

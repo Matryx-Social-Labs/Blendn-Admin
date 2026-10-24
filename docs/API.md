@@ -678,9 +678,12 @@ event's change and a report's outcome have no switch here. Stored as
     - `blend`: the Blend room's own name ("A × B", or "A + 1" for one person),
       while the room's door admits the reader: open and on its clock, no side
       dissolved or hidden, no block across the sides;
-    - `crew_invite`: the crew's name ("‹crew› asked you"), while the reader is
-      still invited or a member and the crew is neither dissolved nor hidden.
-      A crew renamed after you left is never named to you.
+    - `crew_invite`: the crew's name ("‹crew› asked you"), while the Crews
+      screen would list the invite (open and not lapsed, the inviter still a
+      member and your friend, nobody in the crew kept apart from you: the
+      accept's own rule), or you are a member; and the crew neither dissolved
+      nor hidden. A crew renamed after you left is never named to you, and a
+      block is never told by a name appearing or not.
     Otherwise absent. The lock-screen push stays nameless.
   - `event_update`, `event_changed`, `announcement`, `waitlist_promoted`,
     `rating_request`: `visual` `{ type: "event", cover, badge, cancelled }`
@@ -690,7 +693,8 @@ event's change and a report's outcome have no switch here. Stored as
     rows (the app already writes "{event} · {when}"). A row the server cannot resolve (the request
     is gone, the event deleted) carries no `display`: draw the kind's own tile.
 - **`open`**, for `friend_request`, `crew_invite`, `message_request` and
-  `board_request`: whether it is still the reader's to answer. `false` once it is
+  `board_request`: whether it is still the reader's to answer (a `crew_invite`:
+  whether the Crews screen would list it, the same rule as its `context`). `false` once it is
   accepted, declined, dismissed, withdrawn or gone; absent on every other kind.
 - **`data.reason`** on `event_update` and `event_changed`: `cancelled`, `time` or
   `venue`, the most important when several moved (`data.changed` has them all,

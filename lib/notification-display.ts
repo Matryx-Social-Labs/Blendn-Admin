@@ -5,6 +5,7 @@ import { getAccessibleMediaUrl } from "@/lib/tigris"
 import { firstName } from "@/lib/conversation-identity"
 import { blockCounterparties } from "@/lib/conversations"
 import { blendAdmitsMany } from "@/lib/room-kind"
+import { acceptableInviteCrewIds } from "@/lib/crews/views"
 
 /**
  * What a bell row can say for the person reading it, beyond the push's own
@@ -24,8 +25,10 @@ import { blendAdmitsMany } from "@/lib/room-kind"
  *     a Blend's room name ("A × B", as the Banter shows it) while the Blend's
  *     own door admits the reader (`blendAdmitsMany`: open, on its clock, no
  *     side dissolved or hidden, no block across the sides); the crew behind
- *     an invite while the reader is still invited or a member and the crew is
- *     neither dissolved nor hidden. Otherwise nothing: a crew renamed after
+ *     an invite while the Crews screen would list that invite
+ *     (`acceptableInviteCrewIds`: open and not lapsed, the inviter still a
+ *     member and a friend, nobody in it kept apart from the reader), or the
+ *     reader is a member, and the crew is neither dissolved nor hidden. Otherwise nothing: a crew renamed after
  *     you left is never named to you;
  *   - an event: its cover.
  *
@@ -111,17 +114,9 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
           select: { id: true, sender: { select: personSelect } },
         })
       : [],
-    crewInviteRows.length
-      ? db.crew_invites.findMany({
-          where: {
-            invited_user_id: viewerId,
-            crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) },
-            declined_at: null,
-            removed_at: null,
-          },
-          select: { crew_id: true },
-        })
-      : [],
+    // The Crews screen's door (`acceptableInviteCrewIds`): open, not lapsed, the crew standing, the inviter still a
+    // member and your friend, nobody in it kept apart from you. An invite it would not list is neither open nor named.
+    acceptableInviteCrewIds(viewerId, unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId")))),
     crewInviteRows.length
       ? db.crew_members.findMany({
           where: { user_id: viewerId, crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) } },
@@ -170,7 +165,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
           select: { id: true, name: true, blend_id: true },
         })
       : [],
-    matchRows.length ? blockCounterparties(viewerId) : ([] as string[]),
+    matchRows.length ? blockCounterparties(viewerId).then((ids) => new Set(ids)) : new Set<string>(),
   ])
   // The Blend door, the room's own, for the whole page in one read.
   const admits = await blendAdmitsMany(
@@ -179,9 +174,9 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
   )
   const emblemOf = new Map(crews.map((c) => [c.id, c.emblem_seed]))
   const crewOf = new Map(crews.map((c) => [c.id, c]))
-  const invited = new Set(invites.map((i) => i.crew_id))
+  const invited = invites
   const joined = new Set(memberships.map((m) => m.crew_id))
-  // Named only to somebody still invited or in it, and only while the crew stands.
+  // Named only to somebody the Crews screen still shows the invite to, or a member, and only while the crew stands.
   const namesCrew = (crewId: string) => {
     const crew = crewOf.get(crewId)
     return !!crew && !crew.dissolved_at && !crew.hidden_at && (invited.has(crewId) || joined.has(crewId))
@@ -237,7 +232,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
     if (!c || !pseudonym) continue
     // Named while the conversation is still theirs: closed (an unmatch, or a block, which closes it) or blocked names nothing.
     const other = c.user1_id === viewerId ? c.user2_id : c.user1_id
-    const named = !c.closed_at && !blocked.includes(other)
+    const named = !c.closed_at && !blocked.has(other)
     set(row.id, { display: { ...(named && { context: pseudonym }), visual: { type: "creature", pseudonym } } })
   }
 

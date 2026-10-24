@@ -850,7 +850,7 @@ const NotificationSchema = z.object({
         .string()
         .optional()
         .describe(
-          "The counterpart, by the name the reader sees it by now, and only while they may: a match's pseudonym (conversation open, no block), the Blend room's name (the room's door admits the reader), the inviting crew (still invited or a member; the crew neither dissolved nor hidden). Absent otherwise and on every other kind."
+          "The counterpart, by the name the reader sees it by now, and only while they may: a match's pseudonym (conversation open, no block), the Blend room's name (the room's door admits the reader), the inviting crew (the Crews screen would list the invite: open, not lapsed, the inviter a member and a friend, no block with anyone in it; or a member; the crew neither dissolved nor hidden). Absent otherwise and on every other kind."
         ),
       visual: z
         .discriminatedUnion("type", [
