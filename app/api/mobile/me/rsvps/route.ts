@@ -104,6 +104,8 @@ export async function GET(request: NextRequest) {
               longitude: true,
               ...changeSelect,
               media: { orderBy: { order: "asc" }, take: 1 },
+              // As `GET /users/:id/favorites` sends them: the app draws a row's category plate from these.
+              categories: { select: { category: { select: { id: true, name: true, slug: true, icon: true } } } },
             },
           },
         },
@@ -138,6 +140,7 @@ export async function GET(request: NextRequest) {
       ...changeSummaryForResponse(event),
       rsvpStatus: status,
       rsvpAt: created_at,
+      categories: event.categories.map((c) => c.category),
     }))
 
     return successResponse({

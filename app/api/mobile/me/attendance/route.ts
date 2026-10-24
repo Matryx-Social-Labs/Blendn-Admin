@@ -111,6 +111,8 @@ export async function GET(request: NextRequest) {
             venue: { select: { venue_type: true } },
             // Your own rating of the night, if any: `GET /events/:id/rating`'s `ratedAt`, from the same read.
             ratings: { where: { user_id: authUser.userId }, select: { updated_at: true }, take: 1 },
+            // As `GET /users/:id/favorites` sends them: the app draws a Past row's category plate from these.
+            categories: { select: { category: { select: { id: true, name: true, slug: true, icon: true } } } },
           },
         })
       : []
@@ -128,7 +130,7 @@ export async function GET(request: NextRequest) {
       .map((a) => {
         const event = byId.get(a.event_id)
         if (!event) return null
-        const { venue_id, venue, ratings, ...shown } = event
+        const { venue_id, venue, ratings, categories, ...shown } = event
         const visit = event.kind === "venue_day"
         // Only a visit to a place carries these; an event's own row says null.
         return {
@@ -139,6 +141,7 @@ export async function GET(request: NextRequest) {
           venue_type: visit ? (venue?.venue_type ?? null) : null,
           // A place is not a night you rate, so a visit says null.
           ratedAt: event.kind === "event" ? (ratings[0]?.updated_at ?? null) : null,
+          categories: categories.map((c) => c.category),
         }
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)

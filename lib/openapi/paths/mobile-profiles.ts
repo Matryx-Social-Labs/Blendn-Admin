@@ -7,7 +7,7 @@ import {
   ProfileResponseSchema,
   InterestsResponseSchema,
 } from "@/lib/openapi/schemas/profile"
-import { ChangedAtSchema, ChangedFieldsSchema, EventSessionSchema } from "@/lib/openapi/schemas/event"
+import { ChangedAtSchema, ChangedFieldsSchema, EventSessionSchema, RowCategorySchema } from "@/lib/openapi/schemas/event"
 
 // GET /api/mobile/profiles/{userId}
 registry.registerPath({
@@ -184,6 +184,7 @@ registry.registerPath({
                     .datetime()
                     .nullable()
                     .describe("When you last rated this night (`GET /events/{eventId}/rating`'s `ratedAt`): yours alone, null if you have not, and always null for a `venue_day`."),
+                  categories: z.array(RowCategorySchema).describe("The event's categories, as the favourites list sends them (empty for a `venue_day`). Additive."),
                 })
               ),
               pagination: PagedPaginationSchema,
@@ -247,6 +248,7 @@ registry.registerPath({
                   longitude: z.number().nullable(),
                   rsvpStatus: z.enum(["going", "waitlisted"]),
                   rsvpAt: z.string().datetime(),
+                  categories: z.array(RowCategorySchema).describe("The event's categories, as the favourites list sends them. Additive."),
                   changedAt: ChangedAtSchema,
                   changedFields: ChangedFieldsSchema,
                 })

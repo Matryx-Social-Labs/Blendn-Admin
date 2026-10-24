@@ -178,6 +178,14 @@ const EventCategorySchema = z.object({
   icon: z.string().nullable(),
 })
 
+/** A row's categories on the person's own lists (`/me/rsvps`, `/me/attendance`), as `GET /users/{userId}/favorites` sends them: the app draws the row's category plate from `slug`. */
+export const RowCategorySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  slug: z.string(),
+  icon: z.string().nullable(),
+})
+
 const EventStatsSchema = z.object({
   checkInCount: z.number().openapi({ description: "People who checked in, including those who have since left (came, not here now)." }),
   hereCount: z.number().openapi({ description: "People checked in right now: not checked out, guests only, the Room's count. Use this for \"here now\"." }),

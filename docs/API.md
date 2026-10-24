@@ -435,6 +435,10 @@ time: `nextEvent` on `GET /venues`, and `tonight` and each `upcoming` item on
 `GET /venues/:venueId` and `GET /venues/:venueId/upcoming`. Additive; an older
 server omits it, so fall back to the venue's or the phone's zone when absent.
 
+Each row also carries `categories`, `[{ id, name, slug, icon }]` as the
+favourites list sends them (additive; `[]` for a `venue_day`), for the Past
+row's category plate.
+
 Three things are worth knowing before building against it.
 
 **`/me`, and there is no `/users/:id/attendance`.** Attendance history is where
@@ -517,6 +521,10 @@ GET /api/mobile/me/rsvps?page=1&limit=20
 
 - **`/me` only**, like attendance: where somebody is going is the same
   correlation, in the future tense.
+- **`categories`** (additive, 2026-10-24): each event's categories as
+  `GET /users/:userId/favorites` sends them, `[{ id, name, slug, icon }]`, read
+  in the same query. The app draws the row's category plate from `slug`.
+  `GET /me/attendance` rows carry the same (`[]` for a `venue_day`).
 - **`going` and `waitlisted`**, with `rsvpStatus` saying which, so a waitlisted
   place is never shown as a confirmed one. Not `maybe` or `not_going`.
 - **`visibility`** is `public`, `unlisted` or `private`, so a card can say an
