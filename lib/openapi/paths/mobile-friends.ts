@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
 
 /*
  * Friends. Two rules shape every route here (see lib/friends.ts):
@@ -106,6 +106,15 @@ registry.registerPath({
               age: z.number().int().nullable(),
               location: z.string().nullable(),
               interests: z.array(z.object({ id: z.string(), name: z.string(), slug: z.string(), icon: z.string().nullable() })),
+              work_field: z.string().nullable().describe("The about line, as `GET /users/{userId}` sends it to somebody who may see who this is. Additive."),
+              expertise: z.array(z.string()).describe("Labels. Additive."),
+              languages: z.array(z.string()).describe("Labels. Additive."),
+              homeState: z.string().nullable().describe("A label. Additive."),
+              sign: z.string().nullable().describe("A label, \"Leo ♌\". Additive."),
+              badges: z
+                .array(BadgeSchema)
+                .optional()
+                .describe("What check-ins earned, as the profile sends them: present (possibly empty) unless the friend turned `show_badges` off; absent then. Additive."),
               friendsSince: z.string(),
               conversationId: z.string().uuid().nullable(),
             })

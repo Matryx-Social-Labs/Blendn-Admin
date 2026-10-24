@@ -2346,7 +2346,7 @@ already is: counted in the headcount, listed nowhere.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`, `?q=` (a word-prefix search of their names; `count` is then the filtered total); see *Lists are paged* |
-| GET | `/friends/:userId` | A friend's profile (404 for anyone else) |
+| GET | `/friends/:userId` | A friend's profile (404 for anyone else). Carries the about line as `GET /users/:userId` sends it to somebody who may see who this is: `work_field`, `expertise`, `languages`, `homeState`, `sign` (labels), and `badges` unless they turned `show_badges` off (additive, 2026-10-24) |
 | DELETE | `/friends/:userId` | Unfriend — silent, leaves any DM alone |
 | POST | `/friends/:userId/conversation` | Open (or find) a DM with a friend → `{ conversationId }` |
 | GET | `/friends/invite` | My invite link `{ token, url }`, made on first ask |
