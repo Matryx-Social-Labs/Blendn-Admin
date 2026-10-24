@@ -14,6 +14,7 @@ import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { checkTextContent } from "@/lib/moderation/openai-moderation"
 import { checkSpam } from "@/lib/moderation/spam-detector"
 import { deliverOffer } from "@/lib/offers/deliver"
+import { regularsActive } from "@/lib/offers/person"
 import { codeMatches, normaliseCode } from "@/lib/offers/pass-code"
 import { audienceBand, nextOfferAt, OFFERS_PER_WEEK, sentThisWeek, type AudienceBand } from "@/lib/offers/venue"
 import { activeMembership } from "@/lib/org-membership"
@@ -204,6 +205,14 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
   if (!maySendVenueOffers(user.role, gate.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
   if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) {
     throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
+  }
+  /*
+   * No offer reaches anybody until regulars is switched on (review M2): only then does the app show "Offers from
+   * places", the switch that turns them off, so nobody gets a promotion with no way to stop it. Existing profiles
+   * still hold the `true` they were given before S-5; whether to reset them is the owner's call when regulars launch.
+   */
+  if (!(await regularsActive({ venueId }))) {
+    throw new Refusal("Offers to regulars aren’t switched on yet, so nothing was sent.", "REGULARS_INACTIVE")
   }
   const refusal = await offerTextRefusal(venueId, text)
   if (refusal) {

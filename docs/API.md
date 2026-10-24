@@ -4089,7 +4089,10 @@ without an adult age on file. 404 for no such venue.
   anywhere for this person. **False everywhere** until a venue or organiser can
   switch it on (the owner deferred the feature, 2026-10-17); the app shows
   "Offers from places" only when it is true. The same answer as a venue's
-  `regulars.active` on `GET /venues/:venueId/regular` (`regularsActive`).
+  `regulars.active` on `GET /venues/:venueId/regular` (`regularsActive`), and
+  the gate on sending: the dashboard's `sendOffer` refuses every send while it
+  is false (`reasonCode: REGULARS_INACTIVE`), so nobody gets an offer before the
+  app shows them the switch to turn offers off.
 
 - `enabled` — one switch for every venue: off, no venue's offer reaches you.
   **Off until turned on** (S-5, 2026-10-24: promotional consent is opt-in;

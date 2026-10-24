@@ -211,7 +211,7 @@ export async function regularPrefs(userId: string, venueId: string): Promise<Reg
     known: known !== null,
     offersMuted: muted !== null,
     ownerName: venue.owner_org?.display_name ?? null,
-    regulars: { active: await regularsActive(userId, venueId), eligible },
+    regulars: { active: await regularsActive({ personId: userId, venueId }), eligible },
   }
 }
 
@@ -255,14 +255,16 @@ export async function setRegularPrefs(
 }
 
 /**
- * Whether the regulars feature is on anywhere that could reach this person
- * (`venueId`: at that venue). FALSE everywhere until a venue or organiser can
+ * Whether the regulars feature is on: for a person (`personId`: anywhere that
+ * could reach them), or at a venue (`venueId`; also the gate on sending an
+ * offer, `sendOffer`, so nobody gets one before the app shows the switch to
+ * turn them off). FALSE everywhere until a venue or organiser can
  * switch it on (owner, 2026-10-17: the feature is deferred; the dashboard
  * toggle is not built), so the app shows no regulars or "Offers from places"
  * UI. One answer for `/me/offers` and a venue's prefs alike.
  * ponytail: a constant until the toggle exists; then read the venues' switch here (for a person: any venue they have been to).
  */
-export async function regularsActive(_userId: string, _venueId?: string): Promise<boolean> {
+export async function regularsActive(_at: { personId?: string; venueId?: string }): Promise<boolean> {
   return false
 }
 
@@ -278,7 +280,7 @@ export interface OfferSettings {
 const settingsSelect = { offers_from_places: true, offer_push_consent_at: true } as const
 
 export async function offerSettings(userId: string): Promise<OfferSettings> {
-  const [profile, active] = await Promise.all([db.profiles.findUnique({ where: { id: userId }, select: settingsSelect }), regularsActive(userId)])
+  const [profile, active] = await Promise.all([db.profiles.findUnique({ where: { id: userId }, select: settingsSelect }), regularsActive({ personId: userId })])
   return { enabled: profile?.offers_from_places ?? false, pushes: Boolean(profile?.offer_push_consent_at), regulars: { active } }
 }
 
@@ -302,7 +304,7 @@ export async function setOfferSettings(
     },
     select: settingsSelect,
   })
-  return { enabled: profile.offers_from_places, pushes: profile.offer_push_consent_at !== null, regulars: { active: await regularsActive(userId) } }
+  return { enabled: profile.offers_from_places, pushes: profile.offer_push_consent_at !== null, regulars: { active: await regularsActive({ personId: userId }) } }
 }
 
 export type ReportOutcome = "filed" | "already" | "not_found"

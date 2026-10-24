@@ -28,6 +28,16 @@ jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 // The venue's map form imports Leaflet's CSS, which node cannot load.
 jest.mock("@/app/dashboard/venues/[id]/venue-manage", () => ({ VenueManage: () => null }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0) }))
+/*
+ * Regulars is off everywhere until a venue can switch it on (`regularsActive`), and a send is refused until then
+ * (review M2). These cases are about what a send does once it is on, so it is on here unless a case turns it off.
+ * The person's own settings (`/me/offers`) read the real flag, inside the module.
+ */
+const mockRegulars = { active: true }
+jest.mock("@/lib/offers/person", () => ({
+  ...jest.requireActual("@/lib/offers/person"),
+  regularsActive: async () => mockRegulars.active,
+}))
 
 import { NextRequest } from "next/server"
 import { isValidElement, type ReactElement } from "react"
@@ -592,6 +602,22 @@ describe("review pass 2", () => {
     await meOffersRoute.PUT(req("/api/mobile/me/offers", R[0].token, "PUT", { enabled: true }))
     expect((await actions.sendOffer({ venueId: G, text: "Third try", days: 7 })).reached).toBe("5–9")
     expect(await db.audit_logs.count({ where: { user_id: R[0].id } })).toBe(0)
+  })
+
+  it("refuses every send while regulars is off, with reasonCode REGULARS_INACTIVE, and sends nothing (review M2)", async () => {
+    const V = await venue(orgA)
+    await pro(V)
+    for (let i = 0; i < 5; i++) await regular(V, R[i].id)
+    as(owner)
+    mockRegulars.active = false
+    try {
+      const refused = await actions.sendOffer({ venueId: V, text: "Not yet", days: 7 }).catch((e: { message: string; reasonCode?: string }) => e)
+      expect(refused).toMatchObject({ reasonCode: "REGULARS_INACTIVE", message: "Offers to regulars aren’t switched on yet, so nothing was sent." })
+      expect(await db.venue_offers.count({ where: { venue_id: V } })).toBe(0)
+    } finally {
+      mockRegulars.active = true
+    }
+    expect((await actions.sendOffer({ venueId: V, text: "Now it is", days: 7 })).reached).toBe("5–9")
   })
 
   it("a new account has offers from places off, and is in no audience until it turns them on (S-5)", async () => {
