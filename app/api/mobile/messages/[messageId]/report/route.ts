@@ -12,7 +12,7 @@ import {
   serverErrorResponse,
   errorResponse,
 } from "@/lib/api-response"
-import { readJson, isUuid } from "@/lib/api-input"
+import { readJson, isUuid, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 import { roomOwnerDenial, withOwnerDoor } from "@/lib/room-kind"
 
 interface RouteParams {
@@ -21,8 +21,8 @@ interface RouteParams {
 
 const reportMessageSchema = z.object({
   messageType: z.enum(["group", "private"]),
-  reason: z.string().min(1, "Reason is required"),
-  description: z.string().optional(),
+  reason: z.string().min(1, "Reason is required").max(REPORT_REASON_MAX),
+  description: z.string().max(REPORT_DESCRIPTION_MAX).optional(),
 })
 
 // POST /api/mobile/messages/[messageId]/report — Report a chat or private message
@@ -33,7 +33,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return unauthorizedResponse("Authentication required")
     }
 
-    const limited = await rateLimit(request, userLimit("safety", "report-message", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("safety", "report-message", authUser.userId))) ??
+      (await rateLimit(request, userLimit("reportDay", "report-message-day", authUser.userId)))
     if (limited) return limited
 
     const { messageId } = await params

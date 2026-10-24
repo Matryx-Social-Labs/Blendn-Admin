@@ -14,15 +14,15 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { readJson } from "@/lib/api-input"
+import { readJson, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
 }
 
 const reportUserSchema = z.object({
-  reason: z.string().min(1, "Reason is required"),
-  description: z.string().optional(),
+  reason: z.string().min(1, "Reason is required").max(REPORT_REASON_MAX),
+  description: z.string().max(REPORT_DESCRIPTION_MAX).optional(),
 })
 
 // POST /api/mobile/users/[userId]/report — Report a user
@@ -33,7 +33,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return unauthorizedResponse("Authentication required")
     }
 
-    const limited = await rateLimit(request, userLimit("safety", "report-user", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("safety", "report-user", authUser.userId))) ??
+      (await rateLimit(request, userLimit("reportDay", "report-user-day", authUser.userId)))
     if (limited) return limited
 
     // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.

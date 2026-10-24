@@ -121,13 +121,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         return errorResponse("They have already revealed", 400)
       }
 
-      await db.private_conversations.update({
-        where: { id: conversationId },
+      // Only the call that flips the flag notifies: a repeat is a no-op, not
+      // another push at someone who cannot decline (API M4).
+      const unasked = isUser1 ? "user2_reveal_requested" : "user1_reveal_requested"
+      const { count } = await db.private_conversations.updateMany({
+        where: { id: conversationId, [unasked]: false },
         data: isUser1 ? { user2_reveal_requested: true } : { user1_reveal_requested: true },
       })
 
       const themId = isUser1 ? conversation.user2_id : conversation.user1_id
-      notifyRevealRequest(themId, conversationId).catch(() => {})
+      if (count === 1) notifyRevealRequest(themId, conversationId).catch(() => {})
 
       return successResponse({ requested: true })
     }
@@ -158,20 +161,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(`Add ${missing} to your profile first`, 400, "reveal_incomplete")
     }
 
-    const after = await db.private_conversations.update({
-      where: { id: conversationId },
+    // The flip is the claim: only the call whose UPDATE changes the row tells
+    // anybody, so a repeat (or a parallel pair) pushes once (API M4).
+    const mine = isUser1 ? "user1_revealed" : "user2_revealed"
+    const { count } = await db.private_conversations.updateMany({
+      where: { id: conversationId, [mine]: false },
       data: isUser1 ? { user1_revealed: true } : { user2_revealed: true },
+    })
+    const after = await db.private_conversations.findUniqueOrThrow({
+      where: { id: conversationId },
       select: { user1_revealed: true, user2_revealed: true },
     })
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
-    notifyReveal(themId, conversationId).catch(() => {})
-    // Their open DM re-reads now rather than on the next push they may never get.
-    // Once both have revealed the same event goes to both: the friend offer is possible.
-    emitPrivateRevealed(
-      conversationId,
-      after.user1_revealed && after.user2_revealed ? [authUser.userId, themId] : [themId]
-    )
+    if (count === 1) {
+      notifyReveal(themId, conversationId).catch(() => {})
+      // Their open DM re-reads now rather than on the next push they may never get.
+      // Once both have revealed the same event goes to both: the friend offer is possible.
+      emitPrivateRevealed(
+        conversationId,
+        after.user1_revealed && after.user2_revealed ? [authUser.userId, themId] : [themId]
+      )
+    }
     // Both sides have shown themselves now: a friend request held for this pair is delivered.
     // Decided from the values the UPDATE returned, not from the read before it:
     // two reveals at once each read "the other has not", and only the second

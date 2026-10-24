@@ -2273,6 +2273,12 @@ composing close and report as two client calls can half-fail into a closed
 thread whose evidence is out of reach, which is the state this design exists to
 prevent. Omit `report.messageId` to report the person rather than a message.
 
+**Report limits (all report routes).** `reason` is at most 200 characters and
+`description` at most 2000 (`400` beyond). Every report route (message, user,
+event, room, and a conversation leave that carries a `report`) shares one
+allowance of 30 reports per user per day: `429` after that. A leave without a
+`report` is never capped by it.
+
 Reporting a message requires that you could see it — group membership, or being
 a participant in the DM. It deliberately does **not** require the conversation
 to still be open, so somebody who leaves and only later decides to report still
@@ -3393,9 +3399,14 @@ be seen.
 
 ### POST /uploads/presigned-url
 ```json
-{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events" }
+{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events", "size": 183422 }
 ```
 Note: `events` folder requires organiser/admin role.
+
+`size` is the file's byte length. When sent it is signed into the URL as
+`content-length`, so storage refuses a PUT of any other size; a `size` above the
+folder's ceiling (`maxSize` in the response) is `400`. Always send it: a URL
+issued without one accepts any length until the attach step measures it.
 
 PUT the file to `uploadUrl` with **exactly** the `Content-Type` you asked for.
 The type is signed into the URL, so any other type, or none, is refused by

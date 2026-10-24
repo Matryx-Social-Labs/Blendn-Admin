@@ -42,7 +42,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { offerId } = await params
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
-    const limited = await rateLimit(request, userLimit("safety", "offer-report", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("safety", "offer-report", authUser.userId))) ??
+      (await rateLimit(request, userLimit("reportDay", "offer-report-day", authUser.userId)))
     if (limited) return limited
     if (!isUuid(offerId)) return notFoundResponse("Offer not found")
     const parsed = bodySchema.safeParse(await readJson(request))

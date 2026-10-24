@@ -687,7 +687,7 @@ registry.registerPath({
   path: "/api/mobile/uploads/presigned-url",
   tags: ["Mobile Uploads"],
   summary: "Get presigned upload URL",
-  description: "Returns a presigned URL for direct file upload to S3/Tigris. URL expires in 15 minutes.",
+  description: "Returns a presigned URL for direct file upload to S3/Tigris. URL expires in 15 minutes. Send `size` (the file's byte length) and it is signed into the URL as `content-length`: PUT exactly that many bytes. A `size` above the folder's ceiling is 400.",
   security: bearerAuth,
   request: {
     body: { content: { "application/json": { schema: PresignedUrlRequestSchema } } },
@@ -1151,7 +1151,7 @@ registry.registerPath({
   tags: ["Mobile Safety"],
   summary: "Report a message",
   description:
-    "Reports a group or private message. `messageType` is required because the two live in different tables and the id alone is ambiguous.",
+    "Reports a group or private message. `messageType` is required because the two live in different tables and the id alone is ambiguous. `reason` is at most 200 characters, `description` 2000. 429 after 30 reports of any of these kinds in a day (message, user, event, room, or a conversation leave that carries a report).",
   security: bearerAuth,
   request: {
     params: z.object({ messageId: z.string().uuid() }),
@@ -1160,8 +1160,8 @@ registry.registerPath({
         "application/json": {
           schema: z.object({
             messageType: z.enum(["group", "private"]),
-            reason: z.string().min(1),
-            description: z.string().optional(),
+            reason: z.string().min(1).max(200),
+            description: z.string().max(2000).optional(),
           }),
         },
       },
@@ -1178,6 +1178,7 @@ registry.registerPath({
   path: "/api/mobile/users/{userId}/report",
   tags: ["Mobile Safety"],
   summary: "Report a user",
+  description: "`reason` is at most 200 characters, `description` 2000. 429 once you have filed 30 reports in a day.",
   security: bearerAuth,
   request: {
     params: z.object({ userId: UserRefParamSchema }),
@@ -1185,8 +1186,8 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1),
-            description: z.string().optional(),
+            reason: z.string().min(1).max(200),
+            description: z.string().max(2000).optional(),
           }),
         },
       },
@@ -1206,7 +1207,7 @@ registry.registerPath({
   description:
     "An unsafe venue, a misleading listing, a dangerous organiser. No check-in " +
     "required: two of those three are visible from the listing, and the value is " +
-    "catching them before somebody travels to the venue.",
+    "catching them before somebody travels to the venue. `reason` is at most 200 characters. 429 once you have filed 30 reports in a day.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string() }),
@@ -1214,7 +1215,7 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: z.object({
-            reason: z.string().min(1),
+            reason: z.string().min(1).max(200),
             description: z.string().max(2000).optional(),
           }),
         },

@@ -116,8 +116,9 @@ export async function GET(
 
     // If cursor provided, get messages before that message
     if (before) {
-      const cursorMessage = await db.chat_messages.findUnique({
-        where: { id: before },
+      // Of this room only: another room's message id must not move this page (API L10).
+      const cursorMessage = await db.chat_messages.findFirst({
+        where: { id: before, chat_group_id: chatGroupId },
         select: { created_at: true },
       })
 

@@ -448,14 +448,21 @@ export async function revokeUserRefreshTokens(userId: string): Promise<void> {
  * Revoke a specific refresh token. On rotation, `replacedBy` is the successor's
  * id, and the revocation time is (re)stamped so a replay inside the grace
  * window is measured from the rotation the client actually missed.
+ *
+ * The token is decoded, not verified, so `userId` scopes the revocation to a
+ * row its caller owns: a signed-in user presenting someone else's token (or a
+ * guessed jti) revokes nothing (API L10).
  */
-export async function revokeRefreshToken(token: string, replacedBy?: string): Promise<void> {
+export async function revokeRefreshToken(token: string, replacedBy?: string, userId?: string): Promise<void> {
   try {
     const decoded = jwt.decode(token) as DecodedToken | null
     if (!decoded?.jti) return
 
     await db.mobile_refresh_tokens.updateMany({
-      where: replacedBy ? { id: decoded.jti } : { id: decoded.jti, revoked_at: null },
+      where: {
+        ...(replacedBy ? { id: decoded.jti } : { id: decoded.jti, revoked_at: null }),
+        ...(userId !== undefined && { user_id: userId }),
+      },
       data: {
         revoked_at: new Date(),
         ...(replacedBy != null && { replaced_by: replacedBy }),

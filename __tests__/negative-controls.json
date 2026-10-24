@@ -34,6 +34,12 @@
     "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574."
   ],
   "verified": {
+    "report-routes-daily-cap.test.ts": {
+      "guards": "API M8: every app/api/mobile/**/report/route.ts applies userLimit(\"reportDay\").",
+      "mutation": "app/api/mobile/offers/[offerId]/report/route.ts as it was before this fix (only the per-minute `safety` limit).",
+      "observed": "2026-10-25: fails, '/offers/[offerId]/report/route.ts applies the daily report cap' (1 failed, 9 passed). Fixed; green.",
+      "date": "2026-10-25"
+    },
     "venue-visibility-one-rule.test.ts": {
       "guards": "HM-G01 (plan v2 step 2): the undisputed-link read (`venue_link_status: { not: \"disputed\" }`) is spelled in lib/venue-visibility.ts only, TAKEOVER_LEAD_MINUTES is defined there only, and the Places list, the event-card serializer and the venue page import the rule from there; scans app/, lib/ and scripts/ (over 100 files).",
       "mutation": "M565 the venues route's upcomingEventFilter spells the disputed-link OR inline instead of undisputedLinkWhere. M566 a second `TAKEOVER_LEAD_MINUTES = 60` defined in the venues route.",

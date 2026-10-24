@@ -15,7 +15,7 @@ import {
   serverErrorResponse,
   errorResponse,
 } from "@/lib/api-response"
-import { isUuid, readOptionalJson } from "@/lib/api-input"
+import { isUuid, readOptionalJson, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 import { leaveConversationIn } from "@/lib/leave-conversation"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 
@@ -59,8 +59,8 @@ const leaveSchema = z.object({
   action: z.enum(["unmatch", "block"]).default("unmatch"),
   report: z
     .object({
-      reason: z.string().min(1, "Reason is required"),
-      description: z.string().max(2000).optional(),
+      reason: z.string().min(1, "Reason is required").max(REPORT_REASON_MAX),
+      description: z.string().max(REPORT_DESCRIPTION_MAX).optional(),
       /**
        * A specific message, when there is one worth pointing at. Without it the
        * report is filed against the person instead — which is also what stays
@@ -90,6 +90,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const parsed = leaveSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     const { action, report } = parsed.data
+
+    // Leaving is never capped beyond the minute limit; filing a report with it is (API M8).
+    if (report) {
+      const reportCapped = await rateLimit(request, userLimit("reportDay", "report-conversation-day", authUser.userId))
+      if (reportCapped) return reportCapped
+    }
 
     const conversation = await db.private_conversations.findUnique({
       where: { id: conversationId },
