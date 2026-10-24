@@ -8,7 +8,7 @@ import { logger } from "./logger"
 import { performCheckouts, type CheckoutItem } from "./checkout"
 import { realEventsWhere, venueDaysWhere } from "./event-kind"
 import { resolveFence, fenceSelect } from "./geofence"
-import { evaluatePresence, type PresenceState } from "./presence"
+import { evaluatePresence, OCCURRENCE_GRACE_MINUTES, type PresenceState } from "./presence"
 import { closeStrandedSessions } from "./presence-sessions"
 import { sendBulkPushNotifications } from "./push-notifications"
 import { hit } from "./rate-limit-store"
@@ -139,6 +139,8 @@ async function sweepRooms(
     by: ["event_id"],
     // any-kind: `kind` is realEventsWhere or venueDaysWhere, chosen by the pass that calls this.
     where: { status: "checked_in", event: kind },
+    // The room's size too: the guard's denominator, so the rows below can be the actionable few.
+    _count: { _all: true },
     _min: { created_at: true },
     orderBy: { _min: { created_at: "asc" } },
     take: cap,
@@ -152,10 +154,22 @@ async function sweepRooms(
     logger.warn("Presence sweep hit its event cap", { cap, kind: kind.kind })
   }
 
+  /*
+   * Only the rows the sweeper can act on. It carries no ping, so
+   * `evaluatePresence` closes nobody but those past their day's end plus
+   * grace, and those out of the fence (`left_area_at`) -- everyone else is
+   * `stay`, and was fetched, with the event's fence JSON, only to be counted.
+   * The count is the groupBy's.
+   */
+  const roomSize = new Map(busiest.map((b) => [b.event_id, b._count._all]))
   const open = await db.event_check_ins.findMany({
     where: {
       status: "checked_in",
       event_id: { in: busiest.map((b) => b.event_id) },
+      OR: [
+        { left_area_at: { not: null } },
+        { occurrence: { end_time: { lt: new Date(now.getTime() - OCCURRENCE_GRACE_MINUTES * 60_000) } } },
+      ],
     },
     select: {
       id: true,
@@ -168,7 +182,7 @@ async function sweepRooms(
       event: { select: { ...fenceSelect } },
     },
   })
-  result.examined = open.length
+  result.examined = [...roomSize.values()].reduce((sum, n) => sum + n, 0)
   if (open.length === 0) return result
 
   // Grouped so the guard can reason about a room rather than a person.
@@ -224,13 +238,13 @@ async function sweepRooms(
     const departures = toCheckOut.filter((d) => d.decision.reason !== "occurrence_ended")
     if (
       departures.length >= MASS_CHECKOUT_FLOOR &&
-      departures.length / rows.length > MASS_CHECKOUT_THRESHOLD
+      departures.length / (roomSize.get(eventId) ?? rows.length) > MASS_CHECKOUT_THRESHOLD
     ) {
       result.guarded.push(eventId)
       logger.warn("Presence sweep guarded: too many departures at once", {
         eventId,
         wouldCheckOut: departures.length,
-        inRoom: rows.length,
+        inRoom: roomSize.get(eventId) ?? rows.length,
         threshold: MASS_CHECKOUT_THRESHOLD,
         floor: MASS_CHECKOUT_FLOOR,
         hint: "venue signal loss looks identical to everyone leaving; count is unreliable",
