@@ -663,12 +663,17 @@ event's change and a report's outcome have no switch here. Stored as
   - `crew_invite`, `crew_here`: `visual` `{ type: "emblem", seed }`, the crew's
     `emblem_seed`; `blend`: the Blend's id as the seed.
   - `context` (S-2, 2026-10-24) names the counterpart by the name the reader
-    already sees it by, so rows of one kind can be told apart: a `match`'s
-    pseudonym; a `blend`'s other crew (the Blend room is named "A × B", so both
-    are on the reader's screen already; when the other side is one person, who
-    is "+ 1" there, no `context`); a `crew_invite`'s crew ("‹crew› asked you").
-    Only a member of one side of the Blend, or its solo person, is told it. The
-    lock-screen push stays nameless.
+    sees it by in the app at that moment, so rows of one kind can be told
+    apart, and only while they still may:
+    - `match`: the other side's pseudonym (never a name, revealed or not),
+      while the conversation is open and neither has blocked the other;
+    - `blend`: the Blend room's own name ("A × B", or "A + 1" for one person),
+      while the room's door admits the reader: open and on its clock, no side
+      dissolved or hidden, no block across the sides;
+    - `crew_invite`: the crew's name ("‹crew› asked you"), while the reader is
+      still invited or a member and the crew is neither dissolved nor hidden.
+      A crew renamed after you left is never named to you.
+    Otherwise absent. The lock-screen push stays nameless.
   - `event_update`, `event_changed`, `announcement`, `waitlist_promoted`,
     `rating_request`: `visual` `{ type: "event", cover, badge, cancelled }`
     (`badge` `clock`, `map-pin` for a venue change, `megaphone`, `star`;

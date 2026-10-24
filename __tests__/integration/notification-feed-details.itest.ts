@@ -88,6 +88,8 @@ afterAll(async () => {
   await db.chat_group_members.deleteMany({ where: { chat_group_id: { in: blendsMade.map((b) => b.room) } } })
   await db.chat_groups.deleteMany({ where: { id: { in: blendsMade.map((b) => b.room) } } })
   await db.blends.deleteMany({ where: { id: { in: blendsMade.map((b) => b.blend) } } })
+  await db.event_check_ins.deleteMany({ where: { user_id: { in: users } } })
+  await db.blocked_users.deleteMany({ where: { OR: [{ blocker_id: { in: users } }, { blocked_id: { in: users } }] } })
   await db.crew_members.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crew_invites.deleteMany({ where: { crew_id: { in: crews } } })
   await db.crews.deleteMany({ where: { id: { in: crews } } })
@@ -148,7 +150,37 @@ describe("crew rows", () => {
     expect(open.display).toEqual({ context: "Nebula", visual: { type: "emblem", seed: "seed-nebula" } })
 
     await db.crew_invites.update({ where: { id: invite.id }, data: { declined_at: new Date() } })
-    expect((await rowOf(me, "crew_invite")).open).toBe(false)
+    const declined = await rowOf(me, "crew_invite")
+    expect(declined.open).toBe(false)
+    // Declined: no longer theirs to be told the name of.
+    expect(declined.display).toEqual({ visual: { type: "emblem", seed: "seed-nebula" } })
+  })
+
+  it("names the crew only while it stands and the reader is invited or in it: not once they left, nor once it is dissolved or hidden (S-2)", async () => {
+    const owner = await person("nf-cs-owner")
+    const left = await person("nf-cs-left")
+    const invitee = await person("nf-cs-inv")
+    const crew = await db.crews.create({ data: { name: "Old Name", created_by: owner, emblem_seed: "seed-cs" } })
+    crews.push(crew.id)
+    await db.crew_invites.create({ data: { crew_id: crew.id, invited_user_id: invitee, invited_by: owner } })
+    for (const id of [left, invitee]) await notify(id, "crew_invite", { crewId: crew.id })
+
+    // A member (joining spends the invite) is told the name...
+    await db.crew_members.create({ data: { crew_id: crew.id, user_id: left, consented_reveal_at: new Date() } })
+    expect((await rowOf(left, "crew_invite")).display.context).toBe("Old Name")
+    // ...and once they leave and the crew is renamed, neither name is theirs.
+    await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: crew.id, user_id: left } } })
+    await db.crews.update({ where: { id: crew.id }, data: { name: "Renamed" } })
+    const leftRow = await rowOf(left, "crew_invite")
+    expect(leftRow.display).not.toHaveProperty("context")
+    expect(JSON.stringify(leftRow)).not.toMatch(/Old Name|Renamed/)
+    // The happy path: still invited.
+    expect((await rowOf(invitee, "crew_invite")).display.context).toBe("Renamed")
+
+    await db.crews.update({ where: { id: crew.id }, data: { hidden_at: new Date() } })
+    expect((await rowOf(invitee, "crew_invite")).display).not.toHaveProperty("context")
+    await db.crews.update({ where: { id: crew.id }, data: { hidden_at: null, dissolved_at: new Date() } })
+    expect((await rowOf(invitee, "crew_invite")).display).not.toHaveProperty("context")
   })
 })
 
@@ -165,6 +197,28 @@ describe("match rows", () => {
     expect(row.display).toEqual({ context: "Amber Fox", visual: { type: "creature", pseudonym: "Amber Fox" } })
     expect(JSON.stringify(row)).not.toContain("m/2.jpg")
     expect(JSON.stringify(row)).not.toContain("Person nf-m2")
+    await db.private_conversations.delete({ where: { id: convo.id } })
+  })
+
+  it("names the pseudonym only while the conversation is open and nobody blocked anybody; never the real name (S-2)", async () => {
+    const me = await person("nf-mb1")
+    const them = await person("nf-mb2")
+    const [user1_id, user2_id] = [me, them].sort()
+    const convo = await db.private_conversations.create({
+      data: { user1_id, user2_id, user1_pseudonym: user1_id === me ? "Quiet Otter" : "Amber Fox", user2_pseudonym: user2_id === me ? "Quiet Otter" : "Amber Fox" },
+    })
+    await sendPushNotification({ userId: me, title: "t", body: "b", data: { type: "match", conversationId: convo.id } })
+    // Unrevealed: the pseudonym, and the name nowhere.
+    const open = await rowOf(me, "match")
+    expect(open.display.context).toBe("Amber Fox")
+    expect(JSON.stringify(open)).not.toContain("Person nf-mb2")
+
+    await db.blocked_users.create({ data: { blocker_id: them, blocked_id: me } })
+    expect((await rowOf(me, "match")).display).not.toHaveProperty("context")
+    await db.blocked_users.deleteMany({ where: { blocker_id: them, blocked_id: me } })
+
+    await db.private_conversations.update({ where: { id: convo.id }, data: { closed_at: new Date() } })
+    expect((await rowOf(me, "match")).display).not.toHaveProperty("context")
     await db.private_conversations.delete({ where: { id: convo.id } })
   })
 })
@@ -349,55 +403,76 @@ describe("open: what is still the reader's to answer", () => {
 
     await db.crew_members.delete({ where: { crew_id_user_id: { crew_id: crew.id, user_id: me } } })
     await db.crew_invites.update({ where: { id: invite.id }, data: { removed_at: new Date() } })
-    expect((await rowOf(me, "crew_invite")).open).toBe(false)
+    const removed = await rowOf(me, "crew_invite")
+    expect(removed.open).toBe(false)
+    expect(removed.display).toEqual({ visual: { type: "emblem", seed: "seed-joined" } })
   })
 })
 
-describe("blend rows name the other side (S-2)", () => {
-  /** Crews A and B (in the uuid order `blends_pair_order` wants) at one event, a Blend between them, and its room. */
+describe("blend rows name the Blend through its own door (S-2)", () => {
+  /** Crews A and B (in the uuid order `blends_pair_order` wants) at one event, everyone checked in, a Blend and its room. */
   async function blendOf(label: string, o: { solo?: boolean } = {}) {
     const host = await person(`${label}-host`)
     const [aMember, bMember, solo, stranger] = [await person(`${label}-a`), await person(`${label}-b`), await person(`${label}-solo`), await person(`${label}-x`)]
     const eventId = await makeEvent(host)
     events.push(eventId)
     const occurrence = await db.event_occurrences.findFirstOrThrow({ where: { event_id: eventId }, select: { id: true } })
+    for (const id of [aMember, bMember, solo, stranger])
+      await db.event_check_ins.create({ data: { event_id: eventId, occurrence_id: occurrence.id, user_id: id, kind: "attendee", status: "checked_in", check_in_time: new Date() } })
     const [idA, idB] = [randomUUID(), randomUUID()].sort()
     for (const [id, name, member] of [[idA, "Night Owls", aMember], [idB, "Early Birds", bMember]] as const) {
       await db.crews.create({ data: { id, name, created_by: member, emblem_seed: `seed-${id}` } })
       crews.push(id)
       await db.crew_members.create({ data: { crew_id: id, user_id: member, consented_reveal_at: new Date() } })
     }
+    const name = o.solo ? "Night Owls + 1" : "Night Owls × Early Birds"
     const blend = await db.blends.create({
-      data: {
-        occurrence_id: occurrence.id,
-        a_crew_id: idA,
-        ...(o.solo ? { b_user_id: solo } : { b_crew_id: idB }),
-        closes_at: new Date(Date.now() + 12 * 3_600_000),
-      },
+      data: { occurrence_id: occurrence.id, a_crew_id: idA, ...(o.solo ? { b_user_id: solo } : { b_crew_id: idB }), closes_at: new Date(Date.now() + 12 * 3_600_000) },
     })
     const room = await db.chat_groups.create({
-      data: { kind: "blend", blend_id: blend.id, name: "Night Owls × Early Birds", members: { createMany: { data: [aMember, o.solo ? solo : bMember].map((user_id) => ({ user_id })) } } },
+      data: { kind: "blend", blend_id: blend.id, name, members: { createMany: { data: [aMember, o.solo ? solo : bMember].map((user_id) => ({ user_id })) } } },
     })
     blendsMade.push({ blend: blend.id, room: room.id })
     for (const id of [aMember, bMember, solo, stranger]) await notify(id, "blend", { blendId: blend.id, chatGroupId: room.id })
-    return { aMember, bMember, solo, stranger, blendId: blend.id }
+    return { aMember, bMember, solo, stranger, blendId: blend.id, idA, idB }
   }
+  const contextOf = async (id: string) => (await rowOf(id, "blend")).display.context
 
-  it("each side is told the other crew's name; a stranger handed the id is told nothing", async () => {
+  it("both sides are told the room's name; a stranger handed the ids is told nothing", async () => {
     const b = await blendOf("nf-bl")
-    expect((await rowOf(b.aMember, "blend")).display).toEqual({ context: "Early Birds", visual: { type: "emblem", seed: b.blendId } })
-    expect((await rowOf(b.bMember, "blend")).display).toEqual({ context: "Night Owls", visual: { type: "emblem", seed: b.blendId } })
+    expect(await contextOf(b.aMember)).toBe("Night Owls × Early Birds")
+    expect(await contextOf(b.bMember)).toBe("Night Owls × Early Birds")
     const stranger = await rowOf(b.stranger, "blend")
     expect(stranger.display).toEqual({ visual: { type: "emblem", seed: b.blendId } })
     expect(JSON.stringify(stranger)).not.toMatch(/Night Owls|Early Birds/)
   })
 
-  it("a solo side B is told crew A's name; crew A is told no name for one person", async () => {
+  it("the solo person is told it too; the room's '+ 1' is all anybody is told of them", async () => {
     const b = await blendOf("nf-bls", { solo: true })
-    expect((await rowOf(b.solo, "blend")).display.context).toBe("Night Owls")
-    const a = await rowOf(b.aMember, "blend")
-    expect(a.display).not.toHaveProperty("context")
-    expect(JSON.stringify(a)).not.toContain("Person nf-bls-solo")
+    expect(await contextOf(b.solo)).toBe("Night Owls + 1")
+    expect(await contextOf(b.aMember)).toBe("Night Owls + 1")
+    expect(JSON.stringify(await rowOf(b.aMember, "blend"))).not.toContain("Person nf-bls-solo")
+  })
+
+  it("a block across the sides names nothing to that pair", async () => {
+    const b = await blendOf("nf-blb")
+    await db.blocked_users.create({ data: { blocker_id: b.bMember, blocked_id: b.aMember } })
+    expect(await contextOf(b.aMember)).toBeUndefined()
+    expect(await contextOf(b.bMember)).toBeUndefined()
+  })
+
+  it("a closed Blend, one past its clock, and one with a dissolved crew name nothing", async () => {
+    const closed = await blendOf("nf-blc")
+    await db.blends.update({ where: { id: closed.blendId }, data: { closed_at: new Date() } })
+    expect(await contextOf(closed.aMember)).toBeUndefined()
+
+    const expired = await blendOf("nf-ble")
+    await db.blends.update({ where: { id: expired.blendId }, data: { closes_at: new Date(Date.now() - 1000) } })
+    expect(await contextOf(expired.aMember)).toBeUndefined()
+
+    const dissolved = await blendOf("nf-bld")
+    await db.crews.update({ where: { id: dissolved.idB }, data: { dissolved_at: new Date() } })
+    expect(await contextOf(dissolved.aMember)).toBeUndefined()
   })
 })
 
