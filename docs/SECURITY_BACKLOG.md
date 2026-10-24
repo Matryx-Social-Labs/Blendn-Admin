@@ -196,6 +196,8 @@ Two things deliberately left as they are, with reasons:
 
 **WEB H1 + M5 + L1 · HIGH · dashboard sign-in limits, per account, off the URL, timing padded.** The per-IP limit matched the raw path, so `/api/auth/callback/%63redentials` (same catch-all, segment decoded by Next) was unlimited, and nothing was per account. Both limits now live in `authorize()` (`lib/auth.ts`), which every path reaches: 5 per network (as before) and 10 per email per 15 minutes (case-folded, counted whether or not the account exists; past the cap the right password is refused too, with `SIGNIN_RATE_LIMITED`, which `/login` turns into a sentence). The route wrapper is gone. An unknown or password-less account is compared against a cost-12 dummy hash. Tests: `__tests__/dashboard-signin-limits.test.ts`, `__tests__/dashboard-signin-limit-runs-in-node.test.ts`. A deliberate cost: anyone can lock one operator out for 15 minutes by spraying their email (the mobile route already trades the same way).
 
+**API H1 · HIGH · OAuth link left the squatter's sessions alive.** `linkVerifiedOAuthIdentity` (`lib/mobile-auth.ts`) dropped an unverified account's password and nothing else. It now runs in one interactive transaction with `endPhoneSessions(tx, id, "password_reset")` (refresh tokens revoked, `mobile_sessions_revoked_at` stamped, push tokens deleted) and `phoneSessionsEnded` after the commit; the old phone is told `PASSWORD_RESET`. A verified account is untouched. Test: `__tests__/integration/oauth-link-ends-squatter-sessions.itest.ts`.
+
 ### 2026-09-28 — a friend could read which pseudonym was you (SCRUM-371)
 
 **HIGH · fixed on `feat/room-handles`**

@@ -1071,6 +1071,12 @@
       "observed": "1 failing: the NextAuth route does not match on the request path.",
       "date": "2026-10-25"
     },
+    "integration/oauth-link-ends-squatter-sessions.itest.ts": {
+      "guards": "Google/Apple linking to an unverified password account ends its phone sessions in the link transaction: password dropped, refresh tokens revoked as password_reset (the phone is told PASSWORD_RESET), push tokens deleted; a verified account's sessions are left alone (audit API H1)",
+      "mutation": "In lib/mobile-auth.ts linkVerifiedOAuthIdentity, `unproven && false ? endPhoneSessions(...) : null`.",
+      "observed": "2 failing of 3 (Google and Apple): the squatter's push token and live refresh token survived; the verified-account control passes. Red before the fix with the same 2 of 3.",
+      "date": "2026-10-25"
+    },
     "dashboard-signin-limits.test.ts": {
       "guards": "authorize() refuses the sixth attempt from one network and the eleventh on one email (case-folded, from many networks, existing or not) with SIGNIN_RATE_LIMITED even for the right password, and compares against a cost-12 dummy hash when the account is missing or has no password (audit WEB H1/M5/L1)",
       "mutation": "M1: `byAccount.count > ...` -> `false`. M2: `user?.password ?? DUMMY_HASH` -> `user?.password ?? \"\"`.",
