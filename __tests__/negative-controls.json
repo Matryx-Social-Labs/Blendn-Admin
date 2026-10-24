@@ -1095,10 +1095,16 @@
       "observed": "1 failing: expected the event bucket at 10, received 14. The anonymous-claim bucket can still be burned by 2+ addresses each under their own limit; that is the cap's purpose and is left.",
       "date": "2026-10-25"
     },
+    "integration/approval-set-password.itest.ts": {
+      "guards": "approving an application on an email that already has an attendee account: a confirmed account is promoted with its password; an unconfirmed one is taken over only when the application proved the mailbox (password replaced, phone sessions ended, set-password link sent), and refused when it did not; a suspended or deleted account is refused (audit WEB M1 + L9)",
+      "mutation": "In lib/onboarding-actions.ts approveOnboardingRequest, `const takeOver = false`.",
+      "observed": "2 failing of 6 (the takeover and the unproven refusal). Red before the fix: 3 of 6, the suspended refusal too.",
+      "date": "2026-10-25"
+    },
     "dashboard-signin-limits.test.ts": {
       "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and, per email from any network, 20 wrong passwords in 15 minutes and 200 in 24 hours (case-folded, existing or not); the right password is refused past any of them; a victim's success does not reset the email's windows; clearSigninCounters (a completed reset) does; an unknown or password-less account is compared against a cost-12 dummy hash (audit WEB H1/M5/L1)",
-      "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: replace recordSigninFailure in authorize() with a forget of the email key. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`.",
-      "observed": "M1: 1 failing of 11 (the 200-a-day case). M2: 1 failing (the same case, at its final reset). M3: 6 failing. M4 (earlier version): the /64 case failed. M5 (earlier version): both timing cases failed. Red before the fix: 6 of 7 failed.",
+      "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: settleSigninSuccess forgets the email keys instead of releasing one hit. M3b: settleSigninSuccess releases nothing. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`.",
+      "observed": "M1: 1 failing of 11 (the 200-a-day case). M2: 1 failing (the same case, at its final reset). M3 and M3b: 2 failing each (a victim's success must not reset the spray; the day case). The concurrency case (30 parallel wrong passwords, at most 20 reach bcrypt) was red against check-then-count: 30 reached it. M4 (earlier version): the /64 case failed. M5 (earlier version): both timing cases failed. Red before the fix: 6 of 7 failed.",
       "date": "2026-10-25"
     },
     "client-ip.test.ts": {

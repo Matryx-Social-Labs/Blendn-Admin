@@ -34,7 +34,7 @@ describe("where it does", () => {
     const src = read("lib/auth.ts")
     expect(src).toMatch(/refuseOverSigninLimits\(keys\)/)
     expect(src.indexOf("refuseOverSigninLimits(keys)")).toBeLessThan(src.indexOf("bcrypt.compare"))
-    expect(src).toMatch(/recordSigninFailure\(keys\)/)
+    expect(src).toMatch(/settleSigninSuccess\(keys\)/)
   })
 
   it("a completed password reset clears the email's sign-in counters", () => {

@@ -91,6 +91,16 @@ describe("per email, across networks", () => {
     await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
   })
 
+  it("holds the cap under concurrency: 30 parallel wrong passwords, at most 20 reach the password check", async () => {
+    const email = `${fresh("race")}@x.test`
+    asVictim(email)
+    mockCompare.mockClear()
+    const outcomes = await Promise.allSettled(Array.from({ length: 30 }, () => authorize({ email, password: "wrong" }, lone())))
+    expect(mockCompare).toHaveBeenCalledTimes(20)
+    expect(outcomes.filter((o) => o.status === "rejected")).toHaveLength(10)
+    await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
+  })
+
   it("also stops at 200 a day, after the 15-minute window has rolled over every time, until a reset", async () => {
     const email = `${fresh("day")}@x.test`
     asVictim(email)

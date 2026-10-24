@@ -3,7 +3,7 @@ import { NextAuthOptions, getServerSession, User } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { db } from "./db"
-import { recordSigninFailure, refuseOverSigninLimits, signinKeys } from "./dashboard-signin-limits"
+import { refuseOverSigninLimits, settleSigninSuccess, signinKeys } from "./dashboard-signin-limits"
 import { APP_ONLY_SIGNIN, canAccessDashboard } from "./rbac"
 import { SessionEnded, isRevoked, provenAt } from "./session-revocation"
 import type { user_role } from "@prisma/client"
@@ -41,9 +41,9 @@ export const authOptions: NextAuthOptions = {
 
         const isValid = await bcrypt.compare(credentials.password, user?.password ?? DUMMY_HASH)
         if (!user?.password || !isValid) {
-          await recordSigninFailure(keys)
           return null
         }
+        await settleSigninSuccess(keys)
 
         /*
          * A suspended or deleted account cannot sign in.
