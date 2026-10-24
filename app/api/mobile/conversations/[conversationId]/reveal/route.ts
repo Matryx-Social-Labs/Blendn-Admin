@@ -160,16 +160,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(`Add ${missing} to your profile first`, 400, "reveal_incomplete")
     }
 
-    const after = await db.private_conversations.update({
+    // The flip is the claim: only the call whose UPDATE changes the row tells
+    // anybody, so a repeat (or a parallel pair) pushes once (API M4).
+    const mine = isUser1 ? "user1_revealed" : "user2_revealed"
+    const { count } = await db.private_conversations.updateMany({
+      where: { id: conversationId, [mine]: false },
+      data: { [mine]: true },
+    })
+    const after = await db.private_conversations.findUniqueOrThrow({
       where: { id: conversationId },
-      data: isUser1 ? { user1_revealed: true } : { user2_revealed: true },
       select: { user1_revealed: true, user2_revealed: true },
     })
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
-    // A repeat reveal changes nothing, so it tells nobody (API M4).
-    const changed = !(isUser1 ? conversation.user1_revealed : conversation.user2_revealed)
-    if (changed) {
+    if (count === 1) {
       notifyReveal(themId, conversationId).catch(() => {})
       // Their open DM re-reads now rather than on the next push they may never get.
       // Once both have revealed the same event goes to both: the friend offer is possible.

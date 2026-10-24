@@ -73,3 +73,10 @@ it("pushes a reveal once, however many times it is repeated", async () => {
   expect(await call(a, id)).toBe(200)
   expect(notifyReveal).toHaveBeenCalledTimes(1)
 })
+
+it("pushes once when two reveals race", async () => {
+  const { a, id } = await pair()
+  const statuses = await Promise.all([call(a, id), call(a, id), call(a, id)])
+  expect(statuses).toEqual([200, 200, 200])
+  expect(notifyReveal).toHaveBeenCalledTimes(1)
+})
