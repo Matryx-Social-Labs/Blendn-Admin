@@ -60,7 +60,9 @@ it("refuses a group heading, alone or beside a leaf, and stores nothing", async 
   for (const ids of [[group], [leaf, group]]) {
     const r = await add(ids)
     expect(r.status).toBe(400)
-    expect(r.body.reasonCode).toBe("CATEGORY_IS_A_GROUP")
+    // The validation shape: VALIDATION_FAILED with the field's error, and the reason beside it.
+    expect([r.body.errorCode, r.body.reasonCode]).toEqual(["VALIDATION_FAILED", "CATEGORY_IS_A_GROUP"])
+    expect(r.body.errors).toEqual([{ field: "categoryIds", message: "Pick an interest inside a group, not the group itself." }])
     expect(r.held).toEqual([])
   }
 })

@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { refRoomBanRefusal } from "@/lib/room-ban"
 import { NextRequest } from "next/server"
+import { ZodError } from "zod"
 import { db } from "@/lib/db"
 import { blockedEitherWay } from "@/lib/conversations"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -192,7 +193,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return notFoundResponse("One or more categories not found")
     }
     if (existingCategories.some((c) => c._count.children > 0)) {
-      return errorResponse("Pick an interest inside a group, not the group itself.", 400, undefined, "CATEGORY_IS_A_GROUP")
+      // VALIDATION_FAILED with the field's error, the documented shape for a bad body; the reason beside it.
+      const issue = { code: "custom" as const, path: ["categoryIds"], message: "Pick an interest inside a group, not the group itself.", input: categoryIds }
+      return validationErrorResponse(new ZodError([issue]), "CATEGORY_IS_A_GROUP")
     }
 
     // Add interests (skip duplicates)

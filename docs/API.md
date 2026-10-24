@@ -3378,7 +3378,7 @@ be seen.
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |
 | PUT | `/profiles/:userId/interests` | Update interests |
-| POST | `/profiles/:userId/interests` | Add interests (`categoryIds`, at most 10 held, `TOO_MANY_INTERESTS`). Leaves only: a category with children is a group heading and is refused, `400` with `reasonCode: CATEGORY_IS_A_GROUP`, storing nothing (S-9). A top-level category with no children is its own option |
+| POST | `/profiles/:userId/interests` | Add interests (`categoryIds`, at most 10 held, `TOO_MANY_INTERESTS`). Leaves only: a category with children is a group heading and is refused, `400 VALIDATION_FAILED` with a `categoryIds` field error and `reasonCode: CATEGORY_IS_A_GROUP`, storing nothing (S-9). A top-level category with no children is its own option |
 
 ---
 

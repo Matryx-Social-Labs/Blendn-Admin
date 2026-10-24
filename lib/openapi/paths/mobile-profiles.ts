@@ -79,7 +79,7 @@ registry.registerPath({
   summary: "Add interests",
   description:
     "Adds categories to your interests, at most 10 held (`TOO_MANY_INTERESTS`). Leaves only: a category with children is a group " +
-    "heading and is refused with 400 and `reasonCode: CATEGORY_IS_A_GROUP`, storing nothing. A top-level category with no " +
+    "heading and is refused with 400 VALIDATION_FAILED (a `categoryIds` field error) and `reasonCode: CATEGORY_IS_A_GROUP`, storing nothing. A top-level category with no " +
     "children is its own option. An unknown id is 404.",
   security: bearerAuth,
   request: {
