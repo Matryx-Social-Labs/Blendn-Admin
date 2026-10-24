@@ -167,10 +167,10 @@ describe("an advertiser's copy is not the room's mood", () => {
      * — a batch that slowly fills with work nobody can do, and a backlog that
      * never drains.
      */
-    expect(src).toMatch(/SELECT m\.id/)
-    // The id list is what the fetch is scoped to, so the exclusion cannot be
-    // bypassed by a later change to the Prisma `where`.
-    expect(src).toMatch(/id: \{ in: eligibleIds \}/)
+    expect(src).toMatch(/SELECT m\.id, m\.content/)
+    // The same statement that excludes them fetches the batch (there is no second,
+    // Prisma read for a later change to the `where` to bypass the exclusion through).
+    expect(src).not.toMatch(/chat_messages\.findMany/)
   })
 
   it("keeps messages that carry no metadata at all", () => {
