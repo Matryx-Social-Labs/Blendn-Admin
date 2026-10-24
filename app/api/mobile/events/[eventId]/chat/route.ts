@@ -903,8 +903,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
        * No verdict in a big room: wait for the call in flight, and if it still
        * has none, take the row back and refuse. Nothing has been emitted.
        */
-      const openaiCheck = await verdictForBigRoom(roomEventId, message.id, raced, pendingText)
-      if (!openaiCheck) return discardAndRefuse(message.id)
+      const outcome = await verdictForBigRoom(roomEventId, message.id, raced, pendingText)
+      if (outcome.kind === "refuse") return discardAndRefuse(message.id)
+      if (outcome.kind === "removed") {
+        // Deleted during the wait by somebody else: never emitted, answered as removed.
+        return successResponse({
+          message: { id: message.id, type: message.type, content: null, moderation_hidden: true, createdAt: message.created_at },
+        })
+      }
+      const openaiCheck = outcome.check
       examinedInline = openaiCheck.checked
       const openaiResult = openaiCheck.checked ? openaiCheck.result : null
       if (openaiResult && openaiResult.action === "hide") {

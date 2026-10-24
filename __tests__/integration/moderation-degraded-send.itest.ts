@@ -124,6 +124,14 @@ const send = (which: "group" | "event", r: Room, content: string) =>
     : eventRoute.POST(post(`http://localhost/api/mobile/events/${r.eventId}/chat`, r.token, { content, type: "text" }), {
         params: Promise.resolve({ eventId: r.eventId }),
       })
+const sendWith = (which: "group" | "event", r: Room, content: string, clientId: string) =>
+  which === "group"
+    ? groupRoute.POST(post(`http://localhost/api/mobile/chat/groups/${r.groupId}/messages`, r.token, { content, type: "text", clientId }), {
+        params: Promise.resolve({ chatGroupId: r.groupId }),
+      })
+    : eventRoute.POST(post(`http://localhost/api/mobile/events/${r.eventId}/chat`, r.token, { content, type: "text", clientId }), {
+        params: Promise.resolve({ eventId: r.eventId }),
+      })
 const rows = (r: Room) => db.chat_messages.count({ where: { chat_group_id: r.groupId } })
 
 describe.each(["group", "event"] as const)("%s route", (which) => {
@@ -182,6 +190,67 @@ describe.each(["group", "event"] as const)("%s route", (which) => {
     expect((await sending).status).toBe(201)
     expect(await readersSee()).toBe(true)
     expect(emitted).toEqual(["held line"])
+  })
+
+  it("a line deleted by somebody else during the wait is not emitted or resurrected", async () => {
+    const r = await liveRoom()
+    mockHere.mockResolvedValue(BIG)
+    mockCheckText.mockImplementation(() => new Promise((ok) => setTimeout(() => ok({ checked: true, result: null }), 1800)))
+    const sending = send(which, r, "removed meanwhile")
+    await new Promise((resolve) => setTimeout(resolve, 1400))
+    // A moderator removes it while it is held.
+    await db.chat_messages.updateMany({ where: { chat_group_id: r.groupId }, data: { deleted_at: new Date(), deleted_by: r.memberId } })
+    const res = await sending
+    expect(emitted).toEqual([])
+    const data = (await res.json()).data
+    expect(data.message ?? data).toMatchObject({ moderation_hidden: true, content: null })
+    const row = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: r.groupId } })
+    expect(row.deleted_at).not.toBeNull()
+  })
+
+  it("refuses a big room when the room count itself fails, instead of delivering unchecked", async () => {
+    const r = await liveRoom()
+    mockHere.mockRejectedValue(new Error("db blip"))
+    mockCheckText.mockResolvedValue(DOWN)
+    const res = await send(which, r, "count failed")
+    expect(res.status).toBe(503)
+    expect(await rows(r)).toBe(0)
+    expect(emitted).toEqual([])
+  })
+
+  it("answers a retry of a held row with the refusal, not 'sent'", async () => {
+    const r = await liveRoom()
+    const clientId = "3f1d2c4b-5a6e-4f70-8b91-a2b3c4d5e6f7"
+    await db.chat_messages.create({
+      data: { chat_group_id: r.groupId, user_id: r.memberId, content: "held", type: "text", client_id: clientId, deleted_at: new Date() },
+    })
+    const res = await sendWith(which, r, "held", clientId)
+    expect(res.status).toBe(503)
+    expect((await res.json()).errorCode).toBe("MODERATION_UNAVAILABLE")
+    expect(await rows(r)).toBe(1) // still held: its request may be about to finish
+  })
+
+  it("removes an abandoned held row on retry, and the resend after that goes through", async () => {
+    const r = await liveRoom()
+    const clientId = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+    await db.chat_messages.create({
+      data: { chat_group_id: r.groupId, user_id: r.memberId, content: "held", type: "text", client_id: clientId, deleted_at: new Date(Date.now() - 5 * 60_000) },
+    })
+    expect((await sendWith(which, r, "held", clientId)).status).toBe(503)
+    expect(await rows(r)).toBe(0)
+    mockCheckText.mockResolvedValue({ checked: true, result: null })
+    expect((await sendWith(which, r, "held", clientId)).status).toBe(201)
+  })
+
+  it("a retry after a refusal is a clean send once the vendor is back", async () => {
+    const r = await liveRoom()
+    const clientId = "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d"
+    mockHere.mockResolvedValue(BIG)
+    mockCheckText.mockResolvedValue(DOWN)
+    expect((await sendWith(which, r, "again", clientId)).status).toBe(503)
+    mockCheckText.mockResolvedValue({ checked: true, result: null })
+    expect((await sendWith(which, r, "again", clientId)).status).toBe(201)
+    expect(await rows(r)).toBe(1)
   })
 
   it("a big room whose slow call answers with a hide hides it and emits nothing", async () => {

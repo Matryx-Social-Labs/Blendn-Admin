@@ -231,7 +231,7 @@ export const moderationUnavailableError = errorBody("Moderation unavailable in a
 export const MODERATION_UNAVAILABLE_NOTE =
   "**While OpenAI moderation is down:** a room with more than 200 people inside refuses the send instead of delivering an unchecked line — " +
   "`503 MODERATION_UNAVAILABLE` with `retryAfter: 5` (also `Retry-After`) and the sentence \"This room is busy and messages can’t be checked right now. Try again in a few seconds.\" " +
-  "Nothing is written or emitted; resend the same `clientId`. Rooms of 200 or fewer, and every non-event room, still deliver and are re-checked within a minute of the vendor's return."
+  "Nothing is written or emitted; resend the same `clientId`. Rooms of 200 or fewer, and every non-event room, still deliver and are re-checked by a sweeper once the vendor is back, oldest first, up to 64 x 20 messages a minute."
 
 /**
  * A display-only line two people (or two crews) share — matching v2, plan v2

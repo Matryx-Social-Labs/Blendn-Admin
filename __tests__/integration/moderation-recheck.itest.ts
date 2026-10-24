@@ -17,7 +17,7 @@ jest.mock("@/lib/socket-server", () => ({
   emitChatMessageHidden: (...a: unknown[]) => void hiddenEmits.push(a[1] as string),
 }))
 
-import { RECHECK_BATCH_LIMIT, RECHECK_WINDOW_MS, recheckUncheckedMessages } from "@/lib/moderation-recheck"
+import { RECHECK_BATCH_LIMIT, RECHECK_WINDOW_MS, discardAbandonedHolds, recheckBacklog, recheckUncheckedMessages } from "@/lib/moderation-recheck"
 import { BREAKER_FAILURES_TO_OPEN, recordTextFailure, recordTextSuccess } from "@/lib/moderation/text-breaker"
 import { db, closeDb, makeUser, testId } from "./helpers"
 
@@ -128,6 +128,55 @@ describe("the moderation re-check sweep", () => {
     expect(asked).not.toContain("deleted")
     expect(asked).not.toContain("done")
     expect([await statusOf(old.id), await statusOf(gone.id), await statusOf(clean.id)]).toEqual(["unchecked", "unchecked", "clean"])
+  })
+
+  it("never overwrites a moderator's decision made while the check was out", async () => {
+    const row = await unchecked("being decided")
+    mockCheckBatch.mockImplementation(async () => {
+      // A moderator keeps it, in the middle of the sweep's vendor call.
+      await db.chat_messages.update({ where: { id: row.id }, data: { moderation_status: "clean" } })
+      return [HIDE]
+    })
+    const out = await recheckUncheckedMessages()
+    expect(out.settled).toBe(0)
+    const after = await db.chat_messages.findUniqueOrThrow({ where: { id: row.id } })
+    expect(after.moderation_status).toBe("clean")
+    expect(after.deleted_at).toBeNull()
+    expect(hiddenEmits).toEqual([])
+    expect(await db.moderation_flags.count({ where: { message_id: row.id } })).toBe(0)
+  })
+
+  it("drains a backlog larger than one batch in a single pass, and stops when a batch is not full", async () => {
+    const t0 = Date.now() - 20 * 60_000
+    for (let i = 0; i < RECHECK_BATCH_LIMIT + 6; i++) await unchecked(`b${String(i).padStart(3, "0")}`, { created_at: new Date(t0 + i * 1000) })
+    mockCheckBatch.mockImplementation(async (c: string[]) => c.map(() => CLEAN))
+    const out = await recheckBacklog()
+    expect(out).toMatchObject({ looked: RECHECK_BATCH_LIMIT + 6, settled: RECHECK_BATCH_LIMIT + 6 })
+    expect(mockCheckBatch).toHaveBeenCalledTimes(2)
+    expect(await db.chat_messages.count({ where: { chat_group_id: groupId, moderation_status: "unchecked" } })).toBe(0)
+  })
+
+  it("does not loop on rows it cannot settle", async () => {
+    for (let i = 0; i < RECHECK_BATCH_LIMIT; i++) await unchecked(`s${i}`)
+    mockCheckBatch.mockImplementation(async (c: string[]) => c.map(() => UNCHECKED))
+    await recheckBacklog()
+    expect(mockCheckBatch).toHaveBeenCalledTimes(1)
+  })
+
+  it("deletes a held row whose request died, and only that", async () => {
+    const stale = new Date(Date.now() - 5 * 60_000)
+    const make = (extra: object) => db.chat_messages.create({ data: { chat_group_id: groupId, user_id: userId, content: "x", type: "text", ...extra } })
+    const abandoned = await make({ deleted_at: stale })
+    const justHeld = await make({ deleted_at: new Date() })
+    const byModerator = await make({ deleted_at: stale, deleted_by: userId })
+    const hidden = await make({ deleted_at: stale, moderation_status: "hidden" })
+    const ancient = await make({ deleted_at: stale, created_at: new Date(Date.now() - RECHECK_WINDOW_MS - 60_000) })
+
+    expect(await discardAbandonedHolds()).toBe(1)
+
+    const left = await db.chat_messages.findMany({ where: { chat_group_id: groupId }, select: { id: true } })
+    expect(left.map((m) => m.id).sort()).toEqual([justHeld.id, byModerator.id, hidden.id, ancient.id].sort())
+    expect(left.map((m) => m.id)).not.toContain(abandoned.id)
   })
 
   it("does nothing without a key", async () => {
