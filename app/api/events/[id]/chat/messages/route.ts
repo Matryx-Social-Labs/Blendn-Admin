@@ -26,7 +26,17 @@ function feedKind(m: { type: string; metadata: unknown }): "user" | "announcemen
   return "user"
 }
 
-export async function GET(_: Request, { params }: RouteContext) {
+const MEMBER_SELECT = {
+  user_id: true,
+  anonymous_name: true,
+  role: true,
+  status: true,
+  banned_at: true,
+  banned_by: true,
+  muted_at: true,
+} as const
+
+export async function GET(request: Request, { params }: RouteContext) {
   try {
     const session = await getAuth()
     if (!session?.user) return errorResponse("Unauthorized", 401)
@@ -45,7 +55,7 @@ export async function GET(_: Request, { params }: RouteContext) {
     // The full shape even when there is no room yet — the feed types
     // `pendingFlags` and `members` as required.
     if (!event.chat_group) {
-      return NextResponse.json({ chatGroupId: null, pendingFlags: 0, messages: [], members: [] })
+      return NextResponse.json({ chatGroupId: null, pendingFlags: 0, activeCount: 0, messages: [], members: [] })
     }
 
     /*
@@ -70,10 +80,20 @@ export async function GET(_: Request, { params }: RouteContext) {
     const idFor = (userId: string) =>
       isPlatformAdmin ? userId : idForViewer(session.user.id, eventId, userId)
 
-    // One wave. These four depend only on the chat group id; they ran one
+    /*
+     * The poll asks for `?light=1` while the Messages tab is open: it is polled
+     * every 5 seconds per open room, and the whole roster (5,000 rows in a big
+     * room) is only what the Members tab shows. A light read carries the members
+     * that change what a message looks like -- whoever is restricted, and the
+     * authors of the messages returned -- and `activeCount` for the header; the
+     * client keeps the rest of the roster from its last full read.
+     */
+    const light = new URL(request.url).searchParams.get("light") === "1"
+
+    // One wave. These depend only on the chat group id; they ran one
     // after another, and this route is polled every 5 seconds per open room.
     const chatGroupId = event.chat_group.id
-    const [messages, members, violationCounts, pendingFlags] = await Promise.all([
+    const [messages, roster, violationCounts, pendingFlags, activeCount] = await Promise.all([
       db.chat_messages.findMany({
         where: { chat_group_id: chatGroupId, deleted_at: null },
         orderBy: { created_at: "desc" },
@@ -84,16 +104,8 @@ export async function GET(_: Request, { params }: RouteContext) {
       }),
       // Members with banned_by user info
       db.chat_group_members.findMany({
-        where: { chat_group_id: chatGroupId },
-        select: {
-          user_id: true,
-          anonymous_name: true,
-          role: true,
-          status: true,
-          banned_at: true,
-          banned_by: true,
-          muted_at: true,
-        },
+        where: { chat_group_id: chatGroupId, ...(light && { status: { in: ["banned", "muted"] } }) },
+        select: MEMBER_SELECT,
       }),
       // Violation counts per user (hidden messages)
       db.moderation_flags.groupBy({
@@ -106,7 +118,21 @@ export async function GET(_: Request, { params }: RouteContext) {
       db.moderation_flags.count({
         where: { chat_group_id: chatGroupId, status: "pending" },
       }),
+      db.chat_group_members.count({ where: { chat_group_id: chatGroupId, status: "active" } }),
     ])
+    // The authors a light read has not got yet (the restricted came in the roster).
+    const known = new Set(roster.map((m) => m.user_id))
+    const missingAuthors = light ? [...new Set(messages.map((m) => m.user_id))].filter((id) => !known.has(id)) : []
+    const members =
+      missingAuthors.length > 0
+        ? [
+            ...roster,
+            ...(await db.chat_group_members.findMany({
+              where: { chat_group_id: chatGroupId, user_id: { in: missingAuthors } },
+              select: MEMBER_SELECT,
+            })),
+          ]
+        : roster
     const memberMap = new Map(members.map((m) => [m.user_id, m]))
     const violationMap = new Map(violationCounts.map((v) => [v.user_id, v._count.id]))
 
@@ -152,6 +178,7 @@ export async function GET(_: Request, { params }: RouteContext) {
     return NextResponse.json({
       chatGroupId: event.chat_group.id,
       pendingFlags,
+      activeCount,
       messages: messages.reverse().map((m) => ({
         id: m.id,
         content: m.content,
