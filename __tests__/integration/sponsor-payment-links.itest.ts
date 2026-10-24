@@ -315,7 +315,7 @@ afterAll(async () => {
 })
 
 describe("Send payment link", () => {
-  it("records the link against the charge, at its amount, for the sponsor's organisation", async () => {
+  it("records the link against the charge, at its amount, for the sponsor’s organisation", async () => {
     const c = await charge({ amountMinor: 312_500 })
     as(admin, "app_admin")
     const out = await sendPaymentLink(c.chargeId)
@@ -356,7 +356,7 @@ describe("Send payment link", () => {
     await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("no organisation yet")
     const d = await charge()
     delete process.env.RAZORPAY_KEY_ID
-    await expect(sendPaymentLink(d.chargeId)).rejects.toThrow("Payments aren't switched on")
+    await expect(sendPaymentLink(d.chargeId)).rejects.toThrow("Payments aren’t switched on")
     expect(await db.billing_checkouts.count({ where: { charge_id: { in: [c.chargeId, d.chargeId] } } })).toBe(0)
   })
 })
@@ -389,7 +389,7 @@ describe("payment_link.paid settles the charge (MN-I01..I04)", () => {
     expect(kept).not.toContain("+919999999999")
   })
 
-  it("a link paid 13 days after it was sent is settled, and its payment recorded, at the payment's time (SCRUM-606)", async () => {
+  it("a link paid 13 days after it was sent is settled, and its payment recorded, at the payment’s time (SCRUM-606)", async () => {
     const { chargeId, linkId } = await sentLink()
     const paymentId = `pay_${randomUUID().slice(0, 10)}`
     const sentAt = T0 - 13 * 24 * 60 * 60
@@ -399,7 +399,7 @@ describe("payment_link.paid settles the charge (MN-I01..I04)", () => {
     expect(payment.captured_at.getTime()).toBe(T0 * 1000)
   })
 
-  it("L6: the backfill puts a link payment recorded before #673 back to the payment's time, once, and leaves a right one alone", async () => {
+  it("L6: the backfill puts a link payment recorded before #673 back to the payment’s time, once, and leaves a right one alone", async () => {
     const { Client } = await import("pg")
     const sql = readFileSync(join(process.cwd(), "prisma/migrations/20261011200000_link_payment_time_backfill/migration.sql"), "utf8")
     const runBackfill = async () => {
@@ -469,7 +469,7 @@ describe("payment_link.paid settles the charge (MN-I01..I04)", () => {
     expect(await db.audit_logs.count({ where: { resource_id: chargeId, action: "charge.paid_after_void" } })).toBe(1)
   })
 
-  it("a full refund of the link's payment voids the charge it settled", async () => {
+  it("a full refund of the link’s payment voids the charge it settled", async () => {
     const { chargeId, linkId, eventId } = await sentLink()
     const paymentId = `pay_${randomUUID().slice(0, 10)}`
     await post(linkPaid(linkId, { paymentId }))
@@ -513,7 +513,7 @@ describe("reach (F8)", () => {
     }
   }
 
-  it("counts distinct people across a campaign's sends, the larger of two campaigns, and holds back under 5", async () => {
+  it("counts distinct people across a campaign’s sends, the larger of two campaigns, and holds back under 5", async () => {
     const big = await charge({ start: new Date(Date.now() - 2 * DAY) })
     const crowd = people(7)
     await campaign(big.eventId, [crowd.slice(0, 5), crowd.slice(2, 7), crowd.slice(0, 3)], 4)
@@ -576,7 +576,7 @@ describe("Send payment link: when one side fails (review H4; scans 3 and 4)", ()
     const c = await charge()
     as(admin, "app_admin")
     fail.create = true
-    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Razorpay didn't accept that just now")
+    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Razorpay didn’t accept that just now")
     expect(await db.billing_checkouts.count({ where: { charge_id: c.chargeId } })).toBe(0)
     expect(await auditCount(c.chargeId, "charge.link_sent")).toBe(0)
     expect(calls.some((x) => x.url.endsWith("/cancel"))).toBe(false)
@@ -618,15 +618,15 @@ describe("Send payment link: when one side fails (review H4; scans 3 and 4)", ()
     expect(loggedWith("paymentLinkId", out.linkId)).toBe(true)
   })
 
-  it("a pay URL that is not Razorpay's is never stored", async () => {
+  it("a pay URL that is not Razorpay’s is never stored", async () => {
     const c = await charge()
     as(admin, "app_admin")
     payHost = "rzp.io.evil.example"
-    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Razorpay didn't accept that just now")
+    await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Razorpay didn’t accept that just now")
     expect(await db.billing_checkouts.count({ where: { charge_id: c.chargeId } })).toBe(0)
   })
 
-  it("refuses a suspended brand's organisation, and more than ten sends a minute, refusals included", async () => {
+  it("refuses a suspended brand’s organisation, and more than ten sends a minute, refusals included", async () => {
     const c = await charge()
     as(admin, "app_admin")
     await db.organisations.update({ where: { id: sponsorOrg }, data: { status: "suspended" } })
@@ -651,7 +651,7 @@ describe("Send payment link: when one side fails (review H4; scans 3 and 4)", ()
     expect(await payable(chargeId)).toBe(1)
   })
 
-  it("the role is the database's: a session claiming app_admin for an organiser sends nothing", async () => {
+  it("the role is the database’s: a session claiming app_admin for an organiser sends nothing", async () => {
     const c = await charge()
     as(host, "app_admin")
     await expect(sendPaymentLink(c.chargeId)).rejects.toThrow("Forbidden")
@@ -699,7 +699,7 @@ describe("a void or a hand settlement closes the link first (review H1)", () => 
     const { chargeId, linkId } = await sentLink()
     as(admin, "app_admin")
     fail.cancel = true
-    await expect(advanceCharge(chargeId, "void", undefined, "Sponsor pulled out before the night")).rejects.toThrow("wouldn't cancel")
+    await expect(advanceCharge(chargeId, "void", undefined, "Sponsor pulled out before the night")).rejects.toThrow("wouldn’t cancel")
     expect((await chargeRow(chargeId)).status).toBe("agreed")
     expect(await payable(chargeId)).toBe(1)
     expect(await auditCount(chargeId, "charge.void")).toBe(0)
@@ -790,7 +790,7 @@ describe("the webhook, against our rows (review H3, M2, M5; db M1, M2)", () => {
     expect((await db.billing_checkouts.findFirstOrThrow({ where: { provider_ref: paid.linkId } })).status).toBe("paid")
   })
 
-  it("the organisation's Plan page never lists a sponsor link payment (review 16, db M3)", async () => {
+  it("the organisation’s Plan page never lists a sponsor link payment (review 16, db M3)", async () => {
     const { linkId } = await sentLink(420_000)
     await post(linkPaid(linkId, { amount: 420_000 }))
     const page = await planPageData({ orgId: sponsorOrg, orgName: "x", memberRole: "owner", mayBuy: true })
@@ -852,7 +852,7 @@ describe("races, run at once (scan 4)", () => {
     expect(await auditCount(chargeId, "charge.paid_after_void")).toBe(1)
   })
 
-  it("hand settle ∥ payment_link.paid: settled by hand; the link's payment is recorded and flagged paid twice", async () => {
+  it("hand settle ∥ payment_link.paid: settled by hand; the link’s payment is recorded and flagged paid twice", async () => {
     const { chargeId, linkId } = await sentLink()
     const paymentId = `pay_${randomUUID().slice(0, 10)}`
     as(admin, "app_admin")
@@ -870,7 +870,7 @@ describe("races, run at once (scan 4)", () => {
   })
 })
 
-describe("void ∥ payment_link.paid, unordered, twenty times (the database review's trial)", () => {
+describe("void ∥ payment_link.paid, unordered, twenty times (the database review’s trial)", () => {
   it("whichever wins: never a payment lost, never void unflagged, never settled and voided", async () => {
     for (let i = 0; i < 20; i++) {
       resetMemoryStore() // one admin, forty actions: the per-minute limits are not what this tests
@@ -892,7 +892,7 @@ describe("void ∥ payment_link.paid, unordered, twenty times (the database revi
 })
 
 describe("stored reach (db H5)", () => {
-  it("stores each ended campaign's reach once, empties its hashes, and reads the same figure after", async () => {
+  it("stores each ended campaign’s reach once, empties its hashes, and reads the same figure after", async () => {
     const ended = await charge({ start: new Date(Date.now() - 2 * DAY) })
     const m = await db.event_sponsored_messages.create({ data: { event_id: ended.eventId, sponsor_id: brand, content: "Sample sponsored message" } })
     const creative = await db.sponsored_creatives.create({ data: { message_id: m.id, content: "Sample sponsored message", moderation_status: "approved" } })
@@ -935,7 +935,7 @@ const refundEvent = (paymentId: string, amount: number, at: number) => ({
 })
 
 describe("GAP", () => {
-  it("GAP-Y05 a void that commits between the send's first read and its lock stops the send before Razorpay", async () => {
+  it("GAP-Y05 a void that commits between the send’s first read and its lock stops the send before Razorpay", async () => {
     const c = await charge()
     as(admin, "app_admin")
     let sending!: Promise<unknown>
@@ -1046,7 +1046,7 @@ describe("GAP", () => {
     expect(await db.event_sponsored_messages.findUniqueOrThrow({ where: { id: made.older } })).toMatchObject({ reach: 5 })
   })
 
-  it("GAP-Y13 the scheduler's own tick stores an ended campaign's reach and empties its hashes", async () => {
+  it("GAP-Y13 the scheduler’s own tick stores an ended campaign’s reach and empties its hashes", async () => {
     const ended = await charge({ start: new Date(Date.now() - 2 * DAY) })
     const m = await db.event_sponsored_messages.create({ data: { event_id: ended.eventId, sponsor_id: brand, content: "Sample sponsored message" } })
     const creative = await db.sponsored_creatives.create({ data: { message_id: m.id, content: "Sample sponsored message", moderation_status: "approved" } })
@@ -1065,7 +1065,7 @@ describe("GAP", () => {
     expect((await getSponsorOverview()).placements.find((p) => p.eventId === eventId)?.due).toBeNull()
   })
 
-  it("GAP-X12 a brand handed to another organisation between the send's read and its lock is not sent a link", async () => {
+  it("GAP-X12 a brand handed to another organisation between the send’s read and its lock is not sent a link", async () => {
     const c = await charge()
     as(admin, "app_admin")
     const other = await db.organisations.create({ data: { kind: "company", display_name: testId("pl-other-org"), status: "verified" } })

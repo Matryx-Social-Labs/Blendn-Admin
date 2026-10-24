@@ -25,7 +25,7 @@ describe("the out-of-range refusal", () => {
      * somebody 45m out.
      */
     expect(outOfRangeMessage(45)).toBe(
-      "You're about 45m outside the check-in area. Move closer to the venue and try again."
+      "You’re about 45m outside the check-in area. Move closer to the venue and try again."
     )
   })
 
@@ -37,7 +37,7 @@ describe("the out-of-range refusal", () => {
   it("switches to kilometres once the distance is not walkable", () => {
     // The real staging figure.
     expect(outOfRangeMessage(7514501)).toBe(
-      "You're about 7515km from the venue, so check-in isn't available yet. Check in once you're there."
+      "You’re about 7515km from the venue, so check-in isn’t available yet. Check in once you’re there."
     )
   })
 

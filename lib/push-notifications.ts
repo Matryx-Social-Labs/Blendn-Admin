@@ -851,7 +851,7 @@ export async function notifyBoardPostRemoved(
   return sendPushNotification({
     userId: authorId,
     title: "Your board post was taken down",
-    body: "It didn't meet the board's rules. Open the board to see where things stand.",
+    body: "It didn’t meet the board’s rules. Open the board to see where things stand.",
     data: { type: "board_post_removed", eventId, postId },
   })
 }

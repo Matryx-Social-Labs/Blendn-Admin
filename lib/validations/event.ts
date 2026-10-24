@@ -211,7 +211,7 @@ export const eventWriteSchema = z
     // rows that have it; nothing new may be written with it.
     visibility: z
       .enum(["public", "unlisted"], {
-        message: "Private events aren't available yet — use unlisted, which hides the event and opens it by link.",
+        message: "Private events aren’t available yet — use unlisted, which hides the event and opens it by link.",
       })
       .nullish(),
     max_capacity: z.number().int().nullish(),

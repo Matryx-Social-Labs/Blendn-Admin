@@ -57,7 +57,7 @@ import { venueReadiness } from "@/lib/venue-plan"
  * race past the lock anyway.
  */
 
-const PAYMENTS_OFF = "Payments aren't switched on here yet."
+const PAYMENTS_OFF = "Payments aren’t switched on here yet."
 const STARTS = { max: 5, windowMs: 60_000 }
 /** The lock is held across up to two Razorpay calls (≤15 s each: a previous owner's checkout cancelled, then ours made), so the transaction may run that long and a little more. */
 const TX = { maxWait: 10_000, timeout: 40_000 }
@@ -80,7 +80,7 @@ async function requireBuyer() {
   const user = await currentUser()
   if (!user) throw new Refusal("Unauthorized")
   const org = await billingOrgFor(user)
-  if (!org) throw new Refusal("Only an organiser's organisation has a plan.")
+  if (!org) throw new Refusal("Only an organiser’s organisation has a plan.")
   if (!org.mayBuy) throw new Refusal("Only an owner or admin of your organisation can change its plan.")
   return { user, org, keyId: await payable(org.orgId) }
 }
@@ -105,7 +105,7 @@ async function payable(rateKey: string): Promise<string> {
   return keys.keyId
 }
 
-const NOT_YOUR_VENUE = "That venue isn't one of your organisation's."
+const NOT_YOUR_VENUE = "That venue isn’t one of your organisation’s."
 
 /**
  * The caller may change this venue's plan: a venue owner who is an owner or
@@ -127,7 +127,7 @@ async function requireVenueBuyer(venueId: string) {
   })
   if (!member) throw new Refusal(NOT_YOUR_VENUE)
   if (!mayManageVenueBilling(user.role, member.role)) {
-    throw new Refusal("Only an owner or admin of the venue's organisation can change its plan.")
+    throw new Refusal("Only an owner or admin of the venue’s organisation can change its plan.")
   }
   return { user, orgId: venue.owner_org_id, keyId: await payable(`venue:${venue.id}`) }
 }
@@ -147,7 +147,7 @@ function startFailure(err: unknown, what: string, orphan: string | null): never 
   if (err instanceof Refusal) throw err
   if (err instanceof RazorpayError) {
     logger.error(`Razorpay ${what} failed`, { status: err.status, error: err.message })
-    throw new Refusal("Razorpay didn't accept that just now. Try again in a minute.")
+    throw new Refusal("Razorpay didn’t accept that just now. Try again in a minute.")
   }
   logger.error(`Saving the ${what} failed`, {
     error: err instanceof Error ? err.message : String(err),
@@ -356,7 +356,7 @@ export interface OrderCheckout {
 
 /** Start (or resume) an Event Pass purchase for one of the organisation's events. */
 export async function startEventPassCheckout(eventId: string): Promise<OrderCheckout> {
-  const id = parse(idSchema, eventId, "That event isn't one of your organisation's.")
+  const id = parse(idSchema, eventId, "That event isn’t one of your organisation’s.")
   const { user, org, keyId } = await requireBuyer()
   const subject = { kind: "org" as const, id: org.orgId }
   const plan = BILLING_PLANS.event_pass
@@ -370,7 +370,7 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
         where: { id, organizer_org_id: org.orgId, deleted_at: null, ...realEventsWhere },
         select: { id: true },
       })
-      if (!event) throw new Refusal("That event isn't one of your organisation's.")
+      if (!event) throw new Refusal("That event isn’t one of your organisation’s.")
       if (await hasEntitlement(subject, "analytics")) {
         throw new Refusal("Analytics already covers every event your organisation runs.")
       }
@@ -380,8 +380,8 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
       // Nothing to sell while it is open anyway: the free window, or the first
       // event that cleared the floor (lib/analytics-access.ts).
       const access = await analyticsAccess(org.orgId)
-      if (access.org) throw new Refusal("Every event's analytics are free for now, so there's nothing to buy yet.")
-      if (mayOpenEvent(access, id)) throw new Refusal("That event's analytics are already open to you.")
+      if (access.org) throw new Refusal("Every event’s analytics are free for now, so there’s nothing to buy yet.")
+      if (mayOpenEvent(access, id)) throw new Refusal("That event’s analytics are already open to you.")
       // An unpaid order for this event is the one to pay: never a second.
       const open = await tx.billing_checkouts.findFirst({
         where: { org_id: org.orgId, kind: "order", event_id: id, status: "created" },
@@ -478,14 +478,14 @@ async function cancelOpen(
     },
     select: { id: true, provider_ref: true, status: true, org_id: true },
   })
-  if (open.length === 0) throw new Refusal("There's no subscription to cancel, or it's already set to end.")
+  if (open.length === 0) throw new Refusal("There’s no subscription to cancel, or it’s already set to end.")
   for (const sub of open) {
     const outcome = await cancelThenRecord(sub, {
       userId,
       resource: scope.venueId ? "venue" : "organisation",
       resourceId: scope.venueId ?? scope.orgId,
     })
-    if (outcome === "razorpay_refused") throw new Refusal("Razorpay didn't accept that just now. Nothing was cancelled; try again in a minute.")
+    if (outcome === "razorpay_refused") throw new Refusal("Razorpay didn’t accept that just now. Nothing was cancelled; try again in a minute.")
     if (outcome === "not_recorded") {
       throw new Refusal("Razorpay has stopped it, but saving that here failed. This page catches up when Razorpay confirms.")
     }
@@ -541,7 +541,7 @@ async function revokePaidAudited(
 ): Promise<void> {
   await db.$transaction(async (tx) => {
     const revoked = await revokePaid(subject, entitlementId, new Date(), tx)
-    if (!revoked) throw new Refusal("That entitlement isn't live, or isn't a paid one.")
+    if (!revoked) throw new Refusal("That entitlement isn’t live, or isn’t a paid one.")
     // The payer's — the checkout's organisation, never the venue's owner now
     // (step 18, M3). A paid entitlement with no checkout here is the platform's alone.
     const payer = revoked.externalRef
@@ -567,7 +567,7 @@ export async function grantAnalytics(orgId: string, months: number, reason: stri
 
   const org = await db.organisations.findUnique({ where: { id }, select: { id: true, status: true, display_name: true } })
   if (!org) throw new Refusal("Organisation not found")
-  if (org.status === "suspended") throw new Refusal("A suspended organisation can't be granted Analytics.")
+  if (org.status === "suspended") throw new Refusal("A suspended organisation can’t be granted Analytics.")
 
   const grant = await db.$transaction(async (tx) => {
     // One live grant per organisation: the check and the insert are one decision.
@@ -606,7 +606,7 @@ export async function endAnalyticsGrant(orgId: string, reason: string): Promise<
 export async function revokePaidEntitlement(orgId: string, entitlementId: string, reason: string): Promise<void> {
   const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, orgId, "Organisation not found")
-  const ent = parse(idSchema, entitlementId, "That entitlement isn't live.")
+  const ent = parse(idSchema, entitlementId, "That entitlement isn’t live.")
   const why = parse(reasonSchema, reason, "Give a reason for revoking it (10 to 500 characters).")
   await revokePaidAudited(admin.id, { kind: "org", id }, ent, why)
   revalidatePath("/dashboard/organisations")
@@ -629,7 +629,7 @@ export async function grantVenuePro(venueId: string, months: number, reason: str
 
   const venue = await db.venues.findUnique({ where: { id }, select: { id: true, name: true, owner_org_id: true, deleted_at: true } })
   if (!venue || venue.deleted_at) throw new Refusal("Venue not found")
-  if (!venue.owner_org_id) throw new Refusal("Venue Pro is for a venue's owner. This one is unclaimed.")
+  if (!venue.owner_org_id) throw new Refusal("Venue Pro is for a venue’s owner. This one is unclaimed.")
 
   const grant = await db.$transaction(async (tx) => {
     // One live grant per venue: the check and the insert are one decision.
@@ -673,7 +673,7 @@ export async function endVenueProGrant(venueId: string, reason: string): Promise
 export async function revokeVenueProPaid(venueId: string, entitlementId: string, reason: string): Promise<void> {
   const admin = await requireAdminWithinLimit()
   const id = parse(idSchema, venueId, "Venue not found")
-  const ent = parse(idSchema, entitlementId, "That entitlement isn't live.")
+  const ent = parse(idSchema, entitlementId, "That entitlement isn’t live.")
   const why = parse(reasonSchema, reason, "Give a reason for revoking it (10 to 500 characters).")
   await revokePaidAudited(admin.id, { kind: "venue", id }, ent, why)
   revalidatePath(`/dashboard/venues/${id}`)
@@ -720,7 +720,7 @@ export async function grantPlus(userId: string, months: number, reason: string):
 
   const person = await db.user.findFirst({ where: { id, deletedAt: null }, select: { id: true, email: true, suspended_at: true } })
   if (!person) throw new Refusal("Person not found")
-  if (person.suspended_at) throw new Refusal("A suspended account can't be given Blendn+.")
+  if (person.suspended_at) throw new Refusal("A suspended account can’t be given Blendn+.")
 
   const grant = await db.$transaction(async (tx) => {
     await lockOrg(tx, "grant-user", id)

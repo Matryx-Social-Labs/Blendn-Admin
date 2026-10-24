@@ -267,7 +267,7 @@ const RATING_REQUEST_BATCH = 50
 
 export const RATING_REQUEST_COPY = {
   /** Somebody you connected with is waiting to be rated. */
-  peers: "The night's over. Rate the people you met — only you see what you say.",
+  peers: "The night’s over. Rate the people you met — only you see what you say.",
   /** You attended, and the event is what there is to rate. */
   event: "How was it? Tap to rate the night.",
 } as const

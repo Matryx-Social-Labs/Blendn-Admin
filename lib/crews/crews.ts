@@ -86,7 +86,7 @@ export const characters = (text: string): number => [...text].length
  */
 const crewName = z
   .string()
-  .refine((s) => !hasInvisibleChars(s), { message: "A crew name can't contain invisible characters" })
+  .refine((s) => !hasInvisibleChars(s), { message: "A crew name can’t contain invisible characters" })
   .transform((s) => foldText(s).trim().replace(/\s+/g, " "))
   .refine((s) => characters(s) >= CREW.NAME_MIN && characters(s) <= CREW.NAME_MAX, {
     message: `A crew name is ${CREW.NAME_MIN}–${CREW.NAME_MAX} characters`,
@@ -162,9 +162,9 @@ const NOT_FRIENDS: CrewRefusal = { refusal: "You can only invite your friends in
 const ADULTS: CrewRefusal = { refusal: "Crews are for people 18 and over who have finished setting up.", status: 403 }
 const OWNS_ENOUGH: CrewRefusal = { refusal: `You can own up to ${CREW.MAX_OWNED} crews at a time.`, status: 409 }
 const IN_ENOUGH: CrewRefusal = { refusal: `You can be in up to ${CREW.MAX_JOINED} crews at a time.`, status: 409 }
-const MADE_ENOUGH: CrewRefusal = { refusal: "That's enough new crews for today — try again tomorrow.", status: 429 }
+const MADE_ENOUGH: CrewRefusal = { refusal: "That’s enough new crews for today — try again tomorrow.", status: 429 }
 /** A crew a moderator hid takes nobody new: it is off every surface outside itself (C12). */
-const HIDDEN: CrewRefusal = { refusal: "A moderator has hidden this crew, so it can't take new members.", status: 403 }
+const HIDDEN: CrewRefusal = { refusal: "A moderator has hidden this crew, so it can’t take new members.", status: 403 }
 
 /* -------------------------------------------------------------------------- */
 /* Name and bio                                                               */
@@ -188,12 +188,12 @@ const OPENAI_BOUND_MS = 1000
  * caught that way.
  */
 export async function crewTextRefusal(field: "name" | "bio", text: string): Promise<string | null> {
-  const what = field === "name" ? "a crew's name" : "a crew's bio"
-  if (checkKeywords(text)?.action === "hide") return `This can't be ${what}.`
+  const what = field === "name" ? "a crew’s name" : "a crew’s bio"
+  if (checkKeywords(text)?.action === "hide") return `This can’t be ${what}.`
   const contact = findProfileContactInfo(text)
   if (contact.length > 0) {
     const hints = [...new Set(contact.map((c) => c.hint))].join(" ")
-    return `${hints} A crew card is shown to people you haven't met, so contact details can't go on it.`
+    return `${hints} A crew card is shown to people you haven’t met, so contact details can’t go on it.`
   }
   let timeout: ReturnType<typeof setTimeout> | undefined
   const check = await Promise.race([
@@ -202,7 +202,7 @@ export async function crewTextRefusal(field: "name" | "bio", text: string): Prom
       timeout = setTimeout(() => resolve(notChecked("timeout")), OPENAI_BOUND_MS)
     }),
   ]).finally(() => clearTimeout(timeout))
-  return check.checked && check.result?.action === "hide" ? `This can't be ${what}.` : null
+  return check.checked && check.result?.action === "hide" ? `This can’t be ${what}.` : null
 }
 
 /** The first refusal among the text fields being written, or null. */
@@ -699,8 +699,8 @@ async function notifyCrewInvites(inviterId: string, crewId: string, inviteeIds: 
 function notifyCrewInvite(recipientId: string, crewId: string): void {
   sendPushNotification({
     userId: recipientId,
-    title: "You're invited to a crew",
-    body: "A friend wants you in their crew. Open Blend'n to see.",
+    title: "You’re invited to a crew",
+    body: "A friend wants you in their crew. Open Blend’n to see.",
     data: { type: "crew_invite", crewId },
   }).catch((err: unknown) => logger.warn("Push notification failed", { context: "crew invite", error: String(err) }))
 }

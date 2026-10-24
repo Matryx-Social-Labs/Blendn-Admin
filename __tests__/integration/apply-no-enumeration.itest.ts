@@ -104,7 +104,7 @@ it("emails the existing address a fixed text with nothing the request typed in i
   await settled()
   expect(sent).toHaveLength(1)
   const mail = sent[0]
-  expect(mail).toMatchObject({ to: hostEmail, subject: "You already have a Blend'n host account" })
+  expect(mail).toMatchObject({ to: hostEmail, subject: "You already have a Blend’n host account" })
   const everything = `${mail.subject}\n${mail.text}\n${mail.html ?? ""}`
   for (const typed of ["Mallory", "Bcc", "victim@example.com", "urgent", "Totally Legit", "evil.example", "M4 Events"]) {
     expect(everything).not.toContain(typed)
@@ -131,7 +131,7 @@ it("answers an address that already applied the same way, queues nothing new, an
   await settled()
   expect(await db.organiser_onboarding_requests.count({ where: { contact_email: email } })).toBe(1)
   expect(sent).toHaveLength(1)
-  expect(sent[0].subject).toBe("We already have your Blend'n application")
+  expect(sent[0].subject).toBe("We already have your Blend’n application")
 })
 
 it("never waits for the mail, on either branch", async () => {

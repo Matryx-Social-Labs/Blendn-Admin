@@ -14,7 +14,7 @@ import { neverBuildHits } from "@/lib/never-build"
  * deploy (plan v2 §8.4, `lib/never-build.ts`). One sentence for every hit.
  */
 const NEVER_A_CATEGORY =
-  "That can't be a category: Blendn never groups people by diet, faith, caste, community, income, height, college or neighbourhood."
+  "That can’t be a category: Blendn never groups people by diet, faith, caste, community, income, height, college or neighbourhood."
 
 /**
  * Managing the category taxonomy.

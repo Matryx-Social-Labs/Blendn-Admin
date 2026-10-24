@@ -492,7 +492,7 @@ export async function advanceCharge(
 
 const CHARGE_ACTION = { agreed: "charge.agreed", settled: "charge.settled", void: "charge.void" } as const
 const CHANGED_JUST_NOW = "Someone else changed that charge just now. Reload and look again."
-const PAID_THROUGH_LINK = "A payment came through this charge's link. Let it settle, or refund it at Razorpay first."
+const PAID_THROUGH_LINK = "A payment came through this charge’s link. Let it settle, or refund it at Razorpay first."
 
 /** Razorpay's statuses for a link that can still be paid, or was. */
 const LIVE_LINK = ["created", "issued", "partially_paid", "paid"]
@@ -555,7 +555,7 @@ async function closeAtRazorpay(chargeId: string, linkId: string): Promise<string
       error: err instanceof Error ? err.message : String(err),
     })
     if (now && !UNPAID_LINK.includes(now.status)) throw new Refusal(PAID_THROUGH_LINK)
-    throw new Refusal("Razorpay wouldn't cancel this charge's payment link, so nothing was changed. Try again in a minute.")
+    throw new Refusal("Razorpay wouldn’t cancel this charge’s payment link, so nothing was changed. Try again in a minute.")
   }
 }
 
@@ -581,7 +581,7 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
   // After authorisation, before any Razorpay call; refusals count too.
   const { count: sends } = await hit(`charges:link:${admin.id}`, LINK_SENDS.windowMs)
   if (sends > LINK_SENDS.max) throw new Refusal("Too many payment links in a minute. Wait a moment and try again.")
-  if (!paymentsOn()) throw new Refusal("Payments aren't switched on here yet. Settle this one by hand.")
+  if (!paymentsOn()) throw new Refusal("Payments aren’t switched on here yet. Settle this one by hand.")
 
   const charge = await db.placement_charges.findUnique({
     where: { id: chargeId },
@@ -622,7 +622,7 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
   if (charge.currency !== "INR") throw new Refusal("Payment links are in rupees only.")
   const sponsor = charge.placement.sponsor
   if (!sponsor.org_id) throw new Refusal("This brand has no organisation yet, so there is nobody to send a link to. Settle it by hand.")
-  if (sponsor.org?.status === "suspended") throw new Refusal("This brand's organisation is suspended.")
+  if (sponsor.org?.status === "suspended") throw new Refusal("This brand’s organisation is suspended.")
   const orgId = sponsor.org_id
   const contact = sponsor.org?.members[0]?.user ?? null
 
@@ -737,7 +737,7 @@ export async function sendPaymentLink(chargeId: string): Promise<{ linkId: strin
     if (violatedConstraint(err, ONE_LINK_PER_CHARGE)) throw new Refusal("A link for this charge was sent just now. Reload to see it.")
     if (err instanceof RazorpayError) {
       logger.error("Razorpay payment link failed", { status: err.status, error: err.message, chargeId })
-      throw new Refusal("Razorpay didn't accept that just now. Try again in a minute.")
+      throw new Refusal("Razorpay didn’t accept that just now. Try again in a minute.")
     }
     logger.error("Saving the payment link failed", {
       error: err instanceof Error ? err.message : String(err),

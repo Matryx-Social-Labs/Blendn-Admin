@@ -252,7 +252,7 @@ describe("organiser overview", () => {
     expect(overview.ratings).toEqual([2, 0, 1, 0, 2])
   })
 
-  it("withholds the average and the spread under five raters: two ratings are each other's (SCRUM-437)", async () => {
+  it("withholds the average and the spread under five raters: two ratings are each other’s (SCRUM-437)", async () => {
     const owner = await makeUser("ovw_rating_few", "organizer")
     users.push(owner)
     const event = await makeScheduledEvent(owner, { startsInDays: -2 })
@@ -317,7 +317,7 @@ describe("organiser overview", () => {
     }
   })
 
-  it("derives Getting set up from the organisation's rows: domain unverified, nobody invited, one published (step 15)", async () => {
+  it("derives Getting set up from the organisation’s rows: domain unverified, nobody invited, one published (step 15)", async () => {
     const owner = await makeUser("ovw_setup", "organizer")
     users.push(owner)
     const org = await db.organisations.create({ data: { display_name: `Setup ${testId("o")}`, kind: "company" } })
@@ -376,7 +376,7 @@ describe("organiser overview", () => {
     expect(overview.latestFeedback).toMatchObject({ eventId: older, ratings: [0, 0, 1, 3, 1], averageRating: 4 })
   })
 
-  it("pools only events that pass alone: the org's bars minus a visible event are never a withheld one's (SCRUM-437)", async () => {
+  it("pools only events that pass alone: the org’s bars minus a visible event are never a withheld one’s (SCRUM-437)", async () => {
     const owner = await makeUser("ovw_rating_pool", "organizer")
     users.push(owner)
     const [open, small] = await Promise.all([
@@ -420,7 +420,7 @@ describe("venue owner overview", () => {
     expect(byName["Basement"]).toBe(1)
   })
 
-  it("withholds a venue's rating under five raters, and says nothing about it skewing low (SCRUM-437)", async () => {
+  it("withholds a venue’s rating under five raters, and says nothing about it skewing low (SCRUM-437)", async () => {
     const owner = await makeUser("ovw_venue_rating", "organizer")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
@@ -441,7 +441,7 @@ describe("venue owner overview", () => {
     expect(snug?.tone).not.toBe("destructive")
   })
 
-  it("shows a venue's rating from five raters, and flags it when it skews low (SCRUM-437)", async () => {
+  it("shows a venue’s rating from five raters, and flags it when it skews low (SCRUM-437)", async () => {
     const owner = await makeUser("ovw_venue_low", "organizer")
     users.push(owner)
     await db.user.update({ where: { id: owner }, data: { role: "venue_owner" } })
@@ -507,7 +507,7 @@ describe("admin overview", () => {
     expect(overview.funnel.map((s) => s.label)).toEqual([
       "signed up",
       "onboarded",
-      "RSVP'd",
+      "RSVP’d",
       "checked in",
       "came back",
       "matched",

@@ -116,7 +116,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Users can only update their own interests
     if (authUser.userId !== userId) {
-      return forbiddenResponse("Cannot update another user's interests")
+      return forbiddenResponse("Cannot update another user’s interests")
     }
 
     const body = await readJson(request)
@@ -220,7 +220,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
     // Users can only update their own interests
     if (authUser.userId !== userId) {
-      return forbiddenResponse("Cannot update another user's interests")
+      return forbiddenResponse("Cannot update another user’s interests")
     }
 
     const body = await readJson(request)

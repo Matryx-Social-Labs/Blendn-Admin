@@ -300,7 +300,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     // Users can only update their own profile
     if (authUser.userId !== userId) {
-      return forbiddenResponse("Cannot update another user's profile")
+      return forbiddenResponse("Cannot update another user’s profile")
     }
 
     const body = await readJson(request)

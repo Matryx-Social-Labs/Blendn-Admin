@@ -69,6 +69,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
   } catch (error) {
     logger.error("Venue upcoming error", { error: error instanceof Error ? error.message : String(error) })
-    return serverErrorResponse("Failed to load the venue's events")
+    return serverErrorResponse("Failed to load the venue’s events")
   }
 }

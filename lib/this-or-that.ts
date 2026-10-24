@@ -45,7 +45,7 @@ export const THIS_OR_THAT: readonly ThisOrThat[] = [
   {
     slug: "cup_namdu_or_no_cricket",
     a: { label: "Ee sala cup namdu", phrase: "ee sala cup namdu" },
-    b: { label: "I don't watch cricket", phrase: "not watching cricket" },
+    b: { label: "I don’t watch cricket", phrase: "not watching cricket" },
   },
   { slug: "window_or_aisle", a: { label: "Window seat", phrase: "the window seat" }, b: { label: "Aisle", phrase: "the aisle" } },
   { slug: "text_or_voice", a: { label: "Text", phrase: "texting" }, b: { label: "Voice note", phrase: "voice notes" } },

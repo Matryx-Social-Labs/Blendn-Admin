@@ -49,12 +49,12 @@ describe("the list reads labels the way people write them", () => {
 
 describe("create and rename refuse it (M5)", () => {
   it("refuses to create one, and writes nothing", async () => {
-    await expect(createCategory("Pure Veg", null)).rejects.toThrow(/can't be a category/)
-    await expect(createCategory("Halal grills", null)).rejects.toThrow(/can't be a category/)
+    await expect(createCategory("Pure Veg", null)).rejects.toThrow(/can’t be a category/)
+    await expect(createCategory("Halal grills", null)).rejects.toThrow(/can’t be a category/)
     expect(mockDb.categories.create).not.toHaveBeenCalled()
   })
   it("refuses to rename into one, and writes nothing", async () => {
-    await expect(renameCategory("11111111-1111-1111-1111-111111111111", "Jain thali")).rejects.toThrow(/can't be a category/)
+    await expect(renameCategory("11111111-1111-1111-1111-111111111111", "Jain thali")).rejects.toThrow(/can’t be a category/)
     expect(mockDb.categories.update).not.toHaveBeenCalled()
   })
   it("lets an ordinary one through", async () => {

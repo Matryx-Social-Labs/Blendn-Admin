@@ -274,7 +274,7 @@ export async function boardPseudonyms(
 }
 
 /** What refused board text is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
-export const BOARD_REFUSAL = "This can't go on the board."
+export const BOARD_REFUSAL = "This can’t go on the board."
 
 export interface BoardTextVerdict {
   /** The sentence to refuse with, or null to let it through. */
@@ -302,7 +302,7 @@ export async function checkBoardText(text: string): Promise<BoardTextVerdict> {
   const contact = checkContactInfo(text)
   if (contact) {
     return {
-      refusal: `${contact.reason} The board is anonymous, so contact details can't go on it.`,
+      refusal: `${contact.reason} The board is anonymous, so contact details can’t go on it.`,
       unchecked: false,
     }
   }

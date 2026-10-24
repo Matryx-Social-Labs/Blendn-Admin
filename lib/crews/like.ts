@@ -73,7 +73,7 @@ const NO_PERSON: CrewRefusal = { refusal: "User not found", status: 404 }
 const NOTHING_TOLD = { liked: true, blend: null } as const
 const NOT_IN: CrewRefusal = { refusal: "Check in before liking anyone here.", status: 403 }
 const MY_CREW_NOT_HERE: CrewRefusal = {
-  refusal: "Your crew isn't here yet — two of you need to be checked in.",
+  refusal: "Your crew isn’t here yet — two of you need to be checked in.",
   status: 403,
 }
 const NOT_OPTED_IN: CrewRefusal = {
@@ -363,7 +363,7 @@ async function announceBlend(blend: { blendId: string; chatGroupId: string }, li
     if (userIds.length === 0) return
     await sendBulkPushNotifications({
       userIds,
-      title: "It's a Blend",
+      title: "It’s a Blend",
       body: "Your crew and another matched tonight. Say hi in the Blend.",
       data: { type: "blend", blendId: blend.blendId, chatGroupId: blend.chatGroupId },
     })

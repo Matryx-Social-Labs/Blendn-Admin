@@ -83,7 +83,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if ("refusal" in result) {
       if (result.refusal === "not_found") return notFoundResponse("Venue not found")
       if (result.refusal === "unclaimed") {
-        return errorResponse("Nobody runs this place on Blendn yet, so there's nobody to tell.", 409, ErrorCode.VENUE_UNCLAIMED)
+        return errorResponse("Nobody runs this place on Blendn yet, so there’s nobody to tell.", 409, ErrorCode.VENUE_UNCLAIMED)
       }
       return errorResponse(`${ADULTS_ONLY} Add your date of birth to your profile first.`, 403, ErrorCode.AGE_RESTRICTED)
     }

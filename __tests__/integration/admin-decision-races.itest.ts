@@ -109,7 +109,7 @@ async function race(a: () => Promise<unknown>, b: () => Promise<unknown>) {
   const lost = [ra, rb].filter((r): r is PromiseRejectedResult => r.status === "rejected")
   expect(won).toHaveLength(1)
   expect(lost).toHaveLength(1)
-  expect(String(lost[0].reason?.message)).toMatch(/Someone else decided this|already|Somebody else's claim was approved first/)
+  expect(String(lost[0].reason?.message)).toMatch(/Someone else decided this|already|Somebody else’s claim was approved first/)
   return { firstWon: ra.status === "fulfilled" }
 }
 

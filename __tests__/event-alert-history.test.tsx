@@ -152,7 +152,7 @@ describe("Alert history, on the Overview of an event that is over", () => {
     mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-b" }
     const html = await overview()
     expect(html).toContain("Alert history")
-    expect(html).toContain("More guests than the event&#x27;s stated capacity.")
+    expect(html).toContain("More guests than the event’s stated capacity.")
     expect(html).not.toContain("132")
     expect(html).not.toContain("120")
     expect(html).not.toContain("Leaving early")

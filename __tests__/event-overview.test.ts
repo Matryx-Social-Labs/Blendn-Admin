@@ -66,7 +66,7 @@ describe("getEventOverview — upcoming", () => {
     expect(o?.tiles[3].value).toBe("60 m")
   })
 
-  it("the fence tile shows the radius that covers the event's outline, not the 60 m the row stored (SCRUM-350)", async () => {
+  it("the fence tile shows the radius that covers the event’s outline, not the 60 m the row stored (SCRUM-350)", async () => {
     // ~265 m square outline on the pin, +20 m buffer: the phone gets ~207 m.
     const d = 0.0012
     const outline = {
@@ -124,10 +124,10 @@ describe("getEventOverview — over", () => {
     expect(o?.hero).toEqual({ label: "Turned up", value: "50%", hint: "2 of 4 who said they would" })
   })
 
-  it("with nobody RSVP'd the hero is the count of who came, not a percentage of nothing", async () => {
+  it("with nobody RSVP’d the hero is the count of who came, not a percentage of nothing", async () => {
     arrange({ event: over, going: 0, attended: [{ user_id: "a", kind: "attendee" }, { user_id: "b", kind: "attendee" }] })
     const o = await getEventOverview("e1")
-    expect(o?.hero).toEqual({ label: "Came", value: "2", hint: "nobody RSVP'd — walk-ins only" })
+    expect(o?.hero).toEqual({ label: "Came", value: "2", hint: "nobody RSVP’d — walk-ins only" })
   })
 
   it("the rating tile says nobody rated it rather than showing a dash with no reason", async () => {
@@ -137,7 +137,7 @@ describe("getEventOverview — over", () => {
     expect(rating).toEqual({ label: "Rating", value: null, hint: "nobody rated it" })
   })
 
-  it("withholds the rating until five people gave one: one rating beside 'Checked in 1' is that person's (SCRUM-437)", async () => {
+  it("withholds the rating until five people gave one: one rating beside 'Checked in 1' is that person’s (SCRUM-437)", async () => {
     arrange({ event: over, going: 4, ratings: [4, 2, 5, 5] })
     const few = (await getEventOverview("e1"))?.tiles.find((t) => t.label === "Rating")
     expect(few).toEqual({ label: "Rating", value: null, hint: "not enough ratings yet" })

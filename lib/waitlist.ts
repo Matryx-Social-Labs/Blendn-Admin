@@ -138,7 +138,7 @@ export async function promoteFromWaitlist(eventId: string): Promise<string[]> {
     // holds. They will see it in the app either way.
     void sendPushNotification({
       userId,
-      title: "You're in",
+      title: "You’re in",
       body: `A place opened up at ${event.title}.`,
       data: { type: "waitlist_promoted", eventId },
     }).catch((error) =>

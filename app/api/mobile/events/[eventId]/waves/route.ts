@@ -121,7 +121,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * conversation is exactly the contact leaving was meant to end.
      */
     const notHere = () =>
-      errorResponse("They're not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
+      errorResponse("They’re not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
     if (!theirs || !toUserId) return notHere()
     // Banned from the room is not in it: the same answer, never which.
     if (await eventRoomBan(eventId, toUserId)) return notHere()

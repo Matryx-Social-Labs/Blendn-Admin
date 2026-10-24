@@ -285,7 +285,7 @@ export async function inviteMember(
   }
 
   const target = email.trim().toLowerCase()
-  if (!emailDomain(target)) return { ok: false, message: "That doesn't look like an email address." }
+  if (!emailDomain(target)) return { ok: false, message: "That doesn’t look like an email address." }
 
   const org = await db.organisations.findUniqueOrThrow({
     where: { id: orgId },
@@ -308,7 +308,7 @@ export async function inviteMember(
     where: { org_id: orgId, user: { email: target } },
     select: { id: true },
   })
-  if (already) return { ok: false, message: "They're already a member." }
+  if (already) return { ok: false, message: "They’re already a member." }
 
   const outstanding = await db.organisation_invites.findFirst({
     where: {
@@ -379,7 +379,7 @@ export async function inviteMember(
     ok: true,
     message:
       emailFailure === "not_configured"
-        ? "Invite created. Email isn't configured — send them this link."
+        ? "Invite created. Email isn’t configured — send them this link."
         : `Invite created, but the mail to ${target} was refused. Check the address, or send them this link.`,
     // Returned only when nothing was emailed, so there is no other way to
     // deliver it. Once the mail goes out, the token stays in the mailbox.
@@ -420,7 +420,7 @@ export async function setMemberRole(orgId: string, memberId: string, role: org_r
   // An admin cannot make owners, nor demote one. Otherwise the admin tier is
   // the owner tier with an extra click.
   if (myRole !== "owner" && (role === "owner" || member.role === "owner")) {
-    throw new Refusal("Only an owner can change an owner's role.")
+    throw new Refusal("Only an owner can change an owner’s role.")
   }
 
   // Losing the last owner leaves an org nobody can administer — including the
@@ -487,9 +487,9 @@ export async function claimDomain(orgId: string, raw: string): Promise<DomainCla
   const { user } = await requireOrgRole(orgId, (p) => p.canVerifyDomain)
 
   const domain = normaliseDomain(raw)
-  if (!domain) return { ok: false, message: "That doesn't look like a domain." }
+  if (!domain) return { ok: false, message: "That doesn’t look like a domain." }
   if (isFreeProvider(domain)) {
-    return { ok: false, message: "You can't claim a public email provider — use your own domain." }
+    return { ok: false, message: "You can’t claim a public email provider — use your own domain." }
   }
 
   const existing = await db.organisation_domains.findUnique({
@@ -499,7 +499,7 @@ export async function claimDomain(orgId: string, raw: string): Promise<DomainCla
   if (existing && existing.org_id !== orgId) {
     // Deliberately vague. Confirming which org holds a domain would let anyone
     // enumerate the customer list one domain at a time.
-    return { ok: false, message: "That domain is already claimed. Contact support if it's yours." }
+    return { ok: false, message: "That domain is already claimed. Contact support if it’s yours." }
   }
   if (existing) {
     return {
@@ -552,7 +552,7 @@ export async function verifyDomain(orgId: string, domainId: string): Promise<{ o
           ? "No TXT records found yet. DNS can take up to an hour to propagate."
           : check.reason === "not_found"
             ? "Found TXT records, but not ours. Check the value is exact."
-            : "Couldn't look up that domain just now. Try again shortly.",
+            : "Couldn’t look up that domain just now. Try again shortly.",
     }
   }
 

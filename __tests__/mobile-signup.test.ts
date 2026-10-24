@@ -111,14 +111,14 @@ describe("POST /api/mobile/auth/signup — name and age", () => {
     const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age: undefined }))
     expect(res.status).toBe(400)
     const body = await res.json()
-    expect(body.errors).toContainEqual({ field: "age", message: "Enter your age. Blend'n is for people 18 and over." })
+    expect(body.errors).toContainEqual({ field: "age", message: "Enter your age. Blend’n is for people 18 and over." })
     expect(mockDb.user.create).not.toHaveBeenCalled()
   })
 
   it.each([11, 17])("refuses %i — the floor is 18", async (age) => {
     const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age }))
     expect(res.status).toBe(400)
-    expect((await res.json()).errors).toContainEqual({ field: "age", message: "Blend'n is for people 18 and over." })
+    expect((await res.json()).errors).toContainEqual({ field: "age", message: "Blend’n is for people 18 and over." })
     expect(mockDb.user.create).not.toHaveBeenCalled()
   })
 

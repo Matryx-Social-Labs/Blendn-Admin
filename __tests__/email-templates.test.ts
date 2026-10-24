@@ -20,7 +20,7 @@ const templates = () => [
   onboardingVerifyEmail("Asha", "https://api.blendn.app/apply/verify?token=t"),
   inviteEmail("Byg Brewski", "Asha", "https://api.blendn.app/invite?token=t"),
   approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t"),
-  declinedEmail("Asha", "We couldn't confirm your venue licence."),
+  declinedEmail("Asha", "We couldn’t confirm your venue licence."),
   domainVerifyEmail("bygbrewski.com", "https://api.blendn.app/verify?token=t"),
   passwordResetEmail("Asha", "https://api.blendn.app/reset-password?token=t"),
 ]
@@ -33,11 +33,11 @@ const designed = () => [
 const shelled = () => [
   inviteEmail("Byg Brewski", "Asha", "https://api.blendn.app/invite?token=t"),
   approvedEmail("Asha", "Byg Brewski", "asha@bygbrewski.com", "https://x/reset-password?token=t"),
-  declinedEmail("Asha", "We couldn't confirm your venue licence."),
+  declinedEmail("Asha", "We couldn’t confirm your venue licence."),
   domainVerifyEmail("bygbrewski.com", "https://api.blendn.app/verify?token=t"),
 ]
 
-describe("the brand is spelled Blend'n", () => {
+describe("the brand is spelled Blend’n", () => {
   it("never writes it without the apostrophe", () => {
     // The UI has always written `Blend'n`; the email copy was the one place
     // that said "Blendn", so the sender name and the body disagreed.
@@ -70,7 +70,7 @@ describe("every template carries its link and says how long it lasts", () => {
     expect(domainVerifyEmail("acme.com", "l").text).toMatch(/expires in 24 hours/)
   })
 
-  it("tells someone who didn't expect it that they can ignore it", () => {
+  it("tells someone who didn’t expect it that they can ignore it", () => {
     // These three arrive unsolicited from the recipient's point of view.
     for (const t of [
       onboardingVerifyEmail("A", "l"),
@@ -104,8 +104,8 @@ describe("the decline email", () => {
     // The reason is the whole point — a decline with no cause gets an identical
     // reapplication. And the reply invitation is why the sender address must be
     // a monitored mailbox rather than no-reply@.
-    const t = declinedEmail("Asha", "We couldn't confirm your venue licence.")
-    expect(t.text).toContain("We couldn't confirm your venue licence.")
+    const t = declinedEmail("Asha", "We couldn’t confirm your venue licence.")
+    expect(t.text).toContain("We couldn’t confirm your venue licence.")
     expect(t.text).toMatch(/reply to this email/i)
   })
 })
@@ -166,7 +166,7 @@ describe("the HTML is readable with images blocked", () => {
     // A large share of recipients have images off by default. A logo-only
     // header leaves them with an unbranded email.
     for (const html of shelled().map((t) => (t as { html: string }).html)) {
-      expect(html).toContain("Blend&#39;n</span>")
+      expect(html).toContain("Blend&rsquo;n</span>")
     }
   })
 
@@ -178,13 +178,13 @@ describe("the HTML is readable with images blocked", () => {
     }
   })
 
-  it("names the brand in the lockup's alt text where the logo is the wordmark", () => {
+  it("names the brand in the lockup’s alt text where the logo is the wordmark", () => {
     // The design's header is the lockup image alone; with images off, the alt
     // text is what the client shows in its place.
     for (const html of designed().map((t) => t.html)) {
       const imgs = html.match(/<img [^>]*>/g) ?? []
       expect(imgs.length).toBe(2) // light and dark lockups
-      for (const img of imgs) expect(img).toContain(`alt="Blend'n"`)
+      for (const img of imgs) expect(img).toContain(`alt="Blend’n"`)
     }
   })
 })
@@ -248,14 +248,14 @@ describe("no invented compliance footer", () => {
   })
 
   it("includes it when set", () => {
-    process.env.EMAIL_FOOTER_ADDRESS = "Blend'n, 1 Test Road, Bengaluru"
+    process.env.EMAIL_FOOTER_ADDRESS = "Blend’n, 1 Test Road, Bengaluru"
     const html = (declinedEmail("A", "Reason enough.") as unknown as { html: string }).html
     expect(html).toContain("1 Test Road")
     delete process.env.EMAIL_FOOTER_ADDRESS
   })
 })
 
-describe("the approval email's account block", () => {
+describe("the approval email’s account block", () => {
   it("carries the address and the set-password button, and no password", () => {
     const link = "https://api.blendn.app/reset-password?token=abc"
     const html = (approvedEmail("Asha", "Byg Brewski", "asha@byg.in", link) as unknown as { html: string }).html
@@ -323,8 +323,8 @@ describe("the confirm and reset emails, from the design", () => {
   const reset = () => passwordResetEmail("Asha", resetLink)
 
   it("keeps the subjects the code has always sent", () => {
-    expect(confirm().subject).toBe("Confirm your email — Blend'n host application")
-    expect(reset().subject).toBe("Reset your Blend'n password")
+    expect(confirm().subject).toBe("Confirm your email — Blend’n host application")
+    expect(reset().subject).toBe("Reset your Blend’n password")
   })
 
   it("puts the confirm link in the button and prints it under it", () => {
@@ -344,7 +344,7 @@ describe("the confirm and reset emails, from the design", () => {
     expect(reset().text).toContain(resetLink)
   })
 
-  it("states the expiry the code enforces, not the design's", () => {
+  it("states the expiry the code enforces, not the design’s", () => {
     // Onboarding tokens live 24 hours (app/api/onboarding/apply). Reset links
     // live one hour (RESET_TTL_MS); the design said 30 minutes.
     expect(confirm().html).toContain("The link works for 24 hours.")
@@ -355,7 +355,7 @@ describe("the confirm and reset emails, from the design", () => {
     expect(reset().text).toMatch(/expires in one hour/)
   })
 
-  it("carries the recipient's name, and the organisation they applied as", () => {
+  it("carries the recipient’s name, and the organisation they applied as", () => {
     expect(confirm().html).toContain("Hi Asha,")
     expect(confirm().html).toContain("<b>Byg Brewski</b>")
     expect(reset().html).toContain("Hi Asha,")
@@ -363,7 +363,7 @@ describe("the confirm and reset emails, from the design", () => {
 
   it("names the brand and the company as the guidelines spell them", () => {
     for (const { html } of [confirm(), reset()]) {
-      expect(html).toContain("Blend'n")
+      expect(html).toContain("Blend’n")
       expect(html).not.toMatch(/\bBlendn\b/)
       expect(html).toContain("Matrix Social Labs")
       expect(html).not.toContain("Matryx") // the registered name is for legal lines only
@@ -411,7 +411,7 @@ describe("the confirm and reset emails, from the design", () => {
     delete process.env.EMAIL_FOOTER_ADDRESS
     expect(reset().html).toContain("nothing to unsubscribe from")
     expect(reset().html).not.toContain("1 Test Road")
-    process.env.EMAIL_FOOTER_ADDRESS = "Blend'n, 1 Test Road, Bengaluru"
+    process.env.EMAIL_FOOTER_ADDRESS = "Blend’n, 1 Test Road, Bengaluru"
     expect(reset().html).toContain("1 Test Road")
     delete process.env.EMAIL_FOOTER_ADDRESS
   })

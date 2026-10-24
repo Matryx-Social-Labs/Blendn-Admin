@@ -25,7 +25,7 @@ export function analyticsAccessLine(access: AnalyticsPageView["access"], day: (i
   if (access.reason === "grant") {
     return {
       headline: dated ? `Founding grant, ${dated}` : "Founding grant",
-      detail: "Blend'n has given your organisation Analytics. Nothing is charged.",
+      detail: "Blend’n has given your organisation Analytics. Nothing is charged.",
     }
   }
   if (access.reason === "analytics") {
