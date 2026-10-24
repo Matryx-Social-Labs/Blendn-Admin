@@ -227,6 +227,7 @@ async function checkOutChunk(items: readonly CheckoutItem[], reason: CheckoutRea
        WHERE c.id = v.id AND c.status = 'checked_in' ${sameWindow}
    RETURNING c.id, c.event_id, c.user_id, c.occurrence_id, c.kind::text AS kind, v.at
     )
+    -- any-kind: the rows are already chosen by id; this only reads each one's kind (a venue day cuts chat access)
     SELECT m.*, e.kind::text AS event_kind FROM moved m JOIN events e ON e.id = m.event_id`
   if (rows.length === 0) return []
 

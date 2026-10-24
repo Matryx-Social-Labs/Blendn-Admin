@@ -32,6 +32,7 @@ import { discloseStarsAcross, discloseVenueCounts, spreadsByEvent } from "@/lib/
 import { stillArriving } from "@/lib/occurrences"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { rsvpCounts } from "@/lib/event-tallies"
 import { turnUpPct } from "@/lib/counting"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { resolveRange } from "@/lib/date-range"
@@ -207,11 +208,6 @@ export default async function VenueDetailPage({
         organizer_org_id: true,
         organizer_org: { select: { display_name: true } },
         organizer: { select: { name: true } },
-        _count: {
-          select: {
-            rsvps: { where: { status: "going" } },
-          },
-        },
       },
     }),
     // Per event, so the total pools only events that could show their own.
@@ -235,13 +231,13 @@ export default async function VenueDetailPage({
    * three times the people who came through its doors — on the page a venue
    * owner reads for licensing and staffing.
    */
-  const attended = await distinctAttendeeCounts(events.map((e) => e.id))
+  const [attended, going] = await Promise.all([distinctAttendeeCounts(events.map((e) => e.id)), rsvpCounts(events.map((e) => e.id))])
 
   const rows: VenueEventRow[] = events.map((e) => {
     const exact = {
-      going: e._count.rsvps,
+      going: going.get(e.id) ?? 0,
       attended: attended.get(e.id) ?? 0,
-      fillPct: e.max_capacity ? Math.round((e._count.rsvps / e.max_capacity) * 100) : null,
+      fillPct: e.max_capacity ? Math.round(((going.get(e.id) ?? 0) / e.max_capacity) * 100) : null,
     }
     return {
       id: e.id,

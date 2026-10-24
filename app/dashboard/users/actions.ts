@@ -62,7 +62,6 @@ export interface UserWithProfile {
     organized_events: number
     event_check_ins: number
     event_favorites: number
-    chat_messages: number
   }
 }
 
@@ -145,18 +144,26 @@ export async function getUsers(
             },
           },
           user_interests: { select: { category: { select: { name: true } } } },
-          _count: {
-            select: {
-              organized_events: true,
-              event_check_ins: true,
-              event_favorites: true,
-              chat_messages: true,
-            },
-          },
         },
       }),
       db.user.count({ where }),
     ])
+
+    /*
+     * The three tallies the table shows, grouped over this page's people. As a
+     * relation `_count` each was a join over the whole child table (and
+     * `chat_messages`, which nothing rendered, the biggest table there is).
+     */
+    const ids = users.map((user) => user.id)
+    const [organized, checkIns, favourites] = await Promise.all([
+      // any-kind: an account's organised events as the old relation `_count` counted them, venue days included
+      db.events.groupBy({ by: ["organizer_id"], where: { organizer_id: { in: ids } }, _count: { _all: true } }),
+      db.event_check_ins.groupBy({ by: ["user_id"], where: { user_id: { in: ids } }, _count: { _all: true } }),
+      db.event_favorites.groupBy({ by: ["user_id"], where: { user_id: { in: ids } }, _count: { _all: true } }),
+    ])
+    const organizedBy = new Map(organized.map((r) => [r.organizer_id, r._count._all]))
+    const checkInsBy = new Map(checkIns.map((r) => [r.user_id, r._count._all]))
+    const favouritesBy = new Map(favourites.map((r) => [r.user_id, r._count._all]))
 
     await Promise.all(
       users.map(async (user) => {
@@ -168,6 +175,11 @@ export async function getUsers(
 
     const shaped = users.map((user) => ({
       ...user,
+      _count: {
+        organized_events: organizedBy.get(user.id) ?? 0,
+        event_check_ins: checkInsBy.get(user.id) ?? 0,
+        event_favorites: favouritesBy.get(user.id) ?? 0,
+      },
       // The birth date itself never leaves the server (lib/age.ts); the
       // browser gets the derived number and whether a date decided it.
       profile: user.profile
