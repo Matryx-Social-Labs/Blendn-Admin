@@ -1,7 +1,7 @@
 import { buildLiveSnapshot, HELD_EVENT_MS, type HeldEvent } from "@/lib/live-snapshot"
 import { recordIssuesFor } from "@/lib/event-issues"
 
-import { sqlCounter } from "./sql-count"
+import { sqlCounter, waveCounter } from "./sql-count"
 import { closeDb, db, makeEvent, makeUser, occurrenceOf, putInRoom, testId } from "./helpers"
 
 /**
@@ -85,15 +85,33 @@ describe("a loop's ticks", () => {
     try {
       const first = await counter.during(() => buildLiveSnapshot(eventId, held))
       const second = await counter.during(() => buildLiveSnapshot(eventId, held))
-      console.info(`tick: first ${first.sql.length} statements in ${first.levels} waves, next ${second.sql.length} in ${second.levels}`)
+      console.info(`tick: first ${first.sql.length} statements, next ${second.sql.length}`)
       expect(second.sql.length).toBe(first.sql.length - 3)
-      expect(second.levels).toBeLessThan(first.levels)
       expect(second.result).toEqual({ ...first.result!, at: second.result!.at })
       // And a stale hold is read again.
       held.current = { ...held.current!, readAt: Date.now() - HELD_EVENT_MS - 1 }
       expect((await counter.during(() => buildLiveSnapshot(eventId, held))).sql.length).toBe(first.sql.length)
     } finally {
       await counter.stop()
+    }
+  })
+})
+
+describe("a loop's held tick, in waves", () => {
+  it("is one wave where a fresh snapshot is three (the event, its days, then the figures)", async () => {
+    const eventId = await liveRoom()
+    const held: { current?: HeldEvent } = {}
+    const waves = waveCounter()
+    try {
+      const fresh = await waves.during(() => buildLiveSnapshot(eventId))
+      const first = await waves.during(() => buildLiveSnapshot(eventId, held))
+      const next = await waves.during(() => buildLiveSnapshot(eventId, held))
+      console.info(`waves: fresh ${fresh.waves}, held loop's first ${first.waves}, then ${next.waves}`)
+      expect(fresh.waves).toBe(3)
+      expect(first.waves).toBe(3)
+      expect(next.waves).toBe(1)
+    } finally {
+      await waves.stop()
     }
   })
 })
