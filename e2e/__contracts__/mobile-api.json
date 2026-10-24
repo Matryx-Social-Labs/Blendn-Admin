@@ -442,6 +442,7 @@
       "messages",
       "mute",
       "pagination",
+      "status",
       "write"
     ],
     "nested": {
