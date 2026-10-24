@@ -158,6 +158,12 @@ export async function getPresignedUploadUrl(
      * then sent unattended for hours.
      */
     checksum?: boolean
+    /**
+     * The byte length the client declares. Signed into the URL as
+     * `content-length`, so the storage refuses a PUT of any other size
+     * (API M6). Callers refuse a size above `getMaxFileSize` first.
+     */
+    size?: number
   } = {}
 ): Promise<{ uploadUrl: string; publicUrl: string; key: string }> {
   const client = getS3Client()
@@ -167,6 +173,7 @@ export async function getPresignedUploadUrl(
     Bucket: bucketFor(folder),
     Key: key,
     ContentType: contentType,
+    ...(opts.size !== undefined ? { ContentLength: opts.size } : {}),
     ...(opts.checksum ? { ChecksumAlgorithm: "SHA256" as const } : {}),
     // Set cache control for browser caching. A private document is never
     // cached by an intermediary.
@@ -186,12 +193,14 @@ export async function getPresignedUploadUrl(
    * type differs from a signed one (403, measured on staging). Every caller
    * already sends the type it asked for, so nothing honest changes.
    *
-   * The size is still unbound here: signing `content-length` needs the client
-   * to declare it first. What is attached is measured by `sealUpload`.
+   * The size is bound only when the client declares it (`opts.size`): the
+   * signature then carries `content-length`. A client that does not declare
+   * one (builds before this) still gets an unbound URL; what is attached is
+   * measured by `sealUpload` either way.
    */
   const uploadUrl = await getSignedUrl(client, command, {
     expiresIn: 900,
-    signableHeaders: new Set(["content-type"]),
+    signableHeaders: new Set(opts.size !== undefined ? ["content-type", "content-length"] : ["content-type"]),
   })
 
   const publicUrl = getPublicUrl(key)
