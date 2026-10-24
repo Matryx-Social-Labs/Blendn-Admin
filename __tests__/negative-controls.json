@@ -2091,6 +2091,24 @@
       "observed": "M2111: 1 failing, naming lib/crews/like.ts:366. Restored; 1 of 1.",
       "date": "2026-10-24"
     },
+    "room-status-on-open.itest.ts": {
+      "guards": "S-12 (2026-10-24): GET /events/:eventId/chat carries the room's own status, `locked` for every member of a locked room (a muted one included, whose write.reason is the mute), `active` once reopened.",
+      "mutation": "M2115 status hard-coded to \"active\".",
+      "observed": "M2115: 1 failing. Restored; 1 of 1.",
+      "date": "2026-10-24"
+    },
+    "interests-leaves-only.itest.ts": {
+      "guards": "S-9 (2026-10-24): POST /profiles/:id/interests refuses a category with children (400, reasonCode CATEGORY_IS_A_GROUP), alone or beside a leaf, storing nothing; a leaf and a childless top-level category are stored.",
+      "mutation": "M2114 the children check disabled (`false &&`).",
+      "observed": "M2114: 1 failing (the refusal case). Restored; 2 of 2.",
+      "date": "2026-10-24"
+    },
+    "discovery-visibility.itest.ts": {
+      "guards": "S-6 (2026-10-24): a search with the default sortBy is ranked title, venue, city, then description, by start time within each, across pages.",
+      "mutation": "M2113 rankBySearch forced false (date order alone).",
+      "observed": "M2113: 1 failing (the S-6 case). Restored; 13 of 13.",
+      "date": "2026-10-24"
+    },
     "bulk-bell-chunks.test.ts": {
       "guards": "lib/push-notifications.ts recordBulk: the bulk bell insert is 5,000 rows to a statement; a chunk that fails is logged and skipped while the others keep their rows, their pushes keep notificationId, and only the recorded recipients are announced to the bell.",
       "mutation": "M1549 BELL_INSERT_CHUNK = 1e9 (one statement for everyone). M1550 a failing chunk rethrows.",
