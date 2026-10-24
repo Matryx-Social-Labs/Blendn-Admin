@@ -1643,7 +1643,9 @@ a Blend's only while it is open (`closesAt` is its clock — gone from the list
 then, sweeper or not) and never to two people a block across it parted.
 `lastMessage.user` is named as that room names people: a crewmate's first
 name; in a Blend, tonight's pseudonym (a reveal names people on `GET /blends`,
-never in the chat). Own list rather
+never in the chat). `lastMessage.type` (S-7, additive, on `groups` rows too) is
+the message's kind: a crew's "liked … for the crew" line is `system`, so the
+preview drops "You:" before it. Own list rather
 than more `groups` rows because an installed app reads `event` off every
 `groups` row, and these rooms have none. A hidden crew's chat stays listed to
 its members — hiding takes a crew off every surface outside it, not its own

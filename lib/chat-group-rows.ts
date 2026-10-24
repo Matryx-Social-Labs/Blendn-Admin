@@ -352,6 +352,8 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
               lastMessage.type === "image" || lastMessage.type === "video"
                 ? `[${lastMessage.type}]`
                 : lastMessage.content.substring(0, 100),
+            /** The message's kind (`text`, `image`, `system`, `announcement`…): a `system` line is the room's, so the list says no "You:" before it (S-7). */
+            type: lastMessage.type,
             createdAt: lastMessage.created_at,
             user: {
               // The room's handle for anyone but you (SCRUM-371).
@@ -414,6 +416,8 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
               lastMessage.type === "image" || lastMessage.type === "video"
                 ? `[${lastMessage.type}]`
                 : lastMessage.content.substring(0, 100),
+            // As on `groups`: a crew's "liked … for the crew" line is `system` (S-7).
+            type: lastMessage.type,
             createdAt: lastMessage.created_at,
             user: { id: idForViewer(userId, scope, lastMessage.user_id), name: roomSenderNames.get(room.id) },
           }

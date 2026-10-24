@@ -172,6 +172,7 @@ export const ChatGroupSchema = z
       .object({
         id: z.string().uuid(),
         content: z.string(),
+        type: z.string().describe("The message's kind (`text`, `image`, `system`, `announcement`…). A `system` line is the room's: preview it without a sender. Additive: absent from an older server."),
         createdAt: z.string().datetime(),
         user: z.object({ id: RoomUserRefSchema, name: z.string() }),
       })
@@ -224,6 +225,9 @@ export const ChatRoomListItemSchema = z
       .object({
         id: z.string().uuid(),
         content: z.string(),
+        type: z
+          .string()
+          .describe("The message's kind. A crew's \"liked … for the crew\" line is `system` (metadata kind `crew_like`): preview it without \"You:\". Additive."),
         createdAt: z.string().datetime(),
         user: z
           .object({ id: RoomUserRefSchema, name: z.string() })
