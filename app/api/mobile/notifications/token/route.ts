@@ -53,28 +53,34 @@ export async function POST(request: NextRequest) {
     // If not, create a new one
     const now = new Date()
 
-    await db.push_tokens.upsert({
-      where: {
-        user_id_token: {
-          user_id: user.userId,
-          token: token,
+    // A token belongs to one account: whoever registered it last. Otherwise a
+    // sign-out that never reached the server leaves the previous user's row
+    // delivering their pushes to this phone (API M3).
+    await db.$transaction([
+      db.push_tokens.deleteMany({ where: { token, user_id: { not: user.userId } } }),
+      db.push_tokens.upsert({
+        where: {
+          user_id_token: {
+            user_id: user.userId,
+            token: token,
+          },
         },
-      },
-      update: {
-        platform,
-        // Only when the app says: a token re-registered by an older build must not lose it.
-        ...(channelSet !== undefined && { channel_set: channelSet }),
-        updated_at: now,
-      },
-      create: {
-        user_id: user.userId,
-        token,
-        platform,
-        ...(channelSet !== undefined && { channel_set: channelSet }),
-        created_at: now,
-        updated_at: now,
-      },
-    })
+        update: {
+          platform,
+          // Only when the app says: a token re-registered by an older build must not lose it.
+          ...(channelSet !== undefined && { channel_set: channelSet }),
+          updated_at: now,
+        },
+        create: {
+          user_id: user.userId,
+          token,
+          platform,
+          ...(channelSet !== undefined && { channel_set: channelSet }),
+          created_at: now,
+          updated_at: now,
+        },
+      }),
+    ])
 
     // Clean up old tokens for this user on this platform
     // Keep only the most recent 3 tokens per platform to handle multiple devices
