@@ -3,8 +3,8 @@ import { personCard, personSelect } from "@/lib/friends"
 import { VISIBLE_TO_AUTHOR } from "@/lib/board-access"
 import { getAccessibleMediaUrl } from "@/lib/tigris"
 import { firstName } from "@/lib/conversation-identity"
-import { blockCounterparties } from "@/lib/conversations"
-import { blendAdmitsMany } from "@/lib/room-kind"
+import { blockCounterparties, closedPairKeys } from "@/lib/conversations"
+import { admittingBlendRooms } from "@/lib/room-kind"
 import { acceptableInviteCrewIds } from "@/lib/crews/views"
 
 /**
@@ -23,7 +23,7 @@ import { acceptableInviteCrewIds } from "@/lib/crews/views"
  *     app at this moment (S-2), and only while they still may: a match's
  *     pseudonym while the conversation is open and nobody blocked anybody;
  *     a Blend's room name ("A × B", as the Banter shows it) while the Blend's
- *     own door admits the reader (`blendAdmitsMany`: open, on its clock, no
+ *     own door admits the reader (`admittingBlendRooms`: open, on its clock, no
  *     side dissolved or hidden, no block across the sides); the crew behind
  *     an invite while the Crews screen would list that invite
  *     (`acceptableInviteCrewIds`: open and not lapsed, the inviter still a
@@ -99,6 +99,15 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
 
   const crewRows = rows.filter((r) => r.kind === "crew_invite" || r.kind === "crew_here")
 
+  /*
+   * Everybody kept apart from the reader (a block either way, or a closed conversation): read once for the page and
+   * shared by every door below that asks it (an invite's, a Blend's, a match's), never once per door or per row.
+   */
+  const apart: Promise<ReadonlySet<string>> =
+    crewInviteRows.length || blendRows.length || matchRows.length
+      ? Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId)]).then(([b, c]) => new Set([...b, ...c]))
+      : Promise.resolve(new Set<string>())
+
   const [friendRequests, invites, memberships, messageRequests, boardRequests, conversations, events, crews, blendRooms, blocked] = await Promise.all([
     friendRows.length
       ? db.friend_requests.findMany({
@@ -116,7 +125,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       : [],
     // The Crews screen's door (`acceptableInviteCrewIds`): open, not lapsed, the crew standing, the inviter still a
     // member and your friend, nobody in it kept apart from you. An invite it would not list is neither open nor named.
-    acceptableInviteCrewIds(viewerId, unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId")))),
+    acceptableInviteCrewIds(viewerId, unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))), new Date(), apart),
     crewInviteRows.length
       ? db.crew_members.findMany({
           where: { user_id: viewerId, crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) } },
@@ -158,20 +167,11 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
           select: { id: true, emblem_seed: true, name: true, dissolved_at: true, hidden_at: true },
         })
       : [],
-    // Each Blend's room, found by the Blend (never by the payload's room id): its name and its door below.
-    blendRows.length
-      ? db.chat_groups.findMany({
-          where: { kind: "blend", blend_id: { in: unique(blendRows.map((r) => uuidOf(r.payload, "blendId"))) } },
-          select: { id: true, name: true, blend_id: true },
-        })
-      : [],
-    matchRows.length ? blockCounterparties(viewerId).then((ids) => new Set(ids)) : new Set<string>(),
+    // Each Blend's room that admits the reader now, found by the Blend (never by the payload's room id): the room's
+    // own door (`blendDenial`: open, on its clock, no side dissolved or hidden, no block across the sides), one read.
+    admittingBlendRooms(unique(blendRows.map((r) => uuidOf(r.payload, "blendId"))), viewerId, apart),
+    apart,
   ])
-  // The Blend door, the room's own, for the whole page in one read.
-  const admits = await blendAdmitsMany(
-    blendRooms.map((r) => r.id),
-    [viewerId]
-  )
   const emblemOf = new Map(crews.map((c) => [c.id, c.emblem_seed]))
   const crewOf = new Map(crews.map((c) => [c.id, c]))
   const invited = invites
@@ -236,10 +236,10 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
     set(row.id, { display: { ...(named && { context: pseudonym }), visual: { type: "creature", pseudonym } } })
   }
 
-  const blendRoomOf = new Map(blendRooms.map((r) => [r.blend_id, r]))
+  const blendRoomOf = new Map(blendRooms.map((r) => [r.blendId, r]))
   for (const row of blendRows) {
     const room = blendRoomOf.get(uuidOf(row.payload, "blendId") ?? "")
-    if (room && admits.get(room.id)?.has(viewerId)) set(row.id, { display: { ...out.get(row.id)?.display, context: room.name } })
+    if (room) set(row.id, { display: { ...out.get(row.id)?.display, context: room.name } })
   }
 
   const eventOf = new Map(events.map((e) => [e.id, e]))

@@ -150,19 +150,28 @@ export function inviteAcceptable(
  * The crews among `crewIds` with an invite to `userId` the Crews screen would
  * list now: open and not lapsed, the crew standing, and `inviteAcceptable`.
  * Set-based: one read of the invites, then the blocks and the friends once.
+ * `apart`, when the caller already holds it, is everybody kept apart from
+ * `userId` (a block either way or a closed conversation, `blocksBetween`'s
+ * rule from their side), so the blocks are not read a second time.
  */
-export async function acceptableInviteCrewIds(userId: string, crewIds: readonly string[], now: Date = new Date()): Promise<Set<string>> {
+export async function acceptableInviteCrewIds(
+  userId: string,
+  crewIds: readonly string[],
+  now: Date = new Date(),
+  apart?: ReadonlySet<string> | Promise<ReadonlySet<string>>
+): Promise<Set<string>> {
   if (crewIds.length === 0) return new Set()
   const invites = await db.crew_invites.findMany({
     where: { invited_user_id: userId, crew_id: { in: [...crewIds] }, ...openInviteWhere(now), crew: { dissolved_at: null, hidden_at: null } },
     select: { crew_id: true, invited_by: true, crew: { select: { members: ACTIVE_MEMBERS } } },
   })
   if (invites.length === 0) return new Set()
-  const [apart, friends] = await Promise.all([
-    blocksBetween([userId], [...new Set(invites.flatMap((i) => [i.invited_by, ...i.crew.members.map((m) => m.user_id)]))]),
+  const people = [...new Set(invites.flatMap((i) => [i.invited_by, ...i.crew.members.map((m) => m.user_id)]))]
+  const [pairs, friends] = await Promise.all([
+    apart ? Promise.resolve(apart).then((ids) => new Set([...ids].map((id) => `${userId}|${id}`))) : blocksBetween([userId], people),
     friendIdsOf(userId).then((ids) => new Set(ids)),
   ])
-  return new Set(invites.filter((i) => inviteAcceptable(userId, i, apart, friends)).map((i) => i.crew_id))
+  return new Set(invites.filter((i) => inviteAcceptable(userId, i, pairs, friends)).map((i) => i.crew_id))
 }
 
 /** The most open invites one read looks at, newest first. Nobody has this many waiting; the cap is what keeps the read bounded. */
