@@ -128,6 +128,9 @@ export const EventChatResponseSchema = z
   .object({
     chatGroupId: z.string().uuid(),
     chatGroupName: z.string(),
+    status: z
+      .enum(["active", "locked", "archived"])
+      .describe("The room's own state, the same for everybody in it: `locked` is the organiser's lock; `archived` a closed room's record. `write.reason` is the caller's answer and names a mute or ban first. Additive."),
     write: RoomWriteSchema,
     mute: RoomMuteSchema,
     // Every key is sent on this read, the ones ChatMessage leaves optional too.

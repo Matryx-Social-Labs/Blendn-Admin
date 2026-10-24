@@ -1795,6 +1795,11 @@ back as a single `NOT_CHECKED_IN` covering several unrelated situations, so the
 app either showed the wrong reason or let someone type a paragraph and then threw
 it away. `closesAt` lets the room show an honest countdown.
 
+**`status`** (S-12, additive) is the room's own state, `active`, `locked`
+(the organiser's lock) or `archived`, the same for everybody in it. Read the lock from it,
+not from `write.reason`: that is the caller's own answer, and names their
+mute or ban before a lock.
+
 **Before the room opens.** An event's room opens 24 hours before it starts. A
 person entitled to it (RSVP `going`, or the event saved) who asks earlier — `GET`
 or `POST /events/:eventId/chat` — gets a refusal that says when, so the app can
