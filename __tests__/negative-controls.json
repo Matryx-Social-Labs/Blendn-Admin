@@ -1101,6 +1101,12 @@
       "observed": "2 failing of 6 (the takeover and the unproven refusal). Red before the fix: 3 of 6, the suspended refusal too.",
       "date": "2026-10-25"
     },
+    "integration/create-role-user-audited.itest.ts": {
+      "guards": "createRoleUser writes a user.created audit row (admin, new account, role, no password) in the same transaction as the account, so a refused audit write leaves no account (audit WEB L8)",
+      "mutation": "In lib/admin-role-actions.ts createRoleUser, replace the $transaction with the bare tx.user.create (no auditInTx).",
+      "observed": "Red before the fix, 2 of 2 failing: no user.created row; the account existed after its audit write was refused.",
+      "date": "2026-10-25"
+    },
     "dashboard-signin-limits.test.ts": {
       "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and, per email from any network, 20 wrong passwords in 15 minutes and 200 in 24 hours (case-folded, existing or not); the right password is refused past any of them; a victim's success does not reset the email's windows; clearSigninCounters (a completed reset) does; an unknown or password-less account is compared against a cost-12 dummy hash (audit WEB H1/M5/L1)",
       "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: settleSigninSuccess forgets the email keys instead of releasing one hit. M3b: settleSigninSuccess releases nothing. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`.",
