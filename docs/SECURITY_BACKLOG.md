@@ -230,11 +230,15 @@ Each has a test that failed before the fix.
 
 **Still open, on purpose:**
 
-- **M6, the cap is opt-in.** An installed client that does not send `size` still
-  gets an unbound URL. Make `size` required once the app ships sending it; until
-  then the bound is `sealUpload` at attach time. A hard bound for any client
-  needs a presigned POST with a `content-length-range` policy (new client
-  upload path, and Tigris POST-policy support unverified).
+- **M6, `size` is required, but only where it can be.** The dashboard route
+  requires it now (its upload code sends `file.size`). The mobile route requires
+  it from app **1.0.1** (`UPLOAD_SIZE_REQUIRED_FROM_VERSION`, read from
+  `X-App-Version` by the same parser as the 426 gate; client `app.json` is
+  1.0.0). Builds below that, and requests with no header, keep an unbound URL
+  until `MOBILE_MIN_APP_VERSION` is raised past them, at which point drop the
+  version test and require it for everyone; an abuser who omits the header is
+  in the old group until then. The bound at attach time is `sealUpload`. A hard
+  bound needs a presigned POST with a `content-length-range` policy.
 - **M6, orphans.** Raw uploads that are never attached are not swept, and a
   `profile/` raw object is world-readable until then. A sweep needs a list of
   attached keys to diff against, or a bucket lifecycle rule on the raw prefixes
@@ -243,6 +247,10 @@ Each has a test that failed before the fix.
   moderation column and this fix adds no migration, so there is no evidence row
   for a report to rest on. Add one if a hidden-but-stored shape is wanted.
 - **M8, the `reportDay` number is 30, not 50.** The existing policy was reused.
+  A conversation leave over it still leaves and blocks, and drops the report
+  (`reportAccepted: false`).
+- **M1, requests are also capped at 20 a day** per sender (`requestDay`).
+- **M2, the event-chat re-join** (`events/:id/chat`) now keeps a mute too.
 
 ### 2026-09-28 — a friend could read which pseudonym was you (SCRUM-371)
 

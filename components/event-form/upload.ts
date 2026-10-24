@@ -11,7 +11,7 @@ export async function requestPresignedUrl(file: File, folder: UploadFolder = "ev
   const res = await fetch("/api/uploads/presigned-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename: file.name, contentType: file.type, folder }),
+    body: JSON.stringify({ filename: file.name, contentType: file.type, folder, size: file.size }),
   })
   // The route refuses in words — a content type it will not take, the rate
   // limit, storage switched off — and every caller showed a generic line

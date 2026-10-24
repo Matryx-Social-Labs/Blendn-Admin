@@ -19,6 +19,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
+import { sendsUploadSize } from "@/lib/mobile-gate"
 
 const presignedUrlSchema = z.object({
   filename: z.string().min(1, "Filename is required").max(255),
@@ -52,6 +53,11 @@ export async function POST(request: NextRequest) {
     }
 
     const { filename, contentType, folder, size } = validation.data
+
+    // From the build that sends it, `size` is required: omitting it was the way to an unbound URL (API M6).
+    if (size === undefined && sendsUploadSize(request.headers.get("x-app-version"))) {
+      return errorResponse("size is required", 400)
+    }
 
     // Restrict event uploads to organizers and admins
     if (folder === "events") {
