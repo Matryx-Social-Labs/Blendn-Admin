@@ -132,7 +132,22 @@ export async function getUsers(
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: {
+        /*
+         * Exactly `UserWithProfile`, by `select`. An `include` returned every
+         * scalar on User -- `password`, `suspension_reason` -- into the RSC
+         * payload of a page that renders neither (audit 2026-10-24, WEB M2).
+         */
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          emailVerified: true,
+          image: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+          deletedAt: true,
+          suspended_at: true,
           profile: {
             select: {
               id: true,
@@ -288,12 +303,11 @@ export async function updateUser(
     // `deletedAt: null` in the where: an erased account cannot be edited back
     // into existence. The row menu is hidden for those rows, but a server
     // action is callable without a menu. P2025 surfaces as the generic error.
-    const user = await db.user.update({
+    await db.user.update({
       where: { id, deletedAt: null },
       data: updateData,
-      include: {
-        profile: true,
-      },
+      // Nothing is read back: the row carries the password hash and the birth date.
+      select: { id: true },
     })
 
     const changed: Record<string, { from: unknown; to: unknown }> = {}
@@ -320,7 +334,7 @@ export async function updateUser(
     }
 
     revalidatePath("/dashboard/users")
-    return { success: true, user }
+    return { success: true }
   } catch (error) {
     if (error instanceof Refusal) throw error
     logger.error("Error updating user", { error: error instanceof Error ? error.message : String(error) })

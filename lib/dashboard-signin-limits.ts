@@ -1,0 +1,77 @@
+// Relative imports, as lib/auth.ts.
+import { clientNetworkFrom } from "./client-ip"
+import { RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW } from "./constants"
+import { forget, hit, release } from "./rate-limit-store"
+import { SIGNIN_ACCOUNT_LOCKED, SIGNIN_RATE_LIMITED } from "./rbac"
+
+/*
+ * The dashboard sign-in limits, called from authorize() (lib/auth.ts) because
+ * that is the one place every request path to a password check reaches. They
+ * used to match the raw URL in the route, and a percent-encoded `%63redentials`
+ * walked around them (security audit 2026-10-24, WEB H1).
+ *
+ * - Per network (the /64 for IPv6): 5 attempts in 15 minutes, every attempt
+ *   counted, as before.
+ * - Per email, from any network: 20 wrong passwords in 15 minutes AND 200 in
+ *   24 hours. Only failures stay counted (an attempt is reserved up front and
+ *   given back on success), and nothing but a completed password reset
+ *   clears them (`clearSigninCounters`): a victim signing in does not reset a
+ *   spray that is still going. A person on their own network is held to the
+ *   network limit first, so an attacker has to bring four networks to lock an
+ *   operator out, and the operator gets back in by resetting their password.
+ *
+ * The email key is the typed address whether or not it exists, so a cap is no
+ * oracle. Past any limit the right password is refused too. Every counter is
+ * fail-closed where Redis is configured. A (email, network) counter is left
+ * out on purpose: the network limit always fires before it could, and a reset
+ * could not clear it without scanning keys.
+ */
+const FAIL_CLOSED = { failClosed: true } as const
+const PREFIX = "rl:auth:dashboard-signin"
+
+export interface SigninKeys {
+  network: string
+  account: string
+  accountDay: string
+}
+
+export function signinKeys(email: string, headers: Record<string, unknown> | undefined): SigninKeys {
+  const network = clientNetworkFrom({
+    get: (name) => (typeof headers?.[name] === "string" ? (headers[name] as string) : null),
+  })
+  return { network: `${PREFIX}:${network}`, account: `${PREFIX}:acct:${email}`, accountDay: `${PREFIX}:acct-day:${email}` }
+}
+
+/**
+ * Before the password is read: reserve a place in every window, and throw when
+ * any is over its cap. Reserve-then-settle, not check-then-count: N parallel
+ * guesses all reading "under the cap" before any counted would each get a
+ * bcrypt, so the increment is the check. The network goes first and alone, so
+ * an attacker's refused attempts from one address never spend the email's.
+ */
+export async function refuseOverSigninLimits(keys: SigninKeys): Promise<void> {
+  const byNetwork = await hit(keys.network, RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN, FAIL_CLOSED)
+  if (byNetwork.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN) throw new Error(SIGNIN_RATE_LIMITED)
+  const [recent, today] = await Promise.all([
+    hit(keys.account, RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN, FAIL_CLOSED),
+    hit(keys.accountDay, RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN_ACCOUNT_DAY, FAIL_CLOSED),
+  ])
+  if (recent.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN_ACCOUNT || today.count > RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN_ACCOUNT_DAY) {
+    throw new Error(SIGNIN_ACCOUNT_LOCKED)
+  }
+}
+
+/**
+ * The right password: give the email's two reservations back, so only wrong
+ * passwords stay counted. Releases, never clears -- a victim signing in does
+ * not reset a spray that is still going.
+ */
+export async function settleSigninSuccess(keys: SigninKeys): Promise<void> {
+  await Promise.all([release(keys.account), release(keys.accountDay)])
+}
+
+/** A completed password reset proved control of the mailbox: that email's counters start over. */
+export async function clearSigninCounters(email: string): Promise<void> {
+  const { account, accountDay } = signinKeys(email.trim().toLowerCase(), undefined)
+  await Promise.all([forget(account), forget(accountDay)])
+}

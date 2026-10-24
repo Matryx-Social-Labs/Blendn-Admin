@@ -1,4 +1,4 @@
-import { hit, resetMemoryStore } from "@/lib/rate-limit-store"
+import { hit, release, resetMemoryStore } from "@/lib/rate-limit-store"
 
 /**
  * The counter behind every limit.
@@ -20,6 +20,24 @@ describe("hit", () => {
     expect((await hit(key, 60_000)).count).toBe(1)
     expect((await hit(key, 60_000)).count).toBe(2)
     expect((await hit(key, 60_000)).count).toBe(3)
+  })
+
+  it("answers each concurrent hit with the count as of that hit", async () => {
+    // Redis does; the in-process store returned its live entry, so every parallel caller
+    // saw the final count and a check-by-increment refused them all.
+    const counts = (await Promise.all(Array.from({ length: 5 }, () => hit("test:parallel", 60_000)))).map((r) => r.count)
+    expect(counts.sort()).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it("release gives one hit back, never goes below zero and never creates a key", async () => {
+    await hit("test:release", 60_000)
+    await hit("test:release", 60_000)
+    await release("test:release")
+    expect((await hit("test:release", 60_000)).count).toBe(2)
+    await release("test:never-hit")
+    expect((await hit("test:never-hit", 60_000)).count).toBe(1)
+    await release("test:release"); await release("test:release"); await release("test:release")
+    expect((await hit("test:release", 60_000)).count).toBe(1)
   })
 
   it("keeps separate keys separate", async () => {

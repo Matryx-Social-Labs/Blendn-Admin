@@ -7,6 +7,7 @@ import { db } from "./db"
 import { recentlyBlocked } from "./account-blocklist"
 import { SYSTEM_USER_ID } from "./event-kind"
 import { PRODUCT_EVENTS, record } from "./product-events"
+import { endPhoneSessions, phoneSessionsEnded } from "./session-end"
 import { Prisma } from "@prisma/client"
 
 function getJwtSecret(): string {
@@ -699,22 +700,32 @@ async function linkVerifiedOAuthIdentity(
 ): Promise<void> {
   const unproven = existingUser.emailVerified === null
 
-  await db.$transaction([
-    db.user_oauth_accounts.create({
+  /*
+   * An unproven account is evicted whole, not just its password: every phone
+   * session ends and its push tokens go, in the same transaction. The squatter's
+   * refresh token otherwise rotated for thirty days and their phone kept the
+   * victim's DM previews (security audit 2026-10-24, API H1). `password_reset`
+   * is the reason that is true -- the credential is gone -- and the phone is
+   * told PASSWORD_RESET (Flow 15).
+   */
+  const ended = await db.$transaction(async (tx) => {
+    await tx.user_oauth_accounts.create({
       data: {
         user_id: existingUser.id,
         provider,
         provider_id: providerId,
         email,
       },
-    }),
-    db.user.update({
+    })
+    await tx.user.update({
       where: { id: existingUser.id },
       data: unproven
         ? { emailVerified: new Date(), password: null }
         : { emailVerified: existingUser.emailVerified },
-    }),
-  ])
+    })
+    return unproven ? endPhoneSessions(tx, existingUser.id, "password_reset") : null
+  })
+  if (ended) phoneSessionsEnded(existingUser.id, ended.at)
 
   if (unproven && existingUser.password) {
     // Worth knowing about: either a squatter was just evicted, or someone will

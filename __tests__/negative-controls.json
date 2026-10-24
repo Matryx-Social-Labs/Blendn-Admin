@@ -1066,10 +1066,52 @@
       "date": "2026-09-21"
     },
     "dashboard-signin-limit-runs-in-node.test.ts": {
-      "guards": "POST /api/auth/callback/credentials is rate limited in the NextAuth route (Node runtime, Redis-backed) before NextAuth sees the password, and middleware.ts no longer carries the limiter — on the Edge runtime it let five of six attempts through (SCRUM-194)",
-      "mutation": "In app/api/auth/[...nextauth]/route.ts, `if (limited && false) return limited`.",
-      "observed": "1 failing: returns the limiter's 429 and never reaches NextAuth — expected 429, received 302.",
-      "date": "2026-09-21"
+      "guards": "the NextAuth route does not match on the request path and middleware.ts does not carry the sign-in limiter (Edge cannot load Redis, SCRUM-194; a path match is walked around by %63redentials, audit WEB H1); authorize() asks the limits before it reads the password and a password reset clears the email's counters",
+      "mutation": "Append `req.nextUrl.pathname === \"/api/auth/callback/credentials\"` to app/api/auth/[...nextauth]/route.ts.",
+      "observed": "1 failing: the NextAuth route does not match on the request path.",
+      "date": "2026-10-25"
+    },
+    "integration/oauth-link-ends-squatter-sessions.itest.ts": {
+      "guards": "Google/Apple linking to an unverified password account ends its phone sessions in the link transaction: password dropped, refresh tokens revoked as password_reset (the phone is told PASSWORD_RESET), push tokens deleted; a verified account's sessions are left alone (audit API H1)",
+      "mutation": "In lib/mobile-auth.ts linkVerifiedOAuthIdentity, `unproven && false ? endPhoneSessions(...) : null`.",
+      "observed": "2 failing of 3 (Google and Apple): the squatter's push token and live refresh token survived; the verified-account control passes. Red before the fix with the same 2 of 3.",
+      "date": "2026-10-25"
+    },
+    "integration/admin-users-no-secrets-to-browser.itest.ts": {
+      "guards": "getUsers and updateUser results carry no password hash, birth date or suspension note (audit WEB M2)",
+      "mutation": "In app/dashboard/users/actions.ts getUsers, `select: {` -> `include: {` (and drop the scalar fields); or updateUser `select: { id: true }` -> `include: { profile: true }` and return the row.",
+      "observed": "Red before the fix, 2 of 2 failing: the serialised result contained the bcrypt hash.",
+      "date": "2026-10-25"
+    },
+    "integration/limiters-authorize-first.itest.ts": {
+      "guards": "cancelVenuePro spends a bucket keyed on the caller, not the venue's own startVenueProCheckout bucket, and sendOffer checks the sender's role before it spends the owner's offer-send bucket (audit WEB M3 + L5)",
+      "mutation": "M1: payable(`venue-cancel:${user.id}:${id}`) -> payable(`venue:${id}`) in cancelVenuePro. M2: move the overLimit(`offer-send:...`) block above the maySendVenueOffers check in sendOffer.",
+      "observed": "Red before the fix, 2 of 2 failing: the victim's cancel met \"Too many tries in a minute\"; staff's ninth send met \"Too many tries\" instead of the role refusal.",
+      "date": "2026-10-25"
+    },
+    "claim-limit-order.test.ts": {
+      "guards": "overClaimLimit counts the event's window only for a caller who passed their own email and address windows, so a flooder over their own limit cannot burn the event's 20 an hour (audit WEB L5)",
+      "mutation": "In lib/claim-limit.ts hit the target window together with the email and address windows again.",
+      "observed": "1 failing: expected the event bucket at 10, received 14. The anonymous-claim bucket can still be burned by 2+ addresses each under their own limit; that is the cap's purpose and is left.",
+      "date": "2026-10-25"
+    },
+    "integration/approval-set-password.itest.ts": {
+      "guards": "approving an application on an email that already has an attendee account: a confirmed account is promoted with its password; an unconfirmed one is taken over only when the application proved the mailbox (password replaced, phone sessions ended, set-password link sent), and refused when it did not; a suspended or deleted account is refused (audit WEB M1 + L9)",
+      "mutation": "In lib/onboarding-actions.ts approveOnboardingRequest, `const takeOver = false`.",
+      "observed": "2 failing of 6 (the takeover and the unproven refusal). Red before the fix: 3 of 6, the suspended refusal too.",
+      "date": "2026-10-25"
+    },
+    "integration/create-role-user-audited.itest.ts": {
+      "guards": "createRoleUser writes a user.created audit row (admin, new account, role, no password) in the same transaction as the account, so a refused audit write leaves no account (audit WEB L8)",
+      "mutation": "In lib/admin-role-actions.ts createRoleUser, replace the $transaction with the bare tx.user.create (no auditInTx).",
+      "observed": "Red before the fix, 2 of 2 failing: no user.created row; the account existed after its audit write was refused.",
+      "date": "2026-10-25"
+    },
+    "dashboard-signin-limits.test.ts": {
+      "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and, per email from any network, 20 wrong passwords in 15 minutes and 200 in 24 hours (case-folded, existing or not); the right password is refused past any of them; a victim's success does not reset the email's windows; clearSigninCounters (a completed reset) does; an unknown or password-less account is compared against a cost-12 dummy hash (audit WEB H1/M5/L1)",
+      "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: settleSigninSuccess forgets the email keys instead of releasing one hit. M3b: settleSigninSuccess releases nothing. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`.",
+      "observed": "M1: 1 failing of 11 (the 200-a-day case). M2: 1 failing (the same case, at its final reset). M3 and M3b: 2 failing each (a victim's success must not reset the spray; the day case). The concurrency case (30 parallel wrong passwords, at most 20 reach bcrypt) was red against check-then-count: 30 reached it. M4 (earlier version): the /64 case failed. M5 (earlier version): both timing cases failed. Red before the fix: 6 of 7 failed.",
+      "date": "2026-10-25"
     },
     "client-ip.test.ts": {
       "guards": "clientIpFrom returns the client as Railway's edge presents it — x-real-ip first (edge-set, not client-settable), else the FIRST x-forwarded-for hop — and ignores x-envoy-external-address / cf-connecting-ip, which the edge passes through as sent; the previous last-hop reader keyed every per-network limit and audit row on Railway's own edge node (SCRUM-195)",
