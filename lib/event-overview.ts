@@ -165,14 +165,14 @@ export async function getEventOverview(
               label: "Checked in now",
               // A range for the venue: it moves with every arrival (SCRUM-516).
               value: venue ? liveCountLabel(liveCountBucket(checkedIn)) : fmt(checkedIn),
-              hint: going === 0 ? "Nobody RSVP'd" : `${say(goingN)} said they were coming`,
+              hint: going === 0 ? "Nobody RSVP’d" : `${say(goingN)} said they were coming`,
             }
           : going === 0
             ? {
                 // A percentage of nothing is a dash. The count is still real.
                 label: "Came",
                 value: fmt(attendedPeople),
-                hint: "nobody RSVP'd — walk-ins only",
+                hint: "nobody RSVP’d — walk-ins only",
               }
             : {
                 label: "Turned up",

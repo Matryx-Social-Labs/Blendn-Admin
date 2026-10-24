@@ -29,7 +29,7 @@ function refuseIfFenceDrifted(fence: Geofence, pin: { lat: number; lng: number }
   const metres = haversineDistanceMeters(pin.lat, pin.lng, centre.lat, centre.lng)
   if (metres > FENCE_DRIFT_LIMIT_METRES) {
     throw new Refusal(
-      `The check-in area is ${Math.round(metres)} m from the venue's pin. Draw it around the venue, or move the pin.`
+      `The check-in area is ${Math.round(metres)} m from the venue’s pin. Draw it around the venue, or move the pin.`
     )
   }
 }
@@ -322,7 +322,7 @@ export async function updateVenue(id: string, input: UpdateVenueInput): Promise<
   refuseUnknownVenueType(input.venueType)
   if (input.floors !== undefined) {
     if (user.role !== "app_admin" && !writable.owner_org_id) {
-      throw new Refusal("Only the venue's owner or an admin sets its floors.")
+      throw new Refusal("Only the venue’s owner or an admin sets its floors.")
     }
     if (input.floors !== null && (!Number.isInteger(input.floors) || input.floors < 1 || input.floors > MAX_FLOORS)) {
       throw new Refusal(`Floors is a whole number from 1 to ${MAX_FLOORS}, or empty.`)
@@ -453,7 +453,7 @@ export async function setVenueOpenOnBlendn(id: string, open: boolean): Promise<v
   if (typeof open !== "boolean") throw new Refusal("Open on Blendn is on or off.")
   const venue = await venueForWrite(id, user)
   if (!venue.owner_org_id) {
-    throw new Refusal("Only a claimed venue can leave the app's Places. An unclaimed one is always listed.")
+    throw new Refusal("Only a claimed venue can leave the app’s Places. An unclaimed one is always listed.")
   }
   // Taking a venue out of the app is its organisation's owners' and admins'
   // call, not every member's (step 18 security review, L2): staff run nights.
@@ -462,7 +462,7 @@ export async function setVenueOpenOnBlendn(id: string, open: boolean): Promise<v
       where: { user_id: user.id, org_id: venue.owner_org_id, role: { in: ["owner", "admin"] }, ...activeMembership },
       select: { id: true },
     })
-    if (!manager) throw new Refusal("Only the venue organisation's owners and admins can change this.")
+    if (!manager) throw new Refusal("Only the venue organisation’s owners and admins can change this.")
   }
 
   const changed = await db.$transaction(async (tx) => {

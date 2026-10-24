@@ -264,7 +264,7 @@ export async function filePublicVenueClaim(
    * and an incumbent on record; a stranger's form against an owned venue is
    * not a claim a reviewer can weigh.
    */
-  if (venue.owner_org_id) return { ok: false, error: "This place already has an owner on Blend'n" }
+  if (venue.owner_org_id) return { ok: false, error: "This place already has an owner on Blend’n" }
 
   try {
     const claim = await db.venue_claims.create({
@@ -342,13 +342,13 @@ function noAccountFlags(contactEmail: string | null, website: string | null, gst
   const flags: string[] = []
   const domain = contactEmail ? emailDomain(contactEmail) : null
   if (domain && isFreeProvider(domain)) {
-    flags.push(`Filed from a free email address (${domain}), not one at the venue's own domain`)
+    flags.push(`Filed from a free email address (${domain}), not one at the venue’s own domain`)
   }
   const site = website ? normaliseDomain(website) : null
   if (domain && site && !isFreeProvider(domain) && domain !== site) {
     flags.push(`Email domain ${domain} does not match the website they gave (${site})`)
   }
-  if (gstin) flags.push("GSTIN passes its checksum only — check the registered address is this venue's")
+  if (gstin) flags.push("GSTIN passes its checksum only — check the registered address is this venue’s")
   return flags
 }
 

@@ -453,6 +453,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       chatGroupId: chatGroup.id,
       chatGroupName: chatGroup.name,
+      /**
+       * The room's own state, `active` or `locked` (the organiser's lock), for
+       * everyone in it: `write.reason` is this caller's answer and names their
+       * mute or ban before a lock, so it cannot say the room is locked (S-12).
+       */
+      status: chatGroup.status,
       write: {
         allowed: denial === null,
         reason: denial?.reason ?? null,

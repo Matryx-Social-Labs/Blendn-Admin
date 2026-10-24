@@ -18,6 +18,7 @@ import { inviteTokenFor } from "@/lib/friends"
 import * as entitlementsModule from "@/lib/entitlements"
 import { hasPlus, plusRequired, plusRequiredForPing, threeOnDistinctEvents, trialRef } from "@/lib/plus"
 import { flushProductEvents } from "@/lib/product-events"
+import { distinctEventsAttended } from "@/lib/attendee-counts"
 
 import { closeDb, db, makeEvent, makeUser, occurrenceOf, refusingWrites, testId } from "./helpers"
 import { checkInOf, cleanupWorld, eventParams, goLive, INSIDE, person, req, routes, until, venue, world } from "./go-live-world"
@@ -39,6 +40,7 @@ const friendRequests = require("@/app/api/mobile/friends/requests/route") as typ
  */
 
 const DAY = 86_400_000
+const HOUR = 3_600_000
 const hosts: string[] = []
 const extraEvents: string[] = []
 
@@ -86,18 +88,26 @@ async function trialUsed(userId: string) {
   })
 }
 
-/** `n` nights out, in `city`, the newest `daysAgo` days ago and one more day back for each older one. */
-async function nightsOut(userId: string, n: number, o: { city?: string; daysAgo?: number } = {}) {
+/**
+ * `n` nights out, in `city`, the newest `daysAgo` days ago and one more day back for each older one.
+ * Each ends 3 hours after you arrive, so a night started more than 3 hours ago has ended;
+ * `runningFor` keeps it going that much longer (a night still on).
+ */
+async function nightsOut(userId: string, n: number, o: { city?: string; daysAgo?: number; runningFor?: number } = {}) {
   if (hosts.length === 0) hosts.push(await makeUser(testId("plus_host"), "organizer"))
+  const ids: string[] = []
   for (let i = 0; i < n; i++) {
     const eventId = await makeEvent(hosts[0])
     extraEvents.push(eventId)
-    await db.events.update({ where: { id: eventId }, data: { city: o.city ?? "Bengaluru" } })
+    ids.push(eventId)
     const at = new Date(Date.now() - ((o.daysAgo ?? 1) + i) * DAY)
+    const end = o.runningFor ? Date.now() + o.runningFor : at.getTime() + 3 * HOUR
+    await db.events.update({ where: { id: eventId }, data: { city: o.city ?? "Bengaluru", start_time: at, end_time: new Date(end) } })
     await db.event_check_ins.create({
       data: { event_id: eventId, occurrence_id: await occurrenceOf(eventId), user_id: userId, kind: "attendee", status: "checked_out", check_in_time: at, created_at: at },
     })
   }
+  return ids
 }
 
 const audits = (userId: string) =>
@@ -496,6 +506,48 @@ describe("night history beyond 3 (the history gate)", () => {
     await plus(me.id)
     const paid = await attendance(me.token)
     expect([paid.data.events.length, paid.data.lockedCount]).toEqual([5, 0])
+  })
+
+  /*
+   * S-1, the Me tab's "48 nights" over "Your first night isn't written yet"
+   * (qa.rc.a on staging, 2026-10-23: the 3 newest nights by check-in were all
+   * still running). The free slots are the latest 3 ENDED nights; a night
+   * still on is listed as well and is never a slot, and listed + locked is the
+   * profile's count.
+   */
+  it("keeps the 3 free slots for ended nights: nights still on are listed beside them, never in them (S-1)", async () => {
+    process.env.PLUS_GATING = "Bengaluru"
+    const me = await person()
+    const ended = await nightsOut(me.id, 5, { daysAgo: 3 })
+    // Checked in more recently than every ended night, and still going: the bug's shape.
+    const running = await nightsOut(me.id, 2, { daysAgo: 0.01, runningFor: 6 * HOUR })
+
+    const res = await attendance(me.token)
+    const ids = (res.data.events as { id: string; end_time: string }[]).map((e) => e.id)
+    expect(res.data.lockedCount).toBe(2)
+    expect(ids).toEqual([...running, ...ended.slice(0, 3)])
+    expect(res.data.pagination.totalCount + res.data.lockedCount).toBe(await distinctEventsAttended(me.id, { places: true }))
+    // What the app keeps (`end_time < now`): the 3 free nights, never 0.
+    expect((res.data.events as { end_time: string }[]).filter((e) => new Date(e.end_time).getTime() < Date.now())).toHaveLength(3)
+
+    // Paged: the same 5, once each, and nothing older.
+    const p1 = await attendance(me.token, "?page=1&limit=4")
+    const p2 = await attendance(me.token, "?page=2&limit=4")
+    expect([...p1.data.events, ...p2.data.events].map((e) => (e as { id: string }).id)).toEqual(ids)
+
+    // With Plus every night is listed and nothing is locked.
+    await plus(me.id)
+    const paid = await attendance(me.token)
+    expect([paid.data.events.length, paid.data.lockedCount]).toEqual([7, 0])
+  })
+
+  it("locks nothing while 3 or fewer nights have ended, however many are still on (S-1)", async () => {
+    process.env.PLUS_GATING = "Bengaluru"
+    const me = await person()
+    await nightsOut(me.id, 3, { daysAgo: 3 })
+    await nightsOut(me.id, 2, { daysAgo: 0.01, runningFor: 6 * HOUR })
+    const res = await attendance(me.token)
+    expect([res.data.events.length, res.data.lockedCount, res.data.pagination.totalCount]).toEqual([5, 0, 5])
   })
 
   it("locks nothing for 3 nights or fewer, and gives away no trial over it", async () => {

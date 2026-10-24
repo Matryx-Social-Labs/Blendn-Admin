@@ -289,7 +289,7 @@ export async function decideEventClaim(
     if (refusal) {
       throw new Refusal(
         refusal === "already_claimed"
-          ? "Somebody else's claim was approved first."
+          ? "Somebody else’s claim was approved first."
           : "This event is running. Decide once the room has closed."
       )
     }
@@ -316,7 +316,7 @@ export async function decideEventClaim(
           where: { id: claim.event.id, claimed_at: null },
           data: { organizer_org_id: orgId, claimed_at: new Date() },
         })
-        if (handed.count !== 1) throw new Refusal("Somebody else's claim was approved first.")
+        if (handed.count !== 1) throw new Refusal("Somebody else’s claim was approved first.")
       }
 
       // Conditional on still pending: of two decisions racing, one writes and
@@ -362,7 +362,7 @@ export async function decideEventClaim(
     })
   } catch (error) {
     if (violatedConstraint(error, "event_claims_one_approved_per_event")) {
-      throw new Refusal("Somebody else's claim was approved first.")
+      throw new Refusal("Somebody else’s claim was approved first.")
     }
     // Postgres chose this transaction to lose a lock cycle: somebody else's decision went first.
     if (isWriteConflict(error)) throw new Refusal(ALREADY_DECIDED)

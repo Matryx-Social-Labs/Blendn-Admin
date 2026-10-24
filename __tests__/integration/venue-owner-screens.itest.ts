@@ -98,7 +98,7 @@ describe("venues.floors", () => {
     const id = await venue()
     await db.venues.update({ where: { id }, data: { created_by_org_id: creatorOrg } })
     as(creatorUser, "organizer")
-    await expect(updateVenue(id, { floors: 3 })).rejects.toThrow("Only the venue's owner or an admin sets its floors.")
+    await expect(updateVenue(id, { floors: 3 })).rejects.toThrow("Only the venue’s owner or an admin sets its floors.")
     expect(await floorsOf(id)).toBeNull()
     // The control: the same caller may still rename it, so the refusal is about floors.
     await updateVenue(id, { name: testId("Renamed") })
@@ -111,7 +111,7 @@ describe("venues.floors", () => {
     expect(await floorsOf(id)).toBeNull()
   })
 
-  it("refuses an id that is not a venue's, as not found", async () => {
+  it("refuses an id that is not a venue’s, as not found", async () => {
     as(admin, "app_admin")
     await expect(updateVenue("not-a-uuid", { floors: 3 })).rejects.toThrow("Venue not found")
   })
@@ -143,7 +143,7 @@ describe("venues.floors", () => {
   })
 })
 
-describe("In the building counts the venue's own live room", () => {
+describe("In the building counts the venue’s own live room", () => {
   it("as a range for the owner and exactly for an admin", async () => {
     const id = await venue({ ownerOrg })
     for (let i = 0; i < 6; i++) {
@@ -197,8 +197,8 @@ describe("over licence says only what the ranges prove (review M8)", () => {
   })
 })
 
-describe("the venue owner's overview", () => {
-  it("leads with the building only while a room runs, and holds back another host's small next booking", async () => {
+describe("the venue owner’s overview", () => {
+  it("leads with the building only while a room runs, and holds back another host’s small next booking", async () => {
     // A venue of its own, so the owner's other fixtures do not crowd the read.
     const soloUser = await makeUser(testId("vo_solo"), "organizer")
     world.users.push(soloUser)
@@ -233,7 +233,7 @@ describe("the venue owner's overview", () => {
     expect(lit.buildings[0].occupancy.rooms[0]).toMatchObject({ venueDay: true, inside: "quiet" })
   })
 
-  it("puts a 19:00 Bengaluru night in the evening slot, on the event's clock", async () => {
+  it("puts a 19:00 Bengaluru night in the evening slot, on the event’s clock", async () => {
     const tzUser = await makeUser(testId("vo_tz"), "organizer")
     world.users.push(tzUser)
     await db.user.update({ where: { id: tzUser }, data: { role: "venue_owner" } })
@@ -269,7 +269,7 @@ describe("the venue owner's overview", () => {
 })
 
 describe("GAP over licence with a quiet room beside a busy one", () => {
-  it("GAP-X18 says over licence when one range's floor proves it, even with a room under 5 in the building", async () => {
+  it("GAP-X18 says over licence when one range’s floor proves it, even with a room under 5 in the building", async () => {
     const id = await venue({ ownerOrg })
     const fill = async (n: number) => {
       const night = await realEvent(id, { startsInMin: -30, link: "confirmed" })

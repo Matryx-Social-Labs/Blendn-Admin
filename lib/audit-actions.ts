@@ -162,7 +162,7 @@ export async function getAuditLog(filters: AuditFilters = {}): Promise<AuditPage
   const actorMap = new Map(
     actors.map((a) => [
       a.id,
-      !isAdmin && a.role === "app_admin" ? { id: "blendn", name: "Blend'n", email: "" } : { id: a.id, name: a.name, email: a.email },
+      !isAdmin && a.role === "app_admin" ? { id: "blendn", name: "Blend’n", email: "" } : { id: a.id, name: a.name, email: a.email },
     ])
   )
 

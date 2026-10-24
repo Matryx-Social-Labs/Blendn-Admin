@@ -155,6 +155,22 @@ const LIVE_REAL_EVENT = Prisma.sql`
 `
 
 /**
+ * Ended or still running, by the event's `end_time` against `now`: the app's
+ * "past" is `end_time < now`. The Blendn+ history gate counts and lists the
+ * ended ones (`lib/plus.ts`), so its count and its free list share this one
+ * predicate: a night still running is tonight, never one of the free slots.
+ */
+export type NightsWhen = { ended: boolean; now: Date }
+
+function endedClause(when?: NightsWhen) {
+  if (!when) return Prisma.empty
+  // any-kind: narrows the caller's own predicate by the clock, and a person's places stay among their nights (D-6).
+  return when.ended
+    ? Prisma.sql`AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.end_time < ${when.now})`
+    : Prisma.sql`AND EXISTS (SELECT 1 FROM events e WHERE e.id = event_check_ins.event_id AND e.end_time >= ${when.now})`
+}
+
+/**
  * How many distinct *events* this person has attended.
  *
  * `_count.event_check_ins` on a user counts attendance-days, so somebody whose
@@ -169,7 +185,7 @@ export async function distinctEventsAttended(
    * else's view of them — how many venue days somebody has is a trail of where
    * they go out, for nothing a stranger needs (step 4 review).
    */
-  opts: { places: boolean } = { places: false }
+  opts: { places: boolean; when?: NightsWhen } = { places: false }
 ): Promise<number> {
   const [row] = await db.$queryRaw<{ events: bigint }[]>`
     SELECT COUNT(DISTINCT event_id) AS events
@@ -178,6 +194,7 @@ export async function distinctEventsAttended(
       AND status::text IN (${Prisma.join(ATTENDED)})
       AND kind = 'attendee'
       ${opts.places ? LIVE_EVENT : LIVE_REAL_EVENT}
+      ${endedClause(opts.when)}
   `
   return Number(row?.events ?? 0)
 }
@@ -200,7 +217,7 @@ export async function distinctEventsAttended(
  */
 export async function attendedEventIds(
   userId: string,
-  opts: { limit: number; skip: number; after?: { at: Date; id: string } }
+  opts: { limit: number; skip: number; after?: { at: Date; id: string }; when?: NightsWhen }
 ): Promise<Array<{ event_id: string; first_seen: Date }>> {
   return db.$queryRaw<Array<{ event_id: string; first_seen: Date }>>`
     SELECT event_id, first_seen FROM (
@@ -212,6 +229,7 @@ export async function attendedEventIds(
         AND status::text IN (${Prisma.join(ATTENDED)})
         AND kind = 'attendee'
         ${LIVE_EVENT}
+        ${endedClause(opts.when)}
       ORDER BY event_id, COALESCE(check_in_time, created_at) ASC
     ) AS attended
     ${opts.after ? Prisma.sql`WHERE (first_seen, event_id) < (${opts.after.at}::timestamptz, ${opts.after.id}::uuid)` : Prisma.empty}

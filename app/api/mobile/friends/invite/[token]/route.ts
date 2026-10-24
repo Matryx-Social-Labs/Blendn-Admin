@@ -39,7 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { token } = await params
     // `errorCode` stays NOT_FOUND; one reason for every way a link can fail.
     const notFound = () =>
-      errorResponse("This invite link doesn't work any more", 404, ErrorCode.NOT_FOUND, ErrorCode.INVITE_UNAVAILABLE)
+      errorResponse("This invite link doesn’t work any more", 404, ErrorCode.NOT_FOUND, ErrorCode.INVITE_UNAVAILABLE)
     if (!INVITE_TOKEN.test(token)) return notFound()
 
     const invite = await db.friend_invites.findUnique({

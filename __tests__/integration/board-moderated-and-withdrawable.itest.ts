@@ -86,7 +86,7 @@ beforeAll(async () => {
   stranger = await poster("bmw-stranger")
 })
 
-describe("a post gets the room's checks first", () => {
+describe("a post gets the room’s checks first", () => {
   it("stores an ordinary post", async () => {
     const res = await post(author.token, "anyone going from Indiranagar?")
     expect(res.status).toBe(201)
@@ -102,7 +102,7 @@ describe("a post gets the room's checks first", () => {
   it("refuses abuse, without teaching the filter, and stores nothing", async () => {
     const res = await post(author.token, "you are a retard")
     expect(res.status).toBe(422)
-    expect((await res.json()).error).toBe("This can't go on the board.")
+    expect((await res.json()).error).toBe("This can’t go on the board.")
     expect(await db.board_posts.count({ where: { event_id: eventId, body: { contains: "retard" } } })).toBe(0)
   })
 })
@@ -117,14 +117,14 @@ describe("the author can take a post back", () => {
     expect(listed.data.posts.map((p) => p.id)).not.toContain(created.data.id)
   })
 
-  it("cannot withdraw somebody else's — a 404, and the post stands", async () => {
+  it("cannot withdraw somebody else’s — a 404, and the post stands", async () => {
     const created = (await (await post(author.token, "sharing an auto after")).json()) as { data: { id: string } }
     expect((await withdraw(stranger.token, created.data.id)).status).toBe(404)
     expect((await db.board_posts.findUniqueOrThrow({ where: { id: created.data.id } })).deleted_at).toBeNull()
   })
 })
 
-describe("a request's message gets the same checks, and a withdrawn post's words leave with it", () => {
+describe("a request’s message gets the same checks, and a withdrawn post’s words leave with it", () => {
   it("refuses a message with a phone number, and sends nothing", async () => {
     const created = (await (await post(author.token, "two seats from Koramangala")).json()) as { data: { id: string } }
     const res = await ask(stranger.token, created.data.id, "text me on 98765 43210")
@@ -133,7 +133,7 @@ describe("a request's message gets the same checks, and a withdrawn post's words
     expect(await db.board_requests.count({ where: { post_id: created.data.id } })).toBe(0)
   })
 
-  it("stops showing a withdrawn post's body in the requester's list", async () => {
+  it("stops showing a withdrawn post’s body in the requester’s list", async () => {
     const created = (await (await post(author.token, "leaving MG Road at 7, 2 seats")).json()) as { data: { id: string } }
     expect((await ask(stranger.token, created.data.id, "could I join?")).status).toBe(201)
     const theirs = async () => {

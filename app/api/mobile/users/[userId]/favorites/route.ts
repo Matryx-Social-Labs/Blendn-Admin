@@ -43,7 +43,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * There is no cross-user use case for this endpoint.
      */
     if (authUser.userId !== userId) {
-      return forbiddenResponse("Cannot view another user's favorites")
+      return forbiddenResponse("Cannot view another user’s favorites")
     }
 
     // Parse query parameters

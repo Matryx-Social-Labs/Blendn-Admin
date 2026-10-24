@@ -14,6 +14,7 @@ import { checkKeywords } from "@/lib/moderation/keyword-filter"
 import { checkTextContent } from "@/lib/moderation/openai-moderation"
 import { checkSpam } from "@/lib/moderation/spam-detector"
 import { deliverOffer } from "@/lib/offers/deliver"
+import { regularsActive } from "@/lib/offers/person"
 import { codeMatches, normaliseCode } from "@/lib/offers/pass-code"
 import { audienceBand, nextOfferAt, OFFERS_PER_WEEK, sentThisWeek, type AudienceBand } from "@/lib/offers/venue"
 import { activeMembership } from "@/lib/org-membership"
@@ -89,8 +90,8 @@ import { venueDayBounds } from "@/lib/venue-day"
  * member at the door.
  */
 
-const NOT_YOUR_VENUE = "This venue isn't yours to send offers from."
-const NOT_A_PASS_HERE = "That code isn't a live pass here. Ask them to open the pass again."
+const NOT_YOUR_VENUE = "This venue isn’t yours to send offers from."
+const NOT_A_PASS_HERE = "That code isn’t a live pass here. Ask them to open the pass again."
 const UNDER_FLOOR = `Fewer than ${MIN_CELL} regulars right now, so nothing was sent. A regular has come on ${REGULAR_NIGHTS} or more nights in the last ${REGULAR_WINDOW_DAYS}.`
 const MAX_DAYS = 14
 /** A pass shown in the last three minutes is one being shown at the door. */
@@ -106,7 +107,7 @@ const VENUE_BACKSTOP = 100
 const VENUE_BACKSTOP_WINDOW_MS = 10 * 60 * 1000
 const BACKSTOP_DELAY_STEP_MS = 200
 const BACKSTOP_DELAY_MAX_MS = 5000
-const STORE_DOWN = "This can't be checked right now. Try again in a minute."
+const STORE_DOWN = "This can’t be checked right now. Try again in a minute."
 /** Sends a minute per organisation and venue, and door attempts a minute per venue and staff member. */
 const SENDS_PER_MINUTE = 5
 const DOOR_TRIES_PER_MINUTE = 30
@@ -151,11 +152,11 @@ const endInput = z.object({ offerId: z.uuid(), reason: z.string().trim().min(10,
 
 /** Why these words cannot go out, and the category recorded for admins; or null. */
 async function offerTextRefusal(venueId: string, text: string): Promise<{ message: string; category: string } | null> {
-  if (checkKeywords(text)?.action === "hide") return { message: "This can't be sent as an offer.", category: "keyword" }
+  if (checkKeywords(text)?.action === "hide") return { message: "This can’t be sent as an offer.", category: "keyword" }
   const contact = findProfileContactInfo(text)
   if (contact.length > 0) {
     return {
-      message: `${[...new Set(contact.map((c) => c.hint))].join(" ")} An offer can't carry contact details or links: people find you in the app.`,
+      message: `${[...new Set(contact.map((c) => c.hint))].join(" ")} An offer can’t carry contact details or links: people find you in the app.`,
       category: `contact:${[...new Set(contact.map((c) => c.kind))].join(",")}`,
     }
   }
@@ -170,7 +171,7 @@ async function offerTextRefusal(venueId: string, text: string): Promise<{ messag
     }),
   ]).finally(() => clearTimeout(timeout))
   // ponytail: an OpenAI timeout or outage passes, as the room's does; the deterministic checks have run.
-  if (check.checked && check.result) return { message: "This can't be sent as an offer.", category: "openai" }
+  if (check.checked && check.result) return { message: "This can’t be sent as an offer.", category: "openai" }
   return null
 }
 
@@ -192,7 +193,7 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
   const user = await currentUser()
   if (!user) throw new Refusal("Unauthorized")
   const parsed = sendInput.safeParse(input)
-  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "That offer can't be sent.")
+  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "That offer can’t be sent.")
   const { venueId, text, days } = parsed.data
 
   const gate = await senderAt(db, venueId, user.id)
@@ -201,9 +202,17 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
   if (await overLimit(`offer-send:${gate.place.owner_org_id}:${venueId}`, SENDS_PER_MINUTE, MINUTE_MS)) {
     throw new Refusal("Too many tries. Wait a minute and send again.")
   }
-  if (!maySendVenueOffers(user.role, gate.member.role)) throw new Refusal("Only an owner or admin of the venue's organisation can send offers.")
+  if (!maySendVenueOffers(user.role, gate.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
   if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) {
     throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
+  }
+  /*
+   * No offer reaches anybody until regulars is switched on (review M2): only then does the app show "Offers from
+   * places", the switch that turns them off, so nobody gets a promotion with no way to stop it. Existing profiles
+   * still hold the `true` they were given before S-5; whether to reset them is the owner's call when regulars launch.
+   */
+  if (!(await regularsActive({ venueId }))) {
+    throw new Refusal("Offers to regulars aren’t switched on yet, so nothing was sent.", "REGULARS_INACTIVE")
   }
   const refusal = await offerTextRefusal(venueId, text)
   if (refusal) {
@@ -219,7 +228,7 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
     // Again under the lock (L4): the owner, the sender's role and the plan as they are now.
     const held = await senderAt(tx, venueId, user.id)
     if (!held || held.place.owner_org_id !== gate.place.owner_org_id) throw new Refusal(NOT_YOUR_VENUE)
-    if (!maySendVenueOffers(user.role, held.member.role)) throw new Refusal("Only an owner or admin of the venue's organisation can send offers.")
+    if (!maySendVenueOffers(user.role, held.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
     if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro", {}, now, tx))) {
       throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
     }
@@ -334,7 +343,7 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
     })
   } catch (error) {
     if (violatedConstraint(error, "venue_offer_sends_one_pass_a_night")) {
-      throw new Refusal("They've already used a pass here tonight. One a night.")
+      throw new Refusal("They’ve already used a pass here tonight. One a night.")
     }
     if (!(error instanceof Refusal)) logger.error("Pass redemption failed", { venueId, error: error instanceof Error ? error.message : String(error) })
     throw error
@@ -350,7 +359,7 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
 export async function endOffer(input: { offerId: string; reason: string }): Promise<{ endedAt: string }> {
   const admin = await requireAdmin()
   const parsed = endInput.safeParse(input)
-  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "That offer can't be ended.")
+  if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "That offer can’t be ended.")
   const now = new Date()
   const venueId = await db.$transaction(async (tx) => {
     const offer = await tx.venue_offers.findUnique({ where: { id: parsed.data.offerId }, select: { venue_id: true, ends_at: true } })

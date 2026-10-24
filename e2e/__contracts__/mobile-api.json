@@ -442,6 +442,7 @@
       "messages",
       "mute",
       "pagination",
+      "status",
       "write"
     ],
     "nested": {
@@ -686,6 +687,7 @@
     "nested": {
       "events[]": [
         "attendedAt",
+        "categories",
         "city",
         "cover_image_url",
         "end_time",

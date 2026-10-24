@@ -129,7 +129,7 @@ export async function loopClosure(): Promise<LoopStage[]> {
   return [
     { label: "signed up", value: n(row?.signed_up) },
     { label: "onboarded", value: n(row?.onboarded) },
-    { label: "RSVP'd", value: n(row?.rsvpd) },
+    { label: "RSVP’d", value: n(row?.rsvpd) },
     { label: "checked in", value: n(row?.checked_in) },
     // Right after the stage it is a share of. It sat under `conversed`, so three
     // people who had come back read as none because none of them had matched.

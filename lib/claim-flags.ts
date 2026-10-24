@@ -147,8 +147,8 @@ export const FLAG_COPY: Record<ClaimFlag, string> = {
     "Listed on a ticketing platform — a matching email domain proves nothing here. Ask for something else.",
   domain_verified_for_org:
     "Their organisation has proved control of this domain by DNS record.",
-  email_matches_source: "Their email domain matches the listing's.",
-  role_address_at_source: "Filed from a role address at the listing's domain.",
+  email_matches_source: "Their email domain matches the listing’s.",
+  role_address_at_source: "Filed from a role address at the listing’s domain.",
   free_email_provider: "Filed from a free email provider. Not suspicious, not evidence.",
   repeat_claim: "Somebody has claimed this event before.",
   no_organisation_yet: "No account yet — approve their application first; the hand-over then goes to that organisation.",

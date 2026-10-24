@@ -846,7 +846,12 @@ const NotificationSchema = z.object({
   display: z
     .object({
       title: z.string().optional(),
-      context: z.string().optional(),
+      context: z
+        .string()
+        .optional()
+        .describe(
+          "The counterpart, by the name the reader sees it by now, and only while they may: a match's pseudonym (conversation open, no block), the Blend room's name (the room's door admits the reader), the inviting crew (the Crews screen would list the invite: open, not lapsed, the inviter a member and a friend, no block with anyone in it; or a member; the crew neither dissolved nor hidden). Absent otherwise and on every other kind."
+        ),
       visual: z
         .discriminatedUnion("type", [
           z.object({ type: z.literal("photo"), uri: z.string() }),
@@ -863,7 +868,7 @@ const NotificationSchema = z.object({
     })
     .optional()
     .describe(
-      "What the row can say for the reader beyond the push's nameless words, only where they may already see it: a friend request's asker (name and photo) while it waits; a match's room pseudonym; a crew's emblem seed; an event's cover. Absent when it cannot be resolved: draw the kind's own tile. `stack` is not sent."
+      "What the row can say for the reader beyond the push's nameless words, only where they may already see it: a friend request's asker (name and photo) while it waits; a match's room pseudonym (also as `context`); a crew's emblem seed, with `context` naming the Blend's room or the inviting crew while the reader may see them; an event's cover. Absent when it cannot be resolved: draw the kind's own tile. `stack` is not sent."
     ),
   open: z
     .boolean()

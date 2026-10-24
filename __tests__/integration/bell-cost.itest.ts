@@ -13,7 +13,8 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 import { randomUUID } from "crypto"
 import { Client } from "pg"
 import { signAccessToken } from "@/lib/mobile-auth"
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, testId } from "./helpers"
+import { conversationPair } from "@/lib/conversations"
 import { req } from "./go-live-world"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -23,6 +24,7 @@ const users: string[] = []
 const events: string[] = []
 const crews: string[] = []
 const conversations: string[] = []
+const blends: { blend: string; room: string }[] = []
 const tokenOf = (id: string) => signAccessToken(id, `${id}@itest.invalid`)
 
 /** Every statement sent to Postgres while `run` runs: its text and parameters. */
@@ -61,6 +63,29 @@ async function fillBell(viewer: string, count: number) {
   events.push(eventId)
   const crew = await db.crews.create({ data: { name: "Bell crew", created_by: host, emblem_seed: "seed-bell" } as never })
   crews.push(crew.id)
+  /*
+   * Real things behind the rows, so every decoration read runs as it does in production (review M1): an invite the
+   * Crews screen would list (the host a member and the viewer's friend), and a live Blend the viewer is in, its door
+   * read with both crews' members and the viewer's check-in.
+   */
+  await db.crew_members.create({ data: { crew_id: crew.id, user_id: host, role: "owner", consented_reveal_at: new Date() } })
+  const [f1, f2] = conversationPair(host, viewer)
+  await db.friendships.create({ data: { user1_id: f1, user2_id: f2 } })
+  await db.crew_invites.create({ data: { crew_id: crew.id, invited_user_id: viewer, invited_by: host } })
+  const occurrenceId = await occurrenceOf(eventId)
+  const other = await person(`bc-other-${count}`)
+  const [idA, idB] = [randomUUID(), randomUUID()].sort()
+  for (const [id, member] of [[idA, viewer], [idB, other]] as const) {
+    await db.crews.create({ data: { id, name: id === idA ? "Night Owls" : "Early Birds", created_by: member, emblem_seed: `seed-${id}` } })
+    crews.push(id)
+    await db.crew_members.create({ data: { crew_id: id, user_id: member, consented_reveal_at: new Date() } })
+    await db.event_check_ins.create({ data: { event_id: eventId, occurrence_id: occurrenceId, user_id: member, kind: "attendee", status: "checked_in", check_in_time: new Date() } })
+  }
+  const blend = await db.blends.create({ data: { occurrence_id: occurrenceId, a_crew_id: idA, b_crew_id: idB, closes_at: new Date(Date.now() + 12 * 3_600_000) } })
+  const room = await db.chat_groups.create({
+    data: { kind: "blend", blend_id: blend.id, name: "Night Owls × Early Birds", members: { createMany: { data: [{ user_id: viewer }, { user_id: other }] } } },
+  })
+  blends.push({ blend: blend.id, room: room.id })
 
   const kinds = ["friend_request", "crew_invite", "crew_here", "blend", "message_request", "board_request", "match", "event_update", "event_changed", "announcement"] as const
   const rows = []
@@ -71,7 +96,7 @@ async function fillBell(viewer: string, count: number) {
       const asker = await person(`bc-asker-${count}-${i}`)
       data.requestId = (await db.friend_requests.create({ data: { sender_id: asker, recipient_id: viewer } })).id
     } else if (kind === "crew_invite" || kind === "crew_here") data.crewId = crew.id
-    else if (kind === "blend") data.blendId = randomUUID()
+    else if (kind === "blend") data.blendId = blend.id
     else if (kind === "message_request" || kind === "board_request") data.requestId = randomUUID()
     else if (kind === "match") data.conversationId = randomUUID()
     else data.eventId = eventId
@@ -84,14 +109,29 @@ afterAll(async () => {
   await db.friend_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
   await db.private_messages.deleteMany({ where: { conversation_id: { in: conversations } } })
   await db.private_conversations.deleteMany({ where: { id: { in: conversations } } })
+  await db.chat_group_members.deleteMany({ where: { chat_group_id: { in: blends.map((b) => b.room) } } })
+  await db.chat_groups.deleteMany({ where: { id: { in: blends.map((b) => b.room) } } })
+  await db.blends.deleteMany({ where: { id: { in: blends.map((b) => b.blend) } } })
+  await db.event_check_ins.deleteMany({ where: { event_id: { in: events } } })
+  await db.crew_invites.deleteMany({ where: { crew_id: { in: crews } } })
+  await db.crew_members.deleteMany({ where: { crew_id: { in: crews } } })
+  await db.friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.crews.deleteMany({ where: { id: { in: crews } } })
   await db.notifications.deleteMany({ where: { user_id: { in: users } } })
   await cleanup(users, events)
   await closeDb()
 }, 120_000)
 
-/** The most statements one poll can send: the page, eight decoration reads (nine for crews and their members), two relation loads for a friend request's sender, two counts. */
-const MOST_STATEMENTS = 13
+/**
+ * The most statements one poll can send, measured with a REAL live Blend and a real open invite behind the rows
+ * (review M1), so every decoration read runs: the page and its two counts (3); the decoration reads, one per kind
+ * (friend requests, memberships, message and board requests, conversations, events, crews: 7) and the friend
+ * request's sender and profile (2); everybody kept apart from the reader, read once for every door (2); the crew
+ * invite door (the invites, their crews' members, the friends: 4, plus a crew Prisma loads for the relation); and
+ * the Blend door (the Blends, their rooms, crews, members and the reader's check-ins: 5). Each once per page, never
+ * per row: the 10-row and 50-row pages below cost the same, and no statement is sent twice.
+ */
+const MOST_STATEMENTS = 23
 
 it("a 50-row page costs the statements a 10-row page does, once each, and no more than the cap", async () => {
   const small = await person("bc-small")
@@ -103,7 +143,11 @@ it("a 50-row page costs the statements a 10-row page does, once each, and no mor
   const ofTen = await statementsDuring(() => poll(small, 10))
   const ofFifty = await statementsDuring(() => poll(big, 50))
 
-  expect((await ofFifty.result.json()).data.notifications).toHaveLength(50)
+  const fifty = (await ofFifty.result.json()).data.notifications as { kind: string; open?: boolean; display?: { context?: string } }[]
+  expect(fifty).toHaveLength(50)
+  // The real things decorate: the Blend is named through its door, the invite is open and named.
+  expect(fifty.find((n) => n.kind === "blend")?.display?.context).toBe("Night Owls × Early Birds")
+  expect(fifty.find((n) => n.kind === "crew_invite")).toMatchObject({ open: true, display: { context: "Bell crew" } })
   expect(ofTen.statements).toHaveLength(ofFifty.statements.length)
   expect(ofFifty.statements.length).toBeLessThanOrEqual(MOST_STATEMENTS)
   // One read per table, however many rows ask: a statement sent twice is a loop.

@@ -41,7 +41,7 @@ export function outOfRangeMessage(shortfallMetres: number): string {
      * this exact sentence at 45m, and the whole point of that test is that the
      * client once tried to build its own and got it wrong.
      */
-    return `You're about ${metres}m outside the check-in area. Move closer to the venue and try again.`
+    return `You’re about ${metres}m outside the check-in area. Move closer to the venue and try again.`
   }
 
   /*
@@ -51,7 +51,7 @@ export function outOfRangeMessage(shortfallMetres: number): string {
    * precision nobody asked for.
    */
   const km = Math.round(metres / 1000)
-  return `You're about ${km}km from the venue, so check-in isn't available yet. Check in once you're there.`
+  return `You’re about ${km}km from the venue, so check-in isn’t available yet. Check in once you’re there.`
 }
 
 /**

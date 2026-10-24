@@ -349,7 +349,7 @@ export async function declineOnboardingRequest(requestId: string, reason: string
 
   // A decline that reaches the applicant with no reason is worse than none —
   // they reapply identically and the queue gets the same row again.
-  const trimmed = reasonFrom(reason, true, "Give a reason — it's sent to the applicant.") ?? ""
+  const trimmed = reasonFrom(reason, true, "Give a reason — it’s sent to the applicant.") ?? ""
 
   const request = await db.organiser_onboarding_requests.findUnique({
     where: { id: requestId },

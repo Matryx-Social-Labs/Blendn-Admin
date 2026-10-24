@@ -9,6 +9,9 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { UNNAMED } from "@/lib/conversation-identity"
 import { holdingPair, matchSelect, unfriend } from "@/lib/friends"
 import { userIdFromRefIfIdentified } from "@/lib/identity"
+import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
+import { expertiseLabels } from "@/lib/expertise"
+import { profileBadges } from "@/lib/profile-badges"
 import {
   successResponse,
   unauthorizedResponse,
@@ -66,6 +69,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
               occupation: true,
               education: true,
               photos: true,
+              // The about line and badges, as `GET /users/:id` reads them for somebody you may see.
+              work_field: true,
+              expertise: true,
+              languages: true,
+              home_state: true,
+              sun_sign: true,
+              sign_system: true,
+              show_badges: true,
+              shows_up_badge: true,
             },
           },
           user_interests: { select: { category: { select: { id: true, name: true, slug: true, icon: true } } } },
@@ -92,6 +104,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       age: ageFrom(p),
       location: await normalizeLocationToCity(p?.location),
       interests: user.user_interests.map((ui) => ui.category),
+      /*
+       * The about line, as `GET /users/:id` sends it to somebody who may see
+       * who this is (a friend always may): the field of work and expertise
+       * (labels), and the Tier B set (plan v2 §8.5) a card keeps back until then.
+       */
+      work_field: p?.work_field ?? null,
+      expertise: expertiseLabels(p?.expertise),
+      languages: languageLabels(p?.languages),
+      homeState: homeStateLabel(p?.home_state),
+      sign: signLabel(p?.sun_sign, p?.sign_system),
+      // Badges under the profile's rule: shown unless they turned them off (`show_badges`). Derived, never stored.
+      ...(p && p.show_badges !== false ? { badges: await profileBadges(user.id, p.shows_up_badge) } : {}),
       friendsSince: friendship.created_at,
       // An open DM, so "Message" goes straight to it. A closed one is not
       // offered: leaving a conversation is the pair's own decision. Nor is one

@@ -18,7 +18,7 @@ import { loopClosure } from "@/lib/loop-closure"
 
 it("puts came back after checked in, and gives matched its base", async () => {
   const stages = await loopClosure()
-  expect(stages.map((s) => s.label)).toEqual(["signed up", "onboarded", "RSVP'd", "checked in", "came back", "matched", "conversed"])
+  expect(stages.map((s) => s.label)).toEqual(["signed up", "onboarded", "RSVP’d", "checked in", "came back", "matched", "conversed"])
   expect(stages.find((s) => s.label === "came back")?.value).toBe(3)
   expect(stages.find((s) => s.label === "matched")?.base).toBe("checked in")
 })

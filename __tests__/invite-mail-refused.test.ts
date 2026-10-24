@@ -51,7 +51,7 @@ describe("an invite that could not be emailed", () => {
     const r = await inviteMember("org_1", "someone@blendn.app", "staff")
     expect(r.ok).toBe(true)
     expect(r.message).toContain("someone@blendn.app")
-    expect(r.message).not.toMatch(/isn't configured/)
+    expect(r.message).not.toMatch(/isn’t configured/)
     expect(r.link).toMatch(/^http:\/\/localhost\/invite\?token=/)
     expect(r.emailFailure).toBe("provider_error")
     // The audit row says why, not just that it didn't.
@@ -62,7 +62,7 @@ describe("an invite that could not be emailed", () => {
     configured = false
     const r = await inviteMember("org_1", "someone@blendn.app", "staff")
     expect(mockSend).not.toHaveBeenCalled()
-    expect(r.message).toMatch(/isn't configured/)
+    expect(r.message).toMatch(/isn’t configured/)
     expect(r.emailFailure).toBe("not_configured")
     expect(r.link).toBeDefined()
   })

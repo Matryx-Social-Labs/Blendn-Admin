@@ -204,7 +204,7 @@ describe("who to show as the host", () => {
     })).toEqual({ name: "The Humming Tree", isPlatform: false })
   })
 
-  it("never shows the curating admin's name on a public card", () => {
+  it("never shows the curating admin’s name on a public card", () => {
     /*
      * The admin who ran the curation is not the host. Putting their name on a
      * card would be wrong AND a small privacy leak — the one place a founder's
@@ -323,10 +323,10 @@ describe("two admins cannot both approve", () => {
     expect(sql).toMatch(/WHERE "status" = 'approved'/)
   })
 
-  it("turns the loser's constraint violation into the right sentence", () => {
+  it("turns the loser’s constraint violation into the right sentence", () => {
     const src = code(ACTIONS)
     expect(src).toMatch(/event_claims_one_approved_per_event/)
-    expect(src).toMatch(/Somebody else's claim was approved first\./)
+    expect(src).toMatch(/Somebody else’s claim was approved first\./)
   })
 
   it("wraps the transaction, not just the pre-check", () => {

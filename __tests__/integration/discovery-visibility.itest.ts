@@ -327,3 +327,121 @@ describe("age is checked at the door, not in the feed", () => {
     expect(JSON.stringify(body)).toMatch(/Add your age to your profile/)
   })
 })
+
+describe("GET /events?search= ranks by where the word is (S-6)", () => {
+  it("title, then venue, then only the description; by start time within each; paging keeps the order", async () => {
+    const t = nextToken()
+    const v = await viewer("dv_rank")
+    // Earliest first, so date order alone would be exactly backwards.
+    const make = async (hoursFromNow: number, fields: { title?: string; description?: string; venue_name?: string }) => {
+      const row = await db.events.create({
+        data: {
+          slug: testId("dvr"),
+          title: fields.title ?? "A night out",
+          description: fields.description ?? "Nothing to see",
+          venue_name: fields.venue_name ?? "Somewhere",
+          start_time: new Date(Date.now() + hoursFromNow * HOUR),
+          end_time: new Date(Date.now() + (hoursFromNow + 2) * HOUR),
+          timezone: "UTC",
+          status: "published",
+          visibility: "public",
+          organizer_id: organiser,
+        },
+      })
+      events.push(row.id)
+      return row.id
+    }
+    const inDescription = await make(1, { title: "AI in Production", description: `${t} and snacks after` })
+    const atVenue = await make(2, { venue_name: `${t} Roasters` })
+    const inTitleLater = await make(4, { title: `${t} cupping, round two` })
+    const inTitle = await make(3, { title: `${t} cupping` })
+
+    expect(await listedIds(v.token, t)).toEqual([inTitle, inTitleLater, atVenue, inDescription])
+
+    const page = async (n: number) => {
+      const res = await listRoute.GET(
+        new NextRequest(`http://localhost/api/mobile/events?limit=3&page=${n}&search=${t}`, { headers: { authorization: `Bearer ${v.token}` } })
+      )
+      const body = await res.json()
+      return { ids: body.data.events.map((e: { id: string }) => e.id), total: body.data.pagination?.totalCount ?? body.pagination?.totalCount }
+    }
+    const [p1, p2] = [await page(1), await page(2)]
+    expect([...p1.ids, ...p2.ids]).toEqual([inTitle, inTitleLater, atVenue, inDescription])
+    expect(p1.total).toBe(4)
+  })
+})
+
+describe("GET /events?search= bounds (review M3)", () => {
+  const ask = (auth: string, q: string) =>
+    listRoute.GET(new NextRequest(`http://localhost/api/mobile/events?${q}`, { headers: { authorization: `Bearer ${auth}` } }))
+
+  it("never refuses a short search: 1 character is filtered in date order, empty is no filter; over 100 is SEARCH_TOO_LONG (review N1)", async () => {
+    const t = nextToken()
+    const v = await viewer("dv_short")
+    const ids = async (q: string) => {
+      const res = await ask(v.token, `limit=100&${q}`)
+      expect(res.status).toBe(200)
+      return ((await res.json()).data.events as { id: string }[]).map((e) => e.id)
+    }
+    // A title match starting later than a description-only match: ranked, the title leads; in date order, it does not.
+    const make = async (hoursFromNow: number, title: string, description: string) => {
+      const row = await db.events.create({
+        data: { slug: testId("dvs"), title, description, start_time: new Date(Date.now() + hoursFromNow * HOUR), end_time: new Date(Date.now() + (hoursFromNow + 2) * HOUR), timezone: "UTC", status: "published", visibility: "public", organizer_id: organiser },
+      })
+      events.push(row.id)
+      return row.id
+    }
+    const early = await make(1, "A night out", `${t} inside`)
+    const late = await make(2, `${t} in the title`, "x")
+    expect(await ids(`search=${t}`)).toEqual([late, early])
+
+    // One character: answered, in date order (the earlier one first), never a 400.
+    const one = await ids(`search=${t[0]}`)
+    expect(one).toEqual(expect.arrayContaining([early, late]))
+    expect(one.indexOf(early)).toBeLessThan(one.indexOf(late))
+
+    // Empty, or only spaces: no search at all, the unfiltered list.
+    const all = await ids("")
+    for (const q of ["search=", "search=%20%20"]) expect(await ids(q)).toEqual(all)
+
+    const long = await ask(v.token, `search=${"x".repeat(101)}`)
+    const body = await long.json()
+    expect([long.status, body.errorCode, body.reasonCode]).toEqual([400, "VALIDATION_FAILED", "SEARCH_TOO_LONG"])
+    expect((await ask(v.token, `search=${"x".repeat(100)}`)).status).toBe(200)
+  })
+
+  it("past the ranking ceiling, a search is in date order with the true count, never a capped one", async () => {
+    const t = nextToken()
+    const v = await viewer("dv_ceiling")
+    const slugPrefix = testId("dvc")
+    const now = Date.now()
+    // 501 matches by description, the earliest first; then one by title, starting last.
+    await db.events.createMany({
+      data: Array.from({ length: 501 }, (_, i) => ({
+        slug: `${slugPrefix}-${i}`,
+        title: "A night out",
+        description: `${t} somewhere`,
+        start_time: new Date(now + (i + 1) * 60_000),
+        end_time: new Date(now + 3 * HOUR + (i + 1) * 60_000),
+        timezone: "UTC",
+        status: "published" as const,
+        visibility: "public" as const,
+        organizer_id: organiser,
+      })),
+    })
+    const byTitle = await db.events.create({
+      data: { slug: `${slugPrefix}-title`, title: `${t} by title`, description: "x", start_time: new Date(now + 10 * HOUR), end_time: new Date(now + 12 * HOUR), timezone: "UTC", status: "published", visibility: "public", organizer_id: organiser },
+    })
+    try {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+      const body = await (await ask(v.token, `limit=5&search=${t}`)).json()
+      expect(body.data.pagination.totalCount).toBe(502)
+      // Date order: the title match, starting last, is not first.
+      expect(body.data.events[0].id).not.toBe(byTitle.id)
+      expect(warn.mock.calls.flat().join(" ")).toContain("Search ranking hit its ceiling")
+      warn.mockRestore()
+    } finally {
+      await db.events.deleteMany({ where: { slug: { startsWith: slugPrefix } } })
+    }
+  })
+})

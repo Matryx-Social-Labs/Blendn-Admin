@@ -128,6 +128,9 @@ export const EventChatResponseSchema = z
   .object({
     chatGroupId: z.string().uuid(),
     chatGroupName: z.string(),
+    status: z
+      .enum(["active", "locked", "archived"])
+      .describe("The room's own state, the same for everybody in it: `locked` is the organiser's lock; `archived` a closed room's record. `write.reason` is the caller's answer and names a mute or ban first. Additive."),
     write: RoomWriteSchema,
     mute: RoomMuteSchema,
     // Every key is sent on this read, the ones ChatMessage leaves optional too.
@@ -172,6 +175,7 @@ export const ChatGroupSchema = z
       .object({
         id: z.string().uuid(),
         content: z.string(),
+        type: z.string().describe("The message's kind (`text`, `image`, `system`, `announcement`…). A `system` line is the room's: preview it without a sender. Additive: absent from an older server."),
         createdAt: z.string().datetime(),
         user: z.object({ id: RoomUserRefSchema, name: z.string() }),
       })
@@ -224,6 +228,9 @@ export const ChatRoomListItemSchema = z
       .object({
         id: z.string().uuid(),
         content: z.string(),
+        type: z
+          .string()
+          .describe("The message's kind. A crew's \"liked … for the crew\" line is `system` (metadata kind `crew_like`): preview it without \"You:\". Additive."),
         createdAt: z.string().datetime(),
         user: z
           .object({ id: RoomUserRefSchema, name: z.string() })

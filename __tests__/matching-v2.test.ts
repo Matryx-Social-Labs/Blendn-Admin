@@ -89,7 +89,7 @@ describe("Both CSK — in RCB country outranks Both RCB (MV-U01)", () => {
     expect(ranked.findIndex((m) => m.userId === "rcb-fan")).toBeGreaterThan(0)
   })
 
-  it("says so, naming the room's team", () => {
+  it("says so, naming the room’s team", () => {
     const iplTeams = new Map([
       ["csk", "CSK"],
       ["rcb", "RCB"],
@@ -230,7 +230,7 @@ describe("the Tier B budget in orderLabels (MV-U02)", () => {
     expect(cardFor({ max: 2, tierB: 0 }, designer(), designer()).showWorkField).toBe(false)
   })
 
-  it("a viewer's own Tier B counts only if set before their check-in (H1)", () => {
+  it("a viewer’s own Tier B counts only if set before their check-in (H1)", () => {
     const mine = traits({ languages: ["tulu"], homeState: "kerala", sign: { slug: "leo", system: "western" }, workField: "design", answers: { coffee_or_chai: "a" } })
     const checkedIn = new Date("2026-10-10T20:00:00Z")
     expect(viewerTierB(mine, null, checkedIn)).toBe(mine)
@@ -271,7 +271,7 @@ describe("what a card says (MV-U03)", () => {
 
   it("languages, home state and this-or-that", () => {
     expect(say({ languages: ["kannada_learning"] }, { languages: ["kannada_learning", "tamil"] })).toEqual([
-      "You're both learning Kannada",
+      "You’re both learning Kannada",
     ])
     expect(say({ homeState: "abroad" }, { homeState: "abroad" })).toEqual(["You both grew up abroad"])
     expect(say({ answers: { metro_or_auto: "b" } }, { answers: { metro_or_auto: "b" } })).toEqual([
@@ -325,7 +325,7 @@ describe("badges from check-ins (MV-U04)", () => {
 describe("crew-held signals and size balance (MV-U05)", () => {
   const m = (interestIds: string[], t: Partial<DisplayTraits> = {}) => ({ interestIds, traits: traits(t) })
 
-  it("two members and a third of the crew, never one person's taste", () => {
+  it("two members and a third of the crew, never one person’s taste", () => {
     expect(crewHoldsAt(2)).toBe(2)
     expect(crewHoldsAt(12)).toBe(4)
     expect(crewHeld([m(["techno"]), m([]), m([])]).has("techno")).toBe(false)
@@ -381,7 +381,7 @@ describe("crew-held signals and size balance (MV-U05)", () => {
     ])
   })
 
-  it("damps a crew more than twice the other's size, and only crew to crew", () => {
+  it("damps a crew more than twice the other’s size, and only crew to crew", () => {
     expect(sizeBalance(2, 4)).toBe(1)
     expect(sizeBalance(2, 5)).toBe(0.5)
     expect(sizeBalance(6, 2)).toBe(0.5)

@@ -435,6 +435,10 @@ time: `nextEvent` on `GET /venues`, and `tonight` and each `upcoming` item on
 `GET /venues/:venueId` and `GET /venues/:venueId/upcoming`. Additive; an older
 server omits it, so fall back to the venue's or the phone's zone when absent.
 
+Each row also carries `categories`, `[{ id, name, slug, icon }]` as the
+favourites list sends them (additive; `[]` for a `venue_day`), for the Past
+row's category plate.
+
 Three things are worth knowing before building against it.
 
 **`/me`, and there is no `/users/:id/attendance`.** Attendance history is where
@@ -453,12 +457,18 @@ on the profile, by construction: the list and the count share one predicate, so
 they cannot disagree. Working an event as staff is not attending it, and
 appears in neither.
 
-**Your latest 3 nights are free; the rest are Blendn+** where it is gated (the
-city of your latest night). This list is what "night history" means for
-Blendn+; a room's own messages follow the room's rules, not Plus. Without Plus there, `events` stops at the third,
-the pages stop with it (`totalCount` is 3), and `lockedCount` says how many more
-there are — show "‹n› more nights with Blendn+". `lockedCount` is 0 whenever
-nothing is hidden.
+**Your latest 3 ended nights are free; the older ended ones are Blendn+** where
+it is gated (the city of your latest night). This list is what "night history"
+means for Blendn+; a room's own messages follow the room's rules, not Plus.
+"Ended" is `end_time < now`, the app's own "past". Without Plus there, `events`
+is every night still running (tonight, never locked, never one of the 3) and
+your latest 3 ended nights, newest first; the pages stop there (`totalCount` is
+that number), and `lockedCount` is how many ended nights are older — show
+"‹n› more nights with Blendn+". `lockedCount` is 0 whenever nothing is hidden,
+including while 3 or fewer of your nights have ended. `totalCount +
+lockedCount` stays `stats.eventsAttended`. (Before S-1, 2026-10-24, the 3 free
+slots were the latest by check-in, so on a night out they were the nights still
+running and the app, which lists only ended ones, showed none.)
 
 An event the platform has since deleted is in neither the list nor the count,
 so every page is full and `totalCount` is the number of events listed
@@ -511,6 +521,10 @@ GET /api/mobile/me/rsvps?page=1&limit=20
 
 - **`/me` only**, like attendance: where somebody is going is the same
   correlation, in the future tense.
+- **`categories`** (additive, 2026-10-24): each event's categories as
+  `GET /users/:userId/favorites` sends them, `[{ id, name, slug, icon }]`, read
+  in the same query. The app draws the row's category plate from `slug`.
+  `GET /me/attendance` rows carry the same (`[]` for a `venue_day`).
 - **`going` and `waitlisted`**, with `rsvpStatus` saying which, so a waitlisted
   place is never shown as a confirmed one. Not `maybe` or `not_going`.
 - **`visibility`** is `public`, `unlisted` or `private`, so a card can say an
@@ -653,19 +667,34 @@ event's change and a report's outcome have no switch here. Stored as
     `visual` `{ type: "photo", uri }`, the asker exactly as `GET /friends/requests`
     shows them to the same person.
   - `match`: `visual` `{ type: "creature", pseudonym }`, the other side's room
-    pseudonym. Never a name or a photo.
+    pseudonym, and `context` the same pseudonym. Never a name or a photo.
   - `crew_invite`, `crew_here`: `visual` `{ type: "emblem", seed }`, the crew's
-    `emblem_seed`; `blend`: the Blend's id as the seed. No crew name (it is
-    user-typed text).
+    `emblem_seed`; `blend`: the Blend's id as the seed.
+  - `context` (S-2, 2026-10-24) names the counterpart by the name the reader
+    sees it by in the app at that moment, so rows of one kind can be told
+    apart, and only while they still may:
+    - `match`: the other side's pseudonym (never a name, revealed or not),
+      while the conversation is open and neither has blocked the other;
+    - `blend`: the Blend room's own name ("A × B", or "A + 1" for one person),
+      while the room's door admits the reader: open and on its clock, no side
+      dissolved or hidden, no block across the sides;
+    - `crew_invite`: the crew's name ("‹crew› asked you"), while the Crews
+      screen would list the invite (open and not lapsed, the inviter still a
+      member and your friend, nobody in the crew kept apart from you: the
+      accept's own rule), or you are a member; and the crew neither dissolved
+      nor hidden. A crew renamed after you left is never named to you, and a
+      block is never told by a name appearing or not.
+    Otherwise absent. The lock-screen push stays nameless.
   - `event_update`, `event_changed`, `announcement`, `waitlist_promoted`,
     `rating_request`: `visual` `{ type: "event", cover, badge, cancelled }`
     (`badge` `clock`, `map-pin` for a venue change, `megaphone`, `star`;
     `cancelled` when the event is cancelled or the reason is).
-  - **Not sent:** `stack` (nothing aggregates rows yet) and `context` (the app
-    already writes "{event} · {when}"). A row the server cannot resolve (the request
+  - **Not sent:** `stack` (nothing aggregates rows yet), and `context` on event
+    rows (the app already writes "{event} · {when}"). A row the server cannot resolve (the request
     is gone, the event deleted) carries no `display`: draw the kind's own tile.
 - **`open`**, for `friend_request`, `crew_invite`, `message_request` and
-  `board_request`: whether it is still the reader's to answer. `false` once it is
+  `board_request`: whether it is still the reader's to answer (a `crew_invite`:
+  whether the Crews screen would list it, the same rule as its `context`). `false` once it is
   accepted, declined, dismissed, withdrawn or gone; absent on every other kind.
 - **`data.reason`** on `event_update` and `event_changed`: `cancelled`, `time` or
   `venue`, the most important when several moved (`data.changed` has them all,
@@ -1049,7 +1078,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 |-------|------|---------|-------------|
 | page | int | 1 | Page number |
 | limit | int | 20 | Items per page (max 100) |
-| search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi |
+| search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi. Trimmed; empty is no search. At most 100 characters, else `400 VALIDATION_FAILED` with `reasonCode: SEARCH_TOO_LONG`. One character is answered, filtered in date order (not ranked). From 2 characters, with the default `sortBy=start_time`, results are ranked by where the word is: title, then venue, then city, then only the description; by start time within each (S-6). Past 500 matches the search is in date order instead, with the true `totalCount` (never a capped one). `sortBy=distance` or `created_at` orders as asked |
 | city | string | - | **Scope the list to one city.** Exact, case-insensitive. Values come from `GET /events/cities` |
 | lat | float | - | Latitude — sorts and labels by distance, never excludes |
 | lon | float | - | Longitude |
@@ -1626,7 +1655,9 @@ a Blend's only while it is open (`closesAt` is its clock — gone from the list
 then, sweeper or not) and never to two people a block across it parted.
 `lastMessage.user` is named as that room names people: a crewmate's first
 name; in a Blend, tonight's pseudonym (a reveal names people on `GET /blends`,
-never in the chat). Own list rather
+never in the chat). `lastMessage.type` (S-7, additive, on `groups` rows too) is
+the message's kind: a crew's "liked … for the crew" line is `system`, so the
+preview drops "You:" before it. Own list rather
 than more `groups` rows because an installed app reads `event` off every
 `groups` row, and these rooms have none. A hidden crew's chat stays listed to
 its members — hiding takes a crew off every surface outside it, not its own
@@ -1737,8 +1768,9 @@ a page edge neither repeats nor loses a row that shares an instant: RSVPs by
 start time then RSVP id, saves newest first then id, nights newest first then
 event id. A cursor that is not ours, or does not name a row id, is `400`. With
 none of `page`, `limit` and `cursor` (an installed build), up to 200. Where
-Blendn+ gates `/me/attendance`, the cursor pages the free nights and stops at
-them (`lockedCount`, `totalCount` as before).
+Blendn+ gates `/me/attendance`, the cursor pages the free nights (those still
+running and the latest 3 ended) and stops at them (`lockedCount`, `totalCount`
+as before).
 
 ### GET /conversations
 Each conversation carries **`fromMatch`** — it opened from a mutual like rather
@@ -1774,6 +1806,11 @@ when allowed and for `muted`, `banned` and `left`. The composer used to guess: e
 back as a single `NOT_CHECKED_IN` covering several unrelated situations, so the
 app either showed the wrong reason or let someone type a paragraph and then threw
 it away. `closesAt` lets the room show an honest countdown.
+
+**`status`** (S-12, additive) is the room's own state, `active`, `locked`
+(the organiser's lock) or `archived`, the same for everybody in it. Read the lock from it,
+not from `write.reason`: that is the caller's own answer, and names their
+mute or ban before a lock.
 
 **Before the room opens.** An event's room opens 24 hours before it starts. A
 person entitled to it (RSVP `going`, or the event saved) who asks earlier — `GET`
@@ -2313,7 +2350,7 @@ already is: counted in the headcount, listed nowhere.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`, `?q=` (a word-prefix search of their names; `count` is then the filtered total); see *Lists are paged* |
-| GET | `/friends/:userId` | A friend's profile (404 for anyone else) |
+| GET | `/friends/:userId` | A friend's profile (404 for anyone else). Carries the about line as `GET /users/:userId` sends it to somebody who may see who this is: `work_field`, `expertise`, `languages`, `homeState`, `sign` (labels), and `badges` unless they turned `show_badges` off (additive, 2026-10-24) |
 | DELETE | `/friends/:userId` | Unfriend — silent, leaves any DM alone |
 | POST | `/friends/:userId/conversation` | Open (or find) a DM with a friend → `{ conversationId }` |
 | GET | `/friends/invite` | My invite link `{ token, url }`, made on first ask |
@@ -3333,7 +3370,7 @@ be seen.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null }` — your open conversation and any pending message request between you; absent otherwise |
+| GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null, youRevealed, theyRevealed }` — your open conversation, any pending message request between you, and who has revealed in it as `GET /conversations/:id` says (both false with no open conversation; additive, for the one-sided copy); absent otherwise, so the side that has not been revealed to learns nothing |
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
 | GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their board post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow |
 | GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps` |
@@ -3341,6 +3378,7 @@ be seen.
 | PUT | `/profiles/:userId` | Update profile |
 | GET | `/profiles/:userId/interests` | Get category interests — 404 when either of you has blocked the other, as the profile answers (SCRUM-299); empty through a room handle for somebody that room keeps anonymous |
 | PUT | `/profiles/:userId/interests` | Update interests |
+| POST | `/profiles/:userId/interests` | Add interests (`categoryIds`, at most 10 held, `TOO_MANY_INTERESTS`). Leaves only: a category with children is a group heading and is refused, `400 VALIDATION_FAILED` with a `categoryIds` field error and `reasonCode: CATEGORY_IS_A_GROUP`, storing nothing (S-9). A top-level category with no children is its own option |
 
 ---
 
@@ -3978,7 +4016,7 @@ A venue on Venue Pro can send an offer — "First drink on the house, Thu–Sun
 before 10" — to its **regulars**: people who came on 3 or more nights in the
 last 30, counted from the venue's claim on (a host's event there or its own
 live room; staff never count; accounts under 30 days old and anyone with
-"Offers from places" off never are). The venue picks the words; we pick who,
+"Offers from places" not on never are; it is off by default). The venue picks the words; we pick who,
 and the venue never learns who. It is told how many each offer reached as a
 band (5–9, 10–24, 25–49, 50+), and how many were opened and redeemed only as
 totals across its offers, published once a week, each held back when it or
@@ -4045,10 +4083,21 @@ without an adult age on file. 404 for no such venue.
 
 ### GET / PUT /me/offers — "Offers from places" and offer notifications
 
-`{ "enabled": true, "pushes": false }`.
+`{ "enabled": false, "pushes": false, "regulars": { "active": false } }` for an account made since S-5.
+
+- `regulars.active` (additive, 2026-10-24) — whether the regulars feature is on
+  anywhere for this person. **False everywhere** until a venue or organiser can
+  switch it on (the owner deferred the feature, 2026-10-17); the app shows
+  "Offers from places" only when it is true. The same answer as a venue's
+  `regulars.active` on `GET /venues/:venueId/regular` (`regularsActive`), and
+  the gate on sending: the dashboard's `sendOffer` refuses every send while it
+  is false (`reasonCode: REGULARS_INACTIVE`), so nobody gets an offer before the
+  app shows them the switch to turn offers off.
 
 - `enabled` — one switch for every venue: off, no venue's offer reaches you.
-  On unless turned off.
+  **Off until turned on** (S-5, 2026-10-24: promotional consent is opt-in;
+  `profiles.offers_from_places` defaults false). Accounts made before then
+  keep the `true` they were given; changing that is a product decision.
 - `pushes` — offer notifications. **Off until you say yes** (SCRUM-628), for
   every account: ask in context, the first time an offer exists for the
   person, never in onboarding. Off, offers still arrive with no push. The yes

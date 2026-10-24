@@ -241,15 +241,16 @@ describe("GET /me/attendance: cursor, ratedAt, venue_type", () => {
   it("where Plus gates, the cursor pages the free nights and stops at them", async () => {
     process.env.PLUS_GATING = "Bengaluru"
     try {
+      // Today's venue day is still running: listed, and not one of the 3 free ended slots (S-1).
       const locked = await body(await get(routes.attendance, "/api/mobile/me/attendance?limit=2", me))
-      expect(locked.json.data.lockedCount).toBe(3)
-      expect(locked.json.data.pagination).toMatchObject({ totalCount: 3, hasMore: true })
+      expect(locked.json.data.lockedCount).toBe(2)
+      expect(locked.json.data.pagination).toMatchObject({ totalCount: 4, hasMore: true })
       const { seen, sizes } = await walk(
         async (c) => body(await get(routes.attendance, `/api/mobile/me/attendance?limit=2${c ? `&cursor=${c}` : ""}`, me)),
         (d) => d.events.map((e: { id: string }) => e.id)
       )
-      expect(seen).toEqual(ids.slice(0, 3))
-      expect(sizes).toEqual([2, 1])
+      expect(seen).toEqual(ids.slice(0, 4))
+      expect(sizes).toEqual([2, 2])
     } finally {
       delete process.env.PLUS_GATING
     }
@@ -465,5 +466,34 @@ describe("rating refusals carry a reasonCode, and keep their errorCode", () => {
     expect([early.status, early.json.errorCode, early.json.reasonCode]).toEqual([403, "FORBIDDEN", "NOT_ENDED"])
     const late = await body(await rate(over.id))
     expect([late.status, late.json.errorCode, late.json.reasonCode]).toEqual([403, "FORBIDDEN", "NOT_CONNECTED"])
+  })
+})
+
+describe("categories on /me/rsvps and /me/attendance rows, as favourites sends them", () => {
+  it("each row carries its event's categories; an event with none carries []", async () => {
+    const me = await person("gp_cat_me")
+    const host = await person("gp_cat_host")
+    const category = await db.categories.create({ data: { name: "Live music", slug: testId("gp-live-music"), icon: "music-2" } })
+    const upcoming = await eventAt(host.id, 24)
+    const bare = await eventAt(host.id, 30)
+    const past = await eventAt(host.id, -6, { endsInH: -3 })
+    try {
+      await db.event_categories.createMany({ data: [upcoming, past].map((e) => ({ event_id: e.id, category_id: category.id })) })
+      for (const e of [upcoming, bare]) await db.event_rsvps.create({ data: { event_id: e.id, user_id: me.id, status: "going" } })
+      const occ = await db.event_occurrences.create({ data: { event_id: past.id, occurs_on: new Date(past.start_time.toISOString().slice(0, 10)), start_time: past.start_time, end_time: past.end_time } })
+      await db.event_check_ins.create({ data: { event_id: past.id, occurrence_id: occ.id, user_id: me.id, kind: "attendee", status: "checked_out", check_in_time: past.start_time } })
+
+      const shape = { id: category.id, name: "Live music", slug: category.slug, icon: "music-2" }
+      const rsvps = (await body(await get(rsvpsRoute, "/api/mobile/me/rsvps?limit=50", me))).json.data.events as { id: string; categories: unknown[] }[]
+      expect(rsvps.find((e) => e.id === upcoming.id)?.categories).toEqual([shape])
+      expect(rsvps.find((e) => e.id === bare.id)?.categories).toEqual([])
+      const nights = (await body(await get(routes.attendance, "/api/mobile/me/attendance?limit=50", me))).json.data.events as { id: string; categories: unknown[] }[]
+      expect(nights.find((e) => e.id === past.id)?.categories).toEqual([shape])
+    } finally {
+      await db.event_categories.deleteMany({ where: { category_id: category.id } })
+      await db.event_check_ins.deleteMany({ where: { event_id: past.id } })
+      await db.event_rsvps.deleteMany({ where: { event_id: { in: [upcoming.id, bare.id] } } })
+      await db.categories.delete({ where: { id: category.id } })
+    }
   })
 })

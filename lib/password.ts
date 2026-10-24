@@ -72,7 +72,7 @@ export function checkPassword(password: string, email?: string): PasswordCheck {
       ok: false,
       problem: "obvious",
       message:
-        "That is one of the first passwords anyone would try — adding digits to the end doesn't change that. Pick something else.",
+        "That is one of the first passwords anyone would try — adding digits to the end doesn’t change that. Pick something else.",
     }
   }
 
@@ -84,7 +84,7 @@ export function checkPassword(password: string, email?: string): PasswordCheck {
       return {
         ok: false,
         problem: "contains_email",
-        message: "Don't build the password out of your email address.",
+        message: "Don’t build the password out of your email address.",
       }
     }
   }

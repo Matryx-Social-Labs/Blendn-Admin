@@ -29,7 +29,7 @@ describe("liveCountBucket", () => {
     expect(liveCountLabel(liveCountBucket(n))).toBe(label)
   })
 
-  it("prints an exact count as itself, for the host's copy of the same screen", () => {
+  it("prints an exact count as itself, for the host’s copy of the same screen", () => {
     expect(liveCountLabel(7)).toBe("7")
   })
 })
@@ -61,7 +61,7 @@ function hostSnapshot(over: Partial<LiveSnapshot> = {}): LiveSnapshot {
         kind: "over_capacity",
         severity: "critical",
         title: "Over stated capacity",
-        body: "11 guests against capacity 10 — 1 over. Staff aren't counted toward fill; 12 bodies are in the room.",
+        body: "11 guests against capacity 10 — 1 over. Staff aren’t counted toward fill; 12 bodies are in the room.",
       },
     ],
     ...over,
@@ -103,7 +103,7 @@ describe("forVenue", () => {
     expect(venue).toMatchObject({ capacity: 10, messagesPerMinute: 1.4, openFlags: 2 })
   })
 
-  it("drops the figures nothing above rounds: fill, the median, the curve's totals", () => {
+  it("drops the figures nothing above rounds: fill, the median, the curve’s totals", () => {
     expect(venue).not.toHaveProperty("fillPct")
     expect(venue).not.toHaveProperty("medianRate10m")
   })
@@ -122,7 +122,7 @@ describe("forVenue", () => {
         kind: "over_capacity",
         severity: "critical",
         title: "Over stated capacity",
-        body: "More guests than the event's stated capacity.",
+        body: "More guests than the event’s stated capacity.",
       },
     ])
     expect(JSON.stringify(venue.alerts)).not.toMatch(/\d/)
@@ -153,7 +153,7 @@ describe("alertsForVenue", () => {
     expect(sent.map((a) => a.kind)).toEqual(["safety", "entry_backing_up", "over_capacity", "mood_sliding", "room_died"])
   })
 
-  it("sends the rest as sentences with none of the night's figures in them", () => {
+  it("sends the rest as sentences with none of the night’s figures in them", () => {
     for (const a of sent) expect(a.body).not.toMatch(/\b(7|12)\b|23:40/)
     // The issue it came from is otherwise intact: id, kind, times.
     expect(sent[0]).toMatchObject({ id: "safety", kind: "safety" })

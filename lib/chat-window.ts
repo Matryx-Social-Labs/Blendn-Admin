@@ -54,7 +54,7 @@ export type ChatWindowState =
  * never live through Go Live, which is no access — fail closed. For an event
  * room the column is not read at all.
  */
-export const NOT_LIVE_MESSAGE = "You're not live here any more. Go live at the venue to join today's room."
+export const NOT_LIVE_MESSAGE = "You’re not live here any more. Go live at the venue to join today’s room."
 
 export function liveInVenueDay(
   event: { kind: event_kind },

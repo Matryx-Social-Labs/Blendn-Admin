@@ -87,14 +87,14 @@ it.each([
   ["an unknown or reset token", () => mockInvite.mockResolvedValue(null), TOKEN],
   ["a deleted owner", () => mockInvite.mockResolvedValue(owner({ deletedAt: new Date() })), TOKEN],
   ["a suspended owner", () => mockInvite.mockResolvedValue(owner({ suspended_at: new Date() })), TOKEN],
-])("answers the signed-in route's one 404 for %s", async (_l, arrange, token) => {
+])("answers the signed-in route’s one 404 for %s", async (_l, arrange, token) => {
   arrange()
   const res = await call(token)
   expect(res.status).toBe(404)
   // One reason for every way a link fails, so a block and a reset link cannot be told apart.
   expect(res.json).toEqual({
     success: false,
-    error: "This invite link doesn't work any more",
+    error: "This invite link doesn’t work any more",
     errorCode: "NOT_FOUND",
     reasonCode: "INVITE_UNAVAILABLE",
   })

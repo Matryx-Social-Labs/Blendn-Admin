@@ -244,7 +244,7 @@ export function personCard(
       kind: "language",
       tier: "B",
       weight: w(`lang:${l}`),
-      text: l === "kannada_learning" ? "You're both learning Kannada" : `You both speak ${LANGUAGE_LABEL.get(l)}`,
+      text: l === "kannada_learning" ? "You’re both learning Kannada" : `You both speak ${LANGUAGE_LABEL.get(l)}`,
     })
   }
 
@@ -449,7 +449,7 @@ export function crewOverlaps(
         kind: "ipl",
         tier: "A",
         weight,
-        text: (solo ? `A ${code} crew, and you're ${code} ${heart}` : `Two ${code} crews ${heart}`).trim(),
+        text: (solo ? `A ${code} crew, and you’re ${code} ${heart}` : `Two ${code} crews ${heart}`).trim(),
       })
       continue
     }

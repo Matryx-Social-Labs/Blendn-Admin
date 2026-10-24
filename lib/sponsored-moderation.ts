@@ -92,7 +92,7 @@ export function canActivate(campaign: {
   if (!campaign.placementApproved) {
     return {
       allowed: false,
-      reason: "This brand's placement at the event has not been approved yet.",
+      reason: "This brand’s placement at the event has not been approved yet.",
     }
   }
   if (!campaign.hasChatGroup) {

@@ -168,7 +168,7 @@ describe("filing a venue claim with no account", () => {
     expect(after).toEqual({ owner_org_id: null, claimed_at: null })
   })
 
-  it("refuses an application that is not this address's, or not a venue owner's", async () => {
+  it("refuses an application that is not this address’s, or not a venue owner’s", async () => {
     const venueId = await venue()
     const mine = await application()
     const organiser = await application("organizer")
@@ -192,7 +192,7 @@ describe("filing a venue claim with no account", () => {
 
     const file = (venueId: string) =>
       filePublicVenueClaim({ venueId, contactEmail: app.contact_email, onboardingId: app.id })
-    await expect(file(owned)).resolves.toEqual({ ok: false, error: "This place already has an owner on Blend'n" })
+    await expect(file(owned)).resolves.toEqual({ ok: false, error: "This place already has an owner on Blend’n" })
     await expect(file(archived)).resolves.toEqual({ ok: false, error: "Venue not found" })
     await expect(file("not-a-uuid")).resolves.toEqual({ ok: false, error: "Venue not found" })
     expect(await db.venue_claims.count({ where: { venue_id: { in: [owned, archived] } } })).toBe(0)

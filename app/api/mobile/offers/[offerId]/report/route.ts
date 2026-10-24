@@ -50,7 +50,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const outcome = await reportOffer(authUser.userId, offerId, parsed.data.reason, parsed.data.description || null)
     if (outcome === "not_found") return notFoundResponse("Offer not found")
-    if (outcome === "already") return errorResponse("You've already reported this offer. We're looking at it.", 409, ErrorCode.CONFLICT)
+    if (outcome === "already") return errorResponse("You’ve already reported this offer. We’re looking at it.", 409, ErrorCode.CONFLICT)
     return successResponse({ reported: true })
   } catch (error) {
     logger.error("Report offer failed", { error: error instanceof Error ? error.message : String(error) })

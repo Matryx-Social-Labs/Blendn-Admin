@@ -36,6 +36,17 @@ import { FEATURED_MAX, featuredSeed, rotated } from "@/lib/featured"
  * result, so this only bounds what gets sorted.
  */
 const DISTANCE_SORT_CEILING = 5000
+/**
+ * The most matches a search ranks in memory (S-6, review M3). A 2+ character
+ * search in one city matches tens of events, so this is a backstop, not
+ * tuning: past it the ranking would rank a truncated set and the count would
+ * stop at the ceiling, so the search falls back to date order with the true
+ * count, and says so in the log. Lower than the distance sort's because each
+ * row here carries three text columns, not two numbers.
+ */
+const SEARCH_RANK_CEILING = 500
+/** The shortest search that is ranked; shorter is filtered in date order (review N1: never refused, the apps send a first letter). */
+const SEARCH_RANK_MIN = 2
 
 // Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<
@@ -81,7 +92,8 @@ export async function GET(request: NextRequest) {
     const searchParams = Object.fromEntries(request.nextUrl.searchParams)
     const parsed = eventQuerySchema.safeParse(searchParams)
     if (!parsed.success) {
-      return validationErrorResponse(parsed.error)
+      const searchRefused = parsed.error.issues.some((i) => i.path[0] === "search")
+      return validationErrorResponse(parsed.error, searchRefused ? "SEARCH_TOO_LONG" : undefined)
     }
 
     // The Pulse's search box calls this route with `search=`, not
@@ -279,6 +291,9 @@ export async function GET(request: NextRequest) {
     // The featured section is in the day's rotation, not by distance.
     const shouldSortByDistance =
       !featured && sortBy === "distance" && lat !== undefined && lon !== undefined
+    // A search the caller did not ask to order otherwise is ordered by how well each event answers it (S-6). One
+    // character matches by substring nearly everything: it is filtered and served in date order, the cheap path.
+    const rankBySearch = !!search && search.length >= SEARCH_RANK_MIN && !featured && !shouldSortByDistance && sortBy === "start_time"
 
     const cacheKey = buildEventsCacheKey({
       page,
@@ -318,6 +333,16 @@ export async function GET(request: NextRequest) {
       const orderBy: Prisma.eventsOrderByWithRelationInput = shouldSortByDistance
         ? { start_time: "asc" }
         : { [sortBy]: sortOrder }
+      /*
+       * The page in `orderBy`, and the count beside it. Both at once: `count`
+       * needs only `where`, so awaiting the page first added a full sequential
+       * round trip to every cache miss on the discovery feed.
+       */
+      const datePage = () =>
+        Promise.all([
+          db.events.findMany({ where, select: eventListSelect, orderBy, skip: (page - 1) * pageSize, take: pageSize }),
+          db.events.count({ where }),
+        ])
 
       if (featured) {
         /*
@@ -339,6 +364,34 @@ export async function GET(request: NextRequest) {
         })
         const byId = new Map(picked.map((e) => [e.id, e]))
         events = topIds.map((id) => byId.get(id)).filter((e): e is EventListItem => Boolean(e))
+      } else if (rankBySearch) {
+        /*
+         * The title first, then the venue, then the city, then only the
+         * description; by start time within each (S-6). Ordered by date alone,
+         * "coffee" put a tech meetup that mentions coffee in its description
+         * above a coffee cupping, because the meetup started first.
+         *
+         * The distance sort's shape: the light columns for every match, ranked
+         * here, then the full rows for the page only.
+         * ponytail: ranks in memory under DISTANCE_SORT_CEILING matches; past
+         * that it belongs in SQL (a CASE in ORDER BY, or full-text search).
+         */
+        const matches = await db.events.findMany({
+          where,
+          select: { id: true, title: true, venue_name: true, city: true },
+          orderBy: [{ start_time: sortOrder }, { id: "asc" }],
+          take: SEARCH_RANK_CEILING + 1,
+        })
+        if (matches.length > SEARCH_RANK_CEILING) {
+          // Never a ranked truncation nor a capped count: date order, the true total.
+          logger.warn("Search ranking hit its ceiling; this search is in date order", { ceiling: SEARCH_RANK_CEILING, city: city ?? null })
+          ;[events, totalCount] = await datePage()
+        } else {
+          // `sort` is stable, so the date order holds within a tier. Under the ceiling, `matches` is every match.
+          const ranked = [...matches].sort((a, b) => searchTier(a, search!) - searchTier(b, search!))
+          totalCount = ranked.length
+          events = await hydrateInOrder(ranked.slice((page - 1) * pageSize, page * pageSize).map((e) => e.id))
+        }
       } else if (shouldSortByDistance) {
         /*
          * Fetch only id + coordinates to sort by distance in-memory, avoiding
@@ -399,31 +452,10 @@ export async function GET(request: NextRequest) {
           .slice((page - 1) * pageSize, page * pageSize)
           .map((e) => e.id)
 
-        // Fetch full data only for the current page's events
-        const pageEvents = await db.events.findMany({
-          // Hydrating ids `where` (with the fragment) already chose.
-          where: { id: { in: pageIds }, ...realEventsWhere },
-          select: eventListSelect,
-        })
-        // Restore distance order (findMany with `in` doesn't preserve order)
-        const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
-        events = pageIds.map((id) => eventMap.get(id)!).filter(Boolean)
+        events = await hydrateInOrder(pageIds)
       } else {
-        /*
-         * Both at once. `count` needs only `where`, so awaiting the page first
-         * added a full sequential round trip to every cache miss on the
-         * discovery feed — the highest-traffic read in the product.
-         */
-        ;[events, totalCount] = await Promise.all([
-          db.events.findMany({
-            where,
-            select: eventListSelect,
-            orderBy,
-            skip: (page - 1) * pageSize,
-            take: pageSize,
-          }),
-          db.events.count({ where }),
-        ])
+        // The discovery feed, the highest-traffic read in the product: `datePage`.
+        ;[events, totalCount] = await datePage()
       }
 
       setCache(cacheKey, {
@@ -570,4 +602,21 @@ export async function GET(request: NextRequest) {
     logger.error("List events error", { error: String(error) })
     return serverErrorResponse("Failed to list events")
   }
+}
+
+/** The full rows for a page of ids `where` (with the fragment) already chose, in the order given: `findMany` with `in` does not keep it. */
+async function hydrateInOrder(pageIds: string[]): Promise<EventListItem[]> {
+  const pageEvents = await db.events.findMany({
+    where: { id: { in: pageIds }, ...realEventsWhere },
+    select: eventListSelect,
+  })
+  const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
+  return pageIds.map((id) => eventMap.get(id)).filter((e): e is EventListItem => Boolean(e))
+}
+
+/** How well an event answers a search, best first: its title, its venue, its city, else (only) its description. */
+function searchTier(e: { title: string; venue_name: string | null; city: string | null }, search: string): number {
+  const term = search.toLowerCase()
+  const has = (v: string | null) => !!v && v.toLowerCase().includes(term)
+  return has(e.title) ? 0 : has(e.venue_name) ? 1 : has(e.city) ? 2 : 3
 }

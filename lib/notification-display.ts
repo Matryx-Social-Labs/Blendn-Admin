@@ -3,6 +3,9 @@ import { personCard, personSelect } from "@/lib/friends"
 import { VISIBLE_TO_AUTHOR } from "@/lib/board-access"
 import { getAccessibleMediaUrl } from "@/lib/tigris"
 import { firstName } from "@/lib/conversation-identity"
+import { blockCounterparties, closedPairKeys } from "@/lib/conversations"
+import { admittingBlendRooms } from "@/lib/room-kind"
+import { acceptableInviteCrewIds } from "@/lib/crews/views"
 
 /**
  * What a bell row can say for the person reading it, beyond the push's own
@@ -15,7 +18,18 @@ import { firstName } from "@/lib/conversation-identity"
  *   - a friend request: the asker, exactly as `GET /friends/requests` shows them
  *     to the same person, and only while the request is still waiting;
  *   - a match: the other side's room pseudonym, never a name or a photo;
- *   - a crew's or a Blend's emblem: a seed, no text of anyone's;
+ *   - a crew's or a Blend's emblem: a seed;
+ *   - `context`, the counterpart by the name this reader sees it by in the
+ *     app at this moment (S-2), and only while they still may: a match's
+ *     pseudonym while the conversation is open and nobody blocked anybody;
+ *     a Blend's room name ("A × B", as the Banter shows it) while the Blend's
+ *     own door admits the reader (`admittingBlendRooms`: open, on its clock, no
+ *     side dissolved or hidden, no block across the sides); the crew behind
+ *     an invite while the Crews screen would list that invite
+ *     (`acceptableInviteCrewIds`: open and not lapsed, the inviter still a
+ *     member and a friend, nobody in it kept apart from the reader), or the
+ *     reader is a member, and the crew is neither dissolved nor hidden. Otherwise nothing: a crew renamed after
+ *     you left is never named to you;
  *   - an event: its cover.
  *
  * Everything is optional and read defensively by the app. A row this cannot
@@ -80,11 +94,21 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
   const messageRequestRows = of("message_request")
   const boardRows = of("board_request")
   const matchRows = of("match")
+  const blendRows = of("blend")
   const eventRows = rows.filter((r) => r.kind in EVENT_KINDS)
 
   const crewRows = rows.filter((r) => r.kind === "crew_invite" || r.kind === "crew_here")
 
-  const [friendRequests, invites, memberships, messageRequests, boardRequests, conversations, events, crews] = await Promise.all([
+  /*
+   * Everybody kept apart from the reader (a block either way, or a closed conversation): read once for the page and
+   * shared by every door below that asks it (an invite's, a Blend's, a match's), never once per door or per row.
+   */
+  const apart: Promise<ReadonlySet<string>> =
+    crewInviteRows.length || blendRows.length || matchRows.length
+      ? Promise.all([blockCounterparties(viewerId), closedPairKeys(viewerId)]).then(([b, c]) => new Set([...b, ...c]))
+      : Promise.resolve(new Set<string>())
+
+  const [friendRequests, invites, memberships, messageRequests, boardRequests, conversations, events, crews, blendRooms, blocked] = await Promise.all([
     friendRows.length
       ? db.friend_requests.findMany({
           where: {
@@ -99,17 +123,9 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
           select: { id: true, sender: { select: personSelect } },
         })
       : [],
-    crewInviteRows.length
-      ? db.crew_invites.findMany({
-          where: {
-            invited_user_id: viewerId,
-            crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) },
-            declined_at: null,
-            removed_at: null,
-          },
-          select: { crew_id: true },
-        })
-      : [],
+    // The Crews screen's door (`acceptableInviteCrewIds`): open, not lapsed, the crew standing, the inviter still a
+    // member and your friend, nobody in it kept apart from you. An invite it would not list is neither open nor named.
+    acceptableInviteCrewIds(viewerId, unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))), new Date(), apart),
     crewInviteRows.length
       ? db.crew_members.findMany({
           where: { user_id: viewerId, crew_id: { in: unique(crewInviteRows.map((r) => uuidOf(r.payload, "crewId"))) } },
@@ -134,7 +150,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
             id: { in: unique(matchRows.map((r) => uuidOf(r.payload, "conversationId"))) },
             OR: [{ user1_id: viewerId }, { user2_id: viewerId }],
           },
-          select: { id: true, user1_id: true, user1_pseudonym: true, user2_pseudonym: true },
+          select: { id: true, user1_id: true, user2_id: true, user1_pseudonym: true, user2_pseudonym: true, closed_at: true },
         })
       : [],
     eventRows.length
@@ -146,10 +162,25 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       : [],
     // The seed the crew's own screens draw its emblem from, so the bell draws the same one.
     crewRows.length
-      ? db.crews.findMany({ where: { id: { in: unique(crewRows.map((r) => uuidOf(r.payload, "crewId"))) } }, select: { id: true, emblem_seed: true } })
+      ? db.crews.findMany({
+          where: { id: { in: unique(crewRows.map((r) => uuidOf(r.payload, "crewId"))) } },
+          select: { id: true, emblem_seed: true, name: true, dissolved_at: true, hidden_at: true },
+        })
       : [],
+    // Each Blend's room that admits the reader now, found by the Blend (never by the payload's room id): the room's
+    // own door (`blendDenial`: open, on its clock, no side dissolved or hidden, no block across the sides), one read.
+    admittingBlendRooms(unique(blendRows.map((r) => uuidOf(r.payload, "blendId"))), viewerId, apart),
+    apart,
   ])
   const emblemOf = new Map(crews.map((c) => [c.id, c.emblem_seed]))
+  const crewOf = new Map(crews.map((c) => [c.id, c]))
+  const invited = invites
+  const joined = new Set(memberships.map((m) => m.crew_id))
+  // Named only to somebody the Crews screen still shows the invite to, or a member, and only while the crew stands.
+  const namesCrew = (crewId: string) => {
+    const crew = crewOf.get(crewId)
+    return !!crew && !crew.dissolved_at && !crew.hidden_at && (invited.has(crewId) || joined.has(crewId))
+  }
 
   const requestOf = new Map(friendRequests.map((r) => [r.id, r]))
   for (const row of friendRows) {
@@ -169,13 +200,17 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
     })
   }
 
-  const invited = new Set(invites.map((i) => i.crew_id))
-  const joined = new Set(memberships.map((m) => m.crew_id))
   for (const row of crewInviteRows) {
     const crewId = uuidOf(row.payload, "crewId")
     set(row.id, {
       open: crewId !== null && invited.has(crewId) && !joined.has(crewId),
-      ...(crewId && emblemOf.has(crewId) && { display: { visual: { type: "emblem", seed: emblemOf.get(crewId)! } } }),
+      ...(crewId &&
+        emblemOf.has(crewId) && {
+          display: {
+            ...(namesCrew(crewId) && { context: crewOf.get(crewId)!.name }),
+            visual: { type: "emblem", seed: emblemOf.get(crewId)! },
+          },
+        }),
     })
   }
   for (const row of rows.filter((r) => r.kind === "crew_here" || r.kind === "blend")) {
@@ -194,7 +229,17 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
     const c = conversationOf.get(uuidOf(row.payload, "conversationId") ?? "")
     // The other side's pseudonym. Null is a conversation that did not come from a match: no creature to draw.
     const pseudonym = c && (c.user1_id === viewerId ? c.user2_pseudonym : c.user1_pseudonym)
-    if (pseudonym) set(row.id, { display: { visual: { type: "creature", pseudonym } } })
+    if (!c || !pseudonym) continue
+    // Named while the conversation is still theirs: closed (an unmatch, or a block, which closes it) or blocked names nothing.
+    const other = c.user1_id === viewerId ? c.user2_id : c.user1_id
+    const named = !c.closed_at && !blocked.has(other)
+    set(row.id, { display: { ...(named && { context: pseudonym }), visual: { type: "creature", pseudonym } } })
+  }
+
+  const blendRoomOf = new Map(blendRooms.map((r) => [r.blendId, r]))
+  for (const row of blendRows) {
+    const room = blendRoomOf.get(uuidOf(row.payload, "blendId") ?? "")
+    if (room) set(row.id, { display: { ...out.get(row.id)?.display, context: room.name } })
   }
 
   const eventOf = new Map(events.map((e) => [e.id, e]))

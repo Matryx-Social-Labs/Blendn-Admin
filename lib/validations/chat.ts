@@ -41,7 +41,7 @@ const SEAL_REFUSAL: Record<SealRefusal, string> = {
   missing: "That photo did not finish uploading. Try again.",
   too_small: "That photo is empty. Try again.",
   too_large: "That file is too large to send.",
-  wrong_type: "That kind of file can't be sent.",
+  wrong_type: "That kind of file can’t be sent.",
 }
 
 /**

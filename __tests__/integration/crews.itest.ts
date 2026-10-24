@@ -224,7 +224,7 @@ afterAll(async () => {
 /* -------------------------------------------------------------------------- */
 
 describe("the database holds the shape", () => {
-  it("a crew's room has the crew as its one owner, one room per crew (chat_groups_one_owner)", async () => {
+  it("a crew’s room has the crew as its one owner, one room per crew (chat_groups_one_owner)", async () => {
     const owner = await person("db-owner")
     const crew = await db.crews.create({ data: { name: "Shape", emblem_seed: "x", created_by: owner.id }, select: { id: true } })
     const insert = (kind: string, crewId: string | null, eventId: string | null) =>
@@ -291,7 +291,7 @@ describe("made from friends, 2–12, consent on joining (CR-I03, CR-U01/U02)", (
     ]) {
       const res = await api.create(owner, body)
       expect(res.status).toBe(400)
-      expect(res.body.error).toMatch(/contact details can't go on it/)
+      expect(res.body.error).toMatch(/contact details can’t go on it/)
     }
     expect(await db.crews.count({ where: { created_by: owner.id } })).toBe(0)
   })
@@ -444,7 +444,7 @@ describe("the crew room: real first names inside, its members now and nobody els
   })
 })
 
-describe("\"We're here\" and presence at an event (CR-I04, CR-I05)", () => {
+describe("\"We’re here\" and presence at an event (CR-I04, CR-I05)", () => {
   it("pushes every other member once — not the tapper, not someone who muted the chat — and checks nobody in", async () => {
     const owner = await person("here-owner")
     const a = await person("here-a")
@@ -621,7 +621,7 @@ const inviteRow = (crewId: string, userId: string) =>
   db.crew_invites.findUnique({ where: { crew_id_invited_user_id: { crew_id: crewId, invited_user_id: userId } } })
 const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000)
 
-describe("\"We're here\" once per person per crew per occurrence, kept in the database", () => {
+describe("\"We’re here\" once per person per crew per occurrence, kept in the database", () => {
   it("tells the crew again on the next night, from a second member, and in a second crew — and a muted phone still gets the bell", async () => {
     const owner = await person("here2-owner")
     const a = await person("here2-a")
@@ -788,7 +788,7 @@ describe("what the viewer is shown is what the viewer can do (step 9 review, H4,
     expect((await api.join(target, crewId)).status).toBe(404)
   })
 
-  it("marks each crewmate who is the viewer's friend, and nobody else", async () => {
+  it("marks each crewmate who is the viewer’s friend, and nobody else", async () => {
     const owner = await person("fr-owner", "Meera Iyer")
     const x = await person("fr-x", "Xavier Dsouza")
     const y = await person("fr-y", "Yamini Rao")
@@ -806,7 +806,7 @@ describe("what the viewer is shown is what the viewer can do (step 9 review, H4,
   })
 })
 
-describe("invites over time, and the owner's word (C8, C10)", () => {
+describe("invites over time, and the owner’s word (C8, C10)", () => {
   it("does not re-ask a no for 30 days, then asks again and pushes again", async () => {
     const owner = await person("dec-owner")
     const friend = await person("dec-friend")
@@ -842,7 +842,7 @@ describe("invites over time, and the owner's word (C8, C10)", () => {
     expect((await api.join(friend, crewId)).status).toBe(200)
   })
 
-  it("keeps a removed member out: another member's invite is skipped, the owner's brings them back", async () => {
+  it("keeps a removed member out: another member’s invite is skipped, the owner’s brings them back", async () => {
     const owner = await person("rm-owner")
     const member = await person("rm-member")
     const removed = await person("rm-removed")
@@ -899,8 +899,8 @@ describe("invites over time, and the owner's word (C8, C10)", () => {
   })
 })
 
-describe("standing: active members only, an owner who can act, and the sweeper's repair", () => {
-  it("hands an owner's crew to the longest-standing ACTIVE member, skipping a suspended one", async () => {
+describe("standing: active members only, an owner who can act, and the sweeper’s repair", () => {
+  it("hands an owner’s crew to the longest-standing ACTIVE member, skipping a suspended one", async () => {
     const owner = await person("ho-owner")
     const early = await person("ho-early")
     const later = await person("ho-later")
@@ -999,7 +999,7 @@ describe("standing: active members only, an owner who can act, and the sweeper's
     expect((await api.join(slow, crewId)).status).toBe(404)
   })
 
-  it("does not wait on an invite whose sender is no longer an active member, nor on an owner's removal marker", async () => {
+  it("does not wait on an invite whose sender is no longer an active member, nor on an owner’s removal marker", async () => {
     const owner = await person("nw-owner")
     const mate = await person("nw-mate")
     const asked = await person("nw-asked")
@@ -1050,7 +1050,7 @@ describe("account erasure inside the transaction (SEC-22, MUST)", () => {
       new NextRequest("http://localhost/api/mobile/account", { method: "DELETE", headers: { authorization: `Bearer ${p.token}` } })
     )
 
-  it("an erased owner's crew passes on, and every invite to or from them goes", async () => {
+  it("an erased owner’s crew passes on, and every invite to or from them goes", async () => {
     const owner = await person("eo-owner")
     const m1 = await person("eo-m1")
     const m2 = await person("eo-m2")
@@ -1073,7 +1073,7 @@ describe("account erasure inside the transaction (SEC-22, MUST)", () => {
   })
 })
 
-describe("reports and the moderator's levers (C12)", () => {
+describe("reports and the moderator’s levers (C12)", () => {
   it("files a crew report once, with the card as it read; a moderator hides it off the cards, then dissolves it", async () => {
     const host = await person("mod-host")
     const { eventId, occurrenceId } = await liveEvent(host.id)
@@ -1178,7 +1178,7 @@ describe("nothing a crew does tells anybody about a friend (step 8 follow-up)", 
     expect((await db.crew_invites.findMany({ where: { crew_id: crewId, invited_user_id: { in: [apart.id, fine.id] } }, select: { invited_user_id: true } })).map((i) => i.invited_user_id)).toEqual([fine.id])
   })
 
-  it("keeps an owner's removal and a friend's decline after the owner erases their account", async () => {
+  it("keeps an owner’s removal and a friend’s decline after the owner erases their account", async () => {
     const owner = await person("fu-er-owner")
     const mate = await person("fu-er-mate")
     const third = await person("fu-er-third")
@@ -1219,7 +1219,7 @@ describe("nothing a crew does tells anybody about a friend (step 8 follow-up)", 
     expect(owners.map((o) => o.user_id)).toEqual([next.id])
   })
 
-  it("a crew a moderator hid takes nobody new and is not on an invitee's list", async () => {
+  it("a crew a moderator hid takes nobody new and is not on an invitee’s list", async () => {
     const owner = await person("fu-hid-owner")
     const mate = await person("fu-hid-mate")
     const invitee = await person("fu-hid-invitee")
