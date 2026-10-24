@@ -599,7 +599,7 @@ describe("a response that differs for a friend is the id by another route (and a
     it("a pending request shows on the card from either side", async () => {
       await db.message_requests.create({ data: { sender_id: ben.id, recipient_id: ana.id, message: "hey", status: "pending" } })
       const card = await call(userRoute.GET, `/api/mobile/users/${hBen}`, ana, { params: { userId: hBen } })
-      expect(card.body.data.connection).toEqual({ conversationId: dmId, request: "received" })
+      expect(card.body.data.connection).toEqual({ conversationId: dmId, request: "received", youRevealed: false, theyRevealed: true })
       await db.message_requests.deleteMany({ where: { sender_id: ben.id, recipient_id: ana.id } })
     })
   })
