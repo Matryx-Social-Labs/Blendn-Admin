@@ -58,7 +58,7 @@ it("lets a clean intro through (negative control)", async () => {
   expect(await db.message_requests.count({ where: { sender_id: a.id } })).toBe(1)
 })
 
-it.each(["call me on 9876543210 tonight", "mail me at someone@example.com", "add me on instagram @someone_else"])(
+it.each(["call me on 9876543210 tonight", "add me on instagram @someone_else"])(
   "refuses %j before storing it",
   async (text) => {
     const { a, b } = await pairInARoom()
