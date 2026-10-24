@@ -17,7 +17,8 @@ const mockCompare = jest.fn(async (given: string, stored: string) => given === s
 jest.mock("bcryptjs", () => ({ compare: (...a: [string, string]) => mockCompare(...a) }))
 
 import { authOptions } from "@/lib/auth"
-import { SIGNIN_RATE_LIMITED } from "@/lib/rbac"
+import { clearSigninCounters } from "@/lib/dashboard-signin-limits"
+import { SIGNIN_ACCOUNT_LOCKED, SIGNIN_RATE_LIMITED } from "@/lib/rbac"
 
 type Req = { headers: Record<string, string> }
 type Authorize = (c: Record<string, string>, req?: Req) => Promise<unknown>
@@ -53,52 +54,92 @@ describe("per network", () => {
   })
 })
 
+/** A network of its own for every call, so only the per-email limits are in play. */
+const lone = () => {
+  const c = ++n + 1000
+  return from(`10.${100 + (c >> 16)}.${(c >> 8) & 255}.${c & 255}`)
+}
 /** `count` wrong passwords on one email, each from a network of its own. */
 async function spray(email: string, count: number) {
   for (let i = 0; i < count; i++) {
-    await expect(authorize({ email, password: "wrong" }, from(`10.${100 + (n % 100)}.${Math.floor(n / 250)}.${++n % 250}`))).resolves.toBeNull()
+    await expect(authorize({ email, password: "wrong" }, lone())).resolves.toBeNull()
   }
 }
+const asVictim = (email: string) => mockFindUnique.mockResolvedValue(operator(email))
 
-describe("per account, across networks", () => {
-  it("refuses the 51st wrong password on one email, even the right one, from a fresh network", async () => {
+describe("per email, across networks", () => {
+  it("stops at 20 wrong passwords in 15 minutes, and refuses the right one from a fresh network", async () => {
     const email = `${fresh("victim")}@x.test`
-    mockFindUnique.mockResolvedValue(operator(email))
-    await spray(email, 50)
-    await expect(authorize({ email, password: PASSWORD }, from(`10.3.0.${++n}`))).rejects.toThrow(SIGNIN_RATE_LIMITED)
+    asVictim(email)
+    await spray(email, 20)
+    await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
   })
 
-  it("does not lock the victim out of their own network below that ceiling", async () => {
+  it("lets the right password in below that, from anywhere", async () => {
     const email = `${fresh("below")}@x.test`
-    mockFindUnique.mockResolvedValue(operator(email))
-    await spray(email, 40)
-    await expect(authorize({ email, password: PASSWORD }, from(`10.3.1.${++n}`))).resolves.toMatchObject({ id: "u1" })
+    asVictim(email)
+    await spray(email, 19)
+    await expect(authorize({ email, password: PASSWORD }, lone())).resolves.toMatchObject({ id: "u1" })
   })
 
-  it("clears the account's count on a correct password", async () => {
-    const email = `${fresh("clears")}@x.test`
-    mockFindUnique.mockResolvedValue(operator(email))
-    await spray(email, 49)
-    await expect(authorize({ email, password: PASSWORD }, from(`10.3.2.${++n}`))).resolves.toMatchObject({ id: "u1" })
-    // Without the clear, the next guess is the 51st.
-    await spray(email, 49)
-    await expect(authorize({ email, password: PASSWORD }, from(`10.3.3.${++n}`))).resolves.toMatchObject({ id: "u1" })
+  it("is not reset by the victim signing in: the spray goes on counting", async () => {
+    const email = `${fresh("noreset")}@x.test`
+    asVictim(email)
+    await spray(email, 19)
+    await expect(authorize({ email, password: PASSWORD }, lone())).resolves.toMatchObject({ id: "u1" })
+    await spray(email, 1)
+    await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
+  })
+
+  it("also stops at 200 a day, after the 15-minute window has rolled over every time, until a reset", async () => {
+    const email = `${fresh("day")}@x.test`
+    asVictim(email)
+    const realNow = Date.now
+    let offset = 0
+    jest.spyOn(Date, "now").mockImplementation(() => realNow() + offset)
+    try {
+      for (let round = 0; round < 10; round++) {
+        await spray(email, 19)
+        offset += 16 * 60 * 1000
+      }
+      await spray(email, 9)
+      offset += 16 * 60 * 1000
+      // 199 wrong passwords today, none in the last 15 minutes: still in.
+      await expect(authorize({ email, password: PASSWORD }, lone())).resolves.toMatchObject({ id: "u1" })
+      await spray(email, 1)
+      offset += 16 * 60 * 1000
+      await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
+      // The day's lockout is what a reset must end too.
+      await clearSigninCounters(email)
+      await expect(authorize({ email, password: PASSWORD }, lone())).resolves.toMatchObject({ id: "u1" })
+    } finally {
+      jest.restoreAllMocks()
+    }
+  })
+
+  it("ends at a completed password reset", async () => {
+    const email = `${fresh("reset")}@x.test`
+    asVictim(email)
+    await spray(email, 20)
+    await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
+    await clearSigninCounters(email.toUpperCase())
+    await expect(authorize({ email, password: PASSWORD }, lone())).resolves.toMatchObject({ id: "u1" })
   })
 
   it("counts the email case-insensitively and trimmed", async () => {
     const email = `${fresh("case")}@x.test`
-    mockFindUnique.mockResolvedValue(operator(email))
-    for (let i = 0; i < 50; i++) {
-      await authorize({ email: i % 2 ? ` ${email.toUpperCase()} ` : email, password: "wrong" }, from(`10.4.${n}.${++n % 250}`))
+    asVictim(email)
+    for (let i = 0; i < 20; i++) {
+      await authorize({ email: i % 2 ? ` ${email.toUpperCase()} ` : email, password: "wrong" }, lone())
     }
-    await expect(authorize({ email, password: PASSWORD }, from(`10.5.0.${++n}`))).rejects.toThrow(SIGNIN_RATE_LIMITED)
+    await expect(authorize({ email, password: PASSWORD }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
   })
 
   it("is not an oracle: an address with no account hits the same cap", async () => {
     const email = `${fresh("ghost")}@x.test`
     mockFindUnique.mockResolvedValue(null)
-    await spray(email, 50)
-    await expect(authorize({ email, password: "wrong" }, from(`10.7.0.${++n}`))).rejects.toThrow(SIGNIN_RATE_LIMITED)
+    await spray(email, 20)
+    await expect(authorize({ email, password: "wrong" }, lone())).rejects.toThrow(SIGNIN_ACCOUNT_LOCKED)
   })
 })
 

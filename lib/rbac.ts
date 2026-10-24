@@ -19,6 +19,9 @@ export const APP_ONLY_SIGNIN = "AppOnlyAccount"
 /** authorize() refuses a sign-in over its per-network or per-account limit with this; the form turns it into a sentence. */
 export const SIGNIN_RATE_LIMITED = "SigninRateLimited"
 
+/** As above, for the per-email ceiling: the one a stranger can spend against a name, so the form says how to get in now. */
+export const SIGNIN_ACCOUNT_LOCKED = "SigninAccountLocked"
+
 export function canSendSystemMessages(role: user_role): boolean {
   return role === "app_admin"
 }

@@ -1066,7 +1066,7 @@
       "date": "2026-09-21"
     },
     "dashboard-signin-limit-runs-in-node.test.ts": {
-      "guards": "the NextAuth route does not match on the request path and middleware.ts does not carry the sign-in limiter (Edge cannot load Redis, SCRUM-194; a path match is walked around by %63redentials, audit WEB H1); authorize() counts both limits before it reads the password",
+      "guards": "the NextAuth route does not match on the request path and middleware.ts does not carry the sign-in limiter (Edge cannot load Redis, SCRUM-194; a path match is walked around by %63redentials, audit WEB H1); authorize() asks the limits before it reads the password and a password reset clears the email's counters",
       "mutation": "Append `req.nextUrl.pathname === \"/api/auth/callback/credentials\"` to app/api/auth/[...nextauth]/route.ts.",
       "observed": "1 failing: the NextAuth route does not match on the request path.",
       "date": "2026-10-25"
@@ -1096,9 +1096,9 @@
       "date": "2026-10-25"
     },
     "dashboard-signin-limits.test.ts": {
-      "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and 50 wrong passwords per email across networks (case-folded, existing or not), refuses the right password past either, clears the email's count on a correct one, leaves a victim on their own network alone below the ceiling, and compares against a cost-12 dummy hash when the account is missing or has no password (audit WEB H1/M5/L1)",
-      "mutation": "M1: comment out `await forget(keys.account)`. M2: clientNetworkFrom -> clientIpFrom in lib/auth.ts. M3: `byAccount.count > ...` -> `false`. M4: `user?.password ?? DUMMY_HASH` -> `user?.password ?? \"\"`.",
-      "observed": "M1: 1 failing of 9 (clears the count on a correct password). M2: 1 failing of 9 (shares one bucket across a /64). M3 and M4 (first version, cap 10): 3 and 2 failing. Red before the fix: 6 of 7 failed.",
+      "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and, per email from any network, 20 wrong passwords in 15 minutes and 200 in 24 hours (case-folded, existing or not); the right password is refused past any of them; a victim's success does not reset the email's windows; clearSigninCounters (a completed reset) does; an unknown or password-less account is compared against a cost-12 dummy hash (audit WEB H1/M5/L1)",
+      "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: replace recordSigninFailure in authorize() with a forget of the email key. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`.",
+      "observed": "M1: 1 failing of 11 (the 200-a-day case). M2: 1 failing (the same case, at its final reset). M3: 6 failing. M4 (earlier version): the /64 case failed. M5 (earlier version): both timing cases failed. Red before the fix: 6 of 7 failed.",
       "date": "2026-10-25"
     },
     "client-ip.test.ts": {

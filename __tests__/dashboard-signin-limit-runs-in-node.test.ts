@@ -30,10 +30,16 @@ describe("where the sign-in limit does not live", () => {
 })
 
 describe("where it does", () => {
-  it("authorize() limits per network and per account before it reads the password", () => {
+  it("authorize() limits per network and per email before it reads the password", () => {
     const src = read("lib/auth.ts")
-    expect(src).toMatch(/dashboard-signin:\$\{/)
-    expect(src).toMatch(/dashboard-signin:acct:/)
-    expect(src.indexOf("dashboard-signin:acct:")).toBeLessThan(src.indexOf("bcrypt.compare"))
+    expect(src).toMatch(/refuseOverSigninLimits\(keys\)/)
+    expect(src.indexOf("refuseOverSigninLimits(keys)")).toBeLessThan(src.indexOf("bcrypt.compare"))
+    expect(src).toMatch(/recordSigninFailure\(keys\)/)
+  })
+
+  it("a completed password reset clears the email's sign-in counters", () => {
+    const src = read("app/api/auth/reset-password/route.ts")
+    expect(src).toMatch(/clearSigninCounters\(row\.user\.email\)/)
+    expect(src.indexOf("await clearSigninCounters")).toBeGreaterThan(src.indexOf("endPhoneSessions(tx"))
   })
 })

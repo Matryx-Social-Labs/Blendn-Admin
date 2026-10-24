@@ -2,6 +2,7 @@ import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { db } from "@/lib/db"
+import { clearSigninCounters } from "@/lib/dashboard-signin-limits"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
@@ -124,6 +125,8 @@ export async function POST(req: NextRequest) {
     // And what was live when it changed closes now (SCRUM-603).
     dashboardSessionsEnded(row.user.id)
     phoneSessionsEnded(row.user.id, phonesEndedAt)
+    // The mailbox is proven: a lockout a stranger spent against this address ends (audit WEB M5).
+    await clearSigninCounters(row.user.email)
 
     auditLog({
       userId: row.user.id,
