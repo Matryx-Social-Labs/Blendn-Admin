@@ -1078,7 +1078,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 |-------|------|---------|-------------|
 | page | int | 1 | Page number |
 | limit | int | 20 | Items per page (max 100) |
-| search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi. Trimmed; at least 2 characters, else `400 VALIDATION_FAILED` with `reasonCode: SEARCH_TOO_SHORT` (send none rather than one letter). With the default `sortBy=start_time`, results are ranked by where the word is: title, then venue, then city, then only the description; by start time within each (S-6). Past 500 matches the search is in date order instead, with the true `totalCount` (never a capped one). `sortBy=distance` or `created_at` orders as asked |
+| search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi. Trimmed; empty is no search. At most 100 characters, else `400 VALIDATION_FAILED` with `reasonCode: SEARCH_TOO_LONG`. One character is answered, filtered in date order (not ranked). From 2 characters, with the default `sortBy=start_time`, results are ranked by where the word is: title, then venue, then city, then only the description; by start time within each (S-6). Past 500 matches the search is in date order instead, with the true `totalCount` (never a capped one). `sortBy=distance` or `created_at` orders as asked |
 | city | string | - | **Scope the list to one city.** Exact, case-insensitive. Values come from `GET /events/cities` |
 | lat | float | - | Latitude — sorts and labels by distance, never excludes |
 | lon | float | - | Longitude |

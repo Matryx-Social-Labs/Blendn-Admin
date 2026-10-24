@@ -45,6 +45,8 @@ const DISTANCE_SORT_CEILING = 5000
  * row here carries three text columns, not two numbers.
  */
 const SEARCH_RANK_CEILING = 500
+/** The shortest search that is ranked; shorter is filtered in date order (review N1: never refused, the apps send a first letter). */
+const SEARCH_RANK_MIN = 2
 
 // Bounded LRU-style cache with max size and TTL eviction
 const eventsCache = new Map<
@@ -91,7 +93,7 @@ export async function GET(request: NextRequest) {
     const parsed = eventQuerySchema.safeParse(searchParams)
     if (!parsed.success) {
       const searchRefused = parsed.error.issues.some((i) => i.path[0] === "search")
-      return validationErrorResponse(parsed.error, searchRefused ? "SEARCH_TOO_SHORT" : undefined)
+      return validationErrorResponse(parsed.error, searchRefused ? "SEARCH_TOO_LONG" : undefined)
     }
 
     // The Pulse's search box calls this route with `search=`, not
@@ -289,8 +291,9 @@ export async function GET(request: NextRequest) {
     // The featured section is in the day's rotation, not by distance.
     const shouldSortByDistance =
       !featured && sortBy === "distance" && lat !== undefined && lon !== undefined
-    // A search the caller did not ask to order otherwise is ordered by how well each event answers it (S-6).
-    const rankBySearch = !!search && !featured && !shouldSortByDistance && sortBy === "start_time"
+    // A search the caller did not ask to order otherwise is ordered by how well each event answers it (S-6). One
+    // character matches by substring nearly everything: it is filtered and served in date order, the cheap path.
+    const rankBySearch = !!search && search.length >= SEARCH_RANK_MIN && !featured && !shouldSortByDistance && sortBy === "start_time"
 
     const cacheKey = buildEventsCacheKey({
       page,

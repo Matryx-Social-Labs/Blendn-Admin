@@ -375,14 +375,39 @@ describe("GET /events?search= bounds (review M3)", () => {
   const ask = (auth: string, q: string) =>
     listRoute.GET(new NextRequest(`http://localhost/api/mobile/events?${q}`, { headers: { authorization: `Bearer ${auth}` } }))
 
-  it("refuses a search under 2 characters after trimming: 400, VALIDATION_FAILED, reasonCode SEARCH_TOO_SHORT", async () => {
+  it("never refuses a short search: 1 character is filtered in date order, empty is no filter; over 100 is SEARCH_TOO_LONG (review N1)", async () => {
+    const t = nextToken()
     const v = await viewer("dv_short")
-    for (const q of ["search=c", "search=%20%20", "search=%20c%20"]) {
-      const res = await ask(v.token, q)
-      const body = await res.json()
-      expect([res.status, body.errorCode, body.reasonCode]).toEqual([400, "VALIDATION_FAILED", "SEARCH_TOO_SHORT"])
+    const ids = async (q: string) => {
+      const res = await ask(v.token, `limit=100&${q}`)
+      expect(res.status).toBe(200)
+      return ((await res.json()).data.events as { id: string }[]).map((e) => e.id)
     }
-    expect((await ask(v.token, "search=co")).status).toBe(200)
+    // A title match starting later than a description-only match: ranked, the title leads; in date order, it does not.
+    const make = async (hoursFromNow: number, title: string, description: string) => {
+      const row = await db.events.create({
+        data: { slug: testId("dvs"), title, description, start_time: new Date(Date.now() + hoursFromNow * HOUR), end_time: new Date(Date.now() + (hoursFromNow + 2) * HOUR), timezone: "UTC", status: "published", visibility: "public", organizer_id: organiser },
+      })
+      events.push(row.id)
+      return row.id
+    }
+    const early = await make(1, "A night out", `${t} inside`)
+    const late = await make(2, `${t} in the title`, "x")
+    expect(await ids(`search=${t}`)).toEqual([late, early])
+
+    // One character: answered, in date order (the earlier one first), never a 400.
+    const one = await ids(`search=${t[0]}`)
+    expect(one).toEqual(expect.arrayContaining([early, late]))
+    expect(one.indexOf(early)).toBeLessThan(one.indexOf(late))
+
+    // Empty, or only spaces: no search at all, the unfiltered list.
+    const all = await ids("")
+    for (const q of ["search=", "search=%20%20"]) expect(await ids(q)).toEqual(all)
+
+    const long = await ask(v.token, `search=${"x".repeat(101)}`)
+    const body = await long.json()
+    expect([long.status, body.errorCode, body.reasonCode]).toEqual([400, "VALIDATION_FAILED", "SEARCH_TOO_LONG"])
+    expect((await ask(v.token, `search=${"x".repeat(100)}`)).status).toBe(200)
   })
 
   it("past the ranking ceiling, a search is in date order with the true count, never a capped one", async () => {

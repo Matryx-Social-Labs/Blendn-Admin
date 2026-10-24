@@ -2104,9 +2104,9 @@
       "date": "2026-10-24"
     },
     "discovery-visibility.itest.ts": {
-      "guards": "S-6 (2026-10-24): a search with the default sortBy is ranked title, venue, city, then description, by start time within each, across pages. Review M3: search under 2 characters after trimming is 400 VALIDATION_FAILED with reasonCode SEARCH_TOO_SHORT; past 500 matches a search is in date order with the true totalCount and a logged warning.",
-      "mutation": "M2113 rankBySearch forced false (date order alone). M2120 the search schema back to z.string().optional(). M2121 the ceiling branch removed (rank whatever was read).",
-      "observed": "M2113: 1 failing (the S-6 case). Restored; 13 of 13. M2120: 1 failing (the short-search case). M2121: 1 failing (the ceiling case). Each restored; 15 of 15.",
+      "guards": "S-6 (2026-10-24): a search with the default sortBy is ranked title, venue, city, then description, by start time within each, across pages. Review M3 and N1: a search is never refused for being short (1 character is filtered in date order, not ranked; empty or spaces is no filter); over 100 characters is 400 VALIDATION_FAILED with reasonCode SEARCH_TOO_LONG; past 500 matches a search is in date order with the true totalCount and a logged warning.",
+      "mutation": "M2113 rankBySearch forced false (date order alone). M2120 (M3, superseded by N1) the search schema back to z.string().optional(). M2121 the ceiling branch removed (rank whatever was read). M2122 a minimum of 2 put back on the schema. M2123 one-character searches ranked (SEARCH_RANK_MIN to 1).",
+      "observed": "M2113: 1 failing (the S-6 case). Restored; 13 of 13. M2120: 1 failing (the short-search case, before N1). M2121: 1 failing (the ceiling case). M2122: 1 failing (the N1 case: a first letter answered 400). M2123: 1 failing (the N1 case: date order). Each restored; 15 of 15.",
       "date": "2026-10-24"
     },
     "bulk-bell-chunks.test.ts": {

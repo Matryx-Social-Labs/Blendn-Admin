@@ -6,11 +6,18 @@ export const eventQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 
   /**
-   * Search: trimmed, at least 2 characters (review M3). One letter matches most
-   * of the catalogue by substring, which is a scan to rank, not a search; the
-   * route answers it as a 400 with `reasonCode: SEARCH_TOO_SHORT`.
+   * Search: trimmed, at most 100 characters (over is a 400 with `reasonCode:
+   * SEARCH_TOO_LONG`). No minimum: every installed app sends the term as typed
+   * after a pause and shows any error as "Couldn't load events.", so a first
+   * letter must answer (review N1). One character is served in date order, not
+   * ranked (the route's `SEARCH_RANK_MIN`); empty, or only spaces, is no search.
    */
-  search: z.string().trim().min(2, "Search for at least 2 characters.").max(100, "A search is at most 100 characters.").optional(),
+  search: z
+    .string()
+    .trim()
+    .max(100, "A search is at most 100 characters.")
+    .transform((s) => s || undefined)
+    .optional(),
 
   /**
    * Where to browse. The one thing that scopes a page of discovery.
