@@ -279,6 +279,8 @@ export async function GET(request: NextRequest) {
     // The featured section is in the day's rotation, not by distance.
     const shouldSortByDistance =
       !featured && sortBy === "distance" && lat !== undefined && lon !== undefined
+    // A search the caller did not ask to order otherwise is ordered by how well each event answers it (S-6).
+    const rankBySearch = !!search && !featured && !shouldSortByDistance && sortBy === "start_time"
 
     const cacheKey = buildEventsCacheKey({
       page,
@@ -339,6 +341,28 @@ export async function GET(request: NextRequest) {
         })
         const byId = new Map(picked.map((e) => [e.id, e]))
         events = topIds.map((id) => byId.get(id)).filter((e): e is EventListItem => Boolean(e))
+      } else if (rankBySearch) {
+        /*
+         * The title first, then the venue, then the city, then only the
+         * description; by start time within each (S-6). Ordered by date alone,
+         * "coffee" put a tech meetup that mentions coffee in its description
+         * above a coffee cupping, because the meetup started first.
+         *
+         * The distance sort's shape: the light columns for every match, ranked
+         * here, then the full rows for the page only.
+         * ponytail: ranks in memory under DISTANCE_SORT_CEILING matches; past
+         * that it belongs in SQL (a CASE in ORDER BY, or full-text search).
+         */
+        const matches = await db.events.findMany({
+          where,
+          select: { id: true, title: true, venue_name: true, city: true },
+          orderBy: [{ start_time: sortOrder }, { id: "asc" }],
+          take: DISTANCE_SORT_CEILING,
+        })
+        // `sort` is stable, so the date order holds within a tier.
+        const ranked = [...matches].sort((a, b) => searchTier(a, search!) - searchTier(b, search!))
+        totalCount = ranked.length
+        events = await hydrateInOrder(ranked.slice((page - 1) * pageSize, page * pageSize).map((e) => e.id))
       } else if (shouldSortByDistance) {
         /*
          * Fetch only id + coordinates to sort by distance in-memory, avoiding
@@ -399,15 +423,7 @@ export async function GET(request: NextRequest) {
           .slice((page - 1) * pageSize, page * pageSize)
           .map((e) => e.id)
 
-        // Fetch full data only for the current page's events
-        const pageEvents = await db.events.findMany({
-          // Hydrating ids `where` (with the fragment) already chose.
-          where: { id: { in: pageIds }, ...realEventsWhere },
-          select: eventListSelect,
-        })
-        // Restore distance order (findMany with `in` doesn't preserve order)
-        const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
-        events = pageIds.map((id) => eventMap.get(id)!).filter(Boolean)
+        events = await hydrateInOrder(pageIds)
       } else {
         /*
          * Both at once. `count` needs only `where`, so awaiting the page first
@@ -570,4 +586,21 @@ export async function GET(request: NextRequest) {
     logger.error("List events error", { error: String(error) })
     return serverErrorResponse("Failed to list events")
   }
+}
+
+/** The full rows for a page of ids `where` (with the fragment) already chose, in the order given: `findMany` with `in` does not keep it. */
+async function hydrateInOrder(pageIds: string[]): Promise<EventListItem[]> {
+  const pageEvents = await db.events.findMany({
+    where: { id: { in: pageIds }, ...realEventsWhere },
+    select: eventListSelect,
+  })
+  const eventMap = new Map(pageEvents.map((e) => [e.id, e]))
+  return pageIds.map((id) => eventMap.get(id)).filter((e): e is EventListItem => Boolean(e))
+}
+
+/** How well an event answers a search, best first: its title, its venue, its city, else (only) its description. */
+function searchTier(e: { title: string; venue_name: string | null; city: string | null }, search: string): number {
+  const term = search.toLowerCase()
+  const has = (v: string | null) => !!v && v.toLowerCase().includes(term)
+  return has(e.title) ? 0 : has(e.venue_name) ? 1 : has(e.city) ? 2 : 3
 }

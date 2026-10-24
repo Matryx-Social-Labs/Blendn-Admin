@@ -327,3 +327,46 @@ describe("age is checked at the door, not in the feed", () => {
     expect(JSON.stringify(body)).toMatch(/Add your age to your profile/)
   })
 })
+
+describe("GET /events?search= ranks by where the word is (S-6)", () => {
+  it("title, then venue, then only the description; by start time within each; paging keeps the order", async () => {
+    const t = nextToken()
+    const v = await viewer("dv_rank")
+    // Earliest first, so date order alone would be exactly backwards.
+    const make = async (hoursFromNow: number, fields: { title?: string; description?: string; venue_name?: string }) => {
+      const row = await db.events.create({
+        data: {
+          slug: testId("dvr"),
+          title: fields.title ?? "A night out",
+          description: fields.description ?? "Nothing to see",
+          venue_name: fields.venue_name ?? "Somewhere",
+          start_time: new Date(Date.now() + hoursFromNow * HOUR),
+          end_time: new Date(Date.now() + (hoursFromNow + 2) * HOUR),
+          timezone: "UTC",
+          status: "published",
+          visibility: "public",
+          organizer_id: organiser,
+        },
+      })
+      events.push(row.id)
+      return row.id
+    }
+    const inDescription = await make(1, { title: "AI in Production", description: `${t} and snacks after` })
+    const atVenue = await make(2, { venue_name: `${t} Roasters` })
+    const inTitleLater = await make(4, { title: `${t} cupping, round two` })
+    const inTitle = await make(3, { title: `${t} cupping` })
+
+    expect(await listedIds(v.token, t)).toEqual([inTitle, inTitleLater, atVenue, inDescription])
+
+    const page = async (n: number) => {
+      const res = await listRoute.GET(
+        new NextRequest(`http://localhost/api/mobile/events?limit=3&page=${n}&search=${t}`, { headers: { authorization: `Bearer ${v.token}` } })
+      )
+      const body = await res.json()
+      return { ids: body.data.events.map((e: { id: string }) => e.id), total: body.data.pagination?.totalCount ?? body.pagination?.totalCount }
+    }
+    const [p1, p2] = [await page(1), await page(2)]
+    expect([...p1.ids, ...p2.ids]).toEqual([inTitle, inTitleLater, atVenue, inDescription])
+    expect(p1.total).toBe(4)
+  })
+})

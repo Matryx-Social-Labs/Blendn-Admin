@@ -1066,7 +1066,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 |-------|------|---------|-------------|
 | page | int | 1 | Page number |
 | limit | int | 20 | Items per page (max 100) |
-| search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi |
+| search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi. With the default `sortBy=start_time`, results are ranked by where the word is: title, then venue, then city, then only the description; by start time within each (S-6). `sortBy=distance` or `created_at` orders as asked |
 | city | string | - | **Scope the list to one city.** Exact, case-insensitive. Values come from `GET /events/cities` |
 | lat | float | - | Latitude — sorts and labels by distance, never excludes |
 | lon | float | - | Longitude |

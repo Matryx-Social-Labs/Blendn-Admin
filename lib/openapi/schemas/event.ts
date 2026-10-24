@@ -13,7 +13,10 @@ export const EventQuerySchema = z
   .object({
     page: z.number().int().min(1).default(1),
     limit: z.number().int().min(1).max(100).default(20),
-    search: z.string().optional(),
+    search: z
+      .string()
+      .optional()
+      .describe("Matches title, description, venue or city. With the default sortBy=start_time, ranked title, venue, city, then description; by start time within each."),
     city: z
       .string()
       .min(1)
