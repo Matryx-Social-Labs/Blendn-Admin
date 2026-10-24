@@ -38,6 +38,11 @@ const VENUE = {
   capacity: null,
   venue_type: "pub_bar",
   floors: null,
+  area: null,
+  area_slug: null,
+  timezone: "Asia/Kolkata",
+  day_reset_hour: 6,
+  hours: null,
   _count: { events: 0 },
   events: [],
 }
