@@ -47,8 +47,17 @@ const MAX_EVENTS_PER_PASS = 200
 let timer: NodeJS.Timeout | null = null
 let running = false
 
-/** Events that are on right now, and therefore worth alerting about. */
-async function liveEventIds(now: Date): Promise<string[]> {
+/**
+ * Events that are on right now, and therefore worth alerting about.
+ *
+ * No `ORDER BY … LIMIT` in the statement. With one, the planner walks
+ * `(status, start_time)` in order, looking for the first 200 live events among
+ * every published event that ever started -- found on a 300k-event history: 66 ms
+ * and 300k rows filtered to return nine, every minute. Without it, `(status,
+ * end_time)` reaches only what has not ended (5 ms). The live set is small by
+ * nature; the order and the cap are applied here to the ids it returns.
+ */
+export async function liveEventIds(now: Date, max = MAX_EVENTS_PER_PASS): Promise<string[]> {
   const rows = await db.events.findMany({
     where: {
       deleted_at: null,
@@ -59,11 +68,12 @@ async function liveEventIds(now: Date): Promise<string[]> {
       start_time: { lte: now },
       end_time: { gte: now },
     },
-    select: { id: true },
-    take: MAX_EVENTS_PER_PASS,
-    orderBy: { start_time: "asc" },
+    select: { id: true, start_time: true },
   })
-  return rows.map((r) => r.id)
+  return rows
+    .sort((a, b) => a.start_time.getTime() - b.start_time.getTime())
+    .slice(0, max)
+    .map((r) => r.id)
 }
 
 /**

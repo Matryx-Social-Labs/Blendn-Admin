@@ -1,4 +1,6 @@
-import { recordIssuesFor, issuesFor } from "@/lib/event-issues"
+import { recordIssuesFor, issuesFor, liveEventIds } from "@/lib/event-issues"
+
+import { sqlCounter } from "./sql-count"
 
 import { db, closeDb, makeUser, makeEvent, occurrenceOf, testId, putInRoom } from "./helpers"
 
@@ -133,5 +135,39 @@ describe("issues are recorded whether or not anyone is watching", () => {
     expect(
       await db.event_issues.count({ where: { event_id: eventId, kind: "over_capacity" } })
     ).toBe(2)
+  })
+})
+
+describe("which events are live", () => {
+  async function eventAt(host: string, start: Date, end: Date, status: "published" | "draft" = "published") {
+    const id = await makeEvent(host)
+    events.push(id)
+    await db.events.update({ where: { id }, data: { start_time: start, end_time: end, status } })
+    return id
+  }
+
+  it("is the published events running now, earliest start first, capped — read without an ORDER BY … LIMIT the planner would walk history for", async () => {
+    const host = await makeUser(testId("iss-live-host"), "organizer")
+    users.push(host)
+    const now = new Date()
+    const at = (minutes: number) => new Date(now.getTime() + minutes * 60_000)
+    const third = await eventAt(host, at(-30), at(60))
+    const first = await eventAt(host, at(-180), at(60))
+    const second = await eventAt(host, at(-90), at(60))
+    const ended = await eventAt(host, at(-300), at(-10))
+    const ahead = await eventAt(host, at(10), at(120))
+    const draft = await eventAt(host, at(-60), at(60), "draft")
+
+    const counter = sqlCounter()
+    try {
+      const { result, sql } = await counter.during(() => liveEventIds(now, 100_000))
+      expect(result.filter((id) => [first, second, third, ended, ahead, draft].includes(id))).toEqual([first, second, third])
+      expect(sql.filter((s) => /FROM "public"."events"/.test(s)).every((s) => !/LIMIT/.test(s) && !/ORDER BY/.test(s))).toBe(true)
+    } finally {
+      await counter.stop()
+    }
+    // The cap keeps the earliest, whoever else is live in this database.
+    const all = await liveEventIds(now, 100_000)
+    expect(await liveEventIds(now, 2)).toEqual(all.slice(0, 2))
   })
 })
