@@ -3,12 +3,13 @@
 // require() — the build goes green and the container dies on boot with
 // MODULE_NOT_FOUND. This module is reachable from server.ts through the
 // presence sweeper, so everything it imports must be relative too.
+import { Prisma } from "@prisma/client"
 import { db } from "./db"
 import { closeSession } from "./presence-sessions"
 import { logger } from "./logger"
 import { arrivalAnnounced } from "./arrivals-in-flight"
-import { emitEventCheckOut, evictFromVenueDay } from "./socket-server"
-import { notifyFriendsHere } from "./room-friends"
+import { emitEventCheckOut, emitEventCheckOuts, evictFromVenueDay } from "./socket-server"
+import { notifyFriendsHere, notifyFriendsHereMany } from "./room-friends"
 
 /**
  * The one way someone stops being in the room.
@@ -168,6 +169,101 @@ export async function performCheckout(
   })
 
   return { changed: true, eventId: checkIn.event_id, userId: checkIn.user_id }
+}
+
+/** One check-in to close, and the instant it ended (an expiry's own end, else the sweep's clock). */
+export interface CheckoutItem {
+  id: string
+  at: Date
+}
+
+/** Ids per statement: bound parameters, and how long one UPDATE holds its row locks. */
+const CHECKOUT_CHUNK = 2000
+
+interface CheckedOutRow {
+  id: string
+  event_id: string
+  user_id: string
+  occurrence_id: string
+  kind: "attendee" | "staff"
+  event_kind: string
+  at: Date
+}
+
+/**
+ * `performCheckout` for a sweep: the same rows, session closures, chat cuts and
+ * telling, in a handful of statements for the whole batch instead of ~15 per
+ * person. For the sweepers, which close hundreds or thousands at once (an
+ * occurrence ending with the room still inside); one person is `performCheckout`.
+ *
+ * Idempotent the same way: a row already out, or racing a manual checkout, is
+ * left alone and simply not returned. Returns only the rows this call changed.
+ *
+ * Differences from the one-at-a-time path, all deliberate: the departure is
+ * `GREATEST(at, arrived_at)` (the one-at-a-time write would have thrown on
+ * `presence_sessions_departure_after_arrival` and stopped the sweep); each room
+ * is told with one `hereCount` (the room once all of them are out); and the
+ * friends-here signal is one batched read per chunk, told once per event.
+ */
+export async function performCheckouts(items: readonly CheckoutItem[], reason: CheckoutReason): Promise<CheckoutResult[]> {
+  const changed: CheckoutResult[] = []
+  for (let i = 0; i < items.length; i += CHECKOUT_CHUNK) {
+    changed.push(...(await checkOutChunk(items.slice(i, i + CHECKOUT_CHUNK), reason)))
+  }
+  return changed
+}
+
+async function checkOutChunk(items: readonly CheckoutItem[], reason: CheckoutReason): Promise<CheckoutResult[]> {
+  const ids = items.map((i) => i.id)
+  const ats = items.map((i) => i.at.toISOString())
+  // See `performCheckout`: an expiry acts only on the window it read, to the millisecond.
+  const sameWindow = reason === "expired" ? Prisma.sql`AND c.expires_at < v.at + interval '1 millisecond'` : Prisma.empty
+  // Guarded in the statement, like the one-at-a-time write: a racing caller cannot make both act.
+  const rows = await db.$queryRaw<CheckedOutRow[]>`
+    WITH moved AS (
+      UPDATE event_check_ins c
+         SET status = 'checked_out', check_out_time = v.at, updated_at = v.at
+        FROM unnest(${ids}::uuid[], ${ats}::timestamptz[]) AS v(id, at)
+       WHERE c.id = v.id AND c.status = 'checked_in' ${sameWindow}
+   RETURNING c.id, c.event_id, c.user_id, c.occurrence_id, c.kind::text AS kind, v.at
+    )
+    SELECT m.*, e.kind::text AS event_kind FROM moved m JOIN events e ON e.id = m.event_id`
+  if (rows.length === 0) return []
+
+  // The sessions, in the one place the checkouts pass through (see `performCheckout`).
+  await db.$executeRaw`
+    UPDATE presence_sessions ps
+       SET departed_at = GREATEST(v.at, ps.arrived_at), departed_source = ${DEPARTURE_SOURCE[reason]}::departure_source, updated_at = v.at
+      FROM unnest(${rows.map((r) => r.occurrence_id)}::uuid[], ${rows.map((r) => r.user_id)}::text[], ${rows.map((r) => r.at.toISOString())}::timestamptz[]) AS v(occ, usr, at)
+     WHERE ps.occurrence_id = v.occ AND ps.user_id = v.usr AND ps.departed_at IS NULL`
+
+  const cut = rows.filter((r) => cutsChatAccess(reason, r.event_kind === "venue_day"))
+  if (cut.length > 0) {
+    const groups = await db.chat_groups.findMany({
+      where: { event_id: { in: [...new Set(cut.map((r) => r.event_id))] } },
+      select: { id: true, event_id: true },
+    })
+    const groupOf = new Map(groups.map((g) => [g.event_id, g.id]))
+    const members = cut.filter((r) => groupOf.has(r.event_id))
+    if (members.length > 0) {
+      await db.$executeRaw`
+        UPDATE chat_group_members m
+           SET last_allowed_at = v.at, updated_at = v.at
+          FROM unnest(${members.map((r) => groupOf.get(r.event_id))}::uuid[], ${members.map((r) => r.user_id)}::text[], ${members.map((r) => r.at.toISOString())}::timestamptz[]) AS v(grp, usr, at)
+         WHERE m.chat_group_id = v.grp AND m.user_id = v.usr`
+    }
+    for (const r of cut) if (r.event_kind === "venue_day") evictFromVenueDay(r.event_id, groupOf.get(r.event_id) ?? null, r.user_id, reason)
+  }
+
+  // After their arrival's broadcast, never before it (see `performCheckout`).
+  await Promise.all(rows.map((r) => arrivalAnnounced(r.event_id, r.user_id)))
+  const byEvent = new Map<string, string[]>()
+  for (const r of rows) byEvent.set(r.event_id, [...(byEvent.get(r.event_id) ?? []), r.user_id])
+  for (const [eventId, userIds] of byEvent) emitEventCheckOuts(eventId, userIds)
+  void notifyFriendsHereMany(rows.filter((r) => r.kind === "attendee").map((r) => ({ userId: r.user_id, eventId: r.event_id })))
+
+  logger.info("Checked out", { reason, count: rows.length, events: byEvent.size })
+  return rows.map((r) => ({ changed: true, eventId: r.event_id, userId: r.user_id }))
 }
 
 /** A room a switch took somebody out of, named for the "You left {A}." toast (SCRUM-635). */

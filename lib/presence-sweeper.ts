@@ -5,7 +5,7 @@ import type { Prisma } from "@prisma/client"
 import { ageFrom, minAgeRefusal } from "./age"
 import { db } from "./db"
 import { logger } from "./logger"
-import { performCheckout } from "./checkout"
+import { performCheckouts, type CheckoutItem } from "./checkout"
 import { realEventsWhere, venueDaysWhere } from "./event-kind"
 import { resolveFence, fenceSelect } from "./geofence"
 import { evaluatePresence, type PresenceState } from "./presence"
@@ -177,6 +177,7 @@ async function sweepRooms(
     byEvent.set(row.event_id, [...(byEvent.get(row.event_id) ?? []), row])
   }
 
+  const pending: Record<"occurrence_ended" | "left_area", CheckoutItem[]> = { occurrence_ended: [], left_area: [] }
   for (const [eventId, rows] of byEvent) {
     /*
      * One resolver. This consulted the event's fence and the venue's and never
@@ -236,22 +237,21 @@ async function sweepRooms(
       })
       // Still close out anyone whose day simply ended.
       for (const d of toCheckOut.filter((x) => x.decision.reason === "occurrence_ended")) {
-        const done = await performCheckout(d.row.id, "occurrence_ended", now)
-        if (done?.changed) result.checkedOut++
+        pending.occurrence_ended.push({ id: d.row.id, at: now })
       }
       continue
     }
 
     for (const { row, decision } of decisions) {
       if (decision.action === "auto_checkout") {
-        const done = await performCheckout(
-          row.id,
-          decision.reason === "occurrence_ended" ? "occurrence_ended" : "left_area",
-          now
-        )
-        if (done?.changed) result.checkedOut++
+        pending[decision.reason === "occurrence_ended" ? "occurrence_ended" : "left_area"].push({ id: row.id, at: now })
       }
     }
+  }
+
+  // Once for the pass, not once per person: the rows, the sessions and the telling are batched (`performCheckouts`).
+  for (const reason of ["occurrence_ended", "left_area"] as const) {
+    result.checkedOut += (await performCheckouts(pending[reason], reason)).length
   }
 
   if (result.checkedOut > 0 || result.guarded.length > 0) {
@@ -335,12 +335,9 @@ export async function expireWindows(now: Date = new Date()): Promise<number> {
   if (due.length === MAX_EXPIRIES_PER_SWEEP) {
     logger.warn("Venue-day sweep hit its expiry cap", { cap: MAX_EXPIRIES_PER_SWEEP })
   }
-  let expired = 0
-  for (const row of due) {
-    const done = await performCheckout(row.id, "expired", row.expires_at!)
-    if (done?.changed) expired++
-  }
-  return expired
+  // Each at its own end (PL-U04); one batch.
+  const done = await performCheckouts(due.map((row) => ({ id: row.id, at: row.expires_at! })), "expired")
+  return done.length
 }
 
 /**
@@ -393,14 +390,10 @@ async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: num
       take: MAX_CLOSED_PER_VENUE,
       select: { id: true, user: { select: { profile: { select: { age: true, date_of_birth: true } } } } },
     })
-    const told: string[] = []
-    for (const row of live) {
-      // Not somebody the event's own age rule would turn away at its door
-      // (D-3): their Go Live was allowed, and stays theirs.
-      if (minAgeRefusal(ageFrom(row.user.profile), event.min_age)) continue
-      const done = await performCheckout(row.id, "event_started", now)
-      if (done?.changed) told.push(done.userId)
-    }
+    // Not somebody the event's own age rule would turn away at its door
+    // (D-3): their Go Live was allowed, and stays theirs.
+    const eligible = live.filter((row) => !minAgeRefusal(ageFrom(row.user.profile), event.min_age))
+    const told = (await performCheckouts(eligible.map((row) => ({ id: row.id, at: now })), "event_started")).map((r) => r.userId)
     closedForEvents += told.length
     if (told.length === 0) continue
 
