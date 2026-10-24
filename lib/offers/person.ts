@@ -211,8 +211,7 @@ export async function regularPrefs(userId: string, venueId: string): Promise<Reg
     known: known !== null,
     offersMuted: muted !== null,
     ownerName: venue.owner_org?.display_name ?? null,
-    // ponytail: hard false until a venue/organiser can switch regulars on (a dashboard toggle, not built); then read it off the venue here.
-    regulars: { active: false, eligible },
+    regulars: { active: await regularsActive(userId, venueId), eligible },
   }
 }
 
@@ -255,25 +254,43 @@ export async function setRegularPrefs(
   return { prefs: prefs ?? { known: false, offersMuted: false, ownerName: null, regulars: { active: false, eligible: false } } }
 }
 
+/**
+ * Whether the regulars feature is on anywhere that could reach this person
+ * (`venueId`: at that venue). FALSE everywhere until a venue or organiser can
+ * switch it on (owner, 2026-10-17: the feature is deferred; the dashboard
+ * toggle is not built), so the app shows no regulars or "Offers from places"
+ * UI. One answer for `/me/offers` and a venue's prefs alike.
+ * ponytail: a constant until the toggle exists; then read the venues' switch here (for a person: any venue they have been to).
+ */
+export async function regularsActive(_userId: string, _venueId?: string): Promise<boolean> {
+  return false
+}
+
 export interface OfferSettings {
   /** "Offers from places": the one switch for every venue (review M6). Off until turned on (S-5); off, no offer reaches them. */
   enabled: boolean
   /** Offer pushes (SCRUM-628): off until they say yes in the app. Off, offers still arrive, with no push. */
   pushes: boolean
+  /** Whether regulars is on anywhere for them (`regularsActive`): the app shows "Offers from places" only when it is. */
+  regulars: { active: boolean }
 }
 
 const settingsSelect = { offers_from_places: true, offer_push_consent_at: true } as const
 
 export async function offerSettings(userId: string): Promise<OfferSettings> {
-  const profile = await db.profiles.findUnique({ where: { id: userId }, select: settingsSelect })
-  return { enabled: profile?.offers_from_places ?? false, pushes: Boolean(profile?.offer_push_consent_at) }
+  const [profile, active] = await Promise.all([db.profiles.findUnique({ where: { id: userId }, select: settingsSelect }), regularsActive(userId)])
+  return { enabled: profile?.offers_from_places ?? false, pushes: Boolean(profile?.offer_push_consent_at), regulars: { active } }
 }
 
 /**
  * Changes what it is given. A yes to pushes is kept with when it was first
  * given — a second yes (a retry, a double tap) is the same yes; a no clears it.
  */
-export async function setOfferSettings(userId: string, change: Partial<OfferSettings>, now: Date = new Date()): Promise<OfferSettings> {
+export async function setOfferSettings(
+  userId: string,
+  change: Partial<Pick<OfferSettings, "enabled" | "pushes">>,
+  now: Date = new Date()
+): Promise<OfferSettings> {
   const firstYes = change.pushes
     ? (await db.profiles.findUnique({ where: { id: userId }, select: { offer_push_consent_at: true } }))?.offer_push_consent_at
     : null
@@ -285,7 +302,7 @@ export async function setOfferSettings(userId: string, change: Partial<OfferSett
     },
     select: settingsSelect,
   })
-  return { enabled: profile.offers_from_places, pushes: profile.offer_push_consent_at !== null }
+  return { enabled: profile.offers_from_places, pushes: profile.offer_push_consent_at !== null, regulars: { active: await regularsActive(userId) } }
 }
 
 export type ReportOutcome = "filed" | "already" | "not_found"

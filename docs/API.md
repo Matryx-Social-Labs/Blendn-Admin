@@ -4079,7 +4079,13 @@ without an adult age on file. 404 for no such venue.
 
 ### GET / PUT /me/offers — "Offers from places" and offer notifications
 
-`{ "enabled": false, "pushes": false }` for an account made since S-5.
+`{ "enabled": false, "pushes": false, "regulars": { "active": false } }` for an account made since S-5.
+
+- `regulars.active` (additive, 2026-10-24) — whether the regulars feature is on
+  anywhere for this person. **False everywhere** until a venue or organiser can
+  switch it on (the owner deferred the feature, 2026-10-17); the app shows
+  "Offers from places" only when it is true. The same answer as a venue's
+  `regulars.active` on `GET /venues/:venueId/regular` (`regularsActive`).
 
 - `enabled` — one switch for every venue: off, no venue's offer reaches you.
   **Off until turned on** (S-5, 2026-10-24: promotional consent is opt-in;

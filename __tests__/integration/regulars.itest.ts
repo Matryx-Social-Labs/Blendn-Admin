@@ -586,7 +586,7 @@ describe("review pass 2", () => {
     await db.user.update({ where: { id: fresh.id }, data: { createdAt: new Date(Date.now() - 31 * DAY) } })
     // Now five — until one of them turns offers from places off.
     const off = await meOffersRoute.PUT(req("/api/mobile/me/offers", R[0].token, "PUT", { enabled: false }))
-    expect((await off.json()).data).toEqual({ enabled: false, pushes: false })
+    expect((await off.json()).data).toEqual({ enabled: false, pushes: false, regulars: { active: false } })
     expect((await meOffersRoute.PUT(req("/api/mobile/me/offers", R[0].token, "PUT", { enabled: "false" }))).status).toBe(400)
     expect(await refusal(actions.sendOffer({ venueId: G, text: "Second try", days: 7 }))).toMatch(/^Fewer than 5 regulars/)
     await meOffersRoute.PUT(req("/api/mobile/me/offers", R[0].token, "PUT", { enabled: true }))
@@ -601,7 +601,7 @@ describe("review pass 2", () => {
     const newcomer = await person("rg_asmade", { asMade: true })
     await regular(S, newcomer.id)
     expect((await meOffersRoute.GET(req("/api/mobile/me/offers", newcomer.token))).status).toBe(200)
-    expect((await (await meOffersRoute.GET(req("/api/mobile/me/offers", newcomer.token))).json()).data).toEqual({ enabled: false, pushes: false })
+    expect((await (await meOffersRoute.GET(req("/api/mobile/me/offers", newcomer.token))).json()).data).toEqual({ enabled: false, pushes: false, regulars: { active: false } })
     expect((await db.profiles.findUniqueOrThrow({ where: { id: newcomer.id }, select: { offers_from_places: true } })).offers_from_places).toBe(false)
     as(owner)
     expect(await refusal(actions.sendOffer({ venueId: S, text: "Before the yes", days: 7 }))).toMatch(/^Fewer than 5 regulars/)
@@ -615,27 +615,27 @@ describe("review pass 2", () => {
     const answer = async (res: Response) => (await res.json()).data
     const row = () => db.profiles.findUniqueOrThrow({ where: { id: p.id }, select: { offers_from_places: true, offer_push_consent_at: true } })
 
-    expect(await answer(await meOffersRoute.GET(req(url, p.token)))).toEqual({ enabled: true, pushes: false })
+    expect(await answer(await meOffersRoute.GET(req(url, p.token)))).toEqual({ enabled: true, pushes: false, regulars: { active: false } })
     for (const garbled of [{ pushes: "true" }, { pushes: 1 }, {}, { pushes: true, extra: 1 }]) {
       expect((await meOffersRoute.PUT(req(url, p.token, "PUT", garbled))).status).toBe(400)
     }
     expect((await row()).offer_push_consent_at).toBeNull()
 
     const before = Date.now()
-    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { pushes: true })))).toEqual({ enabled: true, pushes: true })
+    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { pushes: true })))).toEqual({ enabled: true, pushes: true, regulars: { active: false } })
     const at = (await row()).offer_push_consent_at!
     expect(at.getTime()).toBeGreaterThanOrEqual(before - 1000)
     expect(at.getTime()).toBeLessThanOrEqual(Date.now())
-    expect(await answer(await meOffersRoute.GET(req(url, p.token)))).toEqual({ enabled: true, pushes: true })
+    expect(await answer(await meOffersRoute.GET(req(url, p.token)))).toEqual({ enabled: true, pushes: true, regulars: { active: false } })
     // A second yes (a retry, a double tap) is the same yes: it keeps when it was first given.
     await new Promise((r) => setTimeout(r, 20))
-    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { pushes: true })))).toEqual({ enabled: true, pushes: true })
+    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { pushes: true })))).toEqual({ enabled: true, pushes: true, regulars: { active: false } })
     expect((await row()).offer_push_consent_at).toEqual(at)
     // "Offers from places" is its own switch: off leaves the yes as it was.
-    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { enabled: false })))).toEqual({ enabled: false, pushes: true })
+    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { enabled: false })))).toEqual({ enabled: false, pushes: true, regulars: { active: false } })
     expect(await row()).toEqual({ offers_from_places: false, offer_push_consent_at: at })
     // Both at once.
-    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { enabled: true, pushes: false })))).toEqual({ enabled: true, pushes: false })
+    expect(await answer(await meOffersRoute.PUT(req(url, p.token, "PUT", { enabled: true, pushes: false })))).toEqual({ enabled: true, pushes: false, regulars: { active: false } })
     expect(await row()).toEqual({ offers_from_places: true, offer_push_consent_at: null })
     expect(await db.audit_logs.count({ where: { user_id: p.id } })).toBe(0)
   })
