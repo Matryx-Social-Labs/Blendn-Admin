@@ -35,7 +35,9 @@ const signupEmails: string[] = []
 afterAll(async () => {
   const signedUp = await db.user.findMany({ where: { email: { in: signupEmails } }, select: { id: true } })
   users.push(...signedUp.map((u) => u.id))
-  await db.audit_logs.deleteMany({ where: { OR: [{ resource_id: { in: users } }, { action: "moderation.text_refused", user_id: null }] } })
+  await db.audit_logs.deleteMany({
+    where: { OR: [{ resource_id: { in: users } }, { action: { in: ["moderation.text_refused", "moderation.text_flagged"] }, user_id: null }] },
+  })
   await db.message_requests.deleteMany({ where: { sender_id: { in: users } } })
   await db.crew_invites.deleteMany({ where: { crew: { members: { some: { user_id: { in: users } } } } } })
   const crews = await db.crew_members.findMany({ where: { user_id: { in: users } }, select: { crew_id: true } })
@@ -83,6 +85,17 @@ async function refusalAudit(userId: string | null, field: string) {
   throw new Error(`no moderation.text_refused row for ${field}`)
 }
 
+/** The `moderation.text_flagged` row for an allowed, ambiguous field. */
+async function flagAudit(userId: string, field: string) {
+  for (let i = 0; i < 50; i++) {
+    const rows = await db.audit_logs.findMany({ where: { action: "moderation.text_flagged", user_id: userId } })
+    const row = rows.find((r) => (r.details as { field?: string }).field === field)
+    if (row) return row.details as Record<string, unknown>
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  throw new Error(`no moderation.text_flagged row for ${field}`)
+}
+
 describe("profile", () => {
   const put = (p: Person, body: Record<string, unknown>) =>
     call(profileRoute.PUT, `/api/mobile/profiles/${p.id}`, p, "PUT", body, { userId: p.id })
@@ -102,6 +115,25 @@ describe("profile", () => {
     const p = await person("pt-links")
     expectRefused(await put(p, { bio: "https://a.test https://b.test https://c.test" }), "bio")
     expect(await refusalAudit(p.id, "bio")).toMatchObject({ source: "spam" })
+  })
+
+  it.each(["Magi", "Shala Patel", "Bal Krishna", "Boli", "Otha"])("saves the real name %s, flagged for review", async (name) => {
+    const p = await person(`pt-real`)
+    const res = await put(p, { name })
+    expect(res.status).toBe(200)
+    expect((await db.profiles.findUniqueOrThrow({ where: { id: p.id } })).name).toBe(name)
+    expect(await flagAudit(p.id, "name")).toMatchObject({ surface: "profile", field: "name" })
+  })
+
+  it("saves a bio that names a faith, flagged for review", async () => {
+    const p = await person("pt-faith")
+    expect((await put(p, { bio: "Sunni Muslim, love chai" })).status).toBe(200)
+    expect(await flagAudit(p.id, "bio")).toMatchObject({ matched: ["sunni"] })
+  })
+
+  it("refuses a slur in location", async () => {
+    const p = await person("pt-location")
+    expectRefused(await put(p, { location: "Bengaluru, you retard" }), "location")
   })
 
   it("saves ordinary text", async () => {
@@ -136,6 +168,10 @@ describe("sign-up", () => {
   it("creates the account with an ordinary name", async () => {
     const res = await signup("Asha Rao")
     expect(res.status).toBe(201)
+  })
+
+  it("creates the account for a real name the chat list would refuse", async () => {
+    expect((await signup("Bal Krishna")).status).toBe(201)
   })
 })
 
@@ -199,6 +235,12 @@ describe("crew", () => {
     expect(res.status).toBe(400)
     expect(res.body.errorCode).toBe("VALIDATION_FAILED")
     expect(res.body.reasonCode).toBeUndefined()
+  })
+
+  it("makes a crew named for a real person the chat list would refuse, flagged for review", async () => {
+    const { o, friend } = await owner()
+    expect((await create(o, friend, { name: "Bal Krishna Lot" })).status).toBe(201)
+    expect(await flagAudit(o.id, "name")).toMatchObject({ surface: "crew", matched: ["bal"] })
   })
 
   it("makes and edits a crew with ordinary text", async () => {

@@ -14,10 +14,10 @@ import { friendIdsOf } from "../friends"
 import { logger } from "../logger"
 import { findProfileContactInfo } from "../moderation/contact-info"
 import { foldText, hasInvisibleChars } from "../moderation/fold"
-import { checkKeywords } from "../moderation/keyword-filter"
+import { checkIdentityKeywords } from "../moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "../moderation/openai-moderation"
 import type { ModerationResult } from "../moderation/types"
-import { recordRefusedText, TEXT_NOT_ALLOWED } from "../moderation/user-text"
+import { recordScreenedText, TEXT_NOT_ALLOWED } from "../moderation/user-text"
 import { sendPushNotification } from "../push-notifications"
 import { closeRoomSockets, leaveRoomSockets } from "../room-close"
 import { blocksBetween } from "./blocks"
@@ -181,7 +181,7 @@ const OPENAI_BOUND_MS = 1000
  * Why this crew name or bio may not be written (`refusal`, the sentence for the
  * writer), or null.
  *
- * The keyword filter, then contact details in the strict reading a card gets
+ * The identity keyword list (`checkIdentityKeywords`), then contact details in the strict reading a card gets
  * (`findProfileContactInfo`: phone numbers, handles, emails, web addresses,
  * spelled out or not), then OpenAI within a bound. Contact details say which
  * — the fix is the writer's. Anything else gets one sentence that teaches
@@ -197,7 +197,8 @@ export async function crewTextRefusal(
   text: string
 ): Promise<{ refusal: string; /** Set when the text itself was objectionable, not contact details. */ objectionable?: ModerationResult } | null> {
   const what = field === "name" ? "a crew’s name" : "a crew’s bio"
-  const keyword = checkKeywords(text)
+  // The identity list: a crew called "Bal Krishna's Lot" is a name, not abuse (PR #755 review, H1).
+  const keyword = checkIdentityKeywords(text)
   if (keyword?.action === "hide") return { refusal: `This can’t be ${what}.`, objectionable: keyword }
   const contact = findProfileContactInfo(text)
   if (contact.length > 0) {
@@ -224,9 +225,14 @@ async function textRefusal(userId: string, fields: { name?: string; bio?: string
     const text = fields[field]
     if (!text) continue
     const verdict = await crewTextRefusal(field, text)
-    if (!verdict) continue
+    if (!verdict) {
+      // Let through; an ambiguous word (a name, a faith) is flagged for a human.
+      const suspicion = checkIdentityKeywords(text)
+      if (suspicion) recordScreenedText(userId, "crew", field, { action: "flag", result: suspicion })
+      continue
+    }
     if (!verdict.objectionable) return { refusal: verdict.refusal, status: 400, field }
-    recordRefusedText(userId, "crew", field, verdict.objectionable)
+    recordScreenedText(userId, "crew", field, { action: "refuse", result: verdict.objectionable })
     return { refusal: verdict.refusal, status: 400, field, reasonCode: TEXT_NOT_ALLOWED }
   }
   return null

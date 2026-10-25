@@ -324,7 +324,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (signRefusal) return errorResponse(signRefusal, 400, "VALIDATION_ERROR")
 
     // What strangers read on the card is screened before anything is written (App Store 1.2).
-    const refusedText = screenUserText(userId, "profile", { name, bio, occupation, education })
+    // `location` too: the free text the room card shows.
+    const refusedText = screenUserText(userId, "profile", { name, bio, occupation, education, location })
     if (refusedText) return textNotAllowedResponse(refusedText.field, "That can’t go on your profile.")
 
     /*

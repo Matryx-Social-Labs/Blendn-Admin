@@ -34,6 +34,19 @@ describe("screenUserText", () => {
     expect(entry.details).toEqual({ surface: "profile", field: "bio", source: "keyword", matched: ["retard"] })
   })
 
+  it("lets an ambiguous name through on identity text and records it as flagged", () => {
+    expect(screenUserText("u1", "profile", { name: "Shala Patel", bio: "Sunni Muslim, love chai" })).toBeNull()
+    const actions = (auditLog as jest.Mock).mock.calls.map(([e]) => [e.action, e.details.field, e.details.matched])
+    expect(actions).toEqual([
+      ["moderation.text_flagged", "name", ["shala"]],
+      ["moderation.text_flagged", "bio", ["sunni"]],
+    ])
+  })
+
+  it("holds a message request to the chat rule", () => {
+    expect(screenUserText("u1", "message_request", { message: "you magi" })).toEqual({ field: "message" })
+  })
+
   it("skips empty and absent fields, and records nothing when all pass", () => {
     expect(screenUserText("u1", "profile", { name: "Asha", bio: null, occupation: undefined, education: "" })).toBeNull()
     expect(auditLog).not.toHaveBeenCalled()
