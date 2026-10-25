@@ -662,7 +662,7 @@ describe("held to this environment and to what Blendn+ is (MN-U05)", () => {
       expect((await post(rc("INITIAL_PURCHASE", { user: other, txn: notListed, at: T0 }))).json).toMatchObject({ refused: "wrong_environment" })
       expect(await rowsFor(notListed)).toHaveLength(0)
       // A transfer is not a purchase: still held to the environment.
-      expect((await post(transfer([other], [reviewer], T0))).json).toMatchObject({ refused: "wrong_environment" })
+      expect((await post(transfer([other], [reviewer], T0, { app_user_id: reviewer }))).json).toMatchObject({ refused: "wrong_environment" })
     } finally {
       delete process.env.RAILWAY_ENVIRONMENT_NAME
       delete process.env.REVIEW_ACCOUNT_EMAILS

@@ -19,8 +19,9 @@ describe("objectionableText", () => {
   it("lets ordinary text, two links, and a separator-only suspicion through", () => {
     expect(objectionableText("Here for the music and the food.")).toBeNull()
     expect(objectionableText("https://a.test and https://b.test")).toBeNull()
-    // "the flag" folds to "theflag", which contains a word on the list: a suspicion, not a verdict.
-    expect(objectionableText("Waving the flag tonight")).toBeNull()
+    // Found only once separators are stripped: a suspicion, not a verdict, as in a room.
+    // Refusing it would also refuse a name like "Mr. Etard" ("mretard").
+    expect(objectionableText("r e t a r d")).toBeNull()
   })
 })
 
