@@ -252,14 +252,17 @@ and the line to set) and must not be deleted; a deleted review account's
 address can be signed up with again, and that new account gets nothing.
 
 ```bash
-# 1. The account (prints its user id), and mark the event the reviewer will use:
-APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... REVIEW_DEMO_EVENT_ID=<event uuid> npm run seed:review
+# 1. The account (prints its user id):
+APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... npm run seed:review
 # 2. On the server (Railway production), only if the owner decides to turn it on:
 REVIEW_ACCOUNT_IDS=<user id from step 1>
 ```
 
-`seed:review` marks the event it creates `review_demo`; `REVIEW_DEMO_EVENT_ID`
-marks an existing one. Turn it off after approval by deleting the variable.
+Only the event `seed:review` creates is ever `review_demo`, so the reviewer is
+never put in a real room with real people. It creates one only when nothing
+upcoming is published; on a database with real upcoming events there is no
+`review_demo` event, and the geofence half of the aid has nothing to apply to.
+Turn the aid off after approval by deleting the variable.
 
 ### 8. Populate a room — staging only
 

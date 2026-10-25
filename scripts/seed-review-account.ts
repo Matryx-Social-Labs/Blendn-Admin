@@ -3,7 +3,6 @@
  *
  *   APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... DATABASE_URL=... npx tsx scripts/seed-review-account.ts
  *   npm run seed:review
- *   REVIEW_DEMO_EVENT_ID=<event uuid> ... npm run seed:review   (also marks that event review_demo)
  *
  * ## Why this is a script and not a fixture
  *
@@ -219,17 +218,6 @@ async function main() {
     eventNote =
       `created "${event.title}" (${event.id}) starting ${event.start_time.toISOString()}` +
       ` — ${days.length} occurrence(s)`
-  }
-
-  /*
-   * An existing event the reviewer should be able to check in to from anywhere
-   * (lib/review-accounts.ts): marked `review_demo`. Does nothing for anyone
-   * until REVIEW_ACCOUNT_IDS lists the review account on the server.
-   */
-  const demoEventId = process.env.REVIEW_DEMO_EVENT_ID?.trim()
-  if (demoEventId) {
-    const marked = await db.events.updateMany({ where: { id: demoEventId, deleted_at: null }, data: { review_demo: true } })
-    eventNote += marked.count ? `; marked ${demoEventId} review_demo` : `; REVIEW_DEMO_EVENT_ID ${demoEventId} NOT FOUND`
   }
 
   console.log("Review account ready.")
