@@ -21,7 +21,8 @@ const APPLE_TIMEOUT_MS = 5_000
 
 export type AppleRevokeOutcome =
   | { outcome: "revoked" }
-  | { outcome: "skipped"; reason: "no_code" | "not_configured" }
+  /** `different_apple_id`: the code was for another Apple ID than the one linked, whose grant is not ours to revoke. */
+  | { outcome: "skipped"; reason: "no_code" | "not_configured" | "different_apple_id" }
   | { outcome: "failed"; reason: string }
 
 /**
@@ -64,8 +65,13 @@ async function postForm(path: string, form: Record<string, string>): Promise<Rec
   return body
 }
 
-/** Exchange the code and revoke the grant. Never throws. */
-export async function revokeAppleAuthorization(code: string | null | undefined): Promise<AppleRevokeOutcome> {
+/**
+ * Exchange the code and revoke the grant, only if the code belongs to
+ * `linkedSub`, the Apple user id on the account being deleted. Somebody who
+ * picks a different Apple ID in the sheet hands us a code for a grant that is
+ * not this account's; that one is left alone. Never throws.
+ */
+export async function revokeAppleAuthorization(code: string | null | undefined, linkedSub: string): Promise<AppleRevokeOutcome> {
   if (!code) return { outcome: "skipped", reason: "no_code" }
   const config = appleRevokeConfig()
   if (!config) return { outcome: "skipped", reason: "not_configured" }
@@ -81,6 +87,15 @@ export async function revokeAppleAuthorization(code: string | null | undefined):
     const refresh = typeof tokens.refresh_token === "string" ? tokens.refresh_token : null
     const access = typeof tokens.access_token === "string" ? tokens.access_token : null
     if (!refresh && !access) return { outcome: "failed", reason: "no token in Apple's answer" }
+    /*
+     * Whose grant this is. The id_token came straight from Apple over TLS in
+     * answer to our own signed request, so reading its `sub` needs no second
+     * signature check; without one, nothing is revoked.
+     */
+    const idToken = typeof tokens.id_token === "string" ? jwt.decode(tokens.id_token) : null
+    const sub = idToken && typeof idToken === "object" ? idToken.sub : undefined
+    if (!sub) return { outcome: "failed", reason: "no id_token sub in Apple's answer" }
+    if (sub !== linkedSub) return { outcome: "skipped", reason: "different_apple_id" }
     await postForm("/auth/revoke", {
       client_id: config.clientId,
       client_secret: clientSecret,

@@ -1276,7 +1276,7 @@ registry.registerPath({
   tags: ["Mobile Profile"],
   summary: "Delete your own account",
   description:
-    "Anonymises the account rather than hard-deleting the row. Events, chat messages and check-ins cascade from User, so a real delete would destroy other people's event history and conversations along with yours. An Apple-linked account's Sign in with Apple grant is revoked after the erasure when the app sends `appleAuthorizationCode`; best effort, and never a reason the deletion fails.",
+    "Anonymises the account rather than hard-deleting the row. Events, chat messages and check-ins cascade from User, so a real delete would destroy other people's event history and conversations along with yours. An Apple-linked account's Sign in with Apple grant is revoked after the erasure when the app sends `appleAuthorizationCode` (only if the code's Apple ID is the one linked); best effort, and never a reason the deletion fails.",
   security: bearerAuth,
   request: {
     body: {

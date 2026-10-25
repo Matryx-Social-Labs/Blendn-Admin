@@ -51,6 +51,12 @@ export async function GET(request: NextRequest) {
       createdAt: user.createdAt,
       // What the account can sign in with, for the one row Settings shows or hides (the Password row).
       signInMethod: signInMethodOf(user),
+      /*
+       * Whether Sign in with Apple is linked, whatever `signInMethod` says: an
+       * account made with Apple that later set a password reads `password`, and
+       * the app must still fetch an Apple code before deleting it (5.1.1(v)).
+       */
+      appleLinked: user.oauth_accounts.some((a) => a.provider === "apple"),
       profile: user.profile
         ? { ...profileForSelfResponse(user.profile), location: normalizedLocation }
         : null,

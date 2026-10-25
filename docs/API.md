@@ -215,6 +215,10 @@ token" (`lib/account-blocklist.ts`); the refresh that follows says why.
 **`GET /auth/session` also returns `signInMethod`**: `"password" | "google" |
 "apple"`. The tokens do not carry how this phone signed in, so it answers for the
 account: `password` when it has one, else the provider linked most recently.
+And `appleLinked` (boolean, additive): Sign in with Apple is linked, whatever
+`signInMethod` says. An account made with Apple that later set a password reads
+`signInMethod: "password"` and `appleLinked: true`; the app fetches an Apple
+`authorizationCode` before `DELETE /account` whenever `appleLinked` is true.
 
 **Socket handshake.** `io` refuses a mobile token whose account is not live with
 `Error("Authentication required")` and `error.data.code` of `ACCOUNT_SUSPENDED`,
@@ -3907,8 +3911,12 @@ in with Apple; after the erasure the server exchanges it at
 Store 5.1.1(v)). Best effort: with no code, no key configured
 (`APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY`) or Apple failing, the
 account is still deleted, a warning is logged and an `account.apple_revoke`
-audit row records the outcome (`revoked`, `skipped`, `failed`). The code and
-tokens are never stored or logged. A body that is not this shape is a 400
+audit row records the outcome (`revoked`, `skipped`, `failed`). The code must
+belong to the account: the `sub` of the `id_token` Apple returns is checked
+against the account's linked Apple user id, and a code for a different Apple ID
+revokes nothing (`skipped` / `different_apple_id`). The code, tokens and Apple
+ids are never stored or logged. `GET /auth/session`'s `appleLinked` says when to
+send it. A body that is not this shape is a 400
 `VALIDATION_FAILED`, before anything is erased.
 
 That decision has a cost worth stating: **nothing is removed automatically**, so

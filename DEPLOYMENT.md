@@ -225,6 +225,42 @@ Put the credentials in **App Store Connect → App Review Information →
 Sign-In Information**. Note there that onboarding can be reviewed by creating a
 fresh account, since this one is deliberately already onboarded.
 
+#### App Review aid (`REVIEW_ACCOUNT_IDS`) — OFF by default, the owner's call
+
+The review event is in Bengaluru and check-in is GPS-validated, so a reviewer
+in Cupertino cannot reach the Room; with `PLUS_GATING` unset the plans never
+show; and production refuses sandbox purchases, which is what App Review buys
+with. `REVIEW_ACCOUNT_IDS` is a server-side aid for exactly those three, for
+the listed accounts only (`lib/review-accounts.ts`):
+
+- **Geofence:** check-in, and the presence ping that keeps them in, skip the
+  fence at an event marked `review_demo`. The time window still applies, so the
+  event must be on when the reviewer checks in.
+- **Blendn+:** treated as gated for them (as if `PLUS_GATING` were on, with no
+  trial), so the plans show and a purchase visibly unlocks something.
+- **Sandbox purchases:** a RevenueCat `SANDBOX` purchase is credited in
+  production. Purchases only; a transfer is still held to the environment.
+
+Every bypass is logged and written to `audit_logs` as `review.bypass` (at most
+once per account, bypass and event every ten minutes; the log line is every
+time). Unset or empty: nothing changes and no query runs. Nothing in any API
+response says an account is a review account.
+
+**User ids, never emails.** An email is whatever somebody typed at sign-up; an
+id is ours. The account must be the one `seed:review` created (it prints the id
+and the line to set) and must not be deleted; a deleted review account's
+address can be signed up with again, and that new account gets nothing.
+
+```bash
+# 1. The account (prints its user id), and mark the event the reviewer will use:
+APP_REVIEW_EMAIL=... APP_REVIEW_PASSWORD=... REVIEW_DEMO_EVENT_ID=<event uuid> npm run seed:review
+# 2. On the server (Railway production), only if the owner decides to turn it on:
+REVIEW_ACCOUNT_IDS=<user id from step 1>
+```
+
+`seed:review` marks the event it creates `review_demo`; `REVIEW_DEMO_EVENT_ID`
+marks an existing one. Turn it off after approval by deleting the variable.
+
 ### 8. Populate a room — staging only
 
 ```bash
@@ -342,6 +378,11 @@ so it is never related to session or login state.
 | `PLUS_GATING` | No | Where Blendn+ is gated and since when: comma-separated `<city>:<YYYY-MM-DD>` (the day gating goes on, midnight IST), `*:<date>` for everywhere; a city without a date is gated with no trial; `true` = everywhere, no trial. Cities match through one alias map (`Bangalore` is Bengaluru); a place with no city is gated once anything is. Unset or `false`: launch season everywhere. Setting it is the whole switch: the trial (accounts that existed and came out in the 90 days before the date) is granted by the server at their first gate (docs/IAP-SETUP.md) |
 | `REVENUECAT_WEBHOOK_SECRET` | For Blendn+ | 32+ characters, chosen by us (`openssl rand -hex 32`). The RevenueCat webhook's Authorization header is `Bearer <this>`. Unset: the webhook refuses everything and no store purchase grants Blendn+. Production grants only PRODUCTION purchases, every other environment only SANDBOX ones (`RAILWAY_ENVIRONMENT_NAME`). Setup: docs/IAP-SETUP.md |
 | `REVENUECAT_SECRET_KEY` | For Blendn+ transfers | RevenueCat's secret API key (`sk_…`). A `TRANSFER` moves only what RevenueCat's own record of the receiving account confirms; unset, transfers move nothing (`unreconciled`) — fail closed. Also deletes an erased account at RevenueCat. Never in the app |
+| `APPLE_TEAM_ID` | For Apple account deletion | The 10-character Team ID. With `APPLE_KEY_ID` and `APPLE_PRIVATE_KEY`, deleting an Apple-linked account revokes its Sign in with Apple grant (App Store 5.1.1(v)). Any of the three unset: the account is still deleted, and the skipped revoke is logged and audited (`account.apple_revoke`) |
+| `APPLE_KEY_ID` | For Apple account deletion | The Key ID of a key with **Sign in with Apple** enabled (developer.apple.com → Certificates, IDs & Profiles → Keys), configured for the app's primary App ID |
+| `APPLE_PRIVATE_KEY` | For Apple account deletion | That key's `.p8` file contents, `-----BEGIN PRIVATE KEY-----` to `-----END PRIVATE KEY-----`. Newlines may be pasted as literal `\n`. A secret: never in the app, never logged |
+| `APPLE_BUNDLE_ID` | No | The Sign in with Apple client id, which is the app's bundle id. Default `com.matryxsociallabs.blendn`. Also the audience Apple identity tokens are checked against |
+| `REVIEW_ACCOUNT_IDS` | No (App Review aid) | Comma-separated **user ids** (not emails) of App Review accounts. OFF when unset. See § 7 "App Review aid" |
 | `SHARE_PROXY_SECRET` | For public share pages | 32+ characters, chosen by us (`openssl rand -hex 32`); the SAME value as the landing site's Vercel env var of that name (Preview and Production). The landing sends it as `x-share-proxy` on its server-to-server calls to `GET /api/public/share/*`; holding it makes the forwarded `x-share-client` address believed, so the 120/min limit counts the visitor. Unset (do not create the variable): the endpoint still works, every caller is limited by its own address, and the landing's shared Vercel egress will hit the limit under traffic. **Set but empty or under 32 characters, `validateEnv` fails and production does not boot.** Not set by an agent: the owner sets it on Railway staging and production |
 | `SENTRY_AUTH_TOKEN` | No | Source map upload at build time |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Error reporting. Sentry is disabled if unset |

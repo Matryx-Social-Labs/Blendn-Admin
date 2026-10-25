@@ -58,7 +58,7 @@ export async function DELETE(request: NextRequest) {
     // Read before the erasure, which deletes the link: whether there is an Apple grant to revoke.
     const appleLinked = await db.user_oauth_accounts.findFirst({
       where: { user_id: authUser.userId, provider: "apple" },
-      select: { id: true },
+      select: { provider_id: true },
     })
 
     const anonymizedEmail = `deleted-${authUser.userId}@deleted.blendn.invalid`
@@ -549,7 +549,9 @@ export async function DELETE(request: NextRequest) {
     await settleCrewsAfterErasure(leftCrews.map((row) => row.crew_id))
 
     // Their Sign in with Apple grant goes too (5.1.1(v)): after the erasure, so Apple can never hold it up.
-    if (appleLinked) await revokeAppleAfterErasure(authUser.userId, parsed.data.appleAuthorizationCode, getRequestIp(request))
+    if (appleLinked) {
+      await revokeAppleAfterErasure(authUser.userId, appleLinked.provider_id, parsed.data.appleAuthorizationCode, getRequestIp(request))
+    }
 
     // Gone at RevenueCat too (best effort; it holds their purchase history
     // under our user id). A store subscription still running is the store's.
@@ -651,8 +653,9 @@ export async function DELETE(request: NextRequest) {
  * audit row, so it can be followed up; the deletion has already happened.
  * Neither the code nor any token is logged.
  */
-async function revokeAppleAfterErasure(userId: string, code: string | undefined, ipAddress: string): Promise<void> {
-  const result = await revokeAppleAuthorization(code)
+async function revokeAppleAfterErasure(userId: string, linkedSub: string, code: string | undefined, ipAddress: string): Promise<void> {
+  // The outcome names no Apple identity: a mismatch is "different_apple_id", never either sub.
+  const result = await revokeAppleAuthorization(code, linkedSub)
   const details = { ...result }
   if (result.outcome === "revoked") logger.info("Account deletion: Sign in with Apple grant revoked", { userId })
   else logger.warn("Account deletion: Sign in with Apple grant NOT revoked", { userId, ...details })

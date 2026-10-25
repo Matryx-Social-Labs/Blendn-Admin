@@ -10,6 +10,7 @@ import { NextRequest } from "next/server"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0), withdrawFromPublic: jest.fn() }))
 import { generateKeyPairSync } from "crypto"
+import jwt from "jsonwebtoken"
 import { logger } from "@/lib/logger"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
@@ -41,11 +42,19 @@ afterAll(async () => {
   await closeDb()
 })
 
+/** The linked Apple user id of each fixture, which the exchange's id_token must carry. */
+const subOf = new Map<string, string>()
+const idToken = (sub: string) => jwt.sign({ sub }, "not-checked")
+
 async function appleUser(linked = true) {
   const id = await makeUser("apple-del")
   users.push(id)
   await onboard(id)
-  if (linked) await db.user_oauth_accounts.create({ data: { user_id: id, provider: "apple", provider_id: testId("sub") } })
+  if (linked) {
+    const sub = testId("sub")
+    subOf.set(id, sub)
+    await db.user_oauth_accounts.create({ data: { user_id: id, provider: "apple", provider_id: sub } })
+  }
   return id
 }
 
@@ -81,7 +90,7 @@ it("exchanges the code, revokes the grant, erases the account and audits it", as
   const id = await appleUser()
   const fetchSpy = jest
     .spyOn(global, "fetch")
-    .mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt" }))
+    .mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt", id_token: idToken(subOf.get(id)!) }))
     .mockResolvedValueOnce(answer(200, {}))
 
   const res = await deleteAccount(id, { appleAuthorizationCode: CODE })
@@ -94,6 +103,26 @@ it("exchanges the code, revokes the grant, erases the account and audits it", as
   ])
   const row = await revokeAudit(id)
   expect(row.details).toEqual({ outcome: "revoked" })
+})
+
+it("revokes nothing when the code is for a different Apple ID, still erases, and audits it without either id", async () => {
+  const id = await appleUser()
+  const other = "000999.someone-else.0001"
+  const fetchSpy = jest
+    .spyOn(global, "fetch")
+    .mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt", id_token: idToken(other) }))
+  const warn = jest.spyOn(logger, "warn")
+
+  const res = await deleteAccount(id, { appleAuthorizationCode: CODE })
+
+  expect(res.status).toBe(200)
+  await expectErased(id)
+  expect(fetchSpy.mock.calls.map(([url]) => url)).toEqual(["https://appleid.apple.com/auth/token"])
+  const row = await revokeAudit(id)
+  expect(row.details).toEqual({ outcome: "skipped", reason: "different_apple_id" })
+  const said = JSON.stringify([row.details, warn.mock.calls])
+  expect(said).not.toContain(other)
+  expect(said).not.toContain(subOf.get(id)!)
 })
 
 it("still erases the account when Apple is down, and audits the failure without the code", async () => {
