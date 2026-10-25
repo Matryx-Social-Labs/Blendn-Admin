@@ -209,3 +209,57 @@ export function checkKeywords(content: string): ModerationResult | null {
     matched: [...new Set(matched)],
   }
 }
+
+/**
+ * The words a NAME, bio or card may be refused for: unambiguous slurs and
+ * abuse only (PR #755 security review, H1).
+ *
+ * The lists above are for chat, where a whole-word hit hides one message. On
+ * identity text the same hit refuses a sign-up or an onboarding step, and the
+ * lists carry words that are also names, ordinary words, places and a faith:
+ * "Magi", "Shala", "Bal" (Bal Krishna), "Boli" (a language), "Otha" (Tamil
+ * for "one"), "Sunni", "Randi", "Laude", "Poori", "Gudda", "BC". Everything
+ * not listed here is ALLOWED on identity text and flagged for a human
+ * (`checkIdentityKeywords`).
+ *
+ * An explicit list rather than the chat list minus exceptions, on purpose: a
+ * word added to the chat list later is flagged on a profile, never refused, so
+ * nobody's name starts failing sign-up by surprise. Every entry must also be
+ * in the chat list (`keyword-identity.test.ts`).
+ */
+export const IDENTITY_SLURS: ReadonlySet<string> = new Set([
+  // English
+  "nigger", "nigga", "faggot", "retard", "kike", "wetback", "tranny", "cunt",
+  // Hindi
+  "मादरचोद", "भोसडीके", "चूतिया", "बहनचोद", "लौड़ा",
+  "madarchod", "bhosadike", "bhosdi", "chutiya", "chutiye", "behenchod", "bsdk",
+  // Tamil
+  "தேவடியா", "கூதி", "thevadiya", "myiru",
+  // Telugu
+  "లంజ", "దెంగు", "పూకు", "లంజకొడుకు", "lanja", "pooku", "lanjakoduku",
+  // Kannada
+  "ಸೂಳೆ",
+  // Malayalam
+  "തായോളി", "കുണ്ണ", "thayoli",
+  // Bengali
+  "খানকি", "khanki",
+  // Marathi
+  "झवाड्या", "आईघाल", "zavadya", "aighala", "bhikarchot",
+  // Gujarati
+  "ભોસડી", "ચૂતિયો", "ghelchodo", "bhosadi",
+])
+
+/** Every keyword the chat filter knows, for the subset test. */
+export const CHAT_KEYWORDS: ReadonlySet<string> = new Set([...ALL_KEYWORDS.flatMap((s) => [...s]), ...ABBREVIATION_KEYWORDS])
+
+/**
+ * `checkKeywords` for identity text (a name, a bio, a crew card): `hide` only
+ * for a whole-word hit on `IDENTITY_SLURS`; any other hit is a `flag`, which
+ * the caller lets through and records for review.
+ */
+export function checkIdentityKeywords(content: string): ModerationResult | null {
+  const result = checkKeywords(content)
+  if (!result) return null
+  const refused = result.action === "hide" ? (result.matched ?? []).filter((k) => IDENTITY_SLURS.has(k)) : []
+  return refused.length > 0 ? { ...result, matched: refused } : { ...result, action: "flag" }
+}

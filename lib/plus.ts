@@ -8,6 +8,7 @@ import { ATTENDED } from "./counting"
 import { db } from "./db"
 import { addMonths, grantPlusOnce, hasEntitlement, plusGrantsSince, plusNotEnded } from "./entitlements"
 import { plusGateFor, plusGatedAnywhere, plusGatedEverywhere } from "./env"
+import { isReviewAccount, recordReviewBypass } from "./review-accounts"
 import { PING_INTERVAL_MINUTES } from "./presence"
 
 /**
@@ -232,6 +233,17 @@ async function audit(
 }
 
 /**
+ * App Review (lib/review-accounts.ts): a listed review account sees Blendn+ as
+ * gated everywhere, with no trial, so the plans show and a purchase visibly
+ * unlocks something. No query unless the person is listed in REVIEW_ACCOUNT_IDS.
+ */
+async function reviewGated(userId: string): Promise<boolean> {
+  if (!(await isReviewAccount(userId))) return false
+  recordReviewBypass(userId, "plus_gating")
+  return true
+}
+
+/**
  * The one Blendn+ gate: is Plus needed here and missing? False in a city's
  * launch season, and false for anyone holding Plus or a live Night Pass.
  * Before answering yes, pays out a trial or referral month that is owed, and
@@ -242,7 +254,7 @@ async function audit(
  * cached response says who has Plus (test plan MN-I10, SEC-15).
  */
 export async function plusRequired(userId: string, city: string | null, now: Date = new Date()): Promise<boolean> {
-  const gate = plusGateFor(city)
+  const gate = (await reviewGated(userId)) ? { gated: true, flippedAt: null } : plusGateFor(city)
   if (!gate.gated) return false
   if (await hasPlus(userId, now)) return false
   return !(await grantOwed(userId, gate.flippedAt, now))
@@ -278,6 +290,7 @@ export async function plusRequiredForPing(userId: string, city: string | null, n
  * everywhere is gated. Not a gate.
  */
 export async function plusGatedForPerson(userId: string): Promise<boolean> {
+  if (await reviewGated(userId)) return true
   if (!plusGatedAnywhere()) return false
   const [latest] = await attendedEventIds(userId, { limit: 1, skip: 0 })
   if (!latest) return plusGatedEverywhere()
@@ -296,7 +309,7 @@ export async function plusGatedForPerson(userId: string): Promise<boolean> {
  * running is tonight: always listed (`freeNights`), never locked, never a slot.
  */
 export async function lockedNights(userId: string, now: Date = new Date()): Promise<number> {
-  if (!plusGatedAnywhere()) return 0
+  if (!plusGatedAnywhere() && !(await isReviewAccount(userId))) return 0
   const ended = await distinctEventsAttended(userId, { places: true, when: { ended: true, now } })
   if (ended <= PLUS.FREE_HISTORY_NIGHTS) return 0
   const [latest] = await attendedEventIds(userId, { limit: 1, skip: 0 })

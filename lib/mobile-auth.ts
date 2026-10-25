@@ -8,6 +8,7 @@ import { recentlyBlocked } from "./account-blocklist"
 import { SYSTEM_USER_ID } from "./event-kind"
 import { PRODUCT_EVENTS, record } from "./product-events"
 import { Prisma } from "@prisma/client"
+import { oauthDisplayName } from "./moderation/oauth-name"
 
 function getJwtSecret(): string {
   const secret = process.env.MOBILE_JWT_SECRET
@@ -747,11 +748,12 @@ export async function findOrCreateGoogleUser(
     }
   }
 
-  // Create a new user with the Google account
+  // Create a new user with the Google account. The name is capped and screened (oauthDisplayName).
+  const googleName = oauthDisplayName(googlePayload.name || googlePayload.given_name)
   const newUser = await db.user.create({
     data: {
       email,
-      name: googlePayload.name || googlePayload.given_name || null,
+      name: googleName,
       /*
        * The Google avatar is deliberately NOT taken.
        *
@@ -769,7 +771,7 @@ export async function findOrCreateGoogleUser(
       emailVerified: new Date(), // Google email is verified
       profile: {
         create: {
-          name: googlePayload.name || googlePayload.given_name || null,
+          name: googleName,
           onboarded: false,
         },
       },
@@ -852,7 +854,8 @@ export async function findOrCreateAppleUser(
     }
   }
 
-  const displayName = [fullName?.givenName, fullName?.familyName].filter(Boolean).join(" ") || null
+  // Sent by the app, not signed by Apple: capped and screened, and a refused one leaves no name (onboarding asks).
+  const displayName = oauthDisplayName([fullName?.givenName, fullName?.familyName].filter(Boolean).join(" "))
 
   // Apple may omit email on tokens after the first authorization; in that
   // case Apple guarantees `sub` is stable so the OAuth-account lookup above

@@ -1,6 +1,6 @@
 import { logger } from "@/lib/logger"
 import { Prisma } from "@prisma/client"
-import { NextRequest } from "next/server"
+import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
@@ -16,7 +16,26 @@ import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
 import { eraseChatMedia, retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
 import { promoteFromWaitlist } from "@/lib/waitlist"
 import { performCheckout } from "@/lib/checkout"
-import { successResponse, unauthorizedResponse, serverErrorResponse } from "@/lib/api-response"
+import { successResponse, unauthorizedResponse, serverErrorResponse, validationErrorResponse } from "@/lib/api-response"
+import { readOptionalJson } from "@/lib/api-input"
+import { revokeAppleAuthorization } from "@/lib/apple-revoke"
+import { auditLog, getRequestIp } from "@/lib/audit-log"
+import { z } from "zod"
+
+/**
+ * The delete's optional body. `appleAuthorizationCode`: a fresh code from Sign
+ * in with Apple, sent by the app when the account is Apple-linked, so the grant
+ * can be revoked (5.1.1(v)). Apple's codes are short; the cap only bounds input.
+ *
+ * Strict: the default action here is erasure, so a body this route cannot read
+ * (unknown keys, wrong types, not JSON) is a 400 and erases nothing. No body,
+ * or `{}`, deletes as it always did.
+ */
+const deleteAccountSchema = z
+  .object({
+    appleAuthorizationCode: z.string().trim().min(1).max(2048).optional(),
+  })
+  .strict()
 
 // DELETE /api/mobile/account — Delete the authenticated user's own account.
 //
@@ -39,6 +58,19 @@ export async function DELETE(request: NextRequest) {
 
     const limited = await rateLimit(request, userLimit("heavy", "account-delete", authUser.userId))
     if (limited) return limited
+
+    const parsed = deleteAccountSchema.safeParse(await readOptionalJson(request))
+    if (!parsed.success) return validationErrorResponse(parsed.error)
+    // Read before the erasure, which deletes the link: whether there is an Apple grant to revoke.
+    // Every Apple link, not the first: the code's Apple ID is checked against all of them (review L1).
+    const appleSubs = new Set(
+      (
+        await db.user_oauth_accounts.findMany({
+          where: { user_id: authUser.userId, provider: "apple" },
+          select: { provider_id: true },
+        })
+      ).map((link) => link.provider_id)
+    )
 
     const anonymizedEmail = `deleted-${authUser.userId}@deleted.blendn.invalid`
 
@@ -614,9 +646,36 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
+    /*
+     * Their Sign in with Apple grant (5.1.1(v)): last, and after the response.
+     * Apple can take up to two 5 s calls, and a deletion that waited on it ran
+     * past the app's 15 s timeout with RevenueCat's call on top (PR #755
+     * review, M1). Every erasure above has already happened by now.
+     */
+    if (appleSubs.size > 0) {
+      const { userId } = authUser
+      const ipAddress = getRequestIp(request)
+      after(() => revokeAppleAfterErasure(userId, appleSubs, parsed.data.appleAuthorizationCode, ipAddress))
+    }
+
     return successResponse({ deleted: true })
   } catch (error) {
     logger.error("Account deletion error", { userId: authUser?.userId, error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to delete account")
   }
+}
+
+/**
+ * Revoke the Apple grant, best effort, and record what happened. A skipped or
+ * failed revoke is a warning (the person's Apple ID still lists the app) and an
+ * audit row, so it can be followed up; the deletion has already happened.
+ * Neither the code nor any token is logged.
+ */
+async function revokeAppleAfterErasure(userId: string, linkedSubs: ReadonlySet<string>, code: string | undefined, ipAddress: string): Promise<void> {
+  // The outcome names no Apple identity: a mismatch is "different_apple_id", never either sub.
+  const result = await revokeAppleAuthorization(code, linkedSubs)
+  const details = { ...result }
+  if (result.outcome === "revoked") logger.info("Account deletion: Sign in with Apple grant revoked", { userId })
+  else logger.warn("Account deletion: Sign in with Apple grant NOT revoked", { userId, ...details })
+  auditLog({ userId, action: "account.apple_revoke", resource: "user", resourceId: userId, details, ipAddress })
 }

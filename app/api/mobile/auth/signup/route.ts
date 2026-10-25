@@ -21,6 +21,7 @@ import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { checkPassword } from "@/lib/password"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
+import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
@@ -39,6 +40,10 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, password, name, age, deviceInfo } = parsed.data
+
+    // The display name strangers will read, screened before the account exists (App Store 1.2).
+    const refusedName = screenUserText(null, "profile", { name })
+    if (refusedName) return textNotAllowedResponse(refusedName.field, "That name can’t be used.")
 
     /*
      * The same check `/api/auth/reset-password` runs, so signup and reset

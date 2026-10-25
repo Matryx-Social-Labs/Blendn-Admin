@@ -14,8 +14,10 @@ import { friendIdsOf } from "../friends"
 import { logger } from "../logger"
 import { findProfileContactInfo } from "../moderation/contact-info"
 import { foldText, hasInvisibleChars } from "../moderation/fold"
-import { checkKeywords } from "../moderation/keyword-filter"
+import { checkIdentityKeywords } from "../moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "../moderation/openai-moderation"
+import type { ModerationResult } from "../moderation/types"
+import { recordScreenedText, TEXT_NOT_ALLOWED } from "../moderation/user-text"
 import { sendPushNotification } from "../push-notifications"
 import { closeRoomSockets, leaveRoomSockets } from "../room-close"
 import { blocksBetween } from "./blocks"
@@ -143,6 +145,8 @@ export interface CrewRefusal {
   status: 400 | 403 | 404 | 409 | 429
   /** Which text was refused (a name or a bio), when a refusal is about one of them. */
   field?: "name" | "bio"
+  /** `TEXT_NOT_ALLOWED` when the text itself was objectionable (not contact details). */
+  reasonCode?: string
 }
 
 export const isRefusal = (value: unknown): value is CrewRefusal =>
@@ -174,9 +178,10 @@ const HIDDEN: CrewRefusal = { refusal: "A moderator has hidden this crew, so it 
 const OPENAI_BOUND_MS = 1000
 
 /**
- * Why this crew name or bio may not be written, or null.
+ * Why this crew name or bio may not be written (`refusal`, the sentence for the
+ * writer), or null.
  *
- * The keyword filter, then contact details in the strict reading a card gets
+ * The identity keyword list (`checkIdentityKeywords`), then contact details in the strict reading a card gets
  * (`findProfileContactInfo`: phone numbers, handles, emails, web addresses,
  * spelled out or not), then OpenAI within a bound. Contact details say which
  * — the fix is the writer's. Anything else gets one sentence that teaches
@@ -187,13 +192,18 @@ const OPENAI_BOUND_MS = 1000
  * board's `hideBoardPostIfFlagged`) is the upgrade if a crew name is ever
  * caught that way.
  */
-export async function crewTextRefusal(field: "name" | "bio", text: string): Promise<string | null> {
+export async function crewTextRefusal(
+  field: "name" | "bio",
+  text: string
+): Promise<{ refusal: string; /** Set when the text itself was objectionable, not contact details. */ objectionable?: ModerationResult } | null> {
   const what = field === "name" ? "a crew’s name" : "a crew’s bio"
-  if (checkKeywords(text)?.action === "hide") return `This can’t be ${what}.`
+  // The identity list: a crew called "Bal Krishna's Lot" is a name, not abuse (PR #755 review, H1).
+  const keyword = checkIdentityKeywords(text)
+  if (keyword?.action === "hide") return { refusal: `This can’t be ${what}.`, objectionable: keyword }
   const contact = findProfileContactInfo(text)
   if (contact.length > 0) {
     const hints = [...new Set(contact.map((c) => c.hint))].join(" ")
-    return `${hints} A crew card is shown to people you haven’t met, so contact details can’t go on it.`
+    return { refusal: `${hints} A crew card is shown to people you haven’t met, so contact details can’t go on it.` }
   }
   let timeout: ReturnType<typeof setTimeout> | undefined
   const check = await Promise.race([
@@ -202,16 +212,28 @@ export async function crewTextRefusal(field: "name" | "bio", text: string): Prom
       timeout = setTimeout(() => resolve(notChecked("timeout")), OPENAI_BOUND_MS)
     }),
   ]).finally(() => clearTimeout(timeout))
-  return check.checked && check.result?.action === "hide" ? `This can’t be ${what}.` : null
+  return check.checked && check.result?.action === "hide" ? { refusal: `This can’t be ${what}.`, objectionable: check.result } : null
 }
 
-/** The first refusal among the text fields being written, or null. */
-async function textRefusal(fields: { name?: string; bio?: string | null }): Promise<CrewRefusal | null> {
+/**
+ * The first refusal among the text fields being written, or null. An
+ * objectionable one is recorded (`moderation.text_refused`) and carries
+ * `TEXT_NOT_ALLOWED`; contact details are the writer's to fix and are neither.
+ */
+async function textRefusal(userId: string, fields: { name?: string; bio?: string | null }): Promise<CrewRefusal | null> {
   for (const field of ["name", "bio"] as const) {
     const text = fields[field]
     if (!text) continue
-    const refusal = await crewTextRefusal(field, text)
-    if (refusal) return { refusal, status: 400, field }
+    const verdict = await crewTextRefusal(field, text)
+    if (!verdict) {
+      // Let through; an ambiguous word (a name, a faith) is flagged for a human.
+      const suspicion = checkIdentityKeywords(text)
+      if (suspicion) recordScreenedText(userId, "crew", field, { action: "flag", result: suspicion })
+      continue
+    }
+    if (!verdict.objectionable) return { refusal: verdict.refusal, status: 400, field }
+    recordScreenedText(userId, "crew", field, { action: "refuse", result: verdict.objectionable })
+    return { refusal: verdict.refusal, status: 400, field, reasonCode: TEXT_NOT_ALLOWED }
   }
   return null
 }
@@ -294,7 +316,7 @@ export async function createCrew(
   if (!(await mayJoinCrews(creatorId))) return ADULTS
   const wanted = [...new Set(input.inviteUserIds)].filter((id) => id !== creatorId)
   if ((await strangersTo(creatorId, wanted)).length > 0) return NOT_FRIENDS
-  const text = await textRefusal({ name: input.name, bio: input.bio })
+  const text = await textRefusal(creatorId, { name: input.name, bio: input.bio })
   if (text) return text
   const apart = await blocksBetween([creatorId], wanted)
   const invitees = wanted.filter((id) => !apart.has(`${creatorId}|${id}`))
@@ -589,7 +611,7 @@ export async function updateCrew(
     select: { user_id: true },
   })
   if (!owner) return NO_CREW
-  const text = await textRefusal({ name: input.name, bio: input.bio })
+  const text = await textRefusal(ownerId, { name: input.name, bio: input.bio })
   if (text) return text
   await db.$transaction([
     db.crews.update({
@@ -710,7 +732,14 @@ export function refusalResponse(r: CrewRefusal) {
   if (!r.field) return errorResponse(r.refusal, r.status)
   // The field twice: `field` for the form, and `errors` as every validation answer carries it.
   return NextResponse.json(
-    { success: false, error: r.refusal, errorCode: ErrorCode.VALIDATION_FAILED, field: r.field, errors: [{ field: r.field, message: r.refusal }] },
+    {
+      success: false,
+      error: r.refusal,
+      errorCode: ErrorCode.VALIDATION_FAILED,
+      ...(r.reasonCode && { reasonCode: r.reasonCode }),
+      field: r.field,
+      errors: [{ field: r.field, message: r.refusal }],
+    },
     { status: r.status }
   )
 }
