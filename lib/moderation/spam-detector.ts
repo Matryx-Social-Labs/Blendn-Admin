@@ -81,6 +81,23 @@ function countLinks(content: string): number {
 }
 
 /**
+ * The spam check a single piece of text can answer on its own: too many
+ * links. Burst and near-duplicate need a stream of messages, so text saved
+ * once (a profile, a crew card, a message request) is judged by this alone.
+ */
+export function checkLinkSpam(content: string): ModerationResult | null {
+  const linkCount = countLinks(content)
+  if (linkCount <= MAX_LINKS_PER_MESSAGE) return null
+  return {
+    action: "hide",
+    source: "spam",
+    categories: { spam: 0.9 },
+    confidence: 0.9,
+    reason: `Too many links (${linkCount})`,
+  }
+}
+
+/**
  * Check if a message is spam based on:
  * 1. Excessive links
  * 2. Burst rate (too many messages in a short window) -- shared across replicas
@@ -111,17 +128,11 @@ export async function checkSpam(
   history.lastCleanup = now
 
   // --- Check 1: Link density ---
-  const linkCount = countLinks(content)
-  if (linkCount > MAX_LINKS_PER_MESSAGE) {
+  const links = checkLinkSpam(content)
+  if (links) {
     // Record this message but return spam result
     history.messages.push({ content: normalizedContent, timestamp: now })
-    return {
-      action: "hide",
-      source: "spam",
-      categories: { spam: 0.9 },
-      confidence: 0.9,
-      reason: `Too many links (${linkCount})`,
-    }
+    return links
   }
 
   /*

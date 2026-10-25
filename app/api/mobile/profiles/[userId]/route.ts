@@ -41,6 +41,7 @@ import { homeStateLabel, languageLabels, signLabel, westernSignFor } from "@/lib
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { notifyFriendsHere } from "@/lib/room-friends"
+import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
 interface RouteParams {
   params: Promise<{ userId: string }>
@@ -321,6 +322,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     } = parsed.data
     const signRefusal = signPairRefusal(parsed.data)
     if (signRefusal) return errorResponse(signRefusal, 400, "VALIDATION_ERROR")
+
+    // What strangers read on the card is screened before anything is written (App Store 1.2).
+    const refusedText = screenUserText(userId, "profile", { name, bio, occupation, education })
+    if (refusedText) return textNotAllowedResponse(refusedText.field, "That can’t go on your profile.")
 
     /*
      * A photo moderation pulled stays pulled (SCRUM-479). The app sends back
