@@ -1876,7 +1876,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 
 **The shape is the stored row, snake_case** — `created_at`, `is_edited`, `edited_at`, `parent_id`, `client_id`, `deleted_at`, `deleted_by`, `moderation_status`, plus `moderation_hidden`, `user`, `reactions` (tallies), `parent_message` (`{ id, type, metadata, content, user: { id, name } }` or null) and `_count.replies`. It is not the camelCase message of `GET /events/:eventId/chat`; `pagination` is `{ hasMore, nextCursor }`.
 
-**Who may read (SCRUM-205):** an `active`, `muted` or `left` member. A `banned` member gets `403 USER_BANNED` — "The organiser has removed you from this room." when a person pressed Ban. A ban nobody pressed is the one a suspension leaves behind, and only a restored account can reach this point, so it reads "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it." Checking in lifts that ban (SCRUM-291). A draft or deleted event's room answers `404`. The same rule (`roomReadDenial`, `lib/chat-window.ts`) governs `GET …/participants`, `GET /events/:eventId/chat` and the socket's `join:chat`; before it, the three GETs served the room to anybody with a membership row, banned included.
+**Who may read (SCRUM-205):** an `active`, `muted` or `left` member. A `banned` member gets `403 USER_BANNED` — "The organiser has removed you from this room." when a person pressed Ban. A ban nobody pressed is the one a suspension leaves behind, and only a restored account can reach this point, so it reads "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it." Checking in lifts that ban (SCRUM-291). A draft or deleted event's room (or a closed room of any other kind) answers `404 NOT_FOUND`; when the caller has a membership row it also carries `reasonCode: "ROOM_CLOSED"`, `roomKind` and `roomName`, so the app can say what closed. A caller with no membership row gets the bare 404, so a guessed id never learns a name. The same rule (`roomReadDenial`, `lib/chat-window.ts`) governs `GET …/participants`, `GET /events/:eventId/chat` and the socket's `join:chat`; before it, the three GETs served the room to anybody with a membership row, banned included.
 
 ### POST /chat/groups/:chatGroupId/messages
 ```json
@@ -2006,10 +2006,18 @@ lands.
 A hidden message is stored and not sent. It has to be stored:
 `moderation_flags.message_id` is a `NOT NULL` foreign key to `chat_messages`, so
 a flag against a DM is structurally impossible and the row itself is the only
-record a later report can rest on. It is excluded from the thread, from the
-inbox preview, and from the unread count — the last is the one that gets
+record a later report can rest on. It is excluded from the recipient's thread,
+from the inbox preview, and from the unread count — the last is the one that gets
 forgotten, and leaving it in is a badge nobody can clear on a thread with
 nothing in it to clear.
+
+**The sender still sees their own hidden message (RC8).** `GET
+/conversations/:id/messages` returns it to the sender only, as a removed
+message: `moderation_hidden: true`, `text: null`, `mediaUrl: null`,
+`replyTo: null`, `isRead: false`, `deliveredAt: null`. `mediaType` is kept so a
+withheld photo draws the photo-sized frame. The recipient never receives the
+row, and the inbox preview, unread counts, pushes, badge and mark-as-read are
+unchanged.
 
 **`private_messages.moderation_status` is NULL for an ordinary message, and NULL
 is not "clean".** No model runs here, so there is no clean bill to record;

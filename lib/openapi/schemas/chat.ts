@@ -400,6 +400,7 @@ export const DMMessageSchema = z
     mediaUrl: z.string().nullable(),
     mediaType: z.string().nullable(),
     isRead: z.boolean(),
+    moderation_hidden: z.boolean().optional().openapi({ description: "True on the sender's own hidden message; its content is withheld." }),
     createdAt: z.string().datetime(),
   })
   .openapi("DMMessage")

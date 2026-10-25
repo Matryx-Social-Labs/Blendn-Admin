@@ -102,14 +102,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Build query
     /*
-     * `VISIBLE_DM` excludes a message the deterministic checks hid. It is
-     * excluded for the sender too, which is the same answer the group route
-     * gives: a hidden message is stored as evidence for a later report, not
-     * kept readable by the person who sent it.
+     * `VISIBLE_DM` excludes a message the deterministic checks hid, and the
+     * recipient never sees one. The sender does, as a removed message (RC8):
+     * they were told at send time (`moderation_hidden: true`), and a reload
+     * that dropped the bubble made it look as if it had never been sent. The
+     * other `VISIBLE_DM` readers -- inbox preview, unread counts, pushes,
+     * badge, mark-as-read -- are unchanged; a hidden row is never delivered.
      */
     const whereClause: Record<string, unknown> = {
       conversation_id: conversationId,
-      ...VISIBLE_DM,
+      OR: [...VISIBLE_DM.OR, { moderation_status: "hidden", sender_id: authUser.userId }],
     }
     if (before) {
       whereClause.created_at = { lt: new Date(before) }
@@ -142,30 +144,38 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const otherParty = conversation.user1_id === authUser.userId ? conversation.user2 : conversation.user1
 
     // Format for mobile app
-    const formattedMessages = messages.map((msg) => ({
-      id: msg.id,
-      conversationId: msg.conversation_id,
-      senderId: idInConversation(conversation, authUser.userId, msg.sender_id),
-      // The pseudonym holds on every message, not just the header.
-      sender: {
-        ...msg.sender,
-        id: idInConversation(conversation, authUser.userId, msg.sender.id),
-        name: displayNameInConversation(conversation, msg.sender.id, msg.sender.name),
-        image: mayShowRealName(conversation, msg.sender.id) ? msg.sender.image : null,
-      },
-      text: msg.message_text,
-      mediaUrl: msg.media_url,
-      mediaType: msg.media_type,
-      isRead: isReadForViewer({
-        senderIsViewer: msg.sender_id === authUser.userId,
-        isRead: msg.is_read,
-        otherPartyAllowsReceipts: otherParty.profile?.read_receipts,
-      }),
-      // Your own messages only: ✓✓ once their app has it (SCRUM-408).
-      deliveredAt: msg.sender_id === authUser.userId ? msg.delivered_at : undefined,
-      replyTo: quoteOf(conversation, msg.reply_to),
-      createdAt: msg.created_at,
-    }))
+    const formattedMessages = messages.map((msg) => {
+      const shown = {
+        id: msg.id,
+        conversationId: msg.conversation_id,
+        senderId: idInConversation(conversation, authUser.userId, msg.sender_id),
+        // The pseudonym holds on every message, not just the header.
+        sender: {
+          ...msg.sender,
+          id: idInConversation(conversation, authUser.userId, msg.sender.id),
+          name: displayNameInConversation(conversation, msg.sender.id, msg.sender.name),
+          image: mayShowRealName(conversation, msg.sender.id) ? msg.sender.image : null,
+        },
+        text: msg.message_text,
+        mediaUrl: msg.media_url,
+        mediaType: msg.media_type,
+        isRead: isReadForViewer({
+          senderIsViewer: msg.sender_id === authUser.userId,
+          isRead: msg.is_read,
+          otherPartyAllowsReceipts: otherParty.profile?.read_receipts,
+        }),
+        // Your own messages only: ✓✓ once their app has it (SCRUM-408).
+        deliveredAt: msg.sender_id === authUser.userId ? msg.delivered_at : undefined,
+        replyTo: quoteOf(conversation, msg.reply_to),
+        createdAt: msg.created_at,
+      }
+      // Only the sender's own hidden rows reach here (the query): shown as
+      // removed, content withheld. `mediaType` stays, so a withheld photo
+      // draws the photo-sized frame.
+      return msg.moderation_status === "hidden"
+        ? { ...shown, moderation_hidden: true, text: null, mediaUrl: null, replyTo: null, isRead: false, deliveredAt: null }
+        : shown
+    })
 
     return successResponse({
       messages: formattedMessages,

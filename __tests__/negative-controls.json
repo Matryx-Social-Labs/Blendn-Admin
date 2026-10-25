@@ -34,6 +34,18 @@
     "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574."
   ],
   "verified": {
+    "dm-sender-sees-withheld.itest.ts": {
+      "guards": "The DM thread's own-hidden clause: the sender sees their withheld message as removed, the recipient never does.",
+      "mutation": "M2201 the thread query's { moderation_status: 'hidden', sender_id } lost its sender_id, so any hidden row reaches either reader.",
+      "observed": "M2201: 3 of 8 failing across the two new suites (the recipient saw the row). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "closed-room-names-itself-to-members.itest.ts": {
+      "guards": "A closed room names its kind and name to a caller with a membership row only.",
+      "mutation": "M2202 the no-membership early return before the ROOM_CLOSED body was removed, so a non-member also got the name.",
+      "observed": "M2202: the non-member case failing (name in body). Reverted; green.",
+      "date": "2026-10-25"
+    },
     "venue-visibility-one-rule.test.ts": {
       "guards": "HM-G01 (plan v2 step 2): the undisputed-link read (`venue_link_status: { not: \"disputed\" }`) is spelled in lib/venue-visibility.ts only, TAKEOVER_LEAD_MINUTES is defined there only, and the Places list, the event-card serializer and the venue page import the rule from there; scans app/, lib/ and scripts/ (over 100 files).",
       "mutation": "M565 the venues route's upcomingEventFilter spells the disputed-link OR inline instead of undisputedLinkWhere. M566 a second `TAKEOVER_LEAD_MINUTES = 60` defined in the venues route.",
