@@ -86,7 +86,7 @@ export async function revokeAppleAuthorization(code: string | null | undefined, 
     // The refresh token revokes the whole grant; an access token (1 h) is Apple's accepted fallback.
     const refresh = typeof tokens.refresh_token === "string" ? tokens.refresh_token : null
     const access = typeof tokens.access_token === "string" ? tokens.access_token : null
-    if (!refresh && !access) return { outcome: "failed", reason: "no token in Apple's answer" }
+    if (!refresh && !access) return { outcome: "failed", reason: "no token in Apple’s answer" }
     /*
      * Whose grant this is. The id_token came straight from Apple over TLS in
      * answer to our own signed request, so reading its `sub` needs no second
@@ -94,7 +94,7 @@ export async function revokeAppleAuthorization(code: string | null | undefined, 
      */
     const idToken = typeof tokens.id_token === "string" ? jwt.decode(tokens.id_token) : null
     const sub = idToken && typeof idToken === "object" ? idToken.sub : undefined
-    if (!sub) return { outcome: "failed", reason: "no id_token sub in Apple's answer" }
+    if (!sub) return { outcome: "failed", reason: "no id_token sub in Apple’s answer" }
     if (sub !== linkedSub) return { outcome: "skipped", reason: "different_apple_id" }
     await postForm("/auth/revoke", {
       client_id: config.clientId,

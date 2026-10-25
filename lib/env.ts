@@ -134,7 +134,7 @@ const envSchema = z.object({
    */
   APPLE_TEAM_ID: z.string().regex(/^[A-Z0-9]{10}$/, "APPLE_TEAM_ID is the 10-character Team ID").optional(),
   APPLE_KEY_ID: z.string().regex(/^[A-Z0-9]{10}$/, "APPLE_KEY_ID is the 10-character Key ID").optional(),
-  APPLE_PRIVATE_KEY: z.string().includes("BEGIN PRIVATE KEY", { message: "APPLE_PRIVATE_KEY is the .p8 file's contents" }).optional(),
+  APPLE_PRIVATE_KEY: z.string().includes("BEGIN PRIVATE KEY", { message: "APPLE_PRIVATE_KEY is the .p8 file’s contents" }).optional(),
   APPLE_BUNDLE_ID: z.string().optional(),
 
   /**

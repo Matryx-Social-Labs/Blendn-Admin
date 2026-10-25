@@ -124,7 +124,7 @@ describe("revokeAppleAuthorization", () => {
   it("revokes nothing when Apple's answer has no id_token to check", async () => {
     configure()
     const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt" }))
-    expect(await revokeAppleAuthorization("c0de", SUB)).toEqual({ outcome: "failed", reason: "no id_token sub in Apple's answer" })
+    expect(await revokeAppleAuthorization("c0de", SUB)).toEqual({ outcome: "failed", reason: "no id_token sub in Apple’s answer" })
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 

@@ -178,7 +178,8 @@ const HIDDEN: CrewRefusal = { refusal: "A moderator has hidden this crew, so it 
 const OPENAI_BOUND_MS = 1000
 
 /**
- * Why this crew name or bio may not be written, or null.
+ * Why this crew name or bio may not be written (`refusal`, the sentence for the
+ * writer), or null.
  *
  * The keyword filter, then contact details in the strict reading a card gets
  * (`findProfileContactInfo`: phone numbers, handles, emails, web addresses,
@@ -191,12 +192,10 @@ const OPENAI_BOUND_MS = 1000
  * board's `hideBoardPostIfFlagged`) is the upgrade if a crew name is ever
  * caught that way.
  */
-export async function crewTextRefusal(field: "name" | "bio", text: string): Promise<string | null> {
-  return (await crewTextVerdict(field, text))?.refusal ?? null
-}
-
-/** `crewTextRefusal`, with the moderation result when the text itself was objectionable (not contact details). */
-async function crewTextVerdict(field: "name" | "bio", text: string): Promise<{ refusal: string; objectionable?: ModerationResult } | null> {
+export async function crewTextRefusal(
+  field: "name" | "bio",
+  text: string
+): Promise<{ refusal: string; /** Set when the text itself was objectionable, not contact details. */ objectionable?: ModerationResult } | null> {
   const what = field === "name" ? "a crew’s name" : "a crew’s bio"
   const keyword = checkKeywords(text)
   if (keyword?.action === "hide") return { refusal: `This can’t be ${what}.`, objectionable: keyword }
@@ -224,7 +223,7 @@ async function textRefusal(userId: string, fields: { name?: string; bio?: string
   for (const field of ["name", "bio"] as const) {
     const text = fields[field]
     if (!text) continue
-    const verdict = await crewTextVerdict(field, text)
+    const verdict = await crewTextRefusal(field, text)
     if (!verdict) continue
     if (!verdict.objectionable) return { refusal: verdict.refusal, status: 400, field }
     recordRefusedText(userId, "crew", field, verdict.objectionable)

@@ -54,8 +54,3 @@ export function recordReviewBypass(userId: string, bypass: ReviewBypass, details
   lastAudited.set(key, now)
   auditLog({ userId, action: "review.bypass", resource: "user", resourceId: userId, details: { bypass, ...details } })
 }
-
-/** Forget the audit window (tests). */
-export function resetReviewBypassAudit(): void {
-  lastAudited.clear()
-}

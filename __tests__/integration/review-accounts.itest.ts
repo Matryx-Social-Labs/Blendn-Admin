@@ -12,7 +12,6 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { lockedNights, plusGatedForPerson, plusRequired } from "@/lib/plus"
-import { resetReviewBypassAudit } from "@/lib/review-accounts"
 import { closeDb, db, makeUser, onboard, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -31,7 +30,6 @@ const CUPERTINO = { lat: 37.3349, lng: -122.009 }
 
 afterEach(() => {
   process.env = { ...saved }
-  resetReviewBypassAudit()
 })
 
 afterAll(async () => {
