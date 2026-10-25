@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server"
+import { NextRequest, after } from "next/server"
 
 /*
  * Deleting an Apple-linked account revokes its Sign in with Apple grant
@@ -9,9 +9,11 @@ import { NextRequest } from "next/server"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/tigris", () => ({ deletePrefix: jest.fn().mockResolvedValue(0), withdrawFromPublic: jest.fn() }))
+jest.mock("next/server", () => ({ ...jest.requireActual("next/server"), after: jest.fn() }))
 import { generateKeyPairSync } from "crypto"
 import jwt from "jsonwebtoken"
 import { logger } from "@/lib/logger"
+import { deletePrefix } from "@/lib/tigris"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -58,7 +60,18 @@ async function appleUser(linked = true) {
   return id
 }
 
+/** Runs what the route handed to `after()`, as the server does once the response is sent. */
+const runAfter = () => Promise.all((after as jest.Mock).mock.calls.map(([fn]) => fn()))
+
+/** The delete, then whatever it left for after the response. */
 async function deleteAccount(userId: string, body?: unknown) {
+  const res = await respond(userId, body)
+  await runAfter()
+  return res
+}
+
+async function respond(userId: string, body?: unknown) {
+  ;(after as jest.Mock).mockClear()
   const { email } = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
   return accountRoute.DELETE(
     new NextRequest("http://localhost/api/mobile/account", {
@@ -103,6 +116,27 @@ it("exchanges the code, revokes the grant, erases the account and audits it", as
   ])
   const row = await revokeAudit(id)
   expect(row.details).toEqual({ outcome: "revoked" })
+})
+
+it("answers before Apple is called, with storage already erased; the revoke runs after the response", async () => {
+  const id = await appleUser()
+  const fetchSpy = jest
+    .spyOn(global, "fetch")
+    .mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt", id_token: idToken(subOf.get(id)!) }))
+    .mockResolvedValueOnce(answer(200, {}))
+  ;(deletePrefix as jest.Mock).mockClear()
+
+  const res = await respond(id, { appleAuthorizationCode: CODE })
+
+  expect(res.status).toBe(200)
+  await expectErased(id)
+  expect(deletePrefix).toHaveBeenCalledWith(`profile/${id}/`, expect.anything())
+  expect(fetchSpy).not.toHaveBeenCalled()
+  expect(after).toHaveBeenCalledTimes(1)
+
+  await runAfter()
+  expect(fetchSpy).toHaveBeenCalledTimes(2)
+  expect((await revokeAudit(id)).details).toEqual({ outcome: "revoked" })
 })
 
 it("revokes nothing when the code is for a different Apple ID, still erases, and audits it without either id", async () => {
@@ -175,6 +209,7 @@ it("does nothing with Apple for an account that never signed in with Apple", asy
   expect(res.status).toBe(200)
   await expectErased(id)
   expect(fetchSpy).not.toHaveBeenCalled()
+  expect(after).not.toHaveBeenCalled()
   await new Promise((r) => setTimeout(r, 200))
   expect(await db.audit_logs.count({ where: { resource_id: id, action: "account.apple_revoke" } })).toBe(0)
 })

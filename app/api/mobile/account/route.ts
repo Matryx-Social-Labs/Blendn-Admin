@@ -1,6 +1,6 @@
 import { logger } from "@/lib/logger"
 import { Prisma } from "@prisma/client"
-import { NextRequest } from "next/server"
+import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockAccountNow } from "@/lib/account-blocklist"
@@ -554,11 +554,6 @@ export async function DELETE(request: NextRequest) {
     const leftCrews = erased[erasure.indexOf(leaveCrews)] as { crew_id: string }[]
     await settleCrewsAfterErasure(leftCrews.map((row) => row.crew_id))
 
-    // Their Sign in with Apple grant goes too (5.1.1(v)): after the erasure, so Apple can never hold it up.
-    if (appleLinked) {
-      await revokeAppleAfterErasure(authUser.userId, appleLinked.provider_id, parsed.data.appleAuthorizationCode, getRequestIp(request))
-    }
-
     // Gone at RevenueCat too (best effort; it holds their purchase history
     // under our user id). A store subscription still running is the store's.
     const rcKey = revenuecatSecretKey()
@@ -644,6 +639,18 @@ export async function DELETE(request: NextRequest) {
           error: error instanceof Error ? error.message : String(error),
         })
       }
+    }
+
+    /*
+     * Their Sign in with Apple grant (5.1.1(v)): last, and after the response.
+     * Apple can take up to two 5 s calls, and a deletion that waited on it ran
+     * past the app's 15 s timeout with RevenueCat's call on top (PR #755
+     * review, M1). Every erasure above has already happened by now.
+     */
+    if (appleLinked) {
+      const { userId } = authUser
+      const ipAddress = getRequestIp(request)
+      after(() => revokeAppleAfterErasure(userId, appleLinked.provider_id, parsed.data.appleAuthorizationCode, ipAddress))
     }
 
     return successResponse({ deleted: true })
