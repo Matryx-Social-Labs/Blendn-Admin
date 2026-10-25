@@ -168,7 +168,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     /*
      * App Review (lib/review-accounts.ts): a listed review account at an event
      * marked `review_demo` is not held to the fence, so a reviewer anywhere
-     * can reach the Room. Off, with no query, unless REVIEW_ACCOUNT_EMAILS is set.
+     * can reach the Room. No query unless the person is listed in REVIEW_ACCOUNT_IDS.
      */
     const reviewBypass = event.review_demo && (await isReviewAccount(authUser.userId))
     if (reviewBypass) recordReviewBypass(authUser.userId, "geofence", { eventId, at: "checkin" })

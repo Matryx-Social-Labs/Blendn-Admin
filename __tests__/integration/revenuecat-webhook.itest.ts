@@ -645,13 +645,13 @@ describe("held to this environment and to what Blendn+ is (MN-U05)", () => {
     const other = await fresh("rc-other")
     process.env.RAILWAY_ENVIRONMENT_NAME = "production"
     try {
-      delete process.env.REVIEW_ACCOUNT_EMAILS
+      delete process.env.REVIEW_ACCOUNT_IDS
       const unlisted = newTxn()
       expect((await post(rc("INITIAL_PURCHASE", { user: reviewer, txn: unlisted, at: T0 }))).json).toMatchObject({ refused: "wrong_environment" })
       expect(await rowsFor(unlisted)).toHaveLength(0)
 
-      // Case and spaces as an operator would paste them.
-      process.env.REVIEW_ACCOUNT_EMAILS = ` ${reviewer.toUpperCase()}@ITEST.INVALID , someone@else.test`
+      // Spaces as an operator would paste them.
+      process.env.REVIEW_ACCOUNT_IDS = ` ${reviewer} , someone-else`
       const credited = newTxn()
       expect((await post(rc("INITIAL_PURCHASE", { user: reviewer, txn: credited, at: T0 }))).json.applied).toBe(true)
       expect(await rowsFor(credited)).toHaveLength(1)
@@ -665,7 +665,7 @@ describe("held to this environment and to what Blendn+ is (MN-U05)", () => {
       expect((await post(transfer([other], [reviewer], T0, { app_user_id: reviewer }))).json).toMatchObject({ refused: "wrong_environment" })
     } finally {
       delete process.env.RAILWAY_ENVIRONMENT_NAME
-      delete process.env.REVIEW_ACCOUNT_EMAILS
+      delete process.env.REVIEW_ACCOUNT_IDS
       await db.audit_logs.deleteMany({ where: { resource_id: { in: [reviewer, other] } } })
     }
   })

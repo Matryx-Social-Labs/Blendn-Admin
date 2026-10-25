@@ -1,4 +1,4 @@
--- App Review aid: an event a REVIEW_ACCOUNT_EMAILS account may check in to
+-- App Review aid: an event a REVIEW_ACCOUNT_IDS account may check in to
 -- from anywhere (lib/review-accounts.ts). False for every existing row.
 --
 -- ADD COLUMN with a constant DEFAULT is catalogue-only on Postgres 11+ (no

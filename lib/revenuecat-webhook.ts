@@ -304,7 +304,7 @@ async function apply(tx: Tx, e: RevenuecatEvent, now: Date, confirmed: Set<strin
  * Apple expects the production server to honour it. So in production, and for
  * a listed review account only (lib/review-accounts.ts), a SANDBOX purchase is
  * credited like a real one, logged and audited in this transaction. Purchases
- * only: a TRANSFER stays refused. Off while REVIEW_ACCOUNT_EMAILS is empty.
+ * only: a TRANSFER stays refused. Off while REVIEW_ACCOUNT_IDS is empty.
  */
 async function reviewSandbox(tx: Tx, e: RevenuecatEvent, isWindow: boolean): Promise<boolean> {
   const userId = e.app_user_id

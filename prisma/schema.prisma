@@ -507,7 +507,7 @@ model events {
   /// which is the real door, and used to hide events from people whose stated
   /// age is below it. See `lib/age.ts`.
   min_age           Int?
-  /// App Review aid: a `REVIEW_ACCOUNT_EMAILS` account may check in here from
+  /// App Review aid: a `REVIEW_ACCOUNT_IDS` account may check in here from
   /// anywhere (the geofence is skipped, logged and audited). Does nothing while
   /// that list is empty. Set by `npm run seed:review`. See lib/review-accounts.ts.
   review_demo       Boolean            @default(false)

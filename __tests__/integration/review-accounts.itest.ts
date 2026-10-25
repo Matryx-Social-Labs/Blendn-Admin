@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server"
 
 /*
- * App Review accounts (lib/review-accounts.ts), OFF unless REVIEW_ACCOUNT_EMAILS
- * names somebody. For a listed account only: the geofence is skipped at an
+ * App Review accounts (lib/review-accounts.ts), OFF unless REVIEW_ACCOUNT_IDS
+ * names somebody, by user id. For a listed account only: the geofence is skipped at an
  * event marked `review_demo` (at the door and in the presence ping that keeps
  * them in), and Blendn+ reads as gated. Everybody else, every event not marked,
  * and everybody with the list empty: unchanged. The sandbox purchase half is in
@@ -17,6 +17,7 @@ import { closeDb, db, makeUser, onboard, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const checkinRoute = require("@/app/api/mobile/events/[eventId]/checkin/route") as typeof import("@/app/api/mobile/events/[eventId]/checkin/route")
+const signupRoute = require("@/app/api/mobile/auth/signup/route") as typeof import("@/app/api/mobile/auth/signup/route")
 const presenceRoute = require("@/app/api/mobile/events/[eventId]/presence/route") as typeof import("@/app/api/mobile/events/[eventId]/presence/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -108,7 +109,7 @@ async function bypassAudits(userId: string) {
 describe("check-in geofence", () => {
   it("lets a listed review account in from anywhere at a review_demo event, keeps it in on the ping, and audits it", async () => {
     const reviewer = await person("rv-in")
-    process.env.REVIEW_ACCOUNT_EMAILS = `someone@else.test, ${reviewer.email.toUpperCase()}`
+    process.env.REVIEW_ACCOUNT_IDS = `someone-else, ${reviewer.id}`
     const eventId = await liveEvent(true)
 
     expect((await checkIn(eventId, reviewer.token)).status).toBe(200)
@@ -126,11 +127,11 @@ describe("check-in geofence", () => {
     const marked = await liveEvent(true)
     const unmarked = await liveEvent(false)
 
-    process.env.REVIEW_ACCOUNT_EMAILS = reviewer.email
+    process.env.REVIEW_ACCOUNT_IDS = reviewer.id
     expect((await checkIn(marked, other.token)).status).toBe(400)
     expect((await checkIn(unmarked, reviewer.token)).status).toBe(400)
 
-    delete process.env.REVIEW_ACCOUNT_EMAILS
+    delete process.env.REVIEW_ACCOUNT_IDS
     const refused = await checkIn(marked, reviewer.token)
     expect(refused.status).toBe(400)
     expect((await refused.json()).errorCode).toBe("OUT_OF_RANGE")
@@ -148,7 +149,7 @@ describe("Blendn+ gating", () => {
     expect(await plusGatedForPerson(reviewer.id)).toBe(false)
     expect(await plusRequired(reviewer.id, "Bengaluru")).toBe(false)
 
-    process.env.REVIEW_ACCOUNT_EMAILS = reviewer.email
+    process.env.REVIEW_ACCOUNT_IDS = reviewer.id
     expect(await plusGatedForPerson(reviewer.id)).toBe(true)
     expect(await plusRequired(reviewer.id, "Bengaluru")).toBe(true)
     expect(await plusRequired(reviewer.id, null)).toBe(true)
@@ -160,10 +161,38 @@ describe("Blendn+ gating", () => {
     expect(await plusRequired(other.id, "Bengaluru")).toBe(false)
   })
 
+  it("binds to the id, not the email: nobody else can sign up into the bypass", async () => {
+    const reviewer = await person("rv-bound")
+    process.env.REVIEW_ACCOUNT_IDS = reviewer.id
+    const signup = (email: string) =>
+      signupRoute.POST(
+        new NextRequest("http://localhost/api/mobile/auth/signup", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-real-ip": "203.0.113.77" },
+          body: JSON.stringify({ email, password: "Correct-horse-battery-9", name: "Someone Else", age: 30 }),
+        })
+      )
+
+    // While the review account exists its address is taken, in any case.
+    expect((await signup(reviewer.email.toUpperCase())).status).toBe(409)
+
+    // Deleted, its address is free again: whoever takes it is a new id, and gets nothing.
+    await db.user.update({ where: { id: reviewer.id }, data: { deletedAt: new Date(), email: `deleted-${reviewer.id}@deleted.blendn.invalid` } })
+    const res = await signup(reviewer.email)
+    expect(res.status).toBe(201)
+    const newcomer = await db.user.findUniqueOrThrow({ where: { email: reviewer.email }, select: { id: true } })
+    users.push(newcomer.id)
+    expect(newcomer.id).not.toBe(reviewer.id)
+    expect(await plusGatedForPerson(newcomer.id)).toBe(false)
+    expect(await plusGatedForPerson(reviewer.id)).toBe(false)
+    // And nothing in the answer says what a review account is.
+    expect(JSON.stringify(await res.json())).not.toMatch(/review/i)
+  })
+
   it("leaves a deleted review account alone", async () => {
     const reviewer = await person("rv-deleted")
     await db.user.update({ where: { id: reviewer.id }, data: { deletedAt: new Date() } })
-    process.env.REVIEW_ACCOUNT_EMAILS = reviewer.email
+    process.env.REVIEW_ACCOUNT_IDS = reviewer.id
     expect(await plusGatedForPerson(reviewer.id)).toBe(false)
   })
 })

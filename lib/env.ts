@@ -138,12 +138,13 @@ const envSchema = z.object({
   APPLE_BUNDLE_ID: z.string().optional(),
 
   /**
-   * App Review aid, OFF unless set (docs/APP-REVIEW.md). Comma-separated emails
-   * of accounts that skip the check-in geofence at events marked `review_demo`,
-   * see Blendn+ as gated, and have sandbox store purchases credited in
-   * production. Every bypass is logged and audited. Empty: nothing changes.
+   * App Review aid, OFF unless set (DEPLOYMENT.md § 7). Comma-separated USER IDS
+   * (never emails: anybody can sign up with an address) of accounts that skip
+   * the check-in geofence at events marked `review_demo`, see Blendn+ as gated,
+   * and have sandbox store purchases credited in production. `seed:review`
+   * prints the id. Every bypass is logged and audited. Empty: nothing changes.
    */
-  REVIEW_ACCOUNT_EMAILS: z.string().optional(),
+  REVIEW_ACCOUNT_IDS: z.string().optional(),
 
   /**
    * Razorpay (plan v2 §9.2). All optional: unset, the Plan page says payments
@@ -429,10 +430,10 @@ export function appleRevokeConfig(): AppleRevokeConfig | null {
   return { teamId, keyId, privateKey, clientId: appleClientId() }
 }
 
-/** `REVIEW_ACCOUNT_EMAILS`, lower-cased. Empty (the default): the App Review aid is off. */
-export function reviewAccountEmails(): Set<string> {
-  const raw = process.env.REVIEW_ACCOUNT_EMAILS ?? ""
-  return new Set(raw.split(",").map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@")))
+/** `REVIEW_ACCOUNT_IDS`: the user ids of the App Review accounts. Empty (the default): the aid is off. */
+export function reviewAccountIds(): Set<string> {
+  const raw = process.env.REVIEW_ACCOUNT_IDS ?? ""
+  return new Set(raw.split(",").map((id) => id.trim()).filter(Boolean))
 }
 
 /**

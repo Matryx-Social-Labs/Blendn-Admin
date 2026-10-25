@@ -235,7 +235,7 @@ async function audit(
 /**
  * App Review (lib/review-accounts.ts): a listed review account sees Blendn+ as
  * gated everywhere, with no trial, so the plans show and a purchase visibly
- * unlocks something. No query while REVIEW_ACCOUNT_EMAILS is empty.
+ * unlocks something. No query unless the person is listed in REVIEW_ACCOUNT_IDS.
  */
 async function reviewGated(userId: string): Promise<boolean> {
   if (!(await isReviewAccount(userId))) return false

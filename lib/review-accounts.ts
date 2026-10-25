@@ -1,11 +1,11 @@
 import type { Prisma } from "@prisma/client"
 import { auditLog } from "./audit-log"
 import { db } from "./db"
-import { reviewAccountEmails } from "./env"
+import { reviewAccountIds } from "./env"
 import { logger } from "./logger"
 
 /**
- * App Review accounts (DEPLOYMENT.md § 7). OFF unless `REVIEW_ACCOUNT_EMAILS`
+ * App Review accounts (DEPLOYMENT.md § 7). OFF unless `REVIEW_ACCOUNT_IDS`
  * names somebody; the owner decides whether to set it. For those accounts only:
  *
  * - `geofence`: check-in (and the presence ping that keeps them in) at an
@@ -24,12 +24,16 @@ export type ReviewBypass = "geofence" | "plus_gating" | "sandbox_purchase"
 
 type Reader = Pick<Prisma.TransactionClient, "user">
 
-/** Is this a listed review account (and not deleted)? False, with no query, while the list is empty. */
+/**
+ * Is this a listed review account that exists and is not deleted? Bound to the
+ * user id the operator put in `REVIEW_ACCOUNT_IDS`, never to an email: an
+ * address is whatever somebody typed at sign-up, an id is ours. False, with no
+ * query, while the list is empty. Never said to the app.
+ */
 export async function isReviewAccount(userId: string | null | undefined, client: Reader = db): Promise<boolean> {
-  const emails = reviewAccountEmails()
-  if (emails.size === 0 || !userId) return false
-  const user = await client.user.findUnique({ where: { id: userId }, select: { email: true, deletedAt: true } })
-  return !!user?.email && !user.deletedAt && emails.has(user.email.toLowerCase())
+  if (!userId || !reviewAccountIds().has(userId)) return false
+  const user = await client.user.findUnique({ where: { id: userId }, select: { deletedAt: true } })
+  return !!user && user.deletedAt === null
 }
 
 /** One audit row per account, bypass and resource per window; a log line every time. */
