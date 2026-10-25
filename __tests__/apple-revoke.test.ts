@@ -129,6 +129,35 @@ describe("revokeAppleAuthorization", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
+  it("gives up when Apple does not answer in time: each call carries a 5 s timeout signal", async () => {
+    configure()
+    const timedOut = new DOMException("The operation was aborted due to timeout", "TimeoutError")
+    const timeout = jest.spyOn(AbortSignal, "timeout").mockImplementation(() => AbortSignal.abort(timedOut))
+    // A fetch that only ever ends when its signal aborts, as a hung connection does.
+    jest.spyOn(global, "fetch").mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init!.signal!
+          if (signal.aborted) reject(signal.reason)
+          signal.addEventListener("abort", () => reject(signal.reason))
+        })
+    )
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({
+      outcome: "failed",
+      reason: expect.stringContaining("aborted due to timeout"),
+    })
+    expect(timeout).toHaveBeenCalledWith(5_000)
+  })
+
+  it("fails cleanly on an answer that is not JSON, ok or not", async () => {
+    configure()
+    const html = (status: number) => ({ ok: status < 400, status, text: async () => "<html>bad gateway</html>" }) as unknown as Response
+    jest.spyOn(global, "fetch").mockResolvedValueOnce(html(502))
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({ outcome: "failed", reason: "/auth/token answered 502 (unknown)" })
+    jest.spyOn(global, "fetch").mockResolvedValueOnce(html(200))
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({ outcome: "failed", reason: "no token in Apple’s answer" })
+  })
+
   it("fails without throwing, and the reason carries no code or token", async () => {
     configure()
     jest.spyOn(global, "fetch").mockResolvedValueOnce(answer(400, { error: "invalid_grant", detail: "c0de" }))
