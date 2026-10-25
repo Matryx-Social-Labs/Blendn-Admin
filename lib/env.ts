@@ -124,6 +124,28 @@ const envSchema = z.object({
   REVENUECAT_SECRET_KEY: z.string().regex(/^sk_[A-Za-z0-9]+$/, "REVENUECAT_SECRET_KEY must look like sk_…").optional(),
 
   /**
+   * Sign in with Apple token revocation on account deletion (App Store 5.1.1(v)).
+   * A key with "Sign in with Apple" enabled (developer.apple.com → Keys): its
+   * Team ID, Key ID and the `.p8` file's contents (newlines may be pasted as
+   * `\n`). All three or nothing: unset, deletion still deletes and the skipped
+   * revoke is logged and audited (`appleRevokeConfig`). `APPLE_BUNDLE_ID` is the
+   * client id, defaulting to the app's bundle id; it is also the identity
+   * token's audience (lib/mobile-auth.ts).
+   */
+  APPLE_TEAM_ID: z.string().regex(/^[A-Z0-9]{10}$/, "APPLE_TEAM_ID is the 10-character Team ID").optional(),
+  APPLE_KEY_ID: z.string().regex(/^[A-Z0-9]{10}$/, "APPLE_KEY_ID is the 10-character Key ID").optional(),
+  APPLE_PRIVATE_KEY: z.string().includes("BEGIN PRIVATE KEY", { message: "APPLE_PRIVATE_KEY is the .p8 file's contents" }).optional(),
+  APPLE_BUNDLE_ID: z.string().optional(),
+
+  /**
+   * App Review aid, OFF unless set (docs/APP-REVIEW.md). Comma-separated emails
+   * of accounts that skip the check-in geofence at events marked `review_demo`,
+   * see Blendn+ as gated, and have sandbox store purchases credited in
+   * production. Every bypass is logged and audited. Empty: nothing changes.
+   */
+  REVIEW_ACCOUNT_EMAILS: z.string().optional(),
+
+  /**
    * Razorpay (plan v2 §9.2). All optional: unset, the Plan page says payments
    * are off and the webhook refuses everything. A key id names its mode
    * (`rzp_test_…` / `rzp_live_…`), and the refinement below holds each mode to
@@ -383,6 +405,34 @@ export function revenuecatSecretKey(): string | null {
 export function revenuecatWebhookSecret(): string | null {
   const secret = process.env.REVENUECAT_WEBHOOK_SECRET?.trim()
   return secret && secret.length >= 32 ? secret : null
+}
+
+/** The Sign in with Apple client id: the app's bundle id. Also the identity token's audience. */
+export function appleClientId(): string {
+  return process.env.APPLE_BUNDLE_ID?.trim() || "com.matryxsociallabs.blendn"
+}
+
+export interface AppleRevokeConfig {
+  teamId: string
+  keyId: string
+  privateKey: string
+  clientId: string
+}
+
+/** What revoking a Sign in with Apple grant needs, or null when any of it is missing (the revoke is then skipped). */
+export function appleRevokeConfig(): AppleRevokeConfig | null {
+  const teamId = process.env.APPLE_TEAM_ID?.trim()
+  const keyId = process.env.APPLE_KEY_ID?.trim()
+  // Railway and .env files often carry a pasted .p8 as one line with literal `\n`.
+  const privateKey = process.env.APPLE_PRIVATE_KEY?.replace(/\\n/g, "\n").trim()
+  if (!teamId || !keyId || !privateKey) return null
+  return { teamId, keyId, privateKey, clientId: appleClientId() }
+}
+
+/** `REVIEW_ACCOUNT_EMAILS`, lower-cased. Empty (the default): the App Review aid is off. */
+export function reviewAccountEmails(): Set<string> {
+  const raw = process.env.REVIEW_ACCOUNT_EMAILS ?? ""
+  return new Set(raw.split(",").map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@")))
 }
 
 /**

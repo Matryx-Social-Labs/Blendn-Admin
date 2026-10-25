@@ -3900,6 +3900,17 @@ Sockets the account already had open are closed too (`io server disconnect`),
 so a second phone stops receiving its rooms and DMs at once (SCRUM-449).
 The account can never be signed back into.
 
+**Body (optional):** `{ "appleAuthorizationCode": "<code>" }`. For an account
+that signed in with Apple, the app sends a fresh `authorizationCode` from Sign
+in with Apple; after the erasure the server exchanges it at
+`appleid.apple.com/auth/token` and revokes the grant at `/auth/revoke` (App
+Store 5.1.1(v)). Best effort: with no code, no key configured
+(`APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY`) or Apple failing, the
+account is still deleted, a warning is logged and an `account.apple_revoke`
+audit row records the outcome (`revoked`, `skipped`, `failed`). The code and
+tokens are never stored or logged. A body that is not this shape is a 400
+`VALIDATION_FAILED`, before anything is erased.
+
 That decision has a cost worth stating: **nothing is removed automatically**, so
 every column added to `profiles` survives deletion until it is explicitly
 scrubbed. `goals` and `looking_for` already survived a release that way.
