@@ -179,9 +179,12 @@ it("does nothing with Apple for an account that never signed in with Apple", asy
   expect(await db.audit_logs.count({ where: { resource_id: id, action: "account.apple_revoke" } })).toBe(0)
 })
 
-it("refuses a malformed body before erasing anything", async () => {
+it.each([
+  ["a wrong type", { appleAuthorizationCode: 42 }],
+  ["an unknown key", { appleAuthorisationCode: CODE }],
+])("refuses a body with %s before erasing anything", async (_, body) => {
   const id = await appleUser()
-  const res = await deleteAccount(id, { appleAuthorizationCode: 42 })
+  const res = await deleteAccount(id, body)
   expect(res.status).toBe(400)
   expect((await res.json()).errorCode).toBe("VALIDATION_FAILED")
   expect((await db.user.findUniqueOrThrow({ where: { id }, select: { deletedAt: true } })).deletedAt).toBeNull()

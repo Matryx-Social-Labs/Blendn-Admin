@@ -3916,8 +3916,9 @@ belong to the account: the `sub` of the `id_token` Apple returns is checked
 against the account's linked Apple user id, and a code for a different Apple ID
 revokes nothing (`skipped` / `different_apple_id`). The code, tokens and Apple
 ids are never stored or logged. `GET /auth/session`'s `appleLinked` says when to
-send it. A body that is not this shape is a 400
-`VALIDATION_FAILED`, before anything is erased.
+send it. A body that is not exactly this shape (not JSON,
+a wrong type, an unknown key) is a 400 `VALIDATION_FAILED`, before anything is
+erased: the default action here is erasure. No body, or `{}`, deletes.
 
 That decision has a cost worth stating: **nothing is removed automatically**, so
 every column added to `profiles` survives deletion until it is explicitly

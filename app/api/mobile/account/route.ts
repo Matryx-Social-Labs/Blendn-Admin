@@ -26,10 +26,16 @@ import { z } from "zod"
  * The delete's optional body. `appleAuthorizationCode`: a fresh code from Sign
  * in with Apple, sent by the app when the account is Apple-linked, so the grant
  * can be revoked (5.1.1(v)). Apple's codes are short; the cap only bounds input.
+ *
+ * Strict: the default action here is erasure, so a body this route cannot read
+ * (unknown keys, wrong types, not JSON) is a 400 and erases nothing. No body,
+ * or `{}`, deletes as it always did.
  */
-const deleteAccountSchema = z.object({
-  appleAuthorizationCode: z.string().trim().min(1).max(2048).optional(),
-})
+const deleteAccountSchema = z
+  .object({
+    appleAuthorizationCode: z.string().trim().min(1).max(2048).optional(),
+  })
+  .strict()
 
 // DELETE /api/mobile/account — Delete the authenticated user's own account.
 //

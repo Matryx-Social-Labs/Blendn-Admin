@@ -1290,7 +1290,7 @@ registry.registerPath({
               .max(2048)
               .optional()
               .describe("A fresh `authorizationCode` from Sign in with Apple (valid 5 minutes). Send it when the account signed in with Apple; it is exchanged and revoked, never stored or logged. Omitted: the revoke is skipped and audited."),
-          }),
+          }).strict().describe("Strict: an unknown key or a wrong type is a 400 and erases nothing."),
         },
       },
     },
