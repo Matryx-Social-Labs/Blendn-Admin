@@ -1,6 +1,7 @@
 import "server-only"
 
 import { auditInTx } from "./audit-log"
+import { isReviewAccount } from "./review-accounts"
 import { createHash, timingSafeEqual } from "crypto"
 
 import { Prisma } from "@prisma/client"
@@ -292,8 +293,32 @@ async function apply(tx: Tx, e: RevenuecatEvent, now: Date, confirmed: Set<strin
   const isWindow = WINDOW_EVENTS.has(e.type)
   if (!isWindow && e.type !== "TRANSFER") return nothing
   // A TRANSFER may leave its environment out; a purchase never does.
-  if ((isWindow || e.environment) && e.environment !== storeEnvironment()) return refuse("wrong_environment")
+  if ((isWindow || e.environment) && e.environment !== storeEnvironment() && !(await reviewSandbox(tx, e, isWindow))) {
+    return refuse("wrong_environment")
+  }
   return isWindow ? applyPurchase(tx, e, now) : applyTransfer(tx, e, confirmed ?? null)
+}
+
+/**
+ * App Review buys with a sandbox account against the production build, and
+ * Apple expects the production server to honour it. So in production, and for
+ * a listed review account only (lib/review-accounts.ts), a SANDBOX purchase is
+ * credited like a real one, logged and audited in this transaction. Purchases
+ * only: a TRANSFER stays refused. Off while REVIEW_ACCOUNT_EMAILS is empty.
+ */
+async function reviewSandbox(tx: Tx, e: RevenuecatEvent, isWindow: boolean): Promise<boolean> {
+  const userId = e.app_user_id
+  if (!isWindow || !userId || e.environment !== "SANDBOX" || storeEnvironment() !== "PRODUCTION") return false
+  if (!(await isReviewAccount(userId, tx))) return false
+  logger.warn("App Review account: sandbox purchase credited in production", { userId, eventId: e.id, type: e.type })
+  await auditInTx(tx, {
+    userId,
+    action: "review.bypass",
+    resource: "user",
+    resourceId: userId,
+    details: { bypass: "sandbox_purchase", eventId: e.id, type: e.type, product: e.product_id ?? null },
+  })
+  return true
 }
 
 /** RevenueCat's refunds: a support refund, or one the developer made (Google revocations). */
