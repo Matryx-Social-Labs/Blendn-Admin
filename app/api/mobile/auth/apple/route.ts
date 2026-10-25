@@ -28,6 +28,7 @@ const appleAuthSchema = z.object({
   identityToken: z.string().min(1, "Identity token is required"),
   fullName: z
     .object({
+      // Never refused here: the stored name is capped at 64 and screened (oauthDisplayName), so sign-in never fails on it.
       givenName: z.string().nullable().optional(),
       familyName: z.string().nullable().optional(),
     })
