@@ -640,6 +640,36 @@ describe("held to this environment and to what Blendn+ is (MN-U05)", () => {
     }
   })
 
+  it("App Review: in production a listed review account's sandbox purchase is credited and audited; nobody else's, and none with the list empty", async () => {
+    const reviewer = await fresh("rc-reviewer")
+    const other = await fresh("rc-other")
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+    try {
+      delete process.env.REVIEW_ACCOUNT_IDS
+      const unlisted = newTxn()
+      expect((await post(rc("INITIAL_PURCHASE", { user: reviewer, txn: unlisted, at: T0 }))).json).toMatchObject({ refused: "wrong_environment" })
+      expect(await rowsFor(unlisted)).toHaveLength(0)
+
+      // Spaces as an operator would paste them.
+      process.env.REVIEW_ACCOUNT_IDS = ` ${reviewer} , someone-else`
+      const credited = newTxn()
+      expect((await post(rc("INITIAL_PURCHASE", { user: reviewer, txn: credited, at: T0 }))).json.applied).toBe(true)
+      expect(await rowsFor(credited)).toHaveLength(1)
+      const audit = await db.audit_logs.findFirst({ where: { resource_id: reviewer, action: "review.bypass" } })
+      expect(audit?.details).toMatchObject({ bypass: "sandbox_purchase", type: "INITIAL_PURCHASE" })
+
+      const notListed = newTxn()
+      expect((await post(rc("INITIAL_PURCHASE", { user: other, txn: notListed, at: T0 }))).json).toMatchObject({ refused: "wrong_environment" })
+      expect(await rowsFor(notListed)).toHaveLength(0)
+      // A transfer is not a purchase: still held to the environment.
+      expect((await post(transfer([other], [reviewer], T0, { app_user_id: reviewer }))).json).toMatchObject({ refused: "wrong_environment" })
+    } finally {
+      delete process.env.RAILWAY_ENVIRONMENT_NAME
+      delete process.env.REVIEW_ACCOUNT_IDS
+      await db.audit_logs.deleteMany({ where: { resource_id: { in: [reviewer, other] } } })
+    }
+  })
+
   it("grants nothing for another product, another entitlement or another store", async () => {
     const cases = [
       { entitlements: ["pro"], product: "some_other_sub" },

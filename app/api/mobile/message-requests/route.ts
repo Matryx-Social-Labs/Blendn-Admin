@@ -24,6 +24,7 @@ import {
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
+import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
 const createRequestSchema = z.object({
   // User ids are cuid, not uuid — do not tighten this to z.string().uuid().
@@ -70,6 +71,9 @@ export async function POST(request: NextRequest) {
     // A room handle or a raw id (SCRUM-371). `ref` is what the response
     // echoes, so a handle never comes back as the real id behind it.
     const { recipientId: ref, message } = parsed.data
+    // The first thing a stranger reads from them, screened before it is stored or pushed (App Store 1.2).
+    const refusedText = screenUserText(authUser.userId, "message_request", { message })
+    if (refusedText) return textNotAllowedResponse(refusedText.field, "That message can’t be sent.")
     const recipientId = userIdFromRef(ref)
     // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
     const banned = await refRoomBanRefusal(ref, authUser.userId)

@@ -21,6 +21,7 @@ import { resolveOccurrence } from "@/lib/occurrences"
 import { canJoinEvent } from "@/lib/socket-auth"
 import { readJson, isUuid } from "@/lib/api-input"
 import { fenceRefusal, personAtTheDoor, seatAtTheDoor, vagueFixRefusal } from "@/lib/check-in-core"
+import { isReviewAccount, recordReviewBypass } from "@/lib/review-accounts"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -164,7 +165,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * not read at the door: an event copies it when saved (owner's ruling 3),
      * so nothing can move it live.
      */
-    const refused = fenceRefusal({
+    /*
+     * App Review (lib/review-accounts.ts): a listed review account at an event
+     * marked `review_demo` is not held to the fence, so a reviewer anywhere
+     * can reach the Room. No query unless the person is listed in REVIEW_ACCOUNT_IDS.
+     */
+    const reviewBypass = event.review_demo && (await isReviewAccount(authUser.userId))
+    if (reviewBypass) recordReviewBypass(authUser.userId, "geofence", { eventId, at: "checkin" })
+    const refused = reviewBypass ? null : fenceRefusal({
       fence: resolveFence(event),
       point: { lat: latitude, lng: longitude },
       gpsAccuracy,

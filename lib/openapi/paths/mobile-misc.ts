@@ -1276,8 +1276,25 @@ registry.registerPath({
   tags: ["Mobile Profile"],
   summary: "Delete your own account",
   description:
-    "Anonymises the account rather than hard-deleting the row. Events, chat messages and check-ins cascade from User, so a real delete would destroy other people's event history and conversations along with yours.",
+    "Anonymises the account rather than hard-deleting the row. Events, chat messages and check-ins cascade from User, so a real delete would destroy other people's event history and conversations along with yours. An Apple-linked account's Sign in with Apple grant is revoked after the erasure when the app sends `appleAuthorizationCode` (only if the code's Apple ID is the one linked); best effort, and never a reason the deletion fails.",
   security: bearerAuth,
+  request: {
+    body: {
+      required: false,
+      content: {
+        "application/json": {
+          schema: z.object({
+            appleAuthorizationCode: z
+              .string()
+              .min(1)
+              .max(2048)
+              .optional()
+              .describe("A fresh `authorizationCode` from Sign in with Apple (valid 5 minutes). Send it when the account signed in with Apple; it is exchanged and revoked, never stored or logged. Omitted: the revoke is skipped and audited."),
+          }).strict().describe("Strict: an unknown key or a wrong type is a 400 and erases nothing."),
+        },
+      },
+    },
+  },
   responses: {
     200: { description: "Account deleted", content: { "application/json": { schema: wrap(MessageResponseSchema) } } },
     ...standardErrors,

@@ -118,6 +118,12 @@ export const SessionResponseSchema = z
         "What the account can sign in with: `password` when it has one, else the provider linked most recently. " +
           "The tokens do not carry how *this* phone signed in, so this answers for the account."
       ),
+    appleLinked: z
+      .boolean()
+      .describe(
+        "Sign in with Apple is linked to the account, whatever `signInMethod` says (an Apple account that later set a password reads `password`). " +
+          "When true, send a fresh `appleAuthorizationCode` with `DELETE /account` so the grant is revoked. Additive."
+      ),
     profile: UserProfileSchema.nullable(),
   })
   .openapi("SessionResponse")
