@@ -62,10 +62,15 @@ export async function DELETE(request: NextRequest) {
     const parsed = deleteAccountSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     // Read before the erasure, which deletes the link: whether there is an Apple grant to revoke.
-    const appleLinked = await db.user_oauth_accounts.findFirst({
-      where: { user_id: authUser.userId, provider: "apple" },
-      select: { provider_id: true },
-    })
+    // Every Apple link, not the first: the code's Apple ID is checked against all of them (review L1).
+    const appleSubs = new Set(
+      (
+        await db.user_oauth_accounts.findMany({
+          where: { user_id: authUser.userId, provider: "apple" },
+          select: { provider_id: true },
+        })
+      ).map((link) => link.provider_id)
+    )
 
     const anonymizedEmail = `deleted-${authUser.userId}@deleted.blendn.invalid`
 
@@ -647,10 +652,10 @@ export async function DELETE(request: NextRequest) {
      * past the app's 15 s timeout with RevenueCat's call on top (PR #755
      * review, M1). Every erasure above has already happened by now.
      */
-    if (appleLinked) {
+    if (appleSubs.size > 0) {
       const { userId } = authUser
       const ipAddress = getRequestIp(request)
-      after(() => revokeAppleAfterErasure(userId, appleLinked.provider_id, parsed.data.appleAuthorizationCode, ipAddress))
+      after(() => revokeAppleAfterErasure(userId, appleSubs, parsed.data.appleAuthorizationCode, ipAddress))
     }
 
     return successResponse({ deleted: true })
@@ -666,9 +671,9 @@ export async function DELETE(request: NextRequest) {
  * audit row, so it can be followed up; the deletion has already happened.
  * Neither the code nor any token is logged.
  */
-async function revokeAppleAfterErasure(userId: string, linkedSub: string, code: string | undefined, ipAddress: string): Promise<void> {
+async function revokeAppleAfterErasure(userId: string, linkedSubs: ReadonlySet<string>, code: string | undefined, ipAddress: string): Promise<void> {
   // The outcome names no Apple identity: a mismatch is "different_apple_id", never either sub.
-  const result = await revokeAppleAuthorization(code, linkedSub)
+  const result = await revokeAppleAuthorization(code, linkedSubs)
   const details = { ...result }
   if (result.outcome === "revoked") logger.info("Account deletion: Sign in with Apple grant revoked", { userId })
   else logger.warn("Account deletion: Sign in with Apple grant NOT revoked", { userId, ...details })

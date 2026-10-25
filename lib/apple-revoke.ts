@@ -66,12 +66,12 @@ async function postForm(path: string, form: Record<string, string>): Promise<Rec
 }
 
 /**
- * Exchange the code and revoke the grant, only if the code belongs to
- * `linkedSub`, the Apple user id on the account being deleted. Somebody who
+ * Exchange the code and revoke the grant, only if the code belongs to one of
+ * `linkedSubs`, the Apple user ids linked to the account being deleted. Somebody who
  * picks a different Apple ID in the sheet hands us a code for a grant that is
  * not this account's; that one is left alone. Never throws.
  */
-export async function revokeAppleAuthorization(code: string | null | undefined, linkedSub: string): Promise<AppleRevokeOutcome> {
+export async function revokeAppleAuthorization(code: string | null | undefined, linkedSubs: ReadonlySet<string>): Promise<AppleRevokeOutcome> {
   if (!code) return { outcome: "skipped", reason: "no_code" }
   const config = appleRevokeConfig()
   if (!config) return { outcome: "skipped", reason: "not_configured" }
@@ -95,7 +95,7 @@ export async function revokeAppleAuthorization(code: string | null | undefined, 
     const idToken = typeof tokens.id_token === "string" ? jwt.decode(tokens.id_token) : null
     const sub = idToken && typeof idToken === "object" ? idToken.sub : undefined
     if (!sub) return { outcome: "failed", reason: "no id_token sub in Apple’s answer" }
-    if (sub !== linkedSub) return { outcome: "skipped", reason: "different_apple_id" }
+    if (!linkedSubs.has(sub)) return { outcome: "skipped", reason: "different_apple_id" }
     await postForm("/auth/revoke", {
       client_id: config.clientId,
       client_secret: clientSecret,

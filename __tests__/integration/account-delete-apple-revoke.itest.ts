@@ -139,6 +139,19 @@ it("answers before Apple is called, with storage already erased; the revoke runs
   expect((await revokeAudit(id)).details).toEqual({ outcome: "revoked" })
 })
 
+it("revokes when the code is for the account's second Apple link (every link is checked)", async () => {
+  const id = await appleUser()
+  const second = testId("sub2")
+  await db.user_oauth_accounts.create({ data: { user_id: id, provider: "apple", provider_id: second } })
+  jest
+    .spyOn(global, "fetch")
+    .mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt", id_token: idToken(second) }))
+    .mockResolvedValueOnce(answer(200, {}))
+
+  expect((await deleteAccount(id, { appleAuthorizationCode: CODE })).status).toBe(200)
+  expect((await revokeAudit(id)).details).toEqual({ outcome: "revoked" })
+})
+
 it("revokes nothing when the code is for a different Apple ID, still erases, and audits it without either id", async () => {
   const id = await appleUser()
   const other = "000999.someone-else.0001"

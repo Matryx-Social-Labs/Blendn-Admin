@@ -14,6 +14,7 @@ const PEM = privateKey.export({ type: "pkcs8", format: "pem" }).toString()
 const CONFIG = { teamId: "TEAM123456", keyId: "KEY1234567", privateKey: PEM, clientId: "com.matryxsociallabs.blendn" }
 const saved = { ...process.env }
 const SUB = "001234.abcdef.0420"
+const LINKED: ReadonlySet<string> = new Set([SUB])
 /** Apple's id_token as the exchange returns it; only `sub` is read. */
 const idToken = (sub: string) => jwt.sign({ sub, iss: "https://appleid.apple.com" }, "not-checked")
 
@@ -69,9 +70,9 @@ describe("revokeAppleAuthorization", () => {
 
   it("skips without a code or without the key, and calls nobody", async () => {
     const fetchSpy = jest.spyOn(global, "fetch")
-    expect(await revokeAppleAuthorization(undefined, SUB)).toEqual({ outcome: "skipped", reason: "no_code" })
+    expect(await revokeAppleAuthorization(undefined, LINKED)).toEqual({ outcome: "skipped", reason: "no_code" })
     delete process.env.APPLE_TEAM_ID
-    expect(await revokeAppleAuthorization("c0de", SUB)).toEqual({ outcome: "skipped", reason: "not_configured" })
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({ outcome: "skipped", reason: "not_configured" })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
@@ -81,7 +82,7 @@ describe("revokeAppleAuthorization", () => {
       .spyOn(global, "fetch")
       .mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt", id_token: idToken(SUB) }))
       .mockResolvedValueOnce(answer(200, {}))
-    expect(await revokeAppleAuthorization("c0de", SUB)).toEqual({ outcome: "revoked" })
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({ outcome: "revoked" })
 
     const [tokenUrl, tokenInit] = fetchSpy.mock.calls[0]
     expect(tokenUrl).toBe("https://appleid.apple.com/auth/token")
@@ -104,7 +105,7 @@ describe("revokeAppleAuthorization", () => {
       .spyOn(global, "fetch")
       .mockResolvedValueOnce(answer(200, { access_token: "at", id_token: idToken(SUB) }))
       .mockResolvedValueOnce(answer(200, {}))
-    expect(await revokeAppleAuthorization("c0de", SUB)).toEqual({ outcome: "revoked" })
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({ outcome: "revoked" })
     const revoke = new URLSearchParams(String(fetchSpy.mock.calls[1][1]!.body))
     expect(revoke.get("token")).toBe("at")
     expect(revoke.get("token_type_hint")).toBe("access_token")
@@ -115,7 +116,7 @@ describe("revokeAppleAuthorization", () => {
     const fetchSpy = jest
       .spyOn(global, "fetch")
       .mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt", id_token: idToken("000999.other.0001") }))
-    const result = await revokeAppleAuthorization("c0de", SUB)
+    const result = await revokeAppleAuthorization("c0de", LINKED)
     expect(result).toEqual({ outcome: "skipped", reason: "different_apple_id" })
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(JSON.stringify(result)).not.toMatch(/000999|001234/)
@@ -124,17 +125,17 @@ describe("revokeAppleAuthorization", () => {
   it("revokes nothing when Apple's answer has no id_token to check", async () => {
     configure()
     const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValueOnce(answer(200, { access_token: "at", refresh_token: "rt" }))
-    expect(await revokeAppleAuthorization("c0de", SUB)).toEqual({ outcome: "failed", reason: "no id_token sub in Apple’s answer" })
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({ outcome: "failed", reason: "no id_token sub in Apple’s answer" })
     expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it("fails without throwing, and the reason carries no code or token", async () => {
     configure()
     jest.spyOn(global, "fetch").mockResolvedValueOnce(answer(400, { error: "invalid_grant", detail: "c0de" }))
-    const result = await revokeAppleAuthorization("c0de", SUB)
+    const result = await revokeAppleAuthorization("c0de", LINKED)
     expect(result).toEqual({ outcome: "failed", reason: "/auth/token answered 400 (invalid_grant)" })
 
     jest.spyOn(global, "fetch").mockRejectedValueOnce(new Error("network down"))
-    expect(await revokeAppleAuthorization("c0de", SUB)).toEqual({ outcome: "failed", reason: "network down" })
+    expect(await revokeAppleAuthorization("c0de", LINKED)).toEqual({ outcome: "failed", reason: "network down" })
   })
 })

@@ -42,7 +42,7 @@ const mockDb = {
   product_events: { deleteMany: jest.fn() },
   venue_regular_optins: { deleteMany: jest.fn() },
   venue_offer_mutes: { deleteMany: jest.fn() },
-  user_oauth_accounts: { deleteMany: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
+  user_oauth_accounts: { deleteMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   account: { deleteMany: jest.fn() },
   session: { deleteMany: jest.fn() },
   // Rows that deliberately SURVIVE the deletion and are scrubbed in place —
