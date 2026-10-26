@@ -15,14 +15,18 @@ Dashboard → Account & Settings → Business website details.
 3. Create the account on production. You run this, or approve it being run:
 
    ```bash
-   # DATABASE_PUBLIC_URL from the production Postgres service (Railway → Postgres → Variables)
-   DATABASE_URL='<production DATABASE_PUBLIC_URL>' \
-     npx tsx scripts/seed-razorpay-review.ts --production            # dry run: says what it would make
-   DATABASE_URL='<production DATABASE_PUBLIC_URL>' RAZORPAY_REVIEW_PASSWORD='<the password>' \
-     npx tsx scripts/seed-razorpay-review.ts --apply --production
+   # Typed, not pasted into the command line: neither lands in shell history.
+   # DATABASE_PUBLIC_URL is on the production Postgres service (Railway → Postgres → Variables).
+   read -s DATABASE_URL; export DATABASE_URL
+   npx tsx scripts/seed-razorpay-review.ts --production            # dry run: says what it would make
+   read -s RAZORPAY_REVIEW_PASSWORD; export RAZORPAY_REVIEW_PASSWORD
+   npx tsx scripts/seed-razorpay-review.ts --apply --production
+   unset RAZORPAY_REVIEW_PASSWORD DATABASE_URL
    ```
 
-   It prints the email and the ids, never the password. Sign in once at
+   It prints the email and the ids, never the password. It refuses, writing
+   nothing, if `razorpay.review@blendn.app` already belongs to an account it did
+   not create, or one an admin has suspended or changed the role of. Sign in once at
    https://dashboard.blendn.app/login with them to check.
 4. Get a sample invoice from Razorpay (Invoices → create one in test mode under
    the legal name and GSTIN), saved as PDF.
@@ -64,7 +68,8 @@ Dashboard → Account & Settings → Business website details.
 
 > Sign in at https://dashboard.blendn.app/login with the test account. It is an
 > organizer account with its own demo organisation and one draft event; it sees
-> no real users' data. The paid plans are on the Plan page (left menu → Plan):
+> no real users' data, and it cannot publish events, add venues or invite
+> anyone. The paid plans are on the Plan page (left menu → Plan):
 > Analytics monthly or yearly, and the Event Pass. Checkout opens Razorpay
 > Checkout once live keys are issued; until then the page says payments are not
 > switched on yet. Every policy page is linked at the foot of the sign-in page.
@@ -109,12 +114,14 @@ answers are:
 4. **Take the reviewer account down** once Razorpay no longer needs it:
 
    ```bash
-   DATABASE_URL='<production DATABASE_PUBLIC_URL>' \
-     npx tsx scripts/seed-razorpay-review.ts --remove --apply --production
+   read -s DATABASE_URL; export DATABASE_URL
+   npx tsx scripts/seed-razorpay-review.ts --remove --apply --production
+   unset DATABASE_URL
    ```
 
-   The event and membership go, the account is closed, and the organisation is
-   deleted unless it has billing records (tax records: then it is suspended).
+   Every event of the demo organisation is deleted (soft: an Event Pass or
+   payment keeps pointing at it), any venue it added is retired, the
+   organisation is suspended and the account closed.
 
 ## Fix staging's test keys (found 26 October 2026)
 

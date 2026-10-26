@@ -48,7 +48,7 @@ sells anything; www.blendn.app sells nothing and has no checkout.
 | Shipping and delivery policy | `/shipping`: digital only, nothing shipped, access on payment confirmation (usually within a minute), what to do after 24 hours | None anywhere | New page |
 | Legal name matching KYC | "Matryx Social Labs Private Limited" on every policy page footer, the Terms, Contact and About; the Plan page's Payments panel already said it | The brand "Matrix Social Labs" was on www's footer only | `lib/company.ts` holds it once |
 | Working navigation | Every policy page links all seven plus Sign in. The sign-in page's footer links all seven. All answer 200 signed out (`/privacy` 307 to www). | — | `middleware.ts` matcher does not cover them: `__tests__/policy-pages-public.test.ts` |
-| Test login for gated areas | `scripts/seed-razorpay-review.ts` (`npm run seed:razorpay-review`): `razorpay.review@blendn.app`, an organizer who owns its own demo organisation, with one draft event | No such account; the staging test accounts refuse production by design | New script. The owner runs it on production. |
+| Test login for gated areas | `scripts/seed-razorpay-review.ts` (`npm run seed:razorpay-review`): `razorpay.review@blendn.app`, an organizer who owns its own demo organisation, with one draft event. The server refuses that organisation any publish, venue add or link, and invite (`lib/review-demo-org.ts`); the mobile app refuses an organizer's sign-in. The script never takes over an account it did not make. | No such account; the staging test accounts refuse production by design | New script. The owner runs it on production. |
 | Sample invoice | Razorpay issues invoices (the Plan page says so) | None on file | **Owner action:** upload a sample invoice from Razorpay Invoices, or a PDF made there, under the legal name and GSTIN |
 | Checkout reachable by the reviewer | Plan page → "Start Analytics" opens Razorpay Checkout when keys are set | **Production has no Razorpay keys**, so the Plan page there says "Payments aren't switched on here yet". **Staging's test keys are refused by Razorpay** (HTTP 401 on 26 October 2026, from a key id of the right shape): checkout fails on staging too. | **Owner action:** regenerate the test-mode keys and set them on staging. See the submission doc for which site to give the reviewer. |
 | International (CAD) | Nothing charges CAD: INR is hardcoded in `lib/razorpay.ts` and the Plan page. The CAD price pack the owner approved on 19 October 2026 is not built. | — | Not fixed here. `/pricing` shows INR only, because showing a CAD price the checkout cannot charge would be wrong. Apply for international once CAD is built (`docs/RAZORPAY-SUBMISSION.md` § International). |
@@ -66,7 +66,8 @@ the legal name there: a change in the landing repo.
 ### Not changed, worth knowing
 
 - The Terms of Use are a generated template (Termly). §18 sends disputes to
-  the "European Arbitration Chamber (Belgium)" with a Bengaluru seat. The
-  registered address there is spelled "kithore Rani chennamma road", where the
-  privacy policy and this branch say "Kittur Rani Chennamma Road". Both need
-  OWNER/LAWYER REVIEW; the PR lists them.
+  the "European Arbitration Chamber (Belgium)" with a Bengaluru seat. Left as
+  it is: OWNER/LAWYER REVIEW. The usual Indian alternative is arbitration
+  under the Arbitration and Conciliation Act 1996, seat and venue Bengaluru,
+  one arbitrator. The registered address's "kithore Rani chennamma road" was a
+  typo, now "Kittur Rani Chennamma Road" in the Terms and the March privacy draft.
