@@ -16,6 +16,7 @@ import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mobileEventPatchSchema } from "@/lib/validations/event"
 import { canPublish } from "@/lib/geofence-input"
+import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
@@ -491,6 +492,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       if (!gate.ok) {
         return errorResponse(gate.reason ?? "This event cannot be published yet", 400)
       }
+      const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, { publish: true })
+      if (reviewRefusal) return errorResponse(reviewRefusal, 403)
     }
 
     const isCancelling = isCancellingEvent(status, event.status)

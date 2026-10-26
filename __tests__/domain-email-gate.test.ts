@@ -2,7 +2,8 @@ const mockDb = {
   organisation_domains: { findFirst: jest.fn() },
   domain_email_tokens: { create: jest.fn() },
   organisation_members: { findFirst: jest.fn(), findUnique: jest.fn() },
-  audit_logs: { create: jest.fn() },
+  // findFirst: not the Razorpay review organisation (lib/review-demo-org.ts).
+  audit_logs: { create: jest.fn(), findFirst: async () => null },
 }
 const mockAuth = jest.fn()
 const mockSend = jest.fn()

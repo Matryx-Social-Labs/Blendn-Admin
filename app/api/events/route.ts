@@ -12,6 +12,7 @@ import { owningOrgFor } from "@/lib/event-ownership"
 import { canCreateEvents } from "@/lib/rbac"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
+import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { resolveVenueLink, venueFenceToCopy } from "@/lib/venue-link"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { syncOccurrences } from "@/lib/occurrences"
@@ -214,6 +215,13 @@ export async function POST(req: Request) {
         { status: 400 }
       )
     }
+
+    // Razorpay's reviewer: never a published event, never a real venue (lib/review-demo-org.ts).
+    const reviewRefusal = await reviewOrgRefusal(owningOrgId, {
+      publish: (status ?? "draft") === "published",
+      venue: Boolean(venue_id),
+    })
+    if (reviewRefusal) return NextResponse.json({ error: reviewRefusal }, { status: 403 })
 
     /*
      * The city is resolved here, once, rather than on every read.
