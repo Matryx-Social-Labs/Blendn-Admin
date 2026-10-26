@@ -287,7 +287,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
              * here for.
              */
             update: {
-              status: "active",
+              // A mute outlives the `left` the sweeper wrote (API M2).
+              status: membership?.muted_at ? "muted" : "active",
               last_allowed_at: null,
               left_at: null,
               updated_at: new Date(),

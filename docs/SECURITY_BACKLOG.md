@@ -196,7 +196,7 @@ Two things deliberately left as they are, with reasons:
 
 **WEB H1 + M5 + L1 · HIGH · dashboard sign-in limits, per account, off the URL, timing padded.** The per-IP limit matched the raw path, so `/api/auth/callback/%63redentials` (same catch-all, segment decoded by Next) was unlimited, and nothing was per account. Both limits now live in `authorize()` (`lib/auth.ts`, counters in `lib/dashboard-signin-limits.ts`), which every path reaches, and are fail-closed where Redis is configured: 5 attempts per network (the /64 for IPv6, as before) and, per email from any network, 20 wrong passwords per 15 minutes and 200 per 24 hours (case-folded, counted whether or not the account exists, reserved before the password is read and given back on a correct one, so parallel guesses cannot all slip under the cap). Past any limit the right password is refused too (`SIGNIN_RATE_LIMITED`, or `SIGNIN_ACCOUNT_LOCKED` for the per-email ones, which `/login` turns into a sentence). An unknown or password-less account is compared against a cost-12 dummy hash. Tests: `__tests__/dashboard-signin-limits.test.ts`, `__tests__/dashboard-signin-limit-runs-in-node.test.ts`.
 
-*Trade-off, stated:* anyone can spend the per-email windows against a name, so a stranger can lock an operator out of sign-in. It is bounded (it costs four networks, since each is held to 5 attempts first, and ends in 15 minutes unless the spray continues), a victim signing in gives back only their own reservation and does not reset it, and the recovery is a completed password reset (`app/api/auth/reset-password/route.ts` calls `clearSigninCounters`), which proves the mailbox. A per-(email, network) counter was left out: the 5-per-network limit always fires before it could, and a reset could not clear it without scanning keys. **Next step: MFA for `app_admin`**, which would let the per-email ceiling drop without the lockout.
+*Trade-off, stated:* anyone can spend the per-email windows against a name, so a stranger can lock an operator out of sign-in. It is bounded (it costs four networks, since each is held to 5 attempts first, and ends in 15 minutes unless the spray continues), a victim signing in gives back only their own reservation and does not reset it, and the recovery is a completed password reset (`app/api/auth/reset-password/route.ts` calls `clearSigninCounters`), which proves the mailbox. A per-(email, network) counter was left out: the 5-per-network limit always fires before it could, and a reset could not clear it without scanning keys. **Escape hatch: a known device.** A successful sign-in sets a signed (HMAC with `NEXTAUTH_SECRET`, email + issue time), httpOnly, SameSite=Lax, 90-day cookie (`lib/known-device.ts`); presenting a valid one for the typed email skips the per-email windows (the network window and the password still apply), so an operator on their usual browser is not locked out by a stranger's spray. The mobile sign-in route (`app/api/mobile/auth/signin`), which also verified staff passwords, reserves the same per-email windows and compares against the dummy hash for unknown emails. Emails over 254 characters are refused before they become limiter keys. Tests: `__tests__/mobile-signin-shares-email-limits.test.ts`, the known-device cases in `dashboard-signin-limits.test.ts`. **Next step: MFA for `app_admin`**, which would let the per-email ceiling drop without the lockout.
 
 **WEB M1 + L9 · MEDIUM · approval promoted a squatter's unconfirmed account to org owner.** Mobile signup never verifies the address, and `approveOnboardingRequest` promoted any attendee on the applicant's email, password and phones intact. Now (`lib/onboarding-actions.ts`): a confirmed account is promoted as before; an unconfirmed one is taken over only when the application proved the mailbox (`email_verified_at`) -- password replaced, address marked verified, every phone session ended (`endPhoneSessions`), a set-password link to the mailbox, as for a new host -- and approval is refused with an admin-facing sentence when it did not; a suspended or deleted account is refused. Chosen over "refuse every unconfirmed account" because most real hosts who signed up in the app first have never confirmed. Tests: `__tests__/integration/approval-set-password.itest.ts` (red 3 of 6 new cases).
 
@@ -204,7 +204,7 @@ Two things deliberately left as they are, with reasons:
 
 **API H1 · HIGH · OAuth link left the squatter's sessions alive.** `linkVerifiedOAuthIdentity` (`lib/mobile-auth.ts`) dropped an unverified account's password and nothing else. It now runs in one interactive transaction with `endPhoneSessions(tx, id, "password_reset")` (refresh tokens revoked, `mobile_sessions_revoked_at` stamped, push tokens deleted) and `phoneSessionsEnded` after the commit; the old phone is told `PASSWORD_RESET`. A verified account is untouched. Test: `__tests__/integration/oauth-link-ends-squatter-sessions.itest.ts`.
 
-**WEB M3 + L5 · MEDIUM/LOW · limiters spent on someone else's target before authorisation.** `cancelVenuePro` now keys its bucket on the caller (`venue-cancel:<user>:<venue>`) instead of the venue's own `venue:<id>` that starting a plan spends; `sendOffer` checks the sender's role before it touches `offer-send:<org>:<venue>`; `overClaimLimit` counts the event's window only for a claimant who passed their own email and address windows. Left: an anonymous claim form cannot authorise first, so two addresses each under their own limit can still spend an event's 20 an hour; that is what the cap is for. Tests: `__tests__/integration/limiters-authorize-first.itest.ts` (red 2 of 2), `__tests__/claim-limit-order.test.ts` (red: 14 counted, expected 10).
+**WEB M3 + L5 · MEDIUM/LOW · limiters spent on someone else's target before authorisation.** `cancelVenuePro` now keys its bucket on the caller (`venue-cancel:<user>:<venue>`) instead of the venue's own `venue:<id>` that starting a plan spends; `sendOffer` checks the sender's role before it touches `offer-send:<org>:<venue>`; `overClaimLimit` counts the event's window per (event, network) and only for a claimant who passed their own email and address windows. The per-network window is now no tighter than the 10-an-hour address limit, so it is a backstop, not a separate cap. Tests: `__tests__/integration/limiters-authorize-first.itest.ts` (red 2 of 2), `__tests__/claim-limit-order.test.ts` (red: 14 counted, expected 10).
 
 **WEB M2 · MEDIUM · the Users screen sent every password hash to the browser.** `getUsers` used `include` (every `User` scalar) and `updateUser` returned the updated row with its whole profile (hash, date of birth). `getUsers` now `select`s exactly `UserWithProfile`; `updateUser` reads back nothing and returns `{ success: true }`. Test: `__tests__/integration/admin-users-no-secrets-to-browser.itest.ts` (red before: 2 of 2).
 
@@ -246,11 +246,15 @@ Each has a test that failed before the fix.
 
 **Still open, on purpose:**
 
-- **M6, the cap is opt-in.** An installed client that does not send `size` still
-  gets an unbound URL. Make `size` required once the app ships sending it; until
-  then the bound is `sealUpload` at attach time. A hard bound for any client
-  needs a presigned POST with a `content-length-range` policy (new client
-  upload path, and Tigris POST-policy support unverified).
+- **M6, `size` is required, but only where it can be.** The dashboard route
+  requires it now (its upload code sends `file.size`). The mobile route requires
+  it from app **1.0.1** (`UPLOAD_SIZE_REQUIRED_FROM_VERSION`, read from
+  `X-App-Version` by the same parser as the 426 gate; client `app.json` is
+  1.0.0). Builds below that, and requests with no header, keep an unbound URL
+  until `MOBILE_MIN_APP_VERSION` is raised past them, at which point drop the
+  version test and require it for everyone; an abuser who omits the header is
+  in the old group until then. The bound at attach time is `sealUpload`. A hard
+  bound needs a presigned POST with a `content-length-range` policy.
 - **M6, orphans.** Raw uploads that are never attached are not swept, and a
   `profile/` raw object is world-readable until then. A sweep needs a list of
   attached keys to diff against, or a bucket lifecycle rule on the raw prefixes
@@ -259,6 +263,10 @@ Each has a test that failed before the fix.
   moderation column and this fix adds no migration, so there is no evidence row
   for a report to rest on. Add one if a hidden-but-stored shape is wanted.
 - **M8, the `reportDay` number is 30, not 50.** The existing policy was reused.
+  A conversation leave over it still leaves and blocks, and drops the report
+  (`reportAccepted: false`).
+- **M1, requests are also capped at 20 a day** per sender (`requestDay`).
+- **M2, the event-chat re-join** (`events/:id/chat`) now keeps a mute too.
 
 ### 2026-09-28 — a friend could read which pseudonym was you (SCRUM-371)
 

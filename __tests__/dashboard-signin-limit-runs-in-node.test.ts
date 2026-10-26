@@ -32,9 +32,9 @@ describe("where the sign-in limit does not live", () => {
 describe("where it does", () => {
   it("authorize() limits per network and per email before it reads the password", () => {
     const src = read("lib/auth.ts")
-    expect(src).toMatch(/refuseOverSigninLimits\(keys\)/)
-    expect(src.indexOf("refuseOverSigninLimits(keys)")).toBeLessThan(src.indexOf("bcrypt.compare"))
-    expect(src).toMatch(/settleSigninSuccess\(keys\)/)
+    expect(src).toMatch(/refuseOverSigninLimits\(keys, knownDevice\)/)
+    expect(src.indexOf("refuseOverSigninLimits(keys, knownDevice)")).toBeLessThan(src.indexOf("bcrypt.compare"))
+    expect(src).toMatch(/settleSigninSuccess\(keys, knownDevice\)/)
   })
 
   it("a completed password reset clears the email's sign-in counters", () => {

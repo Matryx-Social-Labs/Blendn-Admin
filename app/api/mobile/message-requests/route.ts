@@ -55,7 +55,9 @@ export async function POST(request: NextRequest) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    const limited = await rateLimit(request, userLimit("write", "message-request", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("write", "message-request", authUser.userId))) ??
+      (await rateLimit(request, userLimit("requestDay", "message-request-day", authUser.userId)))
     if (limited) return limited
 
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).

@@ -116,6 +116,21 @@ function updateRefusal(appVersionHeader: string | null, env: MobileGateEnv): Mob
   }
 }
 
+/**
+ * The first app build that sends `size` with a presigned-upload request
+ * (client 1.0.0 + one patch). From here the mobile route requires it; older
+ * builds keep an unbound URL until `MOBILE_MIN_APP_VERSION` passes them (API M6).
+ * Keep in step with the client's app.json `version` when it ships `size`.
+ */
+export const UPLOAD_SIZE_REQUIRED_FROM_VERSION = "1.0.1"
+
+/** True when the `X-App-Version` header names a build at or past the one that sends upload sizes. */
+export function sendsUploadSize(appVersionHeader: string | null | undefined): boolean {
+  const sent = parseAppVersion(appVersionHeader)
+  const from = parseAppVersion(UPLOAD_SIZE_REQUIRED_FROM_VERSION)
+  return Boolean(sent && from && compareVersions(sent, from) >= 0)
+}
+
 /** Maintenance first: while the server is down, "update the app" would be the wrong thing to say. */
 export function mobileGateRefusal(appVersionHeader: string | null, env: MobileGateEnv): MobileGateRefusal | null {
   return maintenanceRefusal(env) ?? updateRefusal(appVersionHeader, env)

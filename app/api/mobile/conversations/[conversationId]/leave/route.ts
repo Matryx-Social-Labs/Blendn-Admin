@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { overUserLimit, rateLimit, userLimit } from "@/lib/rate-limit"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import {
@@ -89,13 +89,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const parsed = leaveSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { action, report } = parsed.data
+    const { action } = parsed.data
 
-    // Leaving is never capped beyond the minute limit; filing a report with it is (API M8).
-    if (report) {
-      const reportCapped = await rateLimit(request, userLimit("reportDay", "report-conversation-day", authUser.userId))
-      if (reportCapped) return reportCapped
-    }
+    /*
+     * Over the daily report allowance (API M8), the leave and the block still
+     * happen and only the report is dropped, said in `reportAccepted: false`:
+     * a cap must never stand between somebody and a block.
+     */
+    const reportDropped = Boolean(parsed.data.report) && (await overUserLimit("reportDay", "report-conversation-day", authUser.userId))
+    const report = reportDropped ? undefined : parsed.data.report
 
     const conversation = await db.private_conversations.findUnique({
       where: { id: conversationId },
@@ -180,6 +182,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       closed: true,
       blocked: action === "block",
       reported: Boolean(report),
+      // False only when a report was sent and the daily allowance had run out.
+      reportAccepted: !reportDropped,
     })
   } catch (error) {
     logger.error("Leave conversation error", {

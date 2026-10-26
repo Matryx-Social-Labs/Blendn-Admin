@@ -1096,7 +1096,7 @@
       "date": "2026-10-25"
     },
     "claim-limit-order.test.ts": {
-      "guards": "overClaimLimit counts the event's window only for a caller who passed their own email and address windows, so a flooder over their own limit cannot burn the event's 20 an hour (audit WEB L5)",
+      "guards": "overClaimLimit counts the event's window only for a caller who passed their own email and address windows, so a flooder over their own limit cannot burn the event's 20 an hour (audit WEB L5); the window is per (target, network), so three networks cannot drain one event between them (review L3)",
       "mutation": "In lib/claim-limit.ts hit the target window together with the email and address windows again.",
       "observed": "1 failing: expected the event bucket at 10, received 14. The anonymous-claim bucket can still be burned by 2+ addresses each under their own limit; that is the cap's purpose and is left.",
       "date": "2026-10-25"
@@ -1113,9 +1113,15 @@
       "observed": "Red before the fix, 2 of 2 failing: no user.created row; the account existed after its audit write was refused.",
       "date": "2026-10-25"
     },
+    "mobile-signin-shares-email-limits.test.ts": {
+      "guards": "POST /api/mobile/auth/signin reserves the same per-email windows as the dashboard (a staff account's right password is refused 429 once the email is over its cap, mobile failures count against the dashboard's), compares against the cost-12 dummy hash for an unknown email, and refuses an email over 254 characters (review M1 + L4)",
+      "mutation": "M1: delete `await refuseOverEmailLimits(emailKeys)` in the route. M2: `user?.password ?? DUMMY_HASH` -> `?? ''`.",
+      "observed": "M1: 2 failing of 5 (the cap and the shared count). M2: the dummy-hash case fails once it asserts the stored hash is cost-12. Red before the fix: 4 of 5 failed (the 403 control passes).",
+      "date": "2026-10-25"
+    },
     "dashboard-signin-limits.test.ts": {
       "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and, per email from any network, 20 wrong passwords in 15 minutes and 200 in 24 hours (case-folded, existing or not); the right password is refused past any of them; a victim's success does not reset the email's windows; clearSigninCounters (a completed reset) does; an unknown or password-less account is compared against a cost-12 dummy hash (audit WEB H1/M5/L1)",
-      "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: settleSigninSuccess forgets the email keys instead of releasing one hit. M3b: settleSigninSuccess releases nothing. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`.",
+      "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: settleSigninSuccess forgets the email keys instead of releasing one hit. M3b: settleSigninSuccess releases nothing. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`. M6: isKnownDevice returns true when the cookie is absent, or skips the MAC compare (known-device cases).",
       "observed": "M1: 1 failing of 11 (the 200-a-day case). M2: 1 failing (the same case, at its final reset). M3 and M3b: 2 failing each (a victim's success must not reset the spray; the day case). The concurrency case (30 parallel wrong passwords, at most 20 reach bcrypt) was red against check-then-count: 30 reached it. M4 (earlier version): the /64 case failed. M5 (earlier version): both timing cases failed. Red before the fix: 6 of 7 failed.",
       "date": "2026-10-25"
     },

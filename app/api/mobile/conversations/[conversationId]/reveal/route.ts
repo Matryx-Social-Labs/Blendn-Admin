@@ -184,7 +184,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
     // Both sides have shown themselves now: a friend request held for this pair is delivered.
-    // Decided from the values the UPDATE returned, not from the read before it:
+    // Decided from the re-read after our UPDATE, not from the read before it:
     // two reveals at once each read "the other has not", and only the second
     // UPDATE sees both. (The release itself announces only what it clears.)
     if (after.user1_revealed && after.user2_revealed) {

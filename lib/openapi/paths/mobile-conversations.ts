@@ -116,7 +116,7 @@ registry.registerPath({
   tags: ["Mobile Conversations"],
   summary: "Leave the conversation, optionally blocking and reporting, in one call",
   description:
-    "Closes the conversation for BOTH participants, permanently. `action: \"block\"` also hides that person from your event rooms and cancels pending requests both ways.\n\nThe optional `report` is filed in the SAME transaction. That is the point of this route existing alongside DELETE: composing close and report on the client can half-fail into a closed thread whose evidence is out of reach, which is the state the design exists to prevent.\n\nOmit `report.messageId` to report the person rather than a specific message. A leave that carries a `report` is 429 once you have filed 30 reports in a day (leaving without one is not capped).",
+    "Closes the conversation for BOTH participants, permanently. `action: \"block\"` also hides that person from your event rooms and cancels pending requests both ways.\n\nThe optional `report` is filed in the SAME transaction. That is the point of this route existing alongside DELETE: composing close and report on the client can half-fail into a closed thread whose evidence is out of reach, which is the state the design exists to prevent.\n\nOmit `report.messageId` to report the person rather than a specific message. Over 30 reports in a day, the leave and block still happen and the report is dropped (`reportAccepted: false`); never a 429.",
   security: bearerAuth,
   request: {
     params: z.object({ conversationId: z.string().uuid() }),
@@ -147,6 +147,7 @@ registry.registerPath({
               closed: z.literal(true),
               blocked: z.boolean(),
               reported: z.boolean(),
+              reportAccepted: z.boolean().describe("False only when a report was sent and the 30-a-day report allowance had run out: the leave and block still happened, the report was dropped."),
             })
           ),
         },

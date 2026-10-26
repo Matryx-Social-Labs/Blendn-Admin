@@ -1694,6 +1694,10 @@ accountability. Anonymous plus unsolicited is the harassment shape. It is also
 what makes the recipient's decision possible — "Someone wants to connect" is a
 coin flip.
 
+**Limits.** 20 requests per sender per day (`429`), on top of the per-minute
+limit. The `message` goes through the deterministic text check (keyword and
+contact details); a hit is `400`, nothing is stored or sent.
+
 Guards, in order: rate limit, self-send, recipient exists, blocks either way,
 closed pair (an unmatch — same 404 as a block, so the refusal never says "this
 person ended it"), `haveSharedAnEvent`, existing request, existing
@@ -2281,8 +2285,9 @@ prevent. Omit `report.messageId` to report the person rather than a message.
 **Report limits (all report routes).** `reason` is at most 200 characters and
 `description` at most 2000 (`400` beyond). Every report route (message, user,
 event, room, and a conversation leave that carries a `report`) shares one
-allowance of 30 reports per user per day: `429` after that. A leave without a
-`report` is never capped by it.
+allowance of 30 reports per user per day: `429` after that (except the leave, below). A conversation
+leave over the allowance is never refused: the leave and block still happen, the
+report is dropped, and the response says `reportAccepted: false`.
 
 Reporting a message requires that you could see it — group membership, or being
 a participant in the DM. It deliberately does **not** require the conversation
@@ -3410,8 +3415,13 @@ Note: `events` folder requires organiser/admin role.
 
 `size` is the file's byte length. When sent it is signed into the URL as
 `content-length`, so storage refuses a PUT of any other size; a `size` above the
-folder's ceiling (`maxSize` in the response) is `400`. Always send it: a URL
-issued without one accepts any length until the attach step measures it.
+folder's ceiling (`maxSize` in the response) is `400`.
+
+**`size` is required** from app version **1.0.1** (`UPLOAD_SIZE_REQUIRED_FROM_VERSION`
+in `lib/mobile-gate.ts`, read from `X-App-Version`): omitting it is `400`. Older
+builds, and requests with no `X-App-Version`, still get an unbound URL until
+`MOBILE_MIN_APP_VERSION` is raised past them. The dashboard route
+(`POST /api/uploads/presigned-url`) always requires it.
 
 PUT the file to `uploadUrl` with **exactly** the `Content-Type` you asked for.
 The type is signed into the URL, so any other type, or none, is refused by

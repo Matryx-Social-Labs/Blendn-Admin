@@ -8,8 +8,7 @@ import { overUserLimit } from "@/lib/rate-limit"
 import { cleanup, closeDb, db, makeUser } from "./helpers"
 
 /*
- * API M8 (security audit): four report endpoints (and the leave route's
- * report) had no daily cap and took free text of any size. Each now shares the
+ * API M8 (security audit): four report endpoints  had no daily cap and took free text of any size. Each now shares the
  * `reportDay` bucket the crew/board reports already use, and bounds its text.
  */
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -17,7 +16,6 @@ const messageReport = require("@/app/api/mobile/messages/[messageId]/report/rout
 const userReport = require("@/app/api/mobile/users/[userId]/report/route") as typeof import("@/app/api/mobile/users/[userId]/report/route")
 const eventReport = require("@/app/api/mobile/events/[eventId]/report/route") as typeof import("@/app/api/mobile/events/[eventId]/report/route")
 const roomReport = require("@/app/api/mobile/chat/groups/[chatGroupId]/report/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/report/route")
-const convLeave = require("@/app/api/mobile/conversations/[conversationId]/leave/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/leave/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const ID = "11111111-1111-4111-8111-111111111111"
@@ -49,7 +47,6 @@ const routes: Array<[string, Handler, Record<string, string>, string, unknown]> 
   ["user", userReport.POST as Handler, { userId: ID }, "report-user-day", { reason: "spam" }],
   ["event", eventReport.POST as Handler, { eventId: ID }, "report-event-day", { reason: "spam" }],
   ["room", roomReport.POST as Handler, { chatGroupId: ID }, "report-room-day", { reason: "spam" }],
-  ["conversation leave", convLeave.POST as Handler, { conversationId: ID }, "report-conversation-day", { report: { reason: "spam" } }],
 ]
 
 describe.each(routes)("%s report", (_name, handler, params, scope, body) => {

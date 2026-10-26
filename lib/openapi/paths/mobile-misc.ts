@@ -1151,7 +1151,7 @@ registry.registerPath({
   tags: ["Mobile Safety"],
   summary: "Report a message",
   description:
-    "Reports a group or private message. `messageType` is required because the two live in different tables and the id alone is ambiguous. `reason` is at most 200 characters, `description` 2000. 429 after 30 reports of any of these kinds in a day (message, user, event, room, or a conversation leave that carries a report).",
+    "Reports a group or private message. `messageType` is required because the two live in different tables and the id alone is ambiguous. `reason` is at most 200 characters, `description` 2000. 429 after 30 reports of any of these kinds in a day (message, user, event, room).",
   security: bearerAuth,
   request: {
     params: z.object({ messageId: z.string().uuid() }),
