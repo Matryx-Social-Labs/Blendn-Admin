@@ -21,6 +21,9 @@ export async function GET(request: NextRequest) {
       where: {
         user_id: authUser.userId,
         status: "checked_in",
+        // A deleted event is not somewhere you are: its detail answers 404, and the app waited on it.
+        // any-kind: a Go Live (venue day) is an active check-in too; only deletion is ruled out here.
+        event: { deleted_at: null },
         // A Go Live whose window ended is not active, swept or not (`inRoomWhere`).
         ...inRoomWhere(authUser.userId),
       },

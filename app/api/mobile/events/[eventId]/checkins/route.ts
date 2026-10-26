@@ -9,7 +9,7 @@ import { eventNotFoundResponse } from "@/lib/event-access"
 import { inRoomWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockCounterparties } from "@/lib/conversations"
-import { normalizeLocationToCity } from "@/lib/location"
+import { geocodeBudget, normalizeLocationToCity } from "@/lib/location"
 import { idForViewer } from "@/lib/room-handle"
 import { visibleInRoom } from "@/lib/identity"
 import { notStrangersTo } from "@/lib/room-people"
@@ -96,13 +96,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      */
     // At a venue day, only while live: you see who is here while you can be seen (`inRoomWhere`).
     // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
-    const banned = await roomBanRefusal(eventId, authUser.userId)
+    // And friends, whatever their switch: two friends never meet as strangers
+    // (lib/room-people.ts). A friend who allows it is in "Friends here" instead.
+    // Four independent reads, one wave; the refusals below still go in their old order.
+    const [banned, attended, blocked, strangersTo] = await Promise.all([
+      roomBanRefusal(eventId, authUser.userId),
+      db.event_check_ins.findFirst({
+        where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
+        select: { id: true },
+      }),
+      blockCounterparties(authUser.userId),
+      notStrangersTo(authUser.userId),
+    ])
     if (banned) return banned
-
-    const attended = await db.event_check_ins.findFirst({
-      where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
-      select: { id: true },
-    })
 
     if (!attended) {
       return forbiddenResponse("Check in to see who else is here")
@@ -136,9 +142,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * would still list somebody you blocked. Both directions, and applied to the
      * count as well, so a filtered page never sits under an unfiltered total.
      */
-    // And friends, whatever their switch: two friends never meet as strangers
-    // (lib/room-people.ts). A friend who allows it is in "Friends here" instead.
-    const hidden = [...(await blockCounterparties(authUser.userId)), ...(await notStrangersTo(authUser.userId))]
+    const hidden = [...blocked, ...strangersTo]
 
     /*
      * "Show online status" off: in the room, counted, not listed (SCRUM-141).
@@ -162,32 +166,31 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     }
 
-    const totalCount = await db.event_check_ins.count({
-      where: visibleCheckIns,
-    })
-
-    const checkIns = await db.event_check_ins.findMany({
-      where: visibleCheckIns,
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            profile: {
-              select: {
-                age: true,
-                date_of_birth: true,
-                location: true,
-                photos: true,
+    const [totalCount, checkIns] = await Promise.all([
+      db.event_check_ins.count({ where: visibleCheckIns }),
+      db.event_check_ins.findMany({
+        where: visibleCheckIns,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              profile: {
+                select: {
+                  age: true,
+                  date_of_birth: true,
+                  location: true,
+                  photos: true,
+                },
               },
             },
           },
         },
-      },
-      orderBy: { check_in_time: "desc" },
-      skip: paginationSkip(page, limit),
-      take: limit,
-    })
+        orderBy: { check_in_time: "desc" },
+        skip: paginationSkip(page, limit),
+        take: limit,
+      }),
+    ])
 
     /*
      * Who the viewer may recognise here: revealed in this room ("Show who I
@@ -200,10 +203,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * on the profile and broken on the list. One function now answers both.
      */
     const [pseudonyms, visible] = await Promise.all([
-      pseudonymsForEvent(eventId),
+      pseudonymsForEvent(eventId, checkIns.map((c) => c.user.id)),
       visibleInRoom(authUser.userId, eventId, checkIns.map((c) => c.user.id)),
     ])
 
+    // One budget for the page: an uncached coordinate is a Nominatim call (1 req/s courtesy).
+    const geocoding = geocodeBudget()
     return successResponse({
       attendees: await Promise.all(
         checkIns.map(async (c) => {
@@ -219,7 +224,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             // Derived — see `ageFrom` in lib/age.ts. The room shows who is here
             // now, so the age it shows should be the one they are now.
             age: ageFrom(c.user.profile),
-            location: await normalizeLocationToCity(c.user.profile?.location),
+            location: await normalizeLocationToCity(c.user.profile?.location, geocoding),
             checkInTime: c.check_in_time,
           }
         })

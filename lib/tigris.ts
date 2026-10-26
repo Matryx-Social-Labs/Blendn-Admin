@@ -20,9 +20,13 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 // Tigris Configuration (S3-compatible on Railway)
-const TIGRIS_ENDPOINT = process.env.TIGRIS_ENDPOINT || ""
-const TIGRIS_ACCESS_KEY = process.env.TIGRIS_ACCESS_KEY || ""
-const TIGRIS_SECRET_KEY = process.env.TIGRIS_SECRET_KEY || ""
+// The credentials are read when the client is made, not at import: a module
+// that imports this one early must not freeze an unset environment into it.
+const credentials = () => ({
+  endpoint: process.env.TIGRIS_ENDPOINT || "",
+  accessKeyId: process.env.TIGRIS_ACCESS_KEY || "",
+  secretAccessKey: process.env.TIGRIS_SECRET_KEY || "",
+})
 const TIGRIS_BUCKET = process.env.TIGRIS_BUCKET || "blendn-media"
 /**
  * Where private documents live. Tigris makes access a property of the
@@ -38,7 +42,8 @@ const TIGRIS_REGION = process.env.TIGRIS_REGION || "auto"
 
 // Validate configuration
 function validateConfig(): boolean {
-  if (!TIGRIS_ENDPOINT || !TIGRIS_ACCESS_KEY || !TIGRIS_SECRET_KEY) {
+  const { endpoint, accessKeyId, secretAccessKey } = credentials()
+  if (!endpoint || !accessKeyId || !secretAccessKey) {
     logger.warn("Tigris configuration incomplete. Storage features will be disabled.")
     return false
   }
@@ -54,12 +59,13 @@ function getS3Client(): S3Client {
       throw new Error("Tigris not configured")
     }
 
+    const { endpoint, accessKeyId, secretAccessKey } = credentials()
     s3Client = new S3Client({
-      endpoint: TIGRIS_ENDPOINT,
+      endpoint,
       region: TIGRIS_REGION,
       credentials: {
-        accessKeyId: TIGRIS_ACCESS_KEY,
-        secretAccessKey: TIGRIS_SECRET_KEY,
+        accessKeyId,
+        secretAccessKey,
       },
       forcePathStyle: true, // Required for S3-compatible services
     })
@@ -158,6 +164,12 @@ export async function getPresignedUploadUrl(
      * then sent unattended for hours.
      */
     checksum?: boolean
+    /**
+     * The byte length the client declares. Signed into the URL as
+     * `content-length`, so the storage refuses a PUT of any other size
+     * (API M6). Callers refuse a size above `getMaxFileSize` first.
+     */
+    size?: number
   } = {}
 ): Promise<{ uploadUrl: string; publicUrl: string; key: string }> {
   const client = getS3Client()
@@ -167,6 +179,7 @@ export async function getPresignedUploadUrl(
     Bucket: bucketFor(folder),
     Key: key,
     ContentType: contentType,
+    ...(opts.size !== undefined ? { ContentLength: opts.size } : {}),
     ...(opts.checksum ? { ChecksumAlgorithm: "SHA256" as const } : {}),
     // Set cache control for browser caching. A private document is never
     // cached by an intermediary.
@@ -186,12 +199,14 @@ export async function getPresignedUploadUrl(
    * type differs from a signed one (403, measured on staging). Every caller
    * already sends the type it asked for, so nothing honest changes.
    *
-   * The size is still unbound here: signing `content-length` needs the client
-   * to declare it first. What is attached is measured by `sealUpload`.
+   * The size is bound only when the client declares it (`opts.size`): the
+   * signature then carries `content-length`. A client that does not declare
+   * one (builds before this) still gets an unbound URL; what is attached is
+   * measured by `sealUpload` either way.
    */
   const uploadUrl = await getSignedUrl(client, command, {
     expiresIn: 900,
-    signableHeaders: new Set(["content-type"]),
+    signableHeaders: new Set(opts.size !== undefined ? ["content-type", "content-length"] : ["content-type"]),
   })
 
   const publicUrl = getPublicUrl(key)

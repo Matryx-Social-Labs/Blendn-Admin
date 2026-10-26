@@ -19,11 +19,14 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
+import { sendsUploadSize } from "@/lib/mobile-gate"
 
 const presignedUrlSchema = z.object({
   filename: z.string().min(1, "Filename is required").max(255),
   contentType: z.string().min(1, "Content type is required"),
   folder: z.enum(["profile", "chat", "events"]).default("profile"),
+  /** Byte length of the file about to be PUT. Signed into the URL when sent (API M6). */
+  size: z.number().int().min(1).optional(),
 })
 
 export async function POST(request: NextRequest) {
@@ -49,7 +52,12 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse(validation.error)
     }
 
-    const { filename, contentType, folder } = validation.data
+    const { filename, contentType, folder, size } = validation.data
+
+    // From the build that sends it, `size` is required: omitting it was the way to an unbound URL (API M6).
+    if (size === undefined && sendsUploadSize(request.headers.get("x-app-version"))) {
+      return errorResponse("size is required", 400)
+    }
 
     // Restrict event uploads to organizers and admins
     if (folder === "events") {
@@ -70,12 +78,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (size !== undefined && size > getMaxFileSize(folder as UploadFolder)) {
+      return errorResponse(`File is larger than the ${getMaxFileSize(folder as UploadFolder)} byte limit for ${folder} uploads`, 400)
+    }
+
     // Get the presigned URL
     const { uploadUrl, publicUrl, key } = await getPresignedUploadUrl(
       filename,
       contentType,
       folder as UploadFolder,
-      user.userId
+      user.userId,
+      { size }
     )
 
     return successResponse({

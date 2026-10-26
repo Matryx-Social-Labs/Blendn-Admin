@@ -26,7 +26,7 @@ jest.mock("@/lib/db", () => ({
     friendships: { findMany: async () => [] },
     ended_friendships: { findMany: async () => [] },
     // The leaver's switch (show_online) and blocks decide whether their departure names them.
-    profiles: { findUnique: async () => ({ show_online: true }) },
+    profiles: { findUnique: async () => ({ show_online: true }), findMany: async () => [] },
     blocked_users: { findMany: async () => [] },
   },
 }))

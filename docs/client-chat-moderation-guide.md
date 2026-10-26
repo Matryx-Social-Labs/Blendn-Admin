@@ -31,6 +31,7 @@ When a message send fails (`POST /api/mobile/chat/groups/{chatGroupId}/messages`
 | `CHAT_LOCKED` | 403 | Organizer locked the chat | Show a banner: "Chat has been locked by the organizer." Disable input. |
 | `NOT_CHECKED_IN` | 403 | User checked out or never checked in | Show: "Check in to the event to send messages." |
 | `SPAM_BLOCKED` | 429 | Sending too fast or duplicate messages | Show a brief toast: "Slow down — you're sending messages too quickly." |
+| `MODERATION_UNAVAILABLE` | 503 | A busy event room (more than 200 inside) while the moderation service is down. Nothing was sent or stored; the body carries `retryAfter` (5) and `Retry-After`. Smaller rooms never see it. | Mark the bubble failed with retry and show the server's `error` text ("This room is busy and messages can’t be checked right now. Try again in a few seconds."). Resend with the same `clientId` after `retryAfter` seconds. |
 | `FORBIDDEN` | 403 | Generic (not a member, etc.) | Show: "You don't have access to this chat." |
 
 ### Implementation in `apiClient.ts` → `sendChatMessage()`

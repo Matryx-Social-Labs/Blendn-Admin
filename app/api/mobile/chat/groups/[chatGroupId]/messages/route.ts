@@ -12,6 +12,7 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
 import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
+import { discardAndRefuse, refuseBigRoomWhileDown, verdictForBigRoom } from "@/lib/moderation/degraded-room"
 import {
   successResponse,
   errorResponse,
@@ -26,7 +27,8 @@ import {
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
 import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
-import { ownerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { withOwnerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
+import { replyCounts } from "@/lib/reply-counts"
 import { roomMessageWords } from "@/lib/validations/chat"
 import { readJson, isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
@@ -62,16 +64,20 @@ export async function GET(
     if (before && !isUuid(before)) return errorResponse("Invalid cursor", 400)
 
     // Check if chat group exists and user is a member
-    const chatGroup = await db.chat_groups.findUnique({
-      where: { id: chatGroupId },
-      include: {
-        members: {
-          where: { user_id: user.userId },
+    // The owner's door is read for this room's kind alone (`withOwnerDoor`): an event's room has none.
+    const chatGroup = await withOwnerDoor(
+      chatGroupId,
+      user.userId,
+      await db.chat_groups.findUnique({
+        where: { id: chatGroupId },
+        include: {
+          members: {
+            where: { user_id: user.userId },
+          },
+          event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
         },
-        event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
-        ...ownerDoor(user.userId),
-      },
-    })
+      })
+    )
 
     if (!chatGroup) {
       return notFoundResponse("Chat group not found")
@@ -126,8 +132,9 @@ export async function GET(
 
     // If cursor provided, get messages before that message
     if (before) {
-      const cursorMessage = await db.chat_messages.findUnique({
-        where: { id: before },
+      // Of this room only: another room's message id must not move this page (API L10).
+      const cursorMessage = await db.chat_messages.findFirst({
+        where: { id: before, chat_group_id: chatGroupId },
         select: { created_at: true },
       })
 
@@ -172,11 +179,6 @@ export async function GET(
         },
         // A poll message's poll, for `pollId`. One join on the page, not a lookup each.
         poll: { select: { id: true } },
-        _count: {
-          select: {
-            replies: true,
-          },
-        },
       },
       orderBy: { created_at: "desc" },
       take: limit + 1, // Fetch one extra to check if there are more
@@ -192,12 +194,13 @@ export async function GET(
      * a crew's or a Blend's room is read only through this route, and its row
      * in `GET /chat/groups` counted everything as unread for ever without it.
      */
-    if (!before && membership && messagesToReturn.length > 0) {
-      await db.chat_group_members.update({
-        where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
-        data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
-      })
-    }
+    const markRead =
+      !before && membership && messagesToReturn.length > 0
+        ? db.chat_group_members.update({
+            where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: user.userId } },
+            data: { last_read_message_id: messagesToReturn[0].id, updated_at: new Date() },
+          })
+        : null
 
     // Reverse to get chronological order (oldest first within the batch)
     messagesToReturn.reverse()
@@ -221,8 +224,19 @@ export async function GET(
       pseudonymFor.add(m.user.id)
       if (m.parent_message) pseudonymFor.add(m.parent_message.user.id)
     }
-    // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
-    const anonMap = await namesInRoom(chatGroup, [...pseudonymFor])
+    /*
+     * The reply counts, for this page's messages. `_count.replies` on the page's
+     * query made Prisma join a COUNT(*) GROUP BY over every message on the
+     * platform (a HashAggregate over a Seq Scan of chat_messages). The same
+     * numbers, from the `parent_id` index, beside the read marker and the names,
+     * which wait on nothing here.
+     */
+    const [, anonMap, repliesByParent] = await Promise.all([
+      markRead,
+      // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
+      namesInRoom(chatGroup, [...pseudonymFor]),
+      replyCounts(messagesToReturn.map((m) => m.id)),
+    ])
 
     /*
      * Every other person's id as their handle in this room, yours as yours
@@ -240,6 +254,7 @@ export async function GET(
           ...m,
           // The poll a `poll` message carries; absent on every other type.
           ...(m.type === "poll" ? { pollId: isHidden ? null : (poll?.id ?? null) } : {}),
+          _count: { replies: repliesByParent.get(m.id) ?? 0 },
           user_id: idFor(m.user_id),
           deleted_by: m.deleted_by && idFor(m.deleted_by),
           /*
@@ -337,22 +352,26 @@ export async function POST(
     }
 
     // Check if chat group exists and user is a member
-    const chatGroup = await db.chat_groups.findUnique({
-      where: { id: chatGroupId },
-      include: {
-        members: {
-          where: { user_id: user.userId },
+    // The owner's door, for this room's kind alone (`withOwnerDoor`).
+    const chatGroup = await withOwnerDoor(
+      chatGroupId,
+      user.userId,
+      await db.chat_groups.findUnique({
+        where: { id: chatGroupId },
+        include: {
+          members: {
+            where: { user_id: user.userId },
+          },
+          // end_time decides the write window; without it this path had no idea
+          // how long ago the event finished.
+          // `start_time` joins it now that the room also has a floor. Selecting
+          // only `end_time` would leave this path silently un-floored --
+          // `chatWindowState` treats a missing start as "no lower bound", which
+          // is the right default for old callers and the wrong one here.
+          event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
         },
-        // end_time decides the write window; without it this path had no idea
-        // how long ago the event finished.
-        // `start_time` joins it now that the room also has a floor. Selecting
-        // only `end_time` would leave this path silently un-floored --
-        // `chatWindowState` treats a missing start as "no lower bound", which
-        // is the right default for old callers and the wrong one here.
-        event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
-        ...ownerDoor(user.userId),
-      },
-    })
+      })
+    )
 
     if (!chatGroup) {
       return notFoundResponse("Chat group not found")
@@ -423,6 +442,7 @@ export async function POST(
     }
 
     // If replying, verify parent message exists in this group
+    let parentAuthorId: string | null = null
     if (parentId) {
       const parentMessage = await db.chat_messages.findFirst({
         where: {
@@ -435,6 +455,7 @@ export async function POST(
       if (!parentMessage) {
         return errorResponse("Parent message not found", 400)
       }
+      parentAuthorId = parentMessage.user_id
     }
 
     // Spam check (sync — block before saving)
@@ -486,6 +507,30 @@ export async function POST(
         createdAt: message.created_at.toISOString(),
       })
     }
+
+    /*
+     * Everything that does not wait on the write starts now, beside it: the
+     * OpenAI check (~95% of a send's server time, a ~300 ms floor Singapore to
+     * the US — keep-alive was measured and does not help), who this sender is
+     * kept apart from, and the names the response and the emit use. The check
+     * is still raced and still finishes, or times out at 1 s, before anything
+     * is emitted; it just no longer starts after the insert. `pendingText`
+     * never rejects; the other two are marked handled here because a hide below
+     * returns without reading them, and are awaited where they are used.
+     */
+    /*
+     * OpenAI is known to be down and this is a big room: refuse before writing
+     * anything (moderation-degraded policy; `lib/moderation/degraded-room.ts`).
+     */
+    const roomEventId = chatGroup.kind === "event" ? chatGroup.event_id : null
+    const refusedWhileDown = await refuseBigRoomWhileDown(roomEventId)
+    if (refusedWhileDown) return refusedWhileDown
+
+    const pendingText = checkTextContent(content)
+    const blocked = keptApartIn(user.userId, chatGroup.kind)
+    const namesPending = namesInRoom(chatGroup, parentAuthorId ? [user.userId, parentAuthorId] : [user.userId])
+    blocked.catch(() => undefined)
+    namesPending.catch(() => undefined)
 
     /*
      * Contact details are detected by `moderateMessage`, not here.
@@ -583,12 +628,29 @@ export async function POST(
        * Four facts in one value, and the code below then wrote
        * `moderation_status: "clean"` for all of them.
        */
-      const openaiCheck = await Promise.race([
-        checkTextContent(content),
+      const raced = await Promise.race([
+        pendingText,
         new Promise<ModerationCheck>((resolve) => {
           timeoutHandle = setTimeout(() => resolve(notChecked("timeout")), 1000)
         }),
       ]).finally(() => clearTimeout(timeoutHandle))
+      /*
+       * No verdict in a big room: wait for the call in flight, and if it still
+       * has none, take the row back and refuse. Nothing has been emitted.
+       */
+      const outcome = await verdictForBigRoom(roomEventId, message.id, raced, pendingText)
+      if (outcome.kind === "refuse") return discardAndRefuse(message.id)
+      if (outcome.kind === "removed") {
+        // Deleted during the wait by somebody else: never emitted, answered as removed.
+        return successResponse({
+          id: message.id,
+          type: message.type,
+          content: null,
+          moderation_hidden: true,
+          createdAt: message.created_at.toISOString(),
+        })
+      }
+      const openaiCheck = outcome.check
       examinedInline = openaiCheck.checked
       const openaiResult = openaiCheck.checked ? openaiCheck.result : null
       if (openaiResult && openaiResult.action === "hide") {
@@ -619,11 +681,12 @@ export async function POST(
        * five characters.
        */
       if (!examinedInline) {
-        void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+        // The check already in flight is the pipeline's text check: one call per message.
+        void moderateMessage(message.id, content, type, user.userId, chatGroupId, undefined, pendingText)
       }
     } catch {
       // OpenAI failed — fall back to async moderation
-      void moderateMessage(message.id, content, type, user.userId, chatGroupId)
+      void moderateMessage(message.id, content, type, user.userId, chatGroupId, undefined, pendingText)
     }
 
     /*
@@ -657,19 +720,23 @@ export async function POST(
         )
     }
 
-    // Update chat group's last_message_at
-    await db.chat_groups.update({
-      where: { id: chatGroupId },
-      data: { last_message_at: new Date() },
-    })
-
     /*
+     * Update chat group's last_message_at — here, after every hide above has
+     * returned: a hidden message must not bump the room. Beside it, the names
+     * started with the write.
+     *
      * The sender and the quoted author by the names this room gives them — a
      * pseudonym, or a first name in a crew's room (`namesInRoom`) — for the
      * socket emit, the push and the response alike.
      */
     const quoted = message.parent_message
-    const names = await namesInRoom(chatGroup, quoted ? [user.userId, quoted.user.id] : [user.userId])
+    const [, names] = await Promise.all([
+      db.chat_groups.update({
+        where: { id: chatGroupId },
+        data: { last_message_at: new Date() },
+      }),
+      namesPending,
+    ])
     const senderAnonName = names.get(user.userId) ?? "Attendee"
 
     /*
@@ -680,11 +747,14 @@ export async function POST(
      * anyone who already had the room open. Two write paths into one table, and
      * only one of them delivered.
      *
-     * Awaited: it never throws, and a reply's push is looked up before the
-     * sender is answered. It does NOT put the room's copy ahead of the 201 —
-     * the emit inside is fire-and-forget (`void toChatRoom`), and across two
-     * connections, or the Redis adapter, arrival order is not ours to promise.
-     * The app takes the echo on either side of its response (SCRUM-440).
+     * Awaited: it never throws, and the emit has gone out when it returns. A
+     * reply's push is NOT waited for: it runs on after this (`pushed`), as
+     * nothing about the 201 depends on it. Awaiting it held the sender ~230-260
+     * ms for an Expo round trip. It does not put the room's copy ahead of the
+     * 201 either way — the emit inside is fire-and-forget (`void toChatRoom`),
+     * and across two connections, or the Redis adapter, arrival order is not
+     * ours to promise. The app takes the echo on either side of its response
+     * (SCRUM-440).
      */
     await deliverToRoom({
       chatGroupId,
@@ -694,6 +764,8 @@ export async function POST(
       senderAnonName,
       message,
       preview: previewFor(type, content),
+      blocked,
+      parentAuthorId: message.parent_message?.user.id ?? (message.parent_id ? undefined : null),
     })
 
     /*

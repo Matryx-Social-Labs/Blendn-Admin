@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
     let revokedAll = false
     if (body.refreshToken) {
-      await revokeRefreshToken(body.refreshToken)
+      await revokeRefreshToken(body.refreshToken, undefined, authUser.userId)
     } else {
       // The same end every other "all phones" caller gives (lib/session-end.ts):
       // the other phones are told why, their old access tokens stop, their

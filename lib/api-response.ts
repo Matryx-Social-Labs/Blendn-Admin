@@ -131,6 +131,8 @@ export const ErrorCode = {
   CANNOT_ADD_SELF: "CANNOT_ADD_SELF",
   /** A page cursor that is not a card from this list (another room's, forged, or an id): start from the top. */
   INVALID_CURSOR: "INVALID_CURSOR",
+  /** 503: a big room's message could not be checked (OpenAI is down). Carries `retryAfter`; nothing was written. */
+  MODERATION_UNAVAILABLE: "MODERATION_UNAVAILABLE",
 } as const
 
 /**
@@ -207,6 +209,18 @@ export function spamBlockedResponse(message: string, retryAfter?: number): NextR
       ...(retryAfter !== undefined && { retryAfter }),
     },
     { status: 429, ...(retryAfter !== undefined && { headers: { "Retry-After": String(retryAfter) } }) }
+  )
+}
+
+/**
+ * A big room's send refused because the moderation vendor is down and the line
+ * cannot be checked (`lib/moderation/degraded-room.ts`). `retryAfter` seconds in
+ * the body and in `Retry-After`, as the other waits carry it.
+ */
+export function moderationUnavailableResponse(message: string, retryAfter: number): NextResponse<ApiResponse> {
+  return NextResponse.json(
+    { success: false, error: message, errorCode: ErrorCode.MODERATION_UNAVAILABLE, retryAfter },
+    { status: 503, headers: { "Retry-After": String(retryAfter) } }
   )
 }
 

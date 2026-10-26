@@ -23,6 +23,7 @@ import {
   forbiddenResponse,
 } from "@/lib/api-response"
 import { readJson } from "@/lib/api-input"
+import { preSaveCheck } from "@/lib/moderation"
 import { boundedInt } from "@/lib/pagination"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
@@ -55,7 +56,9 @@ export async function POST(request: NextRequest) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    const limited = await rateLimit(request, userLimit("write", "message-request", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("write", "message-request", authUser.userId))) ??
+      (await rateLimit(request, userLimit("requestDay", "message-request-day", authUser.userId)))
     if (limited) return limited
 
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
@@ -74,6 +77,16 @@ export async function POST(request: NextRequest) {
     // The first thing a stranger reads from them, screened before it is stored or pushed (App Store 1.2).
     const refusedText = screenUserText(authUser.userId, "message_request", { message })
     if (refusedText) return textNotAllowedResponse(refusedText.field, "That message can’t be sent.")
+    /*
+     * The one channel the recipient never opted into (API M1). Contact details
+     * too, as a room message refuses them (`preSaveCheck`; no model, as for a DM): refused here,
+     * before a row, a push or a socket event exists. It does not depend on the
+     * recipient, so it says nothing about who they are.
+     */
+    // Shaped as the screen above answers (`TEXT_NOT_ALLOWED`), so the app shows the sentence rather than a generic failure.
+    if (preSaveCheck(message)) {
+      return textNotAllowedResponse("message", "That message can’t be sent. Take out contact details and offensive language, and try again.")
+    }
     const recipientId = userIdFromRef(ref)
     // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
     const banned = await refRoomBanRefusal(ref, authUser.userId)

@@ -19,6 +19,10 @@ import { join } from "path"
 const mockDb = {
   user: { findMany: jest.fn(), count: jest.fn(), update: jest.fn(), findUnique: jest.fn() },
   profiles: { count: jest.fn() },
+  // The table's three tallies, grouped over the page's people.
+  events: { groupBy: jest.fn().mockResolvedValue([]) },
+  event_check_ins: { groupBy: jest.fn().mockResolvedValue([]) },
+  event_favorites: { groupBy: jest.fn().mockResolvedValue([]) },
   audit_logs: { create: jest.fn() },
 }
 const mockAuth = jest.fn()
@@ -36,6 +40,7 @@ const read = (rel: string) =>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  for (const model of [mockDb.events, mockDb.event_check_ins, mockDb.event_favorites]) model.groupBy.mockResolvedValue([])
   mockAuth.mockResolvedValue({ user: { id: "admin", role: "app_admin" } })
   mockDb.user.findMany.mockResolvedValue([])
   mockDb.user.count.mockResolvedValue(0)

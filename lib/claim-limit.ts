@@ -39,20 +39,16 @@ export async function overClaimLimit(email: string, target: ClaimTarget): Promis
    */
   const ip = clientNetworkFrom(await headers())
 
-  const [byEmail, byTarget, byIp] = await Promise.all([
-    hit(`rl:claim:email:${email}`, HOUR_MS),
-    hit(`rl:claim:${target.kind}:${target.id}`, HOUR_MS),
-    hit(`rl:claim:ip:${ip}`, HOUR_MS),
-  ])
-
-  if (
-    byEmail.count > CLAIM_LIMITS.perEmailPerHour ||
-    byIp.count > CLAIM_LIMITS.perIpPerHour ||
-    // Deliberately the same sentence for all three. Telling a flooder which
-    // bucket they hit tells them which one to vary.
-    byTarget.count > CLAIM_LIMITS.perTargetPerHour
-  ) {
-    return "You have filed several claims recently. Give us a little time to read them."
-  }
+  // The caller's own two windows first; the target's only once they pass. Otherwise a flooder
+  // already over their own limits still spends the event's 20 an hour, and the real claimant
+  // meets the refusal (audit 2026-10-24, WEB L5).
+  const [byEmail, byIp] = await Promise.all([hit(`rl:claim:email:${email}`, HOUR_MS), hit(`rl:claim:ip:${ip}`, HOUR_MS)])
+  // Deliberately the same sentence for all three. Telling a flooder which
+  // bucket they hit tells them which one to vary.
+  const REFUSAL = "You have filed several claims recently. Give us a little time to read them."
+  if (byEmail.count > CLAIM_LIMITS.perEmailPerHour || byIp.count > CLAIM_LIMITS.perIpPerHour) return REFUSAL
+  // Per (target, network): a shared event-wide count is one several networks drain between them.
+  const byTarget = await hit(`rl:claim:${target.kind}:${target.id}:${ip}`, HOUR_MS)
+  if (byTarget.count > CLAIM_LIMITS.perTargetPerHour) return REFUSAL
   return null
 }

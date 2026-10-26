@@ -70,6 +70,14 @@ type Entry = { ids: Set<string>; bucket: LiveCountBucket; at: number }
 const shared = globalThis as typeof globalThis & { __blendnLiveCounts?: Map<string, Entry> }
 const cache = (shared.__blendnLiveCounts ??= new Map<string, Entry>())
 
+/** The venues whose cached count is missing or a minute old: the only ones worth reading guests for. */
+export function staleVenueIds(venueIds: string[], nowMs: number): string[] {
+  return venueIds.filter((id) => {
+    const entry = cache.get(id)
+    return !entry || nowMs - entry.at >= LIVE_COUNT_TTL_MS
+  })
+}
+
 /**
  * The bucket to show `viewerId` for `venueId`: the venue's figure, at most a
  * minute old, less the viewer only if that figure counted them.

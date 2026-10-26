@@ -7,6 +7,7 @@ import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
 import { featuredOf, featuredSeed, type Featured } from "@/lib/featured"
+import { eventTallies, type EventTallies } from "@/lib/event-tallies"
 
 export const eventListSelect = {
   id: true,
@@ -112,15 +113,7 @@ export const eventListSelect = {
     orderBy: { order: "asc" },
     take: 5,
   },
-  _count: {
-    select: {
-      favorites: true,
-      ratings: true,
-      // One correlated count per row, on `event_rsvps(event_id, status, …)`;
-      // the page is at most PAGINATION.MAX_LIMIT rows.
-      rsvps: { where: { status: "going" } },
-    },
-  },
+  // No `_count`: it aggregates each whole table per call. See `eventTallies`.
 } satisfies Prisma.eventsSelect
 
 export type EventListItem = Prisma.eventsGetPayload<{
@@ -148,6 +141,12 @@ interface TransformContext {
    * rather than the page waiting on a public API.
    */
   geocodes?: GeocodeBudget
+  /**
+   * `listCounts(events)`, already awaited by a caller that started it beside its
+   * own reads (the list route's favourites and check-ins), so the counts do not
+   * wait for them or they for the counts. Omitted: `transformEvents` asks.
+   */
+  counts?: ListCounts
 }
 
 /*
@@ -160,6 +159,7 @@ async function transformEvent(
   ctx: TransformContext,
   attended: Map<string, number>,
   here: Map<string, number>,
+  tallies: EventTallies,
   featured: Featured | null
 ) {
   return {
@@ -265,12 +265,12 @@ async function transformEvent(
      * which is the attended count above, so it kept two people who had left.
      */
     hereCount: here.get(event.id) ?? 0,
-    favoriteCount: event._count.favorites,
-    ratingCount: event._count.ratings,
+    favoriteCount: tallies.favorites.get(event.id) ?? 0,
+    ratingCount: tallies.ratings.get(event.id) ?? 0,
     // The detail's `stats.rsvpCount`, the same number: RSVPs `going` only, never
     // `waitlisted`, `maybe` or `not_going`. On the card so the Pulse need not
     // fetch every event's detail to show it.
-    goingCount: event._count.rsvps,
+    goingCount: tallies.going.get(event.id) ?? 0,
     isFavorited: ctx.favoriteEventIds.has(event.id),
     userCheckin: ctx.includeCheckins
       ? ctx.userCheckinMap?.[event.id] || { status: "none" }
@@ -297,10 +297,18 @@ async function transformEvent(
   }
 }
 
-export async function transformEvents(
-  events: EventListItem[],
-  ctx: TransformContext
-) {
+export interface ListCounts {
+  attended: Map<string, number>
+  here: Map<string, number>
+  tallies: EventTallies
+}
+
+/**
+ * How many people, for a page of events: came, here now, favourited, rated,
+ * going. Four independent reads; a caller with reads of its own starts this
+ * first and awaits both together.
+ */
+export async function listCounts(events: readonly { id: string }[]): Promise<ListCounts> {
   /*
    * `checkInCount` was `_count.check_ins` filtered to `status: "checked_in"`,
    * which was wrong twice over. `_count` has no DISTINCT and the table holds
@@ -310,11 +318,23 @@ export async function transformEvents(
    * while the event was at its busiest.
    */
   const ids = events.map((e) => e.id)
-  const [attended, here] = await Promise.all([distinctAttendeeCounts(ids), hereCounts(ids)])
+  const [attended, here, tallies] = await Promise.all([
+    distinctAttendeeCounts(ids),
+    hereCounts(ids),
+    eventTallies(ids),
+  ])
+  return { attended, here, tallies }
+}
+
+export async function transformEvents(
+  events: EventListItem[],
+  ctx: TransformContext
+) {
+  const { attended, here, tallies } = ctx.counts ?? (await listCounts(events))
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
   const featured = featuredOf(events, ctx.featuredSeed ?? featuredSeed(undefined, new Date()))
   return Promise.all(
-    events.map((event) => transformEvent(event, withBudget, attended, here, featured.get(event.id) ?? null))
+    events.map((event) => transformEvent(event, withBudget, attended, here, tallies, featured.get(event.id) ?? null))
   )
 }

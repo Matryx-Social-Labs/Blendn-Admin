@@ -44,11 +44,13 @@ function hitMemory(key: string, windowMs: number, now: number): HitResult {
     }
     const fresh = { count: 1, resetAt: now + windowMs }
     memory.set(key, fresh)
-    return fresh
+    return { ...fresh }
   }
 
   existing.count += 1
-  return existing
+  // A copy: the stored entry keeps counting, and a caller still awaiting
+  // others must see the count AS OF its own hit, as Redis answers.
+  return { ...existing }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -194,6 +196,31 @@ export async function peek(key: string, opts: StoreOptions = {}): Promise<number
   }
   const existing = memory.get(key)
   return existing && Date.now() <= existing.resetAt ? existing.count : 0
+}
+
+/**
+ * Give back one hit: for a caller that reserves before it knows the outcome
+ * (`hit`, do the work, `release` on success), so that concurrent callers cannot
+ * all read "under the cap" before any of them counts. Never goes below zero and
+ * never creates a key: a Redis `DECR` on an expired key would make a counter
+ * with no TTL at -1 that never expires. Best-effort -- a failed release leaves
+ * the count one high, which is the safe side.
+ */
+export async function release(key: string): Promise<void> {
+  const redis = await getRedis()
+  if (redis) {
+    try {
+      await (redis as unknown as { eval(script: string, opts: { keys: string[] }): Promise<unknown> }).eval(
+        "local n = redis.call('GET', KEYS[1]) if n and tonumber(n) > 0 then return redis.call('DECR', KEYS[1]) end return 0",
+        { keys: [key] }
+      )
+      return
+    } catch (error) {
+      logger.warn("Rate limit Redis release failed", { error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  const existing = memory.get(key)
+  if (existing && Date.now() <= existing.resetAt && existing.count > 0) existing.count -= 1
 }
 
 export function resetMemoryStore(): void {

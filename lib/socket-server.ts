@@ -5,16 +5,16 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
-import { notStrangersTo } from "./room-people"
+import { notStrangersTo, notStrangersToMany } from "./room-people"
 import { idInConversation } from "./conversation-handle"
-import { blockCounterparties, keptApartIn } from "./conversations"
-import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom } from "./socket-auth"
+import { blockCounterpartiesMany, keptApartIn } from "./conversations"
+import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUseConversation } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
-import { buildLiveSnapshot } from "./live-snapshot"
-import { hereCountFor } from "./attendee-counts"
+import { buildLiveSnapshot, type HeldEvent } from "./live-snapshot"
+import { hereCountCoalesced } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
-import { ownerDoor, ownerAdmits, roomOwnerDenial, roomScope } from "./room-kind"
+import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
 import { readableUrl } from "./tigris"
 import { isUuid } from "./api-input"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
@@ -382,6 +382,8 @@ export function startOpsBroadcast(eventId: string): void {
    */
   let stopped = false
   const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
+  // The event and its days, read once a minute rather than every pass (`HeldEvent`).
+  const held: { current?: HeldEvent } = {}
 
   const tick = async (): Promise<void> => {
     try {
@@ -396,7 +398,7 @@ export function startOpsBroadcast(eventId: string): void {
         stopOpsBroadcast(eventId)
         return
       }
-      const snapshot = await buildLiveSnapshot(eventId)
+      const snapshot = await buildLiveSnapshot(eventId, held)
       if (snapshot) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, snapshot))
     } catch (error) {
       // A failed pass must not kill the loop or the process — the next one may
@@ -485,6 +487,25 @@ export async function guardJoin(
   socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
 }
 
+async function readTypingMembership(userId: string, chatGroupId: string) {
+  return db.chat_group_members.findUnique({
+    where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
+    select: {
+      anonymous_name: true,
+      status: true,
+      last_allowed_at: true,
+      chat_group: {
+        select: {
+          id: true,
+          kind: true,
+          event_id: true,
+          event: { select: { status: true, deleted_at: true, kind: true } },
+        },
+      },
+    },
+  })
+}
+
 /**
  * Broadcast a typing indicator to a chat room, under the sender's anonymous name.
  *
@@ -497,35 +518,15 @@ export async function emitChatTyping(
   isTyping: boolean
 ): Promise<void> {
   try {
-    const membership = await db.chat_group_members.findUnique({
-      where: {
-        chat_group_id_user_id: {
-          chat_group_id: chatGroupId,
-          user_id: socket.data.userId,
-        },
-      },
-      select: {
-        anonymous_name: true,
-        status: true,
-        last_allowed_at: true,
-        chat_group: {
-          select: {
-            id: true,
-            kind: true,
-            event_id: true,
-            event: { select: { status: true, deleted_at: true, kind: true } },
-            ...ownerDoor(socket.data.userId),
-          },
-        },
-      },
-    })
-
+    const membership = await readTypingMembership(socket.data.userId, chatGroupId)
     if (!membership || membership.status !== "active") return
     // The room's door, for every kind: a member row whose owner no longer
     // admits them (a board post's ask that is not accepted) types to nobody.
-    if (roomOwnerDenial(membership.chat_group, socket.data.userId)) return
+    // …read for this room's kind alone (`withOwnerDoor`).
+    const room = await withOwnerDoor(chatGroupId, socket.data.userId, membership.chat_group)
+    if (roomOwnerDenial(room, socket.data.userId)) return
     // A venue day's room is the people live in it: an ended Go Live types into nothing.
-    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
+    if (room.event && !liveInVenueDay(room.event, membership)) return
 
     // A block hides the typist from whoever they blocked or were blocked by —
     // the same people `emitChatMessage` leaves out. Typing went to the whole
@@ -580,6 +581,18 @@ const sidesSelect = {
 const otherOf = (c: { user1_id: string; user2_id: string }, userId: string) => (c.user1_id === userId ? c.user2_id : c.user1_id)
 
 /**
+ * The conversation's sides if `userId` may use it (`canJoinConversation`'s rule),
+ * else null: the gate and the naming read, one statement where they were two.
+ */
+async function openConversationOf(userId: string, conversationId: string) {
+  const conversation = await db.private_conversations.findUnique({
+    where: { id: conversationId },
+    select: { ...sidesSelect, closed_at: true },
+  })
+  return mayUseConversation(conversation, userId) ? conversation : null
+}
+
+/**
  * Broadcast a typing indicator into a private conversation.
  *
  * `socket.to(room)` broadcasts to a room the sender does not have to be in, so
@@ -593,8 +606,6 @@ export async function emitPrivateTyping(
   isTyping: boolean
 ): Promise<void> {
   try {
-    if (!(await canJoinConversation(socket.data.userId, conversationId))) return
-
     /*
      * Resolved through the conversation, not read straight off the profile.
      *
@@ -608,17 +619,7 @@ export async function emitPrivateTyping(
      * has revealed, so nothing visible changes for existing conversations.
      */
     const [conversation, profile] = await Promise.all([
-      db.private_conversations.findUnique({
-        where: { id: conversationId },
-        select: {
-          user1_id: true,
-          user2_id: true,
-          user1_pseudonym: true,
-          user2_pseudonym: true,
-          user1_revealed: true,
-          user2_revealed: true,
-        },
-      }),
+      openConversationOf(socket.data.userId, conversationId),
       db.profiles.findUnique({
         where: { id: socket.data.userId },
         select: { name: true },
@@ -670,7 +671,8 @@ export async function emitPrivateRead(
   messageIds: string[]
 ): Promise<void> {
   try {
-    if (!(await canJoinConversation(socket.data.userId, conversationId))) return
+    const sides = await openConversationOf(socket.data.userId, conversationId)
+    if (!sides) return
 
     /*
      * Persist, then decide whether to say so. This function did neither.
@@ -688,6 +690,12 @@ export async function emitPrivateRead(
     if (ids.length === 0) return
 
     const theirs = { id: { in: ids }, conversation_id: conversationId, sender_id: { not: socket.data.userId } }
+    // The reader's setting is independent of the writes below, so it is read beside them.
+    const readerPending = db.profiles.findUnique({
+      where: { id: socket.data.userId },
+      select: { read_receipts: true },
+    })
+    readerPending.catch(() => undefined) // awaited below; marked handled in case a write throws first
     // A read counts as delivered (SCRUM-408): the ones not delivered yet, named for the off branch below.
     const undelivered = (
       await db.private_messages.findMany({ where: { ...theirs, delivered_at: null }, select: { id: true } })
@@ -702,10 +710,7 @@ export async function emitPrivateRead(
      * read receipts off still clears their own unread badge; they simply do
      * not tell the sender.
      */
-    const reader = await db.profiles.findUnique({
-      where: { id: socket.data.userId },
-      select: { read_receipts: true },
-    })
+    const reader = await readerPending
     if (reader?.read_receipts === false) {
       // Delivery is not private (it goes out whatever the setting): the sender
       // still sees ✓✓ for what this read delivered. With receipts on, the
@@ -716,8 +721,7 @@ export async function emitPrivateRead(
       return
     }
 
-    const sides = await db.private_conversations.findUnique({ where: { id: conversationId }, select: sidesSelect })
-    if (sides && !mayShowRealName(sides, socket.data.userId)) {
+    if (!mayShowRealName(sides, socket.data.userId)) {
       socket.nsp.to(`user:${otherOf(sides, socket.data.userId)}`).emit("private:read", {
         conversationId,
         messageIds: ids,
@@ -887,7 +891,15 @@ export function initSocketServer(httpServer: HttpServer): Server {
         const pubClient = createClient({ url: redisUrl })
         const subClient = pubClient.duplicate()
         await Promise.all([pubClient.connect(), subClient.connect()])
-        io?.adapter(createAdapter(pubClient, subClient))
+        /*
+         * `requestsTimeout` is how long a cross-replica request (`fetchSockets`,
+         * `serverSideEmit` acks) waits for every other replica to answer. The
+         * default is 5 s: with two or more replicas one slow replica holds every
+         * `fetchSockets` for up to 5 s, and when it times out the call rejects
+         * and that socket delivery is dropped. 1 s is far above a healthy
+         * round trip over the Redis in the same region and bounds both.
+         */
+        io?.adapter(createAdapter(pubClient, subClient, { requestsTimeout: 1000 }))
         logger.info("Socket.io Redis adapter attached")
       } catch (error) {
         // Falling back to in-memory is correct at one replica and wrong at
@@ -1348,7 +1360,7 @@ async function toChatRoom<E extends keyof ServerToClientEvents>(
  * keeps its last number is right, where one handed a made-up 0 is not.
  */
 function sendWithHereCount(eventId: string, send: (hereCount: number | undefined) => void | Promise<void>): Promise<void> {
-  return hereCountFor(eventId)
+  return hereCountCoalesced(eventId)
     .catch((error: unknown) => {
       logger.warn("hereCount lookup failed; emitting without it", {
         eventId,
@@ -1469,27 +1481,56 @@ export function emitEventCheckIn(
  * Emit an event checkout update
  */
 export function emitEventCheckOut(eventId: string, userId: string): void {
+  emitEventCheckOuts(eventId, [userId])
+}
+
+/** How many leavers' copies are built before the event loop is handed back. */
+const CHECKOUT_EMIT_YIELD_EVERY = 100
+
+/**
+ * A room's departures, told as `emitEventCheckOut` tells one: a checkout each,
+ * with the handle only to the leaver and to a viewer whose roster showed them
+ * (D23, H1). What is shared is the READING, not the telling -- the client
+ * removes one roster row per `event:checkout`, so each leaver still gets their
+ * own. Five reads for the whole room (friends, ended friendships, blocks,
+ * show-online, the headcount) and one `fetchSockets`, where one at a time
+ * was thirteen statements and a fetch per person, on the Socket.io thread,
+ * when an event ended with thousands inside. `hereCount` is the room's count
+ * once all of them are out, the same number for each.
+ */
+export function emitEventCheckOuts(eventId: string, userIds: readonly string[]): void {
   const io = currentIo()
-  if (!io) return
+  if (!io || userIds.length === 0) return
 
   const checkOutTime = new Date().toISOString()
-  // As an arrival: the handle only to the leaver and to a viewer whose roster showed them (D23, H1).
   void Promise.all([
-    notStrangersTo(userId),
-    blockCounterparties(userId),
-    db.profiles.findUnique({ where: { id: userId }, select: { show_online: true } }),
+    notStrangersToMany(userIds),
+    blockCounterpartiesMany(userIds),
+    db.profiles.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, show_online: true } }),
   ])
-    .then(([friends, blocked, profile]) => {
-      const listed = profile?.show_online !== false
-      const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !blocked.includes(viewer))
-      return sendWithHereCount(eventId, (hereCount) =>
-        emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor, _recognises, viewer) => ({
-          eventId,
-          ...(shown(viewer) ? { userId: idFor(userId) } : {}),
-          checkOutTime,
-          hereCount,
-        }))
-      )
+    .then(([friendsOf, blockedOf, profiles]) => {
+      const hidden = new Set(profiles.filter((p) => p.show_online === false).map((p) => p.id))
+      // One audience for all of them: the sockets do not change between two leavers of one pass.
+      const sockets = io.in(`event:${eventId}`).fetchSockets()
+      const audience = { fetchSockets: () => sockets }
+      return sendWithHereCount(eventId, async (hereCount) => {
+        let told = 0
+        for (const userId of userIds) {
+          const friends = friendsOf.get(userId) ?? new Set<string>()
+          const blocked = blockedOf.get(userId) ?? []
+          const shown = (viewer: string) => viewer === userId || (!hidden.has(userId) && !friends.has(viewer) && !blocked.includes(viewer))
+          // One leaver's failure never stops the rest of the room's copies (a ghost on every roster).
+          await emitAsSeenBy(audience, eventId, "event:checkout", (idFor, _recognises, viewer) => ({
+            eventId,
+            ...(shown(viewer) ? { userId: idFor(userId) } : {}),
+            checkOutTime,
+            hereCount,
+          })).catch((error: unknown) =>
+            logger.warn("Checkout emit failed for one leaver", { eventId, error: error instanceof Error ? error.message : String(error) })
+          )
+          if (++told % CHECKOUT_EMIT_YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve))
+        }
+      })
     })
     .catch((error: unknown) => logger.warn("Check-out emit failed", { eventId, error: error instanceof Error ? error.message : String(error) }))
 }

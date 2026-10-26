@@ -34,6 +34,48 @@
     "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574."
   ],
   "verified": {
+    "report-routes-daily-cap.test.ts": {
+      "guards": "API M8: every app/api/mobile/**/report/route.ts applies userLimit(\"reportDay\").",
+      "mutation": "app/api/mobile/offers/[offerId]/report/route.ts as it was before this fix (only the per-minute `safety` limit).",
+      "observed": "2026-10-25: fails, '/offers/[offerId]/report/route.ts applies the daily report cap' (1 failed, 9 passed). Fixed; green.",
+      "date": "2026-10-25"
+    },
+    "batched-checkout.itest.ts": {
+      "guards": "perf/loops-dashboard: performCheckouts (the sweepers' batched checkout) ends in the same check-in rows, closed sessions (source and instant), chat-room telling (friend, show-online-off, blocked copies) and room:friends signal as performCheckout one person at a time over two rooms, in <=30 statements instead of ~130, is idempotent, and an expiry acts only on the window it read.",
+      "mutation": "lib/checkout.ts checkOutChunk: the presence_sessions UPDATE's `AND ps.departed_at IS NULL` replaced with `AND FALSE` (sessions left open).",
+      "observed": "Fails: both tests (the rows snapshot differs from the one-at-a-time path; the expiry's session is not closed 'expired'). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "live-snapshot-cost.itest.ts": {
+      "guards": "perf/loops-dashboard: the live snapshot's chat figures are one statement counting messages in the last ten minutes and distinct senders in the last thirty, a loop's held event is read once a minute (5 statements in one wave on the next tick), and the issue sweep reuses the snapshot's reads of the event and its day.",
+      "mutation": "A: lib/live-snapshot.ts eventAndSlots ignores the held event (`if (false)`). B: the chat query's COUNT(DISTINCT user_id) made COUNT(user_id).",
+      "observed": "A: fails ('read the event and its days once a minute': the second tick costs as many statements as the first). B: fails (activeChatters30m 4, not 3) and the held-tick comparison. Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "dashboard-chat-poll.itest.ts": {
+      "guards": "perf/loops-dashboard: the organiser feed's ?light=1 poll carries only the restricted members, the shown messages' authors and the active count (not the whole roster) with the same messages and flag count as the full read, and filters the roster in the database.",
+      "mutation": "app/api/events/[id]/chat/messages/route.ts: the light status filter on the roster read (`...(light && { status: { in: [banned, muted] } })`) removed.",
+      "observed": "Fails: 2 of 3 (the poll carries all forty members; the roster read is not filtered by status). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "sentiment-sweeper.itest.ts": {
+      "guards": "perf/loops-dashboard: a sentiment pass is two statements however many messages it classifies, leaves messages older than the scan window alone, loses nothing to a message deleted while the model read it, and never overwrites a human correction made in that time (the bulk upsert's WHERE).",
+      "mutation": "A: lib/sentiment-sweeper.ts the scan window's lower bound replaced with new Date(0). B: the `WHERE event_feedback.source <> 'human'` line removed from the bulk upsert.",
+      "observed": "A: fails ('leaves a message older than the scan window alone'). B: fails ('keeps a correction made while the model was reading'). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "event-issues.itest.ts": {
+      "guards": "perf/loops-dashboard: liveEventIds returns the published events running now, earliest start first, capped, from a statement with no ORDER BY or LIMIT (so the planner uses the end_time index instead of walking every event that ever started).",
+      "mutation": "lib/event-issues.ts liveEventIds: `orderBy: { start_time: 'asc' }, take: max` put back on the findMany.",
+      "observed": "Fails ('which events are live': the events statement carries ORDER BY and LIMIT). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "organiser-overview-reads.itest.ts": {
+      "guards": "perf/loops-dashboard: the organiser overview, the Events list, Chatrooms and the Users table join no whole-table relation _count (a `_aggr_count_*` over chat_messages, event_rsvps, event_check_ins, event_favorites or event_ratings), and the live banner's message count and the Users tallies are still right.",
+      "mutation": "app/dashboard/chatrooms/page.tsx: the room select's `_count: { select: { messages: true } }` put back.",
+      "observed": "Fails ('the Chatrooms screen joins no whole-table count'). Reverted; green.",
+      "date": "2026-10-25"
+    },
     "dm-sender-sees-withheld.itest.ts": {
       "guards": "The DM thread's own-hidden clause: the sender sees their withheld message as removed, the recipient never does.",
       "mutation": "M2201 the thread query's { moderation_status: 'hidden', sender_id } lost its sender_id, so any hidden row reaches either reader.",
@@ -408,8 +450,8 @@
     },
     "hot-path-indexes.test.ts": {
       "guards": "The hot-path indexes are declared in the datamodel AND created by a migration, and the polled health probe scopes its interest lookup to recent attendees instead of aggregating the whole user_interests table",
-      "mutation": "A: restore COUNT(*) in the interest-coverage inner aggregate. B: delete @@index([check_in_time]) from the events check-in model",
-      "observed": "A: 1 failing ('counts the joined column, not the row'). B: 1 failing on the declaration assertion. EXPLAIN before/after confirmed the whole-table HashAggregate is gone.",
+      "mutation": "A: restore COUNT(*) in the interest-coverage inner aggregate. B: delete @@index([check_in_time]) from the events check-in model. C (perf/loops-dashboard): lib/mobile-auth.ts cleanupExpiredTokens loses `revoked_reason: null` (no longer what the partial index holds)",
+      "observed": "A: 1 failing ('counts the joined column, not the row'). B: 1 failing on the declaration assertion. EXPLAIN before/after confirmed the whole-table HashAggregate is gone. C: 1 failing (the refresh-token sweep test).",
       "date": "2026-09-05"
     },
     "dashboard-header-title.test.ts": {
@@ -708,8 +750,8 @@
     },
     "read-receipts.test.ts": {
       "guards": "emitPrivateRead persists the read BEFORE consulting read_receipts and only for messages the reader did not send; the conversation list feeds isReadForViewer the OTHER party's setting; the thread route projects isRead through isReadForViewer with the OTHER party's setting",
-      "mutation": "A: delete the `if (reader?.read_receipts === false) return` line in lib/socket-server.ts. B: replace `otherPartyAllowsReceipts: otherUser.profile?.read_receipts` with a literal `true`. C: replace the thread route's `isRead: isReadForViewer({...})` with `isRead: msg.is_read`",
-      "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') — the case a negative match on the old shape could not catch, because that expression is now the helper's argument. C: 1 failing ('nor in the thread itself, which is the third surface'), 2026-09-13",
+      "mutation": "A: delete the `if (reader?.read_receipts === false) return` line in lib/socket-server.ts. B: replace `otherPartyAllowsReceipts: otherUser.profile?.read_receipts` with a literal `true`. C: replace the thread route's `isRead: isReadForViewer({...})` with `isRead: msg.is_read` perf/chat-path: the gate is the decision `reader?.read_receipts`, not the setting's read, which now starts beside the writes. M1521 the decision renamed to reader?.readX in emitPrivateRead.",
+      "observed": "A: 1 failing ('persists the read before deciding whether to announce it'). B: 1 failing ('does not report the sender's own receipt in the conversation list') — the case a negative match on the old shape could not catch, because that expression is now the helper's argument. C: 1 failing ('nor in the thread itself, which is the third surface'), 2026-09-13 M1521: 1 of 9 failing ('persists the read before deciding whether to announce it'). Reverted green.",
       "date": "2026-09-04"
     },
     "dashboard-view.test.ts": {
@@ -1006,10 +1048,10 @@
       "date": "2026-09-17"
     },
     "integration/approval-set-password.itest.ts": {
-      "guards": "approving a host emails a single-use set-password link that expires in 24 hours, never a password; a promoted account keeps its own; with email unconfigured the admin is handed the link once (SCRUM-134)",
-      "mutation": "Replace `issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)` in approveOnboardingRequest with the literal `\"Password: hunter2\"`.",
-      "observed": "2 failing: the mail has no reset-password link to consume, and the offline path hands the admin no link.",
-      "date": "2026-09-17"
+      "guards": "approving a host emails a single-use set-password link that expires in 24 hours, never a password; a promoted account keeps its own; with email unconfigured the admin is handed the link once (SCRUM-134) 2026-10-25: approving an application on an email that already has an attendee account: a confirmed account is promoted with its password; an unconfirmed one is taken over only when the application proved the mailbox (password replaced, phone sessions ended, set-password link sent), and refused when it did not; a suspended or deleted account is refused (audit WEB M1 + L9)",
+      "mutation": "Replace `issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)` in approveOnboardingRequest with the literal `\"Password: hunter2\"`. 2026-10-25: In lib/onboarding-actions.ts approveOnboardingRequest, `const takeOver = false`.",
+      "observed": "2 failing: the mail has no reset-password link to consume, and the offline path hands the admin no link. 2026-10-25: 2 failing of 6 (the takeover and the unproven refusal). Red before the fix: 3 of 6, the suspended refusal too.",
+      "date": "2026-10-25"
     },
     "venue-claims.test.ts": {
       "guards": "deciding a venue claim emails the reason to the claimant, and an approval tells each displaced claimant why (SCRUM-117)",
@@ -1078,10 +1120,52 @@
       "date": "2026-09-21"
     },
     "dashboard-signin-limit-runs-in-node.test.ts": {
-      "guards": "POST /api/auth/callback/credentials is rate limited in the NextAuth route (Node runtime, Redis-backed) before NextAuth sees the password, and middleware.ts no longer carries the limiter — on the Edge runtime it let five of six attempts through (SCRUM-194)",
-      "mutation": "In app/api/auth/[...nextauth]/route.ts, `if (limited && false) return limited`.",
-      "observed": "1 failing: returns the limiter's 429 and never reaches NextAuth — expected 429, received 302.",
-      "date": "2026-09-21"
+      "guards": "the NextAuth route does not match on the request path and middleware.ts does not carry the sign-in limiter (Edge cannot load Redis, SCRUM-194; a path match is walked around by %63redentials, audit WEB H1); authorize() asks the limits before it reads the password and a password reset clears the email's counters",
+      "mutation": "Append `req.nextUrl.pathname === \"/api/auth/callback/credentials\"` to app/api/auth/[...nextauth]/route.ts.",
+      "observed": "1 failing: the NextAuth route does not match on the request path.",
+      "date": "2026-10-25"
+    },
+    "integration/oauth-link-ends-squatter-sessions.itest.ts": {
+      "guards": "Google/Apple linking to an unverified password account ends its phone sessions in the link transaction: password dropped, refresh tokens revoked as password_reset (the phone is told PASSWORD_RESET), push tokens deleted; a verified account's sessions are left alone (audit API H1)",
+      "mutation": "In lib/mobile-auth.ts linkVerifiedOAuthIdentity, `unproven && false ? endPhoneSessions(...) : null`.",
+      "observed": "2 failing of 3 (Google and Apple): the squatter's push token and live refresh token survived; the verified-account control passes. Red before the fix with the same 2 of 3.",
+      "date": "2026-10-25"
+    },
+    "integration/admin-users-no-secrets-to-browser.itest.ts": {
+      "guards": "getUsers and updateUser results carry no password hash, birth date or suspension note (audit WEB M2)",
+      "mutation": "In app/dashboard/users/actions.ts getUsers, `select: {` -> `include: {` (and drop the scalar fields); or updateUser `select: { id: true }` -> `include: { profile: true }` and return the row.",
+      "observed": "Red before the fix, 2 of 2 failing: the serialised result contained the bcrypt hash.",
+      "date": "2026-10-25"
+    },
+    "integration/limiters-authorize-first.itest.ts": {
+      "guards": "cancelVenuePro spends a bucket keyed on the caller, not the venue's own startVenueProCheckout bucket, and sendOffer checks the sender's role before it spends the owner's offer-send bucket (audit WEB M3 + L5)",
+      "mutation": "M1: payable(`venue-cancel:${user.id}:${id}`) -> payable(`venue:${id}`) in cancelVenuePro. M2: move the overLimit(`offer-send:...`) block above the maySendVenueOffers check in sendOffer.",
+      "observed": "Red before the fix, 2 of 2 failing: the victim's cancel met \"Too many tries in a minute\"; staff's ninth send met \"Too many tries\" instead of the role refusal.",
+      "date": "2026-10-25"
+    },
+    "claim-limit-order.test.ts": {
+      "guards": "overClaimLimit counts the event's window only for a caller who passed their own email and address windows, so a flooder over their own limit cannot burn the event's 20 an hour (audit WEB L5); the window is per (target, network), so three networks cannot drain one event between them (review L3)",
+      "mutation": "In lib/claim-limit.ts hit the target window together with the email and address windows again.",
+      "observed": "1 failing: expected the event bucket at 10, received 14. The anonymous-claim bucket can still be burned by 2+ addresses each under their own limit; that is the cap's purpose and is left.",
+      "date": "2026-10-25"
+    },
+    "integration/create-role-user-audited.itest.ts": {
+      "guards": "createRoleUser writes a user.created audit row (admin, new account, role, no password) in the same transaction as the account, so a refused audit write leaves no account (audit WEB L8)",
+      "mutation": "In lib/admin-role-actions.ts createRoleUser, replace the $transaction with the bare tx.user.create (no auditInTx).",
+      "observed": "Red before the fix, 2 of 2 failing: no user.created row; the account existed after its audit write was refused.",
+      "date": "2026-10-25"
+    },
+    "mobile-signin-shares-email-limits.test.ts": {
+      "guards": "POST /api/mobile/auth/signin reserves the same per-email windows as the dashboard (a staff account's right password is refused 429 once the email is over its cap, mobile failures count against the dashboard's), compares against the cost-12 dummy hash for an unknown email, and refuses an email over 254 characters (review M1 + L4)",
+      "mutation": "M1: delete `await refuseOverEmailLimits(emailKeys)` in the route. M2: `user?.password ?? DUMMY_HASH` -> `?? ''`.",
+      "observed": "M1: 2 failing of 5 (the cap and the shared count). M2: the dummy-hash case fails once it asserts the stored hash is cost-12. Red before the fix: 4 of 5 failed (the 403 control passes).",
+      "date": "2026-10-25"
+    },
+    "dashboard-signin-limits.test.ts": {
+      "guards": "authorize() holds 5 attempts per network (the /64 for IPv6) and, per email from any network, 20 wrong passwords in 15 minutes and 200 in 24 hours (case-folded, existing or not); the right password is refused past any of them; a victim's success does not reset the email's windows; clearSigninCounters (a completed reset) does; an unknown or password-less account is compared against a cost-12 dummy hash (audit WEB H1/M5/L1)",
+      "mutation": "M1: drop the `today >= ...DAY` clause in refuseOverSigninLimits. M2: clearSigninCounters forgets only the 15-minute key. M3: settleSigninSuccess forgets the email keys instead of releasing one hit. M3b: settleSigninSuccess releases nothing. M4: clientNetworkFrom -> clientIpFrom. M5: `user?.password ?? DUMMY_HASH` -> `?? \"\"`. M6: isKnownDevice returns true when the cookie is absent, or skips the MAC compare (known-device cases).",
+      "observed": "M1: 1 failing of 11 (the 200-a-day case). M2: 1 failing (the same case, at its final reset). M3 and M3b: 2 failing each (a victim's success must not reset the spray; the day case). The concurrency case (30 parallel wrong passwords, at most 20 reach bcrypt) was red against check-then-count: 30 reached it. M4 (earlier version): the /64 case failed. M5 (earlier version): both timing cases failed. Red before the fix: 6 of 7 failed.",
+      "date": "2026-10-25"
     },
     "client-ip.test.ts": {
       "guards": "clientIpFrom returns the client as Railway's edge presents it — x-real-ip first (edge-set, not client-settable), else the FIRST x-forwarded-for hop — and ignores x-envoy-external-address / cf-connecting-ip, which the edge passes through as sent; the previous last-hop reader keyed every per-network limit and audit row on Railway's own edge node (SCRUM-195)",
@@ -1619,14 +1703,14 @@
     },
     "chat-join-per-kind.test.ts": {
       "guards": "Step 7 / TQ-S07 / CR-G01 (F8, E2, E4): the door of a room of every kind. roomOwnerDenial switches on chat_groups.kind with a TS never arm (event: the event shows the room; board_post: the post's author or an asker the author accepted, never one in a block with the author either way, closed with its post or its event; crew (step 8): a member of the crew now, not suspended, the crew not dissolved — a room row alone is not the key, and a select that never read the crew fails closed; blend (step 8): a member of either side's crew who is at the occurrence, or the matched person, until its clock or an early close, never somebody in a block with anyone on the other side; an unknown kind refused). boardPostDoor's rows name the viewer they were read for and the door refuses any other. roomWindowFor closes a board room OWNER_ROOM_HOURS (12) after its event ends, on the clock. roomReadDenialFor / mayWriteToRoomFor are roomReadDenial / mayWriteToRoom unchanged for an event room and never invent an event for one without it. Structural half: canJoinChat asks roomReadDenialFor; the messages, reactions, participants and message-report routes and roomForMember use the kind-aware rules, never the event-only ones. Step 8: every room select spreads ownerDoor (board_post and crew together), never one owner's door by hand. Review round (PR #631): a closed conversation across the sides is a block at the Blend door (C6); no member row, no Blend room (C3 snapshot).",
-      "mutation": "M508 the board_post arm reduced to \"has a member row\" (accepted asks ignored). M509 crew and blend reduced to \"has a member row\" (return null). M510 canJoinChat back to roomReadDenial(membership, chat_group.event!). M511 the participants route back to roomReadDenial(membership, chatGroup.event!). M514 the viewer check removed (a door read for one person answers for another). M515 the author–asker block ignored. M516 the board room's 12-hour clock removed from roomWindowFor. M637 the crew arm reduced to \"has a member row\" (return null). M638 socket-auth's select back to `board_post: boardPostDoor(userId)` alone. M639 a dissolved crew's room left open. M653 the Blend door blind to a block from side A against a side-B viewer. M654 the Blend door ignoring its clock and its early close. M657 the Blend door ignoring blocks across the sides. M658 the Blend door not reading closed conversations.",
-      "observed": "M508: 1 of 17 failing. M509: 2 of 17. M510: 1 of 17. M511: 1 of 17. M514: 1 of 17 (a stranger admitted on the accepted asker's row). M515: 1 of 17 (a blocked asker read and wrote). M516: 1 of 17 (a write after the clock). Reverted green. Step 8 (2026-10-02): M637: 2 of 25 failing (a left member admitted; a door read for one person answering for another). M638: 1 of 25 (the ownerDoor structural case). M639: 1 of 25 (the dissolved crew's room). Reverted green. M653: 1 of 31 (a side-B member blocked by side A admitted). M654: 1 of 31 (a closed Blend open). Reverted green. M657: 2 of 33 failing (both the block and the closed-conversation cases). M658: 1 of 33 (the closed conversation). Reverted green.",
+      "mutation": "M508 the board_post arm reduced to \"has a member row\" (accepted asks ignored). M509 crew and blend reduced to \"has a member row\" (return null). M510 canJoinChat back to roomReadDenial(membership, chat_group.event!). M511 the participants route back to roomReadDenial(membership, chatGroup.event!). M514 the viewer check removed (a door read for one person answers for another). M515 the author–asker block ignored. M516 the board room's 12-hour clock removed from roomWindowFor. M637 the crew arm reduced to \"has a member row\" (return null). M638 socket-auth's select back to `board_post: boardPostDoor(userId)` alone. M639 a dissolved crew's room left open. M653 the Blend door blind to a block from side A against a side-B viewer. M654 the Blend door ignoring its clock and its early close. M657 the Blend door ignoring blocks across the sides. M658 the Blend door not reading closed conversations. perf/chat-path (2026-10-18), the per-room-lookup guard now asks for withOwnerDoor, not a hand-built or all-kinds door: M1518 room-membership.ts reads the room without withOwnerDoor. M1519 socket-auth.ts names crewDoor(userId) by hand. M1520 doorSelect's board_post arm returns {}.",
+      "observed": "M508: 1 of 17 failing. M509: 2 of 17. M510: 1 of 17. M511: 1 of 17. M514: 1 of 17 (a stranger admitted on the accepted asker's row). M515: 1 of 17 (a blocked asker read and wrote). M516: 1 of 17 (a write after the clock). Reverted green. Step 8 (2026-10-02): M637: 2 of 25 failing (a left member admitted; a door read for one person answering for another). M638: 1 of 25 (the ownerDoor structural case). M639: 1 of 25 (the dissolved crew's room). Reverted green. M653: 1 of 31 (a side-B member blocked by side A admitted). M654: 1 of 31 (a closed Blend open). Reverted green. M657: 2 of 33 failing (both the block and the closed-conversation cases). M658: 1 of 33 (the closed conversation). Reverted green. M1518: 1 of 34 failing. M1519: 1 of 34. M1520: 1 of 34 here, and 2 of 16 in room-door-for.test.ts. Reverted green.",
       "date": "2026-10-02"
     },
     "chat-group-event-readers.test.ts": {
       "guards": "Step 7 / TQ-A10 / CR-G02 (F8): found by the TypeScript checker, not by name — every read of .event / .event_id (dotted, bracketed, optional-chained or destructured, whatever the variable is called) whose property type admits null, i.e. a room's event (chat_groups is the only model with a nullable event). None may stand in for a missing event (?? / || with a non-null default, a non-null assertion, a ternary whose other branch is an object, a destructuring default), and each must sit in a file#function listed with why it is right for a room of any kind; the list may not name a function that no longer reads one. A virtual probe file proves the shapes: g.event ??, cg.event_id!, a destructuring default, g[\"event\"] ||, a ternary stand-in, a renamed destructure; another model's event is never reported; a guard ternary is not a stand-in.",
-      "mutation": "M512 canJoinChat given a stand-in: event: membership.chat_group.event ?? { status: \"published\", deleted_at: null }. M513 toChatRoom given `if (!room.event_id) return` before roomScope — the silent drop this step removed. M517 canJoinChat given a renamed destructuring default: const { event: ev = { status: \"published\", deleted_at: null } } = membership.chat_group.",
-      "observed": "M512: 2 of 8 failing (the stand-in at lib/socket-auth.ts, and an unlisted reader lib/socket-auth.ts#canJoinChat). M513: 1 of 8 (lib/socket-server.ts#toChatRoom undecided). M517: 2 of 8 (a destructuring default, and the unlisted reader). Reverted green.",
+      "mutation": "M512 canJoinChat given a stand-in: event: membership.chat_group.event ?? { status: \"published\", deleted_at: null }. M513 toChatRoom given `if (!room.event_id) return` before roomScope — the silent drop this step removed. M517 canJoinChat given a renamed destructuring default: const { event: ev = { status: \"published\", deleted_at: null } } = membership.chat_group. perf/chat-path: the reply push's reader key moved to lib/room-delivery.ts#pushReplyAuthor. M1522 pushReplyAuthor renamed (an unlisted reader, and a stale listed one).",
+      "observed": "M512: 2 of 8 failing (the stand-in at lib/socket-auth.ts, and an unlisted reader lib/socket-auth.ts#canJoinChat). M513: 1 of 8 (lib/socket-server.ts#toChatRoom undecided). M517: 2 of 8 (a destructuring default, and the unlisted reader). Reverted green. M1522: 2 of 8 failing. Reverted green.",
       "date": "2026-10-02"
     },
     "chat-kinds.itest.ts": {
@@ -2043,6 +2127,12 @@
       "observed": "M1526: 1 of 2 failing (the start/stop test). Reverted; 2 of 2.",
       "date": "2026-10-22"
     },
+    "moderation-recheck-started.test.ts": {
+      "guards": "Moderation-degraded policy: lib/background.ts starts the room-message re-check sweeper and stops it on shutdown, names it in the start-up log, and the files it reaches import by relative path because server.ts compiles with plain tsc.",
+      "mutation": "M1694 the sweeper not started in background.ts (the start line commented out).",
+      "observed": "M1694: 1 of 3 failing (the start/stop test). Reverted; 3 of 3.",
+      "date": "2026-10-25"
+    },
     "object-presence.test.ts": {
       "guards": "SCRUM-732: objectPresence says 'gone' only for a confirmed 404 (NotFound); a 403, a 5xx and a network failure are 'unknown', so the sweep never deletes a record on a storage error.",
       "mutation": "M1534 every error read as gone.",
@@ -2204,6 +2294,54 @@
       "mutation": "M2104 seatInRoom's chat_group_members create gains a column (left_at). M2105 the board route's closing clock changed from <= to <. M2106 the seed's board-event pick changed from start_time > now to >=.",
       "observed": "M2104: 1 of 46 failing (the row the check-in door creates). M2105: 1 of 46 (the route's clock). M2106: 1 of 46 (the seed's pick). Each reverted; 46 of 46.",
       "date": "2026-10-23"
+    },
+    "socket-redis-adapter.test.ts": {
+      "guards": "perf/chat-path: the socket server's Redis adapter is created with requestsTimeout: 1000, not the 5 s default (with two or more replicas one slow replica holds every fetchSockets up to 5 s, and a timeout drops that socket delivery).",
+      "mutation": "M1517 createAdapter(pubClient, subClient) with no options (the default 5000 ms).",
+      "observed": "2026-10-18: M1517: 1 of 1 failing. Reverted; 1 green.",
+      "date": "2026-10-18"
+    },
+    "event-counts-not-whole-table.itest.ts": {
+      "guards": "perf/read-routes fix 1: the events list and detail count favourites, ratings and going RSVPs with exactly three GROUP BY statements, one per table, each restricted to the page's events (`\"event_id\" IN`), and not with a relation `_count` folded into the events statement; the counts themselves (4 / 2 / 3, waitlisted, maybe and not_going excluded).",
+      "mutation": "lib/event-tallies.ts: the page restriction `const where = { event_id: { in: [...eventIds] } }` replaced by `const where = {}`.",
+      "observed": "2026-10-19: fails in both tests; the received statements are `SELECT COUNT(*) ... FROM event_favorites WHERE 1=1 GROUP BY event_id` with no IN. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "event-detail-occupancy.itest.ts": {
+      "guards": "perf/read-routes fix 5: the event detail's currentCapacity is who is inside (staff counted) and equals getOccupancy().inside, from a headcount read and without the unique-attendance read (every attendee's check-in row).",
+      "mutation": "app/api/mobile/events/[eventId]/route.ts: getInsideCount(eventId) replaced by getOccupancy(eventId).then((o) => o.inside).",
+      "observed": "2026-10-19: fails, the unique-attendance statement count is 1 where 0 is expected. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "board-requests-list.itest.ts": {
+      "guards": "perf/read-routes fix 6: GET /board/requests names each counterpart by the pseudonym of the event the ask belongs to (legacy, keyed, a room name that wins, a room name never used at another event), from ONE chat_group_members read and no created_at-only event lookups.",
+      "mutation": "M1 lib/board-access.ts boardPseudonymsAcross: room names keyed by user id alone. M2 the scheme looked up per event (`await pseudonymSchemeFor(eventId)`). M3 a members read per event added.",
+      "observed": "2026-10-19: M1 fails on the third event's names (b2 shown with her other event's room name). M2 fails, 3 created_at-only event lookups where 0 are expected. M3 fails, 4 members reads where 1 is expected. All reverted; green.",
+      "date": "2026-10-19"
+    },
+    "inbox-last-message.itest.ts": {
+      "guards": "perf/read-routes fix 7: the inbox preview is the newest VISIBLE message per conversation (NULL moderation_status counts as visible, hidden never shows) with the id, ISO instant and read flag the Prisma include gave, from one LIMIT 1 read, and unread counts that name only the person's conversations.",
+      "mutation": "app/api/mobile/conversations/route.ts lastVisibleMessages: `(moderation_status IS NULL OR moderation_status <> 'hidden')` reduced to `(moderation_status <> 'hidden')`.",
+      "observed": "2026-10-19: fails, conversation D (newest message and the unread one both NULL) has no preview: received undefined where 'null status newest' is expected. Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "account-blocklist-refresh.test.ts": {
+      "guards": "perf/read-routes fix 9: the blocked-accounts set is served while it refreshes, but only up to 60 s old (a request at 59 s is answered with the read pending, at 61 s it waits), the first load is awaited, and a failed first load is never marked fresh (a request after one, and after two, awaits a retry).",
+      "mutation": "M1 lib/account-blocklist.ts: the failure handler sets fetchedAt unconditionally (the cold-start empty set served as fresh). M2 BLOCKLIST_MAX_STALE_MS doubled to 120 s.",
+      "observed": "2026-10-19: M1 2 failing (a failed first load; two failures then a request). M2 1 failing (the 61 s request is answered while its read is pending). Both reverted; 9 green.",
+      "date": "2026-10-19"
+    },
+    "event-detail-parallel.itest.ts": {
+      "guards": "perf/read-routes fix 5, the speed claim: with every Prisma operation held 60 ms, the event detail's own event read overlaps its favourite, occurrence and check-in reads, and the whole request takes at most 4 sequential waves.",
+      "mutation": "app/api/mobile/events/[eventId]/route.ts replaced by origin/dev's (event, then getOccupancy, then the rest).",
+      "observed": "2026-10-19: fails, the event read no longer overlaps the occurrence read (6 waves, 491 ms against 3 waves, ~330 ms). Reverted; green.",
+      "date": "2026-10-19"
+    },
+    "inbox-parallel.itest.ts": {
+      "guards": "perf/read-routes fix 7, the speed claim: with every Prisma operation held 60 ms, the inbox's last-message read and unread-count read overlap, and both start after the conversations read.",
+      "mutation": "app/api/mobile/conversations/route.ts: the Promise.all of lastVisibleMessages and unreadCounts made two sequential awaits.",
+      "observed": "2026-10-19: fails, the two reads no longer overlap. Reverted; green.",
+      "date": "2026-10-19"
     }
   },
   "grandfathered": [

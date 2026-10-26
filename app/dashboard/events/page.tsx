@@ -6,6 +6,7 @@ import { mayCreateEvents } from "@/lib/event-ownership"
 import { curationState } from "@/lib/curation"
 import { eventRowFields } from "@/lib/event-row"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
+import { rsvpCounts } from "@/lib/event-tallies"
 import { db } from "@/lib/db"
 import { discloseVenueCounts } from "@/lib/disclosure"
 import { eventHost } from "@/lib/event-host"
@@ -77,9 +78,6 @@ export default async function EventsPage() {
       organizer: names ? { select: { name: true } } : false,
       // The owning organisation: after a claim it, not the founder in `organizer`, is the host (`eventHost`).
       organizer_org: names ? { select: { display_name: true } } : false,
-      // Going, as every other screen counts it: `not_going` is a decline, and
-      // "maybe" is not a seat (the overview's hero names it separately).
-      _count: { select: { rsvps: { where: { status: "going" } } } },
     },
     }),
     db.events.count({ where }),
@@ -96,7 +94,10 @@ export default async function EventsPage() {
    * counted them once. That is W17 in a tenth place, on a screen built after
    * W17 shipped.
    */
-  const arrivals = await distinctAttendeeCounts(events.map((event) => event.id))
+  const eventIds = events.map((event) => event.id)
+  // Going, as every other screen counts it: `not_going` is a decline, and
+  // "maybe" is not a seat (the overview's hero names it separately).
+  const [arrivals, going] = await Promise.all([distinctAttendeeCounts(eventIds), rsvpCounts(eventIds)])
 
   /*
    * A venue owner sees another host's event as the venue does: counts under
@@ -110,7 +111,7 @@ export default async function EventsPage() {
       : []
   )
   const counts = (event: (typeof events)[number]) => {
-    const exact = { going: event._count.rsvps, arrivals: arrivals.get(event.id) ?? 0 }
+    const exact = { going: going.get(event.id) ?? 0, arrivals: arrivals.get(event.id) ?? 0 }
     if (!throughBuilding.has(event.id)) return exact
     const shown = discloseVenueCounts({
       going: exact.going,

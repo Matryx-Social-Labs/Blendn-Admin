@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     const accessToken = signAccessToken(user.id, user.email)
     const refreshToken = signRefreshToken(user.id, user.email)
     const newJti = (jwt.decode(refreshToken) as { jti?: string } | null)?.jti
-    // Hashed before the lock below: bcrypt must not run while a row is held.
+    // Hashed before the lock below, which nothing slow may run under.
     const tokenHash = await hashRefreshToken(refreshToken)
 
     /*

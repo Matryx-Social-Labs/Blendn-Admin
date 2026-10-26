@@ -255,6 +255,13 @@ Same categories and thresholds as text moderation, applied to the image content.
 
 **Source:** `lib/moderation/actions.ts` → `flagForReview()`
 
+### When OpenAI is down (degraded policy)
+
+`lib/moderation/text-breaker.ts` opens after 5 consecutive real failures (error or timeout; a missing key never counts) and answers "did not look" at once for 30 s, then lets the next call probe. State is on `globalThis`, per process.
+
+- **Rooms of 200 or fewer inside, and every non-event room:** deliver as before; the message ends `unchecked`. `lib/moderation-recheck.ts` (every 60 s, started from `lib/background.ts`) takes up to 64 `unchecked`, undeleted room messages from the last 24 h, oldest first, asks `checkTextContents` in one batched call, keeps going while a batch comes back full and settled (at most 20 batches, so up to 1,280 a minute), and applies the verdict with the live actions, each claimed first with `WHERE moderation_status = 'unchecked'` so a moderator's decision is never overwritten (`hideMessage` + `flagForReview` + `checkAndAutoMute`, `flagForReview`, or `recordExamined(id, true)`). A row it still cannot check waits for the next pass; the whole pass is skipped while the breaker is open. Partial index `chat_messages_unchecked_idx` serves it. DMs never become `unchecked` (no model runs on them, `lib/dm-moderation.ts`).
+- **Event rooms with more than 200 inside now:** no verdict, no message. The send routes (`lib/moderation/degraded-room.ts`) wait out the call in flight, then delete the just-written row and answer `503 MODERATION_UNAVAILABLE` (`retryAfter: 5`). While they wait the row is soft-deleted (`deleted_at`, which every room reader excludes); the hold starts after the 1 s race, so the line is readable for up to about a second, as every room line has been since the send overlaps moderation with the write. A verdict restores the row only if it still carries that hold, so a moderator's delete during the wait stands; a retry (same `clientId`) of a held row gets the same 503, and the sweeper deletes holds whose request died. Anything that fails in this path (the room count, the hold) refuses; with the breaker already open they refuse before writing. The count (`hereCountFor`) is taken only on this failure path.
+
 ### Mark clean (all checks passed)
 
 1. Message `moderation_status` set to `"clean"`

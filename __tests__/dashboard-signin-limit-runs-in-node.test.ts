@@ -1,67 +1,45 @@
 import { readFileSync } from "fs"
 import { join } from "path"
-import { NextRequest, NextResponse } from "next/server"
 
 /*
- * The dashboard sign-in limit runs in the Node runtime (SCRUM-194).
+ * The dashboard sign-in limit runs in the Node runtime (SCRUM-194), inside
+ * authorize() (lib/auth.ts), not in front of the NextAuth route.
  *
  * Driven on staging: seven wrong passwords showed the lockout sentence, then
  * six more POSTs from the same network went 302 302 429 302 302 302 — the
- * limiter lived in the Edge middleware, where Redis cannot load and the
- * in-process fallback does not survive between invocations. This pins the
- * limiter to the NextAuth route and keeps it out of the middleware.
+ * limiter lived in the Edge middleware, where Redis cannot load. It moved to
+ * the route, matching `pathname === "/api/auth/callback/credentials"`, and a
+ * percent-encoded `%63redentials` reached the same handler unlimited (audit
+ * 2026-10-24, WEB H1). The behaviour is pinned in dashboard-signin-limits.test.ts;
+ * this pins where it must NOT live again.
  */
-const mockHandler = jest.fn()
-const mockRateLimit = jest.fn()
-const mockConfig = jest.fn((type: string) => ({ type }))
+const read = (rel: string) => readFileSync(join(__dirname, "..", rel), "utf8")
 
-jest.mock("next-auth", () => () => mockHandler)
-jest.mock("@/lib/auth", () => ({ authOptions: {} }))
-jest.mock("@/lib/rate-limit", () => ({
-  rateLimit: (...args: unknown[]) => mockRateLimit(...args),
-  createAuthRateLimit: (type: string) => mockConfig(type),
-}))
-
-import { GET, POST } from "@/app/api/auth/[...nextauth]/route"
-
-const ctx = { params: Promise.resolve({ nextauth: ["callback", "credentials"] }) }
-const post = (path: string) =>
-  POST(new NextRequest(`http://localhost${path}`, { method: "POST" }), ctx)
-
-beforeEach(() => {
-  jest.clearAllMocks()
-  mockHandler.mockResolvedValue(new NextResponse(null, { status: 302 }))
-  mockRateLimit.mockResolvedValue(null)
-})
-
-describe("POST /api/auth/callback/credentials", () => {
-  it("asks the dashboard-signin limiter before NextAuth sees the password", async () => {
-    await post("/api/auth/callback/credentials")
-    expect(mockConfig).toHaveBeenCalledWith("dashboard-signin")
-    expect(mockRateLimit).toHaveBeenCalledTimes(1)
-    expect(mockHandler).toHaveBeenCalledTimes(1)
+describe("where the sign-in limit does not live", () => {
+  it("the NextAuth route does not match on the request path", () => {
+    const src = read("app/api/auth/[...nextauth]/route.ts")
+    expect(src).not.toMatch(/pathname/)
+    expect(src).not.toMatch(/callback\/credentials/)
   })
 
-  it("returns the limiter's 429 and never reaches NextAuth once locked out", async () => {
-    const locked = NextResponse.json({ success: false, error: "Too many requests" }, { status: 429 })
-    mockRateLimit.mockResolvedValue(locked)
-    const res = await post("/api/auth/callback/credentials")
-    expect(res.status).toBe(429)
-    expect(mockHandler).not.toHaveBeenCalled()
-  })
-
-  it("leaves every other auth path alone", async () => {
-    await post("/api/auth/signout")
-    expect(mockRateLimit).not.toHaveBeenCalled()
-    expect(mockHandler).toHaveBeenCalledTimes(1)
-    expect(GET).toBe(mockHandler)
-  })
-})
-
-describe("the middleware", () => {
-  it("no longer carries the limiter — the Edge runtime is where it silently stopped working", () => {
-    const src = readFileSync(join(__dirname, "..", "middleware.ts"), "utf8")
+  it("the middleware no longer carries the limiter — the Edge runtime is where it silently stopped working", () => {
+    const src = read("middleware.ts")
     expect(src).not.toMatch(/dashboard-signin/)
     expect(src).not.toMatch(/callback\/credentials/)
+  })
+})
+
+describe("where it does", () => {
+  it("authorize() limits per network and per email before it reads the password", () => {
+    const src = read("lib/auth.ts")
+    expect(src).toMatch(/refuseOverSigninLimits\(keys, knownDevice\)/)
+    expect(src.indexOf("refuseOverSigninLimits(keys, knownDevice)")).toBeLessThan(src.indexOf("bcrypt.compare"))
+    expect(src).toMatch(/settleSigninSuccess\(keys, knownDevice\)/)
+  })
+
+  it("a completed password reset clears the email's sign-in counters", () => {
+    const src = read("app/api/auth/reset-password/route.ts")
+    expect(src).toMatch(/clearSigninCounters\(row\.user\.email\)/)
+    expect(src.indexOf("await clearSigninCounters")).toBeGreaterThan(src.indexOf("endPhoneSessions(tx"))
   })
 })

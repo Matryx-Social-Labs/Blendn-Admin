@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { requireAdmin } from "@/lib/current-user"
-import { auditLog } from "@/lib/audit-log"
+import { auditInTx, auditLog } from "@/lib/audit-log"
 import {
   cancelEventCheckIns,
   eventWriteAction,
@@ -209,7 +209,7 @@ export async function createRoleUser(
   email: string,
   role: user_role
 ): Promise<{ name: string; email: string; password: string }> {
-  await requireAdmin()
+  const admin = await requireAdmin()
 
   // Stored lowercase (SCRUM-328): one address is one account whatever its case.
   const address = email.trim().toLowerCase()
@@ -219,8 +219,20 @@ export async function createRoleUser(
   const plainPassword = generatePassword(12)
   const hashedPassword = await bcrypt.hash(plainPassword, 12)
 
-  await db.user.create({
-    data: { name, email: address, password: hashedPassword, role },
+  // One transaction: an account that can be an app_admin never exists without its record
+  // (audit 2026-10-24, WEB L8). The password is the one thing the row must not hold.
+  await db.$transaction(async (tx) => {
+    const created = await tx.user.create({
+      data: { name, email: address, password: hashedPassword, role },
+      select: { id: true },
+    })
+    await auditInTx(tx, {
+      userId: admin.id,
+      action: "user.created",
+      resource: "user",
+      resourceId: created.id,
+      details: { role, email: address },
+    })
   })
 
   revalidatePath(`/dashboard/organisers`)

@@ -69,19 +69,59 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
-    // Verify conversation exists and user has access
-    const conversation = await db.private_conversations.findUnique({
-      where: { id: conversationId },
-      include: {
-        // The other party's `read_receipts` decides whether the caller may be
-        // told their message was read. The list route already asks; this one
-        // projected `is_read` raw, so a reader who turned receipts off was
-        // reported read on every reload. Driven 2026-09-13 with a probe: the
-        // socket stayed silent and the GET said `isRead: true`.
-        user1: { select: { profile: { select: { read_receipts: true } } } },
-        user2: { select: { profile: { select: { read_receipts: true } } } },
-      },
-    })
+    /*
+     * Build query
+     * `VISIBLE_DM` excludes a message the deterministic checks hid, and the
+     * recipient never sees one. The sender does, as a removed message (RC8):
+     * they were told at send time (`moderation_hidden: true`), and a reload
+     * that dropped the bubble made it look as if it had never been sent. The
+     * other `VISIBLE_DM` readers -- inbox preview, unread counts, pushes,
+     * badge, mark-as-read -- are unchanged; a hidden row is never delivered.
+     */
+    const whereClause: Record<string, unknown> = {
+      conversation_id: conversationId,
+      OR: [...VISIBLE_DM.OR, { moderation_status: "hidden", sender_id: authUser.userId }],
+    }
+    if (before) {
+      whereClause.created_at = { lt: new Date(before) }
+    }
+
+    /*
+     * The conversation and its messages are independent reads, so one level, not
+     * two. Access is decided below, before anything read here is returned or
+     * the thread is opened (`openThread` writes): a stranger gets the refusal
+     * and none of it.
+     */
+    const [conversation, messages] = await Promise.all([
+      // Verify conversation exists and user has access
+      db.private_conversations.findUnique({
+        where: { id: conversationId },
+        include: {
+          // The other party's `read_receipts` decides whether the caller may be
+          // told their message was read. The list route already asks; this one
+          // projected `is_read` raw, so a reader who turned receipts off was
+          // reported read on every reload. Driven 2026-09-13 with a probe: the
+          // socket stayed silent and the GET said `isRead: true`.
+          user1: { select: { profile: { select: { read_receipts: true } } } },
+          user2: { select: { profile: { select: { read_receipts: true } } } },
+        },
+        }),
+      db.private_messages.findMany({
+        where: whereClause,
+        orderBy: { created_at: "desc" },
+        take: limit,
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              image: true,
+            },
+          },
+          reply_to: replyToSelect,
+        },
+      }),
+    ])
 
     if (!conversation) {
       return notFoundResponse("Conversation not found")
@@ -99,39 +139,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (conversation.closed_at) {
       return notFoundResponse("Conversation not found")
     }
-
-    // Build query
-    /*
-     * `VISIBLE_DM` excludes a message the deterministic checks hid, and the
-     * recipient never sees one. The sender does, as a removed message (RC8):
-     * they were told at send time (`moderation_hidden: true`), and a reload
-     * that dropped the bubble made it look as if it had never been sent. The
-     * other `VISIBLE_DM` readers -- inbox preview, unread counts, pushes,
-     * badge, mark-as-read -- are unchanged; a hidden row is never delivered.
-     */
-    const whereClause: Record<string, unknown> = {
-      conversation_id: conversationId,
-      OR: [...VISIBLE_DM.OR, { moderation_status: "hidden", sender_id: authUser.userId }],
-    }
-    if (before) {
-      whereClause.created_at = { lt: new Date(before) }
-    }
-
-    const messages = await db.private_messages.findMany({
-      where: whereClause,
-      orderBy: { created_at: "desc" },
-      take: limit,
-      include: {
-        sender: {
-          select: {
-            id: true,
-            name: true,
-            image: true,
-          },
-        },
-        reply_to: replyToSelect,
-      },
-    })
 
     // Mark unread messages as read
     /*
@@ -200,12 +207,39 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return unauthorizedResponse("Invalid or expired token")
     }
 
+    /*
+     * The reads that do not wait on each other start together: whether this
+     * person may take part, the conversation, and (below, once the body says
+     * which send it is) whether this is a retry. They were three round trips in
+     * a row. Every refusal is still decided in the old order, from what they
+     * return, and each is marked handled here because a refusal returns without
+     * reading the ones after it.
+     */
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
-    const unfinished = await participationRefusal(authUser.userId)
-    if (unfinished) return forbiddenResponse(unfinished)
+    const unfinishedPending = participationRefusal(authUser.userId)
+    const conversationPending = db.private_conversations.findUnique({
+      where: { id: conversationId },
+      include: {
+        user1: { select: { id: true, name: true, image: true } },
+        user2: { select: { id: true, name: true, image: true } },
+      },
+    })
+    unfinishedPending.catch(() => undefined)
+    conversationPending.catch(() => undefined)
 
     const body = await readJson(request)
     const parsed = sendMessageSchema.safeParse(body)
+    const retryPending =
+      parsed.success && parsed.data.clientId
+        ? db.private_messages.findUnique({
+            where: { sender_id_client_id: { sender_id: authUser.userId, client_id: parsed.data.clientId } },
+            include: sentInclude,
+          })
+        : null
+    retryPending?.catch(() => undefined)
+
+    const unfinished = await unfinishedPending
+    if (unfinished) return forbiddenResponse(unfinished)
 
     if (!parsed.success) {
       return validationErrorResponse(parsed.error)
@@ -226,25 +260,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * it: a random id, somebody else's conversation or a quote from elsewhere
      * went uncounted when the limit came after them (SCRUM-451).
      */
-    const retried = clientId
-      ? await db.private_messages.findUnique({
-          where: { sender_id_client_id: { sender_id: authUser.userId, client_id: clientId } },
-          include: sentInclude,
-        })
-      : null
+    const retried = retryPending ? await retryPending : null
     if (retried?.conversation_id !== conversationId) {
       const limited = await rateLimit(request, createUserRateLimit("private-message", authUser.userId))
       if (limited) return limited
     }
 
     // Verify conversation exists and user has access
-    const conversation = await db.private_conversations.findUnique({
-      where: { id: conversationId },
-      include: {
-        user1: { select: { id: true, name: true, image: true } },
-        user2: { select: { id: true, name: true, image: true } },
-      },
-    })
+    const conversation = await conversationPending
 
     if (!conversation) {
       return notFoundResponse("Conversation not found")
@@ -296,19 +319,23 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return answer(retried)
     }
 
-    if (replyToId) {
-      const quoted = await db.private_messages.findFirst({
-        where: { id: replyToId, conversation_id: conversationId },
-        select: { id: true },
-      })
-      if (!quoted) return errorResponse("You can only reply to a message in this conversation", 400)
-    }
-
     // Check if the recipient has blocked the sender
     const recipientId =
       conversation.user1_id === authUser.userId
         ? conversation.user2_id
         : conversation.user1_id
+
+    // The quoted message and the block are independent reads; a missing quote still answers first.
+    const [quoted, blocked] = await Promise.all([
+      replyToId
+        ? db.private_messages.findFirst({
+            where: { id: replyToId, conversation_id: conversationId },
+            select: { id: true },
+          })
+        : null,
+      blockedEitherWay(authUser.userId, recipientId),
+    ])
+    if (replyToId && !quoted) return errorResponse("You can only reply to a message in this conversation", 400)
 
     /*
      * Both directions. This only asked whether the recipient had blocked the
@@ -316,7 +343,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * them — which is not what "block" means to either party, and leaves the
      * blocker receiving replies from a person they have chosen not to hear from.
      */
-    if (await blockedEitherWay(authUser.userId, recipientId)) {
+    if (blocked) {
       // Deliberately does not say which direction the block runs in.
       return forbiddenResponse("You cannot send messages to this user")
     }
@@ -408,14 +435,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * bumping it would surface a thread the recipient has nothing to read in —
      * telling them somebody wrote, which is most of what the sender wanted.
      */
-    if (!hidden) {
-      await db.private_conversations.update({
-        where: { id: conversationId },
-        data: { last_message_at: new Date(), updated_at: new Date() },
-      })
-    }
+    const touched = hidden
+      ? null
+      : db.private_conversations.update({
+          where: { id: conversationId },
+          data: { last_message_at: new Date(), updated_at: new Date() },
+        })
+    touched?.catch(() => undefined) // awaited below; marked handled in case the emit throws first
 
-    // Emit via Socket.io
+    // Emit via Socket.io — before the clock write lands: the recipient's copy does not wait on it.
     const messageData = sentData(message)
     // The recipient's copy names the sender as the recipient may know them: a
     // handle until they reveal. The sender's own is their real id, as everywhere.
@@ -432,6 +460,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!hidden) {
       emitPrivateMessage(conversationId, recipientId, recipientData, messageData)
     }
+    await touched
 
     /*
      * The push TITLE, resolved through the conversation.

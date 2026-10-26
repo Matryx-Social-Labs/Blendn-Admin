@@ -661,9 +661,11 @@ async function seatInRoom(input: SeatInput, eventId: string, now: Date): Promise
              * A mute survives the door, as a human's ban does. It lifts on its
              * own clock (`checkAndAutoUnmute`), not by walking out and back in
              * — which, before this, any muted person could do at a venue in
-             * one tap (step 4 review).
+             * one tap (step 4 review). `muted_at` outlives the status: leaving
+             * writes `left` (and so does the sweeper), and a `left` row that still
+             * carries `muted_at` is a muted member who walked out (API M2).
              */
-            status: existingMembership.status === "muted" ? "muted" : "active",
+            status: existingMembership.status === "muted" || existingMembership.muted_at ? "muted" : "active",
             last_allowed_at: cutOff,
             // Checking in again is the way back into a room you left
             // yourself (`POST /chat/groups/:id/leave`).

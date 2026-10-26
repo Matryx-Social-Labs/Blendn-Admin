@@ -4,7 +4,7 @@ import { keptApartIn } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
 import { roomHandle, type RoomScope } from "@/lib/room-handle"
-import { ownerDoor, roomOwnerDenial } from "@/lib/room-kind"
+import { roomOwnerDenial, withOwnerDoor } from "@/lib/room-kind"
 import { isRoomMuted } from "@/lib/room-mute"
 import { liveInVenueDay } from "@/lib/chat-window"
 
@@ -37,6 +37,16 @@ import { liveInVenueDay } from "@/lib/chat-window"
  * The message is already committed by the time this runs. A failed push must
  * not turn a delivered message into a 500 for the sender, and a failed emit
  * must not stop the push. Both are logged.
+ *
+ * ## The push is not awaited
+ *
+ * The emit goes out before this returns; a reply's push (parent re-read,
+ * membership, mute window, bell row, push tokens, an HTTPS call to Expo) held
+ * the sender's 201 for ~230-260 ms for nothing the sender can see. Nothing
+ * depended on it: the comment that once said awaiting kept the sender's answer
+ * behind the room's copy was corrected in #519 (SCRUM-440) — the emit is
+ * fire-and-forget either way. It runs on, and `pushed` settles when it has,
+ * for the tests; it never rejects.
  */
 export async function deliverToRoom(input: {
   chatGroupId: string
@@ -55,13 +65,23 @@ export async function deliverToRoom(input: {
   }
   /** What the lock screen says. Not the content for anything but text. */
   preview: string
-}): Promise<void> {
+  /**
+   * `keptApartIn(sender, room kind)`, when the caller already started it: it is
+   * independent of the write and of the moderation wait, so it ran beside them.
+   */
+  blocked?: Promise<string[]>
+  /**
+   * The author of the message this one replies to, when the caller already has
+   * it (the create's `parent_message`). Left out, the push reads it.
+   */
+  parentAuthorId?: string | null
+}): Promise<{ pushed: Promise<void> }> {
   const { chatGroupId, senderId, senderAnonName, message } = input
 
   let senderBlocked: string[] = []
   try {
     // A board post's room keeps closed pairs apart too (`keptApartIn`).
-    senderBlocked = await keptApartIn(senderId, typeof input.scope === "string" ? "event" : input.scope.kind)
+    senderBlocked = await (input.blocked ?? keptApartIn(senderId, typeof input.scope === "string" ? "event" : input.scope.kind))
   } catch (error) {
     /*
      * Fail **closed on delivery**, not open.
@@ -75,7 +95,7 @@ export async function deliverToRoom(input: {
       chatGroupId,
       error: error instanceof Error ? error.message : String(error),
     })
-    return
+    return { pushed: Promise.resolve() }
   }
 
   try {
@@ -101,19 +121,24 @@ export async function deliverToRoom(input: {
     })
   }
 
-  /*
-   * The push goes to one person or nobody: the author of the message this one
-   * replies to. Every other room message is for whoever has the room open —
-   * see `notifyRoomReply` for why the room stopped pushing to everyone.
-   */
+  return { pushed: pushReplyAuthor(input, senderBlocked) }
+}
+
+/**
+ * The push goes to one person or nobody: the author of the message this one
+ * replies to. Every other room message is for whoever has the room open —
+ * see `notifyRoomReply` for why the room stopped pushing to everyone.
+ * Never rejects.
+ */
+async function pushReplyAuthor(input: Parameters<typeof deliverToRoom>[0], senderBlocked: string[]): Promise<void> {
+  const { chatGroupId, senderId, senderAnonName, message } = input
   if (!message.parent_id) return
 
   try {
-    const parent = await db.chat_messages.findUnique({
-      where: { id: message.parent_id },
-      select: { user_id: true },
-    })
-    const recipientId = parent?.user_id
+    const recipientId =
+      input.parentAuthorId !== undefined
+        ? input.parentAuthorId
+        : (await db.chat_messages.findUnique({ where: { id: message.parent_id }, select: { user_id: true } }))?.user_id
     // A lock screen is the loudest surface in the product. Somebody in a block
     // with this sender must not get a notification from them.
     if (!recipientId || recipientId === senderId || senderBlocked.includes(recipientId)) return
@@ -131,16 +156,17 @@ export async function deliverToRoom(input: {
             crew_id: true,
             blend_id: true,
             event: { select: { status: true, deleted_at: true, kind: true } },
-            ...ownerDoor(recipientId),
           },
         },
       },
     })
     if (membership?.status !== "active" && membership?.status !== "muted") return
     // The room's door, for every kind: nobody its owner no longer admits is pushed from it.
-    if (roomOwnerDenial(membership.chat_group, recipientId)) return
+    // …read for this room's kind alone (`withOwnerDoor`).
+    const room = await withOwnerDoor(chatGroupId, recipientId, membership.chat_group)
+    if (roomOwnerDenial(room, recipientId)) return
     // A venue day's room is the people live in it: an ended Go Live hears nothing from it.
-    if (membership.chat_group.event && !liveInVenueDay(membership.chat_group.event, membership)) return
+    if (room.event && !liveInVenueDay(room.event, membership)) return
     // And they have not silenced the room (`POST /chat/groups/:id/mute`).
     if (isRoomMuted(membership.notification_preferences)) return
 
