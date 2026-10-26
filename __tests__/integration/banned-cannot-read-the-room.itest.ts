@@ -86,7 +86,7 @@ it("refuses all three reads to a member an organiser banned, and says who did it
   const res = await readAll(groupId, eventId, banned)
   for (const r of Object.values(res)) {
     expect(r.status).toBe(403)
-    expect((await r.json()).error).toBe("The organiser has removed you from this room.")
+    expect((await r.json()).error).toBe("The organizer has removed you from this room.")
   }
 })
 

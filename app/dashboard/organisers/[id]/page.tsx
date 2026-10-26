@@ -8,7 +8,7 @@ import { getRoleUserById } from "@/lib/admin-role-actions"
 import { accountTitleFor } from "@/lib/dashboard-record-titles"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  return { title: (await accountTitleFor((await params).id)) ?? "Organiser" }
+  return { title: (await accountTitleFor((await params).id)) ?? "Organizer" }
 }
 
 export default async function OrganiserDetailPage({
@@ -29,9 +29,9 @@ export default async function OrganiserDetailPage({
   return (
     <>
       <PageHeader
-        title={user.name ?? "Unnamed organiser"}
-        description={`organiser · joined ${format(user.createdAt, "d MMM yyyy")} · ${user.email}`}
-        back={{ href: "/dashboard/organisers", label: "Organisers" }}
+        title={user.name ?? "Unnamed organizer"}
+        description={`organizer · joined ${format(user.createdAt, "d MMM yyyy")} · ${user.email}`}
+        back={{ href: "/dashboard/organisers", label: "Organizers" }}
       />
       <RoleUserDetail user={user} />
     </>

@@ -197,7 +197,7 @@ export const dashboardNav: DashboardNavItem[] = [
     group: "people",
   },
   {
-    title: "Organisers",
+    title: "Organizers",
     description: "The supply side: who publishes, and how concentrated it is.",
     url: "/dashboard/organisers",
     icon: IconMicrophone2,
@@ -221,7 +221,7 @@ export const dashboardNav: DashboardNavItem[] = [
   },
   {
     title: "Leads",
-    description: "Demo requests from the organiser landing page. Oldest untouched first.",
+    description: "Demo requests from the organizer landing page. Oldest untouched first.",
     url: "/dashboard/leads",
     icon: IconInbox,
     allowedRoles: ["app_admin"],

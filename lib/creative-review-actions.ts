@@ -121,7 +121,7 @@ export async function decideCreative(
   const decision = decisionFrom(["approve", "reject"], decisionInput)
   // A refusal with no reason produces an identical resubmission, and the queue
   // gets the same words again.
-  const trimmed = reasonFrom(note, decision === "reject", "Give a reason — the organiser has to know what to change.") ?? ""
+  const trimmed = reasonFrom(note, decision === "reject", "Give a reason — the organizer has to know what to change.") ?? ""
 
   const creative = await db.sponsored_creatives.findUnique({
     where: { id: creativeId },

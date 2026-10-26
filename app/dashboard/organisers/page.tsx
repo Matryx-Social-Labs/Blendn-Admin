@@ -40,7 +40,7 @@ export default async function OrganisersPage() {
       <RoleUsersTable
         users={users}
         role="organizer"
-        roleLabel="Organiser"
+        roleLabel="Organizer"
         detailBasePath="/dashboard/organisers"
         summary={
           /*
@@ -50,7 +50,7 @@ export default async function OrganisersPage() {
           */
           <StatLine
             items={[
-              { value: users.length, label: users.length === 1 ? "organiser" : "organisers" },
+              { value: users.length, label: users.length === 1 ? "organizer" : "organizers" },
               { value: published, label: published === 1 ? "published event" : "published events" },
               busiest !== null &&
                 busiest.published > 0 && {

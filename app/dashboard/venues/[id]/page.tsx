@@ -143,7 +143,7 @@ export default async function VenueDetailPage({
           meta={[venueTypeLabel(venue.venue_type), venue.city, "unclaimed — added by your organisation"]
             .filter(Boolean)
             .join(" · ")}
-          line="You can correct this place until someone claims it. The events held here stay with the organisers who hold them."
+          line="You can correct this place until someone claims it. The events held here stay with the organizers who hold them."
         />
         <VenueManage
           key={venue.updated_at.toISOString()}
@@ -323,7 +323,7 @@ export default async function VenueDetailPage({
             hint: nothingShown ? "held back" : turnUp === null ? "needs a past event" : "of committed RSVPs",
           },
           {
-            label: "Returning organisers",
+            label: "Returning organizers",
             value: returning,
             hint: returning === 0 ? "nobody has come back yet" : "booked here more than once",
           },

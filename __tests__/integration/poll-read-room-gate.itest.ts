@@ -126,7 +126,7 @@ it("refuses a member the organiser banned, with the room's own sentence", async 
   const res = await read(r.eventId, r.pollId, banned)
   const body = await res.json()
   expect(res.status).toBe(403)
-  expect(body.error).toBe("The organiser has removed you from this room.")
+  expect(body.error).toBe("The organizer has removed you from this room.")
   expect(body.data).toBeUndefined()
 })
 

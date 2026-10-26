@@ -157,7 +157,7 @@ export function LiveTab({
       <EmptyState
         icon={<IconLock />}
         title="Not authorised to watch this event"
-        description="Live operations are available to the organiser, the owner of the venue it is held at, and platform admins."
+        description="Live operations are available to the organizer, the owner of the venue it is held at, and platform admins."
       />
     )
   }

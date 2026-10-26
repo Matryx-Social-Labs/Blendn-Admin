@@ -1,6 +1,6 @@
-# Live-event insights — what the organiser and venue owner see, and what to add
+# Live-event insights — what the organizer and venue owner see, and what to add
 
-Written 2026-09-13 after driving the organiser dashboard end to end and
+Written 2026-09-13 after driving the organizer dashboard end to end and
 researching real-time event-ops practice. The headline: **most of this already
 exists and is good.** This document maps what is built against best practice,
 names the gaps, and proposes additions in priority order. Nothing here is built
@@ -8,12 +8,12 @@ yet; each item that is picked gets the design chain and a drive.
 
 ## What already exists (verified by driving it)
 
-**Identity is safe on every organiser/venue/sponsor surface.** Driven as Arjun
-(organiser), Fatima (venue owner) and Meera (sponsor): the room, the members
+**Identity is safe on every organizer/venue/sponsor surface.** Driven as Arjun
+(organizer), Fatima (venue owner) and Meera (sponsor): the room, the members
 list, the live tab, the feedback digest and the chatrooms index all show the
 **pseudonym** ("Cosmic Panda"), never a real name, email or user id. The
 attendee roster at `/dashboard/attendees` used to be the exception -- by
-"decision 7" it showed organisers real names -- and since SCRUM-383 (owner
+"decision 7" it showed organizers real names -- and since SCRUM-383 (owner
 ruling b, 2026-09-28) it shows the same HMAC label as the CSV export, with the
 counts, and no name, email, phone or photo. `DESIGN_BRIEF_VENUES_AND_CONTROL.md:134`
 ("never show a host a real attendee name") now holds on every host surface;
@@ -83,12 +83,12 @@ The numbers exist but are scattered across the live tab, connection-metrics and
 attendance. Assemble one **"How it's going"** hero while live (inside vs
 capacity, check-in rate, pulse, open issues) and one **"Did it work"** hero
 after (connections per 100, second-event rate, turn-up, rating) — the single
-line a venue owner or organiser reads to know whether to run it again. Reuses
+line a venue owner or organizer reads to know whether to run it again. Reuses
 `DESIGN_SYSTEM.md`'s one-`HeroMetric`-per-screen rule.
 
 ### 3. Post-event NPS
 One 0–10 question in the thin post-event flow, disclosure-floored, rolled up per
-event and per organiser. Deferred in `ROADMAP.md` for a good reason (don't fake
+event and per organizer. Deferred in `ROADMAP.md` for a good reason (don't fake
 it from sentiment); worth scheduling as its own small ask.
 
 ### 4. Arrival forecasting (lower priority)

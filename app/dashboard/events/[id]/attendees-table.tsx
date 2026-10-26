@@ -147,7 +147,7 @@ export function EventAttendeesCount({ started, came }: { started: boolean; came:
       <p className="max-w-[70ch] text-[0.8125rem] text-muted-foreground">
         {started && came === null
           ? "A venue sees how many came, never who, and this count could point at somebody, so it is held back."
-          : "A venue sees how many came, never who. The organiser has the list."}
+          : "A venue sees how many came, never who. The organizer has the list."}
       </p>
     </section>
   )

@@ -18,14 +18,14 @@ things in the deck are better than what we built and we are adopting them.
 Someone opens the app, finds an event near them, and **checks in with GPS when
 they physically arrive**. That check-in is the gate: it opens the event's
 chatroom, puts them in the match list for that event, and is the only thing that
-makes the organiser's numbers real.
+makes the organizer's numbers real.
 
 Inside the room they are **pseudonymous** — "Cosmic Panda", a name generated per
 event. They see other people as overlaps rather than as faces: *"you both picked
 Techno and Board games"*. If two people both like each other, a conversation
 opens and identity is exchanged.
 
-Everything the organiser is sold — who is in the room now, whether it filled,
+Everything the organizer is sold — who is in the room now, whether it filled,
 whether anyone actually met anyone — rests on that check-in being physical and
 that room being one people speak freely in.
 
@@ -37,7 +37,7 @@ These are not preferences. Each is enforced by a test that fails the build.
 
 ### 1. GPS check-in is what makes attendance real
 
-There is no manual check-in and no override. Every organiser-facing number
+There is no manual check-in and no override. Every organizer-facing number
 depends on it. A design that lets someone appear at an event without being there
 breaks the product's only defensible claim.
 
@@ -85,7 +85,7 @@ retaliation-shaped.
 
 The geofence deliberately covers the queue outside, so a full room does not turn
 the hundred-and-first person away — that would deny them the chatroom and erase
-them from attendance. Capacity is a **signal to the organiser**, not a door.
+them from attendance. Capacity is a **signal to the organizer**, not a door.
 
 Nothing in the attendee app should say "this event is full" at the door. Before
 the event, an RSVP to a full event becomes a **waitlist** place instead.

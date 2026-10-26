@@ -47,7 +47,7 @@ export function RoleUsersTable({ users, role, roleLabel, detailBasePath, facts, 
   const columns: Column<Row>[] = [
     {
       key: "person",
-      label: venueOwners ? "Owner" : "Organiser",
+      label: venueOwners ? "Owner" : "Organizer",
       primary: true,
       sortType: "string",
       sortValue: (user) => user.name ?? user.email,

@@ -126,7 +126,7 @@ export default async function ClaimEventPage({
           <div className="flex flex-col gap-2 rounded-2xl border border-border p-5">
             <p className="text-[0.875rem] font-medium">
               {refusal === "not_curated"
-                ? "This one already has an organiser."
+                ? "This one already has an organizer."
                 : refusal === "already_claimed"
                   ? "This one has already been claimed."
                   : "This event is running right now."}

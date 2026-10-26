@@ -54,7 +54,7 @@ import { formatCompact, formatNumber } from "@/lib/dashboard-format"
  * Supply panel they pushed the table into a sideways scroll at 1280.
  */
 const supplyColumns: Column<OrganiserSupplyRow>[] = [
-  { key: "name", label: "Organiser", sortType: "string", primary: true },
+  { key: "name", label: "Organizer", sortType: "string", primary: true },
   { key: "published", label: "Published", align: "right", sortType: "number" },
   {
     key: "sharePct",
@@ -359,8 +359,8 @@ function Supply({ data, topHost }: { data: AdminOverview; topHost?: OrganiserSup
         emptyState={
           <EmptyState
             icon={<IconMicrophone2 />}
-            title="No organisers publishing yet"
-            description="Rows appear as organiser accounts publish events — concentration here is the host-liquidity risk signal."
+            title="No organizers publishing yet"
+            description="Rows appear as organizer accounts publish events — concentration here is the host-liquidity risk signal."
           />
         }
       />
