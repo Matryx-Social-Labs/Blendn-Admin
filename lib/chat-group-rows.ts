@@ -168,7 +168,7 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
    * Who wrote last in each crew and Blend room, named as that room names
    * people. A crew's chat names by first name whatever the crew, so every
    * crew's sender is one lookup; a Blend's names are its event's pseudonyms,
-   * one Blend at a time — never a burst on the pool (`lib/db.ts`).
+   * all Blends in one read — two reads at most, never one per room.
    */
   const roomSenderNames = new Map<string, string | null>()
   const withLast = others.flatMap((m) => {
@@ -176,13 +176,23 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
     return last ? [{ id: m.chat_group.id, kind: m.chat_group.kind, sender: last.user_id }] : []
   })
   const crewRooms = withLast.filter((r) => r.kind === "crew")
-  if (crewRooms.length > 0) {
-    const named = await namesInRoom({ id: crewRooms[0].id, kind: "crew" }, crewRooms.map((r) => r.sender))
-    for (const r of crewRooms) roomSenderNames.set(r.id, named.get(r.sender) ?? null)
-  }
-  for (const r of withLast.filter((x) => x.kind === "blend")) {
-    roomSenderNames.set(r.id, (await namesInRoom({ id: r.id, kind: "blend" }, [r.sender])).get(r.sender) ?? null)
-  }
+  // A Blend's people go by their names in its event's room: one read for all the Blends, not one each.
+  const blendRooms = others.flatMap((m) => {
+    const last = lastMessageMap.get(m.chat_group.id)
+    return m.chat_group.kind === "blend" && last ? [{ id: m.chat_group.id, eventId: m.chat_group.blend?.occurrence.event_id, sender: last.user_id }] : []
+  })
+  const [crewNamed, blendNames] = await Promise.all([
+    crewRooms.length > 0 ? namesInRoom({ id: crewRooms[0].id, kind: "crew" }, crewRooms.map((r) => r.sender)) : new Map<string, string>(),
+    blendRooms.length > 0
+      ? db.chat_group_members.findMany({
+          where: { OR: blendRooms.flatMap((r) => (r.eventId ? [{ chat_group: { event_id: r.eventId }, user_id: r.sender }] : [])) },
+          select: { user_id: true, anonymous_name: true, chat_group: { select: { event_id: true } } },
+        })
+      : [],
+  ])
+  for (const r of crewRooms) roomSenderNames.set(r.id, crewNamed.get(r.sender) ?? null)
+  const pseudonymIn = new Map(blendNames.map((n) => [`${n.chat_group.event_id}|${n.user_id}`, n.anonymous_name || "Attendee"]))
+  for (const r of blendRooms) roomSenderNames.set(r.id, pseudonymIn.get(`${r.eventId}|${r.sender}`) ?? "Attendee")
 
   const groupsWithUnread = memberships.map((membership) => {
     const lastReadAt = membership.last_read_message_id

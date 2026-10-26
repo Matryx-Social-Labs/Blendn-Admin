@@ -24,7 +24,7 @@ const mockDb = {
   profiles: { findUnique: jest.fn() },
   venues: { findMany: jest.fn(), count: jest.fn() },
   // The hiding rule's one read (`venuesTakenOver`); nothing takes a venue over here.
-  events: { findMany: jest.fn() },
+  events: { findMany: jest.fn(), groupBy: jest.fn() },
   // `liveGuestIds`: nobody live.
   event_check_ins: { findMany: jest.fn() },
 }
@@ -60,7 +60,6 @@ const venueRow = (over: Record<string, unknown> = {}) => ({
   timezone: "Asia/Kolkata",
   day_reset_hour: 6,
   hours: null,
-  _count: { events: 2 },
   events: [
     {
       id: "33333333-3333-3333-3333-333333333333",
@@ -84,6 +83,8 @@ beforeEach(() => {
   mockDb.venues.findMany.mockResolvedValue([venueRow()])
   mockDb.venues.count.mockResolvedValue(1)
   mockDb.events.findMany.mockResolvedValue([])
+  // The page's upcoming-event counts, beside the page (not a relation count in its select).
+  mockDb.events.groupBy.mockResolvedValue([{ venue_id: "22222222-2222-2222-2222-222222222222", _count: { _all: 2 } }])
   mockDb.event_check_ins.findMany.mockResolvedValue([])
 })
 
@@ -130,8 +131,12 @@ describe("GET /api/mobile/venues", () => {
 
     const select = selectArg()
     // Identity, not deep-equality by luck: the route builds one object and uses
-    // it twice, which is the only way these cannot drift apart later.
-    expect(select._count.select.events.where).toBe(select.events.where)
+    // it twice, which is the only way these cannot drift apart later. The count
+    // spreads it beside the page's venue ids, so its AND is the very same array.
+    const counted = mockDb.events.groupBy.mock.calls[0][0].where
+    expect(counted.AND).toBe(select.events.where.AND)
+    expect(counted).toMatchObject({ status: "published", visibility: "public" })
+    expect(select).not.toHaveProperty("_count")
   })
 
   it("hides nothing when the age is unknown", async () => {
@@ -182,11 +187,13 @@ describe("GET /api/mobile/venues", () => {
   })
 
   it("says nothing is on rather than inventing something", async () => {
-    mockDb.venues.findMany.mockResolvedValue([venueRow({ events: [], _count: { events: 0 } })])
+    mockDb.venues.findMany.mockResolvedValue([venueRow({ events: [] })])
     const res = await GET(req())
     const body = await res.json()
+    mockDb.events.groupBy.mockResolvedValue([])
+    const none = await (await GET(req())).json()
     expect(body.data.venues[0].nextEvent).toBeNull()
-    expect(body.data.venues[0].upcomingEventCount).toBe(0)
+    expect(none.data.venues[0].upcomingEventCount).toBe(0)
   })
 
   it("leaves out the venues an event has taken over, and says liveNow as a bucket to an adult", async () => {

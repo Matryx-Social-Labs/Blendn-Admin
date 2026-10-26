@@ -34,9 +34,9 @@ async function listable(userId: string): Promise<boolean> {
 }
 
 /** The events this person is live in now. */
-async function liveEventsOf(userId: string, eventIds?: readonly string[]): Promise<string[]> {
+async function liveEventsOf(userId: string): Promise<string[]> {
   const rows = await db.event_check_ins.findMany({
-    where: { user_id: userId, status: "checked_in", ...(eventIds && { event_id: { in: [...eventIds] } }), ...inRoomWhere() },
+    where: { user_id: userId, status: "checked_in", ...inRoomWhere() },
     select: { event_id: true },
     distinct: ["event_id"],
   })
@@ -53,9 +53,8 @@ async function liveEventsOf(userId: string, eventIds?: readonly string[]): Promi
 export async function notifyFriendsHere(subjectId: string, opts: { eventIds?: readonly string[]; force?: boolean } = {}): Promise<void> {
   try {
     if (!opts.force && !(await listable(subjectId))) return
-    const events = await liveEventsOf(subjectId, opts.eventIds)
-    // A checkout: the subject is already out, so the events are the caller's.
-    const eventIds = opts.eventIds ? [...opts.eventIds] : events
+    // A check-in or checkout names its event (the subject may already be out of it); only a switch asks.
+    const eventIds = opts.eventIds ? [...opts.eventIds] : await liveEventsOf(subjectId)
     if (eventIds.length === 0) return
     const friends = [...(await friendsOf(subjectId))]
     if (friends.length === 0) return

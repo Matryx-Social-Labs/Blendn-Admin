@@ -182,7 +182,6 @@ export async function GET(request: NextRequest) {
       timezone: true,
       day_reset_hour: true,
       hours: true,
-      _count: { select: { events: { where: upcomingEventFilter } } },
       events: {
         where: upcomingEventFilter,
         // Id as the tiebreak, as the venue page's `upcoming`: card and page agree on which is next.
@@ -295,7 +294,23 @@ export async function GET(request: NextRequest) {
       ;[venues, totalCount] = await Promise.all([pageRead, count])
     }
 
-    const liveNow = mayCountLive ? await liveBuckets(venues.map((v) => v.id), authUser.userId, now) : null
+    /*
+     * Each venue's upcoming events, counted beside the page. A relation `_count`
+     * in the select is a LEFT JOIN over a GROUP BY of every upcoming event on the
+     * platform; this is the page's venues only.
+     */
+    const pageIds = venues.map((v) => v.id)
+    const [liveNow, upcomingCounts] = await Promise.all([
+      mayCountLive ? liveBuckets(pageIds, authUser.userId, now) : null,
+      pageIds.length
+        ? db.events.groupBy({
+            by: ["venue_id"],
+            where: { venue_id: { in: pageIds }, ...upcomingEventFilter },
+            _count: { _all: true },
+          })
+        : [],
+    ])
+    const upcomingOf = new Map(upcomingCounts.map((c) => [c.venue_id, c._count._all]))
 
     const items = venues.map((venue) => {
       const next = venue.events[0]
@@ -329,7 +344,7 @@ export async function GET(request: NextRequest) {
         distance,
         // Tonight's opening from `venues.hours` in the venue's own zone, or null when none is given for its current day.
         tonight: tonightHours(venue, now),
-        upcomingEventCount: venue._count.events,
+        upcomingEventCount: upcomingOf.get(venue.id) ?? 0,
         liveNow: liveNow ? (liveNow.get(venue.id) ?? "quiet") : null,
         // `live`, `open` (open tonight) or `quiet`: the tier `order=live` ranks by. Under that order
         // it is read from the very sets that ordered the page; otherwise by the same rule, per venue.

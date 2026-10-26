@@ -57,6 +57,7 @@ const READERS: Record<string, string> = {
   "lib/polls.ts#getPollResults": "polls are an event room's: the URL's event must be the room's, else not found",
   "lib/polls.ts#castVote": "polls are an event room's: the URL's event must be the room's, else not found",
   "lib/sentiment-sweeper.ts#sweepSentiment": "selects event rooms only (kind = 'event')",
+  "lib/chat-group-rows.ts#buildChatRows": "a Blend room's last speaker, by the event its occurrence names (the room itself has none): a Blend without one is 'Attendee', and the pair is skipped from the read",
   "lib/socket-server.ts#emitChatTyping": "a venue day's liveness, asked only when there is an event; the door (roomOwnerDenial) runs first",
   "lib/room-delivery.ts#pushReplyAuthor": "a venue day's liveness for the reply push, asked only when there is an event; the door runs first",
   "lib/crews/blends.ts#blendsOf":

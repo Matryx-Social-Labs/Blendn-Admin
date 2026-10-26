@@ -62,6 +62,17 @@ export async function canJoinConversation(
     where: { id: conversationId },
     select: { user1_id: true, user2_id: true, closed_at: true },
   })
+  return mayUseConversation(conversation, userId)
+}
+
+/**
+ * The rule behind `canJoinConversation`, for a caller that has already read the
+ * row (with more columns) and should not read it twice.
+ */
+export function mayUseConversation(
+  conversation: { user1_id: string; user2_id: string; closed_at?: Date | null } | null,
+  userId: string
+): boolean {
   if (!conversation) return false
   // A closed conversation is not joinable. Without this, typing indicators and
   // read receipts keep flowing between two people after one of them unmatched

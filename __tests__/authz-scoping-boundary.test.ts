@@ -151,6 +151,7 @@ describe("authorization is not hand-rolled outside lib/rbac.ts", () => {
  * count over the venues an attendee is browsing is a different question.
  */
 const VENUE_IN_READS_ALLOWED = new Map([
+  ["app/api/mobile/venues/route.ts", "the attendee's Places list: how many public upcoming events each venue on the page has (was a relation `_count`); a number on a card, nothing per person, nothing to an owner"],
   ["lib/live-count.ts", "who is live at the venues on an attendee's list or venue page, kept as a bucket; nothing per person reaches anyone, nothing reaches an owner"],
   ["lib/venue-plan.ts", "a venue's purchases (`billing_checkouts.venue_id`, step 17), not its events"],
   ["lib/places-inside.ts", "today's Go Live day at the venues around one attendee, for their own disc (SCRUM-704); nothing per person, nothing to an owner"],
@@ -185,6 +186,7 @@ const VENUE_ID_READ = /\b(?:where|event|events)\s*:\s*\{[^{}]*\bvenue_id\s*:(?!\
  * Anything else that does must go through `claimedWindow()`.
  */
 const VENUE_ID_READS_ALLOWED = new Map([
+  ["app/api/mobile/venues/route.ts", "the attendee's Places list: a count of public upcoming events per venue on the page; nothing per person, nothing to an owner"],
   ["lib/venue-actions.ts", "counts future bookings to refuse a retire; nothing is shown"],
   ["lib/venue-claim-actions.ts", "venue_claims rows, not events"],
   ["lib/venue-day.ts", "finds the venue's own day to go live in; nothing is shown to an owner"],

@@ -320,6 +320,11 @@ same rule the Grid card already applied. Blocks are honoured in both directions 
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
 
+**A roster row's `location` can be null.** A profile location stored as
+coordinates is turned into a city name, at most three such lookups per page
+(the geocoder's budget, cached afterwards); a row past the budget says `null`
+until a later page or request has resolved it. Raw coordinates are never returned.
+
 **The roster is everyone checked in.** It used to be filtered on `onboarded`, a
 non-null name and a non-empty `photos` array — three fields the endpoint does not
 serve. Someone who had passed the GPS gate and was standing in the room was

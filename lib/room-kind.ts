@@ -178,7 +178,11 @@ function blendSelect(viewerIds: string[]) {
       b_user_id: true,
       // At the occurrence: a check-in there, whenever (attendance outlives presence).
       occurrence: {
-        select: { check_ins: { where: { user_id: { in: viewerIds }, check_in_time: { not: null } }, select: { user_id: true } } },
+        select: {
+          // The event whose room names a Blend's people (`namesInRoom`): carried so the chat list need not ask.
+          event_id: true,
+          check_ins: { where: { user_id: { in: viewerIds }, check_in_time: { not: null } }, select: { user_id: true } },
+        },
       },
       a_crew: blendSideSelect(viewerIds),
       b_crew: blendSideSelect(viewerIds),
