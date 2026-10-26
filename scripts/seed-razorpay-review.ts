@@ -2,71 +2,83 @@
  * The dashboard account Razorpay's website reviewer signs in with
  * (docs/RAZORPAY-SUBMISSION.md).
  *
- *   npm run seed:razorpay-review                     # dry run: says what it would do
- *   RAZORPAY_REVIEW_PASSWORD=... npm run seed:razorpay-review -- --apply
- *   npm run seed:razorpay-review -- --remove --apply # after approval: tear it down
- *   ... --apply --production                         # production: the owner runs or approves this
+ *   npx tsx scripts/seed-razorpay-review.ts                     # dry run: says what it would do
+ *   read -s RAZORPAY_REVIEW_PASSWORD; export RAZORPAY_REVIEW_PASSWORD
+ *   npx tsx scripts/seed-razorpay-review.ts --apply             # create, or repair what it made
+ *   npx tsx scripts/seed-razorpay-review.ts --remove --apply    # after approval: take it down
+ *   ... --production                                            # production: the owner runs or approves it
  *
- * (`npm run` eats `--flags` on npm 11; if it does, call `npx tsx
- * scripts/seed-razorpay-review.ts --apply` directly.)
+ * (`npm run seed:razorpay-review` works too, but npm 11 can eat `--flags`.)
  *
  * ## What it makes
  *
- * One organiser, never an admin, as the owner of its OWN organisation, with
- * one draft event at a free-text venue. An organiser because that is the role
- * the Plan page sells to — Analytics and the Event Pass, with Razorpay
- * Checkout (`app/dashboard/plan/page.tsx`); a venue owner's Venue Pro is
- * refused until a venue has four weeks of data, so a fresh demo venue would
- * show the reviewer a locked button. Its own organisation, so it sees a
- * realistic dashboard and nobody else's people.
+ * `razorpay.review@blendn.app`, an organizer (never an admin), owning its own
+ * organisation with one draft, private event at a free-text venue. An
+ * organizer because that is the role the Plan page sells to, with Razorpay
+ * Checkout; a venue owner's Venue Pro is refused until a venue has four weeks
+ * of data. Its own organisation, so it sees no real person's data.
  *
- * ## Why app users never see any of it
+ * ## It never takes over an account it did not make
  *
- * `review_demo` is not an exclusion: it is the App Review geofence bypass,
- * and the App Store review event is public on purpose. What hides an event
- * from every attendee read is `status = 'draft'`: lists ask for `published`,
- * and a single-event read answers not found for a draft
- * (`attendeeEventAccess`, lib/event-access.ts). It is also `private`, so
- * publishing it by accident still lists it to nobody. There is no `venues`
- * row — a venue nobody claimed is listed in Places, and the event's
- * `venue_name` is only text. The account has no profile, check-in or RSVP,
- * so it is in no room, roster or match list.
+ * What it made is what a `razorpay_review.seeded` audit row names: the user,
+ * the organisation (the row's resource) and the event. Never an email match,
+ * a name or a slug. So it refuses, writing nothing, when:
+ *
+ * - somebody already has the address and no seeded row names them;
+ * - its user is in any other organisation, or its organisation has anybody else;
+ * - its user's role was changed (an admin did that on purpose), or an admin
+ *   suspended it (moderation is never undone by a re-run).
+ *
+ * ## Nothing reaches a real person
+ *
+ * The event is a draft (every attendee read refuses one: lists ask for
+ * `published`, `attendeeEventAccess` answers not found) and private. The
+ * server refuses to publish any of the organisation's events, add a venue,
+ * link a venue or invite anyone (`lib/review-demo-org.ts`); the mobile
+ * app refuses an organizer's sign-in (`accountBlockReason`: "staff").
+ * `review_demo` is not used: it is the App Review geofence bypass, not a
+ * hiding rule.
  *
  * ## Where it may run
  *
- * Staging and a database on this machine, like `scripts/test-accounts.ts`.
- * Anything else — production — only with `--production`, which the owner
- * passes. The password comes from `RAZORPAY_REVIEW_PASSWORD` and is never
- * printed: only the email and ids are.
+ * Staging and a database on this machine, like `scripts/test-accounts.ts`;
+ * anything else only with `--production`, which the owner passes. The
+ * password comes from `RAZORPAY_REVIEW_PASSWORD` and is never printed.
  *
  * ## Idempotent
  *
- * Found by email, organisation name and event slug, so a second run changes
- * nothing but the password (re-hashed only when it changed) and puts back a
- * suspension, deletion or role somebody changed. Each applied run writes one
- * audit row on the organisation.
+ * A re-run finds its rows by the ids in the last seeded audit row, resets the
+ * password (re-hashed only when it changed) and makes nothing twice. The
+ * writes are one transaction; the event's occurrences are synced after it
+ * commits (`syncOccurrences` uses the app's own client), and a re-run
+ * repairs them if that step failed.
  */
 import { PrismaPg } from "@prisma/adapter-pg"
-import { PrismaClient } from "@prisma/client"
+import { Prisma, PrismaClient } from "@prisma/client"
 import bcrypt from "bcryptjs"
 
 import { auditInTx } from "../lib/audit-log"
+import { realEventsWhere } from "../lib/event-kind"
 import { syncOccurrences } from "../lib/occurrences"
 import { checkPassword } from "../lib/password"
+import { RAZORPAY_REVIEW_REMOVED, RAZORPAY_REVIEW_SEEDED } from "../lib/review-demo-org"
 
-export const REVIEW_EMAIL_DEFAULT = "razorpay.review@blendn.app"
+export const REVIEW_EMAIL = "razorpay.review@blendn.app"
 export const REVIEW_ORG_NAME = "Demo Events Co (Razorpay review)"
-export const REVIEW_EVENT_SLUG = "razorpay-review-demo-event"
 /** The one role this script ever gives. Never `app_admin`: that reads every real user. */
 export const REVIEW_ROLE = "organizer" as const
+/** Written on the account by `--remove`; the only suspension a re-run may lift. */
+export const REMOVED_REASON = "Razorpay review account removed"
 
 /** Same cost as `test-accounts.ts`. */
 const HASH_COST = 12
 const DAY_MS = 24 * 60 * 60 * 1000
 const EVENT_LEAD_DAYS = 14
 const EVENT_HOURS = 4
+const TIMEZONE = "Asia/Kolkata"
 
 type Env = Record<string, string | undefined>
+type Tx = Prisma.TransactionClient
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
 
 export interface Flags {
@@ -99,19 +111,13 @@ export function environmentRefusal(env: Env, flags: Pick<Flags, "production">): 
   )
 }
 
+/** The address and the organisation's name. Fixed: tests pass their own, nothing else does. */
 export interface ReviewWorld {
   email: string
   orgName: string
-  eventSlug: string
 }
 
-export function worldFrom(env: Env): ReviewWorld {
-  return {
-    email: (env.RAZORPAY_REVIEW_EMAIL?.trim() || REVIEW_EMAIL_DEFAULT).toLowerCase(),
-    orgName: REVIEW_ORG_NAME,
-    eventSlug: REVIEW_EVENT_SLUG,
-  }
-}
+export const WORLD: ReviewWorld = { email: REVIEW_EMAIL, orgName: REVIEW_ORG_NAME }
 
 export interface Seeded {
   userId: string
@@ -119,11 +125,46 @@ export interface Seeded {
   eventId: string
 }
 
+/** What the last seeded row says this script made for that user, or null if it never made them. */
+async function madeBefore(db: Tx, userId: string): Promise<{ orgId: string; eventId: string | null } | null> {
+  const row = await db.audit_logs.findFirst({
+    where: { action: RAZORPAY_REVIEW_SEEDED, details: { path: ["userId"], equals: userId } },
+    orderBy: { created_at: "desc" },
+    select: { resource_id: true, details: true },
+  })
+  if (!row?.resource_id) return null
+  const details = (row.details ?? {}) as { eventId?: unknown }
+  return { orgId: row.resource_id, eventId: typeof details.eventId === "string" ? details.eventId : null }
+}
+
+class Refused extends Error {}
+
+/** The existing account's state, refused unless it is ours and nobody has moderated it. */
+async function ourAccount(db: Tx, email: string) {
+  const user = await db.user.findUnique({
+    where: { email },
+    select: { id: true, role: true, password: true, deletedAt: true, suspended_at: true, suspension_reason: true },
+  })
+  if (!user) return null
+  const prior = await madeBefore(db, user.id)
+  if (!prior) throw new Refused(`${email} belongs to an account this script did not create. Nothing written.`)
+  if (user.role !== REVIEW_ROLE) {
+    throw new Refused(`${email} has role ${user.role}; somebody changed it. Nothing written — change it back by hand if that was a mistake.`)
+  }
+  const ourRemoval = user.suspension_reason === REMOVED_REASON
+  if ((user.suspended_at || user.deletedAt) && !ourRemoval) {
+    throw new Refused(`${email} was suspended or deleted by somebody else. A re-run does not undo moderation. Nothing written.`)
+  }
+  const others = await db.organisation_members.count({ where: { user_id: user.id, org_id: { not: prior.orgId } } })
+  if (others > 0) throw new Refused(`${email} is in ${others} other organisation(s). Nothing written.`)
+  return { user, prior }
+}
+
 /**
- * Create or repair the account, its organisation and its draft event.
- * Refuses (before any query) a database it may not touch, a password the
- * product would refuse, and an organisation by that name that has somebody
- * else in it.
+ * Create the account, its organisation and its draft event, or repair what an
+ * earlier run made. Refuses (before any query) a database it may not touch and
+ * a password the product would refuse; refuses (before any write) anything it
+ * did not make.
  */
 export async function ensureRazorpayReviewAccount(
   db: PrismaClient,
@@ -137,104 +178,124 @@ export async function ensureRazorpayReviewAccount(
   if (!password) throw new Error("RAZORPAY_REVIEW_PASSWORD is not set")
   const check = checkPassword(password, world.email)
   if (!check.ok) throw new Error(`RAZORPAY_REVIEW_PASSWORD refused: ${check.message}`)
+  const fresh = await bcrypt.hash(password, HASH_COST)
 
-  const userId = await upsertUser(db, world.email, password)
-  const orgId = await upsertOrg(db, world.orgName, userId)
+  const seeded = await db.$transaction(async (tx) => {
+    const ours = await ourAccount(tx, world.email)
+    const userId = ours ? await repairUser(tx, ours.user, password, fresh) : await createUser(tx, world.email, fresh)
+    const orgId = await ensureOrg(tx, ours?.prior.orgId ?? null, world.orgName, userId)
+    const eventId = await ensureEvent(tx, ours?.prior.eventId ?? null, userId, orgId)
+    await auditInTx(tx, {
+      action: RAZORPAY_REVIEW_SEEDED,
+      resource: "organisation",
+      resourceId: orgId,
+      orgId,
+      details: { userId, eventId, email: world.email, environment: env.RAILWAY_ENVIRONMENT_NAME ?? hostOf(env.DATABASE_URL) },
+    })
+    return { userId, orgId, eventId }
+  })
 
-  await db.organisation_members.upsert({
+  // After the commit: `syncOccurrences` writes through the app's own client.
+  const event = await db.events.findUniqueOrThrow({ where: { id: seeded.eventId }, select: { start_time: true, end_time: true } })
+  await syncOccurrences(seeded.eventId, event.start_time, event.end_time, TIMEZONE)
+  return seeded
+}
+
+async function createUser(tx: Tx, email: string, hash: string): Promise<string> {
+  const created = await tx.user.create({
+    data: {
+      email,
+      name: "Razorpay Reviewer",
+      password: hash,
+      role: REVIEW_ROLE,
+      // Verified, or a Google sign-in at this address would take the account
+      // over and null the password (`seed-review-account.ts`).
+      emailVerified: new Date(),
+    },
+    select: { id: true },
+  })
+  return created.id
+}
+
+async function repairUser(
+  tx: Tx,
+  user: { id: string; password: string | null; deletedAt: Date | null; suspension_reason: string | null },
+  password: string,
+  hash: string
+): Promise<string> {
+  const unchanged = user.password ? await bcrypt.compare(password, user.password) : false
+  await tx.user.update({
+    where: { id: user.id },
+    data: {
+      ...(!unchanged && { password: hash }),
+      // Only our own `--remove` is lifted; `ourAccount` refused anything else.
+      ...(user.suspension_reason === REMOVED_REASON && {
+        deletedAt: null,
+        suspended_at: null,
+        suspended_by: null,
+        suspension_reason: null,
+      }),
+    },
+  })
+  return user.id
+}
+
+/** The organisation an earlier run made, by id; a new one if there is none. Never one found by name. */
+async function ensureOrg(tx: Tx, priorOrgId: string | null, name: string, userId: string): Promise<string> {
+  const prior = priorOrgId
+    ? await tx.organisations.findUnique({ where: { id: priorOrgId }, select: { id: true, members: { select: { user_id: true } } } })
+    : null
+  if (prior && prior.members.some((m) => m.user_id !== userId)) {
+    throw new Refused(`The review organisation ${prior.id} has other members. Nothing written.`)
+  }
+  const orgId = prior
+    ? (
+        await tx.organisations.update({
+          where: { id: prior.id },
+          data: { status: "verified", suspended_at: null, suspension_reason: null },
+          select: { id: true },
+        })
+      ).id
+    : (
+        await tx.organisations.create({
+          data: { display_name: name, kind: "company", status: "verified", verified_at: new Date() },
+          select: { id: true },
+        })
+      ).id
+  await tx.organisation_members.upsert({
     where: { org_id_user_id: { org_id: orgId, user_id: userId } },
     update: { role: "owner" },
     create: { org_id: orgId, user_id: userId, role: "owner", is_primary_contact: true },
   })
-
-  const eventId = await upsertEvent(db, world.eventSlug, userId, orgId)
-
-  await auditInTx(db, {
-    action: "razorpay_review.seeded",
-    resource: "organisation",
-    resourceId: orgId,
-    orgId,
-    details: { userId, eventId, email: world.email, environment: env.RAILWAY_ENVIRONMENT_NAME ?? hostOf(env.DATABASE_URL) },
-  })
-  return { userId, orgId, eventId }
+  return orgId
 }
 
-async function upsertUser(db: PrismaClient, email: string, password: string): Promise<string> {
-  const existing = await db.user.findUnique({ where: { email }, select: { id: true, password: true } })
-  if (!existing) {
-    const created = await db.user.create({
-      data: {
-        email,
-        name: "Razorpay Reviewer",
-        password: await bcrypt.hash(password, HASH_COST),
-        role: REVIEW_ROLE,
-        // Verified, or a Google sign-in at this address would take the account
-        // over and null the password (`seed-review-account.ts`).
-        emailVerified: new Date(),
-      },
-      select: { id: true },
-    })
-    return created.id
-  }
-  const unchanged = existing.password ? await bcrypt.compare(password, existing.password) : false
-  await db.user.update({
-    where: { id: existing.id },
-    data: {
-      role: REVIEW_ROLE,
-      deletedAt: null,
-      suspended_at: null,
-      suspended_by: null,
-      suspension_reason: null,
-      emailVerified: new Date(),
-      ...(!unchanged && { password: await bcrypt.hash(password, HASH_COST) }),
-    },
-  })
-  return existing.id
-}
-
-/** Its own organisation: refused if anyone but the reviewer has ever been a member. */
-async function upsertOrg(db: PrismaClient, displayName: string, userId: string): Promise<string> {
-  const existing = await db.organisations.findFirst({
-    where: { display_name: displayName },
-    select: { id: true, members: { select: { user_id: true } } },
-  })
-  if (!existing) {
-    const created = await db.organisations.create({
-      data: { display_name: displayName, kind: "company", status: "verified", verified_at: new Date() },
-      select: { id: true },
-    })
-    return created.id
-  }
-  const others = existing.members.filter((m) => m.user_id !== userId)
-  if (others.length > 0) {
-    throw new Error(`"${displayName}" has ${others.length} other member(s); it is not the review organisation. Nothing written.`)
-  }
-  await db.organisations.update({
-    where: { id: existing.id },
-    data: { status: "verified", suspended_at: null, suspension_reason: null },
-  })
-  return existing.id
-}
-
-/** A draft, private event two weeks out; moved forward if a past run's has gone by. */
-async function upsertEvent(db: PrismaClient, slug: string, userId: string, orgId: string): Promise<string> {
+/** The event an earlier run made, by id, kept a draft; a new one if it is gone. */
+async function ensureEvent(tx: Tx, priorEventId: string | null, userId: string, orgId: string): Promise<string> {
+  const hidden = { status: "draft", visibility: "private", pre_suspension_status: null } as const
+  const prior = priorEventId
+    ? await tx.events.findFirst({
+        where: { id: priorEventId, organizer_org_id: orgId, deleted_at: null, ...realEventsWhere },
+        select: { id: true, start_time: true },
+      })
+    : null
   const start = new Date(Date.now() + EVENT_LEAD_DAYS * DAY_MS)
   start.setUTCMinutes(30, 0, 0)
   const end = new Date(start.getTime() + EVENT_HOURS * 60 * 60 * 1000)
-  const existing = await db.events.findUnique({ where: { slug }, select: { id: true, start_time: true, end_time: true } })
 
-  const hidden = { status: "draft", visibility: "private", deleted_at: null, organizer_id: userId, organizer_org_id: orgId } as const
-  if (existing) {
-    const stale = existing.start_time.getTime() < Date.now()
-    await db.events.update({ where: { id: existing.id }, data: { ...hidden, ...(stale && { start_time: start, end_time: end }) } })
-    await syncOccurrences(existing.id, stale ? start : existing.start_time, stale ? end : existing.end_time, "Asia/Kolkata")
-    return existing.id
+  if (prior) {
+    const stale = prior.start_time.getTime() < Date.now()
+    await tx.events.update({ where: { id: prior.id }, data: { ...hidden, ...(stale && { start_time: start, end_time: end }) } })
+    return prior.id
   }
-  const created = await db.events.create({
+  const created = await tx.events.create({
     data: {
       ...hidden,
-      slug,
+      // Unique, and never looked up: the event is found by the id in the audit row.
+      slug: `razorpay-review-demo-${Date.now().toString(36)}`,
       kind: "event",
+      organizer_id: userId,
+      organizer_org_id: orgId,
       title: "Rooftop Sessions: Live Set (demo)",
       description:
         "A demo event for reviewing the dashboard. An evening of live music on a rooftop: doors at 7, first set at 8. " +
@@ -249,13 +310,11 @@ async function upsertEvent(db: PrismaClient, slug: string, userId: string, orgId
       longitude: 77.6068,
       start_time: start,
       end_time: end,
-      timezone: "Asia/Kolkata",
+      timezone: TIMEZONE,
       max_capacity: 120,
     },
     select: { id: true },
   })
-  // Every event the dashboard makes has its occurrences; the event pages read them.
-  await syncOccurrences(created.id, start, end, "Asia/Kolkata")
   return created.id
 }
 
@@ -263,16 +322,19 @@ export interface Removed {
   userId: string | null
   orgId: string | null
   eventsDeleted: number
-  orgDeleted: boolean
-  billingRowsKept: number
+  venuesRetired: number
 }
 
 /**
- * Take it all down after approval. The event goes; the membership goes; the
- * account is closed (deleted and suspended, password cleared — the product's
- * own soft delete, so a later `--apply` can bring it back); the organisation
- * is deleted unless it has billing records, which are tax records and keep it
- * (suspended) — `billing_checkouts.org_id` is Restrict for that reason.
+ * Take it down after approval, in one transaction. Every event of the
+ * organisation — whatever the reviewer renamed or added — is soft-deleted,
+ * published ones first flipped to draft as an organisation suspension does
+ * (`setOrganisationStatus`); soft, because an Event Pass or a payment points
+ * at an event with ON DELETE RESTRICT and is a tax record. Venues it added,
+ * unclaimed or still its own, are retired as `retireVenue` does. The
+ * organisation is suspended (never deleted: billing rows are Restrict) and the
+ * account closed with `REMOVED_REASON`, the one state a later `--apply` may
+ * bring back. Refuses an account this script did not make.
  */
 export async function removeRazorpayReviewAccount(
   db: PrismaClient,
@@ -283,67 +345,51 @@ export async function removeRazorpayReviewAccount(
   const refusal = environmentRefusal(env, flags)
   if (refusal) throw new Error(`REFUSING: ${refusal}`)
 
-  const user = await db.user.findUnique({ where: { email: world.email }, select: { id: true } })
-  const org = await db.organisations.findFirst({
-    where: { display_name: world.orgName },
-    select: { id: true, members: { select: { user_id: true } } },
-  })
-  if (org && org.members.some((m) => m.user_id !== user?.id)) {
-    throw new Error(`"${world.orgName}" has other members; it is not the review organisation. Nothing removed.`)
-  }
+  return db.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({ where: { email: world.email }, select: { id: true } })
+    if (!user) return { userId: null, orgId: null, eventsDeleted: 0, venuesRetired: 0 }
+    const prior = await madeBefore(tx, user.id)
+    if (!prior) throw new Refused(`${world.email} belongs to an account this script did not create. Nothing removed.`)
+    const orgId = prior.orgId
+    const strangers = await tx.organisation_members.count({ where: { org_id: orgId, user_id: { not: user.id } } })
+    if (strangers > 0) throw new Refused(`The review organisation ${orgId} has other members. Nothing removed.`)
 
-  const { count: eventsDeleted } = await db.events.deleteMany({
-    where: { slug: world.eventSlug, ...(org ? { organizer_org_id: org.id } : {}) },
-  })
-
-  let orgDeleted = false
-  let billingRowsKept = 0
-  if (org) {
-    await db.organisation_members.deleteMany({ where: { org_id: org.id } })
-    billingRowsKept = await db.billing_checkouts.count({ where: { org_id: org.id } })
-    if (billingRowsKept === 0) {
-      await db.organisations.delete({ where: { id: org.id } })
-      orgDeleted = true
-    } else {
-      await db.organisations.update({
-        where: { id: org.id },
-        data: { status: "suspended", suspended_at: new Date(), suspension_reason: "Razorpay review finished" },
-      })
-    }
-  }
-
-  if (user) {
-    await db.user.update({
+    const now = new Date()
+    await tx.events.updateMany({
+      where: { organizer_org_id: orgId, ...realEventsWhere, status: "published", deleted_at: null },
+      data: { status: "draft", pre_suspension_status: "published" },
+    })
+    const { count: eventsDeleted } = await tx.events.updateMany({
+      where: { organizer_org_id: orgId, ...realEventsWhere, deleted_at: null },
+      data: { deleted_at: now },
+    })
+    const { count: venuesRetired } = await tx.venues.updateMany({
+      where: { created_by_org_id: orgId, deleted_at: null, OR: [{ owner_org_id: null }, { owner_org_id: orgId }] },
+      data: { deleted_at: now, status: "archived" },
+    })
+    await tx.organisations.update({
+      where: { id: orgId },
+      data: { status: "suspended", suspended_at: now, suspension_reason: "Razorpay review finished" },
+    })
+    await tx.user.update({
       where: { id: user.id },
-      data: {
-        deletedAt: new Date(),
-        suspended_at: new Date(),
-        suspension_reason: "Razorpay review account removed",
-        password: null,
-        sessions_revoked_at: new Date(),
-      },
+      data: { deletedAt: now, suspended_at: now, suspension_reason: REMOVED_REASON, password: null, sessions_revoked_at: now },
     })
-  }
-
-  if (user || org) {
-    // On the organisation while it exists; the platform's alone once it is gone.
-    const onOrg = org && !orgDeleted
-    await auditInTx(db, {
-      action: "razorpay_review.removed",
-      resource: onOrg ? "organisation" : "user",
-      resourceId: onOrg ? org.id : user?.id,
-      orgId: onOrg ? org.id : null,
-      details: { userId: user?.id ?? null, orgId: org?.id ?? null, eventsDeleted, orgDeleted, billingRowsKept },
+    await auditInTx(tx, {
+      action: RAZORPAY_REVIEW_REMOVED,
+      resource: "organisation",
+      resourceId: orgId,
+      orgId,
+      details: { userId: user.id, eventsDeleted, venuesRetired },
     })
-  }
-  return { userId: user?.id ?? null, orgId: org?.id ?? null, eventsDeleted, orgDeleted, billingRowsKept }
+    return { userId: user.id, orgId, eventsDeleted, venuesRetired }
+  })
 }
 
 /* -------------------------------------------------------------------------- */
 
 async function main() {
   const flags = parseFlags(process.argv.slice(2))
-  const world = worldFrom(process.env)
   const where = `${hostOf(process.env.DATABASE_URL)} (${process.env.RAILWAY_ENVIRONMENT_NAME ?? "no Railway environment"})`
   console.log(`Razorpay review account → ${where}`)
 
@@ -354,36 +400,31 @@ async function main() {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) })
   try {
     if (!flags.apply) {
-      const [user, org, event] = await Promise.all([
-        db.user.findUnique({ where: { email: world.email }, select: { id: true, role: true, deletedAt: true } }),
-        db.organisations.findFirst({ where: { display_name: world.orgName }, select: { id: true, status: true } }),
-        db.events.findUnique({ where: { slug: world.eventSlug }, select: { id: true, status: true } }),
-      ])
+      const user = await db.user.findUnique({ where: { email: WORLD.email }, select: { id: true, role: true, deletedAt: true } })
+      const prior = user ? await madeBefore(db, user.id) : null
       console.log(`  DRY RUN — nothing written. Would ${flags.remove ? "remove" : "create or repair"}:`)
-      console.log(`  user   ${world.email}  ${user ? `${user.id} (${user.role}${user.deletedAt ? ", deleted" : ""})` : "(new)"}`)
-      console.log(`  org    ${world.orgName}  ${org ? `${org.id} (${org.status})` : "(new)"}`)
-      console.log(`  event  ${world.eventSlug}  ${event ? `${event.id} (${event.status})` : "(new)"}`)
-      console.log(`  Run again with --apply${flags.remove ? "" : " and RAZORPAY_REVIEW_PASSWORD set"}.`)
+      console.log(`  user   ${WORLD.email}  ${user ? `${user.id} (${user.role}${user.deletedAt ? ", closed" : ""})` : "(new)"}`)
+      if (user && !prior) console.log("  !  that address belongs to an account this script did not create: --apply will refuse")
+      console.log(`  org    ${prior?.orgId ?? "(new)"}`)
+      console.log(`  event  ${prior?.eventId ?? "(new)"}`)
+      console.log(`  Run again with --apply${flags.remove ? "" : " and RAZORPAY_REVIEW_PASSWORD exported"}.`)
       return
     }
     if (flags.remove) {
-      const r = await removeRazorpayReviewAccount(db, world, process.env, flags)
-      console.log(`  removed: user ${r.userId ?? "(none)"} closed, ${r.eventsDeleted} event(s) deleted,`)
+      const r = await removeRazorpayReviewAccount(db, WORLD, process.env, flags)
       console.log(
-        r.orgDeleted
-          ? `  organisation ${r.orgId} deleted`
-          : r.orgId
-            ? `  organisation ${r.orgId} kept and suspended: ${r.billingRowsKept} billing record(s) are tax records`
-            : "  no organisation found"
+        r.userId
+          ? `  removed: user ${r.userId} closed, organisation ${r.orgId} suspended, ${r.eventsDeleted} event(s) deleted, ${r.venuesRetired} venue(s) retired`
+          : "  nothing to remove"
       )
       return
     }
-    const s = await ensureRazorpayReviewAccount(db, process.env.RAZORPAY_REVIEW_PASSWORD ?? "", world, process.env, flags)
+    const s = await ensureRazorpayReviewAccount(db, process.env.RAZORPAY_REVIEW_PASSWORD ?? "", WORLD, process.env, flags)
     // The address and ids, never the password.
     console.log("  Razorpay review account ready.")
-    console.log(`  email         ${world.email}  (role ${REVIEW_ROLE}, owner of its organisation)`)
+    console.log(`  email         ${WORLD.email}  (role ${REVIEW_ROLE}, owner of its organisation)`)
     console.log(`  user id       ${s.userId}`)
-    console.log(`  org id        ${s.orgId}  "${world.orgName}"`)
+    console.log(`  org id        ${s.orgId}  "${WORLD.orgName}"`)
     console.log(`  event id      ${s.eventId}  (draft, private: never in the app)`)
     console.log("  Password: the value of RAZORPAY_REVIEW_PASSWORD. Put both in Razorpay's website details form.")
   } finally {

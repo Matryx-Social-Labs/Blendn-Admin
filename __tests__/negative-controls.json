@@ -32,19 +32,31 @@
     "which tests need a registry entry; it does not mean a behavioural test is",
     "automatically non-vacuous, only that it usually fails on its own terms.",
     "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574.",
-    "2026-10-26: M2203 to M2207 are feat/razorpay-verification's (policy pages, the Razorpay review seed, the policy-page frame guard), taken after origin/dev's last (M2202)."
+    "2026-10-26: M2203 to M2216 are feat/razorpay-verification's (policy pages, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "review-demo-org.test.ts": {
+      "guards": "Every server door that reaches a real person refuses Razorpay's review organisation: dashboard event create and PATCH, the mobile PATCH (publish, venue link), createVenue, inviteMember, sendDomainVerifyEmail; and reviewOrgRefusal asks nothing when a request publishes nothing and links no venue.",
+      "mutation": "M2208 the dashboard PATCH lost its `if (reviewRefusal) return`. M2209 createVenue's guard became `if (false)`. M2210 reviewOrgRefusal lost its early return, so every save queried.",
+      "observed": "M2208: 1 of 8 failing (app/api/events/[id]/route.ts PATCH). M2209: 1 of 8 failing (createVenue). M2210: 1 of 8 failing (asks nothing). Reverted; green.",
+      "date": "2026-10-26"
+    },
+    "seed-razorpay-review.itest.ts": {
+      "guards": "The Razorpay review seed never takes over an account it did not make, never lifts an admin's suspension, and --remove takes down every event and venue of its organisation (soft, so an Event Pass's RESTRICT holds) whatever the reviewer renamed.",
+      "mutation": "M2213 ourAccount treated an address with no seeded audit row as ours. M2214 --remove soft-deleted only the event id the audit row recorded. M2215 --remove hard-deleted the events. M2216 a re-run lifted any suspension.",
+      "observed": "M2213: 1 of 9 failing (an admin at the address had password and role overwritten). M2214: 1 of 9 failing (eventsDeleted 1, expected 2). M2215: 1 of 9 failing (entitlements_event_id_fkey refused the delete). M2216: 1 of 9 failing (the admin's suspension lifted). Reverted; green.",
+      "date": "2026-10-26"
+    },
     "policy-pages-public.test.ts": {
       "guards": "The public policy pages Razorpay verifies (pricing, about, contact, terms, privacy, refunds, shipping) stay outside the middleware matcher, each has a page, and the Terms body cut from docs/legal leaves no div open.",
-      "mutation": "M2203 middleware.ts's matcher gained \"/pricing\". M2204 lib/legal-html.ts stopped turning the generator's unclosed <div id> anchors into spans.",
-      "observed": "M2203: 1 of 20 failing (/pricing is outside the matcher). M2204: 1 of 20 failing (the div balance). Reverted; green.",
+      "mutation": "M2203 middleware.ts's matcher gained \"/pricing\". M2204 lib/legal-html.ts stopped turning the generator's unclosed <div id> anchors into spans. M2211 a <script> spliced into terms-of-use.html before section 32.",
+      "observed": "M2203: 1 of 20 failing (/pricing is outside the matcher). M2204: 1 of 20 failing (the div balance). Reverted; green. M2211: 1 of 21 failing (carries nothing that runs). Reverted; green.",
       "date": "2026-10-26"
     },
     "seed-razorpay-review.test.ts": {
       "guards": "The Razorpay reviewer seed refuses production without --production before any query, and its role is organizer, never app_admin.",
-      "mutation": "M2205 REVIEW_ROLE became \"app_admin\". M2206 environmentRefusal let RAILWAY_ENVIRONMENT_NAME=production through without the flag.",
-      "observed": "M2205: 1 of 10 failing (never an admin). M2206: 2 of 10 failing (the refusal and the no-query case). Reverted; green.",
+      "mutation": "M2205 REVIEW_ROLE became \"app_admin\". M2206 environmentRefusal let RAILWAY_ENVIRONMENT_NAME=production through without the flag. M2212 WORLD read RAZORPAY_REVIEW_EMAIL from the environment again.",
+      "observed": "M2205: 1 of 10 failing (never an admin). M2206: 2 of 10 failing (the refusal and the no-query case). Reverted; green. M2212: 1 of 10 failing (one fixed address). Reverted; green.",
       "date": "2026-10-26"
     },
     "dm-sender-sees-withheld.itest.ts": {

@@ -15,7 +15,8 @@ import {
   ensureRazorpayReviewAccount,
   parseFlags,
   removeRazorpayReviewAccount,
-  worldFrom,
+  REVIEW_EMAIL,
+  WORLD,
 } from "../scripts/seed-razorpay-review"
 
 const touched: string[] = []
@@ -27,7 +28,7 @@ const LAPTOP_TO_PROD = { DATABASE_URL: "postgresql://u:p@shuttle.proxy.rlwy.net:
 const STAGING = { RAILWAY_ENVIRONMENT_NAME: "staging", DATABASE_URL: "postgresql://u:p@db.internal:5432/railway" }
 const LOCAL = { DATABASE_URL: "postgresql://postgres:postgres@localhost:55433/blendn_test" }
 const PASSWORD = "Rzp-Review-Correct-Horse-26"
-const world = worldFrom({})
+const world = WORLD
 
 beforeEach(() => {
   touched.length = 0
@@ -84,14 +85,15 @@ describe("never an admin", () => {
   })
 })
 
-describe("flags and world", () => {
+describe("flags and address", () => {
   it("is a dry run unless --apply", () => {
     expect(parseFlags([])).toEqual({ apply: false, remove: false, production: false })
     expect(parseFlags(["--remove", "--apply", "--production"])).toEqual({ apply: true, remove: true, production: true })
   })
 
-  it("uses RAZORPAY_REVIEW_EMAIL when set, lower-cased", () => {
-    expect(worldFrom({}).email).toBe("razorpay.review@blendn.app")
-    expect(worldFrom({ RAZORPAY_REVIEW_EMAIL: " Reviewer@Example.com " }).email).toBe("reviewer@example.com")
+  it("has one fixed address: no environment override can point it at somebody else's account", () => {
+    expect(WORLD.email).toBe(REVIEW_EMAIL)
+    const source = readFileSync(path.join(__dirname, "../scripts/seed-razorpay-review.ts"), "utf8")
+    expect(source).not.toMatch(/RAZORPAY_REVIEW_EMAIL/)
   })
 })

@@ -60,6 +60,12 @@ describe("termsBody", () => {
     expect(body).toMatch(/dashboard\.blendn\.app\/refunds/)
   })
 
+  it("carries nothing that runs: no script, no inline handler, no javascript: link", () => {
+    expect(body).not.toMatch(/<script/i)
+    expect(body).not.toMatch(/\son\w+\s*=/i)
+    expect(body).not.toMatch(/javascript:/i)
+  })
+
   it("names the legal entity", () => {
     expect(body).toMatch(/Matryx Social Labs Private Limited/)
   })
