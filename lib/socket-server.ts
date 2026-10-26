@@ -1519,12 +1519,15 @@ export function emitEventCheckOuts(eventId: string, userIds: readonly string[]):
           const friends = friendsOf.get(userId) ?? new Set<string>()
           const blocked = blockedOf.get(userId) ?? []
           const shown = (viewer: string) => viewer === userId || (!hidden.has(userId) && !friends.has(viewer) && !blocked.includes(viewer))
+          // One leaver's failure never stops the rest of the room's copies (a ghost on every roster).
           await emitAsSeenBy(audience, eventId, "event:checkout", (idFor, _recognises, viewer) => ({
             eventId,
             ...(shown(viewer) ? { userId: idFor(userId) } : {}),
             checkOutTime,
             hereCount,
-          }))
+          })).catch((error: unknown) =>
+            logger.warn("Checkout emit failed for one leaver", { eventId, error: error instanceof Error ? error.message : String(error) })
+          )
           if (++told % CHECKOUT_EMIT_YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve))
         }
       })

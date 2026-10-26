@@ -218,43 +218,55 @@ async function checkOutChunk(items: readonly CheckoutItem[], reason: CheckoutRea
   const ats = items.map((i) => i.at.toISOString())
   // See `performCheckout`: an expiry acts only on the window it read, to the millisecond.
   const sameWindow = reason === "expired" ? Prisma.sql`AND c.expires_at < v.at + interval '1 millisecond'` : Prisma.empty
-  // Guarded in the statement, like the one-at-a-time write: a racing caller cannot make both act.
-  const rows = await db.$queryRaw<CheckedOutRow[]>`
-    WITH moved AS (
-      UPDATE event_check_ins c
-         SET status = 'checked_out', check_out_time = v.at, updated_at = v.at
-        FROM unnest(${ids}::uuid[], ${ats}::timestamptz[]) AS v(id, at)
-       WHERE c.id = v.id AND c.status = 'checked_in' ${sameWindow}
-   RETURNING c.id, c.event_id, c.user_id, c.occurrence_id, c.kind::text AS kind, v.at
-    )
-    -- any-kind: the rows are already chosen by id; this only reads each one's kind (a venue day cuts chat access)
-    SELECT m.*, e.kind::text AS event_kind FROM moved m JOIN events e ON e.id = m.event_id`
-  if (rows.length === 0) return []
+  /*
+   * The three writes commit together: a chunk is up to CHECKOUT_CHUNK people, and
+   * a failure between them would leave every one of them checked out with their
+   * sessions still open (the headcount stays high) and no chat cut. Side effects
+   * (evictions, emits, signals) run only after the commit.
+   */
+  const written = await db.$transaction(async (tx) => {
+    // Guarded in the statement, like the one-at-a-time write: a racing caller cannot make both act.
+    const rows = await tx.$queryRaw<CheckedOutRow[]>`
+      WITH moved AS (
+        UPDATE event_check_ins c
+           SET status = 'checked_out', check_out_time = v.at, updated_at = v.at
+          FROM unnest(${ids}::uuid[], ${ats}::timestamptz[]) AS v(id, at)
+         WHERE c.id = v.id AND c.status = 'checked_in' ${sameWindow}
+     RETURNING c.id, c.event_id, c.user_id, c.occurrence_id, c.kind::text AS kind, v.at
+      )
+      -- any-kind: the rows are already chosen by id; this only reads each one's kind (a venue day cuts chat access)
+      SELECT m.*, e.kind::text AS event_kind FROM moved m JOIN events e ON e.id = m.event_id`
+    if (rows.length === 0) return null
 
-  // The sessions, in the one place the checkouts pass through (see `performCheckout`).
-  await db.$executeRaw`
-    UPDATE presence_sessions ps
-       SET departed_at = GREATEST(v.at, ps.arrived_at), departed_source = ${DEPARTURE_SOURCE[reason]}::departure_source, updated_at = v.at
-      FROM unnest(${rows.map((r) => r.occurrence_id)}::uuid[], ${rows.map((r) => r.user_id)}::text[], ${rows.map((r) => r.at.toISOString())}::timestamptz[]) AS v(occ, usr, at)
-     WHERE ps.occurrence_id = v.occ AND ps.user_id = v.usr AND ps.departed_at IS NULL`
+    // The sessions, in the one place the checkouts pass through (see `performCheckout`).
+    await tx.$executeRaw`
+      UPDATE presence_sessions ps
+         SET departed_at = GREATEST(v.at, ps.arrived_at), departed_source = ${DEPARTURE_SOURCE[reason]}::departure_source, updated_at = v.at
+        FROM unnest(${rows.map((r) => r.occurrence_id)}::uuid[], ${rows.map((r) => r.user_id)}::text[], ${rows.map((r) => r.at.toISOString())}::timestamptz[]) AS v(occ, usr, at)
+       WHERE ps.occurrence_id = v.occ AND ps.user_id = v.usr AND ps.departed_at IS NULL`
 
-  const cut = rows.filter((r) => cutsChatAccess(reason, r.event_kind === "venue_day"))
-  if (cut.length > 0) {
-    const groups = await db.chat_groups.findMany({
-      where: { event_id: { in: [...new Set(cut.map((r) => r.event_id))] } },
-      select: { id: true, event_id: true },
-    })
-    const groupOf = new Map(groups.map((g) => [g.event_id, g.id]))
-    const members = cut.filter((r) => groupOf.has(r.event_id))
-    if (members.length > 0) {
-      await db.$executeRaw`
-        UPDATE chat_group_members m
-           SET last_allowed_at = v.at, updated_at = v.at
-          FROM unnest(${members.map((r) => groupOf.get(r.event_id))}::uuid[], ${members.map((r) => r.user_id)}::text[], ${members.map((r) => r.at.toISOString())}::timestamptz[]) AS v(grp, usr, at)
-         WHERE m.chat_group_id = v.grp AND m.user_id = v.usr`
+    const cut = rows.filter((r) => cutsChatAccess(reason, r.event_kind === "venue_day"))
+    const groupOf = new Map<string, string>()
+    if (cut.length > 0) {
+      const groups = await tx.chat_groups.findMany({
+        where: { event_id: { in: [...new Set(cut.map((r) => r.event_id))] } },
+        select: { id: true, event_id: true },
+      })
+      for (const g of groups) if (g.event_id) groupOf.set(g.event_id, g.id)
+      const members = cut.filter((r) => groupOf.has(r.event_id))
+      if (members.length > 0) {
+        await tx.$executeRaw`
+          UPDATE chat_group_members m
+             SET last_allowed_at = v.at, updated_at = v.at
+            FROM unnest(${members.map((r) => groupOf.get(r.event_id))}::uuid[], ${members.map((r) => r.user_id)}::text[], ${members.map((r) => r.at.toISOString())}::timestamptz[]) AS v(grp, usr, at)
+           WHERE m.chat_group_id = v.grp AND m.user_id = v.usr`
+      }
     }
-    for (const r of cut) if (r.event_kind === "venue_day") evictFromVenueDay(r.event_id, groupOf.get(r.event_id) ?? null, r.user_id, reason)
-  }
+    return { rows, cut, groupOf }
+  })
+  if (!written) return []
+  const { rows, cut, groupOf } = written
+  for (const r of cut) if (r.event_kind === "venue_day") evictFromVenueDay(r.event_id, groupOf.get(r.event_id) ?? null, r.user_id, reason)
 
   // After their arrival's broadcast, never before it (see `performCheckout`).
   await Promise.all(rows.map((r) => arrivalAnnounced(r.event_id, r.user_id)))
