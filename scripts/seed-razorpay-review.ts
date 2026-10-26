@@ -8,7 +8,8 @@
  *   npx tsx scripts/seed-razorpay-review.ts --remove --apply    # after approval: take it down
  *   ... --production                                            # production: the owner runs or approves it
  *
- * (`npm run seed:razorpay-review` works too, but npm 11 can eat `--flags`.)
+ * No npm script on purpose: npm 11 eats `--flags`, and touching package.json
+ * puts a PR under the dependency audit gate.
  *
  * ## What it makes
  *
