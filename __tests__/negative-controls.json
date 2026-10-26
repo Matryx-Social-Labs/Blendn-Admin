@@ -31,9 +31,22 @@
     "took a raw-SQL assertion to see the difference. The rule still holds for",
     "which tests need a registry entry; it does not mean a behavioural test is",
     "automatically non-vacuous, only that it usually fails on its own terms.",
-    "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574."
+    "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574.",
+    "2026-10-26: M2203 to M2207 are feat/razorpay-verification's (policy pages, the Razorpay review seed, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "policy-pages-public.test.ts": {
+      "guards": "The public policy pages Razorpay verifies (pricing, about, contact, terms, privacy, refunds, shipping) stay outside the middleware matcher, each has a page, and the Terms body cut from docs/legal leaves no div open.",
+      "mutation": "M2203 middleware.ts's matcher gained \"/pricing\". M2204 lib/legal-html.ts stopped turning the generator's unclosed <div id> anchors into spans.",
+      "observed": "M2203: 1 of 20 failing (/pricing is outside the matcher). M2204: 1 of 20 failing (the div balance). Reverted; green.",
+      "date": "2026-10-26"
+    },
+    "seed-razorpay-review.test.ts": {
+      "guards": "The Razorpay reviewer seed refuses production without --production before any query, and its role is organizer, never app_admin.",
+      "mutation": "M2205 REVIEW_ROLE became \"app_admin\". M2206 environmentRefusal let RAILWAY_ENVIRONMENT_NAME=production through without the flag.",
+      "observed": "M2205: 1 of 10 failing (never an admin). M2206: 2 of 10 failing (the refusal and the no-query case). Reverted; green.",
+      "date": "2026-10-26"
+    },
     "dm-sender-sees-withheld.itest.ts": {
       "guards": "The DM thread's own-hidden clause: the sender sees their withheld message as removed, the recipient never does.",
       "mutation": "M2201 the thread query's { moderation_status: 'hidden', sender_id } lost its sender_id, so any hidden row reaches either reader.",
@@ -1800,7 +1813,7 @@
     "apply-theme.test.ts": {
       "guards": "the light override (.apply-light) re-declares :root's values verbatim and never the brand colours; since step 18 one component carries it (components/public-frame.tsx), PublicFrame is imported only under app/apply/** and app/claim/**, and AuthFrame (which draws its page's h1) by nothing under app/dashboard/** or components/** — the reason dashboard-header-title.test.ts may allow that h1",
       "mutation": "Step 18, clearing the grandfathered entry. M1086 `import { PublicFrame } from \"@/components/public-frame\"` added to app/dashboard/settings/page.tsx. M1087 `apply-light` removed from PublicFrame's <main> className. M1088 `import { AuthFrame } from \"@/components/public-frame\"` added to app/dashboard/settings/page.tsx.",
-      "observed": "M1086: 1 failing of 6 ('is rendered only by the public funnel's pages'). M1087: 1 failing of 6 ('is used only by the apply funnel': the file left the list). M1088: 1 failing of 6 ('keeps the public pages' other frame out of the dashboard too'). Restored, 6 of 6.",
+      "observed": "M1086: 1 failing of 6 ('is rendered only by the public funnel's pages'). M1087: 1 failing of 6 ('is used only by the apply funnel': the file left the list). M1088: 1 failing of 6 ('keeps the public pages' other frame out of the dashboard too'). Restored, 6 of 6. M2207 (2026-10-26): a dashboard file importing components/policy-page failed the new 'policy pages frame only on the public policy pages' case, 1 of 7. Reverted; green.",
       "date": "2026-10-10"
     },
     "server-boot-imports.test.ts": {
