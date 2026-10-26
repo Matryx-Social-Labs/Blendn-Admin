@@ -78,7 +78,7 @@ export default async function ChatroomsPage() {
       curated_at: true,
       organizer_id: true,
       organizer_org_id: true,
-      chat_group: { select: { id: true, _count: { select: { messages: true } } } },
+      chat_group: { select: { id: true } },
     },
     orderBy: [{ end_time: "asc" }, { title: "asc" }],
   })
@@ -90,7 +90,7 @@ export default async function ChatroomsPage() {
    * `events.current_capacity`. One of them was always stale.
    */
   const groupIds = rooms.flatMap((r) => (r.chat_group ? [r.chat_group.id] : []))
-  const [occupancies, flagRows] = await Promise.all([
+  const [occupancies, flagRows, messageRows] = await Promise.all([
     getOccupancies(rooms.map((e) => e.id)),
     groupIds.length
       ? db.moderation_flags.groupBy({
@@ -99,8 +99,13 @@ export default async function ChatroomsPage() {
           _count: { id: true },
         })
       : [],
+    // Grouped on the rooms on this page: as a relation `_count` it aggregated every message on the platform.
+    groupIds.length
+      ? db.chat_messages.groupBy({ by: ["chat_group_id"], where: { chat_group_id: { in: groupIds } }, _count: { _all: true } })
+      : [],
   ])
   const flagsFor = new Map(flagRows.map((f) => [f.chat_group_id, f._count.id]))
+  const messagesIn = new Map(messageRows.map((m) => [m.chat_group_id, m._count._all]))
 
   const live = rooms.filter((r) => r.end_time > now)
   const feedback = rooms.length - live.length
@@ -183,7 +188,7 @@ export default async function ChatroomsPage() {
                   {(
                     [
                       [insideOf(room), "inside"],
-                      [ranges(room, room.chat_group?._count.messages ?? 0), "messages"],
+                      [ranges(room, room.chat_group ? messagesIn.get(room.chat_group.id) ?? 0 : 0), "messages"],
                       [ranges(room, roomFlags), "flags"],
                     ] as const
                   ).map(([value, label]) => (

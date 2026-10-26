@@ -1,7 +1,10 @@
-import { MAX_MESSAGES_PER_SWEEP, sweepSentiment } from "@/lib/sentiment-sweeper"
+import { MAX_MESSAGES_PER_SWEEP, SCAN_WINDOW_MS, sweepSentiment } from "@/lib/sentiment-sweeper"
 import { buildLiveSnapshot } from "@/lib/live-snapshot"
 import { deriveAlerts } from "@/lib/live-metrics"
 
+import { classifyMessages } from "@/lib/sentiment/classify"
+
+import { sqlCounter } from "./sql-count"
 import { cleanup, closeDb, db, makeEvent, makeUser } from "./helpers"
 
 /**
@@ -267,5 +270,66 @@ describe("only event rooms are classified (step 7)", () => {
     }
     expect(await db.event_feedback.count({ where: { event_id: roomEvent } })).toBe(1)
     expect(await db.event_feedback.count({ where: { message: { chat_group_id: boardRoom.id } } })).toBe(0)
+  })
+})
+
+describe("a pass is a few statements, however many messages it classifies", () => {
+  it("finds the work in one read and writes it in one", async () => {
+    const { eventId } = await roomWith(Array.from({ length: 30 }, (_, i) => `GOOD set ${i}`))
+    const counter = sqlCounter()
+    try {
+      const { result, sql } = await counter.during(() => sweepSentiment())
+      console.info(`sentiment pass over ${result.classified}: ${sql.length} statements`)
+      expect(result.classified).toBe(30)
+      expect(sql).toHaveLength(2)
+    } finally {
+      await counter.stop()
+    }
+    expect(await db.event_feedback.count({ where: { event_id: eventId } })).toBe(30)
+  })
+
+  it("leaves a message older than the scan window alone", async () => {
+    const { eventId, groupId, author } = await roomWith(["GOOD tonight"])
+    await db.chat_messages.create({
+      data: {
+        chat_group_id: groupId,
+        user_id: author,
+        content: "BAD QUEUE yesterday",
+        type: "text",
+        created_at: new Date(Date.now() - SCAN_WINDOW_MS - 60_000),
+      },
+    })
+    await sweepSentiment()
+    const rows = await db.event_feedback.findMany({ where: { event_id: eventId }, select: { category: true } })
+    expect(rows).toEqual([{ category: "other" }])
+  })
+
+  it("a message deleted while the model reads it costs the rest nothing", async () => {
+    const { eventId, groupId } = await roomWith(["GOOD one", "GOOD two", "BAD QUEUE three"])
+    const gone = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: groupId, content: "GOOD two" }, select: { id: true } })
+    const real = jest.requireActual("@/lib/sentiment/classify").classifyMessages
+    jest.mocked(classifyMessages).mockImplementationOnce(async (messages) => {
+      await db.chat_messages.delete({ where: { id: gone.id } })
+      return real(messages)
+    })
+    const result = await sweepSentiment()
+    expect(result.classified).toBe(2)
+    expect(await db.event_feedback.count({ where: { event_id: eventId } })).toBe(2)
+  })
+
+  it("keeps a correction made while the model was reading", async () => {
+    const { eventId, groupId } = await roomWith(["BAD QUEUE at the door", "GOOD set"])
+    const corrected = await db.chat_messages.findFirstOrThrow({ where: { chat_group_id: groupId, content: "BAD QUEUE at the door" }, select: { id: true } })
+    const real = jest.requireActual("@/lib/sentiment/classify").classifyMessages
+    jest.mocked(classifyMessages).mockImplementationOnce(async (messages) => {
+      await db.event_feedback.create({
+        data: { event_id: eventId, message_id: corrected.id, sentiment: "positive", category: "other", source: "human", confidence: 1 },
+      })
+      return real(messages)
+    })
+    const result = await sweepSentiment()
+    expect(result.classified).toBe(1)
+    const kept = await db.event_feedback.findUniqueOrThrow({ where: { message_id: corrected.id } })
+    expect(kept).toMatchObject({ source: "human", sentiment: "positive", category: "other" })
   })
 })

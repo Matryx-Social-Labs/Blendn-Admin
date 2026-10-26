@@ -5,13 +5,13 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
-import { notStrangersTo } from "./room-people"
+import { notStrangersTo, notStrangersToMany } from "./room-people"
 import { idInConversation } from "./conversation-handle"
-import { blockCounterparties, keptApartIn } from "./conversations"
+import { blockCounterpartiesMany, keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUseConversation } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
-import { buildLiveSnapshot } from "./live-snapshot"
+import { buildLiveSnapshot, type HeldEvent } from "./live-snapshot"
 import { hereCountCoalesced } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
@@ -382,6 +382,8 @@ export function startOpsBroadcast(eventId: string): void {
    */
   let stopped = false
   const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
+  // The event and its days, read once a minute rather than every pass (`HeldEvent`).
+  const held: { current?: HeldEvent } = {}
 
   const tick = async (): Promise<void> => {
     try {
@@ -396,7 +398,7 @@ export function startOpsBroadcast(eventId: string): void {
         stopOpsBroadcast(eventId)
         return
       }
-      const snapshot = await buildLiveSnapshot(eventId)
+      const snapshot = await buildLiveSnapshot(eventId, held)
       if (snapshot) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, snapshot))
     } catch (error) {
       // A failed pass must not kill the loop or the process — the next one may
@@ -1479,27 +1481,53 @@ export function emitEventCheckIn(
  * Emit an event checkout update
  */
 export function emitEventCheckOut(eventId: string, userId: string): void {
+  emitEventCheckOuts(eventId, [userId])
+}
+
+/** How many leavers' copies are built before the event loop is handed back. */
+const CHECKOUT_EMIT_YIELD_EVERY = 100
+
+/**
+ * A room's departures, told as `emitEventCheckOut` tells one: a checkout each,
+ * with the handle only to the leaver and to a viewer whose roster showed them
+ * (D23, H1). What is shared is the READING, not the telling -- the client
+ * removes one roster row per `event:checkout`, so each leaver still gets their
+ * own. Five reads for the whole room (friends, ended friendships, blocks,
+ * show-online, the headcount) and one `fetchSockets`, where one at a time
+ * was thirteen statements and a fetch per person, on the Socket.io thread,
+ * when an event ended with thousands inside. `hereCount` is the room's count
+ * once all of them are out, the same number for each.
+ */
+export function emitEventCheckOuts(eventId: string, userIds: readonly string[]): void {
   const io = currentIo()
-  if (!io) return
+  if (!io || userIds.length === 0) return
 
   const checkOutTime = new Date().toISOString()
-  // As an arrival: the handle only to the leaver and to a viewer whose roster showed them (D23, H1).
   void Promise.all([
-    notStrangersTo(userId),
-    blockCounterparties(userId),
-    db.profiles.findUnique({ where: { id: userId }, select: { show_online: true } }),
+    notStrangersToMany(userIds),
+    blockCounterpartiesMany(userIds),
+    db.profiles.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, show_online: true } }),
   ])
-    .then(([friends, blocked, profile]) => {
-      const listed = profile?.show_online !== false
-      const shown = (viewer: string) => viewer === userId || (listed && !friends.has(viewer) && !blocked.includes(viewer))
-      return sendWithHereCount(eventId, (hereCount) =>
-        emitAsSeenBy(io.in(`event:${eventId}`), eventId, "event:checkout", (idFor, _recognises, viewer) => ({
-          eventId,
-          ...(shown(viewer) ? { userId: idFor(userId) } : {}),
-          checkOutTime,
-          hereCount,
-        }))
-      )
+    .then(([friendsOf, blockedOf, profiles]) => {
+      const hidden = new Set(profiles.filter((p) => p.show_online === false).map((p) => p.id))
+      // One audience for all of them: the sockets do not change between two leavers of one pass.
+      const sockets = io.in(`event:${eventId}`).fetchSockets()
+      const audience = { fetchSockets: () => sockets }
+      return sendWithHereCount(eventId, async (hereCount) => {
+        let told = 0
+        for (const userId of userIds) {
+          const friends = friendsOf.get(userId) ?? new Set<string>()
+          const blocked = blockedOf.get(userId) ?? []
+          const shown = (viewer: string) => viewer === userId || (!hidden.has(userId) && !friends.has(viewer) && !blocked.includes(viewer))
+          await emitAsSeenBy(audience, eventId, "event:checkout", (idFor, _recognises, viewer) => ({
+            eventId,
+            ...(shown(viewer) ? { userId: idFor(userId) } : {}),
+            checkOutTime,
+            hereCount,
+          }))
+          if (++told % CHECKOUT_EMIT_YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve))
+        }
+      })
     })
     .catch((error: unknown) => logger.warn("Check-out emit failed", { eventId, error: error instanceof Error ? error.message : String(error) }))
 }

@@ -1,3 +1,5 @@
+import type { rsvp_status } from "@prisma/client"
+
 import { db } from "./db"
 
 export interface EventTallies {
@@ -31,4 +33,20 @@ export async function eventTallies(eventIds: readonly string[]): Promise<EventTa
   const byEvent = (rows: { event_id: string; _count: number }[]) =>
     new Map(rows.map((r) => [r.event_id, r._count]))
   return { favorites: byEvent(favorites), ratings: byEvent(ratings), going: byEvent(going) }
+}
+
+/**
+ * RSVPs by event for these events, one grouped read restricted to the ids on
+ * the page: the replacement for `_count: { rsvps: { where } }`, whose join
+ * aggregates every matching RSVP on the platform (see above). `going` only
+ * unless the caller names the statuses it counts. Absent for an event with none.
+ */
+export async function rsvpCounts(eventIds: readonly string[], statuses: readonly rsvp_status[] = ["going"]): Promise<Map<string, number>> {
+  if (eventIds.length === 0) return new Map()
+  const rows = await db.event_rsvps.groupBy({
+    by: ["event_id"],
+    where: { event_id: { in: [...eventIds] }, status: { in: [...statuses] } },
+    _count: { _all: true },
+  })
+  return new Map(rows.map((r) => [r.event_id, r._count._all]))
 }

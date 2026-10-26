@@ -6,6 +6,7 @@ import type { LiveEvent, OrganizerOverview } from "./dashboard-types"
 import { eventClock } from "./event-phase"
 import { realEventsWhere } from "./event-kind"
 import { eventRowFields, type EventRowData } from "./event-row"
+import { rsvpCounts } from "./event-tallies"
 import { activeMembership, HOME_ORG_ORDER } from "./org-membership"
 import { getOccupancy } from "./occupancy"
 import type { SetupFacts } from "./setup-checklist"
@@ -37,18 +38,20 @@ export async function liveEventFor(scope: Prisma.eventsWhereInput, now: Date): P
       timezone: true,
       venue_name: true,
       venue: { select: { name: true } },
-      // The same count the Chatrooms screen shows for this room.
-      chat_group: { select: { id: true, _count: { select: { messages: true } } } },
+      chat_group: { select: { id: true } },
     },
   })
   if (!event) return null
 
-  const [occupancy, flags] = await Promise.all([
+  const [occupancy, flags, messages] = await Promise.all([
     // Who is inside today, resolved to the day of a multi-day run.
     getOccupancy(event.id),
     event.chat_group
       ? db.moderation_flags.count({ where: { chat_group_id: event.chat_group.id, status: "pending" } })
       : 0,
+    // The same count the Chatrooms screen shows for this room. Counted by the room's id: as a relation
+    // `_count` it aggregated every message on the platform to read one room's.
+    event.chat_group ? db.chat_messages.count({ where: { chat_group_id: event.chat_group.id } }) : 0,
   ])
   return {
     id: event.id,
@@ -58,7 +61,7 @@ export async function liveEventFor(scope: Prisma.eventsWhereInput, now: Date): P
     flags,
     inside: occupancy.inside,
     checkedIn: occupancy.uniqueAttendance,
-    messages: event.chat_group?._count.messages ?? 0,
+    messages,
   }
 }
 
@@ -137,11 +140,11 @@ export async function comingUpFor(
       latitude: true,
       geofence: true,
       max_capacity: true,
-      _count: { select: { rsvps: { where: { status: "going" } } } },
     },
   })
+  const going = await rsvpCounts(events.map((e) => e.id))
   // Nothing ahead has been checked in to; the cell reads going for these.
-  return events.map((e) => ({ ...eventRowFields(e, now), going: e._count.rsvps, arrivals: 0 }))
+  return events.map((e) => ({ ...eventRowFields(e, now), going: going.get(e.id) ?? 0, arrivals: 0 }))
 }
 
 /**

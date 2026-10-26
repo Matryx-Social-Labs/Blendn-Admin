@@ -70,6 +70,68 @@ export async function notifyFriendsHere(subjectId: string, opts: { eventIds?: re
   }
 }
 
+/** Subjects per read in `notifyFriendsHereMany`: bounds the IN lists (a person's friends times this). */
+const FRIENDS_SIGNAL_CHUNK = 500
+
+/**
+ * `notifyFriendsHere` for a batch of departures (the sweepers'), in three reads
+ * per chunk of people rather than four per person: who is listable, their
+ * friendships, and which of those friends are live at the same events. A room
+ * hears one `room:friends` per event with everyone it concerns -- the signal
+ * is "refetch", so one per person or one for the lot is the same to a phone.
+ */
+export async function notifyFriendsHereMany(departures: readonly { userId: string; eventId: string }[]): Promise<void> {
+  try {
+    for (let i = 0; i < departures.length; i += FRIENDS_SIGNAL_CHUNK) {
+      await notifyChunk(departures.slice(i, i + FRIENDS_SIGNAL_CHUNK))
+    }
+  } catch (error) {
+    logger.warn("room:friends signal failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+async function notifyChunk(departures: readonly { userId: string; eventId: string }[]): Promise<void> {
+  const subjects = [...new Set(departures.map((d) => d.userId))]
+  const people = await db.user.findMany({
+    where: { id: { in: subjects } },
+    select: { id: true, suspended_at: true, deletedAt: true, profile: { select: { friends_see_me_in_rooms: true, show_online: true } } },
+  })
+  const listed = new Set(
+    people
+      .filter((p) => !p.suspended_at && !p.deletedAt && p.profile?.friends_see_me_in_rooms === true && p.profile.show_online === true)
+      .map((p) => p.id)
+  )
+  if (listed.size === 0) return
+  const rows = await db.friendships.findMany({
+    where: { OR: [{ user1_id: { in: [...listed] } }, { user2_id: { in: [...listed] } }] },
+    select: { user1_id: true, user2_id: true },
+  })
+  const friendsOfSubject = new Map<string, Set<string>>()
+  for (const r of rows) {
+    if (listed.has(r.user1_id)) friendsOfSubject.set(r.user1_id, (friendsOfSubject.get(r.user1_id) ?? new Set()).add(r.user2_id))
+    if (listed.has(r.user2_id)) friendsOfSubject.set(r.user2_id, (friendsOfSubject.get(r.user2_id) ?? new Set()).add(r.user1_id))
+  }
+  const departed = departures.filter((d) => friendsOfSubject.has(d.userId))
+  if (departed.length === 0) return
+  const viewers = await db.event_check_ins.findMany({
+    where: {
+      user_id: { in: [...new Set(departed.flatMap((d) => [...friendsOfSubject.get(d.userId)!]))] },
+      event_id: { in: [...new Set(departed.map((d) => d.eventId))] },
+      status: "checked_in",
+      ...inRoomWhere(),
+    },
+    select: { user_id: true, event_id: true },
+  })
+  const liveAt = new Set(viewers.map((v) => `${v.event_id}:${v.user_id}`))
+  const toTell = new Map<string, Set<string>>()
+  for (const d of departed) {
+    for (const friend of friendsOfSubject.get(d.userId)!) {
+      if (liveAt.has(`${d.eventId}:${friend}`)) toTell.set(d.eventId, (toTell.get(d.eventId) ?? new Set()).add(friend))
+    }
+  }
+  for (const [eventId, ids] of toTell) await emitRoomFriends([...ids], eventId)
+}
+
 /**
  * A friendship made or ended between two people: each is told, for the events both
  * are live in, that their Friends here moved, but only if the OTHER is listable for

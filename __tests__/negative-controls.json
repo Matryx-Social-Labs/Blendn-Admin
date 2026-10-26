@@ -40,6 +40,42 @@
       "observed": "2026-10-25: fails, '/offers/[offerId]/report/route.ts applies the daily report cap' (1 failed, 9 passed). Fixed; green.",
       "date": "2026-10-25"
     },
+    "batched-checkout.itest.ts": {
+      "guards": "perf/loops-dashboard: performCheckouts (the sweepers' batched checkout) ends in the same check-in rows, closed sessions (source and instant), chat-room telling (friend, show-online-off, blocked copies) and room:friends signal as performCheckout one person at a time over two rooms, in <=30 statements instead of ~130, is idempotent, and an expiry acts only on the window it read.",
+      "mutation": "lib/checkout.ts checkOutChunk: the presence_sessions UPDATE's `AND ps.departed_at IS NULL` replaced with `AND FALSE` (sessions left open).",
+      "observed": "Fails: both tests (the rows snapshot differs from the one-at-a-time path; the expiry's session is not closed 'expired'). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "live-snapshot-cost.itest.ts": {
+      "guards": "perf/loops-dashboard: the live snapshot's chat figures are one statement counting messages in the last ten minutes and distinct senders in the last thirty, a loop's held event is read once a minute (5 statements in one wave on the next tick), and the issue sweep reuses the snapshot's reads of the event and its day.",
+      "mutation": "A: lib/live-snapshot.ts eventAndSlots ignores the held event (`if (false)`). B: the chat query's COUNT(DISTINCT user_id) made COUNT(user_id).",
+      "observed": "A: fails ('read the event and its days once a minute': the second tick costs as many statements as the first). B: fails (activeChatters30m 4, not 3) and the held-tick comparison. Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "dashboard-chat-poll.itest.ts": {
+      "guards": "perf/loops-dashboard: the organiser feed's ?light=1 poll carries only the restricted members, the shown messages' authors and the active count (not the whole roster) with the same messages and flag count as the full read, and filters the roster in the database.",
+      "mutation": "app/api/events/[id]/chat/messages/route.ts: the light status filter on the roster read (`...(light && { status: { in: [banned, muted] } })`) removed.",
+      "observed": "Fails: 2 of 3 (the poll carries all forty members; the roster read is not filtered by status). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "sentiment-sweeper.itest.ts": {
+      "guards": "perf/loops-dashboard: a sentiment pass is two statements however many messages it classifies, leaves messages older than the scan window alone, loses nothing to a message deleted while the model read it, and never overwrites a human correction made in that time (the bulk upsert's WHERE).",
+      "mutation": "A: lib/sentiment-sweeper.ts the scan window's lower bound replaced with new Date(0). B: the `WHERE event_feedback.source <> 'human'` line removed from the bulk upsert.",
+      "observed": "A: fails ('leaves a message older than the scan window alone'). B: fails ('keeps a correction made while the model was reading'). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "event-issues.itest.ts": {
+      "guards": "perf/loops-dashboard: liveEventIds returns the published events running now, earliest start first, capped, from a statement with no ORDER BY or LIMIT (so the planner uses the end_time index instead of walking every event that ever started).",
+      "mutation": "lib/event-issues.ts liveEventIds: `orderBy: { start_time: 'asc' }, take: max` put back on the findMany.",
+      "observed": "Fails ('which events are live': the events statement carries ORDER BY and LIMIT). Reverted; green.",
+      "date": "2026-10-25"
+    },
+    "organiser-overview-reads.itest.ts": {
+      "guards": "perf/loops-dashboard: the organiser overview, the Events list, Chatrooms and the Users table join no whole-table relation _count (a `_aggr_count_*` over chat_messages, event_rsvps, event_check_ins, event_favorites or event_ratings), and the live banner's message count and the Users tallies are still right.",
+      "mutation": "app/dashboard/chatrooms/page.tsx: the room select's `_count: { select: { messages: true } }` put back.",
+      "observed": "Fails ('the Chatrooms screen joins no whole-table count'). Reverted; green.",
+      "date": "2026-10-25"
+    },
     "venue-visibility-one-rule.test.ts": {
       "guards": "HM-G01 (plan v2 step 2): the undisputed-link read (`venue_link_status: { not: \"disputed\" }`) is spelled in lib/venue-visibility.ts only, TAKEOVER_LEAD_MINUTES is defined there only, and the Places list, the event-card serializer and the venue page import the rule from there; scans app/, lib/ and scripts/ (over 100 files).",
       "mutation": "M565 the venues route's upcomingEventFilter spells the disputed-link OR inline instead of undisputedLinkWhere. M566 a second `TAKEOVER_LEAD_MINUTES = 60` defined in the venues route.",
@@ -402,8 +438,8 @@
     },
     "hot-path-indexes.test.ts": {
       "guards": "The hot-path indexes are declared in the datamodel AND created by a migration, and the polled health probe scopes its interest lookup to recent attendees instead of aggregating the whole user_interests table",
-      "mutation": "A: restore COUNT(*) in the interest-coverage inner aggregate. B: delete @@index([check_in_time]) from the events check-in model",
-      "observed": "A: 1 failing ('counts the joined column, not the row'). B: 1 failing on the declaration assertion. EXPLAIN before/after confirmed the whole-table HashAggregate is gone.",
+      "mutation": "A: restore COUNT(*) in the interest-coverage inner aggregate. B: delete @@index([check_in_time]) from the events check-in model. C (perf/loops-dashboard): lib/mobile-auth.ts cleanupExpiredTokens loses `revoked_reason: null` (no longer what the partial index holds)",
+      "observed": "A: 1 failing ('counts the joined column, not the row'). B: 1 failing on the declaration assertion. EXPLAIN before/after confirmed the whole-table HashAggregate is gone. C: 1 failing (the refresh-token sweep test).",
       "date": "2026-09-05"
     },
     "dashboard-header-title.test.ts": {
@@ -1000,10 +1036,10 @@
       "date": "2026-09-17"
     },
     "integration/approval-set-password.itest.ts": {
-      "guards": "approving a host emails a single-use set-password link that expires in 24 hours, never a password; a promoted account keeps its own; with email unconfigured the admin is handed the link once (SCRUM-134)",
-      "mutation": "Replace `issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)` in approveOnboardingRequest with the literal `\"Password: hunter2\"`.",
-      "observed": "2 failing: the mail has no reset-password link to consume, and the offline path hands the admin no link.",
-      "date": "2026-09-17"
+      "guards": "approving a host emails a single-use set-password link that expires in 24 hours, never a password; a promoted account keeps its own; with email unconfigured the admin is handed the link once (SCRUM-134) 2026-10-25: approving an application on an email that already has an attendee account: a confirmed account is promoted with its password; an unconfirmed one is taken over only when the application proved the mailbox (password replaced, phone sessions ended, set-password link sent), and refused when it did not; a suspended or deleted account is refused (audit WEB M1 + L9)",
+      "mutation": "Replace `issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)` in approveOnboardingRequest with the literal `\"Password: hunter2\"`. 2026-10-25: In lib/onboarding-actions.ts approveOnboardingRequest, `const takeOver = false`.",
+      "observed": "2 failing: the mail has no reset-password link to consume, and the offline path hands the admin no link. 2026-10-25: 2 failing of 6 (the takeover and the unproven refusal). Red before the fix: 3 of 6, the suspended refusal too.",
+      "date": "2026-10-25"
     },
     "venue-claims.test.ts": {
       "guards": "deciding a venue claim emails the reason to the claimant, and an approval tells each displaced claimant why (SCRUM-117)",
@@ -1099,12 +1135,6 @@
       "guards": "overClaimLimit counts the event's window only for a caller who passed their own email and address windows, so a flooder over their own limit cannot burn the event's 20 an hour (audit WEB L5); the window is per (target, network), so three networks cannot drain one event between them (review L3)",
       "mutation": "In lib/claim-limit.ts hit the target window together with the email and address windows again.",
       "observed": "1 failing: expected the event bucket at 10, received 14. The anonymous-claim bucket can still be burned by 2+ addresses each under their own limit; that is the cap's purpose and is left.",
-      "date": "2026-10-25"
-    },
-    "integration/approval-set-password.itest.ts": {
-      "guards": "approving an application on an email that already has an attendee account: a confirmed account is promoted with its password; an unconfirmed one is taken over only when the application proved the mailbox (password replaced, phone sessions ended, set-password link sent), and refused when it did not; a suspended or deleted account is refused (audit WEB M1 + L9)",
-      "mutation": "In lib/onboarding-actions.ts approveOnboardingRequest, `const takeOver = false`.",
-      "observed": "2 failing of 6 (the takeover and the unproven refusal). Red before the fix: 3 of 6, the suspended refusal too.",
       "date": "2026-10-25"
     },
     "integration/create-role-user-audited.itest.ts": {

@@ -58,6 +58,22 @@ export async function notStrangersTo(viewerId: string, client: FriendReader = db
   return new Set([...friends, ...ended].map((r) => (r.user1_id === viewerId ? r.user2_id : r.user1_id)))
 }
 
+/** `notStrangersTo` for several viewers in two reads: each viewer's set, by id. */
+export async function notStrangersToMany(viewerIds: readonly string[], client: FriendReader = db): Promise<Map<string, Set<string>>> {
+  const ids = new Set(viewerIds)
+  const where = { OR: [{ user1_id: { in: [...ids] } }, { user2_id: { in: [...ids] } }] }
+  const [friends, ended] = await Promise.all([
+    client.friendships.findMany({ where, select: { user1_id: true, user2_id: true } }),
+    client.ended_friendships.findMany({ where: { ...where, ended_at: { gt: endedSince() } }, select: { user1_id: true, user2_id: true } }),
+  ])
+  const byViewer = new Map<string, Set<string>>([...ids].map((id) => [id, new Set<string>()]))
+  for (const r of [...friends, ...ended]) {
+    if (ids.has(r.user1_id)) byViewer.get(r.user1_id)!.add(r.user2_id)
+    if (ids.has(r.user2_id)) byViewer.get(r.user2_id)!.add(r.user1_id)
+  }
+  return byViewer
+}
+
 /** Pair form, for the write routes. Under the pair's lock when it decides a write: pass the transaction. */
 export async function knownToEachOther(a: string, b: string, client: FriendReader = db): Promise<boolean> {
   if (a === b) return false
