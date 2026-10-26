@@ -90,7 +90,7 @@ const REQUIRED: Array<{ model: string; index: string; sqlName: string; why: stri
 
 describe("the refresh-token sweep has an index for its revoked half", () => {
   it("is a partial index in migration SQL (schema.prisma cannot say it), one statement, CONCURRENTLY", () => {
-    const sql = readFileSync(join(ROOT, "prisma", "migrations", "20261025100200_refresh_tokens_revoked_sweep_idx", "migration.sql"), "utf8")
+    const sql = readFileSync(join(ROOT, "prisma", "migrations", "20261026100400_refresh_tokens_revoked_sweep_idx", "migration.sql"), "utf8")
     expect(sql.replace(/--.*$/gm, "").trim()).toBe(
       'CREATE INDEX CONCURRENTLY IF NOT EXISTS "mobile_refresh_tokens_revoked_sweep_idx" ON "mobile_refresh_tokens" ("revoked_at") WHERE "revoked_reason" IS NULL AND "revoked_at" IS NOT NULL'
     )
