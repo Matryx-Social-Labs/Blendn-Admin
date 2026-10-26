@@ -83,8 +83,9 @@ export async function POST(request: NextRequest) {
      * before a row, a push or a socket event exists. It does not depend on the
      * recipient, so it says nothing about who they are.
      */
+    // Shaped as the screen above answers (`TEXT_NOT_ALLOWED`), so the app shows the sentence rather than a generic failure.
     if (preSaveCheck(message)) {
-      return errorResponse("That message can’t be sent. Take out contact details and offensive language, and try again.", 400)
+      return textNotAllowedResponse("message", "That message can’t be sent. Take out contact details and offensive language, and try again.")
     }
     const recipientId = userIdFromRef(ref)
     // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).

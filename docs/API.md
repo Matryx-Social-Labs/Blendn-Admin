@@ -1700,7 +1700,9 @@ coin flip.
 
 **Limits.** 20 requests per sender per day (`429`), on top of the per-minute
 limit. The `message` goes through the deterministic text check (keyword and
-contact details); a hit is `400`, nothing is stored or sent.
+contact details); a hit is `400` `VALIDATION_FAILED` with `reasonCode:
+"TEXT_NOT_ALLOWED"` and `field: "message"`, its `error` a sentence to show as
+is. Nothing is stored or sent.
 
 Guards, in order: rate limit, self-send, recipient exists, blocks either way,
 closed pair (an unmatch — same 404 as a block, so the refusal never says "this
