@@ -485,10 +485,6 @@ export async function guardJoin(
   socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
 }
 
-/** How long a socket reuses what it read of its own membership in an event's room, between keystroke bursts. */
-const TYPING_MEMBERSHIP_TTL_MS = 5_000
-const typingMemberships = new WeakMap<object, Map<string, { at: number; membership: TypingMembership }>>()
-
 async function readTypingMembership(userId: string, chatGroupId: string) {
   return db.chat_group_members.findUnique({
     where: { chat_group_id_user_id: { chat_group_id: chatGroupId, user_id: userId } },
@@ -507,31 +503,6 @@ async function readTypingMembership(userId: string, chatGroupId: string) {
     },
   })
 }
-type TypingMembership = NonNullable<Awaited<ReturnType<typeof readTypingMembership>>>
-
-/**
- * The typist's own membership row, three statements a read and one per keystroke
- * burst. Remembered for a few seconds per socket, and only for an event's room
- * (no owner's door to re-ask) while that socket is still IN the room: a ban or a
- * leave evicts it (`emitChatMemberBanned`, `emitChatMemberLeft`), so the next tick
- * goes back to the database and is refused. What the row decides is who may type
- * under which name; who it is shown to (blocks) is still asked every time.
- */
-async function typingMembership(socket: AuthenticatedSocket, chatGroupId: string): Promise<TypingMembership | null> {
-  const remembered = typingMemberships.get(socket)?.get(chatGroupId)
-  if (remembered && Date.now() - remembered.at < TYPING_MEMBERSHIP_TTL_MS && socket.rooms?.has(`chat:${chatGroupId}`)) {
-    return remembered.membership
-  }
-  const membership = await readTypingMembership(socket.data.userId, chatGroupId)
-  const perRoom = typingMemberships.get(socket) ?? new Map()
-  if (membership?.status === "active" && membership.chat_group.kind === "event" && membership.chat_group.event?.kind === "event") {
-    perRoom.set(chatGroupId, { at: Date.now(), membership })
-    typingMemberships.set(socket, perRoom)
-  } else {
-    perRoom.delete(chatGroupId)
-  }
-  return membership
-}
 
 /**
  * Broadcast a typing indicator to a chat room, under the sender's anonymous name.
@@ -545,7 +516,7 @@ export async function emitChatTyping(
   isTyping: boolean
 ): Promise<void> {
   try {
-    const membership = await typingMembership(socket, chatGroupId)
+    const membership = await readTypingMembership(socket.data.userId, chatGroupId)
     if (!membership || membership.status !== "active") return
     // The room's door, for every kind: a member row whose owner no longer
     // admits them (a board post's ask that is not accepted) types to nobody.

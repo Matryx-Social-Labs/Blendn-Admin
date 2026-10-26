@@ -80,26 +80,14 @@ describe("a room's typing", () => {
   }
   const memberReads = (sql: string[]) => sql.filter((q) => /FROM "public"\."chat_group_members"/.test(q)).length
 
-  it("reads the typist's membership once per burst, and says the same thing each time", async () => {
+  it("asks the typist's membership on every burst, so a mute or ban is obeyed at once", async () => {
     const { typist, groupId } = await room()
     const { socket, sent } = fakeSocket(typist, [`chat:${groupId}`])
     const first = await counter.during(() => emitChatTyping(socket, groupId, true))
-    const second = await counter.during(async () => {
-      await emitChatTyping(socket, groupId, false)
-      // `during` insists on a statement: the block list is asked every time.
-    })
     expect(memberReads(first.sql)).toBe(1)
-    expect(memberReads(second.sql)).toBe(0) // before: 1 (and two more levels under it)
-    expect(sent.map((s) => (s.payload as { isTyping: boolean; userName: string }).userName)).toEqual(["Otter Typist", "Otter Typist"])
-  })
-
-  it("asks again once the socket has been put out of the room (a ban, a leave)", async () => {
-    const { typist, groupId } = await room()
-    const { socket, sent } = fakeSocket(typist, [`chat:${groupId}`])
+    // Muted, still in the socket room (a mute evicts nobody): the next burst says nothing.
+    await db.chat_group_members.update({ where: { chat_group_id_user_id: { chat_group_id: groupId, user_id: typist.id } }, data: { status: "muted" } })
     await emitChatTyping(socket, groupId, true)
-    await db.chat_group_members.update({ where: { chat_group_id_user_id: { chat_group_id: groupId, user_id: typist.id } }, data: { status: "banned" } })
-    ;(socket.rooms as Set<string>).delete(`chat:${groupId}`) // what emitChatMemberBanned does
-    await emitChatTyping(socket, groupId, true)
-    expect(sent).toHaveLength(1)
+    expect(sent.map((s) => (s.payload as { userName: string }).userName)).toEqual(["Otter Typist"])
   })
 })
