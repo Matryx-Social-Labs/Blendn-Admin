@@ -321,8 +321,13 @@ describe("no h1 anywhere else in the dashboard tree", () => {
     const withH1 = tree.filter((f) => /<h1[\s>]/.test(readFileSync(join(ROOT, f), "utf8")))
     // `components/` is shared with the public pages, whose frames draw their
     // page's one h1 (step 18). Allowed because `apply-theme.test.ts` keeps
-    // every importer of public-frame outside the dashboard.
-    expect(withH1).toEqual([join("components", "dashboard", "page-header.tsx"), join("components", "public-frame.tsx")])
+    // every importer of public-frame outside the dashboard — the policy pages'
+    // frame included, which that test keeps on the public policy pages.
+    expect(withH1).toEqual([
+      join("components", "dashboard", "page-header.tsx"),
+      join("components", "policy-page.tsx"),
+      join("components", "public-frame.tsx"),
+    ])
   })
 })
 

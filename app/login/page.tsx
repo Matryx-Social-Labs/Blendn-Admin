@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { signIn, useSession } from "next-auth/react"
 
+import { POLICY_LINKS } from "@/lib/company"
 import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -125,13 +126,27 @@ function SignInForm() {
       title="Blend'n dashboard"
       sub="For the people who run the platform and the events on it."
       after={
-        <p className="mx-auto max-w-[40ch] text-center text-[0.78125rem] text-faint-foreground">
-          Operator access only — attendees use the Blend&apos;n app. Not a host yet?{" "}
-          <Link href="/apply" className="underline underline-offset-4 hover:text-foreground">
-            Apply
-          </Link>
-          .
-        </p>
+        <>
+          <p className="mx-auto max-w-[40ch] text-center text-[0.78125rem] text-faint-foreground">
+            Operator access only — attendees use the Blend&apos;n app. Not a host yet?{" "}
+            <Link href="/apply" className="underline underline-offset-4 hover:text-foreground">
+              Apply
+            </Link>
+            .
+          </p>
+          {/* The public policy pages (components/policy-page.tsx), reachable signed out. */}
+          <nav aria-label="Policies">
+            <ul className="flex flex-wrap justify-center gap-x-3 gap-y-1 text-[0.75rem] text-faint-foreground">
+              {POLICY_LINKS.map((l) => (
+                <li key={l.href}>
+                  <Link href={l.href} className="hover:text-foreground">
+                    {l.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </>
       }
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
