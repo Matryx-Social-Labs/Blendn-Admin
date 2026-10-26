@@ -10,6 +10,7 @@ import {
   getMaxFileSize,
   isConfigured,
   UploadFolder,
+  UPLOADS_UNAVAILABLE,
 } from "@/lib/tigris"
 import {
   successResponse,
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
   try {
     // Check if Tigris is configured
     if (!isConfigured()) {
-      return errorResponse("File storage is not configured", 503)
+      return errorResponse(UPLOADS_UNAVAILABLE, 503)
     }
 
     const user = await getAuthenticatedUser(request)

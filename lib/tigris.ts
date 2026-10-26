@@ -665,6 +665,13 @@ export function getAccessibleMediaUrl(urlOrKey: string): string {
 /**
  * Check if Tigris is configured
  */
+/**
+ * What a person is told when uploads cannot run. Never the reason: "File storage
+ * is not configured" reached a phone's photo bubble (drive 2026-10-27). The cause
+ * is logged by `validateConfig` for whoever runs the server.
+ */
+export const UPLOADS_UNAVAILABLE = "Uploads aren’t working right now. Try again in a little while."
+
 export function isConfigured(): boolean {
   return validateConfig()
 }

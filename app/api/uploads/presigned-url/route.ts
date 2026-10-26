@@ -9,6 +9,7 @@ import {
   getMaxFileSize,
   isConfigured,
   UploadFolder,
+  UPLOADS_UNAVAILABLE,
 } from "@/lib/tigris"
 import {
   successResponse,
@@ -30,7 +31,7 @@ const presignedUrlSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     if (!isConfigured()) {
-      return errorResponse("File storage is not configured", 503)
+      return errorResponse(UPLOADS_UNAVAILABLE, 503)
     }
 
     const session = await getAuth()
