@@ -109,7 +109,7 @@ at venues their organisation owns — and no editorial control.
 
 So: no edit button, no publish, no cancel. But everything about **their room**:
 is it filling, are people turning up, how is the chat behaving, and how does this
-organiser compare to others who have booked the same venue. Design the
+organizer compare to others who have booked the same venue. Design the
 scope note as a fact about the relationship, not as an apology for a missing
 button.
 
@@ -178,7 +178,7 @@ rather than rendering a broken-looking chart.
 
 ## Deliver
 
-1. Overview in **four lifecycle states**, desktop and mobile — an organiser will
+1. Overview in **four lifecycle states**, desktop and mobile — an organizer will
    check pacing from their phone an hour before doors.
 2. The **tab shell**, showing how the existing attendee/chat/feedback panels sit
    inside it without being reimplemented.

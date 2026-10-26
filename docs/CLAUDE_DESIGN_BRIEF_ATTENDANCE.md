@@ -85,7 +85,7 @@ imply the app has malfunctioned.
 
 The presence sweeper refuses to auto-check-out more than a quarter of a room in
 one pass, because a venue whose wifi dies produces readings identical to
-everyone leaving at once. When that trips, the organiser is told the count is
+everyone leaving at once. When that trips, the organizer is told the count is
 unreliable rather than handed a wrong number.
 
 Design that state. **"We are not sure right now"** is a genuinely hard thing to

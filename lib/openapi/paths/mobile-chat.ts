@@ -159,7 +159,7 @@ registry.registerPath({
   tags: ["Mobile Chat"],
   summary: "Rejoin a room you left",
   description:
-    "Undoes a leave you made yourself, while the room is open. Muted by the organiser when you left? You come back muted. " +
+    "Undoes a leave you made yourself, while the room is open. Muted by the organizer when you left? You come back muted. " +
     "403 `USER_BANNED` for a ban; 403 `CHAT_CLOSED` / `CHAT_LOCKED` when the room's window has shut or it was released by the lifecycle sweeper. " +
     "Idempotent — rejoining a room you never left answers 200 `{ left: false }`. " +
     ROOM_404,
@@ -178,8 +178,8 @@ registry.registerPath({
   tags: ["Mobile Chat"],
   summary: "Mute a room's notifications",
   description:
-    "Stops the room's pushes to you — a reply to you, an organiser's announcement (and its bell row). You still read and post; nobody is told. " +
-    "Not the organiser's mute, which stops a person posting. Optional `until` (ISO 8601, future, at most a year away); omit or null for until you unmute. " +
+    "Stops the room's pushes to you — a reply to you, an organizer's announcement (and its bell row). You still read and post; nobody is told. " +
+    "Not the organizer's mute, which stops a person posting. Optional `until` (ISO 8601, future, at most a year away); omit or null for until you unmute. " +
     "Posting again replaces `until`. The state is also returned as `mute` by `GET /events/{eventId}/chat` and on each `GET /chat/groups` item. " +
     ROOM_404,
   security: bearerAuth,

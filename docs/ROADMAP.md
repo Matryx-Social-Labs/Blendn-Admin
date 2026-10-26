@@ -18,7 +18,7 @@ repos. Items here are the API half of it; the app half is `blendn/ROADMAP.md`.
 Do not restate the journey in either.
 
 Nothing here is dated. Pricing was decided by the owner on 2026-10-01:
-organisers run events free; analytics, venue plans, sponsor placements and
+organizers run events free; analytics, venue plans, sponsor placements and
 Blendn+ are paid. See **Pricing** under *Now*. The prices are first bets to
 verify.
 
@@ -43,7 +43,7 @@ here is mechanism for that one problem:
 - **Contextual room chat** — a reason to speak at all, about a thing you are
   both currently at.
 
-**The organiser dashboard is the distribution channel first.** Organisers never
+**The organizer dashboard is the distribution channel first.** Organizers never
 pay to run an event; they need to put a QR code on the screen, because that is
 the only way to get **room-level liquidity**. Dating apps need liquidity in a
 city. This needs it in a room, on a night, and it resets at the next event. Two
@@ -51,7 +51,7 @@ numbers nobody else has stay free: live occupancy against licensed capacity, and
 whether anyone actually met anyone.
 
 **Changed on 2026-10-01 by the owner.** Until then this paragraph said
-organisers need not pay at all, and to build only the minimum analytics that
+organizers need not pay at all, and to build only the minimum analytics that
 closes one. Running events stays free; analytics beyond what has already
 shipped is now paid (see **Pricing** under *Now*). And the dashboard has no QR
 code yet — step 15 builds the QR & link tab before any copy promises it.
@@ -81,7 +81,7 @@ in `blendn/ROADMAP.md`; the journey rows are in `USER_JOURNEY.md`.
 **Pricing (plan §9.1b, which supersedes §9.1 where they differ).** First bets
 to verify, not research. The dashboard shows prices including GST.
 
-- **Organisers run events free, forever.** Everything already shipped stays
+- **Organizers run events free, forever.** Everything already shipped stays
   free; Analytics sells only what is new (step 16). **Event Pass** ₹499 per
   event; **Analytics** ₹1,999/mo or ₹19,990/yr — shown and charged as ₹589,
   ₹2,359 and ₹23,588 with GST (`lib/billing-plans.ts`, the one price table). The paywall starts 30 days after the
@@ -187,10 +187,10 @@ plan is `~/.claude/plans/sprightly-questing-aho.md`.
 it, and three screens were answering "which city is this pin in?" three
 different ways — one of them skipping `village` and `municipality` and returning
 the surrounding district instead, another not asking for English at all. Same
-pin, different city, depending on which form the organiser opened.
+pin, different city, depending on which form the organizer opened.
 
 **A live bug fell out of it.** Drawing a polygon never wrote back to
-`latitude`/`longitude`, so an organiser could pin their office, trace a stadium
+`latitude`/`longitude`, so an organizer could pin their office, trace a stadium
 five kilometres away, and save both. Check-in was correct — it uses the fence —
 while every distance the attendee app shows was measured from the office. The
 fence now moves the pin, and `scripts/backfill-event-cities.ts` un-drifts the
@@ -286,7 +286,7 @@ starts. "App" in a row means the work is client-side and tracked in
 | Step | What | Plan |
 |---|---|---|
 | 14 | **Shell and components to the design kit.** Sidebar, top bar with breadcrumbs, `PageHeader` owning the h1, Panel / KpiStrip / Locked (sample data only) / QR | §10 |
-| 15 | **Organiser screens to the kit**, including the QR & link tab — QR does not exist in either repo today | §10, §9.1b |
+| 15 | **Organizer screens to the kit**, including the QR & link tab — QR does not exist in either repo today | §10, §9.1b |
 | 17 | **Venue owner and sponsor screens.** Venue plans (Listed / Pro); a Razorpay payment link per `placement_charges` row, settled by webhook | §9.1b, §10 |
 | 18 | **Admin and public screens to the kit**, including the venue claim page from step 1 | §10 |
 
@@ -526,7 +526,7 @@ with cannot be answered from the product at all today:
 | **Activation rate** | signup → completed profile → first check-in. Where the funnel leaks | Timestamps exist across `profiles`, `user_interests`, `event_check_ins`; nothing joins them |
 | **Check-ins per active user** | The core action. Blendn's equivalent of "orders per user" | Have the data, no rollup |
 | **Match → conversation → reveal** | The product's actual promise, as a funnel | `matches`, `private_conversations`, reveal state all exist separately |
-| **Organiser retention** | Do hosts run a second event? Supply-side health, and usually the harder side | `events.organizer_id` + dates |
+| **Organizer retention** | Do hosts run a second event? Supply-side health, and usually the harder side | `events.organizer_id` + dates |
 | **City demand** | Where people opened the app and found nothing | **Capture built** — `city_demand`. No dashboard view yet |
 
 **The one real dependency is an activity table.** Everything above except city
@@ -577,12 +577,12 @@ mutual like. The meter and the pseudonym are arguing about what the product is.
 
 **Sessions, per-session ratings, Q&A and live polls.** Proposed after auditing
 EventMobi's analytics page, withdrawn one turn later, and then checked against
-what Indian organisers actually use. The check made the cut stronger, not weaker.
+what Indian organizers actually use. The check made the cut stronger, not weaker.
 
 The relevant incumbent here is not Whova, it is **KonfHub** (Bengaluru), and it
 already ships Q&A with AI question generation, live quizzing, session tracking,
 analytics, automated badges and QR check-in — with **WhatsApp confirmation
-messages available only to Indian organisers**. Pricing is **free for free
+messages available only to Indian organizers**. Pricing is **free for free
 events and 1.75% per ticket for paid ones, no subscription, no setup fee**.
 (Since changed: 0% up to 100 registrations, then 2–3.75% + GST — rechecked for
 plan v2 §9.1b, 2026-10-01.)
@@ -604,7 +604,7 @@ first version of this entry was imprecise.
 
 There *is* a documented, unserved pain here: Indian exhibitor management is
 "held together by spreadsheets, shared drives, PDF manuals, email chains and a
-whole lot of chasing", with organisers juggling 15+ Excel sheets and 8 WhatsApp
+whole lot of chasing", with organizers juggling 15+ Excel sheets and 8 WhatsApp
 groups for a single event. That is a genuine status-quo answer, and better
 evidence of pain than anything on the attendee side.
 
@@ -616,12 +616,12 @@ product from the one we would have built.
 Worth keeping as a **future revenue hypothesis**: if attendee engagement
 features are commoditised to free in India (KonfHub proves they are), then the
 money in Indian events is in operations and exhibitors, not in engagement. That
-was read as an argument for never charging organisers and using them purely as
+was read as an argument for never charging organizers and using them purely as
 distribution. **Superseded on 2026-10-01 by the owner:** running events stays
 free, and analytics beyond what has shipped is paid — see **Pricing** under
 *Now*.
 
-**Gamification** — top players, challenges, point totals. An organiser
+**Gamification** — top players, challenges, point totals. An organizer
 engagement toy. Moves no part of the approach-anxiety loop.
 
 **Banner ad impressions, clicks and conversion.** No ad surface, and putting one
@@ -655,7 +655,7 @@ they thought of day one. Per-day closure would remove that. The room stays open
 24 h after the last day, deliberately.
 
 **NPS from the existing ratings.** It was listed as a gap because NPS is the
-number organisers report upward. It cannot be computed from what we collect:
+number organizers report upward. It cannot be computed from what we collect:
 NPS is defined on a **0–10** "how likely are you to recommend" question, and
 `event_ratings.rating` is a **1–5** star. Mapping 5★→promoter and 1–3★→detractor
 is what most tools quietly do, and it produces a number that is not NPS, gets
@@ -750,7 +750,7 @@ so ranking on it buys nothing and would cluster rooms by stars.
   route was deliberately taken from N*3 queries to 3 and it stays there. 7 tests.
 
 - **An event can say what it offers** (#244). The Scene's frame draws two
-  amenity tiles and nothing populated them. Vocabulary, join table, organiser's
+  amenity tiles and nothing populated them. Vocabulary, join table, organizer's
   picker, detail payload — fourteen amenities seeded in the migration itself.
 
   **The venue layer is deliberately not built, and that was the plan's one open
@@ -796,7 +796,7 @@ so ranking on it buys nothing and would cluster rooms by stars.
   this a log of successful *deliveries* — the opposite of somewhere you look for
   what you **missed**. The bulk sender had the same hole and got the same fix:
   `getBulkUserPushTokens` is keyed only by reachable users, so recording inside
-  the send loop would have dropped everybody else from an organiser's
+  the send loop would have dropped everybody else from an organizer's
   announcement.
 
   **Every invariant here fails silently.** A kind the sender emits and the enum
@@ -822,11 +822,11 @@ so ranking on it buys nothing and would cluster rooms by stars.
 ### 0.73.0
 
 - **A clip can finally be given a poster, and the form stops giving bad advice.**
-  Three things, all in the organiser event form.
+  Three things, all in the organizer event form.
 
   `thumbnail_url` had been in the Zod schema, in the field-array default, on
   both write paths and in the edit form's load-and-submit round trip the whole
-  time — with **no input anywhere to fill it**. So every clip an organiser added
+  time — with **no input anywhere to fill it**. So every clip an organizer added
   fell back to the event's cover image. The app's `feedClip` chain is
   `thumbnail_url` → `cover_image_url` → *drop the clip*, which means a video on
   an event with no cover simply never appeared, and nothing in the dashboard
@@ -904,7 +904,7 @@ so ranking on it buys nothing and would cluster rooms by stars.
   and there was no way to tag an event **whose entire purpose is that**.
 
   "Community" is volunteering and hobby groups. "Networking" is professional. A
-  singles night was neither, so an organiser running one filed it under
+  singles night was neither, so an organizer running one filed it under
   Nightlife > Parties, where it is indistinguishable from a club night somebody
   attends with the friends they already have. That is the single most likely
   search on this platform, and until now it had no answer.
@@ -1098,7 +1098,7 @@ so ranking on it buys nothing and would cluster rooms by stars.
   inline because `age` is nullable and `null < 18` is `true`, so the obvious
   check admits exactly the case it was meant to stop.
 
-- **`events.min_age`** (#186), set by the organiser, enforced at check-in with
+- **`events.min_age`** (#186), set by the organizer, enforced at check-in with
   its own error code, and used to hide the event from anyone whose stated age is
   below it. An unknown age is refused at the door but not hidden from in the
   feed — OAuth accounts have no age yet, and failing closed there would empty

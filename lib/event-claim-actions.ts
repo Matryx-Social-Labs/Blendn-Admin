@@ -137,7 +137,7 @@ export async function fileEventClaim(
    * workstream on.
    */
   const refusal = claimRefusal(event)
-  if (refusal === "not_curated") return { ok: false, error: "This event already has an organiser" }
+  if (refusal === "not_curated") return { ok: false, error: "This event already has an organizer" }
   if (refusal === "already_claimed") return { ok: false, error: "This event has already been claimed" }
   if (refusal === "room_open") {
     return {

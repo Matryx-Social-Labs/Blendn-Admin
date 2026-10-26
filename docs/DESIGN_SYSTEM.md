@@ -5,14 +5,14 @@ colour, type, and the layout rules that are easy to break by accident.
 
 ## Owner rulings, 2026-10-01
 
-The claude.ai/design "Blend'n Design System" organiser and platform kits are the
+The claude.ai/design "Blend'n Design System" organizer and platform kits are the
 reference for every dashboard screen. They predate some product rules, so the
 owner ruled on each conflict. These rulings are the rules now. Where a section
 below used to say otherwise, it has been rewritten.
 
 | # | Ruling | What it means on a screen |
 |---|---|---|
-| R1 | **Hosts see labels, never names** (SCRUM-383 b). | Organisers, venue owners and sponsors see an attendee as a pseudonymous label in mono plus counts. Never a name, email, phone, photo, avatar or profile, and never one person's live status ("In the room"). The kit's Name/Avatar columns and "Names only" copy are replaced with the label. Labels are salted with the event's organisation: stable across its events, the same for every member, different at every other organisation. **Every member of the organisation that runs the event (owner, admin and staff) sees the label roster**, because staff work the door and the room. A venue sees aggregates and never people (SCRUM-501). On another host's event at its venue, the Overview and Attendees tabs show Going, Came and fill by the same rule as the Events list, the venue page and the exports (`discloseVenueCounts`, through `venueCounts`). A count is held back under 5, when it would name everyone going or all but one, and when walk-ins take it past the going count. Any other count of people goes through `discloseHeadcount`. Zero is always shown. Hosts get arrivals to the quarter hour, in label order, and none at all while fewer than 5 came, because the room announces each check-in under a room pseudonym. `app_admin` keeps full details on `/dashboard/users`. Guarded by `__tests__/attendee-identity-boundary.test.ts`. The one exception is a regular who opts in to being visible to a venue (plan §2). |
+| R1 | **Hosts see labels, never names** (SCRUM-383 b). | Organizers, venue owners and sponsors see an attendee as a pseudonymous label in mono plus counts. Never a name, email, phone, photo, avatar or profile, and never one person's live status ("In the room"). The kit's Name/Avatar columns and "Names only" copy are replaced with the label. Labels are salted with the event's organisation: stable across its events, the same for every member, different at every other organisation. **Every member of the organisation that runs the event (owner, admin and staff) sees the label roster**, because staff work the door and the room. A venue sees aggregates and never people (SCRUM-501). On another host's event at its venue, the Overview and Attendees tabs show Going, Came and fill by the same rule as the Events list, the venue page and the exports (`discloseVenueCounts`, through `venueCounts`). A count is held back under 5, when it would name everyone going or all but one, and when walk-ins take it past the going count. Any other count of people goes through `discloseHeadcount`. Zero is always shown. Hosts get arrivals to the quarter hour, in label order, and none at all while fewer than 5 came, because the room announces each check-in under a room pseudonym. `app_admin` keeps full details on `/dashboard/users`. Guarded by `__tests__/attendee-identity-boundary.test.ts`. The one exception is a regular who opts in to being visible to a venue (plan §2). |
 | R2 | **No "Waved".** | A wave is a socket event with no row, so nothing can count it. Funnels run RSVP, then checked in, then chatted, then mutual yes. Never design a stage the schema cannot produce. |
 | R3 | **Bordered panels.** | This replaces "hierarchy comes from type, not boxes". See *Panels* below. |
 | R4 | **The plan-card stripe is allowed.** | One gradient element per screen, plus the sidebar plan card's `--gradient-brand` stripe, which is a brand constant on every screen. See *Gradients* below. |
@@ -81,7 +81,7 @@ tokens are decided here:
 | Token | Value | Use |
 |---|---|---|
 | `--brand-ink` | `oklch(0.156 0.002 17.3)` (`#0D0C0C`) | The kit's `var(--brand-ink)`. `text-brand-ink` reads it, so the two are one value. |
-| `--gradient-ember` | see *Gradients* | The interface gradient (ProTag, the organiser's chat bubble). |
+| `--gradient-ember` | see *Gradients* | The interface gradient (ProTag, the organizer's chat bubble). |
 | `--radius-panel` → `rounded-panel` | 12px | The Panel (R3). `--radius` stays 10px for tiles, tables and the hero. |
 | `--text-page-title` → `text-page-title` | 26px | The in-content PageHeader title (R5). |
 | `--text-panel-title` → `text-panel-title` | 15px | A Panel's title (`components/dashboard/kit.tsx`). |
@@ -159,7 +159,7 @@ counts the h1s in a browser for every role.
 **Owned headers.** A record's page is named by the record: an event by its
 title, a venue by its name, an account by the person's. The routes in
 `OWNED_HEADERS` (`lib/dashboard-route-content.ts`: the event, its edit, room and
-feedback pages, a venue and its claim page, an organiser, a venue owner) get
+feedback pages, a venue and its claim page, an organizer, a venue owner) get
 nothing from `RoutePageHeader`; the page renders `<PageHeader title actions
 back>` server-side as its first child, with the record's own actions. The
 breadcrumbs keep the route's kind ("Events › Event › Room"). Each owned route
@@ -236,7 +236,7 @@ we do" and never "what needs attention now".
 | Primary chart | the loop, seven stages | RSVP pacing vs capacity | utilisation heatmap, day x slot |
 | Hero | people who came back for a second event | next event's fill % | — |
 | Secondary | turn-up and refusals; supply concentration | rating distribution | rating distribution, busiest venue |
-| Own screens | Moderation, Users, Organisers, Venues, Applications, Organisations | Attendees, My organisation | My venues, My organisation |
+| Own screens | Moderation, Users, Organizers, Venues, Applications, Organisations | Attendees, My organisation | My venues, My organisation |
 
 **Applications / Organisations vs My organisation.** Two screens, not one with a
 branch. A platform admin managing every host and an owner managing their own
@@ -280,7 +280,7 @@ the sidebar component so the role gate is testable without a NextAuth session.
 headings (`group`: Needs a decision, Supply, People, Commercial, Setup,
 Record). A host's sit in the kit's three blocks (`hostGroup`): the work itself
 with no heading, then Community, then Organisation. Analytics and Plan join the
-organiser's nav when their pages exist (step 16), not before.
+organizer's nav when their pages exist (step 16), not before.
 
 **The shell** (step 14, the kit's `shell.jsx`): a flush 248px sidebar with the
 identity card on top, which names the home organisation (the oldest live

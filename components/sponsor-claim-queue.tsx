@@ -35,7 +35,7 @@ export function SponsorClaimQueue({ claims }: { claims: SponsorClaimQueueRow[] }
       <EmptyState
         icon={<IconBuildingStore />}
         title="No claims waiting"
-        description="Organisers add brands free-hand while setting up an event. A company claims one to take over its name, logo and reporting — that lands here rather than applying itself."
+        description="Organizers add brands free-hand while setting up an event. A company claims one to take over its name, logo and reporting — that lands here rather than applying itself."
       />
     )
   }

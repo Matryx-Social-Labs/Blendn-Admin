@@ -31,7 +31,7 @@ export function OverviewSponsor({ data }: { data: SponsorOverview }) {
     return (
       <EmptyState
         title="No brand yet"
-        description="Everything here hangs off a brand: campaigns are attached to one, and an organiser has to be able to find you by name. Set one up and this fills in."
+        description="Everything here hangs off a brand: campaigns are attached to one, and an organizer has to be able to find you by name. Set one up and this fills in."
         action={
           <Button asChild size="sm">
             <Link href="/dashboard/brand">Set up your brand</Link>
@@ -67,7 +67,7 @@ export function OverviewSponsor({ data }: { data: SponsorOverview }) {
         <HeroMetric
           eyebrow={`Next placement · ${data.brandName}`}
           value="None scheduled"
-          description="An organiser attaches your brand to an event, and it appears here once they do."
+          description="An organizer attaches your brand to an event, and it appears here once they do."
           tone="muted"
         />
       )}

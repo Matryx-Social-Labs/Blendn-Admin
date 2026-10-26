@@ -178,7 +178,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       gpsAccuracy,
       userId: authUser.userId,
       record: { eventId, occurrenceId: occurrence.id },
-      noFenceMessage: "This event has no location set, so check-in is unavailable. Contact the organiser.",
+      noFenceMessage: "This event has no location set, so check-in is unavailable. Contact the organizer.",
     })
     if (refused) return refused
 

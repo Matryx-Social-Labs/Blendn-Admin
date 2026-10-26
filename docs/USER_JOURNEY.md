@@ -1,6 +1,6 @@
 # The user journey
 
-The contract between three repos: this one (API + organiser dashboard), `blendn`
+The contract between three repos: this one (API + organizer dashboard), `blendn`
 (the Expo app), and `blendnorglanding` (the marketing site).
 
 It exists because none of them knew what the others needed. An endpoint-by-endpoint
@@ -29,7 +29,7 @@ payloads is how the two fall out of sync.
 Everything else is negotiable. These are not, and each is enforced by a test
 rather than by memory.
 
-**GPS check-in is what makes attendance real.** Every number an organiser is sold
+**GPS check-in is what makes attendance real.** Every number an organizer is sold
 — occupancy, attendance, retention, turn-up — rests on someone having physically
 been there. There is no manual check-in and no override.
 
@@ -48,7 +48,7 @@ exposes them to exactly the person they were worried about.
 as imports the trust module.
 
 **Check-in never refuses.** The geofence covers the queue outside. Capacity is a
-signal to the organiser, not a door policy — see `CHECKIN.md`.
+signal to the organizer, not a door policy — see `CHECKIN.md`.
 
 ---
 
@@ -140,7 +140,7 @@ Future Echoes '24").
 | Served | `/events/:eventId/presence` + sweeper, live since v0.42.0 |
 
 **The highest-value gap in the whole document.** Nobody is ever checked out, so
-occupancy is cumulative — it climbs all night and never falls, on the organiser's
+occupancy is cumulative — it climbs all night and never falls, on the organizer's
 live screen. A shipped feature producing a wrong number on someone else's screen.
 
 Ping `{ lat, lng, accuracy }` every 5 minutes while checked in. The server judges;
@@ -202,7 +202,7 @@ They had no columns behind them, so every switch read ON regardless of choice.
 
 ---
 
-## Organiser journey
+## Organizer journey
 
 Fully served; the surface is the dashboard, not the app.
 
@@ -227,7 +227,7 @@ from a 1–5 star and needs a real 0–10 question.
 ## Venue owner journey
 
 1. **Claim** a venue → admin review
-2. **My venues** — utilisation, ratings, returning organisers
+2. **My venues** — utilisation, ratings, returning organizers
 3. **Building occupancy** — everyone inside across concurrent events, against the
    venue's own licensed capacity
 4. **Events here** — read-only operational access to events at their venue
@@ -296,7 +296,7 @@ and the public event claim page exist today.
 
 | | |
 |---|---|
-| Designed | "Running this event? Claim it" on a curated event, and "Own this place? Claim it" on a venue, both linking out to the dashboard host, because the app refuses organiser and venue-owner accounts (plan §3) |
+| Designed | "Running this event? Claim it" on a curated event, and "Own this place? Claim it" on a venue, both linking out to the dashboard host, because the app refuses organizer and venue-owner accounts (plan §3) |
 | Built | Nothing — no claim link in the app. Being built in step 1 |
 | Served | The public `/claim/[eventId]` is built and served. The public `/claim/venue/[venueId]` is being built in step 1; today a venue claim needs a dashboard login |
 

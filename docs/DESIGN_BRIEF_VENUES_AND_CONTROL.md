@@ -42,22 +42,22 @@ events.venue_id      ──▶  where it IS  ──▶  venues.owner_id  (nullab
 | Actor | Condition | Editorial (edit, publish, cancel) | Operational (chat, moderation, attendees) |
 |---|---|---|---|
 | admin | always | ✅ | ✅ |
-| organiser | it's their event | ✅ | ✅ |
+| organizer | it's their event | ✅ | ✅ |
 | venue owner | it's at their venue | ✗ | ✅ |
 | venue owner | it's their own event | ✅ | ✅ |
 
 The principle: a venue owner controls **what happens in their building** — the
 chatroom, moderation, who is walking in — but not the event itself, because the
-event is not theirs to change. Host it yourself and you are the organiser, so
+event is not theirs to change. Host it yourself and you are the organizer, so
 you get both.
 
 **Critically, venue linkage is optional and usually absent.** Most events happen
-at places that are not on the platform: the organiser types a location and no
+at places that are not on the platform: the organizer types a location and no
 venue record exists. Those events have no venue owner and nothing changes for
 them. Your designs must treat "no linked venue" as the *common* case, not the
 edge — a venue picker that implies you must choose from a list is wrong.
 
-When an organiser does pick a claimed venue, it **auto-links immediately**. The
+When an organizer does pick a claimed venue, it **auto-links immediately**. The
 venue owner is not asked first; they find out because it appears on their
 dashboard, and they can **dispute and unlink** it. Design that arrival — an
 event you did not agree to, showing up at your venue — as a real moment, not a
@@ -76,11 +76,11 @@ For admins: all venues, who owns each, which are unclaimed, and assigning an
 owner.
 
 New: the **dispute** flow. A venue owner sees an event they did not agree to and
-unlinks it. What happens to the organiser, who now has an event with no venue?
+unlinks it. What happens to the organizer, who now has an event with no venue?
 
 ### 2. Suspending a host
 
-Removing an organiser or venue owner means **suspending**, never deleting —
+Removing an organizer or venue owner means **suspending**, never deleting —
 deleting cascades their events, every check-in and every chat message, which
 destroys other people's history to punish one person.
 
@@ -90,7 +90,7 @@ Suspension is two decisions, and the design must keep them separate:
 2. **Their events** — a disposition step listing every upcoming published event
    with its attendee count, defaulted by risk:
    - starts **< 48h with RSVPs** → default *leave running*; cancelling on the
-     day punishes attendees for the organiser's conduct
+     day punishes attendees for the organizer's conduct
    - starts **≥ 48h** → default *unpublish*; reversible, nobody has travelled
    - **at a claimed venue** → also offer *transfer to the venue owner*
    - always available → *cancel and notify attendees* (sends a push)
@@ -99,10 +99,10 @@ The hard part is making a screen where someone is angry and in a hurry does not
 accidentally cancel six events with 200 committed attendees. Show the blast
 radius before the action, not after.
 
-### 3. Onboarding an organiser
+### 3. Onboarding an organizer
 
-A venue owner wants a specific organiser to host at their venue, and that
-organiser has no account. They submit the organiser's details; an admin verifies
+A venue owner wants a specific organizer to host at their venue, and that
+organizer has no account. They submit the organizer's details; an admin verifies
 and onboards.
 
 Design the request form, the venue owner's view of their pending requests, and
@@ -139,7 +139,7 @@ reviews. Design that as a break-glass action that visibly costs something — it
 should feel like a decision, not a button.
 
 Messages in the feedback window are **auto-classified** as positive / negative /
-neutral, and the organiser can **correct the label**. Design:
+neutral, and the organizer can **correct the label**. Design:
 - the feedback view itself — what a host reads the morning after
 - how a suggested-but-wrong label gets corrected without friction
 - how confidence is conveyed, since the classifier will be wrong about sarcasm

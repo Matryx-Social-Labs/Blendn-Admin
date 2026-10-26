@@ -318,9 +318,9 @@ describe("an Event Pass", () => {
 describe("who may buy (G7)", () => {
   it.each([
     ["staff", () => as(staff, "organizer"), /owner or admin/],
-    ["a venue owner who owns an organisation", () => as(venueOwner, "venue_owner"), /organiser’s organisation/],
-    ["the owner of a suspended organisation", () => as(suspendedOwner, "organizer"), /organiser’s organisation/],
-    ["a platform admin", () => as(admin, "app_admin"), /organiser’s organisation/],
+    ["a venue owner who owns an organisation", () => as(venueOwner, "venue_owner"), /organizer’s organisation/],
+    ["the owner of a suspended organisation", () => as(suspendedOwner, "organizer"), /organizer’s organisation/],
+    ["a platform admin", () => as(admin, "app_admin"), /organizer’s organisation/],
   ])("refuses %s on every action, with no call out and no row", async (_label, sign, sentence) => {
     sign()
     await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(sentence)
@@ -595,7 +595,7 @@ describe("when one side fails (scan 3)", () => {
       await db.organisation_members.create({ data: { org_id: orgId, user_id: demoted, role: "owner" } })
       await db.user.update({ where: { id: demoted }, data: { role: "attendee" } })
       as(demoted, "organizer")
-      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/organiser’s organisation/)
+      await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow(/organizer’s organisation/)
       await db.user.update({ where: { id: demoted }, data: { role: "organizer", suspended_at: new Date() } })
       await expect(actions.startAnalyticsCheckout("monthly")).rejects.toThrow("Unauthorized")
       expect(calls).toHaveLength(0)

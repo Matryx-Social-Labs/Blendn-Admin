@@ -124,7 +124,7 @@ you stop. The latest comment for a lane decides who holds it. Device locks
 (`qa lock`) are local files and only keep sessions on one machine apart.
 
 **Shared controls, read-only:** `teen.tester@` (16, the minor), `daniel.weber@`
-(organiser with no org). **Never touch** `appreview@` (the App Store reviewer).
+(organizer with no org). **Never touch** `appreview@` (the App Store reviewer).
 
 **Destructive work** (suspend, delete, ban, password change, role change) goes
 on a person **your session created**: sign one up through the app as

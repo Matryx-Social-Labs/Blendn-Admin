@@ -28,7 +28,7 @@ Every `/dashboard/venues/[id]` currently 404s.
 A venue is not a row someone types. It carries **operational control over other
 people's events.**
 
-When an organiser picks a claimed venue, the event auto-links immediately and
+When an organizer picks a claimed venue, the event auto-links immediately and
 the venue's owner gets the chatroom, moderation and the attendee list for an
 event that is not theirs. They were not asked first — they find out because it
 appears on their dashboard, and they can dispute it.
@@ -90,7 +90,7 @@ is a real case.
 A venue owner says "this is mine". Design the claim form and the review that
 follows.
 
-Reuse the **onboarding review queue** pattern that already ships for organiser
+Reuse the **onboarding review queue** pattern that already ships for organizer
 applications — it works, admins know it, and it is the right shape.
 
 Evidence to collect, India-specific:
@@ -136,7 +136,7 @@ the check is stronger than it is.
 ## Also design
 
 **The unclaimed venue.** Most venues will have no owner. Design the state: an
-admin created it, or an organiser's free-text location was matched to it. It
+admin created it, or an organizer's free-text location was matched to it. It
 works fine — events there simply carry no venue-owner access. This is the common
 case, not a gap to nag about.
 

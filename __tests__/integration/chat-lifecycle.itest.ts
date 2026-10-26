@@ -235,7 +235,7 @@ describe("a closed room refuses a reaction with the same words as a message", ()
     expect(react.status).toBe(403)
     expect(await react.json()).toMatchObject({
       errorCode: "USER_MUTED",
-      error: "The organiser has muted you in this room.",
+      error: "The organizer has muted you in this room.",
     })
   })
 })

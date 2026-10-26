@@ -14,7 +14,7 @@ every id.
 
 Owning a venue record grants **operational control over other people's events**.
 
-An organiser who picks a claimed venue links their event to it. The venue's
+An organizer who picks a claimed venue links their event to it. The venue's
 owner then sees that event's chatroom, its attendee count and its feedback —
 for an event they are not running. That is deliberate and useful (a venue
 manager should know what is happening in their building tonight), and it is also
@@ -33,7 +33,7 @@ its own.
 | 1 | Proximity dedup | `venuesNear`, 100 m | A second record for a building that already exists |
 | 2 | Admin review | `venue_claims` queue | Ownership asserted by anyone who can fill in a form |
 | 3 | One owner per venue | `assignVenueOwner`, approval transaction | A silent second owner; a second claim is a *dispute* |
-| 4 | Reversible auto-link | organiser can unlink, audited | An approved claim capturing events it should not |
+| 4 | Reversible auto-link | organizer can unlink, audited | An approved claim capturing events it should not |
 
 **Layer 4 is why 1–3 do not have to be bulletproof.** Nothing here can be
 verified automatically — a GSTIN checksum proves the format, not the ownership,
@@ -55,8 +55,8 @@ Who may create:
 | `organizer` | Refused |
 
 A venue owner describing their own place does not create-then-claim it; that
-would be ceremony with no safety value. An organiser is refused outright because
-a venue grants control over other people's events and an organiser has no claim
+would be ceremony with no safety value. An organizer is refused outright because
+a venue grants control over other people's events and an organizer has no claim
 to that — they still get free-text venue names, which is what most events need.
 
 ### The Location stage is the one that matters
@@ -79,7 +79,7 @@ lookup.
 the default check-in extent, from ~150 m for a stadium to ~20 m for a café.
 
 One shared default for a café and a stadium is how a real football match on
-production ended up carrying a **100 km** check-in radius. An organiser given
+production ended up carrying a **100 km** check-in radius. An organizer given
 one wrong default drags the handle until it "looks safe".
 
 OSM tags suggest the type when a building footprint is imported
@@ -152,7 +152,7 @@ Everything stays editable because an event on the rooftop of a three-floor venue
 legitimately differs from the venue's own footprint — that is the sub-venue
 geofence case, not an error.
 
-Capacity prefills only when empty because overwriting a number the organiser
+Capacity prefills only when empty because overwriting a number the organizer
 already typed would silently change what they meant. It warns rather than
 blocks because venue capacity is the room's maximum and an event's is what
 *this* event wants, legitimately lower for a seated layout.
@@ -164,13 +164,13 @@ database, but so did the 100 km radius.
 
 Most events are at places not on the platform. The picker is a text input that
 happens to suggest — not a select. Unlinking keeps the name, location and
-geofence, because the organiser typed an event at this place and clearing it all
+geofence, because the organizer typed an event at this place and clearing it all
 would punish them for unlinking.
 
 ### `venue_link_status` is derived, never sent
 
 ```
-auto_linked  → organiser picked the venue; nobody has confirmed it
+auto_linked  → organizer picked the venue; nobody has confirmed it
 confirmed    → the venue owner agrees this event is theirs to see
 disputed     → the venue owner says it is not
 ```
@@ -189,7 +189,7 @@ Three behaviours the tests pin down:
 - a `PATCH` **omitting** `venue_id` leaves the link alone — a title edit must not
   unlink a venue
 - an id matching no venue is **dropped**, and the save proceeds — failing the
-  whole update over a stale link would cost the organiser their edit for
+  whole update over a stale link would cost the organizer their edit for
   something they can neither see nor fix
 - an existing `confirmed`/`disputed` status **survives a re-save**, but is not
   carried across a change of venue — a confirmation applies to the venue it was
@@ -205,16 +205,16 @@ Three behaviours the tests pin down:
 |---|---|---|
 | Venue owner | **Dispute** | Flags the link `disputed`, with a reason. Does **not** detach. |
 | Venue owner | **Confirm** | Sets `confirmed` — the only place that value can ever be written |
-| Organiser | **Unlink** | Detaches immediately. No review. |
+| Organizer | **Unlink** | Detaches immediately. No review. |
 
 An owner who could unlink freely could hide events they would rather not answer
 for, so disputing flags rather than detaches and an admin resolves it.
 
-An organiser detaches outright, because nobody should have to wait on a review
+An organizer detaches outright, because nobody should have to wait on a review
 to stop a stranger seeing their attendee list.
 
 Unlinking **keeps `venue_name` as free text**: the event really was held there,
-and clearing it would punish an organiser for correcting a bad link.
+and clearing it would punish an organizer for correcting a bad link.
 
 Authorization resolves on **org membership**, not role — the same rule as
 `eventPermissions`. The organisation that owns the venue speaks for it, whoever
@@ -257,13 +257,13 @@ a published night out.
 | Visibility | `published`, `unlisted` | Belt and braces: an attendee feed that only asks for `public` stays blind to it even if it forgot the kind |
 
 **Who may do what** (`eventPermissions`, F1, D-1). A venue day is decided
-before the organiser branch, which must never be the one that answers for it:
+before the organizer branch, which must never be the one that answers for it:
 
 | Actor | edit | operate (room, moderation) | attendees |
 |---|---|---|---|
 | app_admin | yes | yes | yes |
 | venue owner (claimed, day started after the claim) | no | yes — the room's messages and its per-day handles, the live counts | **no** attendee list, as labels or as a count |
-| anyone else, organisers of the same org included | no | no | no |
+| anyone else, organizers of the same org included | no | no | no |
 
 **Hidden from every reader that is not about it.** `lib/event-kind.ts` exports
 `realEventsWhere` (and `venueDaysWhere`); raw SQL says `kind = 'event'`.
@@ -273,7 +273,7 @@ filters, `_count.events`, raw SQL — and fails on one that neither filters nor
 carries an `any-kind: <reason>` comment. Excluded: the feed, search, cities,
 `/venues` counts, the RSVP and favourite lists, the claim page, the venue-link
 confirm/dispute/unlink actions, every dashboard list,
-overview, report and export, organiser counts, demand, reminders, rating
+overview, report and export, organizer counts, demand, reminders, rating
 requests, the issue sweeper, the sponsored scheduler, the loop funnel, an
 organisation's suspension, and the seeds. Included, on purpose: a person's own
 nights (`/me/attendance`, D-6 — labelled as places by the client), a member's

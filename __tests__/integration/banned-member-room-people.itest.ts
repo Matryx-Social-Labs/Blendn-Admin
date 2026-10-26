@@ -86,7 +86,7 @@ const call = async (handler: Handler, path: string, token: string, params: Recor
   return { status: res.status, json: await res.json() }
 }
 
-const REFUSED = { success: false, error: "The organiser has removed you from this room.", errorCode: "USER_BANNED" }
+const REFUSED = { success: false, error: "The organizer has removed you from this room.", errorCode: "USER_BANNED" }
 
 let w: Awaited<ReturnType<typeof room>>
 beforeAll(async () => {
