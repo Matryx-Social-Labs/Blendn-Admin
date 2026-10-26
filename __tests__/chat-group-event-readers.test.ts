@@ -56,7 +56,6 @@ const READERS: Record<string, string> = {
   "app/dashboard/moderation/reports/actions.ts#getReportQueue": "the admin queue's label; no event stays null",
   "lib/polls.ts#getPollResults": "polls are an event room's: the URL's event must be the room's, else not found",
   "lib/polls.ts#castVote": "polls are an event room's: the URL's event must be the room's, else not found",
-  "lib/sentiment-sweeper.ts#sweepSentiment": "selects event rooms only (kind = 'event')",
   "lib/chat-group-rows.ts#buildChatRows": "a Blend room's last speaker, by the event its occurrence names (the room itself has none): a Blend without one is 'Attendee', and the pair is skipped from the read",
   "lib/checkout.ts#checkOutChunk": "the rooms are selected by the event ids of the check-ins being closed, so each room has the event it is keyed by; a room with none is never in the map",
   "lib/socket-server.ts#emitChatTyping": "a venue day's liveness, asked only when there is an event; the door (roomOwnerDenial) runs first",
