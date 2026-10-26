@@ -45,14 +45,14 @@ export function LinkedEvents({ events, total }: { events: VenueLinkedEvent[]; to
           <EmptyState
             icon={<IconCalendar />}
             title="No events linked yet"
-            description="When an organiser picks one of your venues, their event appears here — and so do its chatroom and attendee count. You can dispute anything that is not actually yours."
+            description="When an organizer picks one of your venues, their event appears here — and so do its chatroom and attendee count. You can dispute anything that is not actually yours."
           />
         </div>
       ) : (
         <>
           <p className="max-w-prose px-5 pb-3 text-[0.8125rem] text-muted-foreground">
             You see the chatroom, attendee count and feedback for each of these. If one is not actually at your
-            venue, dispute it — an admin resolves it and the organiser is told.
+            venue, dispute it — an admin resolves it and the organizer is told.
           </p>
           <ul className="flex flex-col">
             {events.map((event) => (
@@ -111,7 +111,7 @@ function LinkedEventRow({ event }: { event: VenueLinkedEvent }) {
             driven as the venue owner, an event on the 20th read "today".
           */}
           {event.venueName} · {whenLabel(new Date(event.startAt), new Date(event.endAt), new Date())} ·{" "}
-          {event.organiserName ?? "Unknown organiser"} ·{" "}
+          {event.organiserName ?? "Unknown organizer"} ·{" "}
           {event.linkStatus === "disputed" ? (
             <span className="font-bold text-destructive">disputed</span>
           ) : event.linkStatus === "confirmed" ? (

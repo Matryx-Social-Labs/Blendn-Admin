@@ -83,7 +83,7 @@ Be honest that this is one or two people, not a rota:
 | Suspend an account platform-wide | Reports queue, or `users` | Yes, and it now **works on the phone** |
 | Reinstate a suspended account | Reports queue | Yes |
 | **Contact the reporter** | -- | **No** |
-| **Tell the organiser someone at their event is in trouble** | -- | **No** |
+| **Tell the organizer someone at their event is in trouble** | -- | **No** |
 | **Get paged when a flag lands** | -- | **No** |
 
 The three gaps at the bottom are the work. The last one is the most urgent,
@@ -125,7 +125,7 @@ the socket handlers and every DM query, to remove evidence from a conversation
 only two people can see. The lever against a DM is the person, not the message.
 
 **Suspension now reaches the app.** `users.suspended_at` had been read in
-exactly one place, `socket-ops-auth.ts`, which guards the *organiser* ops
+exactly one place, `socket-ops-auth.ts`, which guards the *organizer* ops
 socket. Suspending an attendee stopped them opening a dashboard they never had
 and changed nothing about the app they were in. It is now checked wherever a
 mobile token is issued — sign-in, Google, Apple, refresh, session — and
@@ -194,7 +194,7 @@ fault.
 2. **Wire the group-chat report button** (T5, app-side).
 3. **A way to reply to a reporter.** Silence after a report reads as dismissal.
    The queue now shows the reporter's name; it still cannot say anything back.
-4. **A way to tell an organiser** that something is happening at their event,
+4. **A way to tell an organizer** that something is happening at their event,
    without disclosing who reported it.
 5. **Group-chat abuse controls** (T7), before group chat ships.
 

@@ -39,7 +39,7 @@ it("hides a deleted event's room even from an active member (SCRUM-303)", () => 
 })
 
 it("says who removed them", () => {
-  expect(bannedRefusal({ banned_by: "user_organiser" })).toBe("The organiser has removed you from this room.")
+  expect(bannedRefusal({ banned_by: "user_organiser" })).toBe("The organizer has removed you from this room.")
 })
 
 it("tells a restored account the way back in, not a verdict nobody made (SCRUM-291)", () => {

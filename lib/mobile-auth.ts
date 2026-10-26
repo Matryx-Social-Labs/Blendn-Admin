@@ -130,7 +130,7 @@ export const SUSPENDED_MESSAGE =
 
 /** What a staff account is told, in the app, at every entry point. */
 export const STAFF_MESSAGE =
-  "This app is for attendees. Organisers, venue owners and sponsors sign in at the dashboard."
+  "This app is for attendees. Organizers, venue owners and sponsors sign in at the dashboard."
 
 /**
  * Sign an access token (15 min expiry)

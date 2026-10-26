@@ -77,12 +77,12 @@ export const routeContent: Record<string, RouteContent> = {
   },
   "/dashboard/leads": {
     title: "Leads",
-    description: "Demo requests from the organiser landing page. Oldest untouched first.",
+    description: "Demo requests from the organizer landing page. Oldest untouched first.",
   },
   "/dashboard/venue-claims": {
     title: "Venue claims",
     description:
-      "Ownership requests. Approving one hands over the events other organisers hold there.",
+      "Ownership requests. Approving one hands over the events other organizers hold there.",
   },
   "/dashboard/charges": {
     title: "Charges",
@@ -118,7 +118,7 @@ export const routeContent: Record<string, RouteContent> = {
     description: "Accounts, onboarding, and reachability.",
   },
   "/dashboard/organisers": {
-    title: "Organisers",
+    title: "Organizers",
     description: "The supply side: who publishes, and how concentrated it is.",
   },
   // Accounts, not records: "Venues" over a list of people named neither.
@@ -231,7 +231,7 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
     return { title: "Event", description: "Setup, performance, and what happened on the night." }
   }
   if (pathname.startsWith("/dashboard/organisers/")) {
-    return { title: "Organiser", description: "One host account and the events it created." }
+    return { title: "Organizer", description: "One host account and the events it created." }
   }
   if (pathname.startsWith("/dashboard/venue-owners/")) {
     return { title: "Venue owner", description: "One owner account and the events it created." }

@@ -582,7 +582,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
      */
     let blocker: string | null = null
     if (r.status === "proposed") blocker = "Waiting for you to accept"
-    else if (r.status === "draft") blocker = "The organiser has not published this yet"
+    else if (r.status === "draft") blocker = "The organizer has not published this yet"
     else if (r.status === "cancelled") blocker = null
     // Nothing to act on once the event is over: the scheduler switches a
     // campaign off itself at the end, and "Not switched on" beside "Ended · 5

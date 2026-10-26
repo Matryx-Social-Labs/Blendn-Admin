@@ -478,7 +478,7 @@ export function LocationSection({
                     </p>
                   ) : newVenue && !venueId ? (
                     <p role="status" className="text-[0.8125rem] text-muted-foreground">
-                      Saved as a venue when you save the event — the next organiser picks it instead of drawing it.
+                      Saved as a venue when you save the event — the next organizer picks it instead of drawing it.
                     </p>
                   ) : null}
                   {movedKm != null ? (

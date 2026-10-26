@@ -53,8 +53,8 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
         await decideCreative(row.id, decision, note)
         toast.success(
           decision === "approve"
-            ? "Approved — the organiser can switch it on."
-            : "Rejected. The campaign is stopped and the reason goes to the organiser."
+            ? "Approved — the organizer can switch it on."
+            : "Rejected. The campaign is stopped and the reason goes to the organizer."
         )
         router.refresh()
       } catch (e) {
@@ -125,12 +125,12 @@ function CreativeCard({ row }: { row: CreativeQueueRow }) {
           declineLabel="Reject"
           sendLabel="Send rejection"
           reasonLabel={`What has to change in ${brand}'s copy`}
-          placeholder="What has to change — it is sent to the organiser, and a refusal with no reason comes back word for word."
+          placeholder="What has to change — it is sent to the organizer, and a refusal with no reason comes back word for word."
           pending={pending}
           /* What the two buttons actually do, which is not what they say:
              neither starts a campaign, and one stops a running one. Beside the
              buttons, where the decision is made, not above the queue. */
-          hint="Approve lets the organiser switch it on · Reject stops it now"
+          hint="Approve lets the organizer switch it on · Reject stops it now"
           onApprove={() => decide("approve")}
           onDecline={(reason) => decide("reject", reason)}
         />

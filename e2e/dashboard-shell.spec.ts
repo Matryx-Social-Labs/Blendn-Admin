@@ -42,13 +42,13 @@ const MAY_CREATE: Record<string, boolean> = {
 /** The identity card's first line, per account — and the seed's other organisations, which it must not name. */
 const CARD: Record<string, { org: string; sub: RegExp }> = {
   admin: { org: "Blend'n", sub: /^Platform$/i },
-  organizer: { org: "Nightshift Collective", sub: /^Organiser$/i },
+  organizer: { org: "Nightshift Collective", sub: /^Organizer$/i },
   venue: { org: "Indiranagar Hospitality Group", sub: /^Venue owner$/i },
   sponsor: { org: "Blue Tokai Coffee Roasters", sub: /^Sponsor$/i },
-  outsider: { org: "No organisation", sub: /^Organiser$/i },
-  multiOrg: { org: "Lantern Lane Events", sub: /^Organiser · \+1 more$/i },
-  partSuspended: { org: "Sunday Supper Club", sub: /^Organiser$/i },
-  onlySuspended: { org: "Retired Rooms Co", sub: /^Organiser$/i },
+  outsider: { org: "No organisation", sub: /^Organizer$/i },
+  multiOrg: { org: "Lantern Lane Events", sub: /^Organizer · \+1 more$/i },
+  partSuspended: { org: "Sunday Supper Club", sub: /^Organizer$/i },
+  onlySuspended: { org: "Retired Rooms Co", sub: /^Organizer$/i },
   secondVenueOwner: { org: "Koramangala Social House", sub: /^Venue owner$/i },
 }
 // "Blend'n" is also the wordmark beside the logo on every sidebar, so it is

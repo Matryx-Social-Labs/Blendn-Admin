@@ -37,7 +37,7 @@ table, two join tables, `venuePermissions`, and one derived column.
       │ Cascade            │ Cascade
       ▼                    ▼
    venues                events
-  (owner curates)     (organiser asserts)
+  (owner curates)     (organizer asserts)
 ```
 
 `Cascade` points at the thing that owns the row; `Restrict` points at the
@@ -49,27 +49,27 @@ event saying what it actually offered.
 ### Suggestion, not inheritance
 
 ```
-organiser picks a venue
+organizer picks a venue
         │
         ▼
-  venue.owner_org_id set?  ──no──▶  no suggestions; organiser ticks from vocabulary
+  venue.owner_org_id set?  ──no──▶  no suggestions; organizer ticks from vocabulary
         │yes
         ▼
  show the venue's amenities as DEFAULTS, pre-ticked
         │
         ▼
- organiser edits and saves  ──▶  event_amenities = what the ORGANISER asserted
+ organizer edits and saves  ──▶  event_amenities = what the ORGANIZER asserted
 ```
 
 The event stores its own rows. It never reads through to the venue at render
 time. So a venue editing its list next month cannot change what last month's
-event claimed, and an organiser who unticks "Open Bar" is believed.
+event claimed, and an organizer who unticks "Open Bar" is believed.
 
-**Ownership gates suggestions, not link confirmation.** The organiser's picker
+**Ownership gates suggestions, not link confirmation.** The organizer's picker
 always writes `venue_link_status: "auto_linked"` (`location-section.tsx:67`);
 `confirmed` is produced later by the venue owner clicking "That's mine"
 (`linked-events.tsx:153`). Gating on `confirmed` would show an empty list at the
-only moment the organiser uses it. Ownership is the signal that a human curated
+only moment the organizer uses it. Ownership is the signal that a human curated
 the list; confirmation is a different question about a different fact.
 
 ### Authorisation
@@ -90,7 +90,7 @@ inconsistent granularity, in the local language.
 ```
 neighbourhood → suburb → quarter → city_district → (null)
                                                      │
-                                          organiser override wins over all
+                                          organizer override wins over all
                                                      │
                                         render: override ?? derived ?? city
 ```
@@ -102,7 +102,7 @@ are excluded from the city chain and must stay excluded — `neighbourhoodFrom()
 lives beside `cityFrom()` and shares nothing with it.
 
 Rendering a messy value is survivable where grouping on it was not. But
-"Koramangala 5th Block" is not "Arts District", so the organiser can overwrite
+"Koramangala 5th Block" is not "Arts District", so the organizer can overwrite
 it. Machine suggests, human asserts — the same rule as amenities.
 
 ### Derived server-side, from a human-confirmed point
@@ -193,7 +193,7 @@ Launch **A, B, C in parallel**. S4 waits on both A and B. S5 waits on A. S7 last
 | D9 | `Restrict` + `is_active` | Retiring an amenity must not rewrite history |
 | D10 | Best-effort geocode + backfill | A subtitle must not fail event creation |
 | D11 | Detail endpoint only | The cards render no amenity |
-| D12 | Precedence chain + organiser override | Derived is a default; the human wins |
+| D12 | Precedence chain + organizer override | Derived is a default; the human wins |
 
 **Update (client redesign): the `venue_amenities` table ships read-only.** The venue page
 lists a venue's amenities from it (`GET /venues/:id` → `venue.amenities`, names from this
@@ -209,7 +209,7 @@ would ship `venuePermissions` and a venue picker that, for essentially every
 venue in the database, produced an empty list.
 
 So the delivered scope is **S1 + S5 + S7**: the vocabulary, the event join
-table, the organiser's picker and the detail payload. S2 and S4 stay written up
+table, the organizer's picker and the detail payload. S2 and S4 stay written up
 here and unbuilt. Nothing about them is foreclosed — the event stores its own
 rows either way, so suggestions land later as *defaults* without changing what
 any past event claimed.

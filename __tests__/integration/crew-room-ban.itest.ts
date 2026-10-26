@@ -35,7 +35,7 @@ async function world(label: string) {
   return { eventId, occurrenceId, crew, C, solo }
 }
 
-const REFUSED = { error: "The organiser has removed you from this room.", errorCode: "USER_BANNED" }
+const REFUSED = { error: "The organizer has removed you from this room.", errorCode: "USER_BANNED" }
 
 it("a member a host banned is not here for their crew", async () => {
   const w = await world("present")

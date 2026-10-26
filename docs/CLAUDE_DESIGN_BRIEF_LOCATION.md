@@ -1,7 +1,7 @@
 # Blend'n — location, geofencing and check-in brief
 
 Paste into Claude Design. Scope is **one stage of the event editor plus its
-mobile counterpart**: how an organiser defines *where the event is*, and what an
+mobile counterpart**: how an organizer defines *where the event is*, and what an
 attendee sees when they try to check in.
 
 This is the most important screen in the product and the previous round
@@ -38,7 +38,7 @@ problem:
 | Quantity | What it is | Who decides |
 |---|---|---|
 | **Extent** | The venue's actual physical size. A café is 20 m across; Chinnaswamy Stadium is 200 m. A fact about the world. | traced on a map |
-| **Buffer** | Deliberate tolerance — the queue outside, the pavement, the car park. | the organiser |
+| **Buffer** | Deliberate tolerance — the queue outside, the pavement, the car park. | the organizer |
 | **Accuracy allowance** | How wrong *this particular* GPS fix is. The phone reports it per reading; indoors it is routinely 20–65 m. | the device, at check-in |
 
 The rule:
@@ -49,13 +49,13 @@ inside  =  distanceToGeofence(attendee, geofence)
 ```
 
 **Why this matters for the design:** because the accuracy allowance is applied
-per check-in, the organiser no longer has to inflate the shape to absorb bad
+per check-in, the organizer no longer has to inflate the shape to absorb bad
 GPS. They draw the venue *as it actually is*, and the system handles the noise.
 Tight geometry plus adaptive tolerance gives fewer false rejections **and** less
 overlap — instead of trading one against the other, which is what one fat radius
 forces.
 
-The UI has to make that legible, or organisers will still draw huge shapes "to
+The UI has to make that legible, or organizers will still draw huge shapes "to
 be safe".
 
 ---
@@ -85,10 +85,10 @@ not read as "the radius" — the whole point is that they are different things.
 Show the two together, and label them so the difference is obvious without
 reading documentation.
 
-**Show the accuracy allowance.** The organiser should understand that a
+**Show the accuracy allowance.** The organizer should understand that a
 real check-in is tolerated *beyond* the buffer, and roughly by how much. A
 third, faintest ring is one option; a sentence may be better. Your call — but
-the organiser must not be surprised later that someone 60 m out got in.
+the organizer must not be surprised later that someone 60 m out got in.
 
 **Scale matters.** Design this for a 20 m café *and* a 200 m stadium. The
 controls that work at one zoom must work at the other.
@@ -96,16 +96,16 @@ controls that work at one zoom must work at the other.
 #### The address block below the map — derived, not typed
 
 Under the map sit **Address**, **City**, **State / Region**, **Country** and
-**Postal Code**. All five used to be ordinary text inputs the organiser could
+**Postal Code**. All five used to be ordinary text inputs the organizer could
 type into. Four of them no longer are.
 
 | Field | Behaviour |
 |---|---|
-| Address | **Editable.** The street line, and organisers legitimately refine it — *"Gate 3"*, a unit number, a landmark the geocoder does not know |
+| Address | **Editable.** The street line, and organizers legitimately refine it — *"Gate 3"*, a unit number, a landmark the geocoder does not know |
 | City, State / Region, Country, Postal Code | **Read-only.** Filled from the map, greyed, not focusable by typing |
 
 **Why the four are locked, because it is a user-facing restriction and someone
-will ask.** These are the fields the attendee app groups by. If one organiser
+will ask.** These are the fields the attendee app groups by. If one organizer
 types *"Bangalore"* and another *"Bengaluru"*, the app's city browser shows two
 cities and each finds half the events — and neither entry looks wrong on its
 own, so nobody reports it.
@@ -137,9 +137,9 @@ look like a glitch.
 Two events can legitimately share a geofence — a conference with three tracks in
 one building is *meant* to. So this **warns, never blocks**.
 
-Design what the warning looks like when the organiser's shape overlaps another
+Design what the warning looks like when the organizer's shape overlaps another
 event running at the same time: which event, whose it is, how much they overlap,
-and what the organiser can do about it (shrink, move, or accept). It should read
+and what the organizer can do about it (shrink, move, or accept). It should read
 as information, not as an error.
 
 ### C. The mobile check-in states
@@ -160,7 +160,7 @@ The other half of this, and currently unspecified. Design what the attendee sees
 ### D. Venue geofence reuse
 
 Venues are a real table now. A venue owner should be able to define the geofence
-**once on the venue**, and any event there inherits it — with the organiser able
+**once on the venue**, and any event there inherits it — with the organizer able
 to override per event (a rooftop-only event at a three-floor venue). Design the
 inheritance and the override.
 

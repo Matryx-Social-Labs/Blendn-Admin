@@ -19,7 +19,7 @@ questions users bring. Everything about the current layout is open to change.
 
 **Desktop-first**, because these are people at a desk doing operational work
 across dense tables and charts. But it must be genuinely usable on a phone — an
-organiser checking how tonight's event is filling while walking to the venue is
+organizer checking how tonight's event is filling while walking to the venue is
 a real scenario. Mobile is not a scaled-down desktop; decide what a phone user
 actually needs on each screen.
 
@@ -32,7 +32,7 @@ strings swapped, which is the biggest single thing to fix.
 **`app_admin`** — platform operator, and the person who has to tell the
 investor story. Their questions:
 - Is the platform growing, and is that growth real engagement or vanity signups?
-- Do we have host liquidity — are organisers actually publishing events, or is
+- Do we have host liquidity — are organizers actually publishing events, or is
   supply concentrated in three accounts?
 - Is anything on fire right now? Specifically: is there flagged content sitting
   unreviewed in the moderation queue?

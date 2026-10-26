@@ -46,7 +46,7 @@ Blendn is a **social event discovery and anonymous networking app**. Users can:
 - **Anonymous group chat** — Each event has an anonymous chatroom; users get randomly generated names (e.g., "Cosmic Panda", "Neon Falcon") so they can interact without revealing identity
 - **Private messaging** — Users can send message requests to connect privately; both parties must consent before a conversation opens
 - **User profiles** — Name, bio, occupation, education, interests, photos
-- **Event management** — Organisers can create, edit, and manage events with capacity limits, check-in verification, and announcements
+- **Event management** — Organizers can create, edit, and manage events with capacity limits, check-in verification, and announcements
 - **Ratings & reviews** — Users can rate events (1-5 stars) and leave reviews
 - **Content moderation** — Automated AI-powered moderation of chat messages with keyword filtering and OpenAI content analysis
 - **Admin dashboard** — Web-based admin panel for event management, chat moderation, user management, announcements, and sponsored messages
@@ -123,7 +123,7 @@ Blendn is a **social event discovery and anonymous networking app**. Users can:
 ### When Location is Collected
 - **Event check-in:** GPS coordinates required to verify user is within the event's check-in radius
 - **Profile location:** Optional text field, auto-normalised to city name via reverse geocoding
-- **Event creation:** Organisers set event location with coordinates and address
+- **Event creation:** Organizers set event location with coordinates and address
 
 ### How Location is Used
 - **Proximity verification:** Haversine distance calculation ensures user is within configurable radius (default 30m) of event
@@ -160,7 +160,7 @@ Blendn is a **social event discovery and anonymous networking app**. Users can:
 ### Chat Access Rules
 - Must be checked in to an event to send messages
 - After checkout, users can view historical messages up to their checkout time but cannot send new ones
-- Chat can be locked by organisers (prevents all new messages)
+- Chat can be locked by organizers (prevents all new messages)
 
 ### Message Types Supported
 - Text (max 4,000 characters)
@@ -168,8 +168,8 @@ Blendn is a **social event discovery and anonymous networking app**. Users can:
 - Videos (MP4, QuickTime — max 50MB)
 - Audio (MP3, M4A — max 50MB)
 - System messages (automated announcements)
-- Sponsored messages (organiser-configured, auto-sent at intervals)
-- Announcements (organiser-only, push-notified to all members)
+- Sponsored messages (organizer-configured, auto-sent at intervals)
+- Announcements (organizer-only, push-notified to all members)
 
 ### Thread/Reply Support
 - Messages support parent-child threading via `parent_id`
@@ -297,8 +297,8 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 | **Private message** | Sender name + message preview (truncated 100 chars) | New private message received |
 | **Group message** | Anonymous name + message preview (truncated 80 chars) | New message in event chat |
 | **Event check-in** | "[Name] checked in to [Event]" | Someone checks into an event |
-| **Event update** | Event title + update details | Organiser updates event |
-| **Announcement** | Announcement content preview | Organiser sends announcement |
+| **Event update** | Event title + update details | Organizer updates event |
+| **Announcement** | Announcement content preview | Organizer sends announcement |
 | **Message request** | "[Name] wants to connect" | New message request received |
 | **Message request response** | "[Name] accepted your request" | Request accepted/declined |
 
@@ -564,7 +564,7 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 ### Recommendations for Terms & Conditions
 - Define minimum age requirement (typically 13+ for COPPA compliance, 16+ for GDPR)
 - State that the service is not intended for children under the minimum age
-- If targeting events with age restrictions (bars, clubs), note that event organisers are responsible for enforcing age limits at physical venues
+- If targeting events with age restrictions (bars, clubs), note that event organizers are responsible for enforcing age limits at physical venues
 - Consider adding a date-of-birth field at sign-up for age verification
 
 ---
@@ -667,4 +667,4 @@ Include links to these third-party privacy policies in the app's Privacy Policy:
 7. **Cross-border data transfer:** Data is processed on US-based servers (Railway, OpenAI, Expo) — relevant for GDPR/international users
 8. **No COPPA compliance currently:** No age verification is implemented; this needs to be addressed in terms or by implementing age gates
 9. **Indian language moderation:** The keyword filter covers Hindi, Tamil, Telugu, Kannada, Malayalam, Bengali, Marathi, and Gujarati — community guidelines should note multi-language enforcement
-10. **Sponsored messages:** Organisers can send sponsored/promoted messages to event chats at configured intervals — users should be informed that some chat content is promotional
+10. **Sponsored messages:** Organizers can send sponsored/promoted messages to event chats at configured intervals — users should be informed that some chat content is promotional

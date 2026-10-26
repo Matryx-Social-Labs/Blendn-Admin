@@ -53,12 +53,12 @@ days, labelled "session proxy" in the UI so nobody reports it as DAU.
 distribution sums the ratings of every event held there.
 
 **Shipped as designed**, and the interpretation the design calls for — "a low
-rating at one room across several organisers' events is a facilities signal" —
-holds. But a single bad organiser running five events at one venue will drag
+rating at one room across several organizers' events is a facilities signal" —
+holds. But a single bad organizer running five events at one venue will drag
 that venue's distribution, and the data cannot separate the two causes.
 
 **To close it:** rate the venue separately from the event, or weight by distinct
-organiser.
+organizer.
 
 ## 4. Moderation categories are free-shaped JSON
 
@@ -85,9 +85,9 @@ rows of `moderation_flags`.
 **To close it:** either a union view over the report tables, or route user
 reports into `moderation_flags` at write time so the queue has one source.
 
-## 6. No "drafts without a publish" activation signal for organisers
+## 6. No "drafts without a publish" activation signal for organizers
 
-The organisers screen in the design shows a "never published" status derived
+The organizers screen in the design shows a "never published" status derived
 from draft count vs published count. That works today, but `events.status`
 carries no timestamp for when it became a draft, so "has been sitting in draft
 for three weeks" — the actually actionable version — is not available.

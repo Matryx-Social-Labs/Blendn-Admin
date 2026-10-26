@@ -77,7 +77,7 @@ export function BrandForm({ brand }: { brand: MyBrand | null }) {
           placeholder="https://redbull.com"
         />
         <p className="text-[0.8125rem] text-muted-foreground">
-          How an organiser tells you apart from another brand with a similar
+          How an organizer tells you apart from another brand with a similar
           name, when they pick you from a list.
         </p>
       </div>

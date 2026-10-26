@@ -1389,7 +1389,7 @@ async function main() {
       body: "Event updated: start time" },
     { kind: "match" as const, title: "It's a match",
       body: "You and someone in the room both said yes." },
-    { kind: "announcement" as const, title: "From the organiser",
+    { kind: "announcement" as const, title: "From the organizer",
       body: "Last orders in twenty minutes." },
   ]
   let _notificationsMade = 0

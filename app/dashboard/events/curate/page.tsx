@@ -91,7 +91,7 @@ export default async function CuratePage({
             value: dead.length,
             hint: ended.length > 0 ? `of ${ended.length} finished` : "none finished yet",
           },
-          { label: "Claimed", value: claimed, hint: "handed to a real organiser" },
+          { label: "Claimed", value: claimed, hint: "handed to a real organizer" },
           { label: "Curated", value: total },
         ]}
       />

@@ -68,7 +68,7 @@ describe("the reviewer can see what they are approving", () => {
      */
     expect(QUEUE).toMatch(/const ROLE_LABEL: Record<OnboardingRow\["requested_role"\], string>/)
     expect(QUEUE).toMatch(/sponsor: "Sponsor"/)
-    expect(QUEUE).not.toMatch(/requested_role === "venue_owner" \? "Venue owner" : "Organiser"/)
+    expect(QUEUE).not.toMatch(/requested_role === "venue_owner" \? "Venue owner" : "Organizer"/)
   })
 
   it("types the map against the union, so a new role is a compile error", () => {

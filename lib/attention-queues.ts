@@ -79,8 +79,8 @@ export const SHAPE: Record<QueueKey, Omit<AttentionQueue, "count" | "oldest">> =
   },
   applications: {
     key: "applications",
-    label: "organiser application",
-    labelPlural: "organiser applications",
+    label: "organizer application",
+    labelPlural: "organizer applications",
     href: "/dashboard/onboarding",
     slaHours: 72,
   },

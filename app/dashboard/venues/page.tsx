@@ -183,7 +183,7 @@ export default async function MyVenuesPage({
                   </p>
                 ) : (
                   <p className="text-[0.8125rem] text-muted-foreground">
-                    Nothing booked — a room with no listed availability drops off organisers&apos; radar.
+                    Nothing booked — a room with no listed availability drops off organizers&apos; radar.
                   </p>
                 )}
               </div>

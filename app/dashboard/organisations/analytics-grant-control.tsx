@@ -42,7 +42,7 @@ type Mode = null | "grant" | "end" | "revoke"
 
 /** What each subject is given, and its founding grant first. */
 const PRODUCT = {
-  org: { label: "Analytics", months: [6, 3, 12], founding: 6, firstNote: "founding", example: "Founding organiser, Bengaluru season one" },
+  org: { label: "Analytics", months: [6, 3, 12], founding: 6, firstNote: "founding", example: "Founding organizer, Bengaluru season one" },
   venue: { label: "Venue Pro", months: [3, 6, 12], founding: 3, firstNote: "founding", example: "Founding venue, claimed in Bengaluru" },
   user: { label: "Blendn+", months: [1, 3, 12], founding: 1, firstNote: "App Review", example: "App Review account for the iOS submission" },
 } as const

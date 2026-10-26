@@ -80,7 +80,7 @@ async function requireBuyer() {
   const user = await currentUser()
   if (!user) throw new Refusal("Unauthorized")
   const org = await billingOrgFor(user)
-  if (!org) throw new Refusal("Only an organiser’s organisation has a plan.")
+  if (!org) throw new Refusal("Only an organizer’s organisation has a plan.")
   if (!org.mayBuy) throw new Refusal("Only an owner or admin of your organisation can change its plan.")
   return { user, org, keyId: await payable(org.orgId) }
 }

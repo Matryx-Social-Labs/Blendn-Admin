@@ -58,7 +58,7 @@ export interface BroadcastAuthorEvent {
  * the audit found nothing writes — and a message still needs a name on it.
  * "Organiser" is what the room already expects.
  */
-export const GENERIC_AUTHOR = "Organiser"
+export const GENERIC_AUTHOR = "Organizer"
 
 export function broadcastAuthorName(event: BroadcastAuthorEvent): string {
   return event.organizer_org?.display_name?.trim() || GENERIC_AUTHOR

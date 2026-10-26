@@ -146,7 +146,7 @@ export function chatClosedMessage(
 ): string {
   if (reason === "not_live") return NOT_LIVE_MESSAGE
   if (reason === "hidden") return "This event is no longer available."
-  if (reason === "locked") return "This chat has been locked by the organiser"
+  if (reason === "locked") return "This chat has been locked by the organizer"
   // Says when, not just no. "Closed" for a room that has never opened reads as
   // a fault, and the person asking is someone who RSVP'd and is keen.
   if (reason === "not_open_yet") return "This chat opens 24 hours before the event starts."
@@ -295,7 +295,7 @@ export function mayWriteToRoom(
  */
 export function bannedRefusal(membership: { banned_by: string | null }): string {
   return membership.banned_by
-    ? "The organiser has removed you from this room."
+    ? "The organizer has removed you from this room."
     : "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it."
 }
 

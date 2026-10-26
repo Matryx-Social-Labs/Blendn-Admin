@@ -28,7 +28,7 @@ When a message send fails (`POST /api/mobile/chat/groups/{chatGroupId}/messages`
 |-----------|-------------|---------|--------------|
 | `USER_MUTED` | 403 | User is still muted (auto-mute has NOT expired yet). Auto-mutes last 1 hour — if the mute window has passed, the backend auto-unmutes and the send succeeds (you won't see this error). | Show a persistent banner: "You've been muted for policy violations. You can still read messages." Disable the message input. |
 | `USER_BANNED` | 403 | User was banned by admin or auto-system | Show a full-screen overlay or modal: "You've been removed from this chat." Hide the input, optionally navigate back. |
-| `CHAT_LOCKED` | 403 | Organiser locked the chat | Show a banner: "Chat has been locked by the organiser." Disable input. |
+| `CHAT_LOCKED` | 403 | Organizer locked the chat | Show a banner: "Chat has been locked by the organizer." Disable input. |
 | `NOT_CHECKED_IN` | 403 | User checked out or never checked in | Show: "Check in to the event to send messages." |
 | `SPAM_BLOCKED` | 429 | Sending too fast or duplicate messages | Show a brief toast: "Slow down — you're sending messages too quickly." |
 | `FORBIDDEN` | 403 | Generic (not a member, etc.) | Show: "You don't have access to this chat." |
@@ -69,7 +69,7 @@ if (!result.success) {
       break
     case 'CHAT_LOCKED':
       setChatLocked(true)
-      showTray('Chat Locked', 'This chat has been locked by the organiser.')
+      showTray('Chat Locked', 'This chat has been locked by the organizer.')
       break
     case 'NOT_CHECKED_IN':
       showTray('Not Checked In', 'You must be checked in to the event to send messages.')
@@ -125,7 +125,7 @@ sock.on("chat:messageDeleted", (data) => {
 // Already handled in chat/[id].tsx
 const handleBanned: ChatMemberBannedCallback = (data) => {
   if (data.userId === currentUser?.id && data.banned) {
-    showTray('Removed', 'You have been removed from this chat by the organiser.')
+    showTray('Removed', 'You have been removed from this chat by the organizer.')
   }
 }
 ```
@@ -217,7 +217,7 @@ const [chatLocked, setChatLocked] = useState(false)
   <View style={styles.restrictedBanner}>
     <IconLock color={APP_COLORS.textSecondary} size={20} />
     <Text style={styles.restrictedText}>
-      Chat has been locked by the organiser
+      Chat has been locked by the organizer
     </Text>
   </View>
 ) : (
@@ -528,7 +528,7 @@ export const ErrorCode = {
   // ... existing codes ...
   USER_MUTED: "USER_MUTED",       // User muted in chat (auto or admin)
   USER_BANNED: "USER_BANNED",     // User banned from chat
-  CHAT_LOCKED: "CHAT_LOCKED",     // Chat locked by organiser
+  CHAT_LOCKED: "CHAT_LOCKED",     // Chat locked by organizer
   NOT_CHECKED_IN: "NOT_CHECKED_IN", // User not checked in to event
   SPAM_BLOCKED: "SPAM_BLOCKED",   // Rate limit / duplicate detection
 }

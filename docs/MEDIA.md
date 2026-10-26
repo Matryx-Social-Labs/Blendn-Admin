@@ -1,7 +1,7 @@
-# Media — what organisers upload, and what the app draws
+# Media — what organizers upload, and what the app draws
 
 One asset per event has to fill three slots with three different shapes. This
-file is the arithmetic behind the answer, so that the organiser guidance, the
+file is the arithmetic behind the answer, so that the organizer guidance, the
 seed data and the dashboard's preview all quote the same numbers instead of
 three people each rounding differently.
 
@@ -22,7 +22,7 @@ half the height.
 
 ## The answer: a square master, and a published safe area
 
-Organisers upload **one square image**. The app centre-crops it per slot.
+Organizers upload **one square image**. The app centre-crops it per slot.
 
 - The portrait slot keeps the full height and crops to **73.7%** of the width.
 - The wide slot keeps the full width and crops to **52%** of the height.
@@ -45,7 +45,7 @@ inside the safe area.** Outside it, the asset is decoration that some slots show
 and others do not.
 
 This is what the dashboard's device preview exists to make obvious. Telling an
-organiser "73.7% by 52%" is a number; showing them their own poster with the
+organizer "73.7% by 52%" is a number; showing them their own poster with the
 title sliced off is a correction they only need once.
 
 ### Why square rather than 2:1
@@ -55,7 +55,7 @@ something similar — because a banner is the only shape they draw. We draw a
 portrait card as the *hero*, so a 2:1 upload would arrive 1.9× too wide for the
 most prominent slot on the screen and lose two thirds of itself to the crop.
 
-Square is also the shape organisers already have. Every social platform accepts
+Square is also the shape organizers already have. Every social platform accepts
 it, so it is the one asset a venue is most likely to own without commissioning
 anything.
 
@@ -149,7 +149,7 @@ that is mount/unmount rather than play/pause.
 | `components/event-form/cover-image-section.tsx` | Cover guidance. **Pinned by `__tests__/media-guidance.test.ts`** |
 | `components/event-form/media-section.tsx` | Gallery guidance, the poster field, and the file picker's `accept`. Same test |
 | `scripts/seed-*.ts` | Seeded events must carry assets at these sizes, or staging tests the wrong thing |
-| `components/event-form/device-preview.tsx` | Renders the real crops with the safe area drawn on. **Pinned by `__tests__/device-preview.test.ts`** — a preview drawing the wrong safe area is worse than none, because an organiser trusts it and composes to it |
+| `components/event-form/device-preview.tsx` | Renders the real crops with the safe area drawn on. **Pinned by `__tests__/device-preview.test.ts`** — a preview drawing the wrong safe area is worse than none, because an organizer trusts it and composes to it |
 | `lib/feedMedia.ts` (app) | Chooses the asset; enforces the poster rule |
 
 If any of them disagrees with this file, this file is what the app actually
@@ -168,7 +168,7 @@ Two things the frames should assume, because the code now enforces them:
 **A clip without a poster may not be shown at all.** `feedClip` resolves
 `thumbnail_url` → the event's `cover_image_url` → *nothing*, and "nothing" means
 no clip rather than a card that flashes black. So any frame showing video on a
-card is also, implicitly, a frame requiring a still behind it. The organiser
+card is also, implicitly, a frame requiring a still behind it. The organizer
 form asks for the poster and says so.
 
 **Square masters, always.** Every slot crops from one square — the widest is

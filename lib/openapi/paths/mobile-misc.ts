@@ -1204,7 +1204,7 @@ registry.registerPath({
   tags: ["Mobile Safety"],
   summary: "Report an event",
   description:
-    "An unsafe venue, a misleading listing, a dangerous organiser. No check-in " +
+    "An unsafe venue, a misleading listing, a dangerous organizer. No check-in " +
     "required: two of those three are visible from the listing, and the value is " +
     "catching them before somebody travels to the venue.",
   security: bearerAuth,

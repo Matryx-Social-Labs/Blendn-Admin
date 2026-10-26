@@ -15,7 +15,7 @@ the event ends. This brief is for the **web dashboard**, which is a different
 product from the mobile app and serves three roles.
 
 The dashboard is an **operations console**, not a marketing site. The people
-using it are working: an organiser checking whether tonight will fill, a venue
+using it are working: an organizer checking whether tonight will fill, a venue
 owner deciding whether to keep hosting a promoter, a platform admin clearing a
 moderation queue before it ages out. Every screen should answer a question
 someone actually has, at the moment they have it.
@@ -43,7 +43,7 @@ person leaving.
 
 `attendee` is **mobile-only** and never sees the dashboard.
 
-A venue owner is not a lesser organiser. They get operational control (chat,
+A venue owner is not a lesser organizer. They get operational control (chat,
 moderation, attendee list) over events at their venue that *someone else* runs,
 but no editorial control — they cannot edit another company's event. When they
 run their own event, they get both.
@@ -59,7 +59,7 @@ run their own event, they get both.
 /dashboard/events              list + /new, /[id], /[id]/feedback, /[id]/messaging
 /dashboard/chatrooms           rooms with an open chat window
 /dashboard/moderation          platform-wide flag queue (admin)
-/dashboard/attendees           repeat attendance, no-show rate (organiser)
+/dashboard/attendees           repeat attendance, no-show rate (organizer)
 /dashboard/venues              per-venue sections (venue owner)
 /dashboard/users               accounts (admin)
 /dashboard/organisers          supply concentration (admin) + /[id]
@@ -288,7 +288,7 @@ Design:
 ### 2.2 Reports and export — `/dashboard/reports`
 
 **The login page promises this and it does not exist.** Verbatim, on the sign-in
-screen: *"Exportable reporting — Download platform, organiser, and venue reports
+screen: *"Exportable reporting — Download platform, organizer, and venue reports
 directly from the dashboard."* Nothing in the product exports anything. Either
 build it or the login page is lying to every visitor.
 
@@ -297,7 +297,7 @@ Design:
 - Preview before download
 - CSV and PDF
 - Scheduled reports emailed on a cadence (weekly ops summary)
-- Per role: platform reports for admin, event/attendee reports for organisers,
+- Per role: platform reports for admin, event/attendee reports for organizers,
   venue utilisation for venue owners
 
 ### 2.3 Audit log viewer — `/dashboard/audit`
@@ -348,7 +348,7 @@ fail mysteriously.
 
 `/dashboard/venues` lists venues with per-venue sections but there is no
 drill-down. A venue owner with eight rooms needs one page per room: utilisation
-over time, the events hosted there, rating distribution, repeat organisers, and
+over time, the events hosted there, rating distribution, repeat organizers, and
 the claim status.
 
 Admin needs the same page plus: who owns it, unclaimed venues, and **claim
@@ -516,5 +516,5 @@ added.
 6. **A component sheet** of anything new, so it can be built once and reused
 
 Desktop is primary — this is operational software used at a desk. But an
-organiser *will* check pacing from their phone an hour before doors, so the
+organizer *will* check pacing from their phone an hour before doors, so the
 overview and the live event screen must work small.
