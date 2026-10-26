@@ -69,12 +69,12 @@ describe("ordinary crews pass", () => {
 
 describe("the refusal a writer is given", () => {
   it("names the contact detail, so the fix is theirs to make", async () => {
-    expect(await crewTextRefusal("bio", "dm us @thelot")).toMatch(/social media handle.*contact details can’t go on it/)
-    expect(await crewTextRefusal("name", "Lot 98450 12345")).toMatch(/phone number/)
+    expect((await crewTextRefusal("bio", "dm us @thelot"))?.refusal).toMatch(/social media handle.*contact details can’t go on it/)
+    expect((await crewTextRefusal("name", "Lot 98450 12345"))?.refusal).toMatch(/phone number/)
   })
 
   it("says nothing about the filter for a banned word", async () => {
-    expect(await crewTextRefusal("name", "retard squad")).toBe("This can’t be a crew’s name.")
+    expect((await crewTextRefusal("name", "retard squad"))?.refusal).toBe("This can’t be a crew’s name.")
   })
 
   it("lets an ordinary name through, and a duplicate one — names are not unique", async () => {

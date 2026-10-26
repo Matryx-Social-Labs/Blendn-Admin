@@ -177,7 +177,7 @@ export function SponsorPicker({
             placeholder="https://…"
           />
           <p className="text-[0.8125rem] text-muted-foreground">
-            How the next organiser tells this brand from a similar name.
+            How the next organizer tells this brand from a similar name.
           </p>
         </div>
         <div className="flex gap-2">

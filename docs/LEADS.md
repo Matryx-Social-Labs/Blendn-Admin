@@ -135,7 +135,7 @@ person wrote in again meanwhile. That is reported rather than swallowed.
 ## The inbox
 
 `/dashboard/leads`, admin only. A lead carries a stranger's name, email, IP and
-user agent; organisers have no business in it.
+user agent; organizers have no business in it.
 
 - **Defaults to `new`.** An unfiltered list of every lead ever received is
   history. The inbox should show work.

@@ -93,7 +93,10 @@ describe("a venue owner's view of a three-person night", () => {
       ],
     })
     const venue = await db.venues.create({
-      data: { name: testId("v"), city: "Bengaluru", owner_org_id: orgV, claimed_at: new Date(Date.now() - 30 * 24 * HOUR) },
+      // Claimed a month before the nights below, on the same fixed calendar. It was
+      // `Date.now() - 30 days`, which passed the 25 Sept 14:00 night on 25 Oct 14:00
+      // UTC: the claim window then began after the night, and the owner was redirected.
+      data: { name: testId("v"), city: "Bengaluru", owner_org_id: orgV, claimed_at: new Date("2026-08-25T00:00:00.000Z") },
     })
     venues.push(venue.id)
 

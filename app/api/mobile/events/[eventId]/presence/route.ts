@@ -5,7 +5,8 @@ import { touchSession } from "@/lib/presence-sessions"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { successResponse, errorResponse, unauthorizedResponse } from "@/lib/api-response"
-import { evaluateCheckIn, resolveFence, fenceSelect } from "@/lib/geofence"
+import { evaluateCheckIn, resolveFence, fenceSelect, fenceCentre } from "@/lib/geofence"
+import { isReviewAccount, recordReviewBypass } from "@/lib/review-accounts"
 import { performCheckout } from "@/lib/checkout"
 import {
   evaluatePresence,
@@ -81,7 +82,7 @@ export async function POST(
       occurrence: { select: { id: true, end_time: true } },
       // Spread, not hand-picked: a select missing `check_in_radius` reads as
       // "no legacy fence" and silently fails open for every pre-column event.
-      event: { select: { ...fenceSelect, city: true } },
+      event: { select: { ...fenceSelect, city: true, review_demo: true } },
     },
   })
 
@@ -122,6 +123,18 @@ export async function POST(
     return successResponse({ status: "inside", reason: "no_geofence" })
   }
 
+  /*
+   * App Review (lib/review-accounts.ts): the check-in skipped the fence, so the
+   * ping must too, or the reviewer is checked out as "left the area" minutes
+   * later. Judged as if at the fence's centre; what is stored stays the real fix.
+   */
+  const reviewCentre =
+    checkIn.event.review_demo && (await isReviewAccount(authUser.userId)) ? fenceCentre(fence) : null
+  if (reviewCentre) recordReviewBypass(authUser.userId, "geofence", { eventId, at: "presence" })
+  const judged = reviewCentre
+    ? { point: reviewCentre, accuracy: null }
+    : { point: { lat: latitude, lng: longitude }, accuracy: body.accuracy ?? null }
+
   const state: PresenceState = {
     kind: checkIn.kind,
     leftAreaAt: checkIn.left_area_at,
@@ -129,7 +142,7 @@ export async function POST(
   }
   const decision = evaluatePresence(
     state,
-    { point: { lat: latitude, lng: longitude }, accuracy: body.accuracy ?? null },
+    judged,
     fence,
     checkIn.occurrence.end_time,
     now
@@ -175,7 +188,7 @@ export async function POST(
     // Staff skip the fence in `evaluatePresence` (never auto-checked-out), so
     // their "stay" asks it here.
     (decision.reason === "staff_exempt" &&
-      evaluateCheckIn({ lat: latitude, lng: longitude }, fence, body.accuracy ?? null).ok)
+      evaluateCheckIn(judged.point, fence, judged.accuracy).ok)
   /*
    * And only while they may still stay: if Blendn+ lapsed mid-stay in a gated
    * city, the window is no longer carried and ends at most

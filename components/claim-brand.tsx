@@ -99,7 +99,7 @@ export function ClaimBrand({ claims }: { claims: MyClaimRow[] }) {
         <p className="text-[0.8125rem] leading-6 text-muted-foreground">
           A person reads every claim, because nothing in the evidence can be
           checked automatically. Once it is approved the brand is yours, along
-          with any placements organisers have already attached to it.
+          with any placements organizers have already attached to it.
         </p>
       </div>
     )
@@ -176,7 +176,7 @@ export function ClaimBrand({ claims }: { claims: MyClaimRow[] }) {
       <div className="flex flex-col gap-1">
         <h2 className="text-[length:var(--text-h2)] font-bold">Has your brand already been added?</h2>
         <p className="text-[0.8125rem] leading-6 text-muted-foreground">
-          Organisers add brands while setting up an event, so yours may already be
+          Organizers add brands while setting up an event, so yours may already be
           here with placements attached. Claiming it keeps that history —
           creating a second one splits it in two.
         </p>

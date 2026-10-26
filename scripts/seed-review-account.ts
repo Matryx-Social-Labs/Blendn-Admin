@@ -174,6 +174,8 @@ async function main() {
         max_capacity: 120,
         organizer_id: organizer.id,
         check_in_radius: 150,
+        // A REVIEW_ACCOUNT_IDS account may check in here from anywhere (lib/review-accounts.ts).
+        review_demo: true,
       },
     })
 
@@ -221,6 +223,7 @@ async function main() {
   console.log("Review account ready.")
   console.log(`  email         ${email}`)
   console.log(`  user id       ${user.id}`)
+  console.log(`  App Review aid: set REVIEW_ACCOUNT_IDS=${user.id} on the server to turn it on for this account (DEPLOYMENT.md § 7)`)
   console.log(`  emailVerified ${user.emailVerified?.toISOString() ?? "NOT SET — investigate"}`)
   console.log(`  onboarded     true (reviewer lands on the events tab, not onboarding)`)
   console.log(`  interests     ${leaves.length} leaf categories`)

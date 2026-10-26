@@ -37,7 +37,7 @@ const columns: Column<VenueEventRow>[] = [
     sortValue: (r) => new Date(r.startAt),
     render: (r) => formatSince(r.startAt),
   },
-  { key: "organiser", label: "Organiser", sortType: "string", secondary: true },
+  { key: "organiser", label: "Organizer", sortType: "string", secondary: true },
   { key: "going", label: "Going", align: "right", sortType: "number", render: (r) => formatNumber(r.going) },
   {
     key: "attended",

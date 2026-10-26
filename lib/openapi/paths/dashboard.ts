@@ -88,7 +88,7 @@ registry.registerPath({
                 z.object({
                   id: z.string().uuid(),
                   messageId: z.string().uuid(),
-                  userId: z.string().openapi({ description: "For an organiser or venue owner this is the room handle for this event (SCRUM-517), never an account id; app_admin gets the account id." }),
+                  userId: z.string().openapi({ description: "For an organizer or venue owner this is the room handle for this event (SCRUM-517), never an account id; app_admin gets the account id." }),
                   anonymousName: z.string().nullable(),
                   userName: z.string().optional().openapi({ description: "app_admin only" }),
                   userEmail: z.string().optional().openapi({ description: "app_admin only" }),
@@ -334,7 +334,7 @@ registry.registerPath({
   description:
     "Ban removes user from chat and emits a socket event. Requires moderator/organizer/admin role. " +
     "`userId` is the room handle the chat and moderation routes returned for this event (SCRUM-517); " +
-    "an organiser or venue owner never receives an account id, and one sent by them answers 404. " +
+    "an organizer or venue owner never receives an account id, and one sent by them answers 404. " +
     "An app_admin may send either.",
   security: sessionAuth,
   request: {
@@ -382,7 +382,7 @@ registry.registerPath({
   tags: ["Dashboard Chat Moderation"],
   summary: "Get chat messages with member info (dashboard)",
   description:
-    "Returns the room's messages and members by pseudonym. For an organiser or venue owner every other person is " +
+    "Returns the room's messages and members by pseudonym. For an organizer or venue owner every other person is " +
     "this room's handle (SCRUM-517) — the id to send to chat/members/{userId}; the caller's own id stays theirs. " +
     "Name, email and image are app_admin only.",
   security: sessionAuth,
@@ -400,7 +400,7 @@ registry.registerPath({
               type: z.string(),
               createdAt: z.string().datetime(),
               user: z.object({
-                id: z.string().openapi({ description: "For an organiser or venue owner this is the room handle for this event (SCRUM-517), never an account id; app_admin gets the account id." }),
+                id: z.string().openapi({ description: "For an organizer or venue owner this is the room handle for this event (SCRUM-517), never an account id; app_admin gets the account id." }),
                 name: z.string().optional().openapi({ description: "app_admin only" }),
                 email: z.string().optional().openapi({ description: "app_admin only" }),
                 image: z.string().nullable().optional().openapi({ description: "app_admin only" }),
@@ -408,7 +408,7 @@ registry.registerPath({
               }),
             })),
             members: z.array(z.object({
-              userId: z.string().openapi({ description: "For an organiser or venue owner this is the room handle for this event (SCRUM-517), never an account id; app_admin gets the account id." }),
+              userId: z.string().openapi({ description: "For an organizer or venue owner this is the room handle for this event (SCRUM-517), never an account id; app_admin gets the account id." }),
               anonymousName: z.string().nullable(),
               status: z.string(),
               bannedAt: z.string().datetime().nullable(),

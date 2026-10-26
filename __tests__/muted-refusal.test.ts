@@ -19,7 +19,7 @@ const read = (rel: string) =>
 
 describe("mutedRefusal", () => {
   it("names the organiser when a human applied the mute", () => {
-    expect(mutedRefusal({ muted_by: "org_1" })).toBe("The organiser has muted you in this room.")
+    expect(mutedRefusal({ muted_by: "org_1" })).toBe("The organizer has muted you in this room.")
   })
 
   it("names the pipeline when nobody did", () => {

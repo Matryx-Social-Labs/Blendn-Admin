@@ -335,7 +335,7 @@ export const EventDetailSchema = z
     isRecurring: z.boolean(),
     doorPolicy: z.enum(["open", "guest_list", "members_only", "invite_only"]).openapi({
       description:
-        "The organiser's description of the door, not a gate this API keeps. `open` for almost every event, and draws nothing.",
+        "The organizer's description of the door, not a gate this API keeps. `open` for almost every event, and draws nothing.",
     }),
     externalLink: z.string().nullable(),
     createdAt: z.string().datetime(),

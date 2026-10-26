@@ -71,7 +71,7 @@ export function ChargeLedgerView({ ledger }: { ledger: ChargeLedger }) {
             <EmptyState
               icon={<IconReceipt />}
               title="Nothing to bill yet"
-              description="Approved placements appear here as soon as an organiser attaches a brand to an event."
+              description="Approved placements appear here as soon as an organizer attaches a brand to an event."
             />
           </div>
         ) : (

@@ -25,6 +25,7 @@ import {
 import { readJson } from "@/lib/api-input"
 import { preSaveCheck } from "@/lib/moderation"
 import { boundedInt } from "@/lib/pagination"
+import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
 const createRequestSchema = z.object({
   // User ids are cuid, not uuid — do not tighten this to z.string().uuid().
@@ -73,10 +74,12 @@ export async function POST(request: NextRequest) {
     // A room handle or a raw id (SCRUM-371). `ref` is what the response
     // echoes, so a handle never comes back as the real id behind it.
     const { recipientId: ref, message } = parsed.data
+    // The first thing a stranger reads from them, screened before it is stored or pushed (App Store 1.2).
+    const refusedText = screenUserText(authUser.userId, "message_request", { message })
+    if (refusedText) return textNotAllowedResponse(refusedText.field, "That message can’t be sent.")
     /*
-     * The one channel the recipient never opted into, and it had no text check
-     * at all (API M1). The same deterministic pre-save check a room message
-     * gets (keyword + contact details; no model, as for a DM): refused here,
+     * The one channel the recipient never opted into (API M1). Contact details
+     * too, as a room message refuses them (`preSaveCheck`; no model, as for a DM): refused here,
      * before a row, a push or a socket event exists. It does not depend on the
      * recipient, so it says nothing about who they are.
      */

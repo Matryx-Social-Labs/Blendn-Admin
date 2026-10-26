@@ -79,7 +79,7 @@ export default async function PlacementsPage() {
           <EmptyState
             icon={<IconMicrophone2 className="size-6" />}
             title="Add your brand first"
-            description="Your name and logo are what attendees see beside a sponsored message. Once your brand is set up, placements organisers offer you appear here."
+            description="Your name and logo are what attendees see beside a sponsored message. Once your brand is set up, placements organizers offer you appear here."
             action={
               <Button asChild size="sm">
                 <a href="/dashboard/brand">Set up your brand</a>
@@ -112,7 +112,7 @@ export default async function PlacementsPage() {
           <HeroMetric
             eyebrow="Next placement"
             value="None scheduled"
-            description="When an organiser offers your brand a placement, it appears here for you to accept."
+            description="When an organizer offers your brand a placement, it appears here for you to accept."
             tone="muted"
           />
         )}
@@ -159,7 +159,7 @@ export default async function PlacementsPage() {
         {overview.placements.length === 0 ? (
           <div className="px-5 pb-5">
             <EmptyState
-              description="No placements yet. When an organiser adds your brand to an event, it appears here — you will be asked to accept before anything runs."
+              description="No placements yet. When an organizer adds your brand to an event, it appears here — you will be asked to accept before anything runs."
               compact
             />
           </div>
@@ -219,7 +219,7 @@ export default async function PlacementsPage() {
 
       <p className="text-[0.75rem] text-faint-foreground">
         Reach is distinct people your sends reached, withheld below 5 so a small room can&apos;t be identified. A
-        placement is priced by the reach it delivers; the organiser and Blend&apos;n agree the price before anything runs,
+        placement is priced by the reach it delivers; the organizer and Blend&apos;n agree the price before anything runs,
         and you pay it by the link on the row.
       </p>
     </div>

@@ -44,7 +44,7 @@ people legitimately inside the boundary.
 
 The hundred-and-first used to be refused. They were standing at the door about
 to walk in, and refusing them denied the chatroom (the actual product) and
-**erased them from attendance**. The organiser ended the night believing 100
+**erased them from attendance**. The organizer ended the night believing 100
 came when 120 did.
 
 **Check-in is a presence proof, not a ticket.** Nothing here sells admission;
@@ -61,7 +61,7 @@ Fill is measured against **guests**, so four crew do not fill a room of four.
 
 ## Staff, without a client change
 
-Organisers and venue crew check in through the same button as everyone else.
+Organizers and venue crew check in through the same button as everyone else.
 **The client app has no notion of roles and is not gaining one** — no second
 page, no "check in as staff".
 
@@ -73,10 +73,10 @@ staff  ⟺  the person's org runs the event  OR  owns the venue
 
 Keyed on **membership, not role**, deliberately:
 
-- an organiser at *someone else's* event is a guest, which a role check gets wrong
+- an organizer at *someone else's* event is a guest, which a role check gets wrong
 - an `app_admin` has no `orgIds`, so a support visit counts as a guest —
   inflating attendance by one, a far smaller distortion than silently removing
-  them from a number the organiser is reading
+  them from a number the organizer is reading
 
 `kind` is **stored, not derived on read**, because membership changes. Someone
 who leaves the organisation next month should not retroactively become a guest
@@ -90,7 +90,7 @@ for crew to have accounts there — staff log into the dashboard, not the phone.
 production today: 9 check-ins, all `attendee`, zero `staff`.
 
 Kept because it costs nothing — a derived flag at check-in, no client change, no
-extra query — and because it is correct the moment an organiser does check in,
+extra query — and because it is correct the moment an organizer does check in,
 which they plausibly will. But the UI no longer prints "0 staff" beside a real
 number: the split renders only when there is one, since a permanent zero beside a
 live figure is noise pretending to be a reading.
@@ -116,7 +116,7 @@ hours, not a change of date. Days are cut in the **event's own timezone** — 20
 UTC is already tomorrow in Tokyo.
 
 Shrinking a run **cancels** days that had attendance rather than deleting them.
-`occurrence_id` cascades, so deleting would erase who came, and an organiser
+`occurrence_id` cascades, so deleting would erase who came, and an organizer
 correcting an end date by a day should not silently destroy a day's records.
 Days nobody attended are deleted, because an empty row for a day that never ran
 is noise.
@@ -193,7 +193,7 @@ If one sweeper pass would check out more than **25% of a room, it acts on
 nobody** and raises an alert.
 
 A venue whose wifi dies produces readings identical to everyone leaving at once.
-Emptying the room on the organiser's screen would read as an evacuation, and
+Emptying the room on the organizer's screen would read as an evacuation, and
 they are far better served by "this count is unreliable" than by a confidently
 wrong number.
 
@@ -203,7 +203,7 @@ never empty.
 ### Staff are exempt
 
 They are in the back office, working the queue, meeting a supplier. Ejecting the
-organiser from the chatroom they are moderating is worse than a stale staff
+organizer from the chatroom they are moderating is worse than a stale staff
 count. The one exception is the day ending, or their check-in stays open for
 ever and day two counts them twice.
 
@@ -222,7 +222,7 @@ not.
 There were three: the manual route, the branch in check-in that closes your
 previous event, and the sweeper. Three copies of one idea is how they drift —
 one forgets the chat cutoff, another forgets the socket event, and nobody
-notices until an organiser asks why a name is still in the list.
+notices until an organizer asks why a name is still in the list.
 
 Idempotent, which is what lets the sweeper run every five minutes without
 knowing what the last pass did. The status is guarded **inside** the `UPDATE`
@@ -315,7 +315,7 @@ because Prisma's `not` drops NULL), on a day that was not called off (per
 occurrence, D-2), and one the person may attend (its own `min_age`, D-3) —
 **and** the venue's owner confirmed the link, or the event's own area sits at
 the venue: its centre inside the venue's area and buffer (`atTheVenue`, D-x3).
-Any organiser can link a public event to any venue; the link alone must not let
+Any organizer can link a public event to any venue; the link alone must not let
 a stranger close somebody else's venue for the evening. A private event takes
 nothing over and names itself to nobody.
 
@@ -393,7 +393,7 @@ venue days never crowd real events out of the 200-room pass (F5):
    `departed_source = ended` (up to `MAX_CLOSED_PER_VENUE` = 500 a pass), and
    pushed once — per person, per event, for six hours — **"An event just
    started here — tap to check in"**, in our words, never the event's title or
-   the venue's name, which organisers type (D-x3). The bell row is written for
+   the venue's name, which organizers type (D-x3). The bell row is written for
    everybody, the push goes only where the person allows it, and the event's
    id rides in `data`. Somebody too young for the event's own `min_age` keeps
    their session (D-3).

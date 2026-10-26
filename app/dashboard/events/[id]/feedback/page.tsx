@@ -163,7 +163,7 @@ export default async function FeedbackPage({
             {digest.view === "venue" ? (
               <Panel title="What people said">
                 <p className="text-[0.8125rem] leading-5 text-muted-foreground">
-                  The labelled messages are the organiser&apos;s digest. You read what was said where it was said, in
+                  The labelled messages are the organizer&apos;s digest. You read what was said where it was said, in
                   the Room chat you moderate.
                 </p>
               </Panel>

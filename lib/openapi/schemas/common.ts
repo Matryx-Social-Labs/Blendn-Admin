@@ -203,7 +203,7 @@ registry.register("DeviceInfo", DeviceInfoSchema)
  */
 /** Every event-scoped people read and write refuses a member a host banned from the room, as the chat does. */
 export const ROOM_BAN_GATE =
-  "403 `USER_BANNED` (\"The organiser has removed you from this room.\") when a host banned the caller from the " +
+  "403 `USER_BANNED` (\"The organizer has removed you from this room.\") when a host banned the caller from the " +
   "event's room — the chat's own answer; for a route taking a room handle, the room that handle came from. "
 
 export const PARTICIPATION_GATE =

@@ -147,7 +147,7 @@ describe("GET /events/:id/people — a member the room banned", () => {
     await wasThere(n, me, { banned: true })
     await wasThere(n, other)
 
-    const refused = { success: false, error: "The organiser has removed you from this room.", errorCode: "USER_BANNED" }
+    const refused = { success: false, error: "The organizer has removed you from this room.", errorCode: "USER_BANNED" }
     const people403 = await people(n.id, me.token)
     expect(people403.status).toBe(403)
     expect(people403.json).toMatchObject(refused)

@@ -77,7 +77,7 @@ describe("visibleNavFor", () => {
       "Events",
       "Chatrooms",
       "Users",
-      "Organisers",
+      "Organizers",
       "Venues",
       "Leads",
       // "Venue claims" became "Claims" when #284 merged the event and venue
@@ -164,7 +164,7 @@ describe("visibleNavFor", () => {
   it("keeps platform administration away from hosts", () => {
     for (const role of ["organizer", "venue_owner"]) {
       expect(titles(role)).not.toContain("Users")
-      expect(titles(role)).not.toContain("Organisers")
+      expect(titles(role)).not.toContain("Organizers")
       expect(titles(role)).not.toContain("Venues")
       expect(titles(role)).not.toContain("Moderation")
     }

@@ -13,7 +13,7 @@ import { initialsOf } from "@/lib/utils"
 
 const ROLE_LABELS: Record<string, string> = {
   app_admin: "Platform",
-  organizer: "Organiser",
+  organizer: "Organizer",
   venue_owner: "Venue owner",
   sponsor: "Sponsor",
 }

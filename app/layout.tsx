@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     template: "%s | Blend'n Admin",
   },
   description:
-    "Blend'n control center for investor reporting, organiser performance, and venue insights.",
+    "Blend'n control center for investor reporting, organizer performance, and venue insights.",
 }
 
 export default function RootLayout({

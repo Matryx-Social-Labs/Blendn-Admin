@@ -1,5 +1,5 @@
 import { logger } from "@/lib/logger"
-import { NextRequest } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { z } from "zod"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { keptApartIn } from "@/lib/conversations"
@@ -87,7 +87,23 @@ export async function GET(
     // room that is not an event's asks its owner too (F8).
     const membership = chatGroup.members[0]
     const denial = roomReadDenialFor(chatGroup, membership, user.userId)
-    if (denial === "hidden") return notFoundResponse("Chat group not found")
+    if (denial === "hidden") {
+      // Still 404 / NOT_FOUND. A member is also told what closed (RC8: the app
+      // can say "this crew is gone" by name); a caller with no membership row
+      // gets the bare 404, so a guessed id never learns a name.
+      if (!membership) return notFoundResponse("Chat group not found")
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Chat group not found",
+          errorCode: ErrorCode.NOT_FOUND,
+          reasonCode: "ROOM_CLOSED",
+          roomKind: chatGroup.kind,
+          roomName: chatGroup.name,
+        },
+        { status: 404 }
+      )
+    }
     if (denial === "not_member") return forbiddenResponse("You are not a member of this chat group")
     if (denial === "banned") return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
     if (denial === "not_live") return errorResponse(NOT_LIVE_MESSAGE, 403, ErrorCode.NOT_LIVE)

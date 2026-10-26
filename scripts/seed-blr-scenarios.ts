@@ -292,7 +292,7 @@ const EVENTS: EventSpec[] = [
     description:
       "The Ashwin Rao Trio plays two sets of standards and Bossa Nova on the Olive Beach terrace while the kitchen sends out a Mediterranean brunch spread.\n\nCome alone or bring friends — tables are shared, and the Blendn room opens a day before so you can find people to sit with.",
     full:
-      "Olive Beach has been doing Sunday brunch on Wood Street for nearly two decades, and this is the version with a band.\n\nThe Ashwin Rao Trio (piano, upright bass, drums) plays two 45-minute sets — the first leans on Bill Evans and Ahmad Jamal, the second is Bossa Nova and whatever the room asks for.\n\nThe brunch is the house spread: mezze, wood-fired flatbreads, shakshuka, a grill station and the dessert table people come back for. Brunch cocktails and fresh juices are on the bar.\n\nSeating is at long shared tables on purpose. If you're coming solo, check in when you arrive and say hello in the room — the organiser keeps a table for people who came to meet people.",
+      "Olive Beach has been doing Sunday brunch on Wood Street for nearly two decades, and this is the version with a band.\n\nThe Ashwin Rao Trio (piano, upright bass, drums) plays two 45-minute sets — the first leans on Bill Evans and Ahmad Jamal, the second is Bossa Nova and whatever the room asks for.\n\nThe brunch is the house spread: mezze, wood-fired flatbreads, shakshuka, a grill station and the dessert table people come back for. Brunch cocktails and fresh juices are on the bar.\n\nSeating is at long shared tables on purpose. If you're coming solo, check in when you arrive and say hello in the room — the organizer keeps a table for people who came to meet people.",
     photos: "jazz-brunch",
     venue: "oliveBeach",
     venueLink: "confirmed",
@@ -968,7 +968,7 @@ const EVENTS: EventSpec[] = [
     description:
       "Teams of up to four spend 36 hours building civic tech for Bengaluru, with real datasets from BMTC, BBMP and the lake conservation trusts.\n\nMentors on site, food all weekend, and ₹5 lakh in prizes.",
     full:
-      "Build Bengaluru is a 36-hour hackathon for people who want to fix something about the city.\n\nTracks:\n• Mobility — BMTC bus data, Namma Metro ridership, last-mile gaps\n• Lakes & water — sensor data from the lake conservation trusts\n• Roads & civic complaints — BBMP's complaint data and ward budgets\n\nSchedule: kick-off at 9 AM on day 1, hacking through the night, demos at 5 PM on day 2 and prizes at 8 PM.\n\nTeams of 1–4. Solo? We run team-forming at 9:30 AM. Mentors from civic organisations and engineering teams will be on the floor throughout.\n\nOriginally listed from the organisers' public page; the organisers have since claimed it on Blendn.",
+      "Build Bengaluru is a 36-hour hackathon for people who want to fix something about the city.\n\nTracks:\n• Mobility — BMTC bus data, Namma Metro ridership, last-mile gaps\n• Lakes & water — sensor data from the lake conservation trusts\n• Roads & civic complaints — BBMP's complaint data and ward budgets\n\nSchedule: kick-off at 9 AM on day 1, hacking through the night, demos at 5 PM on day 2 and prizes at 8 PM.\n\nTeams of 1–4. Solo? We run team-forming at 9:30 AM. Mentors from civic organisations and engineering teams will be on the floor throughout.\n\nOriginally listed from the organizers' public page; the organizers have since claimed it on Blendn.",
     photos: "hackathon",
     venue: "nimhans",
     venueLink: "confirmed",
@@ -1138,8 +1138,8 @@ const EVENTS: EventSpec[] = [
     scenario: "NEGATIVE — SOFT-DELETED. Must not exist to any reader.",
     title: "Church Street Record Fair",
     short: "Vinyl dealers from across India on one street.",
-    description: "A one-day record fair on Church Street. This listing was removed by the organiser.",
-    full: "Removed by the organiser.",
+    description: "A one-day record fair on Church Street. This listing was removed by the organizer.",
+    full: "Removed by the organizer.",
     photos: "flea-market",
     venue: "churchStSocial",
     venueLink: null,

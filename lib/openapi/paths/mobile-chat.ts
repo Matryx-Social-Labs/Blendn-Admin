@@ -78,7 +78,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/messages",
   tags: ["Mobile Chat"],
   summary: "Get group messages",
-  description: "Messages are the stored rows, snake_case (`created_at`, `is_edited`, `parent_message`, `_count.replies`) — not the camelCase `ChatMessage` of `GET /events/{eventId}/chat`. Cursor-based pagination. Pass `before` (message UUID) to load older messages. Loading the newest page (no `before`) marks the room read, so its row in `GET /chat/groups` stops counting what you have seen. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies.",
+  description: "Messages are the stored rows, snake_case (`created_at`, `is_edited`, `parent_message`, `_count.replies`) — not the camelCase `ChatMessage` of `GET /events/{eventId}/chat`. Cursor-based pagination. Pass `before` (message UUID) to load older messages. Loading the newest page (no `before`) marks the room read, so its row in `GET /chat/groups` stops counting what you have seen. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies. A closed room answers 404 `NOT_FOUND`; if the caller has a membership row the body also carries `reasonCode: \"ROOM_CLOSED\"`, `roomKind` and `roomName`, and a caller with no membership row gets the bare 404.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),
@@ -162,7 +162,7 @@ registry.registerPath({
   tags: ["Mobile Chat"],
   summary: "Rejoin a room you left",
   description:
-    "Undoes a leave you made yourself, while the room is open. Muted by the organiser when you left? You come back muted. " +
+    "Undoes a leave you made yourself, while the room is open. Muted by the organizer when you left? You come back muted. " +
     "403 `USER_BANNED` for a ban; 403 `CHAT_CLOSED` / `CHAT_LOCKED` when the room's window has shut or it was released by the lifecycle sweeper. " +
     "Idempotent — rejoining a room you never left answers 200 `{ left: false }`. " +
     ROOM_404,
@@ -181,8 +181,8 @@ registry.registerPath({
   tags: ["Mobile Chat"],
   summary: "Mute a room's notifications",
   description:
-    "Stops the room's pushes to you — a reply to you, an organiser's announcement (and its bell row). You still read and post; nobody is told. " +
-    "Not the organiser's mute, which stops a person posting. Optional `until` (ISO 8601, future, at most a year away); omit or null for until you unmute. " +
+    "Stops the room's pushes to you — a reply to you, an organizer's announcement (and its bell row). You still read and post; nobody is told. " +
+    "Not the organizer's mute, which stops a person posting. Optional `until` (ISO 8601, future, at most a year away); omit or null for until you unmute. " +
     "Posting again replaces `until`. The state is also returned as `mute` by `GET /events/{eventId}/chat` and on each `GET /chat/groups` item. " +
     ROOM_404,
   security: bearerAuth,

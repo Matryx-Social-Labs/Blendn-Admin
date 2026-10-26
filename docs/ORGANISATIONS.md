@@ -10,7 +10,7 @@ person's account: their colleagues could not help, and if that person left the
 venue was orphaned.
 
 Everything is now an `organisations` row, including a sole trader — `kind`
-distinguishes them, so an individual organiser exists with one member and no
+distinguishes them, so an individual organizer exists with one member and no
 GSTIN while a venue owner must be a company. A uniform shape beats a
 user-or-org union at every call site.
 

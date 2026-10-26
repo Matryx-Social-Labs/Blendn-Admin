@@ -108,7 +108,7 @@ and stay fetchable at the edge for up to an hour after a delete.
 - **User file deletes.** `DELETE /api/mobile/uploads/delete` lets a user delete
   their own files in `profile/`, `chat/` and `events/` whatever their moderation
   state. That includes images in hidden or reported messages.
-- **Delisted events.** After an admin delists an event, the organiser can still
+- **Delisted events.** After an admin delists an event, the organizer can still
   edit its title and description, and its `visibility` too
   (`PUT /api/events/[id]`). The delisting's audit entry keeps only the subject
   id, so nothing keeps the original text.

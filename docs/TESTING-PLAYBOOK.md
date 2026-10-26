@@ -320,7 +320,7 @@ every table header — under AA on nearly every screen.
 
 | Seeded | Why it is there |
 |---|---|
-| `admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app` (from `scripts/test-accounts.ts`), 3 named admins, the no-org organiser, attendees | the 5 × 38 route matrix |
+| `admin@`, `organizer@`, `venue.owner@`, `sponsor@blendn.app` (from `scripts/test-accounts.ts`), 3 named admins, the no-org organizer, attendees | the 5 × 38 route matrix |
 | `teen.tester@blendn.app`, under 18 | the age gate has something to refuse |
 | `rhea.kapoor@blendn.app`, sponsor, org with no brand | a brand claim the admin can approve: the pending Third Wave claim is hers (sponsor@'s org owns Blue Tokai and may not file one) |
 | 3 curated events — open / dead / claimed, **5 refusals on the dead one** | curation health, and the only refusal data in the product |
@@ -460,7 +460,7 @@ the skill that governs the whole phase-2 plan, not one screen of it.
 
 | Skill | Reach for it when | The failure it names |
 |---|---|---|
-| **`click-path-audit`** | a control does something in more than one step | *"Functions individually work but cancel each other out."* That is K1.1 exactly — picking a venue moves the fence and the coordinates and not the pin, because two correct effects disagree. It is also G5: `checkAndAutoUnmute` clearing an organiser's manual mute, where two correct rules compose into a wrong one. |
+| **`click-path-audit`** | a control does something in more than one step | *"Functions individually work but cancel each other out."* That is K1.1 exactly — picking a venue moves the fence and the coordinates and not the pin, because two correct effects disagree. It is also G5: `checkAndAutoUnmute` clearing an organizer's manual mute, where two correct rules compose into a wrong one. |
 | **`living-docs-governance`** | the docs and the code have drifted | Eighteen recorded comments describing behaviour the code does not have, a 200KB plan register measured at **one stale entry in eight**, and two documents that had to be merged because they covered the same thing. `ecc:comment-analyzer` finds instances; this is the systemic answer. |
 
 ### Cost
@@ -756,7 +756,7 @@ Kept as the argument against skipping it:
 | `npm run build` | `pg` in a browser bundle; `export const` in a `"use server"` file |
 | driving it, phone | **Sending a message into a room returned 500** — `metadata: metadata \|\| undefined` under `strictUndefinedChecks`; the ratchet matched `??` and not `\|\|`. On dev and the last production build |
 | socket probe | **No emit from a route or action ever reached a phone** — Next bundles its own copy of `lib/socket-server.ts`, whose `io` was null; live chat delivery, check-in broadcasts and moderation removals were all silent, in dev and the production build alike |
-| driving it, phone | Rejecting a flag left the message visible when it had never been auto-hidden; neither organiser decision wrote to `audit_logs`; a return after check-out kept the old `check_out_time`, so the Banter tab listed the room under Recent rather than Live |
+| driving it, phone | Rejecting a flag left the message visible when it had never been auto-hidden; neither organizer decision wrote to `audit_logs`; a return after check-out kept the old `check_out_time`, so the Banter tab listed the room under Recent rather than Live |
 | driving it, dashboard | The venue owner's list could not reach the venue record it exists to edit; a second amenity with the same name was suffixed rather than refused; "<5 of 1 … read them" on a held-back category; "1 people inside" |
 | read-back | The seed wrote `event_check_ins` and not `presence_sessions`, so the Grid said six and the Rooms page said nobody |
 

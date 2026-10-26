@@ -346,7 +346,7 @@ routes and searches every serialised response for the friend's id.
 - DM and conversation routes, `private:*` events, `users/blocked`, the friends
   list and message-request GET/respond payloads keep real ids: identity is
   already exchanged there, or the people are your own contacts. Dashboard and
-  organiser routes keep real ids for moderation and audit.
+  organizer routes keep real ids for moderation and audit.
 
 ### 2026-08-10 — the group-chat report button now reports
 
@@ -490,21 +490,21 @@ both run `eventPermissions`; GET did neither, and `middleware.ts` does not match
 — drafts, private events, and the `geofence` / `check_in_radius`, which is the
 server-side check-in boundary. Reading it tells you which coordinates to submit
 to pass `evaluateCheckIn` from anywhere, which turns the guarantee every
-organiser number rests on into a formality.
+organizer number rests on into a formality.
 
-**Organiser CSV export shipped attendee name, email and phone** —
-`checkins/export`. `lib/reports.ts` states outright that "an organiser sees who
+**Organizer CSV export shipped attendee name, email and phone** —
+`checkins/export`. `lib/reports.ts` states outright that "an organizer sees who
 came to their events… and never an email address" and that "an export is not a
 way around" pseudonymity. This route was the way around it, and returned
 strictly more than the screen it backs. Now exports pseudonyms via the shared
 `lib/csv.ts` helper — which also fixes **CSV formula injection**, since the
 route hand-rolled RFC 4180 quoting with no formula neutralisation, so an
 attendee could set their display name to `=HYPERLINK(...)` and have it execute
-in the organiser's spreadsheet.
+in the organizer's spreadsheet.
 
 **Dashboard moderation queue leaked real name and email to hosts** —
 `app/api/events/[id]/chat/moderation/route.ts`. Gated on `canOperate`, which is
-organiser and venue owner — not admin. The sibling `chat/messages` route was
+organizer and venue owner — not admin. The sibling `chat/messages` route was
 fixed for exactly this and this one was missed, so any host could read the real
 identity of every "anonymous" attendee who had ever been auto-flagged, with the
 pseudonym on the adjacent tab keyed to the same id. Now returns
@@ -512,7 +512,7 @@ pseudonym on the adjacent tab keyed to the same id. Now returns
 
 #### MEDIUM
 
-**Every organiser's unpublished drafts were listable** —
+**Every organizer's unpublished drafts were listable** —
 `app/api/mobile/events/route.ts:122`. `status` was caller-supplied and the schema
 accepts `"draft"`, with no ownership scoping in the handler. Since `status`
 defaults to `draft` and `visibility` to `public`, every event was a public draft
@@ -570,20 +570,20 @@ the request path** — so a `role !== "app_admin"` redirect in `page.tsx` guards
 the *view* and never the *data* behind it. Four exports relied on precisely
 that.
 
-| Action | What an organiser or venue owner could read |
+| Action | What an organizer or venue owner could read |
 |---|---|
-| `app/dashboard/actions.ts:733` `getDashboardOverview(role, userId)` | `role` was an **argument**. Passing `"app_admin"` returned the whole-platform report: user totals, growth series, the signup→check-in funnel, the moderation backlog, and **every organiser's name and email**. Passing another organiser's id returned their pacing, capacity, no-show rate and drafts |
-| `app/dashboard/actions.ts:753` `getEventRows(userId?)` | The scope argument was **optional**. Omitting it widened the query to the 100 most recent events **platform-wide, every organiser, drafts included** |
+| `app/dashboard/actions.ts:733` `getDashboardOverview(role, userId)` | `role` was an **argument**. Passing `"app_admin"` returned the whole-platform report: user totals, growth series, the signup→check-in funnel, the moderation backlog, and **every organizer's name and email**. Passing another organizer's id returned their pacing, capacity, no-show rate and drafts |
+| `app/dashboard/actions.ts:753` `getEventRows(userId?)` | The scope argument was **optional**. Omitting it widened the query to the 100 most recent events **platform-wide, every organizer, drafts included** |
 | `app/dashboard/moderation/actions.ts:47` `getModerationQueue` | Up to 100 flagged **private chat messages** — content, the author's **real name and email**, and the event. `resolveFlag` directly below it checks for `app_admin`; the read half of the same screen did not |
 | `app/dashboard/users/actions.ts:121` `getUserById` | Any user's `email`, `phone`, `age`, `location` and `role` by id. Every other export in that file checks `app_admin`; this one was missed |
 
-Chainable: the first yields organiser ids, the fourth turns them into phone
+Chainable: the first yields organizer ids, the fourth turns them into phone
 numbers and home cities.
 
 **Not unauthenticated.** The initial report claimed no cookie was required; that
 was wrong, and the distinction is the whole severity. `middleware.ts:175`
 requires a session for `/dashboard/:path*` and `canAccessDashboard` rejects
-attendees. The real bar is **any approved organiser or venue owner** — external
+attendees. The real bar is **any approved organizer or venue owner** — external
 customers who sign up through `/apply`. Still a straight crossing of the RBAC
 boundary, still HIGH.
 

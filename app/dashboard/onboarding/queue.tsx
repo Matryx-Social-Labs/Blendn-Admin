@@ -35,7 +35,7 @@ import { refusalMessage } from "@/lib/refusal"
  * union is a compile error here rather than a wrong label in production.
  */
 const ROLE_LABEL: Record<OnboardingRow["requested_role"], string> = {
-  organizer: "Organiser",
+  organizer: "Organizer",
   venue_owner: "Venue owner",
   sponsor: "Sponsor",
 }

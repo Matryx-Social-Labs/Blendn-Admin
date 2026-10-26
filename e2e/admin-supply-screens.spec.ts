@@ -81,7 +81,7 @@ async function screens(): Promise<Screen[]> {
     },
     {
       path: "/dashboard/organisers",
-      h1: "Organisers",
+      h1: "Organizers",
       check: async (page) => {
         await expect(main(page).getByText(/never published/)).toBeVisible()
         await expect(main(page).getByText("never", { exact: true }).first()).toBeVisible()
@@ -89,7 +89,7 @@ async function screens(): Promise<Screen[]> {
     },
     {
       path: `/dashboard/organisers/${organiser.id}`,
-      h1: organiser.name ?? "Unnamed organiser",
+      h1: organiser.name ?? "Unnamed organizer",
       check: async (page) => {
         await expect(main(page).getByRole("heading", { name: "Events" })).toBeVisible()
       },
