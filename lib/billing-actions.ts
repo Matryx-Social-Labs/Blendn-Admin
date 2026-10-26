@@ -459,7 +459,9 @@ export async function cancelVenuePro(venueId: string): Promise<void> {
     .filter((m) => mayManageVenueBilling(user.role, m.role))
     .map((m) => m.org_id)
   if (payers.length === 0) throw new Refusal("Only an owner or admin of the organisation that pays can cancel Venue Pro.")
-  await payable(`venue:${id}`)
+  // Keyed on the caller: `venue:<id>` is the venue's own bucket (starting a plan spends it),
+  // and a venue id is public, so spending it here let any other venue owner lock the real one out.
+  await payable(`venue-cancel:${user.id}:${id}`)
   await cancelOpen(user.id, { orgId: payers[0], venueId: id, payerOrgIds: payers })
 }
 

@@ -14,6 +14,14 @@ jest.mock("@/lib/attendee-counts", () => ({
   hereCounts: jest.fn(async () => new Map([["e1", 3]])),
 }))
 
+jest.mock("@/lib/event-tallies", () => ({
+  eventTallies: jest.fn(async () => ({
+    favorites: new Map([["e1", 124]]),
+    ratings: new Map(),
+    going: new Map(),
+  })),
+}))
+
 const transformOne = async (event: unknown, ctx: Parameters<typeof transformEvents>[1]) =>
   (await transformEvents([event] as never, ctx))[0]
 
@@ -59,7 +67,6 @@ const EVENT = {
   organizer: null,
   categories: [],
   media: [],
-  _count: { favorites: 124, ratings: 0 },
 } as never
 
 describe("GET /events never previews who is interested", () => {

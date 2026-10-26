@@ -17,6 +17,7 @@ import { isAggregatorDomain } from "@/lib/curation-sources"
 import { emailDomain, isFreeProvider } from "@/lib/org-invites"
 import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/email"
 import { issuePasswordResetLink } from "@/lib/password-reset"
+import { endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { notifyEventUpdate } from "@/lib/push-notifications"
 import { realEventsWhere } from "./event-kind"
 import { liveAnalyticsByOrg } from "./entitlements"
@@ -201,17 +202,41 @@ export async function approveOnboardingRequest(
 
   const existing = await db.user.findUnique({
     where: { email: request.contact_email },
-    select: { id: true, role: true },
+    select: { id: true, role: true, emailVerified: true, deletedAt: true, suspended_at: true },
   })
   // An attendee applying to host is ordinary — they already use the app. Their
   // account is promoted rather than duplicated, since email is unique.
   if (existing && existing.role !== "attendee") {
     throw new Refusal("That email already has a host account")
   }
+  if (existing && (existing.deletedAt || existing.suspended_at)) {
+    throw new Refusal("The account on that email is suspended or deleted. It can’t be made a host account.")
+  }
+  /*
+   * Mobile signup never verifies the address, so an account on this email may
+   * be a squatter's, not the applicant's (audit 2026-10-24, WEB M1). Promoting
+   * it kept the squatter's password and phones and handed them the org.
+   *
+   * - Account confirmed (OAuth, or a link that was clicked): the person in it
+   *   proved the mailbox. Promote it, password and all, as before.
+   * - Account never confirmed, application proved the mailbox: the applicant
+   *   outranks the squatter. The account is taken over like an OAuth link
+   *   takes one (lib/mobile-auth.ts): password replaced, every phone session
+   *   ended, address marked verified, and a set-password link goes to the
+   *   mailbox, as for a new host.
+   * - Neither proved: refuse. Approving would give the org to whoever got to
+   *   the address first.
+   */
+  const takeOver = existing !== null && existing.emailVerified === null
+  if (takeOver && !request.email_verified_at) {
+    throw new Refusal(
+      "An account on that email was never confirmed and the applicant hasn’t verified the address, so approving could hand the organisation to someone else. Ask them to verify it from their email, then approve."
+    )
+  }
 
   const hashed = await bcrypt.hash(undisclosedPassword(), 12)
 
-  const { orgId, userId } = await db.$transaction(async (tx) => {
+  const { orgId, userId, phonesEnded } = await db.$transaction(async (tx) => {
     /*
      * The guard, first (M1): the application goes from undecided to approved
      * here or the transaction ends. Two approvals racing used to each create
@@ -257,10 +282,10 @@ export async function approveOnboardingRequest(
     const user = existing
       ? await tx.user.update({
           where: { id: existing.id },
-          // The password is NOT reset for an existing account — they already
-          // have one, and overwriting it would lock them out of the mobile app
-          // mid-session to hand them a credential they did not ask for.
-          data: { role: request.requested_role },
+          // A confirmed account keeps its password — overwriting it would lock them out of the
+          // mobile app mid-session to hand them a credential they did not ask for. A taken-over
+          // one gets a password nobody knows, and the link below.
+          data: { role: request.requested_role, ...(takeOver && { password: hashed, emailVerified: new Date() }) },
           select: { id: true },
         })
       : await tx.user.create({
@@ -309,14 +334,17 @@ export async function approveOnboardingRequest(
         orgId: org.id,
         role: request.requested_role,
         promotedExisting: !!existing,
+        tookOverUnconfirmed: takeOver,
         note: note?.trim() || null,
       },
     })
 
-    return { orgId: org.id, userId: user.id }
+    const phonesEnded = takeOver ? await endPhoneSessions(tx, user.id, "password_reset") : null
+    return { orgId: org.id, userId: user.id, phonesEnded }
   })
+  if (phonesEnded) phoneSessionsEnded(userId, phonesEnded.at)
 
-  const setPasswordLink = existing ? "" : await issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)
+  const setPasswordLink = existing && !takeOver ? "" : await issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)
 
   let emailSent = false
   if (emailConfigured()) {

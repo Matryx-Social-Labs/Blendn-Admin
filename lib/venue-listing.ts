@@ -2,10 +2,10 @@ import { Prisma } from "@prisma/client"
 
 import { cityKey } from "@/lib/address"
 import { db } from "@/lib/db"
-import { realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
+import { realEventsWhere } from "@/lib/event-kind"
 import type { LiveCountBucket } from "@/lib/disclosure"
 import { likeLiteral } from "@/lib/like-literal"
-import { liveGuestIds, liveGuestsWhere, venueLiveBucket } from "@/lib/live-count"
+import { liveGuestIds, staleVenueIds, venueLiveBucket } from "@/lib/live-count"
 import { logger } from "@/lib/logger"
 import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere } from "@/lib/venue-visibility"
 import { venueDayBounds } from "@/lib/venue-day"
@@ -67,21 +67,42 @@ export function listedVenuesWhere(city: string | undefined): Prisma.venuesWhereI
  * out only if counted.
  */
 export async function liveBuckets(venueIds: string[], viewerId: string, now: Date) {
-  const live = await liveGuestIds(venueIds, now)
+  // Guests are read only for venues whose minute-old count has run out: the cache steadies the figure AND saves the read.
+  const live = await liveGuestIds(staleVenueIds(venueIds, now.getTime()), now)
   const buckets = await Promise.all(
-    venueIds.map((id) => venueLiveBucket(id, viewerId, async () => live.get(id) ?? new Set<string>(), now.getTime()))
+    venueIds.map((id) =>
+      venueLiveBucket(
+        id,
+        viewerId,
+        // An entry that expired between the check above and here is read on its own, never taken for empty.
+        async () => live.get(id) ?? (await liveGuestIds([id], now)).get(id) ?? new Set<string>(),
+        now.getTime()
+      )
+    )
   )
   return new Map(venueIds.map((id, i) => [id, buckets[i]]))
 }
 
 /** The venues matching `where` whose `liveNow` is not `quiet` for this viewer. */
 export async function liveVenueIds(where: Prisma.venuesWhereInput, viewerId: string, now: Date): Promise<Set<string>> {
-  const rows = await db.event_check_ins.findMany({
-    where: { ...liveGuestsWhere(now), event: { ...venueDaysWhere, venue: where } },
-    select: { event: { select: { venue_id: true } } },
-    distinct: ["event_id"],
+  /*
+   * Distinct in SQL: Prisma's `distinct` runs in JS, so this used to ship one
+   * row per live guest in the city to learn which venues have any. The same
+   * predicate as `liveGuestsWhere` (live window open, a guest) on a venue day;
+   * the caller's venue filter is applied to the few ids that come back.
+   */
+  const live = await db.$queryRaw<{ venue_id: string }[]>`
+    SELECT DISTINCT e.venue_id
+      FROM event_check_ins ci
+      JOIN events e ON e.id = ci.event_id
+     WHERE ci.status = 'checked_in' AND ci.expires_at > ${now} AND ci.kind = 'attendee'
+       AND e.kind = 'venue_day' AND e.venue_id IS NOT NULL`
+  if (live.length === 0) return new Set()
+  const listed = await db.venues.findMany({
+    where: { AND: [where, { id: { in: live.map((r) => r.venue_id) } }] },
+    select: { id: true },
   })
-  const ids = [...new Set(rows.flatMap((r) => (r.event.venue_id ? [r.event.venue_id] : [])))]
+  const ids = listed.map((v) => v.id)
   const buckets = await liveBuckets(ids, viewerId, now)
   return new Set(ids.filter((id) => buckets.get(id) !== "quiet"))
 }

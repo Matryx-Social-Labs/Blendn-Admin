@@ -56,7 +56,7 @@ export const signupSchema = z.object({
 
 export const signinSchema = z.object({
   // Lowercased: one address is one account whatever its case (SCRUM-328).
-  email: z.string().trim().toLowerCase().email("Invalid email address"),
+  email: z.string().max(254, "Invalid email address").trim().toLowerCase().email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
   deviceInfo: deviceInfoSchema.optional(),
 })

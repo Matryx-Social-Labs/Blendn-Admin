@@ -1,6 +1,6 @@
 import { db } from "@/lib/db"
 import { isUuid } from "@/lib/api-input"
-import { ownerDoor, roomOwnerDenial, roomWindowFor } from "@/lib/room-kind"
+import { roomOwnerDenial, roomWindowFor, withOwnerDoor } from "@/lib/room-kind"
 
 /**
  * A room and the caller's own row in it, for the routes a member acts on
@@ -22,7 +22,7 @@ export async function roomForMember(
 ) {
   if (!isUuid(chatGroupId)) return null
 
-  const group = await db.chat_groups.findUnique({
+  const found = await db.chat_groups.findUnique({
     where: { id: chatGroupId },
     select: {
       id: true,
@@ -30,9 +30,10 @@ export async function roomForMember(
       event_id: true,
       status: true,
       event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true } },
-      ...ownerDoor(userId),
     },
   })
+  // The owner's door for this room's kind only; an event's room has none to read.
+  const group = await withOwnerDoor(chatGroupId, userId, found)
   if (!group) return null
   const owner = roomOwnerDenial(group, userId)
   if (owner === "not_member" || (owner === "hidden" && !opts.allowHidden)) return null

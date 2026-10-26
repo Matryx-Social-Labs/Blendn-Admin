@@ -5,10 +5,10 @@ import type { Prisma } from "@prisma/client"
 import { ageFrom, minAgeRefusal } from "./age"
 import { db } from "./db"
 import { logger } from "./logger"
-import { performCheckout } from "./checkout"
+import { performCheckouts, type CheckoutItem } from "./checkout"
 import { realEventsWhere, venueDaysWhere } from "./event-kind"
 import { resolveFence, fenceSelect } from "./geofence"
-import { evaluatePresence, type PresenceState } from "./presence"
+import { evaluatePresence, OCCURRENCE_GRACE_MINUTES, type PresenceState } from "./presence"
 import { closeStrandedSessions } from "./presence-sessions"
 import { sendBulkPushNotifications } from "./push-notifications"
 import { hit } from "./rate-limit-store"
@@ -139,6 +139,8 @@ async function sweepRooms(
     by: ["event_id"],
     // any-kind: `kind` is realEventsWhere or venueDaysWhere, chosen by the pass that calls this.
     where: { status: "checked_in", event: kind },
+    // The room's size too: the guard's denominator, so the rows below can be the actionable few.
+    _count: { _all: true },
     _min: { created_at: true },
     orderBy: { _min: { created_at: "asc" } },
     take: cap,
@@ -152,10 +154,22 @@ async function sweepRooms(
     logger.warn("Presence sweep hit its event cap", { cap, kind: kind.kind })
   }
 
+  /*
+   * Only the rows the sweeper can act on. It carries no ping, so
+   * `evaluatePresence` closes nobody but those past their day's end plus
+   * grace, and those out of the fence (`left_area_at`) -- everyone else is
+   * `stay`, and was fetched, with the event's fence JSON, only to be counted.
+   * The count is the groupBy's.
+   */
+  const roomSize = new Map(busiest.map((b) => [b.event_id, b._count._all]))
   const open = await db.event_check_ins.findMany({
     where: {
       status: "checked_in",
       event_id: { in: busiest.map((b) => b.event_id) },
+      OR: [
+        { left_area_at: { not: null } },
+        { occurrence: { end_time: { lt: new Date(now.getTime() - OCCURRENCE_GRACE_MINUTES * 60_000) } } },
+      ],
     },
     select: {
       id: true,
@@ -168,7 +182,7 @@ async function sweepRooms(
       event: { select: { ...fenceSelect } },
     },
   })
-  result.examined = open.length
+  result.examined = [...roomSize.values()].reduce((sum, n) => sum + n, 0)
   if (open.length === 0) return result
 
   // Grouped so the guard can reason about a room rather than a person.
@@ -177,6 +191,7 @@ async function sweepRooms(
     byEvent.set(row.event_id, [...(byEvent.get(row.event_id) ?? []), row])
   }
 
+  const pending: Record<"occurrence_ended" | "left_area", CheckoutItem[]> = { occurrence_ended: [], left_area: [] }
   for (const [eventId, rows] of byEvent) {
     /*
      * One resolver. This consulted the event's fence and the venue's and never
@@ -223,35 +238,34 @@ async function sweepRooms(
     const departures = toCheckOut.filter((d) => d.decision.reason !== "occurrence_ended")
     if (
       departures.length >= MASS_CHECKOUT_FLOOR &&
-      departures.length / rows.length > MASS_CHECKOUT_THRESHOLD
+      departures.length / (roomSize.get(eventId) ?? rows.length) > MASS_CHECKOUT_THRESHOLD
     ) {
       result.guarded.push(eventId)
       logger.warn("Presence sweep guarded: too many departures at once", {
         eventId,
         wouldCheckOut: departures.length,
-        inRoom: rows.length,
+        inRoom: roomSize.get(eventId) ?? rows.length,
         threshold: MASS_CHECKOUT_THRESHOLD,
         floor: MASS_CHECKOUT_FLOOR,
         hint: "venue signal loss looks identical to everyone leaving; count is unreliable",
       })
       // Still close out anyone whose day simply ended.
       for (const d of toCheckOut.filter((x) => x.decision.reason === "occurrence_ended")) {
-        const done = await performCheckout(d.row.id, "occurrence_ended", now)
-        if (done?.changed) result.checkedOut++
+        pending.occurrence_ended.push({ id: d.row.id, at: now })
       }
       continue
     }
 
     for (const { row, decision } of decisions) {
       if (decision.action === "auto_checkout") {
-        const done = await performCheckout(
-          row.id,
-          decision.reason === "occurrence_ended" ? "occurrence_ended" : "left_area",
-          now
-        )
-        if (done?.changed) result.checkedOut++
+        pending[decision.reason === "occurrence_ended" ? "occurrence_ended" : "left_area"].push({ id: row.id, at: now })
       }
     }
+  }
+
+  // Once for the pass, not once per person: the rows, the sessions and the telling are batched (`performCheckouts`).
+  for (const reason of ["occurrence_ended", "left_area"] as const) {
+    result.checkedOut += (await performCheckouts(pending[reason], reason)).length
   }
 
   if (result.checkedOut > 0 || result.guarded.length > 0) {
@@ -335,12 +349,9 @@ export async function expireWindows(now: Date = new Date()): Promise<number> {
   if (due.length === MAX_EXPIRIES_PER_SWEEP) {
     logger.warn("Venue-day sweep hit its expiry cap", { cap: MAX_EXPIRIES_PER_SWEEP })
   }
-  let expired = 0
-  for (const row of due) {
-    const done = await performCheckout(row.id, "expired", row.expires_at!)
-    if (done?.changed) expired++
-  }
-  return expired
+  // Each at its own end (PL-U04); one batch.
+  const done = await performCheckouts(due.map((row) => ({ id: row.id, at: row.expires_at! })), "expired")
+  return done.length
 }
 
 /**
@@ -393,14 +404,10 @@ async function closeForStartingEvents(now: Date): Promise<{ closedForEvents: num
       take: MAX_CLOSED_PER_VENUE,
       select: { id: true, user: { select: { profile: { select: { age: true, date_of_birth: true } } } } },
     })
-    const told: string[] = []
-    for (const row of live) {
-      // Not somebody the event's own age rule would turn away at its door
-      // (D-3): their Go Live was allowed, and stays theirs.
-      if (minAgeRefusal(ageFrom(row.user.profile), event.min_age)) continue
-      const done = await performCheckout(row.id, "event_started", now)
-      if (done?.changed) told.push(done.userId)
-    }
+    // Not somebody the event's own age rule would turn away at its door
+    // (D-3): their Go Live was allowed, and stays theirs.
+    const eligible = live.filter((row) => !minAgeRefusal(ageFrom(row.user.profile), event.min_age))
+    const told = (await performCheckouts(eligible.map((row) => ({ id: row.id, at: now })), "event_started")).map((r) => r.userId)
     closedForEvents += told.length
     if (told.length === 0) continue
 

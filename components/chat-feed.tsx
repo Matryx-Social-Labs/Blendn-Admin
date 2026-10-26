@@ -68,8 +68,27 @@ interface ChatMember {
 interface ChatFeedData {
   chatGroupId: string
   pendingFlags: number
+  /** Members in the room now: the header's number, whichever slice of the roster `members` is. */
+  activeCount: number
   messages: ChatMessage[]
   members: ChatMember[]
+}
+
+/**
+ * A light poll's members onto the roster already held. The poll carries every
+ * restricted member and the authors of the messages shown, so a held member who
+ * was restricted and is not in it is no longer restricted; the rest of the
+ * roster stays as the last full read had it.
+ */
+function mergeMembers(held: ChatMember[], polled: ChatMember[]): ChatMember[] {
+  const fresh = new Map(polled.map((m) => [m.userId, m]))
+  const kept = held.map(
+    (m) =>
+      fresh.get(m.userId) ??
+      (m.status === "banned" || m.status === "muted" ? { ...m, status: "active", bannedAt: null, mutedAt: null } : m)
+  )
+  const heldIds = new Set(held.map((m) => m.userId))
+  return [...kept, ...polled.filter((m) => !heldIds.has(m.userId))]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -134,11 +153,18 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
   // a stale pending-flag count or ban state back on screen.
   const requestSeq = useRef(0)
 
-  const fetchData = useCallback(async (silent = false) => {
+  // The poll reads the tab as it is when it fires, without restarting the timer.
+  const tabRef = useRef(activeTab)
+
+  /*
+   * `light` leaves the roster out (see the route): the Messages tab polls light,
+   * the Members tab, the first load and Refresh read it whole.
+   */
+  const fetchData = useCallback(async (silent = false, light = false) => {
     const seq = ++requestSeq.current
     try {
       if (!silent) setLoading(true)
-      const res = await fetch(`/api/events/${eventId}/chat/messages`, { cache: "no-store" })
+      const res = await fetch(`/api/events/${eventId}/chat/messages${light ? "?light=1" : ""}`, { cache: "no-store" })
       if (seq !== requestSeq.current) return
       if (!res.ok) {
         /*
@@ -155,7 +181,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
       {
         const json = await res.json() as ChatFeedData
         if (seq !== requestSeq.current) return
-        setData(json)
+        setData((prev) => (light && prev ? { ...json, members: mergeMembers(prev.members, json.members) } : json))
         if (isFirstLoad.current) {
           isFirstLoad.current = false
           setTimeout(() => {
@@ -170,9 +196,15 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
 
   useEffect(() => {
     void fetchData()
-    const interval = setInterval(() => void fetchData(true), 5000)
+    const interval = setInterval(() => void fetchData(true, tabRef.current === "messages"), 5000)
     return () => clearInterval(interval)
   }, [fetchData])
+
+  // The roster whole when the Members tab opens: a light poll never carried it.
+  useEffect(() => {
+    tabRef.current = activeTab
+    if (activeTab === "members") void fetchData(true)
+  }, [activeTab, fetchData])
 
   const deleteMessage = async (messageId: string) => {
     if (!confirm("Delete this message?")) return
@@ -258,7 +290,7 @@ export function ChatFeed({ eventId }: ChatFeedProps) {
         <p className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
           {data ? (
             <>
-              <span><b className="font-bold text-foreground">{activeMembers.length}</b> in the room</span>
+              <span><b className="font-bold text-foreground">{data.activeCount}</b> in the room</span>
               <span><b className="font-bold text-foreground">{data.messages.length}</b> messages</span>
               <span><b className="font-bold text-foreground">{restrictedCount}</b> restricted</span>
               {data.pendingFlags > 0 ? (

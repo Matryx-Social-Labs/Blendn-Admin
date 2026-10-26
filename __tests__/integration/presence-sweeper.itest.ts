@@ -258,6 +258,20 @@ describe("the mass-checkout guard", () => {
     expect(result.checkedOut).toBe(1)
   })
 
+  it("measures the share against the whole room, not the few rows the sweep reads", async () => {
+    // The sweep reads only rows it can act on (out of the fence, or past the day's end);
+    // five leavers among forty are 12.5% of the room -- not five of five.
+    const { eventId, occurrenceId } = await liveEvent()
+    for (let i = 0; i < MASS_CHECKOUT_FLOOR; i++) await present(eventId, occurrenceId, `w${i}`, { left_area_at: ago(120) })
+    for (let i = 0; i < 35; i++) await present(eventId, occurrenceId, `x${i}`)
+
+    const result = await sweepPresence()
+    expect(result.guarded).not.toContain(eventId)
+    expect(result.checkedOut).toBe(MASS_CHECKOUT_FLOOR)
+    expect((await getOccupancy(eventId)).inside).toBe(35)
+    expect(result.examined).toBeGreaterThanOrEqual(40)
+  })
+
   it("has a threshold that is a share AND a floor that is a count", () => {
     /*
      * Both, because either alone is wrong. A share with no floor cannot tell a

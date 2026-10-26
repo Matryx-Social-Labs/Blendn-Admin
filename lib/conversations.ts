@@ -174,6 +174,21 @@ export async function blockCounterparties(userId: string): Promise<string[]> {
   return [...new Set(rows.map((r) => (r.blocker_id === userId ? r.blocked_id : r.blocker_id)))]
 }
 
+/** `blockCounterparties` for several people in one read: each one's counterparties, by id. */
+export async function blockCounterpartiesMany(userIds: readonly string[]): Promise<Map<string, string[]>> {
+  const ids = new Set(userIds)
+  const rows = await db.blocked_users.findMany({
+    where: { OR: [{ blocker_id: { in: [...ids] } }, { blocked_id: { in: [...ids] } }] },
+    select: { blocker_id: true, blocked_id: true },
+  })
+  const byUser = new Map<string, Set<string>>([...ids].map((id) => [id, new Set<string>()]))
+  for (const r of rows) {
+    if (ids.has(r.blocker_id)) byUser.get(r.blocker_id)!.add(r.blocked_id)
+    if (ids.has(r.blocked_id)) byUser.get(r.blocked_id)!.add(r.blocker_id)
+  }
+  return new Map([...byUser].map(([id, set]) => [id, [...set]]))
+}
+
 /**
  * Who this person must not share a room with, for the room's delivery, its
  * history, its typing and its roster: everybody in a block with them, in every

@@ -45,7 +45,7 @@ afterAll(async () => {
   await closeDb()
 })
 
-async function application(email: string) {
+async function application(email: string, over: { email_verified_at?: Date | null; status?: "pending" | "email_pending" } = {}) {
   const r = await db.organiser_onboarding_requests.create({
     data: {
       kind: "company",
@@ -53,8 +53,8 @@ async function application(email: string) {
       contact_name: "New Host",
       contact_email: email,
       tier: "needs_proof",
-      status: "pending",
-      email_verified_at: new Date(),
+      status: over.status ?? "pending",
+      email_verified_at: over.email_verified_at === undefined ? new Date() : over.email_verified_at,
       requested_role: "organizer",
     },
     select: { id: true },
@@ -114,7 +114,8 @@ it("a promoted attendee keeps their password and gets no link", async () => {
   const id = await makeUser(testId("asp-att"), "attendee")
   users.push(id)
   const hashed = await bcrypt.hash("Their-own-password-1", 4)
-  await db.user.update({ where: { id }, data: { email, password: hashed } })
+  // Their address is confirmed (OAuth, or the app's own check): only then is "their password" theirs to keep.
+  await db.user.update({ where: { id }, data: { email, password: hashed, emailVerified: new Date() } })
 
   const result = await approveOnboardingRequest(await application(email))
   orgs.push(result.orgId)
@@ -140,4 +141,58 @@ it("with email unconfigured the admin is handed the link, once", async () => {
   } finally {
     emailMod.emailConfigured = was
   }
+})
+
+/*
+ * Mobile signup never verifies the address, so an account on an applicant's email may be a squatter's
+ * (security audit 2026-10-24, WEB M1). Approval used to promote it to org owner with the squatter's password
+ * and phones intact.
+ */
+async function squatter(label: string) {
+  const email = `${testId(label)}@example.test`
+  const id = await makeUser(testId("asp-sq"), "attendee")
+  users.push(id)
+  const hash = await bcrypt.hash("Squatter-chosen-1", 4)
+  await db.user.update({ where: { id }, data: { email, password: hash } })
+  await db.mobile_refresh_tokens.create({
+    data: { user_id: id, token_hash: testId("sqtok"), expires_at: new Date(Date.now() + 86_400_000) },
+  })
+  await db.push_tokens.create({ data: { user_id: id, token: `ExponentPushToken[${id}]`, platform: "ios" } })
+  return { id, email, hash }
+}
+
+it("an applicant who proved the mailbox takes over a squatter's unconfirmed account: password gone, phones ended, a link sent", async () => {
+  const { id, email, hash } = await squatter("evict")
+  const result = await approveOnboardingRequest(await application(email))
+  orgs.push(result.orgId)
+
+  const row = await db.user.findUniqueOrThrow({ where: { id } })
+  expect(row.role).toBe("organizer")
+  expect(row.emailVerified).not.toBeNull()
+  expect(row.password).not.toBe(hash)
+  expect(await bcrypt.compare("Squatter-chosen-1", row.password!)).toBe(false)
+  expect(await db.mobile_refresh_tokens.count({ where: { user_id: id, revoked_at: null } })).toBe(0)
+  expect(await db.push_tokens.count({ where: { user_id: id } })).toBe(0)
+  // The applicant sets their own password from the mailbox they proved.
+  expect(await db.password_reset_tokens.count({ where: { user_id: id, used_at: null } })).toBe(1)
+  expect(sent.find((m) => m.to === email)!.text).toMatch(/reset-password\?token=/)
+})
+
+it("refuses an unproven application on an unconfirmed account, and changes nothing", async () => {
+  const { id, email, hash } = await squatter("unproven")
+  const requestId = await application(email, { email_verified_at: null, status: "email_pending" })
+  await expect(approveOnboardingRequest(requestId)).rejects.toThrow(/never confirmed|verify/i)
+
+  const row = await db.user.findUniqueOrThrow({ where: { id } })
+  expect(row.role).toBe("attendee")
+  expect(row.password).toBe(hash)
+  expect((await db.organiser_onboarding_requests.findUniqueOrThrow({ where: { id: requestId } })).status).toBe("email_pending")
+  expect(await db.organisation_members.count({ where: { user_id: id } })).toBe(0)
+})
+
+it("refuses a suspended account", async () => {
+  const { id, email } = await squatter("suspended")
+  await db.user.update({ where: { id }, data: { emailVerified: new Date(), suspended_at: new Date() } })
+  await expect(approveOnboardingRequest(await application(email))).rejects.toThrow(/suspended|deleted/i)
+  expect((await db.user.findUniqueOrThrow({ where: { id } })).role).toBe("attendee")
 })

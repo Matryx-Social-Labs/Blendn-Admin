@@ -339,8 +339,33 @@ export async function visibleInRoom(viewerId: string, eventId: string, targetIds
  * the name its recipient would see on the roster, without a gate per recipient.
  */
 export async function recognisedInRoomBy(eventId: string, targetId: string, viewerIds: string[]): Promise<Set<string>> {
-  const sees = await roomIdentity(eventId, viewerIds, [targetId])
-  return new Set(viewerIds.filter((v) => sees(v, targetId)))
+  const viewers = [...new Set(viewerIds)]
+  /*
+   * Who could recognise the arriver at all is the arriver's own doing: everyone,
+   * if they revealed in this room, otherwise only the friends of theirs they let
+   * see them. Read from the arriver's side (one reveal row, their friendships),
+   * so the full rule below is asked of those few, not of every listener with
+   * five `IN (all listeners)` lists on every arrival.
+   */
+  const optedIn = { select: { profile: { select: { friends_see_me_in_rooms: true } } } }
+  const [revealed, friendships] = await Promise.all([
+    db.event_match_preferences.findMany({ where: { event_id: eventId, revealed: true, user_id: { in: [targetId] } }, select: { user_id: true } }),
+    db.friendships.findMany({
+      where: { OR: [{ user1_id: targetId }, { user2_id: targetId }] },
+      select: { user1_id: true, user2_id: true, user1: optedIn, user2: optedIn },
+    }),
+  ])
+  const couldRecognise = new Set(
+    revealed.length > 0
+      ? viewers
+      : friendships.flatMap((f) => {
+          const [mine, friend] = f.user1_id === targetId ? [f.user1, f.user2_id] : f.user2_id === targetId ? [f.user2, f.user1_id] : [null, null]
+          return mine?.profile?.friends_see_me_in_rooms && friend ? [friend] : []
+        })
+  )
+  const candidates = viewers.filter((v) => v !== targetId && couldRecognise.has(v))
+  const sees = await roomIdentity(eventId, candidates, [targetId])
+  return new Set(viewers.filter((v) => v === targetId || (couldRecognise.has(v) && sees(v, targetId))))
 }
 
 /**

@@ -3,16 +3,13 @@ import { Prisma } from "@prisma/client"
 import { isUuid } from "./api-input"
 import {
   buildChatRows,
-  doorArgs,
   eventMemberArgs,
   EVENT_ROOM_WHERE,
   eventRowsWithEvent,
   LISTED_MEMBER_STATUSES,
   liveRoomsOnly,
-  openRooms,
-  otherMemberArgs,
-  OTHER_ROOM_WHERE,
 } from "./chat-group-rows"
+import { crewAndBlendRooms } from "./chat-list"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
 import { mutedNowSql } from "./room-mute"
@@ -97,9 +94,9 @@ async function listedAmong(userId: string, now: Date, ids: string[]): Promise<Se
       where: { ...where, chat_group: EVENT_ROOM_WHERE, ...liveRoomsOnly(now) },
       select: { chat_group_id: true },
     }),
-    db.chat_group_members.findMany({ where: { ...where, chat_group: OTHER_ROOM_WHERE }, ...doorArgs(userId) }),
+    crewAndBlendRooms(userId, { chat_group_id: { in: ids } }),
   ])
-  return new Set([...events, ...openRooms(others, userId)].map((m) => m.chat_group_id))
+  return new Set([...events, ...others].map((m) => m.chat_group_id))
 }
 
 /**
@@ -137,18 +134,18 @@ export async function mutedRoomPage(userId: string, limit: number, after: Candid
   const nextCursor = more ? encodeMutedCursor(page[limit - 1]) : resume ? encodeMutedCursor(resume) : null
   if (page.length === 0) return { rooms: [], nextCursor }
 
-  const blockedIds = await blockCounterparties(userId)
-  const notUnread = [...blockedIds, userId]
-  const unreadMessages = { deleted_at: null, user_id: { notIn: notUnread } }
-  const where = { user_id: userId, status: { in: [...LISTED_MEMBER_STATUSES] }, chat_group_id: { in: page.map((c) => c.id) } }
-  const [eventRows, otherRows] = await Promise.all([
-    db.chat_group_members.findMany({ where: { ...where, chat_group: EVENT_ROOM_WHERE, ...liveRoomsOnly(now) }, ...eventMemberArgs(unreadMessages) }),
-    db.chat_group_members.findMany({ where: { ...where, chat_group: OTHER_ROOM_WHERE }, ...otherMemberArgs(userId, unreadMessages) }),
+  const ids = { chat_group_id: { in: page.map((c) => c.id) } }
+  const where = { user_id: userId, status: { in: [...LISTED_MEMBER_STATUSES] }, ...ids }
+  const [blockedIds, eventRows, others] = await Promise.all([
+    blockCounterparties(userId),
+    db.chat_group_members.findMany({ where: { ...where, chat_group: EVENT_ROOM_WHERE, ...liveRoomsOnly(now) }, ...eventMemberArgs }),
+    crewAndBlendRooms(userId, ids),
   ])
+  const notUnread = [...blockedIds, userId]
   const built = await buildChatRows({
     userId,
     memberships: eventRowsWithEvent(eventRows),
-    others: openRooms(otherRows, userId),
+    others,
     notUnread,
     blockedIds,
     now,

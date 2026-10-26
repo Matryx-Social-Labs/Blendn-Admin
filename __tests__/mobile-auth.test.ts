@@ -25,6 +25,7 @@ jest.mock("bcryptjs", () => ({
   compare: (...a: unknown[]) => mockBcryptCompare(...a),
 }))
 
+import { createHash } from "crypto"
 import jwt from "jsonwebtoken"
 import {
   signAccessToken,
@@ -241,5 +242,59 @@ describe("verifyRefreshToken — reuse handling", () => {
   it("rejects an access token presented as a refresh token", async () => {
     await expect(verifyRefreshToken(signAccessToken(USER, EMAIL))).resolves.toBeNull()
     expect(mockDb.mobile_refresh_tokens.findUnique).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * Refresh tokens are hashed with SHA-256, not bcrypt.
+ *
+ * bcrypt is for guessable secrets; a refresh token is a signed JWT with a random
+ * jti, so a slow hash buys nothing. It cost two ~250 ms bcryptjs runs on the event
+ * loop per refresh (579 ms p50 on staging), and bcrypt reads only the first 72
+ * bytes — for a JWT, the header and the start of `userId`, the same for every
+ * token a user holds. Rows written before this keep verifying through bcrypt.
+ */
+describe("refresh token hashing", () => {
+  const sha256 = (s: string) => createHash("sha256").update(s).digest("hex")
+  const rowFor = (token: string, token_hash: string) => {
+    const { jti } = jwt.decode(token) as { jti: string }
+    mockDb.mobile_refresh_tokens.findUnique.mockResolvedValue({
+      id: jti,
+      user_id: USER,
+      token_hash,
+      expires_at: new Date(Date.now() + 60_000),
+      revoked_at: null,
+    })
+  }
+
+  it("stores the SHA-256 of the whole token", async () => {
+    const token = signRefreshToken(USER, EMAIL)
+    await storeRefreshToken(USER, token)
+    const { data } = mockDb.mobile_refresh_tokens.create.mock.calls[0][0]
+    expect(data.token_hash).toBe(sha256(token))
+  })
+
+  it("verifies a token against its SHA-256 row without touching bcrypt", async () => {
+    const token = signRefreshToken(USER, EMAIL)
+    rowFor(token, sha256(token))
+    await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: USER, type: "refresh" })
+    expect(mockBcryptCompare).not.toHaveBeenCalled()
+  })
+
+  it("rejects a row hashed from another token of the same user", async () => {
+    // Both share their first 72 bytes, so bcrypt would have matched them.
+    const held = signRefreshToken(USER, EMAIL)
+    const other = signRefreshToken(USER, EMAIL)
+    expect(held.slice(0, 72)).toBe(other.slice(0, 72))
+    rowFor(held, sha256(other))
+    await expect(verifyRefreshToken(held)).resolves.toBeNull()
+  })
+
+  it("still verifies a row written as bcrypt before the switch, so nobody is signed out", async () => {
+    const token = signRefreshToken(USER, EMAIL)
+    rowFor(token, "$2a$12$legacyrowfromthebcryptdays")
+    mockBcryptCompare.mockResolvedValue(true)
+    await expect(verifyRefreshToken(token)).resolves.toMatchObject({ userId: USER })
+    expect(mockBcryptCompare).toHaveBeenCalledWith(token, "$2a$12$legacyrowfromthebcryptdays")
   })
 })

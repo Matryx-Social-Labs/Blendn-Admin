@@ -62,7 +62,6 @@ export interface UserWithProfile {
     organized_events: number
     event_check_ins: number
     event_favorites: number
-    chat_messages: number
   }
 }
 
@@ -132,7 +131,22 @@ export async function getUsers(
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: {
+        /*
+         * Exactly `UserWithProfile`, by `select`. An `include` returned every
+         * scalar on User -- `password`, `suspension_reason` -- into the RSC
+         * payload of a page that renders neither (audit 2026-10-24, WEB M2).
+         */
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          emailVerified: true,
+          image: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+          deletedAt: true,
+          suspended_at: true,
           profile: {
             select: {
               id: true,
@@ -145,18 +159,26 @@ export async function getUsers(
             },
           },
           user_interests: { select: { category: { select: { name: true } } } },
-          _count: {
-            select: {
-              organized_events: true,
-              event_check_ins: true,
-              event_favorites: true,
-              chat_messages: true,
-            },
-          },
         },
       }),
       db.user.count({ where }),
     ])
+
+    /*
+     * The three tallies the table shows, grouped over this page's people. As a
+     * relation `_count` each was a join over the whole child table (and
+     * `chat_messages`, which nothing rendered, the biggest table there is).
+     */
+    const ids = users.map((user) => user.id)
+    const [organized, checkIns, favourites] = await Promise.all([
+      // any-kind: an account's organised events as the old relation `_count` counted them, venue days included
+      db.events.groupBy({ by: ["organizer_id"], where: { organizer_id: { in: ids } }, _count: { _all: true } }),
+      db.event_check_ins.groupBy({ by: ["user_id"], where: { user_id: { in: ids } }, _count: { _all: true } }),
+      db.event_favorites.groupBy({ by: ["user_id"], where: { user_id: { in: ids } }, _count: { _all: true } }),
+    ])
+    const organizedBy = new Map(organized.map((r) => [r.organizer_id, r._count._all]))
+    const checkInsBy = new Map(checkIns.map((r) => [r.user_id, r._count._all]))
+    const favouritesBy = new Map(favourites.map((r) => [r.user_id, r._count._all]))
 
     await Promise.all(
       users.map(async (user) => {
@@ -168,6 +190,11 @@ export async function getUsers(
 
     const shaped = users.map((user) => ({
       ...user,
+      _count: {
+        organized_events: organizedBy.get(user.id) ?? 0,
+        event_check_ins: checkInsBy.get(user.id) ?? 0,
+        event_favorites: favouritesBy.get(user.id) ?? 0,
+      },
       // The birth date itself never leaves the server (lib/age.ts); the
       // browser gets the derived number and whether a date decided it.
       profile: user.profile
@@ -288,12 +315,11 @@ export async function updateUser(
     // `deletedAt: null` in the where: an erased account cannot be edited back
     // into existence. The row menu is hidden for those rows, but a server
     // action is callable without a menu. P2025 surfaces as the generic error.
-    const user = await db.user.update({
+    await db.user.update({
       where: { id, deletedAt: null },
       data: updateData,
-      include: {
-        profile: true,
-      },
+      // Nothing is read back: the row carries the password hash and the birth date.
+      select: { id: true },
     })
 
     const changed: Record<string, { from: unknown; to: unknown }> = {}
@@ -320,7 +346,7 @@ export async function updateUser(
     }
 
     revalidatePath("/dashboard/users")
-    return { success: true, user }
+    return { success: true }
   } catch (error) {
     if (error instanceof Refusal) throw error
     logger.error("Error updating user", { error: error instanceof Error ? error.message : String(error) })

@@ -198,11 +198,12 @@ export async function sendOffer(input: { venueId: string; text: string; days: nu
 
   const gate = await senderAt(db, venueId, user.id)
   if (!gate) throw new Refusal(NOT_YOUR_VENUE)
+  if (!maySendVenueOffers(user.role, gate.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
   // Per organisation and venue: colleagues share it, and another venue of theirs has its own.
+  // After the role check: staff who may not send must not be able to spend the owner's minute.
   if (await overLimit(`offer-send:${gate.place.owner_org_id}:${venueId}`, SENDS_PER_MINUTE, MINUTE_MS)) {
     throw new Refusal("Too many tries. Wait a minute and send again.")
   }
-  if (!maySendVenueOffers(user.role, gate.member.role)) throw new Refusal("Only an owner or admin of the venue’s organisation can send offers.")
   if (!(await hasEntitlement({ kind: "venue", id: venueId }, "venue_pro"))) {
     throw new Refusal("Offers to regulars are part of Venue Pro. See your plan to add it.")
   }

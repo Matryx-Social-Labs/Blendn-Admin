@@ -204,6 +204,11 @@ const USER_POLICIES = {
    */
   reportDay: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 30 },
   /**
+   * Message requests, per day: the one channel a stranger never opted into. The
+   * minute limit stops a burst; twenty a day is more than anyone asks to meet.
+   */
+  requestDay: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 20 },
+  /**
    * Reads a watcher could poll for a change: the venue page's live count. A
    * phone refreshes it every half minute; sixty a minute is a script.
    */

@@ -1,7 +1,7 @@
 "use server"
 
 import { Refusal } from "@/lib/refusal"
-import type { rsvp_status } from "@prisma/client"
+import type { Prisma, rsvp_status } from "@prisma/client"
 
 import type { user_role } from "@prisma/client"
 
@@ -15,6 +15,7 @@ import { refusalsByReason } from "@/lib/check-in-refusals"
 import { getSponsorOverview } from "@/lib/sponsor-actions"
 import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
+import { rsvpCounts } from "@/lib/event-tallies"
 import { discloseStarsAcross, discloseVenueCounts, spreadsByEventId } from "@/lib/disclosure"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
@@ -143,7 +144,6 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
         // Committed only, like the benchmark query below: `not_going` is never
         // read, and this is the one event most likely to have many rows.
         rsvps: { where: { status: { in: COMMITTED } }, select: { created_at: true, status: true } },
-        _count: { select: { favorites: true } },
       },
     }),
     // The benchmark for the pacing note: the most recent event that has run.
@@ -169,6 +169,8 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
     recentRatedEvents(scope, now),
   ])
   const spreads = spreadsByEventId(ratingRows)
+  // That one event's favourites, counted for it: as a relation `_count` they were every favourite on the platform, aggregated.
+  const nextFavourites = next ? await db.event_favorites.count({ where: { event_id: next.id } }) : 0
 
   // No-show rate over the last 30 days, and the 30 before it, so the delta says
   // whether it is getting better rather than just what it is.
@@ -265,7 +267,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
       daysOut: Math.max(0, clock.daysUntil(next.start_time, now)),
       going,
       maybe,
-      favourites: next._count.favorites,
+      favourites: nextFavourites,
       capacity: next.max_capacity,
       // Going only, the number the hero's caption and every row's bar count.
       // Maybe stays in the pacing curve, where it is intent over time.
@@ -646,29 +648,11 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
   const now = new Date()
   const windowStart = new Date(now.getTime() - WINDOW_WEEKS * 7 * DAY_MS)
 
-  const events = await db.events.findMany({
-    // An event linked to a venue counts even if its free-text name is null —
-    // the link is the stronger statement about where it happened.
-    where: {
-      AND: [scope, { OR: [{ venue_name: { not: null } }, { venue_id: { not: null } }] }],
-    },
-    select: {
-      id: true,
-      title: true,
-      start_time: true,
-      timezone: true,
-      venue_name: true,
-      venue_id: true,
-      venue: { select: { name: true } },
-      max_capacity: true,
-      status: true,
-      organizer_id: true,
-      organizer_org_id: true,
-      ratings: { select: { rating: true } },
-      _count: { select: { rsvps: { where: { status: { in: COMMITTED } } } } },
-    },
-    orderBy: { start_time: "asc" },
-  })
+  // An event linked to a venue counts even if its free-text name is null —
+  // the link is the stronger statement about where it happened.
+  const eventsWhere: Prisma.eventsWhereInput = {
+    AND: [scope, { OR: [{ venue_name: { not: null } }, { venue_id: { not: null } }] }],
+  }
 
   /*
    * Turn-up rate is the one venue metric that can carry a delta. "Peak window"
@@ -685,8 +669,37 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
   const recentFrom = new Date(now.getTime() - RECENT_MS)
   const priorFrom = new Date(now.getTime() - 2 * RECENT_MS)
 
-  const [committed, attended, upcoming14d, recentCommitted, recentAttended, priorCommitted, priorAttended] =
+  /*
+   * One wave. The seven counts, the venues the organisation owns and the
+   * events all depend on the scope alone; the events were awaited first and
+   * the rest queued behind them. Ratings are a grouped read, one row per
+   * (event, stars), not every rating row attached to every event.
+   */
+  const [events, ratingRows, owned, committed, attended, upcoming14d, recentCommitted, recentAttended, priorCommitted, priorAttended] =
     await Promise.all([
+      db.events.findMany({
+        where: eventsWhere,
+        select: {
+          id: true,
+          title: true,
+          start_time: true,
+          timezone: true,
+          venue_name: true,
+          venue_id: true,
+          venue: { select: { name: true } },
+          max_capacity: true,
+          status: true,
+          organizer_id: true,
+          organizer_org_id: true,
+        },
+        orderBy: { start_time: "asc" },
+      }),
+      db.event_ratings.groupBy({ by: ["event_id", "rating"], where: { event: eventsWhere }, _count: { _all: true } }),
+      db.venues.findMany({
+        where: { owner_org_id: { in: actor.orgIds } },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
       db.event_rsvps.count({
         where: {
           status: { in: COMMITTED },
@@ -766,11 +779,6 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
    * there. A venue with nothing on renders with its tiles at zero and the
    * "Nothing booked" line that already exists for it.
    */
-  const owned = await db.venues.findMany({
-    where: { owner_org_id: { in: actor.orgIds } },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  })
   const byVenue = new Map<string, { id: string | null; label: string; events: typeof events }>()
   for (const venue of owned) byVenue.set(venue.id, { id: venue.id, label: venue.name, events: [] })
   for (const event of events) {
@@ -781,22 +789,24 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
     else byVenue.set(key, { id: event.venue_id ?? null, label: displayName, events: [event] })
   }
 
+  // The committed RSVPs of the one event each venue's next booking names, and of no other.
+  const nextOf = (venueEvents: typeof events) => venueEvents.find((e) => e.start_time >= now && e.status === "published")
+  const committedFor = await rsvpCounts(
+    [...byVenue.values()].flatMap((v) => nextOf(v.events)?.id ?? []),
+    COMMITTED
+  )
+  const spreadOf = spreadsByEventId(ratingRows)
+
   const venues: VenueRow[] = Array.from(byVenue.values())
     .map(({ id, label: name, events: venueEvents }) => {
       const inWindow = venueEvents.filter((e) => e.start_time >= windowStart && e.start_time < now)
-      const spreads = venueEvents.map((event) => {
-        const spread = emptyRatings()
-        for (const { rating } of event.ratings) {
-          if (rating >= 1 && rating <= 5) spread[rating - 1] += 1
-        }
-        return spread
-      })
+      const spreads = venueEvents.map((event) => spreadOf.get(event.id) ?? emptyRatings())
       // Withheld under five raters, pooled only from events that pass alone.
       // The tone and note read it too, so "ratings skew low" cannot say what
       // one person gave (SCRUM-437).
       const stars = discloseStarsAcross(spreads)
       const { averageRating } = stars
-      const next = venueEvents.find((e) => e.start_time >= now && e.status === "published")
+      const next = nextOf(venueEvents)
       const nightsPerWeek = inWindow.length / WINDOW_WEEKS
 
       // Tone is about what needs attention, not a ranking: a low rating across
@@ -823,8 +833,8 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
               // Another host's night, seen as the venue: held back under the
               // floor, the rule every venue surface shares (SCRUM-501).
               going: hostsEvent(actor, next)
-                ? next._count.rsvps
-                : discloseVenueCounts({ going: next._count.rsvps, attended: 0, capacity: next.max_capacity }).going,
+                ? (committedFor.get(next.id) ?? 0)
+                : discloseVenueCounts({ going: committedFor.get(next.id) ?? 0, attended: 0, capacity: next.max_capacity }).going,
             }
           : null,
         capacityProxy: venueEvents.reduce<number | null>(
