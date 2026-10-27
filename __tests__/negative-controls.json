@@ -2397,6 +2397,12 @@
       "mutation": "M1720 combining marks removed from the word class (words split at vowel signs again). M1721 zero-width characters not removed before tokenising. M1722 NFC not applied to words. M1723 `@ $ !` mapped to letters even after a word (a trailing '!' read as i). M1724 the multi-word abbreviation never matches.",
       "observed": "M1720: 5 of 50 failing. M1721: 1 of 50. M1722: 1 of 49 (the nukta spellings). M1723: 2 of 49. M1724: 1 of 50. Each reverted; 50 of 50 (plus keyword-filter.test.ts and keyword-identity.test.ts unchanged).",
       "date": "2026-10-27"
+    },
+    "instrumentation-request-error.test.ts": {
+      "guards": "SCRUM-649: instrumentation.ts exports Sentry's captureRequestError as onRequestError (Next hands it every error it caught itself: route handlers, server components, server actions), and the deliberate-failure probe route is a 404 unless SENTRY_PROBE_TOKEN is set and the x-probe-token header matches, throwing as an unhandled 500 does only then.",
+      "mutation": "M1730 onRequestError an empty function again (the SDK was assumed to capture on its own). M1731 the probe's token check dropped (anyone can make it throw).",
+      "observed": "M1730: 1 of 4 failing. M1731: 2 of 4 failing. Each reverted; 4 of 4.",
+      "date": "2026-10-27"
     }
   },
   "grandfathered": [
