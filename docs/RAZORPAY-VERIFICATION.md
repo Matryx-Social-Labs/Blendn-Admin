@@ -65,9 +65,9 @@ the legal name there: a change in the landing repo.
 
 ### Not changed, worth knowing
 
-- The Terms of Use are a generated template (Termly). §18 sends disputes to
-  the "European Arbitration Chamber (Belgium)" with a Bengaluru seat. Left as
-  it is: OWNER/LAWYER REVIEW. The usual Indian alternative is arbitration
-  under the Arbitration and Conciliation Act 1996, seat and venue Bengaluru,
-  one arbitrator. The registered address's "kithore Rani chennamma road" was a
+- The Terms of Use are a generated template (Termly). §18 was changed on
+  27 October 2026 (owner ruling) to arbitration under the Arbitration and
+  Conciliation Act 1996, sole arbitrator, seat and venue Bengaluru; §17 to the
+  laws of India and the Bengaluru courts. Counsel review is still recommended.
+  The registered address's "kithore Rani chennamma road" was a
   typo, now "Kittur Rani Chennamma Road" in the Terms and the March privacy draft.
