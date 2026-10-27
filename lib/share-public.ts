@@ -122,12 +122,20 @@ export function shareState(status: "published" | "cancelled" | "completed" | str
   return status === "completed" || endTime.getTime() <= now.getTime() ? "ended" : "upcoming"
 }
 
+/** The seeded and curated events' covers are Unsplash photos; nothing else on that host is a cover. */
+const UNSPLASH_HOST = "images.unsplash.com"
+const UNSPLASH_PHOTO_PATH = /^\/photo-[A-Za-z0-9_-]{6,80}$/
+/** Our parameters, never the stored ones: the landing fetches this, so the query is ours to choose. */
+const UNSPLASH_COVER_QUERY = "?auto=format&fit=crop&w=1200&q=80"
+
 /**
- * A cover the landing may fetch: https on the public bucket's own host, under
- * `events/`, and nothing else. `cover_image_url` accepts any URL, and the
- * landing fetches what this returns, so anything off the bucket is dropped
- * here and checked again there. Reduced to origin and path: a query string or
- * fragment is not part of an object.
+ * A cover the landing may fetch: https, no credentials or port, and either
+ * the public bucket's own host under `events/`, or an Unsplash photo
+ * (`images.unsplash.com/photo-<id>`) re-issued with our fixed query.
+ * `cover_image_url` accepts any URL, and the landing fetches what this
+ * returns, so anything else is dropped here and checked again there. A bucket
+ * cover is reduced to origin and path: a query string or fragment is not part
+ * of an object.
  */
 export function publicCoverUrl(raw: string | null | undefined, hosts: readonly string[] = publicBucketHosts()): string | null {
   if (!raw) return null
@@ -140,8 +148,11 @@ export function publicCoverUrl(raw: string | null | undefined, hosts: readonly s
   if (url.protocol !== "https:" || url.username || url.password || url.port) return null
   // An encoded slash or backslash is a path separator to some servers and a character to others.
   if (/%2f|%5c/i.test(url.pathname)) return null
+  // `new URL` has already resolved `..` and `%2e%2e`, so the path tests below are the whole check.
+  if (url.hostname === UNSPLASH_HOST) {
+    return UNSPLASH_PHOTO_PATH.test(url.pathname) ? `${url.origin}${url.pathname}${UNSPLASH_COVER_QUERY}` : null
+  }
   if (!hosts.includes(url.hostname)) return null
-  // `new URL` has already resolved `..` and `%2e%2e`, so a prefix test is the whole check.
   if (!url.pathname.startsWith(PUBLIC_COVER_FOLDER) || url.pathname.length === PUBLIC_COVER_FOLDER.length) return null
   return `${url.origin}${url.pathname}`
 }
