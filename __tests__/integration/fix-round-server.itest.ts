@@ -9,7 +9,7 @@ process.env.NEXTAUTH_SECRET ??= "itest-fix-round-secret-32-characters-xxxxx"
 process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 
 import { db, testId } from "./helpers"
-import { api, befriend, call, cleanupCrewWorld, crewOf, liveEvent, person, world, type Person } from "./crew-world"
+import { api, arrive, befriend, call, cleanupCrewWorld, crewOf, liveEvent, person, world, type Person } from "./crew-world"
 import { makeEvent } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -24,6 +24,12 @@ const interestsRoute = require("@/app/api/mobile/profiles/[userId]/interests/rou
 
 const slugs: string[] = []
 afterAll(async () => {
+  const posts = (await db.board_posts.findMany({ where: { event_id: { in: world.events } }, select: { id: true } })).map((p) => p.id)
+  const postRooms = { chat_group: { board_post_id: { in: posts } } }
+  await db.chat_messages.deleteMany({ where: postRooms })
+  await db.chat_group_members.deleteMany({ where: postRooms })
+  await db.chat_groups.deleteMany({ where: { board_post_id: { in: posts } } })
+  await db.board_requests.deleteMany({ where: { event_id: { in: world.events } } })
   await db.board_posts.deleteMany({ where: { event_id: { in: world.events } } })
   await db.event_rsvps.deleteMany({ where: { event_id: { in: world.events } } })
   await db.event_favorites.deleteMany({ where: { event_id: { in: world.events } } })
@@ -196,5 +202,66 @@ describe("GET /profiles/:id/interests: a stable order (SCRUM-798)", () => {
     }
     const res = await call(interestsRoute.GET, `/api/mobile/profiles/${me.id}/interests`, me, { params: { userId: me.id } })
     expect(res.body.data.interests.map((i: { name: string }) => i.name)).toEqual(names)
+  })
+})
+
+describe("no photo in a room that is not a crew's (SCRUM-812)", () => {
+  /** Every person in the room has an account photo; the room must not send it. */
+  const withPhotos = (people: Person[]) =>
+    Promise.all(people.map((p) => db.user.update({ where: { id: p.id }, data: { image: `https://cdn.itest.invalid/${p.id}.jpg` } })))
+  const speak = (roomId: string, p: Person) => db.chat_messages.create({ data: { chat_group_id: roomId, user_id: p.id, content: `from ${p.id}` } })
+  const photosIn = async (as: Person, roomId: string) => {
+    const messages = (await api.read(as, roomId)).body.data.messages as { user: { image: string | null } }[]
+    const roster = (await api.roster(as, roomId)).body.data.participants as { avatar: string | null }[]
+    return { messages: messages.map((m) => m.user.image), roster: roster.map((r) => r.avatar) }
+  }
+  const noneOf = ({ messages, roster }: { messages: unknown[]; roster: unknown[] }) => {
+    expect(messages.length).toBeGreaterThan(0)
+    expect(roster.length).toBeGreaterThan(0)
+    expect([...messages, ...roster].every((x) => x === null)).toBe(true)
+  }
+
+  it("event rooms send none", async () => {
+    const [host, a, b] = [await person("fn-h"), await person("fn-a"), await person("fn-b")]
+    await withPhotos([a, b])
+    const { eventId, occurrenceId } = await liveEvent(host.id)
+    await arrive(eventId, occurrenceId, a)
+    await arrive(eventId, occurrenceId, b)
+    const room = await db.chat_groups.findUniqueOrThrow({ where: { event_id: eventId }, select: { id: true } })
+    await speak(room.id, b)
+    noneOf(await photosIn(a, room.id))
+  })
+
+  it("a Blend's room sends none", async () => {
+    const host = await person("fn-bh")
+    const { eventId, occurrenceId } = await liveEvent(host.id)
+    const [a1, a2, b1, b2] = await Promise.all(["a1", "a2", "b1", "b2"].map((l) => person(`fn-${l}`)))
+    await withPhotos([a1, a2, b1, b2])
+    const A = await crewOf(a1, [a2], "Crew Two")
+    const B = await crewOf(b1, [b2], "Crew Five")
+    for (const p of [a1, a2, b1, b2]) await arrive(eventId, occurrenceId, p)
+    await api.likeCrew(a1, eventId, B.crewId, A.crewId)
+    const roomId = (await api.likeCrew(b1, eventId, A.crewId, B.crewId)).body.data.blend.chatGroupId as string
+    await speak(roomId, b1)
+    noneOf(await photosIn(a1, roomId))
+  })
+
+  it("a board post's room sends none", async () => {
+    const host = await person("fn-ph")
+    const eventId = await makeEvent(host.id)
+    world.events.push(eventId)
+    const start = new Date(Date.now() + 86_400_000)
+    await db.events.update({ where: { id: eventId }, data: { start_time: start, end_time: new Date(start.getTime() + 3 * 3_600_000) } })
+    const [author, a1, a2] = [await person("fn-au"), await person("fn-p1"), await person("fn-p2")]
+    await withPhotos([author, a1, a2])
+    const post = await db.board_posts.create({ data: { event_id: eventId, author_id: author.id, kind: "offer", body: "car", spaces_left: 4 }, select: { id: true } })
+    const decide = require("@/app/api/mobile/board/requests/[requestId]/route") as typeof import("@/app/api/mobile/board/requests/[requestId]/route") // eslint-disable-line @typescript-eslint/no-require-imports
+    for (const asker of [a1, a2]) {
+      const r = await db.board_requests.create({ data: { event_id: eventId, post_id: post.id, from_user_id: asker.id, to_user_id: author.id, status: "pending" }, select: { id: true } })
+      expect((await call(decide.PATCH, `/api/mobile/board/requests/${r.id}`, author, { method: "PATCH", body: { action: "accept" }, params: { requestId: r.id } })).status).toBe(200)
+    }
+    const room = await db.chat_groups.findUniqueOrThrow({ where: { board_post_id: post.id }, select: { id: true } })
+    await speak(room.id, a1)
+    noneOf(await photosIn(author, room.id))
   })
 })
