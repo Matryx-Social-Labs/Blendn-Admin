@@ -205,6 +205,8 @@ describe("PATCH /api/events/[id] gates the transition, not the state", () => {
     // Events published before this gate existed have no coordinates. Gating the
     // state rather than the transition would strand every one of them.
     mockDb.events.findFirst.mockResolvedValue(storedEvent({ status: "published" }))
+    // The row the update locks is the row the route read (updateEventTracked's fromStatus).
+    mockDb.events.findUniqueOrThrow.mockResolvedValue(storedEvent({ status: "published" }))
     const res = await PATCH(patchReq({ title: "Summer Sessions", status: "published" }), ctx)
     expect(res.status).toBe(200)
     expect(mockDb.events.update).toHaveBeenCalled()
@@ -212,6 +214,7 @@ describe("PATCH /api/events/[id] gates the transition, not the state", () => {
 
   it("does not gate a cancellation, or any other status", async () => {
     mockDb.events.findFirst.mockResolvedValue(storedEvent({ status: "published" }))
+    mockDb.events.findUniqueOrThrow.mockResolvedValue(storedEvent({ status: "published" }))
     const res = await PATCH(patchReq({ status: "cancelled" }), ctx)
     expect(res.status).toBe(200)
   })

@@ -1,4 +1,6 @@
 const mockDb = {
+  // Not the Razorpay review organisation (lib/review-demo-org.ts).
+  audit_logs: { findFirst: async () => null },
   $queryRaw: jest.fn(),
   venues: {
     findMany: jest.fn(),

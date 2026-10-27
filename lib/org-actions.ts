@@ -1,5 +1,6 @@
 "use server"
 
+import { isRazorpayReviewOrg, REVIEW_ORG_REFUSAL } from "./review-demo-org"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
@@ -279,6 +280,8 @@ export async function inviteMember(
   reason?: string
 ): Promise<InviteResult> {
   const { user, role: myRole } = await requireOrgRole(orgId, (p) => p.canManageMembers)
+  // Razorpay's reviewer emails nobody (lib/review-demo-org.ts).
+  if (await isRazorpayReviewOrg(orgId)) throw new Refusal(REVIEW_ORG_REFUSAL)
 
   if (role === "owner" && myRole !== "owner") {
     throw new Refusal("Only an owner can invite another owner.")
@@ -610,6 +613,7 @@ export async function sendDomainVerifyEmail(
   address: string
 ): Promise<{ ok: boolean; message: string }> {
   const { user } = await requireOrgRole(orgId, (p) => p.canVerifyDomain)
+  if (await isRazorpayReviewOrg(orgId)) throw new Refusal(REVIEW_ORG_REFUSAL)
 
   const row = await db.organisation_domains.findFirst({
     where: { id: domainId, org_id: orgId },

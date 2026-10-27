@@ -113,10 +113,27 @@ describe("the cuts", () => {
     }
   })
 
-  it("cancelling is its own confirmed action in edit mode, not a dropdown value", () => {
+  it("cancelling is its own confirmed action, offered only on a published event (a draft is deleted; the server refuses draft → cancelled, lib/event-status-move.ts)", () => {
     expect(form).toMatch(/window\.confirm\(/)
     expect(form).toMatch(/submitAs\("cancelled"\)/)
-    expect(rail).toMatch(/isEditing && !cancelled && !compact \? \(/)
+    // `live` is editing a published event, or a completed one (which is never cancelled).
+    expect(rail).toMatch(/const ended = isEditing && status === "completed"/)
+    expect(rail).toMatch(/const live = isEditing && \(status === "published" \|\| ended\)/)
+    expect(rail).toMatch(/\{live && !ended && !compact \? \(\s*<Button[^>]*?onClick=\{onCancelEvent\}/)
+    expect(rail.match(/onClick=\{onCancelEvent\}/g)).toHaveLength(1)
+  })
+})
+
+describe("a completed event is edited like a live one (review of #760)", () => {
+  it("offers Save changes, which sends the status it has; never Publish or Save as draft, which the server refuses", () => {
+    // `live` covers completed: Publish and Save as draft render only when not live.
+    expect(rail).toMatch(/\{live \? \(\s*<Button type="button" onClick=\{onSaveChanges\}/)
+    expect(rail).toMatch(/\{!live \? \(\s*<Button type="button" variant="outline" onClick=\{onSaveDraft\}/)
+    expect(form).toMatch(/onSaveChanges: \(\) => submitAs\(storedStatus \?\? "published"\)/)
+  })
+
+  it("says it has ended", () => {
+    expect(rail).toMatch(/isEditing && status === "completed"\s*\?\s*"This event has ended"/)
   })
 })
 

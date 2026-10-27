@@ -124,7 +124,8 @@ describe("the event form's Where section", () => {
 
   it("a second click cannot list the place twice (React review, SCRUM-353c)", () => {
     const form = readFileSync(join(__dirname, "../components/event-form.tsx"), "utf8")
-    expect(form).toMatch(/const submit = async \(data: EventFormValues\) => \{\s*if \(submitting\.current\) return\s*submitting\.current = true/)
+    // A second click reports "not saved" (false), so submitAsStatus puts the status back.
+    expect(form).toMatch(/const submit = async \(data: EventFormValues\): Promise<boolean> => \{\s*if \(submitting\.current\) return false\s*submitting\.current = true/)
     expect(form).toMatch(/finally \{\s*submitting\.current = false/)
   })
 

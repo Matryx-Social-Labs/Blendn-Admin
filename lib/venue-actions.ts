@@ -1,5 +1,6 @@
 "use server"
 
+import { isRazorpayReviewOrg, REVIEW_ORG_REFUSAL } from "./review-demo-org"
 import { isDeepStrictEqual } from "node:util"
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
@@ -172,6 +173,10 @@ export async function createVenue(input: CreateVenueInput): Promise<{ id: string
 
   if (user.role !== "app_admin" && !orgId) {
     throw new Refusal("Your account is not attached to an organisation yet.")
+  }
+  // An unclaimed venue is listed in Places: Razorpay's reviewer adds none (lib/review-demo-org.ts).
+  if (await isRazorpayReviewOrg(orgId)) {
+    throw new Refusal(REVIEW_ORG_REFUSAL)
   }
   // A venue owner describes their own place; an organiser adds one unclaimed,
   // and so does anyone saving the place of an event.

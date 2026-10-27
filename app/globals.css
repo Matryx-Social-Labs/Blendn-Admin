@@ -368,3 +368,67 @@
     min-height: 100vh;
   }
 }
+
+/*
+ * The public policy pages' running text (components/policy-page.tsx), and the
+ * Terms of Use rendered from docs/legal/terms-of-use.html. Plain elements, so
+ * the legal HTML needs no classes of its own; its table of contents keeps
+ * `.toc`.
+ */
+.policy-prose {
+  font-size: 0.9375rem;
+  line-height: 1.65;
+}
+.policy-prose h2 {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  margin: 1.75rem 0 0.5rem;
+}
+.policy-prose h3 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.375rem;
+}
+.policy-prose p,
+.policy-prose ul,
+.policy-prose ol {
+  margin: 0 0 0.75rem;
+  color: var(--muted-foreground);
+}
+.policy-prose ul,
+.policy-prose ol {
+  padding-left: 1.25rem;
+}
+.policy-prose ul {
+  list-style: disc;
+}
+.policy-prose ol {
+  list-style: decimal;
+}
+.policy-prose li {
+  margin-bottom: 0.25rem;
+}
+.policy-prose strong {
+  color: var(--foreground);
+}
+.policy-prose a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+.policy-prose .toc {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+}
+.policy-prose .toc-title {
+  font-weight: 600;
+}
+.policy-prose .toc ol {
+  list-style: none;
+  padding: 0;
+  margin: 0.25rem 0 0;
+}

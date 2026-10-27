@@ -167,7 +167,8 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
     }
   }, [initialEvent])
 
-  const handleSubmit = async (data: EventFormValues) => {
+  /** True when the save landed. Anything else and the form puts the status back. */
+  const handleSubmit = async (data: EventFormValues): Promise<boolean> => {
     try {
       setIsSaving(true)
 
@@ -236,14 +237,14 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
          * and a second tab's sign-in makes the next Save work (SCRUM-163).
          */
         toast.error("Your session has ended. Sign in again in another tab — your changes are still here.")
-        return
+        return false
       }
       if (!response.ok) {
         // The route's own sentence: no organisation, a capacity it refuses, a
         // missing description. This threw one generic line for all of them, so
         // an organiser never learned what to change (SCRUM-315).
         toast.error(await refusalText(response, "Failed to save event"))
-        return
+        return false
       }
 
       const saved = await response.json()
@@ -254,9 +255,11 @@ export function EventEditor({ categories, amenities = [], initialEvent, canFeatu
       } else {
         router.refresh()
       }
+      return true
     } catch (error) {
       logger.error("Error saving event", { error: error instanceof Error ? error.message : String(error) })
       toast.error("Failed to save event")
+      return false
     } finally {
       setIsSaving(false)
     }
