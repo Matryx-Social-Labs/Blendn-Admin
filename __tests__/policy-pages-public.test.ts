@@ -60,10 +60,19 @@ describe("termsBody", () => {
     expect(body).toMatch(/dashboard\.blendn\.app\/refunds/)
   })
 
-  it("carries nothing that runs: no script, no inline handler, no javascript: link", () => {
-    expect(body).not.toMatch(/<script/i)
-    expect(body).not.toMatch(/\son\w+\s*=/i)
-    expect(body).not.toMatch(/javascript:/i)
+  it("is made only of text tags, text attributes and plain links: nothing that runs, embeds or redirects", () => {
+    // An allowlist, not a list of the dangerous: iframe, object, embed, form, base,
+    // meta, style and script all fail by not being on it.
+    const TAGS = new Set(["a", "b", "br", "div", "em", "h2", "h3", "i", "li", "nav", "ol", "p", "span", "strong", "ul"])
+    const ATTRIBUTES = new Set(["class", "href", "id"])
+    const tags = [...body.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9-]*)/g)].map((m) => m[1].toLowerCase())
+    expect(tags.filter((t) => !TAGS.has(t))).toEqual([])
+    const attributes = [...body.matchAll(/<[a-zA-Z][^>]*>/g)].flatMap((m) =>
+      [...m[0].matchAll(/\s([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=/g)].map((a) => a[1].toLowerCase())
+    )
+    expect(attributes.filter((a) => !ATTRIBUTES.has(a))).toEqual([])
+    const hrefs = [...body.matchAll(/href\s*=\s*"([^"]*)"/gi)].map((m) => m[1])
+    expect(hrefs.filter((h) => !/^(https?:\/\/|mailto:|#)/i.test(h))).toEqual([])
   })
 
   it("names the legal entity", () => {

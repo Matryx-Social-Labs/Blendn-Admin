@@ -1,8 +1,14 @@
+jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
+const mockGetAuth = jest.fn()
+jest.mock("@/lib/auth", () => ({ getAuth: async () => { const s = await mockGetAuth(); return s?.user ? { ...s, user: { signedInAt: 0, ...s.user } } : s } }))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 import bcrypt from "bcryptjs"
 
 import { attendeeEventAccess } from "@/lib/event-access"
 import { realEventsWhere } from "@/lib/event-kind"
 import { accountBlockReason } from "@/lib/mobile-auth"
+import { setOrganisationStatus } from "@/lib/onboarding-actions"
+import { applySuspension } from "@/lib/suspension"
 import { isRazorpayReviewOrg, reviewOrgRefusal, REVIEW_ORG_REFUSAL } from "@/lib/review-demo-org"
 import {
   ensureRazorpayReviewAccount,
@@ -46,10 +52,10 @@ afterAll(async () => {
   const eventIds = events.map((e) => e.id)
   await db.entitlements.deleteMany({ where: { event_id: { in: eventIds } } })
   await db.event_occurrences.deleteMany({ where: { event_id: { in: eventIds } } })
-  await db.venues.deleteMany({ where: { created_by_org_id: { in: orgIds } } })
   const tagged = await db.user.findMany({ where: { OR: tags.map((t) => ({ email: { startsWith: t } })) }, select: { id: true } })
   await cleanup([...new Set([...users, ...tagged.map((u) => u.id)])], eventIds)
   await db.audit_logs.deleteMany({ where: { OR: [{ org_id: { in: orgIds } }, { resource_id: { in: orgIds } }] } })
+  await db.venues.deleteMany({ where: { created_by_org_id: { in: orgIds } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgIds } } })
   await db.organisations.deleteMany({ where: { id: { in: orgIds } } })
   await closeDb()
@@ -98,7 +104,7 @@ describe("apply", () => {
   it("marks the organisation for the server's publish, venue and invite refusals, and no other", async () => {
     const { orgId } = await seed(world)
     expect(await isRazorpayReviewOrg(orgId)).toBe(true)
-    expect(await reviewOrgRefusal(orgId, { publish: true })).toBe(REVIEW_ORG_REFUSAL)
+    expect(await reviewOrgRefusal(orgId, { leaveDraft: true })).toBe(REVIEW_ORG_REFUSAL)
     expect(await reviewOrgRefusal(orgId, { venue: true })).toBe(REVIEW_ORG_REFUSAL)
     expect(await reviewOrgRefusal(orgId, {})).toBeNull()
     const other = await db.organisations.create({ data: { display_name: `${tags[0]} other`, kind: "company" } })
@@ -131,12 +137,53 @@ describe("refuses what it did not make", () => {
     expect((await db.user.findUniqueOrThrow({ where: { id: userId } })).role).toBe("app_admin")
   })
 
-  it("an admin's suspension: refused, not lifted", async () => {
+  it("an admin's suspension, as `applySuspension` writes it: refused, not lifted", async () => {
     const world = worldFor("rzp_susp")
     const { userId } = await seed(world)
-    await db.user.update({ where: { id: userId }, data: { suspended_at: new Date(), suspension_reason: "Abuse report" } })
+    const admin = await makeUser("rzp_admin", "app_admin")
+    users.push(admin)
+    await db.$transaction((tx) => applySuspension(tx, userId, admin))
     await expect(ensureRazorpayReviewAccount(db, PASSWORD, world, LOCAL, LOCAL_FLAGS)).rejects.toThrow(/does not undo moderation/)
-    expect((await db.user.findUniqueOrThrow({ where: { id: userId } })).suspended_at).not.toBeNull()
+    expect(await db.user.findUniqueOrThrow({ where: { id: userId } })).toMatchObject({ suspended_by: admin })
+  })
+
+  it("an admin's suspension after our --remove: the old reason does not make it ours", async () => {
+    const world = worldFor("rzp_susp2")
+    const { userId } = await seed(world)
+    await removeRazorpayReviewAccount(db, world, LOCAL, LOCAL_FLAGS)
+    const admin = await makeUser("rzp_admin2", "app_admin")
+    users.push(admin)
+    await db.$transaction((tx) => applySuspension(tx, userId, admin))
+    await expect(ensureRazorpayReviewAccount(db, PASSWORD, world, LOCAL, LOCAL_FLAGS)).rejects.toThrow(/does not undo moderation/)
+    expect((await db.user.findUniqueOrThrow({ where: { id: userId } })).deletedAt).not.toBeNull()
+  })
+
+  it("--remove leaves an admin's suspension of the account as the admin wrote it", async () => {
+    const world = worldFor("rzp_susp3")
+    const { userId } = await seed(world)
+    const admin = await makeUser("rzp_admin3", "app_admin")
+    users.push(admin)
+    await db.$transaction((tx) => applySuspension(tx, userId, admin))
+    const before = await db.user.findUniqueOrThrow({ where: { id: userId } })
+    await removeRazorpayReviewAccount(db, world, LOCAL, LOCAL_FLAGS)
+    const after = await db.user.findUniqueOrThrow({ where: { id: userId } })
+    expect([after.suspended_at, after.suspended_by, after.suspension_reason]).toEqual([before.suspended_at, admin, before.suspension_reason])
+    await expect(ensureRazorpayReviewAccount(db, PASSWORD, world, LOCAL, LOCAL_FLAGS)).rejects.toThrow(/does not undo moderation/)
+  })
+
+  it("an organisation an admin suspended through setOrganisationStatus: refused, not re-verified, and --remove keeps the admin's reason", async () => {
+    const world = worldFor("rzp_orgsusp")
+    const { orgId } = await seed(world)
+    const admin = await makeUser("rzp_orgadmin", "app_admin")
+    users.push(admin)
+    mockGetAuth.mockResolvedValue({ user: { id: admin, role: "app_admin" } })
+    await setOrganisationStatus(orgId, "suspended", "Suspended while we look at a report")
+    await expect(ensureRazorpayReviewAccount(db, PASSWORD, world, LOCAL, LOCAL_FLAGS)).rejects.toThrow(/suspended by an admin/)
+    await removeRazorpayReviewAccount(db, world, LOCAL, LOCAL_FLAGS)
+    expect(await db.organisations.findUniqueOrThrow({ where: { id: orgId } })).toMatchObject({
+      status: "suspended",
+      suspension_reason: "Suspended while we look at a report",
+    })
   })
 
   it("a user in another organisation, or an organisation with another member", async () => {
@@ -177,12 +224,33 @@ describe("--remove", () => {
       },
     })
     const venue = await db.venues.create({ data: { name: `${tags.at(-1)} venue`, created_by_org_id: orgId } })
+    // Another host's upcoming night at a second venue it added: that venue stays, as retireVenue would refuse it.
+    const used = await db.venues.create({ data: { name: `${tags.at(-1)} used venue`, created_by_org_id: orgId } })
+    const otherOrg = await db.organisations.create({ data: { display_name: `${tags.at(-1)} another host`, kind: "company" } })
+    orgs.add(otherOrg.id)
+    const otherHost = await makeUser("rzp_otherhost", "organizer")
+    users.push(otherHost)
+    await db.events.create({
+      data: {
+        slug: `${tags.at(-1)}-other`,
+        title: "Somebody else's night",
+        description: "x",
+        start_time: new Date(Date.now() + 86_400_000),
+        end_time: new Date(Date.now() + 90_000_000),
+        timezone: "Asia/Kolkata",
+        status: "published",
+        organizer_id: otherHost,
+        organizer_org_id: otherOrg.id,
+        venue_id: used.id,
+      },
+    })
     await db.entitlements.create({
       data: { subject_kind: "org", subject_id: orgId, product: "event_pass", event_id: eventId, source: "grant", starts_at: new Date() },
     })
 
     const removed = await removeRazorpayReviewAccount(db, world, LOCAL, LOCAL_FLAGS)
-    expect(removed).toMatchObject({ userId, orgId, eventsDeleted: 2, venuesRetired: 1 })
+    expect(removed).toMatchObject({ userId, orgId, eventsDeleted: 2, venuesRetired: 1, venuesKept: 1 })
+    expect(await db.venues.findUniqueOrThrow({ where: { id: used.id } })).toMatchObject({ deleted_at: null, status: "active" })
 
     const events = await db.events.findMany({ where: { id: { in: [eventId, extra.id] } } })
     expect(events.every((e) => e.deleted_at !== null && e.status === "draft")).toBe(true)

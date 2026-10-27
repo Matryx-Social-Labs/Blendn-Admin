@@ -69,7 +69,7 @@ Dashboard → Account & Settings → Business website details.
 > Sign in at https://dashboard.blendn.app/login with the test account. It is an
 > organizer account with its own demo organisation and one draft event; it sees
 > no real users' data, and it cannot publish events, add venues or invite
-> anyone. The paid plans are on the Plan page (left menu → Plan):
+> anyone; its events stay drafts. The paid plans are on the Plan page (left menu → Plan):
 > Analytics monthly or yearly, and the Event Pass. Checkout opens Razorpay
 > Checkout once live keys are issued; until then the page says payments are not
 > switched on yet. Every policy page is linked at the foot of the sign-in page.

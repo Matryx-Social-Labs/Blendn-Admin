@@ -34,8 +34,8 @@
  *
  * The event is a draft (every attendee read refuses one: lists ask for
  * `published`, `attendeeEventAccess` answers not found) and private. The
- * server refuses to publish any of the organisation's events, add a venue,
- * link a venue or invite anyone (`lib/review-demo-org.ts`); the mobile
+ * server refuses to take any of the organisation's events out of draft, add
+ * or link a venue, invite anyone or file a claim (`lib/review-demo-org.ts`); the mobile
  * app refuses an organizer's sign-in (`accountBlockReason`: "staff").
  * `review_demo` is not used: it is the App Review geofence bypass, not a
  * hiding rule.
@@ -68,8 +68,14 @@ export const REVIEW_EMAIL = "razorpay.review@blendn.app"
 export const REVIEW_ORG_NAME = "Demo Events Co (Razorpay review)"
 /** The one role this script ever gives. Never `app_admin`: that reads every real user. */
 export const REVIEW_ROLE = "organizer" as const
-/** Written on the account by `--remove`; the only suspension a re-run may lift. */
+/**
+ * Written on the account by `--remove`; the only suspension a re-run may lift,
+ * and only with no `suspended_by` — an admin's suspension (`applySuspension`)
+ * writes `suspended_by` and leaves the reason as it was.
+ */
 export const REMOVED_REASON = "Razorpay review account removed"
+/** Written on the organisation by `--remove`; the only organisation suspension a re-run may lift. */
+export const ORG_FINISHED_REASON = "Razorpay review finished"
 
 /** Same cost as `test-accounts.ts`. */
 const HASH_COST = 12
@@ -140,11 +146,16 @@ async function madeBefore(db: Tx, userId: string): Promise<{ orgId: string; even
 
 class Refused extends Error {}
 
+/** Closed by this script's `--remove`, and by nobody since. */
+function isOurRemoval(user: { suspension_reason: string | null; suspended_by: string | null }): boolean {
+  return user.suspension_reason === REMOVED_REASON && user.suspended_by === null
+}
+
 /** The existing account's state, refused unless it is ours and nobody has moderated it. */
 async function ourAccount(db: Tx, email: string) {
   const user = await db.user.findUnique({
     where: { email },
-    select: { id: true, role: true, password: true, deletedAt: true, suspended_at: true, suspension_reason: true },
+    select: { id: true, role: true, password: true, deletedAt: true, suspended_at: true, suspended_by: true, suspension_reason: true },
   })
   if (!user) return null
   const prior = await madeBefore(db, user.id)
@@ -152,7 +163,7 @@ async function ourAccount(db: Tx, email: string) {
   if (user.role !== REVIEW_ROLE) {
     throw new Refused(`${email} has role ${user.role}; somebody changed it. Nothing written — change it back by hand if that was a mistake.`)
   }
-  const ourRemoval = user.suspension_reason === REMOVED_REASON
+  const ourRemoval = isOurRemoval(user)
   if ((user.suspended_at || user.deletedAt) && !ourRemoval) {
     throw new Refused(`${email} was suspended or deleted by somebody else. A re-run does not undo moderation. Nothing written.`)
   }
@@ -220,7 +231,7 @@ async function createUser(tx: Tx, email: string, hash: string): Promise<string> 
 
 async function repairUser(
   tx: Tx,
-  user: { id: string; password: string | null; deletedAt: Date | null; suspension_reason: string | null },
+  user: { id: string; password: string | null; suspended_by: string | null; suspension_reason: string | null },
   password: string,
   hash: string
 ): Promise<string> {
@@ -230,7 +241,7 @@ async function repairUser(
     data: {
       ...(!unchanged && { password: hash }),
       // Only our own `--remove` is lifted; `ourAccount` refused anything else.
-      ...(user.suspension_reason === REMOVED_REASON && {
+      ...(isOurRemoval(user) && {
         deletedAt: null,
         suspended_at: null,
         suspended_by: null,
@@ -244,10 +255,16 @@ async function repairUser(
 /** The organisation an earlier run made, by id; a new one if there is none. Never one found by name. */
 async function ensureOrg(tx: Tx, priorOrgId: string | null, name: string, userId: string): Promise<string> {
   const prior = priorOrgId
-    ? await tx.organisations.findUnique({ where: { id: priorOrgId }, select: { id: true, members: { select: { user_id: true } } } })
+    ? await tx.organisations.findUnique({
+        where: { id: priorOrgId },
+        select: { id: true, status: true, suspension_reason: true, members: { select: { user_id: true } } },
+      })
     : null
   if (prior && prior.members.some((m) => m.user_id !== userId)) {
     throw new Refused(`The review organisation ${prior.id} has other members. Nothing written.`)
+  }
+  if (prior?.status === "suspended" && prior.suspension_reason !== ORG_FINISHED_REASON) {
+    throw new Refused(`The review organisation ${prior.id} was suspended by an admin. A re-run does not undo moderation. Nothing written.`)
   }
   const orgId = prior
     ? (
@@ -324,6 +341,8 @@ export interface Removed {
   orgId: string | null
   eventsDeleted: number
   venuesRetired: number
+  /** Venues it added that somebody else's upcoming event still uses. */
+  venuesKept: number
 }
 
 /**
@@ -348,7 +367,7 @@ export async function removeRazorpayReviewAccount(
 
   return db.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { email: world.email }, select: { id: true } })
-    if (!user) return { userId: null, orgId: null, eventsDeleted: 0, venuesRetired: 0 }
+    if (!user) return { userId: null, orgId: null, eventsDeleted: 0, venuesRetired: 0, venuesKept: 0 }
     const prior = await madeBefore(tx, user.id)
     if (!prior) throw new Refused(`${world.email} belongs to an account this script did not create. Nothing removed.`)
     const orgId = prior.orgId
@@ -364,26 +383,53 @@ export async function removeRazorpayReviewAccount(
       where: { organizer_org_id: orgId, ...realEventsWhere, deleted_at: null },
       data: { deleted_at: now },
     })
-    const { count: venuesRetired } = await tx.venues.updateMany({
+    // Retired as `retireVenue` would: not while somebody else's event is still booked there.
+    const added = await tx.venues.findMany({
       where: { created_by_org_id: orgId, deleted_at: null, OR: [{ owner_org_id: null }, { owner_org_id: orgId }] },
+      select: { id: true },
+    })
+    const booked = await tx.events.findMany({
+      where: {
+        venue_id: { in: added.map((v) => v.id) },
+        deleted_at: null,
+        ...realEventsWhere,
+        end_time: { gte: now },
+        status: { not: "cancelled" },
+      },
+      select: { venue_id: true },
+      distinct: ["venue_id"],
+    })
+    const keep = new Set(booked.map((e) => e.venue_id))
+    const { count: venuesRetired } = await tx.venues.updateMany({
+      where: { id: { in: added.map((v) => v.id).filter((id) => !keep.has(id)) }, deleted_at: null },
       data: { deleted_at: now, status: "archived" },
     })
-    await tx.organisations.update({
-      where: { id: orgId },
-      data: { status: "suspended", suspended_at: now, suspension_reason: "Razorpay review finished" },
-    })
+    // An admin's suspension of the organisation or the account is left exactly as it is.
+    const org = await tx.organisations.findUniqueOrThrow({ where: { id: orgId }, select: { status: true } })
+    if (org.status !== "suspended") {
+      await tx.organisations.update({
+        where: { id: orgId },
+        data: { status: "suspended", suspended_at: now, suspension_reason: ORG_FINISHED_REASON },
+      })
+    }
+    const account = await tx.user.findUniqueOrThrow({ where: { id: user.id }, select: { suspended_at: true } })
     await tx.user.update({
       where: { id: user.id },
-      data: { deletedAt: now, suspended_at: now, suspension_reason: REMOVED_REASON, password: null, sessions_revoked_at: now },
+      data: {
+        deletedAt: now,
+        password: null,
+        sessions_revoked_at: now,
+        ...(!account.suspended_at && { suspended_at: now, suspension_reason: REMOVED_REASON }),
+      },
     })
     await auditInTx(tx, {
       action: RAZORPAY_REVIEW_REMOVED,
       resource: "organisation",
       resourceId: orgId,
       orgId,
-      details: { userId: user.id, eventsDeleted, venuesRetired },
+      details: { userId: user.id, eventsDeleted, venuesRetired, venuesKept: keep.size },
     })
-    return { userId: user.id, orgId, eventsDeleted, venuesRetired }
+    return { userId: user.id, orgId, eventsDeleted, venuesRetired, venuesKept: keep.size }
   })
 }
 
@@ -415,7 +461,8 @@ async function main() {
       const r = await removeRazorpayReviewAccount(db, WORLD, process.env, flags)
       console.log(
         r.userId
-          ? `  removed: user ${r.userId} closed, organisation ${r.orgId} suspended, ${r.eventsDeleted} event(s) deleted, ${r.venuesRetired} venue(s) retired`
+          ? `  removed: user ${r.userId} closed, organisation ${r.orgId} suspended, ${r.eventsDeleted} event(s) deleted, ` +
+            `${r.venuesRetired} venue(s) retired, ${r.venuesKept} kept for another host's upcoming event`
           : "  nothing to remove"
       )
       return

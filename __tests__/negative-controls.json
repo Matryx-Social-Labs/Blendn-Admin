@@ -32,25 +32,37 @@
     "which tests need a registry entry; it does not mean a behavioural test is",
     "automatically non-vacuous, only that it usually fails on its own terms.",
     "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574.",
-    "2026-10-26: M2203 to M2216 are feat/razorpay-verification's (policy pages, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
+    "2026-10-26: M2203 to M2231 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "event-status-moves.itest.ts": {
+      "guards": "Status moves through the real handlers: no event created cancelled or completed, no draft cancelled or completed at either PATCH, the real flows (publish, edit, unpublish, republish, cancel) still 200; and Razorpay's review organisation is refused out of draft at POST and both PATCHes, a venue link, createVenue, inviteMember and fileEventClaim.",
+      "mutation": "M2217 statusMoveRefusal let a draft be cancelled. M2218 POST /api/events lost its create-status refusal. M2219 the mobile PATCH lost its move check. M2224 fileEventClaim lost its review-org refusal. M2228 POST lost its review-org 403. M2229 the dashboard PATCH lost its review-org 403. M2230 createVenue's guard became `if (false)`. M2231 inviteMember lost its guard.",
+      "observed": "Each: 1 of 7 failing (M2217 also 1 of 18 in event-status-move.test.ts). Reverted; green.",
+      "date": "2026-10-26"
+    },
+    "event-status-move.test.ts": {
+      "guards": "The client status-move table in lib/event-status-move.ts, every pair.",
+      "mutation": "M2217 a draft could be cancelled.",
+      "observed": "M2217: 1 of 18 failing (cancelled from draft). Reverted; green.",
+      "date": "2026-10-26"
+    },
     "review-demo-org.test.ts": {
-      "guards": "Every server door that reaches a real person refuses Razorpay's review organisation: dashboard event create and PATCH, the mobile PATCH (publish, venue link), createVenue, inviteMember, sendDomainVerifyEmail; and reviewOrgRefusal asks nothing when a request publishes nothing and links no venue.",
-      "mutation": "M2208 the dashboard PATCH lost its `if (reviewRefusal) return`. M2209 createVenue's guard became `if (false)`. M2210 reviewOrgRefusal lost its early return, so every save queried.",
-      "observed": "M2208: 1 of 8 failing (app/api/events/[id]/route.ts PATCH). M2209: 1 of 8 failing (createVenue). M2210: 1 of 8 failing (asks nothing). Reverted; green.",
+      "guards": "Every server door that reaches a real person refuses Razorpay's review organisation: dashboard event create and PATCH, the mobile PATCH (publish, venue link), createVenue, inviteMember, sendDomainVerifyEmail; and reviewOrgRefusal asks nothing when a request publishes nothing and links no venue. Since the second review the doors are held through the real handlers in event-status-moves.itest.ts; this file keeps the no-query rule and leavesDraft.",
+      "mutation": "M2208 the dashboard PATCH lost its `if (reviewRefusal) return`. M2209 createVenue's guard became `if (false)`. M2210 reviewOrgRefusal lost its early return, so every save queried. M2220 leavesDraft counted only `published` as leaving draft.",
+      "observed": "M2208: 1 of 8 failing (app/api/events/[id]/route.ts PATCH). M2209: 1 of 8 failing (createVenue). M2210: 1 of 8 failing (asks nothing). Reverted; green. M2220: 2 of 14 failing (cancelled and completed from a draft). Reverted; green.",
       "date": "2026-10-26"
     },
     "seed-razorpay-review.itest.ts": {
       "guards": "The Razorpay review seed never takes over an account it did not make, never lifts an admin's suspension, and --remove takes down every event and venue of its organisation (soft, so an Event Pass's RESTRICT holds) whatever the reviewer renamed.",
-      "mutation": "M2213 ourAccount treated an address with no seeded audit row as ours. M2214 --remove soft-deleted only the event id the audit row recorded. M2215 --remove hard-deleted the events. M2216 a re-run lifted any suspension.",
-      "observed": "M2213: 1 of 9 failing (an admin at the address had password and role overwritten). M2214: 1 of 9 failing (eventsDeleted 1, expected 2). M2215: 1 of 9 failing (entitlements_event_id_fkey refused the delete). M2216: 1 of 9 failing (the admin's suspension lifted). Reverted; green.",
+      "mutation": "M2213 ourAccount treated an address with no seeded audit row as ours. M2214 --remove soft-deleted only the event id the audit row recorded. M2215 --remove hard-deleted the events. M2216 a re-run lifted any suspension. M2221 isOurRemoval ignored suspended_by. M2222 --remove overwrote an admin's suspension with its own reason. M2223 ensureOrg re-verified an organisation an admin suspended. M2225 --remove retired a venue another host's upcoming event uses.",
+      "observed": "M2213: 1 of 9 failing (an admin at the address had password and role overwritten). M2214: 1 of 9 failing (eventsDeleted 1, expected 2). M2215: 1 of 9 failing (entitlements_event_id_fkey refused the delete). M2216: 1 of 9 failing (the admin's suspension lifted). Reverted; green. M2221: 1 of 12 failing (admin suspension after our --remove lifted). M2222: 1 of 12 failing (the admin's suspension rewritten). M2223: 1 of 12 failing (setOrganisationStatus suspension re-verified). M2225: 1 of 12 failing (venuesKept 0). Reverted; green.",
       "date": "2026-10-26"
     },
     "policy-pages-public.test.ts": {
       "guards": "The public policy pages Razorpay verifies (pricing, about, contact, terms, privacy, refunds, shipping) stay outside the middleware matcher, each has a page, and the Terms body cut from docs/legal leaves no div open.",
-      "mutation": "M2203 middleware.ts's matcher gained \"/pricing\". M2204 lib/legal-html.ts stopped turning the generator's unclosed <div id> anchors into spans. M2211 a <script> spliced into terms-of-use.html before section 32.",
-      "observed": "M2203: 1 of 20 failing (/pricing is outside the matcher). M2204: 1 of 20 failing (the div balance). Reverted; green. M2211: 1 of 21 failing (carries nothing that runs). Reverted; green.",
+      "mutation": "M2203 middleware.ts's matcher gained \"/pricing\". M2204 lib/legal-html.ts stopped turning the generator's unclosed <div id> anchors into spans. M2211 a <script> spliced into terms-of-use.html before section 32. M2226 an <iframe> spliced into terms-of-use.html (the check is now an allowlist of tags, attributes and link schemes).",
+      "observed": "M2203: 1 of 20 failing (/pricing is outside the matcher). M2204: 1 of 20 failing (the div balance). Reverted; green. M2211: 1 of 21 failing (carries nothing that runs). Reverted; green. M2226: 1 of 21 failing (iframe not on the allowlist). Reverted; green.",
       "date": "2026-10-26"
     },
     "seed-razorpay-review.test.ts": {
@@ -892,8 +904,8 @@
     },
     "event-authoring-rail.test.ts": {
       "guards": "that the event form renders the publish rail (and the bar below @4xl/main) and no submit of its own, that the buttons set the status and no Status select exists, that Publish is disabled while anything blocks, that every readiness item links to a field id that exists, that the content column beside the sidebar clips rather than scrolls (sticky; the inset until step 14), that the long description is optional and lives under More, that categories are chips + a Popover picker, that Featured is admin-only on the screen and in both API routes, and that cancelling is a confirmed action",
-      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset (step 14: on the content column, in place of `overflow-x-clip`). X: rename `id=\"field-start_time\"` to `field-start` in the When section",
-      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'); step 14 re-run: 1 failing of 11. X: 1 failing ('every readiness item links to its field'). Nine green each time",
+      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset (step 14: on the content column, in place of `overflow-x-clip`). X: rename `id=\"field-start_time\"` to `field-start` in the When section M2227 (2026-10-26) the rail offered Cancel on drafts again (`isEditing && !cancelled`).",
+      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'); step 14 re-run: 1 failing of 11. X: 1 failing ('every readiness item links to its field'). Nine green each time M2227: 1 of 11 failing (Cancel only on a published event). Reverted; green.",
       "reverted": true,
       "date": "2026-09-11",
       "note": "Control X was reverted with `git checkout` on a file that also carried the section's redesign, which threw the redesign away; the registry's own warning about exactly this was re-earned and the edits re-applied."
