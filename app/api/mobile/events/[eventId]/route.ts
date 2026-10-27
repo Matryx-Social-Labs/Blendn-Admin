@@ -16,6 +16,7 @@ import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mobileEventPatchSchema } from "@/lib/validations/event"
 import { canPublish } from "@/lib/geofence-input"
+import { leavesDraft, statusMoveRefusal } from "@/lib/event-status-move"
 import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
@@ -487,13 +488,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      * with OUT_OF_RANGE. The mobile body carries no location fields, so there
      * is nothing to merge — the event has a pin or it does not.
      */
+    // Which status moves a client may make (lib/event-status-move.ts).
+    const moveRefusal = statusMoveRefusal(status, event.status)
+    if (moveRefusal) return errorResponse(moveRefusal, 400)
+    // Razorpay's reviewer: never out of draft (lib/review-demo-org.ts).
+    const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, { leaveDraft: leavesDraft(status, event.status) })
+    if (reviewRefusal) return errorResponse(reviewRefusal, 403)
+
     if (status === "published" && event.status !== "published") {
       const gate = canPublish(event)
       if (!gate.ok) {
         return errorResponse(gate.reason ?? "This event cannot be published yet", 400)
       }
-      const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, { publish: true })
-      if (reviewRefusal) return errorResponse(reviewRefusal, 403)
     }
 
     const isCancelling = isCancellingEvent(status, event.status)

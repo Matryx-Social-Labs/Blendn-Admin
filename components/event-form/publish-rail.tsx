@@ -202,7 +202,8 @@ function Actions({
           {isEditing ? "Save as draft" : "Save draft"}
         </Button>
       ) : null}
-      {isEditing && !cancelled && !compact ? (
+      {/* Only a published event is cancelled; a draft nobody saw is deleted (lib/event-status-move.ts). */}
+      {live && !compact ? (
         <Button
           type="button"
           variant="ghost"

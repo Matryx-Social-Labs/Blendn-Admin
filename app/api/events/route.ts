@@ -12,6 +12,7 @@ import { owningOrgFor } from "@/lib/event-ownership"
 import { canCreateEvents } from "@/lib/rbac"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
+import { leavesDraft, statusMoveRefusal } from "@/lib/event-status-move"
 import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { resolveVenueLink, venueFenceToCopy } from "@/lib/venue-link"
 import { phoneCheckInRadius } from "@/lib/geofence"
@@ -164,6 +165,10 @@ export async function POST(req: Request) {
      * `canPublish` has existed for exactly this and had no caller outside its
      * own test; the Overview's blocker badge was advisory only.
      */
+    // Draft or published, nothing else: cancelled and completed are public too (lib/event-status-move.ts).
+    const createRefusal = statusMoveRefusal(status, null)
+    if (createRefusal) return NextResponse.json({ error: createRefusal }, { status: 400 })
+
     if ((status ?? "draft") === "published") {
       const gate = canPublish({
         latitude: latitude ?? null,
@@ -218,7 +223,7 @@ export async function POST(req: Request) {
 
     // Razorpay's reviewer: never a published event, never a real venue (lib/review-demo-org.ts).
     const reviewRefusal = await reviewOrgRefusal(owningOrgId, {
-      publish: (status ?? "draft") === "published",
+      leaveDraft: leavesDraft(status, null),
       venue: Boolean(venue_id),
     })
     if (reviewRefusal) return NextResponse.json({ error: reviewRefusal }, { status: 403 })

@@ -14,6 +14,7 @@ import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellin
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
+import { leavesDraft, statusMoveRefusal } from "@/lib/event-status-move"
 import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { resolveVenueLink, venueFenceToCopy } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
@@ -171,9 +172,13 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       return errorResponse("Forbidden", 403)
     }
 
-    // Razorpay's reviewer: never a published event, never a real venue (lib/review-demo-org.ts).
+    // Which status moves a client may make (lib/event-status-move.ts).
+    const moveRefusal = statusMoveRefusal(status, event.status)
+    if (moveRefusal) return errorResponse(moveRefusal, 400)
+
+    // Razorpay's reviewer: never out of draft, never a real venue (lib/review-demo-org.ts).
     const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, {
-      publish: status === "published" && event.status !== "published",
+      leaveDraft: leavesDraft(status, event.status),
       venue: venue_id !== undefined && venue_id !== null && venue_id !== event.venue_id,
     })
     if (reviewRefusal) return errorResponse(reviewRefusal, 403)

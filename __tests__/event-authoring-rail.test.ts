@@ -113,10 +113,13 @@ describe("the cuts", () => {
     }
   })
 
-  it("cancelling is its own confirmed action in edit mode, not a dropdown value", () => {
+  it("cancelling is its own confirmed action, offered only on a published event (a draft is deleted; the server refuses draft → cancelled, lib/event-status-move.ts)", () => {
     expect(form).toMatch(/window\.confirm\(/)
     expect(form).toMatch(/submitAs\("cancelled"\)/)
-    expect(rail).toMatch(/isEditing && !cancelled && !compact \? \(/)
+    // `live` is editing a published event.
+    expect(rail).toMatch(/const live = isEditing && status === "published"/)
+    expect(rail).toMatch(/\{live && !compact \? \(\s*<Button[^>]*?onClick=\{onCancelEvent\}/)
+    expect(rail.match(/onClick=\{onCancelEvent\}/g)).toHaveLength(1)
   })
 })
 

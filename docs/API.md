@@ -3326,6 +3326,23 @@ called them; the dashboard owns each job. `PATCH`/`DELETE /events/:id` and
 `POST /events/:id/announce` stay: the app's organizer tray calls them, and
 `mobile-organiser-routes.itest.ts` holds their organisation-shaped rules.
 
+**Status moves** (`lib/event-status-move.ts`). The dashboard `POST /api/events`
+and `PATCH /api/events/:id`, and the mobile `PATCH /events/:eventId`, take a
+status only along these moves; anything else is a **400** with a sentence:
+a new event is `draft` or `published`; `published` only from `draft`;
+`draft` only from `published` (unpublishing); `cancelled` only from
+`published` (a draft is deleted, not cancelled); never out of `cancelled`;
+`completed` is never written by a client, and a completed event stays so.
+Saving with the status the event already has is no move. `cancelled` and
+`completed` are public (the app and the share page open them), so before
+this a client could reach either from a draft past every publish check.
+The admin status control and curation keep their own rules.
+
+**Razorpay's review organisation** (`lib/review-demo-org.ts`): those three
+doors answer **403** to any move out of `draft` or any venue link for the
+organisation `scripts/seed-razorpay-review.ts` made; it also cannot add a
+venue, invite, send a domain email or file an event claim.
+
 Set by the organizer in the dashboard event form, bounded 13–25.
 
 **A suspended organizer's events are drafts** (SCRUM-8). Suspending an
