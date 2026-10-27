@@ -78,7 +78,7 @@ interface Row {
   kind: string
   data: Record<string, unknown> | null
   open?: boolean
-  display?: { title?: string; context?: string; visual?: Record<string, unknown> }
+  display: { title?: string; context?: string; visual?: Record<string, unknown> }
 }
 
 /** What a build that knows `event_changed` declares on every request; an installed build declares nothing. */

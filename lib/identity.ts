@@ -2,7 +2,7 @@ import { firstName, mayShowRealName, UNNAMED } from "./conversation-identity"
 import { blockedEitherWay, conversationPair } from "./conversations"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
-import { openRoomHandle, resolveUserRef } from "./room-handle"
+import { isRoomHandle, openRoomHandle, resolveUserRef } from "./room-handle"
 import { holdingPair, matchSelect } from "./friends"
 import { ownerAdmits } from "./room-kind"
 
@@ -475,7 +475,7 @@ export async function identityForRef(
    * `GET /friends/:id` already returns these fields to this viewer, so this
    * names nobody the friends list does not. A block either way still beats it.
    */
-  if (room !== null) return { userId, room, identified: false }
+  if (room !== null || isRoomHandle(ref)) return { userId, room, identified: false }
   return { userId, room, identified: await isFriendUnblocked(viewerId, userId) }
 }
 
