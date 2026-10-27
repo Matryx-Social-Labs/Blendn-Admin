@@ -42,8 +42,15 @@ describe("termsBody", () => {
   const { updated, body } = termsBody(html)
 
   it("dates the page from the file", () => {
-    expect(updated).toBe("26 October 2026")
+    expect(updated).toBe("27 October 2026")
     expect(body).not.toMatch(/Last updated/)
+  })
+
+  it("sends disputes to arbitration in Bengaluru under Indian law, with no Belgian forum left", () => {
+    expect(body).toMatch(/Arbitration and Conciliation Act, 1996 \(India\)/)
+    expect(body).toMatch(/seat and venue of arbitration shall be Bengaluru, Karnataka, India/)
+    expect(body).toMatch(/courts at Bengaluru, Karnataka shall have exclusive jurisdiction/)
+    expect(body).not.toMatch(/Belgi|Brussels|ICAC|European Arbitration/)
   })
 
   it("leaves no div open, so the seller footer stays outside the terms", () => {
