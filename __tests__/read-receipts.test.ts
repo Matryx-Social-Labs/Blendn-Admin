@@ -86,7 +86,8 @@ describe("both surfaces honour it, and reading is still recorded", () => {
     const body = fn.slice(0, fn.indexOf("\n}"))
 
     const write = body.indexOf("private_messages.updateMany")
-    const gate = body.indexOf("read_receipts")
+    // The decision, not the setting's read: that starts beside the writes (independent of them) and is awaited here.
+    const gate = body.indexOf("reader?.read_receipts")
     const emit = body.indexOf('emit("private:read"')
 
     expect(write).toBeGreaterThan(-1)

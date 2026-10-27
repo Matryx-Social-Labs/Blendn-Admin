@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { distinctAttendeeCounts, hereCountFor } from "@/lib/attendee-counts"
 import { eventHost } from "@/lib/event-host"
+import { eventTallies } from "@/lib/event-tallies"
 import { offersClaim } from "@/lib/curation"
 import { dashboardUrl } from "@/lib/email"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -22,7 +23,7 @@ import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { eventArea } from "@/lib/venue-visibility"
-import { getOccupancy } from "@/lib/occupancy"
+import { getInsideCount } from "@/lib/occupancy"
 import { dayOccurrencesSelect, eventDays, eventSession } from "@/lib/occurrences"
 import { changeForResponse, updateEventTracked } from "@/lib/event-change"
 import {
@@ -83,8 +84,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         .filter(Boolean)
     )
 
-    // Fetch event with all related data
-    const event = await db.events.findUnique({
+    // Fetch event with all related data. Not awaited yet: nothing below needs
+    // its row, so the reads after it start with it (one wave instead of three).
+    const eventRead = db.events.findUnique({
       where: { id: eventId, deleted_at: null },
       include: {
         organizer: {
@@ -154,27 +156,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             status: true,
           },
         },
-        _count: {
-          select: {
-            favorites: true,
-            ratings: true,
-            rsvps: {
-              where: { status: "going" },
-            },
-          },
-        },
       },
     })
 
-    if (!event) {
-      return notFoundResponse("Event not found")
-    }
-
-    // Counted from check-in rows rather than a stored column.
-    const occupancy = await getOccupancy(eventId)
-
-    const [attendedCounts, hereNow, userFavorite, userRating, userCheckIn, userRsvp] =
+    const [event, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
       await Promise.all([
+        eventRead,
+        // Counted from check-in rows rather than a stored column. Just the
+        // headcount: `getOccupancy`'s capacity and unique-attendance reads are
+        // not on this page.
+        getInsideCount(eventId),
         /*
          * `checkInCount` was `_count.check_ins` filtered to `checked_in`, which
          * counted rows on a table holding one per person **per day** — and
@@ -184,6 +175,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         distinctAttendeeCounts([eventId]),
         // Here now, the Room's number: `checkInCount` above keeps who has left.
         hereCountFor(eventId),
+        // Not `_count`: that aggregates each whole table per call. See `eventTallies`.
+        eventTallies([eventId]),
         db.event_favorites.findUnique({
           where: {
             event_id_user_id: {
@@ -216,6 +209,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           },
         }),
       ])
+
+    if (!event) {
+      return notFoundResponse("Event not found")
+    }
 
     // Calculate distance if coordinates provided
     let distance: number | null = null
@@ -287,7 +284,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // the client draws nothing for it, falling back to remaining capacity.
       doorPolicy: event.door_policy,
       // Counted, not stored. The field name stays so no client breaks.
-      currentCapacity: occupancy.inside,
+      currentCapacity: inside,
       // Covers the whole area, outline or circle, from the pin (SCRUM-350) —
       // the app judges "near enough" and "has left" by this circle alone.
       checkInRadius: phoneCheckInRadius(event),
@@ -362,14 +359,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       stats: {
         checkInCount: attendedCounts.get(eventId) ?? 0,
         hereCount: hereNow,
-        favoriteCount: event._count.favorites,
+        favoriteCount: tallies.favorites.get(eventId) ?? 0,
         /*
          * No average. Anyone who can open the event could poll it as people
          * rate and read each new score from the change, and the app promises
          * a rater the night's score is "only ever seen by us" (SCRUM-437).
          */
-        ratingCount: event._count.ratings,
-        rsvpCount: event._count.rsvps,
+        ratingCount: tallies.ratings.get(eventId) ?? 0,
+        rsvpCount: tallies.going.get(eventId) ?? 0,
       },
       userStatus: {
         isFavorited: !!userFavorite,

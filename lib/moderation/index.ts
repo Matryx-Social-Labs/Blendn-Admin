@@ -1,6 +1,6 @@
 import { logger } from "@/lib/logger"
 import { checkKeywords } from "./keyword-filter"
-import { checkTextContent, checkImageContent } from "./openai-moderation"
+import { checkTextContent, checkImageContent, type ModerationCheck } from "./openai-moderation"
 import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
 import { checkContactInfo } from "./contact-info"
 import { readableUrl } from "@/lib/tigris"
@@ -38,6 +38,11 @@ export function preSaveCheck(content: string): { result: ModerationResult; autoM
  * 4. Take action based on highest-severity result
  *
  * Never throws — safe for fire-and-forget usage.
+ *
+ * `textCheck` is the OpenAI text check a send route already started for this
+ * message and gave up waiting for at its 1 s mark. Awaited here instead of
+ * asking again: one call per message, and its verdict (a hide, say) lands as
+ * soon as the first call answers rather than a full second round trip later.
  */
 export async function moderateMessage(
   messageId: string,
@@ -45,7 +50,8 @@ export async function moderateMessage(
   type: string, // "text" | "image" | "video" etc.
   userId: string,
   chatGroupId: string,
-  mediaUrl?: string | null
+  mediaUrl?: string | null,
+  textCheck?: Promise<ModerationCheck>
 ): Promise<void> {
   try {
     /*
@@ -96,8 +102,16 @@ export async function moderateMessage(
     }
 
     // 3. OpenAI text moderation (async)
-    const textCheck = await checkTextContent(content)
-    const textResult = textCheck.checked ? textCheck.result : null
+    let text = await (textCheck ?? checkTextContent(content))
+    /*
+     * The in-flight check is reused so a message costs one call, but a call that
+     * FAILED outright (a 429, a 5xx, a reset) is not an answer: this pipeline
+     * always asked again, and a line that went out unchecked must not stay
+     * visible for want of a second look. A timeout is not retried (another 8 s
+     * wait on the same stalled API) and neither is a missing key.
+     */
+    if (textCheck && !text.checked && text.reason === "error") text = await checkTextContent(content)
+    const textResult = text.checked ? text.result : null
     if (textResult && textResult.action === "hide") {
       await hideMessage(messageId, chatGroupId, userId, textResult)
       await flagForReview(messageId, chatGroupId, userId, textResult)
@@ -168,7 +182,7 @@ export async function moderateMessage(
      * The keyword filter's 130 hard-coded strings were the whole pipeline, and
      * nothing said so.
      */
-    await recordExamined(messageId, textCheck.checked && imageExamined)
+    await recordExamined(messageId, text.checked && imageExamined)
   } catch (error) {
     // Never let moderation errors propagate — log and move on
     logger.error("Moderation pipeline error", {

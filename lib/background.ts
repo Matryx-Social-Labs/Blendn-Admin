@@ -10,6 +10,7 @@ import {
   stopNotificationRetentionSweeper,
 } from "./notification-retention"
 import { startIssueSweeper, stopIssueSweeper } from "./event-issues"
+import { startModerationRecheckSweeper, stopModerationRecheckSweeper } from "./moderation-recheck"
 import { startPhotoModerationSweeper, stopPhotoModerationSweeper } from "./photo-sweeper"
 import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
 import { startReminderSweeper, stopReminderSweeper } from "./reminder-sweeper"
@@ -69,6 +70,8 @@ export function startBackgroundWork(): void {
   startReminderSweeper()
   // Photos the vendor could not look at the first time (SCRUM-732).
   startPhotoModerationSweeper()
+  // Room lines OpenAI could not check when they were sent (moderation-degraded policy).
+  startModerationRecheckSweeper()
 
   logger.info("Background work started", {
     // Listed exhaustively: this said three while starting four, so the log
@@ -81,6 +84,7 @@ export function startBackgroundWork(): void {
       "issues",
       "reminders",
       "photo-moderation",
+      "moderation-recheck",
     ],
   })
 }
@@ -100,4 +104,5 @@ export function stopBackgroundWork(): void {
   stopIssueSweeper()
   stopReminderSweeper()
   stopPhotoModerationSweeper()
+  stopModerationRecheckSweeper()
 }

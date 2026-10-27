@@ -38,6 +38,7 @@ jest.mock("@/lib/anonymous-names", () => ({
 
 jest.mock("@/lib/location", () => ({
   normalizeLocationToCity: jest.fn().mockImplementation(async (l: string | null) => l),
+  geocodeBudget: jest.fn(() => ({ take: () => true })),
 }))
 
 import { NextRequest } from "next/server"

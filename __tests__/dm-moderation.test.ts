@@ -4,7 +4,7 @@ import { join } from "path"
 jest.mock("@/lib/moderation/spam-detector", () => ({ checkSpam: jest.fn() }))
 
 import { checkSpam } from "@/lib/moderation/spam-detector"
-import { screenDirectMessage } from "@/lib/dm-moderation"
+import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 
 /**
  * The one channel nothing was watching.
@@ -137,6 +137,12 @@ describe("the visibility predicate", () => {
     expect(decl).toContain("moderation_status: null")
   })
 
+  it("is exactly 'no verdict, or any verdict but hidden' (the inbox preview writes the same thing in SQL)", () => {
+    // lastVisibleMessages in app/api/mobile/conversations/route.ts spells this predicate out as
+    // `(moderation_status IS NULL OR moderation_status <> 'hidden')`; if this changes, so must that.
+    expect(VISIBLE_DM).toEqual({ OR: [{ moderation_status: null }, { moderation_status: { not: "hidden" } }] })
+  })
+
   it("is carried by every participant-facing read of a DM", () => {
     /*
      * Three readers need it and the third is the one that gets forgotten: the
@@ -164,8 +170,13 @@ describe("the visibility predicate", () => {
      * its producer, already recorded twice in this project.
      */
     const inbox = codeOnly(read("app", "api", "mobile", "conversations", "route.ts"))
-    expect(blockAfter(inbox, "messages: {")).toContain("VISIBLE_DM")
-    expect(blockAfter(inbox, "_count: {")).toContain("VISIBLE_DM")
+    // The preview is raw SQL (a LATERAL ... LIMIT 1: Prisma does not send a nested `take`) in
+    // lib/inbox-preview.ts, carrying the SQL twin of the predicate; the unread count spreads the constant.
+    expect(inbox).toContain("latestVisibleMessages(")
+    expect(blockAfter(codeOnly(read("lib", "inbox-preview.ts")), "async function latestVisibleMessages")).toContain(
+      "VISIBLE_DM_SQL"
+    )
+    expect(blockAfter(inbox, "async function unreadCounts")).toContain("VISIBLE_DM")
 
     const MODERATION_READS = [
       // Reviewing a report. Must see what was hidden.

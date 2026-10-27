@@ -6,6 +6,8 @@ const as = (role: DashboardRole, id: string) => {
   session = { user: { id, role } }
 }
 
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { getDashboardOverview } from "@/app/dashboard/actions"
@@ -13,6 +15,8 @@ import ChatroomsPage from "@/app/dashboard/chatrooms/page"
 import EventsPage from "@/app/dashboard/events/page"
 import { visibleEventsWhere } from "@/lib/event-visibility"
 import { setupFactsFor } from "@/lib/organiser-overview"
+import { getUsers } from "@/app/dashboard/users/actions"
+import { sqlCounter } from "./sql-count"
 import { cleanup, closeDb, db, makeUser, occurrenceOf, testId } from "./helpers"
 
 /*
@@ -258,5 +262,70 @@ describe("the live banner and the latest feedback come through the organisation"
     if (overview.role !== "organizer") throw new Error("wrong overview role")
     expect(overview.live).toBeNull()
     expect(overview.latestFeedback).toBeNull()
+  })
+})
+
+describe("the dashboard counts what is on the page, not the table", () => {
+  /*
+   * A relation `_count` is a LEFT JOIN over a GROUP BY of the whole child table
+   * (`_aggr_count_*`), which Postgres cannot narrow to the page: the Events list's
+   * going counts, a live room's messages and the Users table's tallies each read
+   * every RSVP, message, check-in and favourite on the platform to answer for a
+   * handful of rows.
+   */
+  const WHOLE_TABLE = /_aggr_count_\w+" FROM "public"\."(chat_messages|event_rsvps|event_check_ins|event_favorites|event_ratings)"/
+
+  let host: string
+  let live: string
+  let admin: string
+
+  beforeAll(async () => {
+    const o = await org()
+    host = await member(o, "wt_host")
+    admin = await makeUser("wt_admin", "app_admin")
+    users.push(admin)
+    live = await event(host, o, { start: new Date(Date.now() - HOUR), hours: 4 })
+    const group = await db.chat_groups.create({ data: { event_id: live, name: "room" }, select: { id: true } })
+    await db.chat_messages.createMany({ data: ["a", "b", "c"].map((content) => ({ chat_group_id: group.id, user_id: host, content })) })
+    await db.event_rsvps.create({ data: { event_id: live, user_id: admin, status: "going" } })
+  })
+
+  afterAll(async () => {
+    await db.chat_messages.deleteMany({ where: { chat_group: { event_id: live } } })
+    await db.chat_groups.deleteMany({ where: { event_id: live } })
+    await db.event_rsvps.deleteMany({ where: { event_id: live } })
+  })
+
+  it("the live banner's message count is that room's", async () => {
+    as("organizer", host)
+    const overview = await getDashboardOverview()
+    if (overview.role !== "organizer") throw new Error("wrong overview role")
+    expect(overview.live?.messages).toBe(3)
+  })
+
+  it.each([
+    ["the organiser's overview", async () => { as("organizer", host); await getDashboardOverview() }],
+    ["the Events list", async () => { as("organizer", host); await EventsPage() }],
+    ["the Chatrooms screen", async () => { as("app_admin", admin); renderToStaticMarkup(await ChatroomsPage()) }],
+    ["the Users table", async () => { as("app_admin", admin); await getUsers() }],
+  ])("%s joins no whole-table count", async (_name, run) => {
+    const counter = sqlCounter()
+    try {
+      const { sql } = await counter.during(run)
+      expect(sql.filter((statement) => WHOLE_TABLE.test(statement))).toEqual([])
+    } finally {
+      await counter.stop()
+    }
+  })
+
+  it("the Users table still tallies each person's events, check-ins and favourites", async () => {
+    as("app_admin", admin)
+    const event_id = live
+    await db.event_favorites.create({ data: { event_id, user_id: host } })
+    const { users: listed } = await getUsers(host)
+    const row = listed.find((u) => u.id === host)
+    expect(row?._count).toEqual({ organized_events: expect.any(Number), event_check_ins: 0, event_favorites: 1 })
+    expect(row?._count.organized_events).toBeGreaterThanOrEqual(1)
+    await db.event_favorites.deleteMany({ where: { event_id } })
   })
 })

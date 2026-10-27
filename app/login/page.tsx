@@ -10,7 +10,7 @@ import { AuthFrame } from "@/components/public-frame"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { APP_ONLY_SIGNIN, canAccessDashboard } from "@/lib/rbac"
+import { APP_ONLY_SIGNIN, SIGNIN_ACCOUNT_LOCKED, SIGNIN_RATE_LIMITED, canAccessDashboard } from "@/lib/rbac"
 import { safeRedirect } from "@/lib/safe-redirect"
 
 /**
@@ -81,6 +81,14 @@ function SignInForm() {
       }
       // The password was right and the account is an attendee's: no session
       // was made, so say so instead of reappearing blank (SCRUM-172).
+      if (result?.error === SIGNIN_ACCOUNT_LOCKED) {
+        setError(ACCOUNT_LOCKED)
+        return
+      }
+      if (result?.error === SIGNIN_RATE_LIMITED) {
+        setError(RATE_LIMITED)
+        return
+      }
       if (result?.error === APP_ONLY_SIGNIN) {
         setError(APP_ONLY)
         return
@@ -215,6 +223,10 @@ const APP_ONLY = (
 
 const RATE_LIMITED =
   "Too many sign-in attempts from this network. Wait fifteen minutes and try again."
+
+// Anyone can spend this against an address; the reset link is how its owner gets in at once.
+const ACCOUNT_LOCKED =
+  "Too many wrong passwords for this account. Use Forgot password to reset it and sign in now, or wait fifteen minutes."
 
 export default function LoginPage() {
   return <SignInForm />

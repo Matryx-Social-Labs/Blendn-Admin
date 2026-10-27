@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*. The body can also carry **`reasonCode`** (`ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`) beside an `errorCode` that keeps its old value
+Error codes: `MODERATION_UNAVAILABLE` (503, a busy event room while moderation is down; see *Moderation (pre-emit)*), `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*. The body can also carry **`reasonCode`** (`ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`) beside an `errorCode` that keeps its old value
 
 A refusal that names no specific code carries the one its status stands for:
 401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
@@ -323,6 +323,11 @@ photos — except for someone who turned on "Show who I am" in that room
 same rule the Grid card already applied. Blocks are honoured in both directions everywhere, and are reported as
 "not found" rather than "blocked" — confirming an account exists tells a blocked
 person they were blocked.
+
+**A roster row's `location` can be null.** A profile location stored as
+coordinates is turned into a city name, at most three such lookups per page
+(the geocoder's budget, cached afterwards); a row past the budget says `null`
+until a later page or request has resolved it. Raw coordinates are never returned.
 
 **The roster is everyone checked in.** It used to be filtered on `onboarded`, a
 non-null name and a non-empty `photos` array — three fields the endpoint does not
@@ -1693,6 +1698,12 @@ accountability. Anonymous plus unsolicited is the harassment shape. It is also
 what makes the recipient's decision possible — "Someone wants to connect" is a
 coin flip.
 
+**Limits.** 20 requests per sender per day (`429`), on top of the per-minute
+limit. The `message` goes through the deterministic text check (keyword and
+contact details); a hit is `400` `VALIDATION_FAILED` with `reasonCode:
+"TEXT_NOT_ALLOWED"` and `field: "message"`, its `error` a sentence to show as
+is. Nothing is stored or sent.
+
 Guards, in order: rate limit, self-send, recipient exists, blocks either way,
 closed pair (an unmatch — same 404 as a block, so the refusal never says "this
 person ended it"), `haveSharedAnEvent`, existing request, existing
@@ -1892,7 +1903,9 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 If caught, response returns `{ moderation_hidden: true, content: null }`. The message is never emitted via socket.
 If OpenAI times out (>1s), message is broadcast and moderation falls back to async (socket delete event).
 
-**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `NOT_LIVE` (403, a venue's room after your Go Live ended), `SPAM_BLOCKED` (429)
+**While OpenAI is down** (5 consecutive failed calls open a 30 s breaker per server process): a room of 200 or fewer inside, and every room that is not an event's, still delivers the line, and a sweeper re-checks every `unchecked` room message from the last 24 h each minute, hiding or flagging late through the usual actions. A **busy event room (more than 200 inside now) refuses instead**: when the 1 s race has no verdict the route waits for the call in flight (its own 8 s deadline); with still none it deletes the row it just wrote (nothing was emitted) and answers `503 MODERATION_UNAVAILABLE`, `retryAfter: 5` in the body and `Retry-After`, error "This room is busy and messages can’t be checked right now. Try again in a few seconds." With the breaker already open the refusal comes before anything is written. Resend with the same `clientId`. A missing `OPENAI_API_KEY` is not an outage and never refuses.
+
+**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `CHAT_LOCKED` (403), `NOT_CHECKED_IN` (403), `LEFT_ROOM` (403), `NOT_LIVE` (403, a venue's room after your Go Live ended), `SPAM_BLOCKED` (429), `MODERATION_UNAVAILABLE` (503, busy event rooms only, above)
 
 **`SPAM_BLOCKED` says when to try again** (SV13): a send refused for a burst (5 in
 10 seconds) carries `retryAfter`, whole seconds until that window ends, in the
@@ -2282,6 +2295,13 @@ and does all of it in one transaction. That is why it exists alongside `DELETE`:
 composing close and report as two client calls can half-fail into a closed
 thread whose evidence is out of reach, which is the state this design exists to
 prevent. Omit `report.messageId` to report the person rather than a message.
+
+**Report limits (all report routes).** `reason` is at most 200 characters and
+`description` at most 2000 (`400` beyond). Every report route (message, user,
+event, room, and a conversation leave that carries a `report`) shares one
+allowance of 30 reports per user per day: `429` after that (except the leave, below). A conversation
+leave over the allowance is never refused: the leave and block still happen, the
+report is dropped, and the response says `reportAccepted: false`.
 
 Reporting a message requires that you could see it — group membership, or being
 a participant in the DM. It deliberately does **not** require the conversation
@@ -3420,9 +3440,19 @@ be seen.
 
 ### POST /uploads/presigned-url
 ```json
-{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events" }
+{ "filename": "photo.jpg", "contentType": "image/jpeg", "folder": "profile|chat|events", "size": 183422 }
 ```
 Note: `events` folder requires organizer/admin role.
+
+`size` is the file's byte length. When sent it is signed into the URL as
+`content-length`, so storage refuses a PUT of any other size; a `size` above the
+folder's ceiling (`maxSize` in the response) is `400`.
+
+**`size` is required** from app version **1.0.1** (`UPLOAD_SIZE_REQUIRED_FROM_VERSION`
+in `lib/mobile-gate.ts`, read from `X-App-Version`): omitting it is `400`. Older
+builds, and requests with no `X-App-Version`, still get an unbound URL until
+`MOBILE_MIN_APP_VERSION` is raised past them. The dashboard route
+(`POST /api/uploads/presigned-url`) always requires it.
 
 PUT the file to `uploadUrl` with **exactly** the `Content-Type` you asked for.
 The type is signed into the URL, so any other type, or none, is refused by

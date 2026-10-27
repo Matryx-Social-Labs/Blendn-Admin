@@ -1240,6 +1240,8 @@ model mobile_refresh_tokens {
 
   @@index([user_id])
   @@index([expires_at])
+  /// Also, in migration SQL only: `mobile_refresh_tokens_revoked_sweep_idx`, a partial index
+  /// (revoked_at) WHERE revoked_reason IS NULL AND revoked_at IS NOT NULL, for `cleanupExpiredTokens`.
 }
 
 /// This-or-that answers (plan v2 §8.3). One per person per question; the
@@ -1652,6 +1654,10 @@ model private_messages {
   replies      private_messages[]    @relation("DmReplies")
 
   @@index([conversation_id])
+  /// A thread read newest-first and the first unread are both "this conversation,
+  /// by time": the plain `(conversation_id)` index above reads the whole thread and
+  /// sorts it, and `(created_at)` alone walks every DM on the platform.
+  @@index([conversation_id, created_at])
   @@index([sender_id])
   @@index([created_at])
   @@index([reply_to_id])
@@ -4104,6 +4110,8 @@ model product_events {
   @@index([name, occurred_at])
   /// One person's activity, for cohorts and retention curves.
   @@index([user_id, occurred_at])
+  /// The retention sweep's `occurred_at < cutoff`: BRIN, rows arrive in time order.
+  @@index([occurred_at], type: Brin)
 }
 
 /// A link sent to a role address, proving control of the mailbox.

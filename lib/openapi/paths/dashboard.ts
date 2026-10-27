@@ -555,6 +555,7 @@ registry.registerPath({
         "application/json": {
           schema: PresignedUrlRequestSchema.extend({
             folder: z.enum(["profile", "chat", "events", "claims"]).default("events"),
+            size: z.number().int().min(1).describe("Required here. Byte length of the file; signed into the URL as `content-length`."),
           }),
         },
       },

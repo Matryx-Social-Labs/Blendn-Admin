@@ -73,13 +73,26 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
   // Event rooms only: what is classified is how people feel about an event
   // (`event_feedback.event_id`), and a crew's or a Blend's chat has no event to
   // feel about. Left in, its messages would be selected on every pass for ever.
-  const eligible = await db.$queryRaw<{ id: string }[]>`
-    SELECT m.id
+  /*
+   * Everything the pass needs, in the one statement that finds the work: the
+   * text, the author, the room and its event. This was ids here and a second
+   * `findMany` (with a nested read of the room) to fetch what the ids already
+   * sat beside.
+   *
+   * Only messages younger than `SCAN_WINDOW_MS`. Without it the anti-join
+   * walked every text message of every open room, from the oldest, each pass
+   * (300k messages: 196 ms and 900k buffers to find three). A message still
+   * unclassified after hours is not worth a place in the queue; a room stays
+   * open to end + 24 h, but its mood is a live figure.
+   */
+  const messages = await db.$queryRaw<ToClassify[]>`
+    SELECT m.id, m.content, m.user_id, m.chat_group_id, g.event_id
       FROM chat_messages m
       JOIN chat_groups g ON g.id = m.chat_group_id
      WHERE g.status = 'active'
        AND g.kind = 'event'
        AND m.type = 'text'
+       AND m.created_at > ${new Date(Date.now() - SCAN_WINDOW_MS)}
        AND m.deleted_at IS NULL
        AND (m.moderation_status IS NULL OR m.moderation_status <> 'hidden')
        AND m.metadata ->> 'sponsored_message_id' IS NULL
@@ -87,141 +100,90 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
      ORDER BY m.created_at ASC
      LIMIT ${MAX_MESSAGES_PER_SWEEP + 1}
   `
-  const eligibleIds = eligible.map((r) => r.id)
-  if (eligibleIds.length === 0) return { classified: 0, hasMore: false }
-
-  const messages = await db.chat_messages.findMany({
-    where: {
-      // `status: "active"` is already the state machine for "this room is open"
-      // — live event or post-event feedback window. The chat lifecycle sweeper
-      // archives it afterwards, so this needs no time arithmetic of its own.
-      chat_group: { status: "active", kind: "event" },
-      type: "text",
-      deleted_at: null,
-      /*
-       * A message that was removed should not shape the room's mood — hidden is
-       * the moderation pipeline's verdict, deleted is the author's.
-       *
-       * Spelled as an explicit OR rather than `{ not: "hidden" }`, which is the
-       * obvious way and silently wrong: `moderation_status` is nullable, SQL's
-       * `<> 'hidden'` is NULL for a NULL row, and NULL is not true — so `not`
-       * drops every unmoderated message. Those are set to "clean" by a
-       * fire-and-forget write *after* the response, so the newest messages are
-       * exactly the ones still NULL, and they are the ones a live screen is for.
-       */
-      OR: [{ moderation_status: null }, { moderation_status: { not: "hidden" } }],
-      // `{ is: null }`, not `null` — the bare form does not filter a to-one
-      // relation and quietly matches everything.
-      feedback: { is: null },
-      /*
-       * NOT A PAID MESSAGE.
-       *
-       * A sponsored send is written as `type: "text"` — deliberately, because
-       * `type` also carries the media kind and a sponsored send is the one
-       * broadcast that may be an image, so spending it on the message kind
-       * would lose that. `lib/sponsored-scheduler.ts` records the decision and
-       * the marker it leaves instead: `metadata.sponsored_message_id`.
-       *
-       * The consequence, until now, was that an advertiser's copy was
-       * classified as somebody's feeling about the event — feeding the live
-       * Mood bar and appearing in the post-event digest under "what people
-       * said", attributed to a pseudonym. Announcements stopped doing this when
-       * they got their own `type`; ads could not follow.
-       *
-       * Excluded in the QUERY, never after the fetch. This selects only
-       * messages with no `feedback` row, so an ad skipped in JavaScript would
-       * be re-selected on every pass for ever — a batch that slowly fills with
-       * work nobody can do.
-       */
-      id: { in: eligibleIds },
-    },
-    select: {
-      id: true,
-      content: true,
-      user_id: true,
-      chat_group_id: true,
-      chat_group: { select: { event_id: true } },
-    },
-    // Oldest first: a backlog should drain in the order it happened, so the
-    // 30-minute window the live screen reads fills in chronologically.
-    orderBy: { created_at: "asc" },
-    take: MAX_MESSAGES_PER_SWEEP + 1,
-  })
 
   const hasMore = messages.length > MAX_MESSAGES_PER_SWEEP
   const batch = hasMore ? messages.slice(0, MAX_MESSAGES_PER_SWEEP) : messages
   if (batch.length === 0) return { classified: 0, hasMore: false }
 
-  const eventOf = new Map(batch.map((m) => [m.id, m.chat_group.event_id]))
   const rowOf = new Map(batch.map((m) => [m.id, m]))
   const results = await classifyMessages(batch.map((m) => ({ id: m.id, text: m.content })))
 
-  let classified = 0
-  for (const result of results) {
-    const eventId = eventOf.get(result.id)
-    if (!eventId) continue
+  let written: { message_id: string }[]
+  try {
+    written = await writeFeedback(results.filter((r) => rowOf.has(r.id)).map((r) => ({ ...r, eventId: rowOf.get(r.id)!.event_id })))
+  } catch (error) {
+    // No feedback row was written, so the next pass finds the same messages again.
+    logger.error("Sentiment write failed", { error: error instanceof Error ? error.message : String(error) })
+    return { classified: 0, hasMore }
+  }
+
+  const resultOf = new Map(results.map((r) => [r.id, r]))
+  for (const { message_id } of written) {
+    /*
+     * "Routed to moderation regardless of sentiment" -- the live tab's Safety
+     * alert has said this since it was written, and nothing did it. Driven
+     * 2026-09-13: "some guy keeps following me around the bar and grabbed
+     * my arm" was classified safety_conduct, opened a critical issue, and
+     * never reached the moderation queue -- no flag row, no "flags waiting",
+     * no human unless somebody happened to open the live tab.
+     *
+     * A flag, never a hide: this is a person asking for help, and hiding it
+     * is the one action that makes things worse. `flagged` on the message
+     * only when nothing stronger is already there.
+     */
+    const result = resultOf.get(message_id)
+    const row = rowOf.get(message_id)
+    if (result?.category !== "safety_conduct" || !row) continue
     try {
-      /*
-       * Upsert on the unique `message_id`, which is what makes the whole thing
-       * idempotent: a re-classification updates in place rather than
-       * accumulating rows, so a digest cannot double-count a message.
-       *
-       * A human correction is never overwritten. Someone read the message and
-       * disagreed with the model; running the model again must not quietly undo
-       * that.
-       */
-      const existing = await db.event_feedback.findUnique({
-        where: { message_id: result.id },
-        select: { source: true },
-      })
-      if (existing?.source === "human") continue
-
-      await db.event_feedback.upsert({
-        where: { message_id: result.id },
-        create: {
-          event_id: eventId,
-          message_id: result.id,
-          sentiment: result.sentiment,
-          category: result.category,
-          confidence: result.confidence,
-          source: result.source,
-        },
-        update: {
-          sentiment: result.sentiment,
-          category: result.category,
-          confidence: result.confidence,
-          source: result.source,
-        },
-      })
-      classified += 1
-
-      /*
-       * "Routed to moderation regardless of sentiment" -- the live tab's Safety
-       * alert has said this since it was written, and nothing did it. Driven
-       * 2026-09-13: "some guy keeps following me around the bar and grabbed
-       * my arm" was classified safety_conduct, opened a critical issue, and
-       * never reached the moderation queue -- no flag row, no "flags waiting",
-       * no human unless somebody happened to open the live tab.
-       *
-       * A flag, never a hide: this is a person asking for help, and hiding it
-       * is the one action that makes things worse. `flagged` on the message
-       * only when nothing stronger is already there.
-       */
-      if (result.category === "safety_conduct") {
-        const row = rowOf.get(result.id)
-        if (row) await routeSafetyToModeration(row, result.confidence)
-      }
+      await routeSafetyToModeration(row, result.confidence)
     } catch (error) {
-      // One bad row must not abandon the rest of the batch. It has no feedback
-      // row, so the next pass finds it again.
-      logger.error("Sentiment write failed", {
-        messageId: result.id,
-        error: error instanceof Error ? error.message : String(error),
-      })
+      logger.error("Safety routing failed", { messageId: message_id, error: error instanceof Error ? error.message : String(error) })
     }
   }
 
-  return { classified, hasMore }
+  return { classified: written.length, hasMore }
+}
+
+/** How far back the pass looks for messages to classify. */
+export const SCAN_WINDOW_MS = 6 * 60 * 60_000
+
+interface ToClassify {
+  id: string
+  content: string
+  user_id: string
+  chat_group_id: string
+  event_id: string
+}
+
+/**
+ * One statement for the pass, on the unique `message_id`, which is what makes
+ * the whole thing idempotent: a re-classification updates in place rather than
+ * accumulating rows, so a digest cannot double-count a message.
+ *
+ * A human correction is never overwritten. Someone read the message and
+ * disagreed with the model; running the model again must not quietly undo
+ * that -- the `WHERE` skips it, and it is not returned. A message deleted while
+ * the model was reading it is simply not joined, where a row per message made
+ * that one failed write among the rest.
+ */
+async function writeFeedback(
+  results: ReadonlyArray<Awaited<ReturnType<typeof classifyMessages>>[number] & { eventId: string }>
+): Promise<{ message_id: string }[]> {
+  if (results.length === 0) return []
+  const last = new Map(results.map((r) => [r.id, r]))
+  const rows = [...last.values()]
+  return db.$queryRaw<{ message_id: string }[]>`
+    INSERT INTO event_feedback (id, event_id, message_id, sentiment, category, confidence, source)
+    SELECT gen_random_uuid(), v.event_id, v.message_id, v.sentiment::feedback_sentiment, v.category::issue_category, v.confidence, v.source::feedback_source
+      FROM unnest(
+        ${rows.map((r) => r.eventId)}::uuid[], ${rows.map((r) => r.id)}::uuid[], ${rows.map((r) => r.sentiment)}::text[],
+        ${rows.map((r) => r.category)}::text[], ${rows.map((r) => r.confidence)}::float8[], ${rows.map((r) => r.source)}::text[]
+      ) AS v(event_id, message_id, sentiment, category, confidence, source)
+      JOIN chat_messages m ON m.id = v.message_id
+    ON CONFLICT (message_id) DO UPDATE
+      SET sentiment = EXCLUDED.sentiment, category = EXCLUDED.category, confidence = EXCLUDED.confidence, source = EXCLUDED.source
+      WHERE event_feedback.source <> 'human'
+    RETURNING message_id`
 }
 
 /** One flag per message: the sweeper re-runs, the queue must not fill with copies. */

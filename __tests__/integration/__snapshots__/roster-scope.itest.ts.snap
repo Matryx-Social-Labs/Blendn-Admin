@@ -1,0 +1,48 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`the room roster is what the snapshot says, names a page, and budgets its geocoding 1`] = `
+[
+  {
+    "age": 27,
+    "image": null,
+    "location": null,
+    "name": "Name viewer",
+  },
+  {
+    "age": 27,
+    "image": "https://img.invalid/revealed.jpg",
+    "location": "Bengaluru",
+    "name": "Name revealed",
+  },
+  {
+    "age": 27,
+    "location": "Testville",
+    "name": "Pseudo plain-1",
+  },
+  {
+    "age": 27,
+    "location": "Testville",
+    "name": "Pseudo plain-2",
+  },
+  {
+    "age": 27,
+    "location": "Testville",
+    "name": "Pseudo plain-3",
+  },
+  {
+    "age": 27,
+    "location": "Pune",
+    "name": "Pseudo plain-4",
+  },
+  {
+    "age": 27,
+    "location": "Pune",
+    "name": "Pseudo plain-5",
+  },
+  {
+    "age": 27,
+    "location": "Pune",
+    "name": "Pseudo plain-6",
+  },
+]
+`;

@@ -8,6 +8,7 @@ export const RATE_LIMIT_WINDOW = {
   REFRESH: 15 * 60 * 1000, // 15 minutes
   BATCH: 60 * 1000, // 1 minute
   DASHBOARD_SIGNIN: 15 * 60 * 1000, // 15 minutes
+  DASHBOARD_SIGNIN_ACCOUNT_DAY: 24 * 60 * 60 * 1000, // 24 hours
   ORGANISER_BROADCAST: 60 * 1000, // 1 minute
   PRIVATE_MESSAGE: 60 * 1000, // 1 minute
   SHARE_PUBLIC: 60 * 1000, // 1 minute
@@ -20,6 +21,12 @@ export const RATE_LIMIT_MAX_REQUESTS = {
   REFRESH: 20,
   BATCH: 30,
   DASHBOARD_SIGNIN: 5,
+  // Wrong passwords per EMAIL, from any network (audit 2026-10-24, WEB M5): the ceiling on spraying
+  // from many addresses. Two windows, 15 minutes and 24 hours. Anyone can spend it against a name, so
+  // a completed password reset (proof of the mailbox) clears it. Each network is held to
+  // DASHBOARD_SIGNIN above first, so reaching 20 takes four networks.
+  DASHBOARD_SIGNIN_ACCOUNT: 20,
+  DASHBOARD_SIGNIN_ACCOUNT_DAY: 200,
   // Announcements and sponsored messages broadcast to every attendee.
   ORGANISER_BROADCAST: 10,
   PRIVATE_MESSAGE: 30,

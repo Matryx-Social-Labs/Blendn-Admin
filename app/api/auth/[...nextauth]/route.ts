@@ -1,32 +1,16 @@
-import type { NextRequest } from "next/server"
 import NextAuth from "next-auth"
 
 import { authOptions } from "@/lib/auth"
-import { createAuthRateLimit, rateLimit } from "@/lib/rate-limit"
-
-const handler = NextAuth(authOptions)
 
 /**
- * The dashboard sign-in limit lives HERE, in the Node runtime, not in the
- * middleware.
+ * The dashboard sign-in limits live in `authorize()` (lib/auth.ts), not here.
  *
- * It used to be in `middleware.ts`, which Next 16 still runs on the Edge
- * runtime. There the Redis client cannot load ("Cannot find module
- * 'node:crypto'"), the store falls back to an in-process Map, and an edge
- * isolate does not keep a Map between invocations — so on staging, with five
- * attempts per fifteen minutes configured, one request in six was refused and
- * the rest were checked against the password (SCRUM-194). The route-level
- * limiters, this one included now, log "Rate limiting backed by Redis".
- *
- * Same config and the same 429 body: the login page already reads either as
- * "Too many sign-in attempts from this network".
+ * They were here first, matching on the raw request path — and a percent-encoded
+ * spelling of the credentials callback reaches this same catch-all with the
+ * segment decoded and the path not, so it skipped them (audit 2026-10-24, WEB
+ * H1). They were in `middleware.ts` before that, which runs on the Edge, where
+ * Redis cannot load (SCRUM-194). `authorize()` runs in Node, on every path.
  */
-async function POST(req: NextRequest, ctx: { params: Promise<{ nextauth: string[] }> }) {
-  if (req.nextUrl.pathname === "/api/auth/callback/credentials") {
-    const limited = await rateLimit(req, createAuthRateLimit("dashboard-signin"))
-    if (limited) return limited
-  }
-  return handler(req, ctx)
-}
+const handler = NextAuth(authOptions)
 
-export { handler as GET, POST }
+export { handler as GET, handler as POST }

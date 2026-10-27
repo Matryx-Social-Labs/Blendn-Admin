@@ -98,6 +98,15 @@ export async function pseudonymSchemeFor(
   return event && event.created_at < KEYED_PSEUDONYMS_FROM ? "legacy" : "keyed"
 }
 
+/**
+ * `pseudonymSchemeFor` for a caller that already holds the event's `created_at`
+ * (a list that selected it with the rows), so the names cost no lookup per event.
+ * The same cut-off; keep the two in step.
+ */
+export function pseudonymSchemeAt(createdAt: Date): PseudonymScheme {
+  return createdAt < KEYED_PSEUDONYMS_FROM ? "legacy" : "keyed"
+}
+
 function fnv1a(seed: string): number {
   let h = 0x811c9dc5
   for (let i = 0; i < seed.length; i++) {
@@ -188,7 +197,7 @@ export async function generateUniqueAnonymousName(
 }
 
 /**
- * Everyone's pseudonym in an event's room, keyed by user id.
+ * These people's pseudonyms in an event's room, keyed by user id.
  *
  * The room is pseudonymous everywhere it is rendered — group chat, the
  * participants list, the socket payloads, the dashboard. The attendee list was
@@ -204,9 +213,11 @@ export async function generateUniqueAnonymousName(
  * a bug, and degrading to the thing we are trying not to disclose turns that bug
  * into a disclosure.
  */
-export async function pseudonymsForEvent(eventId: string): Promise<Map<string, string>> {
+export async function pseudonymsForEvent(eventId: string, userIds: readonly string[]): Promise<Map<string, string>> {
+  if (userIds.length === 0) return new Map()
   const members = await db.chat_group_members.findMany({
-    where: { chat_group: { event_id: eventId } },
+    // The page being named, not the room: a roster of 3,000 names 50 people.
+    where: { chat_group: { event_id: eventId }, user_id: { in: [...userIds] } },
     select: { user_id: true, anonymous_name: true },
   })
   return new Map(members.map((m) => [m.user_id, m.anonymous_name || "Attendee"]))

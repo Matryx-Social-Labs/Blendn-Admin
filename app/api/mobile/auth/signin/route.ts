@@ -2,6 +2,8 @@ import { logger } from "@/lib/logger"
 import { accountRefusal } from "@/lib/account-refusal"
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
+import { DUMMY_HASH, emailKeysFor, refuseOverEmailLimits, settleSigninSuccess } from "@/lib/dashboard-signin-limits"
+import { SIGNIN_ACCOUNT_LOCKED } from "@/lib/rbac"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
 import {
@@ -11,6 +13,8 @@ import {
   storeRefreshToken,
 } from "@/lib/mobile-auth"
 import {
+  ErrorCode,
+  errorResponse,
   successResponse,
   validationErrorResponse,
   unauthorizedResponse,
@@ -60,6 +64,22 @@ export async function POST(request: NextRequest) {
     })
     if (perAccount) return perAccount
 
+    /*
+     * The same per-email windows as the dashboard sign-in, counted against the
+     * same address. This door verifies staff passwords too (a right one is
+     * answered 403, a wrong one 401), so without them it was a password oracle
+     * under limits of its own (security review of fix/security-auth, M1).
+     */
+    const emailKeys = emailKeysFor(email)
+    try {
+      await refuseOverEmailLimits(emailKeys)
+    } catch (error) {
+      if (error instanceof Error && error.message === SIGNIN_ACCOUNT_LOCKED) {
+        return errorResponse("Too many sign-in attempts. Try again later.", 429, ErrorCode.RATE_LIMITED)
+      }
+      throw error
+    }
+
     // Find user
     const user = await db.user.findUnique({
       where: { email },
@@ -68,15 +88,12 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    if (!user || !user.password) {
+    // Always a comparison, so an unknown address takes as long as a known one.
+    const isValidPassword = await bcrypt.compare(password, user?.password ?? DUMMY_HASH)
+    if (!user?.password || !isValidPassword) {
       return unauthorizedResponse("Invalid email or password")
     }
-
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password)
-    if (!isValidPassword) {
-      return unauthorizedResponse("Invalid email or password")
-    }
+    await settleSigninSuccess(emailKeys)
 
     /*
      * Checked after the password, deliberately.

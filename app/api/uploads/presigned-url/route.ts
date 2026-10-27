@@ -9,6 +9,7 @@ import {
   getMaxFileSize,
   isConfigured,
   UploadFolder,
+  UPLOADS_UNAVAILABLE,
 } from "@/lib/tigris"
 import {
   successResponse,
@@ -23,12 +24,14 @@ const presignedUrlSchema = z.object({
   filename: z.string().min(1, "Filename is required").max(255),
   contentType: z.string().min(1, "Content type is required"),
   folder: z.enum(["profile", "chat", "events", "claims"]).default("events"),
+  /** Byte length of the file about to be PUT; signed into the URL (API M6). */
+  size: z.number().int().min(1),
 })
 
 export async function POST(request: NextRequest) {
   try {
     if (!isConfigured()) {
-      return errorResponse("File storage is not configured", 503)
+      return errorResponse(UPLOADS_UNAVAILABLE, 503)
     }
 
     const session = await getAuth()
@@ -63,7 +66,7 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse(validation.error)
     }
 
-    const { filename, contentType, folder } = validation.data
+    const { filename, contentType, folder, size } = validation.data
     if (!validateContentType(contentType, folder as UploadFolder)) {
       return errorResponse(
         `Content type "${contentType}" is not allowed for ${folder} uploads`,
@@ -71,11 +74,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    if (size > getMaxFileSize(folder as UploadFolder)) {
+      return errorResponse(`File is larger than the ${getMaxFileSize(folder as UploadFolder)} byte limit for ${folder} uploads`, 400)
+    }
+
     const { uploadUrl, publicUrl, key } = await getPresignedUploadUrl(
       filename,
       contentType,
       folder as UploadFolder,
-      session.user.id
+      session.user.id,
+      { size }
     )
 
     return successResponse({

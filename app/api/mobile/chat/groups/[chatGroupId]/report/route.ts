@@ -12,7 +12,7 @@ import {
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
-import { readJson } from "@/lib/api-input"
+import { readJson, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 
 interface RouteParams {
   params: Promise<{ chatGroupId: string }>
@@ -20,8 +20,8 @@ interface RouteParams {
 
 /** The same body as every other report: a reason, and optionally what happened. */
 const reportRoomSchema = z.object({
-  reason: z.string().trim().min(1, "Reason is required").max(200),
-  description: z.string().max(2000).optional(),
+  reason: z.string().trim().min(1, "Reason is required").max(REPORT_REASON_MAX),
+  description: z.string().max(REPORT_DESCRIPTION_MAX).optional(),
 })
 
 /**
@@ -50,7 +50,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Authentication required")
 
-    const limited = await rateLimit(request, userLimit("safety", "report-room", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("safety", "report-room", authUser.userId))) ??
+      (await rateLimit(request, userLimit("reportDay", "report-room-day", authUser.userId)))
     if (limited) return limited
 
     const validation = reportRoomSchema.safeParse(await readJson(request))

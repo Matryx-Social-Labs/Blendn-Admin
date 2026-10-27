@@ -43,6 +43,35 @@ function afterInInbox(k: Keyset) {
     : { OR: [{ last_message_at: null, ...tied }, { last_message_at: { not: null } }] }
 }
 
+/**
+ * Unread, per conversation: not yours, not read, and visible.
+ *
+ * Was a relation `_count`, which Prisma emits as a LEFT JOIN onto
+ * `SELECT conversation_id, COUNT(*) … GROUP BY conversation_id` over ALL of
+ * private_messages (a Parallel Seq Scan of every unread DM on the platform per
+ * inbox open, 210k rows locally); this names the person's own conversations.
+ */
+async function unreadCounts(conversationIds: string[], viewerId: string) {
+  if (conversationIds.length === 0) return new Map<string, number>()
+  const rows = await db.private_messages.groupBy({
+    by: ["conversation_id"],
+    where: {
+      conversation_id: { in: conversationIds },
+      is_read: false,
+      sender_id: { not: viewerId },
+      /*
+       * The reader that gets forgotten. A hidden message is never
+       * delivered, so it is never marked read — leaving it in this
+       * count is a badge that cannot be cleared, on a thread with
+       * nothing in it to clear.
+       */
+      ...VISIBLE_DM,
+    },
+    _count: true,
+  })
+  return new Map(rows.map((r) => [r.conversation_id, r._count]))
+}
+
 // GET /api/mobile/conversations - List user's conversations, a page at a time
 export async function GET(request: NextRequest) {
   try {
@@ -93,23 +122,6 @@ export async function GET(request: NextRequest) {
             profile: { select: { read_receipts: true } },
           },
         },
-        _count: {
-          select: {
-            messages: {
-              where: {
-                is_read: false,
-                sender_id: { not: authUser.userId },
-                /*
-                 * The reader that gets forgotten. A hidden message is never
-                 * delivered, so it is never marked read — leaving it in this
-                 * count is a badge that cannot be cleared, on a thread with
-                 * nothing in it to clear.
-                 */
-                ...VISIBLE_DM,
-              },
-            },
-          },
-        },
       },
       // Newest first, as it always was: a conversation with nothing said yet
       // leads (`nulls: "first"` is what `desc` meant here), then the rest by
@@ -121,9 +133,11 @@ export async function GET(request: NextRequest) {
     ])
     const page = keysetPage(rows, limit, (c) => ({ at: c.last_message_at, id: c.id, createdAt: c.created_at }))
     const conversations = page.items
-    // The preview of each, in one query (`latestVisibleMessages`).
-    const previews = await latestVisibleMessages(conversations.map((c) => c.id))
     const pagination: ListPagination = { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount }
+
+    // The preview of each (`latestVisibleMessages`) and the unread counts, one query each, side by side.
+    const ids = conversations.map((c) => c.id)
+    const [previews, unread] = await Promise.all([latestVisibleMessages(ids), unreadCounts(ids, authUser.userId)])
 
     // Format conversations for the mobile app
     const formattedConversations = conversations.map((conv) => {
@@ -183,7 +197,7 @@ export async function GET(request: NextRequest) {
               }),
             }
           : null,
-        unreadCount: conv._count.messages,
+        unreadCount: unread.get(conv.id) ?? 0,
         updatedAt: conv.last_message_at || conv.created_at,
       }
     })

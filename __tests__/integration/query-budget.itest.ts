@@ -85,7 +85,11 @@ beforeAll(() => {
         args: unknown
         query: (a: unknown) => Promise<unknown>
       }) {
-        calls.push(`${model ?? "raw"}.${operation}`)
+        // The slot is taken before the await: operations that overlap (a route
+        // that reads in parallel) finish in any order, and pairing rows to calls
+        // by push order would credit one operation's rows to another.
+        const slot = calls.push(`${model ?? "raw"}.${operation}`) - 1
+        rows[slot] = 0
         const result = await query(args)
         /*
          * Rows as well as round trips, and a recorded control is why.
@@ -101,7 +105,7 @@ beforeAll(() => {
          * never shows up as a slow query in a log, only as a route that gets
          * gradually heavier as rooms fill.
          */
-        rows.push(Array.isArray(result) ? result.length : 0)
+        rows[slot] = Array.isArray(result) ? result.length : 0
         return result
       },
     },

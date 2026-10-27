@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -930,7 +930,9 @@ registry.registerPath({
     "",
     "If caught, response has `moderation_hidden: true`, `content: null`. Message is never broadcast.",
     "",
-    "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429)",
+    "**Error codes:** `USER_MUTED` (403), `USER_BANNED` (403), `NOT_CHECKED_IN` (403), `SPAM_BLOCKED` (429), `MODERATION_UNAVAILABLE` (503)",
+    "",
+    MODERATION_UNAVAILABLE_NOTE,
     "",
     NOT_OPEN_YET_NOTE.trim(),
   ].join("\n"),
@@ -941,6 +943,7 @@ registry.registerPath({
   },
   responses: {
     201: { description: "Message sent (check `moderation_hidden` — if true, content was blocked)", content: { "application/json": { schema: wrap(z.object({ message: ChatMessageSchema })) } } },
+    503: moderationUnavailableError,
     ...standardErrors,
   },
 })

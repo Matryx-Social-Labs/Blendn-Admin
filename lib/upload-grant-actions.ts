@@ -9,7 +9,7 @@ import { SPONSORSHIP } from "@/lib/constants"
 import { db } from "@/lib/db"
 import { actorFor, resolveSponsorGrant } from "@/lib/org-membership"
 import { broadcastMayCarryMedia } from "@/lib/rbac"
-import { getPresignedUploadUrl, headObject, isConfigured, pinnedUrl } from "@/lib/tigris"
+import { getPresignedUploadUrl, headObject, isConfigured, pinnedUrl, UPLOADS_UNAVAILABLE } from "@/lib/tigris"
 
 /**
  * Media on a sponsored creative, and where the bytes came from.
@@ -82,7 +82,7 @@ export async function requestCreativeUpload(
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Unauthorized")
 
-  if (!isConfigured()) throw new Refusal("File storage is not configured")
+  if (!isConfigured()) throw new Refusal(UPLOADS_UNAVAILABLE)
 
   const parsed = requestSchema.safeParse(input)
   if (!parsed.success) {

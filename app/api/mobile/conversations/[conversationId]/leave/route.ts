@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { overUserLimit, rateLimit, userLimit } from "@/lib/rate-limit"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
 import {
@@ -15,7 +15,7 @@ import {
   serverErrorResponse,
   errorResponse,
 } from "@/lib/api-response"
-import { isUuid, readOptionalJson } from "@/lib/api-input"
+import { isUuid, readOptionalJson, REPORT_REASON_MAX, REPORT_DESCRIPTION_MAX } from "@/lib/api-input"
 import { leaveConversationIn } from "@/lib/leave-conversation"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 
@@ -59,8 +59,8 @@ const leaveSchema = z.object({
   action: z.enum(["unmatch", "block"]).default("unmatch"),
   report: z
     .object({
-      reason: z.string().min(1, "Reason is required"),
-      description: z.string().max(2000).optional(),
+      reason: z.string().min(1, "Reason is required").max(REPORT_REASON_MAX),
+      description: z.string().max(REPORT_DESCRIPTION_MAX).optional(),
       /**
        * A specific message, when there is one worth pointing at. Without it the
        * report is filed against the person instead — which is also what stays
@@ -89,7 +89,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const parsed = leaveSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { action, report } = parsed.data
+    const { action } = parsed.data
+
+    /*
+     * Over the daily report allowance (API M8), the leave and the block still
+     * happen and only the report is dropped, said in `reportAccepted: false`:
+     * a cap must never stand between somebody and a block.
+     */
+    const reportDropped = Boolean(parsed.data.report) && (await overUserLimit("reportDay", "report-conversation-day", authUser.userId))
+    const report = reportDropped ? undefined : parsed.data.report
 
     const conversation = await db.private_conversations.findUnique({
       where: { id: conversationId },
@@ -174,6 +182,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       closed: true,
       blocked: action === "block",
       reported: Boolean(report),
+      // False only when a report was sent and the daily allowance had run out.
+      reportAccepted: !reportDropped,
     })
   } catch (error) {
     logger.error("Leave conversation error", {

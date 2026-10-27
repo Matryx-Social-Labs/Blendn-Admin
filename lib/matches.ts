@@ -296,13 +296,6 @@ export async function matchesForEvent(
   ])
 
   /*
-   * Who the card names: people who revealed in THIS room (`visibleInRoom`),
-   * asked once for the whole room, so blocks and closed pairs beat a reveal here
-   * as they do on the roster. Friends are not part of this question any more.
-   */
-  const recognised = await visibleInRoom(viewerId, eventId, [...new Set(checkIns.map((c) => c.user_id))])
-
-  /*
    * EVERY friend leaves the deck, whatever their switch (the owner's rule,
    * 2026-10-22: two friends never meet as strangers). This used to remove only
    * the friends you could recognise and keep the rest as pseudonymous cards, on
@@ -376,12 +369,6 @@ export async function matchesForEvent(
       interestHolders.set(id, (interestHolders.get(id) ?? 0) + 1)
     }
   }
-
-  const pseudonyms = await db.chat_group_members.findMany({
-    where: { chat_group: { event_id: eventId } },
-    select: { user_id: true, anonymous_name: true },
-  })
-  const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
 
   /*
    * Shared history, in ONE query for the whole room.
@@ -521,7 +508,8 @@ export async function matchesForEvent(
     sharedPlans: plansOf.get(c.user_id) ?? 0,
     exposures: exposures.get(c.user_id) ?? 0,
     likesReceived: likesOf.get(c.user_id) ?? 0,
-    pseudonym: pseudonymOf.get(c.user_id) ?? "Attendee",
+    // Neither feeds the ranking: both are filled in for the page below.
+    pseudonym: "Attendee",
     interestIds: expand(c.user.user_interests.map((i) => i.category_id)),
     intents: effectiveIntents(
       prefsOf.get(c.user_id)?.intent ?? [],
@@ -535,8 +523,7 @@ export async function matchesForEvent(
     },
     insideNow: c.status === "checked_in",
     checkedInAt: c.check_in_time!,
-    // The roster's rule, not the bare reveal flag (`visibleInRoom`).
-    revealed: recognised.has(c.user_id),
+    revealed: false,
     name: c.user.name,
     /*
      * `photos[0]`, full stop.
@@ -550,22 +537,48 @@ export async function matchesForEvent(
     photo: c.user.profile?.photos?.[0] ?? null,
   }))
 
-  const ranked = rankMatches(
-    {
-      userId: viewerId,
-      interestIds: viewerInterestIds,
-      intents: effectiveIntents(
-        prefsOf.get(viewerId)?.intent ?? [],
-        viewerProfile?.intent_default ?? []
-      ),
-      workField: viewerProfile?.work_field ?? null,
-      dating: {
-        gender: (viewerProfile?.gender ?? null) as Gender | null,
-        interestedIn: (viewerProfile?.interested_in ?? []) as Gender[],
-      },
+  const viewer = {
+    userId: viewerId,
+    interestIds: viewerInterestIds,
+    intents: effectiveIntents(prefsOf.get(viewerId)?.intent ?? [], viewerProfile?.intent_default ?? []),
+    workField: viewerProfile?.work_field ?? null,
+    dating: {
+      gender: (viewerProfile?.gender ?? null) as Gender | null,
+      interestedIn: (viewerProfile?.interested_in ?? []) as Gender[],
     },
-    candidates,
-    { interestHolders, parentOf, population: eligible.length, peopleInside, limit }
+  }
+  const rankOpts = { interestHolders, parentOf, population: eligible.length, peopleInside, limit }
+
+  /*
+   * Rank the room, then name the page.
+   *
+   * Who a card names (`visibleInRoom`: blocks and closed pairs beat a reveal,
+   * as on the roster) and its pseudonym only decide how a card is DISPLAYED,
+   * never where it sorts, so asking them of the whole room was five lists and
+   * a member read of O(room) to label `limit` cards. Ask them of the page and
+   * rank that page again with the answers: every score is the candidate's own
+   * and `population` / `interestHolders` / `peopleInside` are passed in, so the
+   * page ranks to the same order and the same cards.
+   */
+  const page = rankMatches(viewer, candidates, rankOpts)
+  const pageIds = page.map((m) => m.userId)
+  const [recognised, pseudonyms] = await Promise.all([
+    visibleInRoom(viewerId, eventId, pageIds),
+    pageIds.length
+      ? db.chat_group_members.findMany({
+          where: { chat_group: { event_id: eventId }, user_id: { in: pageIds } },
+          select: { user_id: true, anonymous_name: true },
+        })
+      : [],
+  ])
+  const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
+  const onPage = new Set(pageIds)
+  const ranked = rankMatches(
+    viewer,
+    candidates
+      .filter((c) => onPage.has(c.userId))
+      .map((c) => ({ ...c, pseudonym: pseudonymOf.get(c.userId) ?? "Attendee", revealed: recognised.has(c.userId) })),
+    rankOpts
   )
 
   // Category names, resolved once for the whole page rather than per card.
