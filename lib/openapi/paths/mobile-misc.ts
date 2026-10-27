@@ -563,7 +563,7 @@ registry.registerPath({
   tags: ["Mobile Users"],
   summary: "Get user public profile",
   description: ROOM_BAN_GATE +
-    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true.",
+    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true. A friend's raw id (a friendship, no block either way, no open pseudonymous conversation) is named like `GET /friends/{userId}` does (SCRUM-863). A crew's, Blend's or board post's handle is that room's card for somebody it admits now — a crew's first name, a Blend's or post's pseudonym, the same five fields — and 404 for anyone else (SCRUM-864).",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {

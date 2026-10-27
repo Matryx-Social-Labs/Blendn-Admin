@@ -398,6 +398,24 @@ an opaque, url-safe string. Field names and shapes did not change.
   Otherwise `GET /users/:userId` also sends `work_field`, and, when
   `identityVisible` is false, `blurPhoto` (the stored derivative) in place of
   `image` and `photos` (SCRUM-458).
+- **A raw id of a friend is named** (SCRUM-863): with a friendship row, no block
+  either way and no open pseudonymous conversation between you, `GET /users/:userId`
+  and `GET /profiles/:userId` answer as for somebody you may see
+  (`identityVisible: true`) — the same fields `GET /friends/:userId` sends, so a
+  friend opened from a DM header is the page Me → Friends opens. Room handles
+  are unchanged: a friend stays a pseudonym there unless they turned
+  `friends_see_me_in_rooms` on.
+- **A crew's, Blend's or board post's handle is a room card** (SCRUM-864), for a
+  caller that room admits now and a person it admits now; otherwise 404 as before.
+  `GET /users/:userId` returns `{ id, name, age, location, isOwnProfile: false,
+  identityVisible: false }` and `GET /profiles/:userId` the `{ id, name,
+  profile: { id, age, onboarded, location } }` subset, with `name` the room's own
+  name for them: a crew's first name only, a Blend's or a board post's pseudonym.
+  No photos, bio or interests. A block either way is a 404.
+- `GET /users/:userId` also sends `sharedInterests: string[]` (the names you both
+  picked) for somebody you may see (SCRUM-858), `interests: []` (the key stays)
+  when you may not (SCRUM-835), and `stats.savedCount` on your own profile: how
+  many events your default (upcoming) saved list holds (SCRUM-825).
 - **Echoes stay handles.** `GET /users/:userId`, `GET /profiles/:userId` (`id`
   and `profile.id`) and `POST /message-requests` (`recipientId`, `recipient.id`)
   return the ref you sent — a handle in, the same handle out — except for your

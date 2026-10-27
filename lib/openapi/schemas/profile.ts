@@ -357,7 +357,7 @@ export const UserPublicProfileSchema = z
     interests: z
       .array(InterestSchema)
       .optional()
-      .describe("Absent through a room handle for somebody that room keeps anonymous."),
+      .describe("Empty unless `identityVisible` is true (the key stays); absent through a room handle for somebody that room keeps anonymous."),
     memberSince: z
       .string()
       .datetime()
@@ -368,9 +368,17 @@ export const UserPublicProfileSchema = z
         eventsAttended: z.number(),
         eventsFavorited: z.number(),
         eventsOrganized: z.number(),
+        savedCount: z
+          .number()
+          .optional()
+          .describe("Your own profile only: how many events your default (upcoming) saved list holds. Additive."),
       })
       .optional()
       .describe("Absent through a room handle for somebody that room keeps anonymous."),
+    sharedInterests: z
+      .array(z.string())
+      .optional()
+      .describe("The names of the interests you and this person both picked. Only for somebody else you may see (`identityVisible`). Additive."),
     isOwnProfile: z.boolean(),
     identityVisible: z
       .boolean()

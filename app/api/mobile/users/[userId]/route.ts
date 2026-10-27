@@ -8,7 +8,8 @@ import { mayShowRealName } from "@/lib/conversation-identity"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { profileBadges } from "@/lib/profile-badges"
-import { identityForRef } from "@/lib/identity"
+import { identityForRef, nonEventRoomCard } from "@/lib/identity"
+import { savedCount } from "@/lib/saved-events"
 import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
 import { db } from "@/lib/db"
@@ -46,7 +47,14 @@ export async function GET(
      * staging case where a reveal at one event named somebody through the
      * pseudonym they kept at another.
      */
-    const { userId, room, identified } = await identityForRef(authUser.userId, ref)
+    /*
+     * A crew's, Blend's or board post's handle is a room card, not an identity
+     * (SCRUM-864): it names its person only to somebody that room admits.
+     */
+    const card = await nonEventRoomCard(authUser.userId, ref)
+    const { userId, room, identified } = card
+      ? { userId: card.userId, room: null, identified: false }
+      : await identityForRef(authUser.userId, ref)
     // The owner of every venue day is not a person anyone can look at; its
     // "events organised" would be a count of every venue day ever made.
     if (userId === SYSTEM_USER_ID) return notFoundResponse("User not found")
@@ -162,10 +170,10 @@ export async function GET(
      * viewer who has seen this person named elsewhere could match them to
      * the pseudonym field by field.
      */
-    if (room && !identified) {
+    if (card || (room && !identified)) {
       return successResponse({
         id: ref,
-        name: await roomPseudonymOf(room, userId),
+        name: card ? card.name : await roomPseudonymOf(room!, userId),
         age: ageFrom(user.profile),
         location: await normalizeLocationToCity(user.profile?.location),
         isOwnProfile: false,
@@ -219,7 +227,12 @@ export async function GET(
       // never returned; this response is an explicit field list, not a spread.
       age: ageFrom(user.profile),
       location: await normalizeLocationToCity(user.profile?.location),
-      interests: user.user_interests.map((ui) => ui.category),
+      /*
+       * The whole list only to somebody who may see who this is: it is the same
+       * in every room, so a card that withholds the name withholds it too. The
+       * key stays, empty, for clients that read it (SCRUM-835).
+       */
+      interests: identified ? user.user_interests.map((ui) => ui.category) : [],
       memberSince: user.createdAt,
       stats: {
         // Your own count includes the places you went live at, as your list
@@ -227,9 +240,13 @@ export async function GET(
         eventsAttended: await distinctEventsAttended(user.id, { places: isOwnProfile }),
         eventsFavorited: user._count.event_favorites,
         eventsOrganized: user._count.organized_events,
+        // What your own saved list holds (its filter, not every row ever saved); yours alone.
+        ...(isOwnProfile && { savedCount: await savedCount(user.id) }),
       },
       isOwnProfile,
       identityVisible: identified,
+      // The interests you have in common, by name, for the outlined chips (SCRUM-858).
+      ...(identified && !isOwnProfile && { sharedInterests: await sharedInterestNames(authUser.userId, user.user_interests) }),
       /*
        * What is already open between you, so a room card can say "Message" or
        * "Request sent" instead of offering a request that would be refused.
@@ -308,4 +325,15 @@ async function connectionBetween(
     youRevealed: open ? (open.user1_id === viewerId ? open.user1_revealed : open.user2_revealed) : false,
     theyRevealed: open ? mayShowRealName(open, otherId) : false,
   }
+}
+
+/** The names, out of `theirs`, the viewer has picked too. */
+async function sharedInterestNames(viewerId: string, theirs: { category: { id: string; name: string } }[]): Promise<string[]> {
+  if (theirs.length === 0) return []
+  const mine = await db.user_interests.findMany({
+    where: { user_id: viewerId, category_id: { in: theirs.map((t) => t.category.id) } },
+    select: { category_id: true },
+  })
+  const shared = new Set(mine.map((m) => m.category_id))
+  return theirs.filter((t) => shared.has(t.category.id)).map((t) => t.category.name)
 }

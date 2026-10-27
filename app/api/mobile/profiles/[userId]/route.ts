@@ -19,7 +19,7 @@ import { deriveInterestedIn, type Gender, type Orientation } from "@/lib/dating"
 import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
 import { friendOfferFor } from "@/lib/friend-offer"
-import { identityForRef } from "@/lib/identity"
+import { identityForRef, nonEventRoomCard } from "@/lib/identity"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -56,13 +56,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * down. Your own profile answers with your own id.
      */
     const { userId: ref } = await params
-    const userId = userIdFromRef(ref)
-
     // Get authenticated user
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    // A crew's, Blend's or board post's handle is a room card (SCRUM-864); see `GET /users/:id`.
+    const card = await nonEventRoomCard(authUser.userId, ref)
+    const userId = card ? card.userId : userIdFromRef(ref)
     // Banned from the room this handle came from: the chat's answer (`refRoomBanRefusal`).
     const banned = await refRoomBanRefusal(ref, authUser.userId)
     if (banned) return banned
@@ -123,7 +124,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // never of `date_of_birth`, which is stripped from both branches below.
     const profileAge = ageFrom(p)
 
-    const { room, identified } = await identityForRef(authUser.userId, ref)
+    const { room, identified } = card ? { room: null, identified: false } : await identityForRef(authUser.userId, ref)
 
     /*
      * A room card for somebody that room keeps anonymous — the same answer as
@@ -133,10 +134,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * a work field only past a small-room floor this route cannot apply, and
      * `blurPhoto` is one stored URL for every room they are in.
      */
-    if (room && !identified) {
+    if (card || (room && !identified)) {
       return successResponse({
         id: ref,
-        name: await roomPseudonymOf(room, userId),
+        name: card ? card.name : await roomPseudonymOf(room!, userId),
         profile: p
           ? { id: ref, age: profileAge, onboarded: p.onboarded, location: normalizedLocation }
           : null,

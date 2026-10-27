@@ -1,7 +1,10 @@
 import { firstName, mayShowRealName, UNNAMED } from "./conversation-identity"
+import { blockedEitherWay, conversationPair } from "./conversations"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
-import { resolveUserRef } from "./room-handle"
+import { openRoomHandle, resolveUserRef } from "./room-handle"
+import { holdingPair, matchSelect } from "./friends"
+import { ownerAdmits } from "./room-kind"
 
 /**
  * Who may see whose real name and face.
@@ -463,7 +466,55 @@ export async function identityForRef(
 ): Promise<{ userId: string; room: string | null; identified: boolean }> {
   const { userId, eventId: room } = resolveUserRef(ref) ?? { userId: ref, eventId: null }
   if (userId === viewerId) return { userId, room, identified: true }
-  return { userId, room, identified: await maySeeIdentity(viewerId, userId, room ? { room } : {}) }
+  if (await maySeeIdentity(viewerId, userId, room ? { room } : {})) return { userId, room, identified: true }
+  /*
+   * A friend, asked about by their real id: the friends surface's answer, so
+   * one person is one page (SCRUM-863). `maySeeIdentityFor` is a room gate --
+   * friendship counts there only with `friends_see_me_in_rooms` -- and stays
+   * one. A raw id is not from a room (every room surface sends a handle), and
+   * `GET /friends/:id` already returns these fields to this viewer, so this
+   * names nobody the friends list does not. A block either way still beats it.
+   */
+  if (room !== null) return { userId, room, identified: false }
+  return { userId, room, identified: await isFriendUnblocked(viewerId, userId) }
+}
+
+async function isFriendUnblocked(viewerId: string, otherId: string): Promise<boolean> {
+  const [user1_id, user2_id] = conversationPair(viewerId, otherId)
+  const [friendship, conversation] = await Promise.all([
+    db.friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: { id: true } }),
+    db.private_conversations.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } }, select: matchSelect }),
+  ])
+  /*
+   * Not while the pair's open conversation still holds a pseudonym for either
+   * of them: this card would tie that DM's "Heron" to the friend's name. The
+   * friends page withholds the DM there for the same reason (`holdingPair`).
+   */
+  if (!friendship || holdingPair(conversation)) return false
+  return !(await blockedEitherWay(viewerId, otherId))
+}
+
+/**
+ * A crew's, Blend's or board post's handle, answered as that room's card
+ * (SCRUM-864): the person it names and the name that room gives them
+ * (`namesInRoom`: a crew's first name, a Blend's or a post's pseudonym).
+ *
+ * Only for a viewer that room's door lets in now, and only for somebody it
+ * lets in too -- a handle outlives the membership it was minted for, and a
+ * person who left must not stay nameable by it. Null for anything else (an
+ * event's handle, a raw id, a forged or direct-conversation handle, a closed
+ * door), which the caller answers as it always has. The card is a room card,
+ * not an identity: no photos, bio or interests, and a block still beats it.
+ */
+export async function nonEventRoomCard(viewerId: string, ref: string): Promise<{ userId: string; name: string } | null> {
+  const opened = openRoomHandle(ref)
+  if (!opened || typeof opened.scope === "string" || opened.scope.kind === "dm") return null
+  const { kind, groupId } = opened.scope
+  if (opened.userId === viewerId) return null
+  const admitted = await ownerAdmits(groupId, [viewerId, opened.userId])
+  if (!admitted?.has(viewerId) || !admitted.has(opened.userId)) return null
+  const name = (await namesInRoom({ id: groupId, kind }, [opened.userId])).get(opened.userId)
+  return name ? { userId: opened.userId, name } : null
 }
 
 /**
