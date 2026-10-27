@@ -12,10 +12,13 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { bellRowFor, declaredChannelSet, NOT_IN_THE_BELL } from "@/lib/push-notifications"
 import { VISIBLE_DM } from "@/lib/dm-moderation"
-import { decorateNotifications, type RowDecoration } from "@/lib/notification-display"
+import { decorateNotifications, REQUEST_KINDS, type RowDecoration } from "@/lib/notification-display"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
+
+/** How many request rows "Clear all" checks for openness; the rest are cleared with the notices. */
+const KEEP_REQUESTS_SCAN = 200
 
 /**
  * `GET /notifications` — the bell's feed, newest first.
@@ -141,6 +144,8 @@ export async function GET(request: NextRequest) {
       // The app icon's number: unseen bell rows plus conversations with something unread.
       badgeCount: unreadCount + unreadConversations,
       pagination: meta,
+      // `DELETE /notifications` leaves the requests waiting on you in place (SCRUM-860).
+      clearKeepsRequests: true,
     })
   } catch (error) {
     logger.error("Failed to list notifications", { error: String(error) })
@@ -163,8 +168,26 @@ export async function DELETE(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("write", "notifications", user.userId))
     if (limited) return limited
 
-    const { count } = await db.notifications.deleteMany({ where: { user_id: user.userId } })
-    return successResponse({ deleted: count })
+    /*
+     * Everything but the requests still waiting on the reader: an open friend
+     * request or a reveal ask is a question, not a notice, and "Clear all" must
+     * not answer it by deleting it (SCRUM-860). Openness is the feed's own
+     * (`decorateNotifications`), so the two cannot disagree. A cap on the rows
+     * asked about: past it a request stays a notice and goes with the rest.
+     */
+    const asking = await db.notifications.findMany({
+      where: { user_id: user.userId, kind: { in: [...REQUEST_KINDS] } },
+      orderBy: { created_at: "desc" },
+      take: KEEP_REQUESTS_SCAN,
+      select: { id: true, kind: true, data: true },
+    })
+    const decorations = await decorateNotifications(
+      user.userId,
+      asking.map((n) => ({ id: n.id, kind: n.kind, payload: n.data }))
+    )
+    const keep = asking.filter((n) => decorations.get(n.id)?.open === true).map((n) => n.id)
+    const { count } = await db.notifications.deleteMany({ where: { user_id: user.userId, id: { notIn: keep } } })
+    return successResponse({ deleted: count, clearKeepsRequests: true })
   } catch (error) {
     logger.error("Failed to clear notifications", { error: String(error) })
     return errorResponse("Failed to clear notifications", 500)

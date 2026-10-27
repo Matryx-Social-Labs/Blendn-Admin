@@ -19,6 +19,7 @@ import {
   eventListSelect,
   type EventListItem,
   transformEvents,
+  rsvpStatusesFor,
   listCounts,
 } from "@/lib/services/events.service"
 import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
@@ -477,6 +478,8 @@ export async function GET(request: NextRequest) {
       select: { event_id: true },
     })
 
+    const rsvpStatusesPromise = rsvpStatusesFor(authUser.userId, eventIds)
+
     // Optional includes
     const userCheckinsPromise = includeSet.has("checkins")
       ? db.event_check_ins.findMany({
@@ -534,8 +537,9 @@ export async function GET(request: NextRequest) {
     // The counts are per request, never cached with the list. Beside the
     // viewer's own reads: run after them they were one more full round trip on
     // every cache hit.
-    const [userFavorites, userCheckins, activeCheckins, profile, counts] = await Promise.all([
+    const [userFavorites, rsvpStatuses, userCheckins, activeCheckins, profile, counts] = await Promise.all([
       userFavoritesPromise,
+      rsvpStatusesPromise,
       userCheckinsPromise,
       activeCheckinsPromise,
       profilePromise,
@@ -565,6 +569,7 @@ export async function GET(request: NextRequest) {
 
     const transformedEvents = await transformEvents(events, {
       favoriteEventIds,
+      rsvpStatuses,
       userCheckinMap,
       userLat: lat,
       userLon: lon,

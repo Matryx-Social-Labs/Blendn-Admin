@@ -48,6 +48,9 @@ export type NotificationVisual =
 
 type EventBadge = "clock" | "map-pin" | "megaphone" | "star"
 
+/** The kinds that ask the reader something, and so can be "waiting on you" (`open`). */
+export const REQUEST_KINDS = ["friend_request", "crew_invite", "reveal_request", "board_request", "message_request"] as const
+
 export interface RowDecoration {
   display?: { title?: string; context?: string; visual?: NotificationVisual }
   open?: boolean
@@ -94,6 +97,7 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
   const messageRequestRows = of("message_request")
   const boardRows = of("board_request")
   const matchRows = of("match")
+  const revealRows = of("reveal_request")
   const blendRows = of("blend")
   const eventRows = rows.filter((r) => r.kind in EVENT_KINDS)
 
@@ -213,10 +217,28 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
         }),
     })
   }
-  for (const row of rows.filter((r) => r.kind === "crew_here" || r.kind === "blend")) {
-    // A Blend has no emblem of its own: its id is a stable seed.
-    const seed = row.kind === "blend" ? uuidOf(row.payload, "blendId") : emblemOf.get(uuidOf(row.payload, "crewId") ?? "")
+  // A Blend has no emblem of its own, and a crew's would be the wrong one: it carries no visual and the app draws its glyph (SCRUM-861).
+  for (const row of rows.filter((r) => r.kind === "crew_here")) {
+    const seed = emblemOf.get(uuidOf(row.payload, "crewId") ?? "")
     if (seed) set(row.id, { display: { visual: { type: "emblem", seed } } })
+  }
+
+  /*
+   * A reveal request waits on you until you have shown who you are, or the
+   * conversation is gone: "Waiting on you" holds open requests only (SCRUM-859).
+   * Answering it is `*_revealed`, so that is what closes the row.
+   */
+  if (revealRows.length) {
+    const asked = await db.private_conversations.findMany({
+      where: {
+        id: { in: unique(revealRows.map((r) => uuidOf(r.payload, "conversationId"))) },
+        closed_at: null,
+        OR: [{ user1_id: viewerId }, { user2_id: viewerId }],
+      },
+      select: { id: true, user1_id: true, user1_revealed: true, user2_revealed: true },
+    })
+    const waiting = new Set(asked.filter((c) => !(c.user1_id === viewerId ? c.user1_revealed : c.user2_revealed)).map((c) => c.id))
+    for (const row of revealRows) set(row.id, { open: waiting.has(uuidOf(row.payload, "conversationId") ?? "") })
   }
 
   const pendingMessage = new Set(messageRequests.map((m) => m.id))

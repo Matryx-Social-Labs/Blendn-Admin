@@ -1,4 +1,6 @@
 import { Prisma } from "@prisma/client"
+import { db } from "@/lib/db"
+import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendeeCounts, hereCounts } from "@/lib/attendee-counts"
 import { resolveEventCity, geocodeBudget, type GeocodeBudget } from "@/lib/location"
 import { haversineDistance } from "@/lib/geo"
@@ -29,6 +31,9 @@ export const eventListSelect = {
   country: true,
   latitude: true,
   longitude: true,
+  // The area the app judges a check-in by (`checkInRadius` below); never sent raw.
+  geofence: true,
+  check_in_radius: true,
   status: true,
   // So a card can say "unlisted" (Flow 16): the feed itself only ever lists public.
   visibility: true,
@@ -122,6 +127,8 @@ export type EventListItem = Prisma.eventsGetPayload<{
 
 interface TransformContext {
   favoriteEventIds: Set<string>
+  /** The viewer's RSVP status per event on this page (`rsvpStatusesFor`); absent = none. */
+  rsvpStatuses?: Map<string, string>
   userCheckinMap?: Record<
     string,
     { status: string; checkInId?: string; checkInTime?: Date | null }
@@ -192,6 +199,12 @@ async function transformEvent(
     country: event.country,
     latitude: event.latitude,
     longitude: event.longitude,
+    /*
+     * The radius the app judges "am I inside" by: the detail's own number
+     * (`phoneCheckInRadius`), so the centre button and the event page agree.
+     * Without it the list fell back to a flat 100 m for every fence (BAR-03).
+     */
+    checkInRadius: phoneCheckInRadius(event),
     status: event.status,
     visibility: event.visibility,
     /*
@@ -272,6 +285,8 @@ async function transformEvent(
     // fetch every event's detail to show it.
     goingCount: tallies.going.get(event.id) ?? 0,
     isFavorited: ctx.favoriteEventIds.has(event.id),
+    // The viewer's own RSVP (`going`, `maybe`, `waitlisted`, `not_going`), or null: "I'm going" lights the centre button (BAR-05).
+    rsvpStatus: ctx.rsvpStatuses?.get(event.id) ?? null,
     userCheckin: ctx.includeCheckins
       ? ctx.userCheckinMap?.[event.id] || { status: "none" }
       : undefined,
@@ -295,6 +310,16 @@ async function transformEvent(
         ? haversineDistance(ctx.userLat, ctx.userLon, event.latitude, event.longitude)
         : null,
   }
+}
+
+/** The viewer's RSVP status for each of these events, one read for the page. */
+export async function rsvpStatusesFor(userId: string, eventIds: readonly string[]): Promise<Map<string, string>> {
+  if (eventIds.length === 0) return new Map()
+  const rows = await db.event_rsvps.findMany({
+    where: { user_id: userId, event_id: { in: [...eventIds] } },
+    select: { event_id: true, status: true },
+  })
+  return new Map(rows.map((r) => [r.event_id, r.status]))
 }
 
 export interface ListCounts {

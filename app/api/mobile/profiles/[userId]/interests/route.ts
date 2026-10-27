@@ -66,6 +66,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       include: {
         category: true,
       },
+      // A stable order, so "Because you like X" names the same one every time (BAR-12).
+      orderBy: [{ created_at: "asc" }, { id: "asc" }],
       take: PAGINATION.MAX_LIMIT,
     })
 
