@@ -14,13 +14,14 @@ import { db } from "./db"
  * never a name or a slug. The script writes that row in the same transaction
  * as the organisation, so there is no window in which it exists unmarked.
  * Asked only when a request wants one of those things, so an ordinary save
- * costs no query.
+ * costs no query. Out of draft means any status but draft — cancelled and
+ * completed are public too (`lib/event-status-move.ts`).
  */
 export const RAZORPAY_REVIEW_SEEDED = "razorpay_review.seeded"
 export const RAZORPAY_REVIEW_REMOVED = "razorpay_review.removed"
 
 export const REVIEW_ORG_REFUSAL =
-  "This is a demo organisation for Razorpay’s review: its events stay drafts, and it cannot add venues, link a venue or invite anyone."
+  "This is a demo organisation for Razorpay’s review: its events stay drafts, and it cannot add venues, link a venue, claim events or invite anyone."
 
 type Reader = { audit_logs: Pick<typeof db.audit_logs, "findFirst"> }
 
@@ -33,11 +34,11 @@ export async function isRazorpayReviewOrg(orgId: string | null | undefined, clie
   return row !== null
 }
 
-/** The refusal for a request that would publish an event or link a venue, or null. No query when it would do neither. */
+/** The refusal for a request that would take an event out of draft or link a venue, or null. No query when it would do neither. */
 export async function reviewOrgRefusal(
   orgId: string | null | undefined,
-  wants: { publish?: boolean; venue?: boolean }
+  wants: { leaveDraft?: boolean; venue?: boolean }
 ): Promise<string | null> {
-  if (!wants.publish && !wants.venue) return null
+  if (!wants.leaveDraft && !wants.venue) return null
   return (await isRazorpayReviewOrg(orgId)) ? REVIEW_ORG_REFUSAL : null
 }
