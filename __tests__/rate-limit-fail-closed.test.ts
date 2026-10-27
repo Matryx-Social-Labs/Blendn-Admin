@@ -91,14 +91,20 @@ describe("a hit is one round trip", () => {
 
 describe("the window, against Redis", () => {
   it("is fixed: the second hit counts 2 and keeps the first hit's reset (NX)", async () => {
+    // A frozen clock: resetAt is read from two Date.now() calls around the PTTL,
+    // so on a live clock it could land 1 ms short of before + 60 s and fail CI.
     const before = Date.now()
-    const first = await hit("rl:w:u1", 60_000)
-    const second = await hit("rl:w:u1", 60_000)
-    expect(second.count).toBe(2)
-    expect(first.resetAt).toBeGreaterThanOrEqual(before + 60_000)
-    expect(first.resetAt).toBeLessThanOrEqual(Date.now() + 60_000)
-    // Not moved forward by the second hit: within a few ms of the first.
-    expect(Math.abs(second.resetAt - first.resetAt)).toBeLessThan(25)
+    const clock = jest.spyOn(Date, "now").mockReturnValue(before)
+    try {
+      const first = await hit("rl:w:u1", 60_000)
+      const second = await hit("rl:w:u1", 60_000)
+      expect(second.count).toBe(2)
+      expect(first.resetAt).toBe(before + 60_000)
+      // Not moved forward by the second hit (NX): the same reset.
+      expect(second.resetAt).toBe(first.resetAt)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it("ends after windowMs and starts over (PX)", async () => {
