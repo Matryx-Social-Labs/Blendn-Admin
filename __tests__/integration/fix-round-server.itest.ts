@@ -18,6 +18,7 @@ const boardRoute = require("@/app/api/mobile/events/[eventId]/board/route") as t
 const eventChat = require("@/app/api/mobile/events/[eventId]/chat/route") as typeof import("@/app/api/mobile/events/[eventId]/chat/route")
 const profileRoute = require("@/app/api/mobile/profiles/[userId]/route") as typeof import("@/app/api/mobile/profiles/[userId]/route")
 const blockedRoute = require("@/app/api/mobile/users/blocked/route") as typeof import("@/app/api/mobile/users/blocked/route")
+const crewsRoute = require("@/app/api/mobile/crews/route") as typeof import("@/app/api/mobile/crews/route")
 const interestsRoute = require("@/app/api/mobile/profiles/[userId]/interests/route") as typeof import("@/app/api/mobile/profiles/[userId]/interests/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -154,7 +155,7 @@ describe("crew views: the tier badge and seatsLeft (SCRUM-830, 836)", () => {
     expect((await api.invite(owner, c.crewId, [f1.id])).status).toBeLessThan(300)
     const after = (await api.detail(owner, c.crewId)).body.data
     expect(after.seatsLeft).toBe(8)
-    expect((await call(require("@/app/api/mobile/crews/route").GET, "/api/mobile/crews", owner)).body.data.crews[0]).toMatchObject({ seatsLeft: 8 })
+    expect((await call(crewsRoute.GET, "/api/mobile/crews", owner)).body.data.crews[0]).toMatchObject({ seatsLeft: 8 })
   })
 })
 
