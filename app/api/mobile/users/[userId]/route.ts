@@ -230,7 +230,7 @@ export async function GET(
       /*
        * The whole list only to somebody who may see who this is: it is the same
        * in every room, so a card that withholds the name withholds it too. The
-       * key stays, empty, for clients that read it (SCRUM-835).
+       * key stays, empty, for clients that read it (SCRUM-827).
        */
       interests: identified ? user.user_interests.map((ui) => ui.category) : [],
       memberSince: user.createdAt,

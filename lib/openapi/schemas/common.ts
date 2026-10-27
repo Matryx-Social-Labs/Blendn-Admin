@@ -250,6 +250,6 @@ export const OverlapSchema = z
 export const BadgeSchema = z
   .object({
     kind: z.enum(["regular_here", "shows_up", "nights_out", "nights_together"]),
-    label: z.string().describe("\"Regular here\", \"Shows up\", \"5+ nights this month\", \"6 nights out together\""),
+    label: z.string().describe("\"Regular here\", \"Shows up\", \"5+ nights this month\", \"Out together often\""),
   })
   .openapi("Badge")

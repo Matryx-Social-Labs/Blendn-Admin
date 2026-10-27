@@ -152,6 +152,18 @@ export function boardDenialMessage(d: BoardReadDenial | BoardWriteDenial): strin
 }
 
 /**
+ * What a refusal says and its machine-readable `reasonCode` (the `errorCode`
+ * stays the 403's, for installed builds). Reading and posting are different
+ * doors: a reader who neither saved nor RSVP'd is told to save or say they are
+ * going, not "to post here" (SCRUM-862).
+ */
+export function boardRefusal(d: BoardReadDenial | BoardWriteDenial, surface: "read" | "write"): { message: string; reasonCode: string } {
+  if (surface === "read") return { message: "Save the event or say you’re going first.", reasonCode: "BOARD_NOT_COMMITTED" }
+  const reasonCode = { not_going: "BOARD_NOT_GOING", profile_incomplete: "BOARD_PROFILE_INCOMPLETE", too_many_outstanding: "BOARD_TOO_MANY_OUTSTANDING", weekly_limit: "BOARD_WEEKLY_LIMIT" }[d]
+  return { message: boardDenialMessage(d), reasonCode }
+}
+
+/**
  * A report about a board post or a board ask (SCRUM-322).
  *
  * The reasons are the app's message-report reasons: a post and an ask are

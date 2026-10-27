@@ -245,6 +245,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * from check-ins and derived here, never stored (lib/profile-badges.ts).
      */
     const badges = p && p.show_badges !== false && (isSelf || identified) ? await profileBadges(userId, p.shows_up_badge) : null
+    // What you have earned, whether or not you show it: Me keeps the card when "Show my badges" is off (SCRUM-826). Yours only.
+    const earnedBadges = isSelf && p ? (badges ?? (await profileBadges(userId, p.shows_up_badge))) : null
     // The owner's photos with the verdict on each: the ones up, then the ones moderation just pulled.
     const photoStates = isSelf && p ? await photoStatesFor(userId, p.photos) : null
 
@@ -271,6 +273,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             ...(isSelf ? selfProfileFields : publicProfileFields),
             location: normalizedLocation,
             ...(badges && { badges }),
+            ...(earnedBadges && { earned_badges: earnedBadges }),
             ...(photoStates && { photo_states: photoStates }),
           }
         : null,

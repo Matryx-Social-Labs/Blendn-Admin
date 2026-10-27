@@ -23,6 +23,16 @@ export interface MobileGateEnv {
   MOBILE_MIN_APP_VERSION?: string
   MAINTENANCE_MODE?: string
   MAINTENANCE_RETRY_AFTER_SECONDS?: string
+  /** The lowest store build number still served, per platform (SCRUM-851). Unset: no gate. */
+  MOBILE_MIN_APP_BUILD_IOS?: string
+  MOBILE_MIN_APP_BUILD_ANDROID?: string
+}
+
+/** What the request says about the build: `X-App-Build`, and the platform it runs on. */
+export interface MobileBuild {
+  build: string | null
+  platform: string | null
+  userAgent: string | null
 }
 
 export interface MobileGateRefusal {
@@ -116,6 +126,45 @@ function updateRefusal(appVersionHeader: string | null, env: MobileGateEnv): Mob
   }
 }
 
+/** `ios` or `android` from `X-App-Platform`, else from the user agent of a native client; null when it cannot be told. */
+function platformOf({ platform, userAgent }: MobileBuild): "ios" | "android" | null {
+  const named = platform?.trim().toLowerCase()
+  if (named === "ios" || named === "android") return named
+  if (/okhttp|android/i.test(userAgent ?? "")) return "android"
+  if (/cfnetwork|darwin|iphone|ios/i.test(userAgent ?? "")) return "ios"
+  return null
+}
+
+/**
+ * A build number below the platform's minimum. Same fail-open rule as the
+ * version gate: no `X-App-Build` (every installed build, the web), a build
+ * that is not a plain integer, an unknown platform or an unset/invalid minimum
+ * is never refused. TestFlight builds all say 1.0.0, so this is the one that
+ * can retire a single broken build (SCRUM-851).
+ */
+function buildRefusal(sent: MobileBuild, env: MobileGateEnv): MobileGateRefusal | null {
+  if (!sent.build || !/^\d{1,9}$/.test(sent.build.trim())) return null
+  const platform = platformOf(sent)
+  if (!platform) return null
+  const key = platform === "ios" ? "MOBILE_MIN_APP_BUILD_IOS" : "MOBILE_MIN_APP_BUILD_ANDROID"
+  const configured = env[key]?.trim()
+  if (!configured) return null
+  if (!/^\d{1,9}$/.test(configured)) {
+    warnOnce(`${key}="${configured}" is not a build number; no minimum is enforced`)
+    return null
+  }
+  if (Number(sent.build) >= Number(configured)) return null
+  return {
+    status: 426,
+    body: {
+      success: false,
+      error: "This version of Blendn is no longer supported. Update the app to continue.",
+      errorCode: UPDATE_REQUIRED_CODE,
+    },
+    headers: {},
+  }
+}
+
 /**
  * The first app build that sends `size` with a presigned-upload request
  * (client 1.0.0 + one patch). From here the mobile route requires it; older
@@ -132,6 +181,10 @@ export function sendsUploadSize(appVersionHeader: string | null | undefined): bo
 }
 
 /** Maintenance first: while the server is down, "update the app" would be the wrong thing to say. */
-export function mobileGateRefusal(appVersionHeader: string | null, env: MobileGateEnv): MobileGateRefusal | null {
-  return maintenanceRefusal(env) ?? updateRefusal(appVersionHeader, env)
+export function mobileGateRefusal(
+  appVersionHeader: string | null,
+  env: MobileGateEnv,
+  build: MobileBuild = { build: null, platform: null, userAgent: null }
+): MobileGateRefusal | null {
+  return maintenanceRefusal(env) ?? updateRefusal(appVersionHeader, env) ?? buildRefusal(build, env)
 }

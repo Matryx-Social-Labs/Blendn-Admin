@@ -4,8 +4,10 @@ import { db } from "../db"
 import { idForViewer } from "../room-handle"
 import { friendIdsOf } from "../friends"
 import { keysetPage, NEWEST_FIRST, type Keyset, type ListPagination } from "../pagination"
+import { CREW } from "../constants"
 import { blocksBetween } from "./blocks"
 import { CREW_TAGS, openInviteWhere, type CrewTag } from "./crews"
+import { crewBadges, nightsTogether } from "./signals"
 
 /**
  * Crews as their own members see them (`GET /crews`, `GET /crews/:id`).
@@ -84,12 +86,39 @@ async function blockedByViewer(viewerId: string, crews: readonly CrewRow[]): Pro
   return new Set(rows.map((r) => r.blocked_id))
 }
 
+/**
+ * Seats left in each crew, as the invite door counts them: every member row
+ * (suspended ones too) plus every open invite against `CREW.MAX_MEMBERS`
+ * (`inviteToCrew`). Two grouped reads however many crews; never below zero.
+ */
+async function seatsLeftOf(crewIds: readonly string[]): Promise<Map<string, number>> {
+  if (crewIds.length === 0) return new Map()
+  const ids = [...crewIds]
+  const [members, invites] = await Promise.all([
+    db.crew_members.groupBy({ by: ["crew_id"], where: { crew_id: { in: ids } }, _count: { _all: true } }),
+    db.crew_invites.groupBy({ by: ["crew_id"], where: { crew_id: { in: ids }, ...openInviteWhere() }, _count: { _all: true } }),
+  ])
+  const taken = new Map<string, number>()
+  for (const r of [...members, ...invites]) taken.set(r.crew_id, (taken.get(r.crew_id) ?? 0) + r._count._all)
+  return new Map(ids.map((id) => [id, Math.max(0, CREW.MAX_MEMBERS - (taken.get(id) ?? 0))]))
+}
+
+/** What every crew view needs beyond the rows: its badge and its seats (SCRUM-830, SCRUM-836). */
+async function crewExtras(crews: readonly CrewRow[]) {
+  const ids = crews.map((c) => c.id)
+  const [nights, seats] = await Promise.all([nightsTogether(ids), seatsLeftOf(ids)])
+  return { nights, seats }
+}
+
+type CrewExtras = Awaited<ReturnType<typeof crewExtras>>
+
 function crewView(
   viewerId: string,
   crew: CrewRow,
   apart: ReadonlySet<string>,
   friends: ReadonlySet<string>,
-  blockedByMe: ReadonlySet<string>
+  blockedByMe: ReadonlySet<string>,
+  extras: CrewExtras
 ) {
   const roomId = crew.room?.id
   const me = crew.members.find((m) => m.user_id === viewerId)
@@ -107,6 +136,10 @@ function crewView(
     hidden: crew.hidden_at !== null,
     chatGroupId: roomId ?? null,
     size: shown.length,
+    // The tier pill ("Out together often"), or none (SCRUM-830).
+    badges: crewBadges(extras.nights.get(crew.id) ?? 0),
+    // How many more people the crew can take, open invites counted: the number the invite door enforces (SCRUM-836).
+    seatsLeft: extras.seats.get(crew.id) ?? 0,
     // Somebody in the crew is left out of this list because YOU blocked them. Never because they
     // blocked you or a conversation closed: a bare "fewer shown" would say a crewmate is hiding from you.
     apart: crew.members.some((m) => blockedByMe.has(m.user_id)),
@@ -214,7 +247,7 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
       take: INVITES_READ_CAP,
     }),
   ])
-  const [apart, friends, blockedByMe] = await Promise.all([
+  const [apart, friends, blockedByMe, extras] = await Promise.all([
     blocksBetween(
       [userId],
       [
@@ -226,6 +259,7 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
     ),
     friendIdsOf(userId).then((ids) => new Set(ids)),
     blockedByViewer(userId, crews),
+    crewExtras(crews),
   ])
   // Only an invite the accept would take (`inviteAcceptable`): listed and then refused, it told you a block was there.
   const acceptable = invites.filter((i) => inviteAcceptable(userId, i, apart, friends))
@@ -233,7 +267,7 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
   const rest = after ? acceptable.filter((i) => isAfter(i, after)) : acceptable
   const page = keysetPage(rest.slice(0, limit + 1), limit, (i) => ({ at: i.created_at, id: i.id }))
   return {
-    crews: crews.map((c) => crewView(userId, c, apart, friends, blockedByMe)),
+    crews: crews.map((c) => crewView(userId, c, apart, friends, blockedByMe, extras)),
     invitesPagination: {
       limit,
       hasMore: page.hasMore,
@@ -270,10 +304,11 @@ export async function crewDetail(userId: string, crewId: string) {
     select: crewSelect,
   })
   if (!crew) return null
-  const [apart, friends, blockedByMe] = await Promise.all([
+  const [apart, friends, blockedByMe, extras] = await Promise.all([
     blocksBetween([userId], crew.members.map((m) => m.user_id)),
     friendIdsOf(userId).then((ids) => new Set(ids)),
     blockedByViewer(userId, [crew]),
+    crewExtras([crew]),
   ])
-  return crewView(userId, crew, apart, friends, blockedByMe)
+  return crewView(userId, crew, apart, friends, blockedByMe, extras)
 }

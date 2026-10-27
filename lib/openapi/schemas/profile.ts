@@ -287,6 +287,10 @@ export const ProfileResponseSchema = z
         .describe(
           "What check-ins earned: \"5+ nights this month\" and, if they turned it on, \"Shows up\". Derived on read. Present (possibly empty) when `show_badges` is not off, for you and for anybody who can see who they are; absent otherwise. \"Regular here\" is never here: it belongs to a card in that venue's room."
         ),
+      earned_badges: z
+        .array(z.object({ kind: z.enum(["shows_up", "nights_out"]), label: z.string() }))
+        .optional()
+        .describe("Your own profile only: what your check-ins earned, whether or not `show_badges` is on, so Me can keep the card. Additive."),
       photo_states: z
         .array(
           z.object({

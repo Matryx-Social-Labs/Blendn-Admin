@@ -567,3 +567,32 @@ export async function namesInRoom(
   const named = new Map(rows.map((r) => [r.user_id, r.anonymous_name || "Attendee"]))
   return new Map(ids.map((id) => [id, named.get(id) ?? "Attendee"]))
 }
+
+/**
+ * Each of these people's photo in a crew's room (SCRUM-812): the main photo
+ * on their account, for a room that already names them by first name. Not for
+ * a member who chose "keep me anonymous" in this crew, and never for any other
+ * kind of room -- a Blend's or a board post's people go by a pseudonym and a
+ * creature, so a face there would undo it. People without a photo are absent.
+ */
+export async function crewMemberImages(
+  room: { id: string; kind: "event" | "crew" | "blend" | "board_post" },
+  userIds: readonly string[]
+): Promise<Map<string, string>> {
+  const ids = [...new Set(userIds)]
+  if (room.kind !== "crew" || ids.length === 0) return new Map()
+  const rows = await db.chat_groups.findUnique({
+    where: { id: room.id },
+    select: {
+      crew: {
+        select: {
+          members: {
+            where: { user_id: { in: ids }, keep_me_anonymous: false, user: { deletedAt: null, image: { not: null } } },
+            select: { user_id: true, user: { select: { image: true } } },
+          },
+        },
+      },
+    },
+  })
+  return new Map((rows?.crew?.members ?? []).flatMap((m) => (m.user.image ? [[m.user_id, m.user.image] as const] : [])))
+}

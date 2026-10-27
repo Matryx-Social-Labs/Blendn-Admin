@@ -8,7 +8,7 @@ import { ownerRoster, withOwnerDoor, roomReadDenialFor, roomScope } from "@/lib/
 import { bannedRefusal } from "@/lib/moderation/actions"
 import { idForViewer } from "@/lib/room-handle"
 import { notStrangersTo } from "@/lib/room-people"
-import { namesInRoom } from "@/lib/identity"
+import { crewMemberImages, namesInRoom } from "@/lib/identity"
 import {
   successResponse,
   unauthorizedResponse,
@@ -154,12 +154,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // pseudonyms; an event's room by the pseudonym on the row (`namesInRoom`).
     const names =
       chatGroup.kind !== "event" ? await namesInRoom(chatGroup, members.map((m) => m.user.id)) : null
+    const images = await crewMemberImages(chatGroup, members.map((m) => m.user.id))
     return successResponse({
       participants: members.map((m) => ({
         // Yours real; everyone else's as their handle in this room (SCRUM-371).
         userId: idForViewer(authUser.userId, scope, m.user.id),
         name: names?.get(m.user.id) ?? (m.anonymous_name || "Anonymous"),
-        avatar: null,
+        avatar: images.get(m.user.id) ?? null,
         role: m.role,
         status: m.status,
         joinedAt: m.joined_at,

@@ -236,6 +236,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const needsJoin =
       !membership || (membership.status !== "active" && membership.status !== "banned" && membership.status !== "muted")
 
+    // The viewer's own pseudonym in this room: the row they have, or the one they are about to be given (SCRUM-807, 808).
+    let ownPseudonym: string | null = membership?.anonymous_name ?? null
+
     if (needsJoin) {
       /*
        * Two ways in now, and they are not equivalent.
@@ -262,7 +265,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         )
       }
 
-      await claimAnonymousName(
+      const joined = await claimAnonymousName(
         chatGroup.id,
         (anonymous_name) =>
           db.chat_group_members.upsert({
@@ -296,6 +299,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           }),
         { eventId, userId: authUser.userId }
       )
+      ownPseudonym = joined.anonymous_name
 
       await db.chat_groups.update({
         where: { id: chatGroup.id },
@@ -459,6 +463,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       chatGroupId: chatGroup.id,
       chatGroupName: chatGroup.name,
+      // You as this room names you: the banner and your own ring say it. Yours only.
+      you: { pseudonym: ownPseudonym },
       /**
        * The room's own state, `active` or `locked` (the organiser's lock), for
        * everyone in it: `write.reason` is this caller's answer and names their

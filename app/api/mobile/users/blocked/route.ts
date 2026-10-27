@@ -126,7 +126,8 @@ export async function GET(request: NextRequest) {
          */
         blocked_id: blockRef(b.id),
         blocked_user_name: name,
-        blocked_user_photo: visible.has(b.blocked_id) ? b.blocked.image : null,
+        // Never a face: the blocked list shows a creature, and a block is the one place a photo should not follow you (SCRUM-834). The key stays for installed builds.
+        blocked_user_photo: null,
         reason: null,
         blocked_at: b.created_at.toISOString(),
       }

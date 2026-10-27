@@ -1256,7 +1256,7 @@ registry.registerPath({
                   /** An opaque ref to this block (`bk_…`), never an account id. */
                   blocked_id: z.string(),
                   blocked_user_name: z.string().nullable(),
-                  blocked_user_photo: z.string().nullable(),
+                  blocked_user_photo: z.null().describe("Always null: the blocked list draws a creature, never a face (SCRUM-834). The key stays for installed builds."),
                   reason: z.string().nullable(),
                   blocked_at: z.string().datetime(),
                 })

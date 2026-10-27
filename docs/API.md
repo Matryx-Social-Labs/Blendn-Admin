@@ -239,6 +239,15 @@ A missing header (every installed build, and the web), `unknown` or an
 unparsable one is **never** refused; neither is a preflight. Unset: no minimum.
 A `MOBILE_MIN_APP_VERSION` that is not a version enforces nothing and logs a warning once.
 
+**Update required, by build number** (SCRUM-851). Every TestFlight build says
+`1.0.0`, so a single broken build cannot be retired by version. The app also
+sends `X-App-Build` (the store build number, a plain integer) and
+`X-App-Platform` (`ios` or `android`; absent, the platform is read from the
+user agent). When `MOBILE_MIN_APP_BUILD_IOS` / `MOBILE_MIN_APP_BUILD_ANDROID`
+is set and the build is below the platform's minimum, the request is refused
+with the same 426 `UPDATE_REQUIRED`. A missing or non-integer header, an
+unknown platform, or an unset or invalid minimum is **never** refused.
+
 **Maintenance.** With `MAINTENANCE_MODE=1` (or `true`) every `/api/mobile`
 request is refused before its route runs, whatever the version:
 
@@ -414,7 +423,7 @@ an opaque, url-safe string. Field names and shapes did not change.
   No photos, bio or interests. A block either way is a 404.
 - `GET /users/:userId` also sends `sharedInterests: string[]` (the names you both
   picked) for somebody you may see (SCRUM-858), `interests: []` (the key stays)
-  when you may not (SCRUM-835), and `stats.savedCount` on your own profile: how
+  when you may not (SCRUM-827), and `stats.savedCount` on your own profile: how
   many events your default (upcoming) saved list holds (SCRUM-825).
 - **Echoes stay handles.** `GET /users/:userId`, `GET /profiles/:userId` (`id`
   and `profile.id`) and `POST /message-requests` (`recipientId`, `recipient.id`)
@@ -2631,9 +2640,11 @@ here, so a line does not change as each one walks in) in common with your crew h
 with you — `Both crews are into Techno`, `Two RCB crews ❤️`, `This crew picks
 chai over filter coffee, like you` — never a member and never a count;
 languages and home states only between crews of four or more here in a room of
-eight or more, one line at most. `badges` is `N nights out together` (nights
-two or more members checked in at the same occurrence, since they joined) from
-2. Ranked from your side: crew-held interests by rarity across the crews here,
+eight or more, one line at most. `badges` is `Out together often` — a tier, never a count (`kind` stays
+`nights_together`) — once two or more members have checked in at the same
+occurrence on at least 2 nights since they joined. `GET /crews` and
+`GET /crews/:crewId` send it too, with `seatsLeft`: how many more people the
+crew can take, open invites counted (SCRUM-830, SCRUM-836). Ranked from your side: crew-held interests by rarity across the crews here,
 plus shared intent, damped by half when one crew is more than twice the
 other's size here (crew ↔ crew only); then most here, then by id; `limit` 30
 by default, at most 50, `offset`, with `total` and `hasMore`. Hidden from you: a hidden crew, and any crew with a member kept
