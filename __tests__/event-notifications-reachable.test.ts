@@ -1,7 +1,8 @@
+import { statusMoveRefusal } from "@/lib/event-status-move"
 import { readFileSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 import { materialEventChanges } from "@/lib/services/event-notifications.service"
-import { isUncancellingEvent } from "@/lib/event-cancellation"
+import { isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
 
 /**
  * Cancelling an event has to tell the people who were going.
@@ -72,14 +73,18 @@ describe("event notifications are reachable", () => {
      * Driven 2026-09-13: the editor's confirm said "This cannot be undone",
      * everyone going was pushed "This event has been cancelled", and "Save as
      * draft" then flipped the row to `draft` -- from where Publish reopens it
-     * with nobody told. Both routes refuse the transition with the same words.
+     * with nobody told. Both routes refuse the transition with the same words,
+     * now through the one status-move rule (lib/event-status-move.ts), which
+     * answers UNCANCEL_REFUSAL for any move out of cancelled.
      */
-    const callers = callersOf("isUncancellingEvent")
+    const callers = callersOf("statusMoveRefusalFor")
     expect(callers).toContain("app/api/events/[id]/route.ts")
     expect(callers).toContain("app/api/mobile/events/[eventId]/route.ts")
     for (const rel of ["app/api/events/[id]/route.ts", "app/api/mobile/events/[eventId]/route.ts"]) {
-      expect(stripComments(read(rel))).toMatch(/isUncancellingEvent\(status, event\.status\)\) \{\s*return [^\n]*UNCANCEL_REFUSAL/)
+      expect(stripComments(read(rel))).toMatch(/const moveRefusal = await statusMoveRefusalFor\(event\.id, status, event\.status\)\s*if \(moveRefusal\) return errorResponse\(moveRefusal, 400\)/)
     }
+    expect(statusMoveRefusal("draft", "cancelled")).toBe(UNCANCEL_REFUSAL)
+    expect(statusMoveRefusal("published", "cancelled")).toBe(UNCANCEL_REFUSAL)
     expect(isUncancellingEvent("draft", "cancelled")).toBe(true)
     expect(isUncancellingEvent("published", "cancelled")).toBe(true)
     expect(isUncancellingEvent(undefined, "cancelled")).toBe(false)
