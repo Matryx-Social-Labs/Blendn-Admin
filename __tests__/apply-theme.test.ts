@@ -101,10 +101,28 @@ describe("the override stays in its subtree", () => {
 
   it("is rendered only by the public funnel's pages", () => {
     // PublicFrame is the light theme; a dashboard page that reached for it
-    // would go light. The apply and claim pages are the funnel (step 18).
+    // would go light. The apply and claim pages are the funnel (step 18), and
+    // the policy pages' frame (components/policy-page.tsx) is held below.
     const users = importersOf("PublicFrame")
     expect(users.length).toBeGreaterThan(0)
-    expect(users.filter((f) => !/^app\/(apply|claim)\//.test(f))).toEqual([])
+    expect(users.filter((f) => !/^app\/(apply|claim)\//.test(f) && f !== join("components", "policy-page.tsx"))).toEqual([])
+  })
+
+  it("puts the policy pages' frame only on the public policy pages", () => {
+    // Pricing, terms and the rest (Razorpay's website verification): public,
+    // outside the dashboard, each its own top-level route.
+    const users: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        if (entry === "node_modules" || entry.startsWith(".")) continue
+        const full = join(dir, entry)
+        if (statSync(full).isDirectory()) walk(full)
+        else if (/\.tsx?$/.test(entry) && /from "@\/components\/policy-page"/.test(readFileSync(full, "utf8"))) users.push(relative(ROOT, full))
+      }
+    }
+    for (const dir of ["app", "components", "lib"]) walk(join(ROOT, dir))
+    expect(users.length).toBeGreaterThan(0)
+    expect(users.filter((f) => !/^app\/(pricing|about|contact|terms|refunds|shipping)\/page\.tsx$/.test(f))).toEqual([])
   })
 
   it("keeps the public pages' other frame out of the dashboard too", () => {

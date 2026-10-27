@@ -1,5 +1,6 @@
 "use server"
 
+import { isRazorpayReviewOrg, REVIEW_ORG_REFUSAL } from "./review-demo-org"
 import { Refusal } from "./refusal"
 
 import { auditInTx } from "@/lib/audit-log"
@@ -112,6 +113,9 @@ export async function fileEventClaim(
       return { ok: false, error: "That application does not match this email address" }
     }
   }
+
+  // Razorpay's review organisation claims nothing (lib/review-demo-org.ts).
+  if (await isRazorpayReviewOrg(orgId)) return { ok: false, error: REVIEW_ORG_REFUSAL }
 
   if (Boolean(orgId) === Boolean(input.onboardingId)) {
     return {

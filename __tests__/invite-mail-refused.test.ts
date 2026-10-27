@@ -1,4 +1,6 @@
 const mockDb = {
+  // Not the Razorpay review organisation (lib/review-demo-org.ts).
+  audit_logs: { findFirst: async () => null },
   organisations: { findUniqueOrThrow: jest.fn() },
   organisation_members: { findFirst: jest.fn() },
   organisation_invites: { findFirst: jest.fn(), create: jest.fn() },

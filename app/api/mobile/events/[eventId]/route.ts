@@ -9,7 +9,7 @@ import { offersClaim } from "@/lib/curation"
 import { dashboardUrl } from "@/lib/email"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { PRODUCT_EVENTS, record } from "@/lib/product-events"
-import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
 import { auditLog } from "@/lib/audit-log"
 import { notifyEventCancelled } from "@/lib/services/event-notifications.service"
 import { actorFor } from "@/lib/org-membership"
@@ -17,13 +17,15 @@ import { eventPermissions, eventPermissionSelect } from "@/lib/rbac"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { mobileEventPatchSchema } from "@/lib/validations/event"
 import { canPublish } from "@/lib/geofence-input"
+import { leavesDraft, statusMoveRefusalFor } from "@/lib/event-status-move"
+import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { haversineDistance } from "@/lib/geo"
 import { resolveEventCity } from "@/lib/location"
 import { eventArea } from "@/lib/venue-visibility"
 import { getInsideCount } from "@/lib/occupancy"
 import { dayOccurrencesSelect, eventDays, eventSession } from "@/lib/occurrences"
-import { changeForResponse, updateEventTracked } from "@/lib/event-change"
+import { changeForResponse, EventStatusMovedError, updateEventTracked } from "@/lib/event-change"
 import {
   successResponse,
   errorResponse,
@@ -476,6 +478,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
     const { title, description, shortDescription, status } = parsed.data
 
+    // Which status moves a client may make (lib/event-status-move.ts).
+    const moveRefusal = await statusMoveRefusalFor(event.id, status, event.status)
+    if (moveRefusal) return errorResponse(moveRefusal, 400)
+    // Razorpay's reviewer: never out of draft (lib/review-demo-org.ts).
+    const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, { leaveDraft: leavesDraft(status, event.status) })
+    if (reviewRefusal) return errorResponse(reviewRefusal, 403)
+
     /*
      * The same gate the dashboard PATCH runs, for the same reason and through
      * the other door: this route accepts `status: "published"` as well, and an
@@ -491,9 +500,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const isCancelling = isCancellingEvent(status, event.status)
-    if (isUncancellingEvent(status, event.status)) {
-      return errorResponse(UNCANCEL_REFUSAL, 400)
-    }
 
     // The edit and its change record in one transaction (lib/event-change.ts), for "changed while you're going".
     const updated = await updateEventTracked({
@@ -507,7 +513,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         ...(status !== undefined && { status }),
         updated_at: new Date(),
       },
+    }, { fromStatus: event.status }).catch((error: unknown) => {
+      if (error instanceof EventStatusMovedError) return error
+      throw error
     })
+    if (updated instanceof EventStatusMovedError) return errorResponse(updated.message, 409)
 
     // The other door writes the same trail as the dashboard (SCRUM-89).
     auditLog({
