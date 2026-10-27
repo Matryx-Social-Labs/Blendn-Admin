@@ -31,8 +31,7 @@ export const eventListSelect = {
   country: true,
   latitude: true,
   longitude: true,
-  // The area the app judges a check-in by (`checkInRadius` below); never sent raw.
-  geofence: true,
+  // `geofence` comes with `eventVenueSelect`; with `check_in_radius` it makes `checkInRadius` below, and is never sent raw.
   check_in_radius: true,
   status: true,
   // So a card can say "unlisted" (Flow 16): the feed itself only ever lists public.

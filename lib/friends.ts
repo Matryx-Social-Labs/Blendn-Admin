@@ -4,10 +4,13 @@ import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { conversationPair } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
-import { UNNAMED, cameFromMatch, mayShowRealName } from "@/lib/conversation-identity"
+import { UNNAMED, cameFromMatch, holdingPair, matchSelect, mayShowRealName } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { recordEndedFriendship } from "@/lib/room-people"
+
+// They live in lib/conversation-identity.ts now: the socket server reaches lib/identity.ts, which may not import this file.
+export { holdingPair, matchSelect }
 
 /**
  * Friends: two people who both said yes.
@@ -288,18 +291,6 @@ export async function connectablePairs(client: PairReader, pairs: readonly (read
   )
 }
 
-/** What the match rule reads of a conversation. */
-export const matchSelect = {
-  user1_id: true,
-  user2_id: true,
-  user1_pseudonym: true,
-  user2_pseudonym: true,
-  user1_revealed: true,
-  user2_revealed: true,
-  origin_board_request_id: true,
-  closed_at: true,
-} as const
-
 type MatchFacts = {
   user1_pseudonym: string | null
   user2_pseudonym: string | null
@@ -312,17 +303,6 @@ type MatchFacts = {
 /** An open conversation that came from a match: the pair that liked each other. */
 const isOpenMatch = (c: MatchFacts) => c.closed_at === null && cameFromMatch(c)
 
-/**
- * A pair whose conversation is a pseudonymous one (a match, a board post) that
- * is still open and not revealed on both sides.
- *
- * Friendship would name each to the other on every friend surface, and the DM
- * the friends list offers is that conversation — still "Heron". So a request
- * between such a pair is held (`friend_requests.held_at`), and a friend card
- * offers no DM for it.
- */
-export const holdingPair = (c: MatchFacts | null | undefined): boolean =>
-  !!c && c.closed_at === null && (c.user1_pseudonym !== null || c.user2_pseudonym !== null) && !(c.user1_revealed && c.user2_revealed)
 
 /**
  * A held request may be shown to its recipient only on a positive test: the

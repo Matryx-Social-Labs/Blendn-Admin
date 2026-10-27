@@ -1,9 +1,8 @@
-import { firstName, mayShowRealName, UNNAMED } from "./conversation-identity"
+import { firstName, holdingPair, matchSelect, mayShowRealName, UNNAMED } from "./conversation-identity"
 import { blockedEitherWay, conversationPair } from "./conversations"
 import { db } from "./db"
 import { inRoomWhere } from "./event-kind"
 import { isRoomHandle, openRoomHandle, resolveUserRef } from "./room-handle"
-import { holdingPair, matchSelect } from "./friends"
 import { ownerAdmits } from "./room-kind"
 
 /**

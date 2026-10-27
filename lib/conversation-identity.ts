@@ -191,3 +191,35 @@ export function isPseudonymous(conversation: {
 }): boolean {
   return conversation.user1_pseudonym !== null || conversation.user2_pseudonym !== null
 }
+
+/** What the match rule reads of a conversation. Lives here, not in lib/friends.ts, so lib/identity.ts (reached by the socket server) can use it. */
+export const matchSelect = {
+  user1_id: true,
+  user2_id: true,
+  user1_pseudonym: true,
+  user2_pseudonym: true,
+  user1_revealed: true,
+  user2_revealed: true,
+  origin_board_request_id: true,
+  closed_at: true,
+} as const
+
+type PairFacts = {
+  user1_pseudonym: string | null
+  user2_pseudonym: string | null
+  user1_revealed: boolean
+  user2_revealed: boolean
+  closed_at: Date | null
+}
+
+/**
+ * A pair whose conversation is a pseudonymous one (a match, a board post) that
+ * is still open and not revealed on both sides.
+ *
+ * Friendship would name each to the other on every friend surface, and the DM
+ * the friends list offers is that conversation — still "Heron". So a request
+ * between such a pair is held (`friend_requests.held_at`), and a friend card
+ * offers no DM for it.
+ */
+export const holdingPair = (c: PairFacts | null | undefined): boolean =>
+  !!c && c.closed_at === null && (c.user1_pseudonym !== null || c.user2_pseudonym !== null) && !(c.user1_revealed && c.user2_revealed)

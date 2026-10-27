@@ -185,7 +185,7 @@ describe("an 18+ event reached by id", () => {
     // `interest` toggles the favourite the previous call made; the board post
     // fails its own profile gate (two interests, an intent) — not the age one.
     expect(r.interest).toBe("ok")
-    expect(r.boardPost).toBe("403 FORBIDDEN")
+    expect(r.boardPost).toBe("403 FORBIDDEN/BOARD_PROFILE_INCOMPLETE")
     expect(await db.event_rsvps.count({ where: { event_id: eventId, user_id: adult.id } })).toBe(1)
   })
 
