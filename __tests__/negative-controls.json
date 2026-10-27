@@ -2385,6 +2385,12 @@
       "mutation": "app/api/mobile/conversations/route.ts: the Promise.all of lastVisibleMessages and unreadCounts made two sequential awaits.",
       "observed": "2026-10-19: fails, the two reads no longer overlap. Reverted; green.",
       "date": "2026-10-19"
+    },
+    "keyword-filter-indic.test.ts": {
+      "guards": "SCRUM-650: Indic words are not split at their combining marks. Hindi words sharing a consonant skeleton with a banned one (लड़का, गाड़ी, गड़बड़, गांव, कमीज़, ...) are not hidden or matched, while the banned words (चूतिया, हरामी, लौड़ा, रंडी, गांड) are, with the nukta typed precomposed or decomposed; zero-width joiners neither hide a banned word nor split a harmless one; Telugu/Bengali/Tamil near-misses stay clean; Hinglish true and false positives; a slur followed by ! is still a slur while f@gg0t/r3t4rd still read as letters; 'mc bc' matches as a phrase.",
+      "mutation": "M1720 combining marks removed from the word class (words split at vowel signs again). M1721 zero-width characters not removed before tokenising. M1722 NFC not applied to words. M1723 `@ $ !` mapped to letters even after a word (a trailing '!' read as i). M1724 the multi-word abbreviation never matches.",
+      "observed": "M1720: 5 of 50 failing. M1721: 1 of 50. M1722: 1 of 49 (the nukta spellings). M1723: 2 of 49. M1724: 1 of 50. Each reverted; 50 of 50 (plus keyword-filter.test.ts and keyword-identity.test.ts unchanged).",
+      "date": "2026-10-27"
     }
   },
   "grandfathered": [
