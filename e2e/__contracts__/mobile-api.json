@@ -14,6 +14,7 @@
         "address",
         "categories",
         "checkInCount",
+        "checkInRadius",
         "city",
         "claimUrl",
         "country",
@@ -35,6 +36,7 @@
         "media",
         "organizer",
         "ratingCount",
+        "rsvpStatus",
         "session",
         "shortDescription",
         "slug",
@@ -247,6 +249,7 @@
     ],
     "data": [
       "badgeCount",
+      "clearKeepsRequests",
       "notifications",
       "pagination",
       "unreadCount"
@@ -443,7 +446,8 @@
       "mute",
       "pagination",
       "status",
-      "write"
+      "write",
+      "you"
     ],
     "nested": {
       "write": [
@@ -537,6 +541,7 @@
         "bio",
         "blur_photo",
         "created_at",
+        "earned_badges",
         "education",
         "expertise",
         "friends_see_me_in_rooms",
