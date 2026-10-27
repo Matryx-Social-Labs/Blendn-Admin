@@ -2385,6 +2385,12 @@
       "mutation": "app/api/mobile/conversations/route.ts: the Promise.all of lastVisibleMessages and unreadCounts made two sequential awaits.",
       "observed": "2026-10-19: fails, the two reads no longer overlap. Reverted; green.",
       "date": "2026-10-19"
+    },
+    "instrumentation-request-error.test.ts": {
+      "guards": "SCRUM-649: instrumentation.ts exports Sentry's captureRequestError as onRequestError (Next hands it every error it caught itself: route handlers, server components, server actions), and the deliberate-failure probe route is a 404 unless SENTRY_PROBE_TOKEN is set and the x-probe-token header matches, throwing as an unhandled 500 does only then.",
+      "mutation": "M1730 onRequestError an empty function again (the SDK was assumed to capture on its own). M1731 the probe's token check dropped (anyone can make it throw).",
+      "observed": "M1730: 1 of 4 failing. M1731: 2 of 4 failing. Each reverted; 4 of 4.",
+      "date": "2026-10-27"
     }
   },
   "grandfathered": [
