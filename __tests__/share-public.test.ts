@@ -62,6 +62,39 @@ describe("publicCoverUrl", () => {
   ])("drops %s", (_label, raw) => {
     expect(publicCoverUrl(raw, HOSTS)).toBeNull()
   })
+
+  describe("Unsplash photos", () => {
+    const photo = "https://images.unsplash.com/photo-1511795409834-ef04bbd61622"
+    const ours = `${photo}?auto=format&fit=crop&w=1200&q=80`
+
+    it("accepts a photo URL and replaces its query with ours", () => {
+      expect(publicCoverUrl(`${photo}?ixlib=rb-4.0.3&w=400&q=60&evil=1#frag`, HOSTS)).toBe(ours)
+      expect(publicCoverUrl(photo, HOSTS)).toBe(ours)
+    })
+
+    it("does not need the bucket host list", () => {
+      expect(publicCoverUrl(photo, [])).toBe(ours)
+    })
+
+    it.each([
+      ["a lookalike host", "https://images.unsplash.com.evil.com/photo-1511795409834-ef04bbd61622"],
+      ["http", "http://images.unsplash.com/photo-1511795409834-ef04bbd61622"],
+      ["credentials", "https://user:pw@images.unsplash.com/photo-1511795409834-ef04bbd61622"],
+      ["an @ host trick", "https://images.unsplash.com@evil.com/photo-1511795409834-ef04bbd61622"],
+      ["a port", "https://images.unsplash.com:8443/photo-1511795409834-ef04bbd61622"],
+      ["a traversal", "https://images.unsplash.com/photo-x/../../x"],
+      ["an encoded slash", "https://images.unsplash.com/photo-1511795409%2f1234567"],
+      ["an encoded backslash", "https://images.unsplash.com/photo-1511795409%5c1234567"],
+      ["the wrong path", "https://images.unsplash.com/photos/1511795409834-ef04bbd61622"],
+      ["a sub-path", "https://images.unsplash.com/photo-1511795409834-ef04bbd61622/x"],
+      ["another Unsplash host", "https://plus.unsplash.com/photo-1511795409834-ef04bbd61622"],
+      ["an empty id", "https://images.unsplash.com/photo-"],
+      ["a too-short id", "https://images.unsplash.com/photo-abc"],
+      ["a too-long id", `https://images.unsplash.com/photo-${"a".repeat(81)}`],
+    ])("drops %s", (_label, raw) => {
+      expect(publicCoverUrl(raw, HOSTS)).toBeNull()
+    })
+  })
 })
 
 describe("shareState", () => {

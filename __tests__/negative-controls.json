@@ -2385,6 +2385,12 @@
       "mutation": "app/api/mobile/conversations/route.ts: the Promise.all of lastVisibleMessages and unreadCounts made two sequential awaits.",
       "observed": "2026-10-19: fails, the two reads no longer overlap. Reverted; green.",
       "date": "2026-10-19"
+    },
+    "share-public.test.ts": {
+      "guards": "fix/share-cover-unsplash: publicCoverUrl accepts an images.unsplash.com/photo-<id> cover (https, no credentials or port, exact path) and re-issues it with our fixed query, so a link preview shows the cover card; bucket rules unchanged.",
+      "mutation": "M2239 lib/share-public.ts publicCoverUrl: the Unsplash branch (hostname === images.unsplash.com) removed.",
+      "observed": "2026-10-27: M2239 2 failing (accepts a photo URL and replaces its query with ours; does not need the bucket host list). Reverted; 50 of 50.",
+      "date": "2026-10-27"
     }
   },
   "grandfathered": [
