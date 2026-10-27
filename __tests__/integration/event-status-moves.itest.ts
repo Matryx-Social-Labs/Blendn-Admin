@@ -17,7 +17,8 @@ jest.mock("@/lib/push-notifications", () => ({
 import { NextRequest } from "next/server"
 
 import { fileEventClaim } from "@/lib/event-claim-actions"
-import { CANCEL_DRAFT_REFUSAL, COMPLETED_REFUSAL, CREATE_STATUS_REFUSAL } from "@/lib/event-status-move"
+import { EventStatusMovedError, updateEventTracked } from "@/lib/event-change"
+import { CANCEL_DRAFT_REFUSAL, COMPLETED_REFUSAL, CREATE_STATUS_REFUSAL, FROM_COMPLETED_REFUSAL } from "@/lib/event-status-move"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { inviteMember } from "@/lib/org-actions"
 import { REVIEW_ORG_REFUSAL } from "@/lib/review-demo-org"
@@ -42,6 +43,7 @@ afterAll(async () => {
   const ids = events.map((e) => e.id)
   await db.audit_logs.deleteMany({ where: { OR: [{ resource_id: { in: [...ids, ...orgs] } }, { org_id: { in: orgs } }] } })
   await db.event_occurrences.deleteMany({ where: { event_id: { in: ids } } })
+  await db.event_rsvps.deleteMany({ where: { event_id: { in: ids } } })
   await cleanup(users, ids)
   await db.venues.deleteMany({ where: { created_by_org_id: { in: orgs } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
@@ -126,6 +128,35 @@ describe("any organizer", () => {
     expect(await patch(id, payload({ status: "completed" }))).toEqual({ status: 400, body: expect.objectContaining({ error: COMPLETED_REFUSAL }) })
     expect((await patch(id, payload({ status: "cancelled" }))).status).toBe(200)
     expect(await statusOf(id)).toBe("cancelled")
+  })
+
+  it("cancels a draft people have RSVP'd to — an event an admin unpublished — so they are told", async () => {
+    const { body } = await create(payload())
+    const id = body.id!
+    const guest = await makeUser("esm_guest")
+    users.push(guest)
+    await db.event_rsvps.create({ data: { event_id: id, user_id: guest, status: "going" } })
+    expect((await patch(id, payload({ status: "cancelled" }))).status).toBe(200)
+    expect(await statusOf(id)).toBe("cancelled")
+  })
+
+  it("saves an edit to a completed event with the status it has, and moves it nowhere", async () => {
+    const { body } = await create(payload())
+    const id = body.id!
+    await db.events.update({ where: { id }, data: { status: "completed" } })
+    expect((await patch(id, payload({ status: "completed", title: "Renamed after the night" }))).status).toBe(200)
+    expect(await patch(id, payload({ status: "published" }))).toEqual({ status: 400, body: expect.objectContaining({ error: FROM_COMPLETED_REFUSAL }) })
+    expect(await statusOf(id)).toBe("completed")
+  })
+
+  it("does not write over a status that moved since it was read: a concurrent cancel stays cancelled", async () => {
+    const { body } = await create(payload({ status: "published" }))
+    const id = body.id!
+    await db.events.update({ where: { id }, data: { status: "cancelled" } })
+    await expect(
+      updateEventTracked({ where: { id }, data: { title: "An edit read before the cancel" } }, { fromStatus: "published" })
+    ).rejects.toBeInstanceOf(EventStatusMovedError)
+    expect(await db.events.findUniqueOrThrow({ where: { id }, select: { status: true, title: true } })).toMatchObject({ status: "cancelled" })
   })
 
   it("creates an event published straight away, through the publish checks", async () => {

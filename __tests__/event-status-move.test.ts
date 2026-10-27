@@ -38,3 +38,9 @@ it.each([
 ] as const)("%s from %s → %s", (next, current, expected) => {
   expect(statusMoveRefusal(next, current)).toBe(expected)
 })
+
+it("cancels a draft people have RSVP'd to (an event an admin unpublished), and only then", () => {
+  expect(statusMoveRefusal("cancelled", "draft", { draftHasRsvps: true })).toBeNull()
+  expect(statusMoveRefusal("cancelled", "draft", { draftHasRsvps: false })).toBe(CANCEL_DRAFT_REFUSAL)
+  expect(statusMoveRefusal("completed", "draft", { draftHasRsvps: true })).toBe(COMPLETED_REFUSAL)
+})

@@ -3350,10 +3350,14 @@ called them; the dashboard owns each job. `PATCH`/`DELETE /events/:id` and
 and `PATCH /api/events/:id`, and the mobile `PATCH /events/:eventId`, take a
 status only along these moves; anything else is a **400** with a sentence:
 a new event is `draft` or `published`; `published` only from `draft`;
-`draft` only from `published` (unpublishing); `cancelled` only from
-`published` (a draft is deleted, not cancelled); never out of `cancelled`;
-`completed` is never written by a client, and a completed event stays so.
-Saving with the status the event already has is no move. `cancelled` and
+`draft` only from `published` (unpublishing); `cancelled` from `published`,
+or from a draft somebody has RSVP'd to (going, maybe or waitlisted: an event
+an admin unpublished), never from a draft with nobody to tell; never out of
+`cancelled`; `completed` is never written by a client, and a completed event
+stays so. Saving with the status the event already has is no move, so a
+completed event's edit sends `completed`. A status that moved between the
+read and the write (a cancel landing mid-edit) is a **409**, never written
+over. `cancelled` and
 `completed` are public (the app and the share page open them), so before
 this a client could reach either from a draft past every publish check.
 The admin status control and curation keep their own rules.

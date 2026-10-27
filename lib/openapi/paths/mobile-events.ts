@@ -367,12 +367,16 @@ registry.registerPath({
     400: {
       description:
         "Validation error, or a status move a client may not make (lib/event-status-move.ts): `published` only from a draft, " +
-        "`draft` only from published, `cancelled` only from published, never out of `cancelled`, never into or out of `completed`.",
+        "`draft` only from published, `cancelled` from published (or from a draft somebody has RSVP'd to), never out of `cancelled`, never into or out of `completed`.",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
     403: {
       description:
         "Not the organisation's event, or the organisation is Razorpay's review demo, which may take no event out of draft (lib/review-demo-org.ts).",
+      content: { "application/json": { schema: ErrorResponseSchema } },
+    },
+    409: {
+      description: "The event's status moved between the read and the write (a cancel landed mid-edit); nothing was written. Reload and try again.",
       content: { "application/json": { schema: ErrorResponseSchema } },
     },
   },

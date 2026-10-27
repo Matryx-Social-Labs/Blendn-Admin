@@ -32,13 +32,19 @@
     "which tests need a registry entry; it does not mean a behavioural test is",
     "automatically non-vacuous, only that it usually fails on its own terms.",
     "Mutation ids M1539 to M1544 were reserved while the client-gaps branch was planned and never used; the numbering above origin/dev's last (M1516) continues at M1517 and runs to M1574.",
-    "2026-10-26: M2203 to M2231 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
+    "2026-10-26: M2203 to M2236 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "submit-as-status.test.ts": {
+      "guards": "A refused save puts the event's status back in the form (submitAsStatus), so a refused Publish leaves a draft a draft and Save as draft then works; and the editor reports false on a 401, a refusal and an error.",
+      "mutation": "M2232 submitAsStatus stopped restoring after a refused save. M2233 the editor's !response.ok branch returned true; M2233b its catch returned nothing.",
+      "observed": "M2232: 1 of 4 failing (status left at published). M2233: 1 of 4 failing. M2233b: 1 of 4 failing. Reverted; green.",
+      "date": "2026-10-26"
+    },
     "event-status-moves.itest.ts": {
-      "guards": "Status moves through the real handlers: no event created cancelled or completed, no draft cancelled or completed at either PATCH, the real flows (publish, edit, unpublish, republish, cancel) still 200; and Razorpay's review organisation is refused out of draft at POST and both PATCHes, a venue link, createVenue, inviteMember and fileEventClaim.",
-      "mutation": "M2217 statusMoveRefusal let a draft be cancelled. M2218 POST /api/events lost its create-status refusal. M2219 the mobile PATCH lost its move check. M2224 fileEventClaim lost its review-org refusal. M2228 POST lost its review-org 403. M2229 the dashboard PATCH lost its review-org 403. M2230 createVenue's guard became `if (false)`. M2231 inviteMember lost its guard.",
-      "observed": "Each: 1 of 7 failing (M2217 also 1 of 18 in event-status-move.test.ts). Reverted; green.",
+      "guards": "Status moves through the real handlers: no event created cancelled or completed, no draft cancelled or completed at either PATCH, the real flows (publish, edit, unpublish, republish, cancel) still 200; and Razorpay's review organisation is refused out of draft at POST and both PATCHes, a venue link, createVenue, inviteMember and fileEventClaim. Also: a draft with RSVPs may be cancelled, a completed event saves with its own status, and a status that moved since the read is never written over (EventStatusMovedError, 409 at both PATCHes).",
+      "mutation": "M2217 statusMoveRefusal let a draft be cancelled. M2218 POST /api/events lost its create-status refusal. M2219 the mobile PATCH lost its move check. M2224 fileEventClaim lost its review-org refusal. M2228 POST lost its review-org 403. M2229 the dashboard PATCH lost its review-org 403. M2230 createVenue's guard became `if (false)`. M2231 inviteMember lost its guard. M2235 statusMoveRefusalFor never asked for RSVPs. M2236 updateEventTracked lost its fromStatus check.",
+      "observed": "Each: 1 of 7 failing (M2217 also 1 of 18 in event-status-move.test.ts). Reverted; green. M2235: 1 of 10 failing (the RSVP'd draft refused). M2236: 1 of 10 failing (the concurrent cancel written over). Reverted; green.",
       "date": "2026-10-26"
     },
     "event-status-move.test.ts": {
@@ -946,8 +952,8 @@
     },
     "event-authoring-rail.test.ts": {
       "guards": "that the event form renders the publish rail (and the bar below @4xl/main) and no submit of its own, that the buttons set the status and no Status select exists, that Publish is disabled while anything blocks, that every readiness item links to a field id that exists, that the content column beside the sidebar clips rather than scrolls (sticky; the inset until step 14), that the long description is optional and lives under More, that categories are chips + a Popover picker, that Featured is admin-only on the screen and in both API routes, and that cancelling is a confirmed action",
-      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset (step 14: on the content column, in place of `overflow-x-clip`). X: rename `id=\"field-start_time\"` to `field-start` in the When section M2227 (2026-10-26) the rail offered Cancel on drafts again (`isEditing && !cancelled`).",
-      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'); step 14 re-run: 1 failing of 11. X: 1 failing ('every readiness item links to its field'). Nine green each time M2227: 1 of 11 failing (Cancel only on a published event). Reverted; green.",
+      "mutation": "T: drop `blocked` from Publish's disabled expression. U: `...(is_featured != null && { is_featured })` in the POST route. V: a `name=\"status\"` FormField back in the Who-can-come section. W: `overflow-hidden` back on SidebarInset (step 14: on the content column, in place of `overflow-x-clip`). X: rename `id=\"field-start_time\"` to `field-start` in the When section M2227 (2026-10-26) the rail offered Cancel on drafts again (`isEditing && !cancelled`). M2234 (2026-10-26) a completed event no longer counted as live in the rail (Publish and Save as draft offered, both refused).",
+      "observed": "T: 1 failing ('Publish is disabled while anything blocks'). U: 1 failing ('Featured is admin-only'). V: 1 failing ('the buttons set the status; there is no Status select'). W: 1 failing ('the sticky rail is not defeated by the layout'); step 14 re-run: 1 failing of 11. X: 1 failing ('every readiness item links to its field'). Nine green each time M2227: 1 of 11 failing (Cancel only on a published event). Reverted; green. M2234: 1 of 13 failing (completed edited like a live one). Reverted; green.",
       "reverted": true,
       "date": "2026-09-11",
       "note": "Control X was reverted with `git checkout` on a file that also carried the section's redesign, which threw the redesign away; the registry's own warning about exactly this was re-earned and the edits re-applied."

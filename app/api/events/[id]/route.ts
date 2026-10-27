@@ -9,12 +9,12 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { updateEventTracked } from "@/lib/event-change"
-import { cancelEventCheckIns, eventWriteAction, isCancellingEvent, isUncancellingEvent, UNCANCEL_REFUSAL } from "@/lib/event-cancellation"
+import { EventStatusMovedError, updateEventTracked } from "@/lib/event-change"
+import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { auditLog } from "@/lib/audit-log"
-import { leavesDraft, statusMoveRefusal } from "@/lib/event-status-move"
+import { leavesDraft, statusMoveRefusalFor } from "@/lib/event-status-move"
 import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { resolveVenueLink, venueFenceToCopy } from "@/lib/venue-link"
 import { syncOccurrences } from "@/lib/occurrences"
@@ -173,7 +173,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     }
 
     // Which status moves a client may make (lib/event-status-move.ts).
-    const moveRefusal = statusMoveRefusal(status, event.status)
+    const moveRefusal = await statusMoveRefusalFor(event.id, status, event.status)
     if (moveRefusal) return errorResponse(moveRefusal, 400)
 
     // Razorpay's reviewer: never out of draft, never a real venue (lib/review-demo-org.ts).
@@ -220,11 +220,6 @@ export async function PATCH(req: Request, { params }: RouteContext) {
 
     // Fix #35: When cancelling an event, cascade to active check-ins
     const isCancelling = isCancellingEvent(status ?? undefined, event.status)
-
-    // And cancelled is terminal -- see lib/event-cancellation.ts.
-    if (isUncancellingEvent(status, event.status)) {
-      return NextResponse.json({ error: UNCANCEL_REFUSAL }, { status: 400 })
-    }
 
     // Omitted means "leave the link alone" — a PATCH that only changes the
     // title must not unlink the venue. Explicit null unlinks.
@@ -508,7 +503,11 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             }
           : {}),
       },
+    }, { fromStatus: event.status }).catch((error: unknown) => {
+      if (error instanceof EventStatusMovedError) return error
+      throw error
     })
+    if (updatedEvent instanceof EventStatusMovedError) return errorResponse(updatedEvent.message, 409)
 
     // Who published, cancelled or moved it, with the material changes the
     // attendees were told about (SCRUM-89). Straight after the write: the

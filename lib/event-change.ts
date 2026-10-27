@@ -189,7 +189,22 @@ export function changeSummaryForResponse(
  * takes the row's own lock and returns the latest row, and the stale `before`
  * and the first-value-wins rule recompute the same union.
  */
-export async function updateEventTracked(args: Prisma.eventsUpdateArgs) {
+/**
+ * The event's status moved between the caller's read and its write: a cancel
+ * landed while somebody saved an edit. Writing on would undo it.
+ */
+export class EventStatusMovedError extends Error {
+  constructor(readonly now: string) {
+    super(`This event is now ${now}: it changed while you were editing. Reload it and try again.`)
+  }
+}
+
+/**
+ * `fromStatus`: the status the caller read and decided on. Checked under the
+ * row lock, so a status that moved since (a concurrent cancel) is refused with
+ * `EventStatusMovedError` rather than written over.
+ */
+export async function updateEventTracked(args: Prisma.eventsUpdateArgs, opts: { fromStatus?: string } = {}) {
   const eventId = args.where.id
   if (!eventId) throw new Error("updateEventTracked needs the event's id")
   return db.$transaction(async (tx) => {
@@ -199,6 +214,7 @@ export async function updateEventTracked(args: Prisma.eventsUpdateArgs) {
       where: { id: eventId },
       select: { start_time: true, end_time: true, venue_name: true, address: true, status: true, changed_from: true },
     })
+    if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
     const next = nextChange(before.changed_from, before, updated)
     /*
