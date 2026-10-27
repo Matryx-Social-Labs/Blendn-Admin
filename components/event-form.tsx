@@ -7,6 +7,7 @@ import { format } from "date-fns"
 import { Form } from "@/components/ui/form"
 import { toast } from "sonner"
 import type { LocationData } from "@/components/location-picker"
+import { submitAsStatus } from "@/components/event-form/submit-as-status"
 import { eventFormSchema, type EventFormValues } from "@/components/event-form/schema"
 import {
   BasicInfoSection,
@@ -32,7 +33,8 @@ export type { EventFormValues } from "@/components/event-form/schema"
 // ── Main form ─────────────────────────────────────────────────────────────────
 
 interface EventFormProps {
-  onSubmit: (data: EventFormValues) => void | Promise<void>
+  /** Resolves true when the save landed; anything else puts the status back (`submitAsStatus`). */
+  onSubmit: (data: EventFormValues) => Promise<boolean>
   defaultValues?: Partial<EventFormValues>
   isSubmitting?: boolean
   isEditing?: boolean
@@ -224,8 +226,7 @@ export function EventForm({
    * `status` stays a schema field, so the API payload is unchanged.
    */
   const submitAs = (status: EventFormValues["status"]) => {
-    form.setValue("status", status, { shouldDirty: true })
-    void form.handleSubmit(submit)()
+    void submitAsStatus(form, status, submit)
   }
   const [listingVenue, setListingVenue] = useState(false)
   // The rail disables on the state above one render late; this refuses a
@@ -236,8 +237,8 @@ export function EventForm({
    * links to it (SCRUM-353c). Its id goes back into the form: a retry after a
    * refused event save links that venue rather than adding it twice.
    */
-  const submit = async (data: EventFormValues) => {
-    if (submitting.current) return
+  const submit = async (data: EventFormValues): Promise<boolean> => {
+    if (submitting.current) return false
     submitting.current = true
     setListingVenue(true)
     try {
@@ -247,7 +248,7 @@ export function EventForm({
         form.setValue("venue_link_status", "auto_linked")
         form.setValue("new_venue", null)
       }
-      await onSubmit(venueId ? { ...data, venue_id: venueId, venue_link_status: "auto_linked", new_venue: null } : data)
+      return await onSubmit(venueId ? { ...data, venue_id: venueId, venue_link_status: "auto_linked", new_venue: null } : data)
     } finally {
       submitting.current = false
       setListingVenue(false)

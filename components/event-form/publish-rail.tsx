@@ -165,7 +165,14 @@ function Actions({
   compact = false,
 }: Omit<PublishRailProps, "card"> & { compact?: boolean }) {
   const blocked = readiness.blockers.length > 0
-  const live = isEditing && status === "published"
+  /*
+   * A completed event is edited like a live one: "Save changes" sends the
+   * status it has (an echo is no move), and nothing offers to publish, draft or
+   * cancel it — the server refuses every move out of completed
+   * (lib/event-status-move.ts).
+   */
+  const ended = isEditing && status === "completed"
+  const live = isEditing && (status === "published" || ended)
   const cancelled = isEditing && status === "cancelled"
   const left = readiness.blockers.length
   const why = blocked
@@ -202,8 +209,8 @@ function Actions({
           {isEditing ? "Save as draft" : "Save draft"}
         </Button>
       ) : null}
-      {/* Only a published event is cancelled; a draft nobody saw is deleted (lib/event-status-move.ts). */}
-      {live && !compact ? (
+      {/* Only a published event is cancelled here (lib/event-status-move.ts). */}
+      {live && !ended && !compact ? (
         <Button
           type="button"
           variant="ghost"
@@ -225,7 +232,9 @@ export function PublishRail(props: PublishRailProps) {
       ? "Published"
       : isEditing && status === "cancelled"
         ? "Cancelled"
-        : "Before it can go out"
+        : isEditing && status === "completed"
+          ? "This event has ended"
+          : "Before it can go out"
   return (
     <aside
       aria-label="Publish"
