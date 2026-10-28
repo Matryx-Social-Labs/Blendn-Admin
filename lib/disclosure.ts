@@ -57,6 +57,17 @@ import { SPONSORSHIP } from "./constants"
 /** The conventional minimum cell. Override only with a reason. */
 export const MIN_CELL = 5
 
+const QUARTER_HOUR_MS = 15 * 60_000
+
+/**
+ * An arrival as a host may be told it: to the quarter hour. The room tells
+ * everyone in it who arrived and when, under a room pseudonym; a host's
+ * arrival to the minute would match that pseudonym to the label the
+ * organisation's roster and exports use (the Attendees tab, the Check-ins
+ * export).
+ */
+export const toQuarterHour = (at: Date) => new Date(Math.floor(at.getTime() / QUARTER_HOUR_MS) * QUARTER_HOUR_MS)
+
 /**
  * The share of a cell one contributor may hold before the cell identifies them.
  *

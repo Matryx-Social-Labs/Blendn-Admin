@@ -3,7 +3,7 @@ import type { rsvp_status, user_role } from "@prisma/client"
 
 import { distinctAttendeeCounts } from "./attendee-counts"
 import { db } from "./db"
-import { discloseVenueCounts, liveCountBucket, MIN_CELL, type LiveCountBucket } from "./disclosure"
+import { discloseVenueCounts, liveCountBucket, MIN_CELL, toQuarterHour, type LiveCountBucket } from "./disclosure"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { eventScopeFor, labelScopeFor, labelScoper } from "./reports"
@@ -201,10 +201,6 @@ export type EventAttendees =
     }
   /** `came` is a range while the event runs: it is still moving (SCRUM-516). */
   | { view: "count"; started: boolean; came: number | LiveCountBucket | null }
-
-const QUARTER_HOUR_MS = 15 * 60_000
-
-const toQuarterHour = (at: Date) => new Date(Math.floor(at.getTime() / QUARTER_HOUR_MS) * QUARTER_HOUR_MS)
 
 /**
  * Everybody on one event's list, as ids: who came (with their first arrival)

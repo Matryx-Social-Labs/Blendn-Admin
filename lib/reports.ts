@@ -4,7 +4,7 @@ import type { Prisma, user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
 import { distinctAttendeeCounts, distinctAttendeeCountsByDay } from "./attendee-counts"
-import { discloseGuests, discloseVenueCounts } from "./disclosure"
+import { discloseGuests, discloseVenueCounts, MIN_CELL, toQuarterHour } from "./disclosure"
 import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
 import { realEventsWhere } from "./event-kind"
@@ -248,6 +248,32 @@ export async function eventScopeFor(role: user_role, userId: string): Promise<Pr
  */
 export const REPORT_ROW_LIMIT = 10_000
 
+/**
+ * The Check-ins export as a host may have it (SCRUM-887, L3): the rule the
+ * event's Attendees tab already kept (`eventAttendees`), which this export did
+ * not. The room announces every arrival under its pseudonym, so the exact time
+ * beside a label, or the door's order, joined tonight's pseudonym to the label
+ * the organisation sees the same person by at every night. Arrivals to the
+ * quarter hour, rows by label within an event, and no time at all for an event
+ * with fewer than `MIN_CELL` attendees in the export.
+ */
+function arrivalsForHost<R extends { created_at: Date; user_id: string; kind: string; attendee: string; event: { id: string; start_time: Date } }>(
+  rows: R[]
+): Array<Omit<R, "created_at"> & { created_at: Date | null }> {
+  const people = new Map<string, Set<string>>()
+  for (const r of rows) {
+    if (r.kind === "attendee") people.set(r.event.id, (people.get(r.event.id) ?? new Set<string>()).add(r.user_id))
+  }
+  return rows
+    .map((r) => ({ ...r, created_at: (people.get(r.event.id)?.size ?? 0) < MIN_CELL ? null : toQuarterHour(r.created_at) }))
+    .sort(
+      (a, b) =>
+        b.event.start_time.getTime() - a.event.start_time.getTime() ||
+        a.event.id.localeCompare(b.event.id) ||
+        a.attendee.localeCompare(b.attendee)
+    )
+}
+
 /** A report's rows and its header, ready for `toCsv`. */
 export async function buildReport(
   key: ReportKey,
@@ -359,7 +385,8 @@ export async function buildReport(
       const rows = [...byLabel.entries()].map(([attendee, v]) => ({
         attendee,
         events_attended: v.events.size,
-        last_attended: v.last,
+        // The day, not the minute: that night's check-in time is the room's arrival again (SCRUM-887, L4).
+        last_attended: toISODate(v.last),
         repeat: v.events.size > 1,
       }))
       rows.sort((a, b) => b.events_attended - a.events_attended)
@@ -389,23 +416,21 @@ export async function buildReport(
           created_at: true,
           status: true,
           user_id: true,
+          kind: true,
           event: { select: { id: true, title: true, start_time: true, organizer_org_id: true } },
         },
       })
+      const labelled = rows.map((r) => ({ ...r, attendee: attendeeLabel(r.user_id, labelScope(r.event.organizer_org_id)) }))
       return toCsv(
         [
           { key: "created_at", label: "Checked in at" },
           { key: "status", label: "Status" },
-          {
-            key: "attendee",
-            label: "Attendee",
-            value: (r) => attendeeLabel(r.user_id, labelScope(r.event.organizer_org_id)),
-          },
+          { key: "attendee", label: "Attendee" },
           { key: "event_id", label: "Event ID", value: (r) => r.event.id },
           { key: "event", label: "Event", value: (r) => r.event.title },
           { key: "event_start", label: "Event start", value: (r) => r.event.start_time },
         ],
-        rows
+        role === "app_admin" ? labelled : arrivalsForHost(labelled)
       )
     }
 

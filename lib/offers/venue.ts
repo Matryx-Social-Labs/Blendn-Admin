@@ -90,7 +90,13 @@ export interface OfferTotals {
 }
 
 export interface KnownRegular {
-  firstName: string
+  /**
+   * The platform's admin only; null for the venue (SCRUM-887, owner ruling
+   * 2026-10-28). A host never learns who someone is, and saying yes to "let
+   * this venue know I'm a regular" puts them on this list as a regular, with
+   * their nights, not by name.
+   */
+  firstName: string | null
   /** Nights here in the last 30, from the claim on. */
   nights: number
 }
@@ -279,6 +285,6 @@ export async function venueOffersView(
       reached: audienceBand(o.audience_size),
     })),
     totals: publishedTotals(boundaries, await histories(venueId, venue.owner_org_id, boundaries)),
-    known: known.map((k) => ({ firstName: k.first_name || "Someone", nights: k.nights })),
+    known: known.map((k) => ({ firstName: viewer.role === "app_admin" ? k.first_name || "Someone" : null, nights: k.nights })),
   }
 }
