@@ -50,7 +50,7 @@ beforeEach(() => {
 describe("an invite that could not be emailed", () => {
   it("names the address when the provider refused it, and hands over the link", async () => {
     mockSend.mockResolvedValue({ sent: false, reason: "provider_error", detail: "HTTP 422" })
-    const r = await inviteMember("org_1", "someone@blendn.app", "staff")
+    const r = await inviteMember("11111111-1111-4111-8111-111111111111", "someone@blendn.app", "staff")
     expect(r.ok).toBe(true)
     expect(r.message).toContain("someone@blendn.app")
     expect(r.message).not.toMatch(/isn’t configured/)
@@ -62,7 +62,7 @@ describe("an invite that could not be emailed", () => {
 
   it("says the platform has no email only when it has none", async () => {
     configured = false
-    const r = await inviteMember("org_1", "someone@blendn.app", "staff")
+    const r = await inviteMember("11111111-1111-4111-8111-111111111111", "someone@blendn.app", "staff")
     expect(mockSend).not.toHaveBeenCalled()
     expect(r.message).toMatch(/isn’t configured/)
     expect(r.emailFailure).toBe("not_configured")
@@ -71,7 +71,7 @@ describe("an invite that could not be emailed", () => {
 
   it("returns neither a link nor a failure when the mail went out", async () => {
     mockSend.mockResolvedValue({ sent: true })
-    const r = await inviteMember("org_1", "someone@blendn.app", "staff")
+    const r = await inviteMember("11111111-1111-4111-8111-111111111111", "someone@blendn.app", "staff")
     expect(r.message).toBe("Invite sent to someone@blendn.app.")
     expect(r.link).toBeUndefined()
     expect(r.emailFailure).toBeUndefined()
