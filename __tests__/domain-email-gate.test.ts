@@ -23,7 +23,7 @@ jest.mock("@/lib/email", () => ({
 
 import { sendDomainVerifyEmail } from "@/lib/org-actions"
 
-const ORG = "org_1"
+const ORG = "11111111-1111-4111-8111-111111111111"
 const DOMAIN = { id: "dom_1", domain: "acme.com", verified_at: null }
 
 beforeEach(() => {

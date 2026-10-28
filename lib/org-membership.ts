@@ -2,6 +2,7 @@ import type { user_role } from "@prisma/client"
 
 // Relative: reachable from server.ts via socket-ops-auth. See v0.12.1.
 import { db } from "./db"
+import { isUuid } from "./api-input"
 import type { PermissionActor, SponsorGrant } from "./rbac"
 
 /**
@@ -147,6 +148,9 @@ export async function resolveSponsorGrant(
 ): Promise<SponsorGrant | null> {
   if (actor.role === "app_admin") return null
   if (actor.orgIds.length === 0) return null
+  // A server action passes this through as the client sent it; an object would
+  // be a filter, and "an approved placement at ANY event" is not a grant.
+  if (!isUuid(eventId)) return null
   // A campaign with no brand belongs to no organisation that could hold a grant.
   if (sponsorId === null) return null
 

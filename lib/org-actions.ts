@@ -2,6 +2,7 @@
 
 import { isRazorpayReviewOrg, REVIEW_ORG_REFUSAL } from "./review-demo-org"
 import { Refusal } from "./refusal"
+import { isUuid } from "./api-input"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -49,6 +50,10 @@ async function requireOrgRole(
 ) {
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Unauthorized")
+  // A server action's argument is whatever the client posted. An object here is
+  // a Prisma filter — `{ not: <id> }` matched the caller's membership of ANY
+  // organisation, and the action's own `org_id: orgId` then reached all of them.
+  if (!isUuid(orgId)) throw new Refusal("Forbidden")
 
   const membership = await db.organisation_members.findFirst({
     where: { org_id: orgId, user_id: session.user.id, ...activeMembership },
@@ -173,15 +178,8 @@ export async function getOrgMembers(orgId: string): Promise<{
 }> {
   // Reading the member list needs membership, not management — staff should be
   // able to see who their colleagues are.
-  const session = await getAuth()
-  if (!session?.user) throw new Refusal("Unauthorized")
-  const mine = await db.organisation_members.findFirst({
-    where: { org_id: orgId, user_id: session.user.id, ...activeMembership },
-    select: { role: true },
-  })
-  if (!mine) throw new Refusal("Forbidden")
-
-  const canManage = orgPermissions(mine.role).canManageMembers
+  const { role } = await requireOrgRole(orgId, () => true)
+  const canManage = orgPermissions(role).canManageMembers
 
   const [members, invites, joinRequests] = await Promise.all([
     db.organisation_members.findMany({
@@ -393,6 +391,7 @@ export async function inviteMember(
 
 export async function revokeInvite(orgId: string, inviteId: string): Promise<void> {
   const { user } = await requireOrgRole(orgId, (p) => p.canManageMembers)
+  if (!isUuid(inviteId)) throw new Refusal("Invite not found")
 
   await db.organisation_invites.updateMany({
     // org_id in the filter: an invite id from another org must not be revocable
@@ -670,6 +669,7 @@ export async function sendDomainVerifyEmail(
 
 export async function removeDomain(orgId: string, domainId: string): Promise<void> {
   const { user } = await requireOrgRole(orgId, (p) => p.canVerifyDomain)
+  if (!isUuid(domainId)) return
   const row = await db.organisation_domains.findFirst({
     where: { id: domainId, org_id: orgId },
     select: { domain: true },
