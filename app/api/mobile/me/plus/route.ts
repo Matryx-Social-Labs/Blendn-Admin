@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 
 import { serverErrorResponse, successResponse, unauthorizedResponse } from "@/lib/api-response"
-import { livePlus, plusDetail } from "@/lib/entitlements"
+import { livePlus, plusChangedAt, plusDetail } from "@/lib/entitlements"
 import { plusGatedForPerson } from "@/lib/plus"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -30,10 +30,11 @@ export async function GET(request: NextRequest) {
     const limited = await rateLimit(request, userLimit("read", "me-plus", authUser.userId))
     if (limited) return limited
 
-    const [live, gated, detail] = await Promise.all([
+    const [live, gated, detail, changedAt] = await Promise.all([
       livePlus(authUser.userId),
       plusGatedForPerson(authUser.userId),
       plusDetail(authUser.userId),
+      plusChangedAt(authUser.userId),
     ])
     const res = await successResponse({
       active: live !== null,
@@ -41,6 +42,8 @@ export async function GET(request: NextRequest) {
       product: live?.product ?? null,
       source: live?.source ?? null,
       expiresAt: live?.expiresAt?.toISOString() ?? null,
+      // When any of your Plus or Night Pass rows last changed, started or not (a stacked pass counts): the app refetches on a new value.
+      changedAt: changedAt?.toISOString() ?? null,
       // Only when the data says so: `state` of a store subscription (from the
       // RevenueCat deliveries), `grant` for a free month of ours. Never guessed.
       ...detail,

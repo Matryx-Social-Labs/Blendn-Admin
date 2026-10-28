@@ -22,7 +22,7 @@ const healthRoute = require("@/app/api/health/route") as typeof import("@/app/ap
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const eventsRoute = require("@/app/api/mobile/events/route") as typeof import("@/app/api/mobile/events/route")
 
-const VARIABLES = ["MOBILE_MIN_APP_VERSION", "MAINTENANCE_MODE", "MAINTENANCE_RETRY_AFTER_SECONDS"] as const
+const VARIABLES = ["MOBILE_MIN_APP_VERSION", "MAINTENANCE_MODE", "MAINTENANCE_RETRY_AFTER_SECONDS", "MOBILE_MIN_APP_BUILD_IOS", "MOBILE_MIN_APP_BUILD_ANDROID"] as const
 const saved = Object.fromEntries(VARIABLES.map((name) => [name, process.env[name]]))
 afterEach(() => {
   for (const name of VARIABLES) {
@@ -109,5 +109,41 @@ describe("the minimum app version (MOBILE_MIN_APP_VERSION)", () => {
     const { res, reachedRoute } = await get("/api/health", { "x-app-version": "0.0.1" })
     expect(reachedRoute).toBe(true)
     expect(res.status).toBe(200)
+  })
+})
+
+describe("the minimum build number (MOBILE_MIN_APP_BUILD_*, SCRUM-851)", () => {
+  beforeEach(() => {
+    process.env.MOBILE_MIN_APP_BUILD_IOS = "127"
+    process.env.MOBILE_MIN_APP_BUILD_ANDROID = "40"
+  })
+
+  it("answers an iOS build below its minimum 426 UPDATE_REQUIRED, and never reaches the route", async () => {
+    const { res, reachedRoute } = await get("/api/mobile/events", { "x-app-version": "1.0.0", "x-app-build": "126", "x-app-platform": "ios" })
+    expect(reachedRoute).toBe(false)
+    expect(res.status).toBe(426)
+    expect(await res.json()).toMatchObject({ success: false, errorCode: "UPDATE_REQUIRED" })
+  })
+
+  it("judges each platform by its own minimum", async () => {
+    const android126 = await get("/api/mobile/events", { "x-app-build": "126", "x-app-platform": "android" })
+    expect(android126.reachedRoute).toBe(true)
+    const android39 = await get("/api/mobile/events", { "x-app-build": "39", "x-app-platform": "android" })
+    expect(android39.res.status).toBe(426)
+    const ios127 = await get("/api/mobile/events", { "x-app-build": "127", "x-app-platform": "ios" })
+    expect(ios127.reachedRoute).toBe(true)
+  })
+
+  it("passes with no build header (every installed build), a bad one, or an unknown platform", async () => {
+    for (const headers of [{} as Record<string, string>, { "x-app-platform": "ios" }, { "x-app-build": "abc", "x-app-platform": "ios" }, { "x-app-build": "1" }, { "x-app-build": "1", "x-app-platform": "web" }]) {
+      const { res, reachedRoute } = await get("/api/mobile/events", headers)
+      expect(reachedRoute).toBe(true)
+      expect(res.status).toBe(401)
+    }
+  })
+
+  it("is off with no minimum set", async () => {
+    delete process.env.MOBILE_MIN_APP_BUILD_IOS
+    expect((await get("/api/mobile/events", { "x-app-build": "1", "x-app-platform": "ios" })).reachedRoute).toBe(true)
   })
 })

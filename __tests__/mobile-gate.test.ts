@@ -71,6 +71,50 @@ describe("the minimum app version", () => {
   })
 })
 
+describe("the minimum build number (SCRUM-851)", () => {
+  const env = { MOBILE_MIN_APP_BUILD_IOS: "127", MOBILE_MIN_APP_BUILD_ANDROID: "40" }
+  const ios = (build: string | null) => ({ build, platform: "ios", userAgent: null })
+  const android = (build: string | null) => ({ build, platform: "android", userAgent: null })
+
+  it("refuses a build below its platform's minimum with the same 426 UPDATE_REQUIRED", () => {
+    expect(mobileGateRefusal("1.0.0", env, ios("126"))?.body).toMatchObject({ errorCode: "UPDATE_REQUIRED" })
+    expect(mobileGateRefusal("1.0.0", env, android("39"))?.status).toBe(426)
+  })
+
+  it("lets a build at or above through, and judges each platform by its own minimum", () => {
+    expect(mobileGateRefusal("1.0.0", env, ios("127"))).toBeNull()
+    expect(mobileGateRefusal("1.0.0", env, ios("1000"))).toBeNull()
+    expect(mobileGateRefusal("1.0.0", env, android("126"))).toBeNull()
+    expect(mobileGateRefusal("1.0.0", env, android("39"))?.status).toBe(426)
+  })
+
+  it("reads the platform from the user agent when it is not named", () => {
+    expect(mobileGateRefusal(null, env, { build: "5", platform: null, userAgent: "okhttp/4.12.0" })?.status).toBe(426)
+    expect(mobileGateRefusal(null, env, { build: "5", platform: null, userAgent: "Blendn/126 CFNetwork/1568 Darwin/24" })?.status).toBe(426)
+  })
+
+  it.each([null, "", "abc", "12.5", "-3"])("never refuses a build header that is %p", (build) => {
+    expect(mobileGateRefusal("1.0.0", env, ios(build))).toBeNull()
+  })
+
+  it("never refuses with no header at all, an unknown platform, or no minimum set", () => {
+    expect(mobileGateRefusal("1.0.0", env)).toBeNull()
+    expect(mobileGateRefusal(null, env, { build: "1", platform: null, userAgent: "curl/8" })).toBeNull()
+    expect(mobileGateRefusal(null, {}, ios("1"))).toBeNull()
+    expect(mobileGateRefusal(null, { MOBILE_MIN_APP_BUILD_IOS: "  " }, ios("1"))).toBeNull()
+  })
+
+  it("is off, and says so once, when the minimum is not a build number", () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    try {
+      expect(mobileGateRefusal(null, { MOBILE_MIN_APP_BUILD_IOS: "soon" }, ios("1"))).toBeNull()
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
 describe("maintenance", () => {
   it.each(["1", "true", "TRUE", " 1 "])("is on for MAINTENANCE_MODE=%p, 503 with the wait in body and header", (mode) => {
     const refusal = mobileGateRefusal("1.0.0", { MAINTENANCE_MODE: mode })
@@ -248,6 +292,6 @@ describe("the middleware", () => {
 
   it("allows X-App-Version in CORS preflight", async () => {
     const res = await call("/api/mobile/events", { origin: "https://blendn.app" }, "OPTIONS")
-    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, Authorization, X-App-Version, X-Channel-Set")
+    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, Authorization, X-App-Version, X-App-Build, X-App-Platform, X-Channel-Set")
   })
 })

@@ -135,8 +135,8 @@ describe("G7 — the blocked list is not a way to keep an identity", () => {
     const src = code("app/api/mobile/users/blocked/route.ts")
     expect(src).toMatch(/knownAs\.set\(theirs, wasPseudonymous \? \(pseudonym \?\? "Attendee"\) : null\)/)
     expect(src).not.toMatch(/user1_revealed|user2_revealed|mayShowRealName/)
-    // The photo stays behind the gate whatever the name says.
-    expect(src).toMatch(/blocked_user_photo: visible\.has\(b\.blocked_id\) \? b\.blocked\.image : null/)
+    // No photo at all, whatever the name says: the list draws a creature (SCRUM-834).
+    expect(src).toMatch(/blocked_user_photo: null/)
   })
 
   it("makes a block override the identity gate in both directions", () => {

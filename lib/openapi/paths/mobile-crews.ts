@@ -51,6 +51,8 @@ const CrewSchema = z
     hidden: z.boolean().describe("A moderator hid it: off every surface outside the crew, and it takes nobody new"),
     chatGroupId: z.string().uuid().nullable().describe("The crew chat: `/chat/groups/{chatGroupId}/…`"),
     size: z.number().int().describe("Its active members you are shown: one kept apart from you is neither listed nor counted"),
+    badges: z.array(BadgeSchema).describe("\"Out together often\" once the crew has been out together on enough nights; empty before. Additive."),
+    seatsLeft: z.number().int().describe("How many more people the crew can take, open invites counted: the number the invite door enforces. 0 when full. Additive."),
     apart: z.boolean().describe("Somebody in the crew is left out of `members` because YOU blocked them. Never set by them blocking you or by a closed conversation: that would say a crewmate is hiding from you"),
     you: z.object({ role: z.enum(["owner", "member"]), keepMeAnonymous: z.boolean() }).nullable(),
     members: z.array(CrewMemberSchema),
@@ -87,7 +89,7 @@ const CrewCardSchema = z
       .describe(
         "Matching v2: up to two lines of what this crew HOLDS (two members and a third of the crew) in common with your crew here, or with you alone — \"Both crews are into Techno\", \"Two RCB crews\", \"This crew picks chai over filter coffee, like you\". Never a member, never a count. Languages and home states only between crews of four or more here in a room of eight or more, one line at most."
       ),
-    badges: z.array(BadgeSchema).describe("\"N nights out together\": occurrences two or more members checked in at, from 2"),
+    badges: z.array(BadgeSchema).describe("\"Out together often\" (a tier, never a count; `kind` is `nights_together`): from 2 occurrences two or more members checked in at"),
   })
   .describe(
     "Counts only: never a person's name, photo or pseudonym. Ranked from your side: crew-held interests and shared intent, damped when one crew is more than twice the other's size here; then most here, then id."

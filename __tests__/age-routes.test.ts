@@ -55,6 +55,7 @@ const maySeeIdentity = jest.fn().mockResolvedValue(false)
 // Every ref here is a raw id, so `identityForRef` is the unscoped gate — which
 // is what this file varies. Room handles are covered in room-handles.itest.ts.
 jest.mock("@/lib/identity", () => ({
+  nonEventRoomCard: async () => null,
   identityForRef: async (viewerId: string, ref: string) => ({
     userId: ref,
     room: null,

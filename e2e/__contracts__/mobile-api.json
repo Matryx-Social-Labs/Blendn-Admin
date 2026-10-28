@@ -14,6 +14,7 @@
         "address",
         "categories",
         "checkInCount",
+        "checkInRadius",
         "city",
         "claimUrl",
         "country",
@@ -35,6 +36,7 @@
         "media",
         "organizer",
         "ratingCount",
+        "rsvpStatus",
         "session",
         "shortDescription",
         "slug",
@@ -247,6 +249,7 @@
     ],
     "data": [
       "badgeCount",
+      "clearKeepsRequests",
       "notifications",
       "pagination",
       "unreadCount"
@@ -348,6 +351,7 @@
     ],
     "data": [
       "active",
+      "changedAt",
       "expiresAt",
       "gated",
       "product",
@@ -443,7 +447,8 @@
       "mute",
       "pagination",
       "status",
-      "write"
+      "write",
+      "you"
     ],
     "nested": {
       "write": [
@@ -451,7 +456,8 @@
         "closesAt",
         "eventEndedAt",
         "message",
-        "reason"
+        "reason",
+        "reasonCode"
       ],
       "mute": [
         "muted",
@@ -483,7 +489,9 @@
     ],
     "data": [
       "messages",
-      "pagination"
+      "pagination",
+      "status",
+      "write"
     ],
     "nested": {
       "messages[]": [
@@ -537,6 +545,7 @@
         "bio",
         "blur_photo",
         "created_at",
+        "earned_badges",
         "education",
         "expertise",
         "friends_see_me_in_rooms",

@@ -571,8 +571,8 @@ describe("GET /me/plus and the paywall's events (MN-C01)", () => {
     const [none, sub, pass] = [await person(), await person(), await person()]
     await plus(sub.id, { until: Date.parse("2036-01-01T00:00:00Z") })
     await plus(pass.id, { product: "night_pass", until: Date.now() + 3_600_000 })
-    expect(await status(none.token)).toEqual({ active: false, gated: false, product: null, source: null, expiresAt: null })
-    expect(await status(sub.token)).toEqual({ active: true, gated: false, product: "plus", source: "apple", expiresAt: "2036-01-01T00:00:00.000Z" })
+    expect(await status(none.token)).toEqual({ active: false, gated: false, product: null, source: null, expiresAt: null, changedAt: null })
+    expect(await status(sub.token)).toEqual({ active: true, gated: false, product: "plus", source: "apple", expiresAt: "2036-01-01T00:00:00.000Z", changedAt: expect.any(String) })
     expect(await status(pass.token)).toMatchObject({ active: true, product: "night_pass" })
   })
 

@@ -43,7 +43,7 @@ const SOCIAL = new Set(["dating", "networking", "friendship"])
 const MIN_ROOM_FOR_TIER_B = 8
 /** Crews this small never print origin-like lines: a crew of two "has Kerala folks" names both. */
 const MIN_CREW_FOR_TIER_B = 4
-/** "N nights out together" from this many. */
+/** The "Out together often" badge from this many nights. */
 export const CREW_NIGHTS_BADGE_MIN = 2
 
 interface CrewIn {
@@ -156,8 +156,14 @@ export async function nightsTogether(crewIds: readonly string[], now: number = D
   return out
 }
 
+/**
+ * The tier, never the count: "Out together often" (round 4, 14.5). `kind` stays
+ * `nights_together` for the builds that key on it (SCRUM-830).
+ */
+export const CREW_BADGE_LABEL = "Out together often"
+
 export function crewBadges(nights: number): Badge[] {
-  return nights >= CREW_NIGHTS_BADGE_MIN ? [{ kind: "nights_together", label: `${nights} nights out together` }] : []
+  return nights >= CREW_NIGHTS_BADGE_MIN ? [{ kind: "nights_together", label: CREW_BADGE_LABEL }] : []
 }
 
 export interface RankedCrew {
