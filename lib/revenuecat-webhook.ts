@@ -95,6 +95,20 @@ export type Refused =
   | "stale"
   | "old_period_refund"
   | "unreconciled"
+  | "future_event"
+
+/**
+ * Refusals a resend can cure: the person may exist by now, RevenueCat's record may
+ * be readable, the event's time may have come, a fixed parser may read the body
+ * (SCRUM-737). Everything else (the other environment, an older event, a store
+ * that is not ours) says the same thing every time.
+ */
+const RETRYABLE: ReadonlySet<string> = new Set(["unknown_user", "unreconciled", "not_ours", "malformed", "future_event"])
+
+/** A clock may be a few minutes off; an event further ahead than this would freeze its row against every real one behind it (SCRUM-731). */
+export const MAX_CLOCK_SKEW_MS = 10 * 60 * 1000
+/** Nothing Blendn sells runs this long past the event that grants it. */
+export const MAX_WINDOW_MS = 5 * 365 * 24 * 60 * 60 * 1000
 
 export interface DeliveryResult {
   duplicate: boolean
@@ -216,13 +230,29 @@ export async function recordRevenuecatEvent(
         ],
         skipDuplicates: true,
       })
-      if (count === 0) return { duplicate: true, outcome: nothing }
-
+      // Locked per person first, so a decision about a replay is made on the row as it is now.
       await lockPeople(tx, [e.app_user_id, ...(e.transferred_from ?? []), ...(e.transferred_to ?? [])])
+      if (count === 0) {
+        const kept = await tx.payment_events.findUnique({
+          where: { provider_provider_event_id: { provider: PROVIDER, provider_event_id: e.id } },
+          select: { processed_at: true, error: true, body_sha256: true },
+        })
+        // Applied, or refused for a reason that cannot change, or a different body under the same id: a duplicate.
+        // Only a resend of the same bytes whose refusal a resend can cure runs again.
+        if (
+          !kept ||
+          kept.processed_at ||
+          !kept.error ||
+          !RETRYABLE.has(kept.error) ||
+          kept.body_sha256 !== bodySha256
+        ) {
+          return { duplicate: true, outcome: nothing }
+        }
+      }
       const outcome = await apply(tx, e, now, confirmed)
       await tx.payment_events.update({
         where: { provider_provider_event_id: { provider: PROVIDER, provider_event_id: e.id } },
-        data: outcome.refused ? { error: outcome.refused } : { processed_at: new Date() },
+        data: outcome.refused ? { error: outcome.refused } : { processed_at: new Date(), error: null },
       })
       return { duplicate: false, outcome }
     },
@@ -292,6 +322,8 @@ function productOf(e: RevenuecatEvent): PlusProduct | null {
 async function apply(tx: Tx, e: RevenuecatEvent, now: Date, confirmed: Set<string> | null | undefined): Promise<Outcome> {
   const isWindow = WINDOW_EVENTS.has(e.type)
   if (!isWindow && e.type !== "TRANSFER") return nothing
+  // Stamped ahead of our clock: it would win every ordering against the real events behind it.
+  if (e.event_timestamp_ms > now.getTime() + MAX_CLOCK_SKEW_MS) return refuse("future_event")
   // A TRANSFER may leave its environment out; a purchase never does.
   if ((isWindow || e.environment) && e.environment !== storeEnvironment() && !(await reviewSandbox(tx, e, isWindow))) {
     return refuse("wrong_environment")
@@ -368,11 +400,17 @@ async function applyPurchase(tx: Tx, e: RevenuecatEvent, now: Date): Promise<Out
       expiresAt = new Date(Math.min(expiresAt.getTime(), existing.expiresAt.getTime()))
     }
   } else {
-    const until = e.type === "BILLING_ISSUE" ? (e.grace_period_expiration_at_ms ?? e.expiration_at_ms) : e.expiration_at_ms
+    const stated = e.type === "BILLING_ISSUE" ? (e.grace_period_expiration_at_ms ?? e.expiration_at_ms) : e.expiration_at_ms
+    // A refund or an expiration ends access at the event, so it needs no stated expiry; anything that grants time does.
+    const ends = refund || e.type === "EXPIRATION"
+    const until = stated ?? (ends ? e.event_timestamp_ms : null)
     if (until === null || until === undefined) return refuse("malformed")
+    if (until > e.event_timestamp_ms + MAX_WINDOW_MS) return refuse("malformed")
     startsAt = existing?.startsAt ?? bought
     // A refund ends it now; an expiration has ended it — neither ever lengthens it.
     expiresAt = new Date(refund || e.type === "EXPIRATION" ? Math.min(until, e.event_timestamp_ms) : until)
+    // Ending access only ever shortens: a refund or expiration stamped after the row's own end does not move the end later.
+    if (ends && existing?.expiresAt) expiresAt = new Date(Math.min(expiresAt.getTime(), existing.expiresAt.getTime()))
   }
 
   const done = await applyStoreWindow(tx, {
