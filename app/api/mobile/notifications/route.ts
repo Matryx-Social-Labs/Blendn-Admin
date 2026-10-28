@@ -17,8 +17,8 @@ import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
 
-/** How many request rows "Clear all" checks for openness; the rest are cleared with the notices. */
-const KEEP_REQUESTS_SCAN = 200
+/** How many request rows "Clear all" decorates at once while it looks for the open ones. */
+const KEEP_REQUESTS_PAGE = 200
 
 /**
  * `GET /notifications` — the bell's feed, newest first.
@@ -171,22 +171,36 @@ export async function DELETE(request: NextRequest) {
     /*
      * Everything but the requests still waiting on the reader: an open friend
      * request or a reveal ask is a question, not a notice, and "Clear all" must
-     * not answer it by deleting it (SCRUM-860). Openness is the feed's own
-     * (`decorateNotifications`), so the two cannot disagree. A cap on the rows
-     * asked about: past it a request stays a notice and goes with the rest.
+     * not answer it by deleting it (SCRUM-860), whatever its age.
+     *
+     * Openness is the feed's own (`decorateNotifications`), so the two cannot
+     * disagree; it lives across six tables, which is why the keep-set is found
+     * by walking the person's request rows a page at a time rather than by one
+     * SQL predicate that would restate it. Only rows that existed when this
+     * began are deleted, so a request that arrives meanwhile is never lost.
      */
-    const asking = await db.notifications.findMany({
-      where: { user_id: user.userId, kind: { in: [...REQUEST_KINDS] } },
-      orderBy: { created_at: "desc" },
-      take: KEEP_REQUESTS_SCAN,
-      select: { id: true, kind: true, data: true },
+    const began = new Date()
+    const keep: string[] = []
+    for (let cursor: string | undefined; ; ) {
+      const page = await db.notifications.findMany({
+        where: { user_id: user.userId, kind: { in: [...REQUEST_KINDS] }, created_at: { lte: began } },
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        take: KEEP_REQUESTS_PAGE,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+        select: { id: true, kind: true, data: true },
+      })
+      if (page.length === 0) break
+      const decorations = await decorateNotifications(
+        user.userId,
+        page.map((n) => ({ id: n.id, kind: n.kind, payload: n.data }))
+      )
+      for (const n of page) if (decorations.get(n.id)?.open === true) keep.push(n.id)
+      if (page.length < KEEP_REQUESTS_PAGE) break
+      cursor = page[page.length - 1].id
+    }
+    const { count } = await db.notifications.deleteMany({
+      where: { user_id: user.userId, created_at: { lte: began }, ...(keep.length > 0 && { id: { notIn: keep } }) },
     })
-    const decorations = await decorateNotifications(
-      user.userId,
-      asking.map((n) => ({ id: n.id, kind: n.kind, payload: n.data }))
-    )
-    const keep = asking.filter((n) => decorations.get(n.id)?.open === true).map((n) => n.id)
-    const { count } = await db.notifications.deleteMany({ where: { user_id: user.userId, id: { notIn: keep } } })
     return successResponse({ deleted: count, clearKeepsRequests: true })
   } catch (error) {
     logger.error("Failed to clear notifications", { error: String(error) })
