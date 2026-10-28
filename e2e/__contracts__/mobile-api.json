@@ -489,7 +489,9 @@
     ],
     "data": [
       "messages",
-      "pagination"
+      "pagination",
+      "status",
+      "write"
     ],
     "nested": {
       "messages[]": [
