@@ -2166,8 +2166,8 @@
     },
     "photo-sweeper-started.test.ts": {
       "guards": "SCRUM-732: lib/background.ts starts the photo moderation sweeper and stops it on shutdown, and lib/photo-sweeper.ts imports by relative path because server.ts compiles with plain tsc.",
-      "mutation": "M1526 the sweeper not started in background.ts.",
-      "observed": "M1526: 1 of 2 failing (the start/stop test). Reverted; 2 of 2.",
+      "mutation": "M1526 the sweeper not started in background.ts. SCRUM-730: M1780 the orphan photo sweeper not stopped on shutdown.",
+      "observed": "M1526: 1 of 2 failing (the start/stop test). Reverted; 2 of 2. M1780: 1 of 3 failing.",
       "date": "2026-10-22"
     },
     "moderation-recheck-started.test.ts": {
@@ -2403,6 +2403,12 @@
       "mutation": "M1730 onRequestError an empty function again (the SDK was assumed to capture on its own). M1731 the probe's token check dropped (anyone can make it throw).",
       "observed": "M1730: 1 of 4 failing. M1731: 2 of 4 failing. Each reverted; 4 of 4.",
       "date": "2026-10-27"
+    },
+    "integration/photo-orphan-sweep.itest.ts": {
+      "guards": "SCRUM-730: the orphan photo sweep deletes what no profile points at under profile/<uid>/ in the public bucket (a replaced main photo, the raw upload a seal came from, an account that no longer exists), keeps everything a profile or User.image names however the URL is spelled, keeps anything younger than the 24 h grace, is a dry run unless asked to delete, ignores keys that are not profile/<uid>/<name>, refuses a pass in which nearly everything looks orphaned, deletes at most MAX_DELETES_PER_PASS and carries on, survives a failed delete, and reads a big bucket across passes with a cursor. Review round: a photo moderation pulled (its withdrawal to the private bucket may have failed) or has not judged yet is never deleted; a reference that is a bare key, an old bucket's path-style URL or another person's folder still protects the object; three days' grace.",
+      "mutation": "M1770 the grace window dropped. M1771 User.image not counted as a reference. M1772 blur_photo not counted. M1773 a dry run deletes. M1774 no cap per pass. M1775 the sanity guard dropped. M1776 a URL matched only by one spelling (extractKeyFromUrl dropped). M1777 the key-shape check dropped. M1778 a failed delete aborts the pass. M1779 the cursor never kept. M1781 held (pulled or unjudged) photos not protected. M1782 an old bucket's path-style reference not read. M1783 a bare-key reference not read. M1784 the grace shortened to an hour.",
+      "observed": "M1770: 1 of 10 failing. M1771: 1. M1772: 1. M1773: 1. M1774: 1. M1775: 1. M1776: 1. M1777: 1. M1778: 1. M1779: 1. M1781: 1. M1782: 1. M1783: 1. M1784: 1 (after pinning the minimum grace). Each reverted; 13 of 13.",
+      "date": "2026-10-28"
     }
   },
   "grandfathered": [

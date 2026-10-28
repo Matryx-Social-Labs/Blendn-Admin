@@ -10,7 +10,14 @@ describe("the photo moderation sweeper", () => {
     expect(bg).toMatch(/stopPhotoModerationSweeper\(\)/)
   })
 
+  it("starts and stops the orphan photo sweeper too (SCRUM-730)", () => {
+    expect(bg).toMatch(/startOrphanPhotoSweeper\(\)/)
+    expect(bg).toMatch(/stopOrphanPhotoSweeper\(\)/)
+  })
+
   it("is imported by a relative path, because server.ts compiles with plain tsc", () => {
-    expect(readFileSync(join(__dirname, "..", "lib/photo-sweeper.ts"), "utf8")).not.toMatch(/from "@\//)
+    for (const file of ["lib/photo-sweeper.ts", "lib/photo-orphans.ts"]) {
+      expect(readFileSync(join(__dirname, "..", file), "utf8")).not.toMatch(/from "@\//)
+    }
   })
 })
