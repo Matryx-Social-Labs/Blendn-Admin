@@ -195,6 +195,38 @@ describe("reveal_request rows and Clear all (SCRUM-859, SCRUM-860)", () => {
   })
 })
 
+describe("Clear all keeps an open request whatever its age (SCRUM-860 follow-up)", () => {
+  it("keeps an open friend request older than two hundred newer request notices, and deletes the rest", async () => {
+    const asker = await person("nf-old-asker")
+    const me = await person("nf-old-me")
+    const request = await db.friend_requests.create({ data: { sender_id: asker, recipient_id: me } })
+    const day = 86_400_000
+    // The oldest row by far: a request still waiting on the reader.
+    await db.notifications.create({
+      data: { user_id: me, kind: "friend_request", title: "t", body: "b", data: { type: "friend_request", requestId: request.id }, created_at: new Date(Date.now() - 90 * day) },
+    })
+    // More than a window's worth of newer request notices, none of them open: their requests are gone.
+    await db.notifications.createMany({
+      data: Array.from({ length: 230 }, (_, i) => ({
+        user_id: me,
+        kind: "friend_request" as const,
+        title: "t",
+        body: "b",
+        data: { type: "friend_request", requestId: randomUUID() },
+        created_at: new Date(Date.now() - (60 - i / 10) * day),
+      })),
+    })
+    await db.notifications.create({ data: { user_id: me, kind: "announcement", title: "t", body: "b", data: { type: "announcement", eventId: randomUUID() } } })
+
+    const res = await feed.DELETE(req("/api/mobile/notifications", tokenOf(me), "DELETE"))
+    expect(res.status).toBe(200)
+    const left = await db.notifications.findMany({ where: { user_id: me }, select: { kind: true, data: true } })
+    expect(left).toHaveLength(1)
+    expect(left[0].data).toEqual({ type: "friend_request", requestId: request.id })
+    expect((await rowOf(me, "friend_request")).open).toBe(true)
+  })
+})
+
 describe("crew rows", () => {
   it("an invite is open until it is declined; it shows the crew's emblem and names the crew that asked (S-2)", async () => {
     const owner = await person("nf-owner")
