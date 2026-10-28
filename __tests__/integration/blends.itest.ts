@@ -450,6 +450,38 @@ describe("in the Blend: pseudonyms, the crew reveal with its opt-out, leaving al
     expect(await db.blocked_users.count({ where: { blocker_id: a1.id, blocked_id: b1.id } })).toBe(1)
   })
 
+  it("reports somebody by the handle a Blend showed, for the Blend's own people only (SCRUM-623)", async () => {
+    const w = await blended("hrep")
+    const [a1] = w.a
+    const [b1] = w.b
+    const line = (await api.roster(a1, w.roomId)).body.data.participants.find((p: { name: string }) => p.name === w.pseudonyms.get(b1.id))
+    expect(line.userId).toMatch(/^rh_/)
+    // Somebody the Blend's door does not admit names nobody: the same 404 as an id nobody has, and no report.
+    const stranger = await person("hrep-stranger")
+    expect((await api.report(stranger, line.userId)).status).toBe(404)
+    expect(await db.user_reports.count({ where: { reporter_id: stranger.id } })).toBe(0)
+    // Somebody in the Blend reports the person behind the pseudonym.
+    expect((await api.report(a1, line.userId)).status).toBe(201)
+    expect(await db.user_reports.count({ where: { reporter_id: a1.id, reported_id: b1.id, reason: "harassment" } })).toBe(1)
+    // Block and report agree about who the handle names.
+    expect((await api.report(a1, a1.id)).status).toBe(400)
+  })
+
+  it("reports somebody by the handle a crew's chat showed, for the crew's own people only (SCRUM-623)", async () => {
+    const w = await twoCrews("crep")
+    const [a1, a2] = w.a
+    const line = (await api.roster(a1, w.A.roomId)).body.data.participants.find((p: { userId: string }) => p.userId !== a1.id && /^rh_/.test(p.userId))
+    expect(line).toBeDefined()
+    const stranger = await person("crep-stranger")
+    expect((await api.report(stranger, line.userId)).status).toBe(404)
+    expect(await db.user_reports.count({ where: { reporter_id: stranger.id } })).toBe(0)
+    // The other crew is not admitted to this crew's room either.
+    expect((await api.report(w.b[0], line.userId)).status).toBe(404)
+    expect((await api.report(a1, line.userId)).status).toBe(201)
+    const reported = await db.user_reports.findFirstOrThrow({ where: { reporter_id: a1.id } })
+    expect([a2.id, w.a[2].id]).toContain(reported.reported_id)
+  })
+
   it("closes twelve hours after its occurrence ends: the sweeper archives it and nobody gets back in (CR-I13, CR-K04)", async () => {
     const w = await blended("clock")
     await db.blends.update({ where: { id: w.blendId }, data: { closes_at: new Date(Date.now() - 60_000) } })
