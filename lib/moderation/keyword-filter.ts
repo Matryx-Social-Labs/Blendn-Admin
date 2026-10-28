@@ -16,6 +16,8 @@ const LEET_MAP: Record<string, string> = {
  */
 function normalizeAggressive(text: string): string {
   return text
+    .replace(ZERO_WIDTH, "")
+    .normalize("NFC")
     .toLowerCase()
     .replace(/[013457@$!]/g, (c) => LEET_MAP[c] || c)
     .replace(/[\s\-_.]+/g, "") // strip separators used to evade filters
@@ -24,15 +26,31 @@ function normalizeAggressive(text: string): string {
 /**
  * Leetspeak folded, words kept whole.
  *
- * Splits on anything that is not a letter or a number, so Devanagari, Tamil and
- * the rest survive -- `\s`-splitting would have been enough for English and
- * wrong for most of the wordlists this file carries.
+ * A word is a run of letters, combining marks, numbers and the zero-width
+ * joiners. The marks matter: in Devanagari, Tamil, Telugu and the rest a vowel
+ * sign, a nasal mark, a nukta and a virama are `\p{M}`, not `\p{L}`, so a
+ * split on "not a letter" tore every word apart at its vowels -- "लड़का" (boy)
+ * became ["ल","ड","क"], the banned "लौड़ा" became ["ल","ड"], and the one matched
+ * as a run inside the other (SCRUM-650). Zero-width characters are removed, so
+ * a joiner inside a conjunct neither splits a word nor hides one.
+ *
+ * NFC first, so a nukta typed as one code point (U+095C) and as two
+ * (U+0921 U+093C) are the same word -- Unicode keeps those two apart under NFC
+ * because U+095C is a composition exclusion, hence NFC maps both to the pair.
  */
+/** Zero-width characters: invisible, so a word with one inside is the same word (and inserting one is a classic way round a filter). */
+const ZERO_WIDTH = /[\u200b-\u200d\u2060\ufeff]/g
+const NOT_IN_A_WORD = /[^\p{L}\p{M}\p{N}]+/u
+
 function normalizeWords(text: string): string[] {
   return text
+    .replace(ZERO_WIDTH, "")
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[013457@$!]/g, (c) => LEET_MAP[c] || c)
-    .split(/[^\p{L}\p{N}]+/u)
+    .replace(/[013457]/g, (c) => LEET_MAP[c] || c)
+    // `@ $ !` stand for a letter only when a letter follows ("f@g", "$hit"); a "!" after a word is punctuation.
+    .replace(/[@$!](?=[\p{L}\p{N}])/gu, (c) => LEET_MAP[c] || c)
+    .split(NOT_IN_A_WORD)
     .filter(Boolean)
 }
 
@@ -182,9 +200,11 @@ export function checkKeywords(content: string): ModerationResult | null {
     }
   }
 
-  // Abbreviations are whole-word only and always have been.
-  for (const word of words) {
-    if (ABBREVIATION_KEYWORDS.has(word)) exact.push(word)
+  // Abbreviations are whole-word only and always have been; "mc bc" is a phrase.
+  for (const abbreviation of ABBREVIATION_KEYWORDS) {
+    const asWords = normalizeWords(abbreviation)
+    const hit = asWords.length === 1 ? wordSet.has(asWords[0]) : containsRun(words, asWords)
+    if (hit) exact.push(abbreviation)
   }
 
   if (exact.length === 0 && evasive.length === 0) return null

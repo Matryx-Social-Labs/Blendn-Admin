@@ -2391,6 +2391,18 @@
       "mutation": "M1701 `user_id` dropped from the update (the token stays with its first account). M1702 platform not followed. M1703 per-platform prune dropped. M1704 DELETE not scoped to the caller. M1705 any string accepted as a token. M1706 a move not logged. M1707 the move limit dropped. M1708 every register counts as a move. M1709 the prune not scoped to the account. M1710 the token in the log line. M1711 the holder read without FOR UPDATE. M1713 the limiter not fail-closed. M1715 the token in the limiter's key. M1716 peek-then-hit instead of hit-first: NOT caught here (the in-memory limiter makes peek and hit adjacent microtasks, so no parallel move can slip between them; the race needs Redis's network gap), kept hit-first by review.",
       "observed": "Final file, 25 tests: M1701: 3 failing. M1702: 1. M1703: 1. M1704: 1. M1705: 6. M1706: 3. M1707: 3. M1708: 3. M1709: 3. M1710: 1. M1711: 1. M1713: 2. M1715: 4. M1716: survives (see above). Each reverted; 25 of 25.",
       "date": "2026-10-22"
+    },
+    "keyword-filter-indic.test.ts": {
+      "guards": "SCRUM-650: Indic words are not split at their combining marks. Hindi words sharing a consonant skeleton with a banned one (लड़का, गाड़ी, गड़बड़, गांव, कमीज़, ...) are not hidden or matched, while the banned words (चूतिया, हरामी, लौड़ा, रंडी, गांड) are, with the nukta typed precomposed or decomposed; zero-width joiners neither hide a banned word nor split a harmless one; Telugu/Bengali/Tamil near-misses stay clean; Hinglish true and false positives; a slur followed by ! is still a slur while f@gg0t/r3t4rd still read as letters; 'mc bc' matches as a phrase.",
+      "mutation": "M1720 combining marks removed from the word class (words split at vowel signs again). M1721 zero-width characters not removed before tokenising. M1722 NFC not applied to words. M1723 `@ $ !` mapped to letters even after a word (a trailing '!' read as i). M1724 the multi-word abbreviation never matches.",
+      "observed": "M1720: 5 of 50 failing. M1721: 1 of 50. M1722: 1 of 49 (the nukta spellings). M1723: 2 of 49. M1724: 1 of 50. Each reverted; 50 of 50 (plus keyword-filter.test.ts and keyword-identity.test.ts unchanged).",
+      "date": "2026-10-27"
+    },
+    "instrumentation-request-error.test.ts": {
+      "guards": "SCRUM-649: instrumentation.ts exports Sentry's captureRequestError as onRequestError (Next hands it every error it caught itself: route handlers, server components, server actions), and the deliberate-failure probe route is a 404 unless SENTRY_PROBE_TOKEN is set and the x-probe-token header matches, throwing as an unhandled 500 does only then.",
+      "mutation": "M1730 onRequestError an empty function again (the SDK was assumed to capture on its own). M1731 the probe's token check dropped (anyone can make it throw).",
+      "observed": "M1730: 1 of 4 failing. M1731: 2 of 4 failing. Each reverted; 4 of 4.",
+      "date": "2026-10-27"
     }
   },
   "grandfathered": [
