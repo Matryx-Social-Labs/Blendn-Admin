@@ -11,7 +11,7 @@ import { createHash, randomUUID } from "crypto"
 import { NextRequest } from "next/server"
 
 import { hasPlus } from "@/lib/plus"
-import { authorised } from "@/lib/revenuecat-webhook"
+import { authorised, recordRevenuecatEvent, revenuecatBodySchema } from "@/lib/revenuecat-webhook"
 
 import { cleanup, closeDb, db, makeUser, refusingWrites } from "./helpers"
 
@@ -21,10 +21,14 @@ const route = require("@/app/api/webhooks/revenuecat/route") as typeof import("@
 
 const SECRET = "rc_itest_webhook_secret_0123456789abcdef"
 const AUTH = `Bearer ${SECRET}`
-/** An hour ago, so every window here is in the past or the future of a fixed instant. */
-const T0 = Date.now() - 60 * 60 * 1000
 const DAY = 86_400_000
 const MONTH = 30 * DAY
+/**
+ * Three months ago, so every event stamped T0 + (up to two months) is still in the
+ * past: the webhook refuses an event stamped ahead of its own clock (SCRUM-731), and
+ * these cases order events by the store's clock a month apart.
+ */
+const T0 = Date.now() - 3 * MONTH
 
 const users: string[] = []
 let alice = ""
@@ -386,6 +390,8 @@ describe("cancellations, refunds and billing", () => {
 
 describe("the Night Pass (NON_RENEWING_PURCHASE)", () => {
   it("is Plus for 24 hours from purchase; a second stacks after the first; a refund ends it", async () => {
+    // A pass is live now, so stacking ("not yet over") needs events near the present, not three months ago.
+    const T0 = Date.now() - 60 * 60 * 1000
     const carol = await makeUser("rc-carol")
     users.push(carol)
     const first = newTxn()
@@ -690,5 +696,161 @@ describe("held to this environment and to what Blendn+ is (MN-U05)", () => {
     const txn = newTxn()
     await post(rc("INITIAL_PURCHASE", { txn, at: T0, store: "PLAY_STORE", product: "blendn_plus:monthly" }))
     expect(await rowOf(txn)).toMatchObject({ source: "google", product: "plus" })
+  })
+})
+
+describe("a delivery that was refused can be applied by a resend (SCRUM-737)", () => {
+  it("applies the same event id once its cause is gone: an account that did not exist yet", async () => {
+    const later = `itest_later_${randomUUID().slice(0, 10)}`
+    const txn = newTxn()
+    const body = rc("INITIAL_PURCHASE", { txn, at: T0, user: later })
+    expect((await post(body)).json).toMatchObject({ duplicate: false, applied: false, refused: "unknown_user" })
+    expect(await rowsFor(txn)).toHaveLength(0)
+
+    await db.user.create({ data: { id: later, email: `${later}@itest.invalid`, name: "Later" } })
+    users.push(later)
+    // RevenueCat's "resend" is the same bytes under the same event id.
+    expect((await post(body)).json).toMatchObject({ duplicate: false, applied: true })
+    expect(await rowsFor(txn)).toHaveLength(1)
+    const [kept] = await deliveryOf(body)
+    expect(kept.error).toBeNull()
+    expect(kept.processed_at).not.toBeNull()
+    // And now it is a duplicate, applied once.
+    expect((await post(body)).json).toMatchObject({ duplicate: true, applied: false })
+    expect(await rowsFor(txn)).toHaveLength(1)
+  })
+
+  it("still treats a refusal that cannot change as final: the other environment, an older event, an unsupported store", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    const wrongEnv = rc("INITIAL_PURCHASE", { txn, at: T0, user, environment: "PRODUCTION" })
+    expect((await post(wrongEnv)).json).toMatchObject({ refused: "wrong_environment" })
+    expect((await post(wrongEnv)).json).toMatchObject({ duplicate: true })
+    const stripe = rc("INITIAL_PURCHASE", { txn: newTxn(), at: T0, user, store: "STRIPE" })
+    expect((await post(stripe)).json).toMatchObject({ refused: "unsupported_store" })
+    expect((await post(stripe)).json).toMatchObject({ duplicate: true })
+  })
+})
+
+describe("a refund or an expiration ends access even when the event names no expiry (SCRUM-737)", () => {
+  it.each([
+    ["a refund", "CANCELLATION", { cancelReason: "CUSTOMER_SUPPORT" }],
+    ["an EXPIRATION", "EXPIRATION", {}],
+  ])("%s with no expiration_at_ms ends the row at the event", async (_label, type, extra) => {
+    const user = await fresh()
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn, user, at: T0, expires: T0 + MONTH }))
+    const res = await post(rc(type, { txn, user, at: T0 + 10_000, expires: null, ...extra }))
+    expect(res.json).toMatchObject({ applied: true })
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + 10_000)
+  })
+
+  it("still refuses a purchase or renewal that names no expiry: nothing says how long it runs", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    expect((await post(rc("INITIAL_PURCHASE", { txn, user, at: T0, expires: null }))).json).toMatchObject({ refused: "malformed" })
+    expect(await rowsFor(txn)).toHaveLength(0)
+  })
+})
+
+describe("a replay is the same delivery, once (SCRUM-737 review)", () => {
+  it("applies a refused delivery once when two resends race, and says duplicate to the other", async () => {
+    const later = `itest_race_${randomUUID().slice(0, 10)}`
+    const txn = newTxn()
+    const body = rc("INITIAL_PURCHASE", { txn, at: T0, user: later })
+    expect((await post(body)).json).toMatchObject({ refused: "unknown_user" })
+    await db.user.create({ data: { id: later, email: `${later}@itest.invalid`, name: "Race" } })
+    users.push(later)
+    const results = await Promise.all([post(body), post(body), post(body)])
+    const applied = results.filter((r) => (r.json as { applied?: boolean }).applied === true)
+    expect(applied).toHaveLength(1)
+    expect(results.filter((r) => (r.json as { duplicate?: boolean }).duplicate === true)).toHaveLength(2)
+    const [kept] = await deliveryOf(body)
+    expect(kept.error).toBeNull()
+    expect(kept.processed_at).not.toBeNull()
+    expect(await rowsFor(txn)).toHaveLength(1)
+  })
+
+  it("does not apply different bytes under an event id that was refused: a resend is the same body", async () => {
+    const later = `itest_bytes_${randomUUID().slice(0, 10)}`
+    const txn = newTxn()
+    const refused = rc("INITIAL_PURCHASE", { txn, at: T0, user: later })
+    expect((await post(refused)).json).toMatchObject({ refused: "unknown_user" })
+    await db.user.create({ data: { id: later, email: `${later}@itest.invalid`, name: "Bytes" } })
+    users.push(later)
+    // Same event id, a different product and expiry.
+    const other = { ...refused, event: { ...refused.event, expiration_at_ms: T0 + 40 * DAY } }
+    expect((await post(other)).json).toMatchObject({ duplicate: true, applied: false })
+    expect(await rowsFor(txn)).toHaveLength(0)
+    expect((await deliveryOf(refused))[0].error).toBe("unknown_user")
+  })
+})
+
+describe("a refund or an expiration only ever shortens (SCRUM-737 review)", () => {
+  it("does not lengthen a window that already ended earlier, with or without a stated expiry", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn, user, at: T0, expires: T0 + DAY }))
+    // An EXPIRATION stamped a month later, naming no expiry: it ends access, so it cannot move the end to its own time.
+    expect((await post(rc("EXPIRATION", { txn, user, at: T0 + MONTH, expires: null }))).json).toMatchObject({ applied: true })
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + DAY)
+    // Same for a refund that names a later expiry than the row holds.
+    const refundTxn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn: refundTxn, user, at: T0, expires: T0 + DAY }))
+    await post(rc("CANCELLATION", { txn: refundTxn, user, at: T0 + MONTH, expires: T0 + 2 * MONTH, cancelReason: "CUSTOMER_SUPPORT" }))
+    expect((await rowOf(refundTxn)).expires_at!.getTime()).toBe(T0 + DAY)
+  })
+})
+
+describe("the store's clock cannot freeze a row or buy a millennium (SCRUM-731)", () => {
+  it("refuses an event stamped ahead of the server's clock, so a real expiration still lands", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    await post(rc("INITIAL_PURCHASE", { txn, user, at: T0, expires: T0 + MONTH }))
+    const skewed = rc("RENEWAL", { txn, user, at: Date.now() + 10 * DAY, expires: Date.now() + 40 * DAY })
+    expect((await post(skewed)).json).toMatchObject({ applied: false, refused: "future_event" })
+    // Not applied, so the window is where it was, and the next real event is not "stale".
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + MONTH)
+    const end = await post(rc("EXPIRATION", { txn, user, at: T0 + 2 * DAY, expires: T0 + 2 * DAY }))
+    expect(end.json).toMatchObject({ applied: true })
+    expect((await rowOf(txn)).expires_at!.getTime()).toBe(T0 + 2 * DAY)
+  })
+
+  it("lets the same refused event be applied by a resend once its time has come (the refusal is retryable)", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    const eventAt = Date.now() + 2 * 60 * 60 * 1000
+    const soon = rc("INITIAL_PURCHASE", { txn, user, at: eventAt, expires: eventAt + 30 * DAY })
+    expect((await post(soon)).json).toMatchObject({ refused: "future_event" })
+    expect((await deliveryOf(soon))[0].error).toBe("future_event")
+    expect(await rowsFor(txn)).toHaveLength(0)
+    // Two hours on, RevenueCat resends the same bytes: the event's time has come, and it applies.
+    const raw = JSON.stringify(soon)
+    const again = await recordRevenuecatEvent(
+      revenuecatBodySchema.parse(JSON.parse(raw)),
+      createHash("sha256").update(raw).digest("hex"),
+      new Date(eventAt + 1000)
+    )
+    expect(again).toMatchObject({ duplicate: false, applied: true })
+    expect(await rowsFor(txn)).toHaveLength(1)
+  })
+
+  it("tolerates a few minutes of clock skew, which is what a real clock does", async () => {
+    const user = await fresh()
+    const txn = newTxn()
+    const res = await post(rc("INITIAL_PURCHASE", { txn, user, at: Date.now() + 2 * 60 * 1000, expires: Date.now() + MONTH }))
+    expect(res.json).toMatchObject({ applied: true })
+  })
+
+  it("refuses an expiry more than five years past the event", async () => {
+    const user = await fresh()
+    for (const years of [6, 275_000]) {
+      const txn = newTxn()
+      const res = await post(rc("INITIAL_PURCHASE", { txn, user, at: T0, expires: Math.min(T0 + years * 365 * DAY, 8.64e15) }))
+      expect(res.json).toMatchObject({ applied: false, refused: "malformed" })
+      expect(await rowsFor(txn)).toHaveLength(0)
+    }
+    const ok = newTxn()
+    expect((await post(rc("INITIAL_PURCHASE", { txn: ok, user, at: T0, expires: T0 + 4 * 365 * DAY }))).json).toMatchObject({ applied: true })
   })
 })
