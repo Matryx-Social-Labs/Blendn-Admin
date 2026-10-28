@@ -474,6 +474,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       write: {
         allowed: denial === null,
         reason: denial?.reason ?? null,
+        // The same value under the name every refusal carries (SCRUM-809).
+        reasonCode: denial?.reason ?? null,
         message: denial && denial.reason !== "muted" && denial.reason !== "banned" && denial.reason !== "left"
           ? chatClosedMessage(denial.reason)
           : null,

@@ -180,7 +180,7 @@ export function socketHarness() {
     const socket = connect(`http://localhost:${port}`, { auth: { token: p.token }, transports: ["websocket"], reconnection: false })
     clients.push(socket)
     const heard = {
-      message: [] as { message: { content: string; userName: string; userId: string } }[],
+      message: [] as { message: { content: string; userName: string; userId: string; userImage?: string } }[],
       typing: [] as { userName: string }[],
       refused: [] as unknown[],
     }

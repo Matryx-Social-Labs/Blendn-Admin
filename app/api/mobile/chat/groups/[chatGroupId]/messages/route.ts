@@ -74,7 +74,7 @@ export async function GET(
           members: {
             where: { user_id: user.userId },
           },
-          event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
+          event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
         },
       })
     )
@@ -249,7 +249,28 @@ export async function GET(
     const scope = roomScope(chatGroup)
     const idFor = (userId: string) => idForViewer(user.userId, scope, userId)
 
+    /*
+     * Whether you may write here now, so the composer knows a room is muted,
+     * locked or closed without a second door read: the same answer, for every
+     * kind of room, the POST below gives (`mayWriteToRoomFor`). An auto-mute
+     * that has run its course is lifted first, as the POST does, so a screen
+     * is never told "muted" about a room whose send would be accepted.
+     */
+    let writeStatus = membership.status as string
+    if (writeStatus === "muted" && (await checkAndAutoUnmute(user.userId, chatGroupId))) writeStatus = "active"
+    const writeDenial = mayWriteToRoomFor(chatGroup, { status: writeStatus, last_allowed_at: membership.last_allowed_at }, user.userId)
+
     return successResponse({
+      status: chatGroup.status,
+      write: {
+        allowed: writeDenial === null,
+        reason: writeDenial?.reason ?? null,
+        reasonCode: writeDenial?.reason ?? null,
+        message:
+          writeDenial && writeDenial.reason !== "muted" && writeDenial.reason !== "banned" && writeDenial.reason !== "left" && writeDenial.reason !== "not_member"
+            ? chatClosedMessage(writeDenial.reason)
+            : null,
+      },
       messages: messagesToReturn.map(({ poll, ...m }) => {
         const isHidden = m.moderation_status === "hidden"
         return {
