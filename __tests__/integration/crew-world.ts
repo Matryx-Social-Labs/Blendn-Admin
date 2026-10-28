@@ -35,6 +35,7 @@ export const routes = {
   participants: require("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/participants/route"),
   leave: require("@/app/api/mobile/chat/groups/[chatGroupId]/leave/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/leave/route"),
   block: require("@/app/api/mobile/users/[userId]/block/route") as typeof import("@/app/api/mobile/users/[userId]/block/route"),
+  report: require("@/app/api/mobile/users/[userId]/report/route") as typeof import("@/app/api/mobile/users/[userId]/report/route"),
   account: require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route"),
   checkins: require("@/app/api/mobile/events/[eventId]/checkins/route") as typeof import("@/app/api/mobile/events/[eventId]/checkins/route"),
 }
@@ -131,6 +132,8 @@ export const api = {
     call(routes.leave.POST, `/api/mobile/chat/groups/${g}/leave`, as, { method: "POST", params: { chatGroupId: g } }),
   block: (as: Person, userId: string) =>
     call(routes.block.POST, `/api/mobile/users/${userId}/block`, as, { method: "POST", params: { userId } }),
+  report: (as: Person, userId: string, reason = "harassment") =>
+    call(routes.report.POST, `/api/mobile/users/${userId}/report`, as, { method: "POST", body: { reason }, params: { userId } }),
   /** The event's roster: who is here, named only where the room's identity rule says so. */
   checkins: (as: Person, eventId: string) =>
     call(routes.checkins.GET, `/api/mobile/events/${eventId}/checkins?limit=100`, as, { params: { eventId } }),
