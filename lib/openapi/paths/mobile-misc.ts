@@ -1320,6 +1320,11 @@ const PlusStatusSchema = z
       .nullable()
       .describe("`grant`: the trial or a referral month. Manage a store subscription in that store."),
     expiresAt: z.string().datetime().nullable().describe("When the row that lasts longest ends; null never ends."),
+    changedAt: z
+      .string()
+      .datetime()
+      .nullable()
+      .describe("The latest `updated_at` over every `plus` and `night_pass` row, including rows not yet started (a stacked Night Pass). Null with none. Additive."),
     state: z
       .enum(["active", "cancelled", "grace", "hold", "paused", "expired", "refunded"])
       .optional()

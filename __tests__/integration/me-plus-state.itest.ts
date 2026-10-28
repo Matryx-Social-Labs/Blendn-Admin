@@ -176,3 +176,39 @@ it("a store row the webhook did not write has no state to report", async () => {
   expect(body).toMatchObject({ active: true, source: "apple" })
   expect(body).not.toHaveProperty("state")
 })
+
+describe("changedAt (the stacked-pass signal)", () => {
+  const changedAt = async (who: Who) => {
+    const res = await mePlus.GET(new NextRequest("http://localhost/api/mobile/me/plus", { headers: { authorization: `Bearer ${who.token}` } }))
+    return (await res.json()).data.changedAt as string | null
+  }
+
+  it("is null with no row, then moves when a Night Pass that has not started yet is stacked on a grant", async () => {
+    const who = await person(`itest_mps_chg_${randomUUID().slice(0, 6)}`)
+    expect(await changedAt(who)).toBeNull()
+
+    const grantAt = new Date(Date.now() - 10_000)
+    await db.entitlements.create({
+      data: { subject_kind: "user", subject_id: who.id, product: "plus", source: "grant", starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 5 * DAY), external_ref: "plus-trial:itest", updated_at: grantAt },
+    })
+    const first = await changedAt(who)
+    expect(first).toBe(grantAt.toISOString())
+
+    // Stacked: starts after the grant ends, so it is not live and `expiresAt` does not move.
+    const stackedAt = new Date()
+    await db.entitlements.create({
+      data: { subject_kind: "user", subject_id: who.id, product: "night_pass", source: "apple", starts_at: new Date(Date.now() + 6 * DAY), expires_at: new Date(Date.now() + 7 * DAY), external_ref: `itest_mps_np_${randomUUID().slice(0, 6)}`, updated_at: stackedAt },
+    })
+    const second = await changedAt(who)
+    expect(second).toBe(stackedAt.toISOString())
+    expect(second).not.toBe(first)
+  })
+
+  it("ignores another person's rows and other products", async () => {
+    const [a, b] = [await person(`itest_mps_cha_${randomUUID().slice(0, 6)}`), await person(`itest_mps_chb_${randomUUID().slice(0, 6)}`)]
+    await db.entitlements.create({
+      data: { subject_kind: "user", subject_id: b.id, product: "plus", source: "grant", starts_at: new Date(), external_ref: "plus-trial:itest-b" },
+    })
+    expect(await changedAt(a)).toBeNull()
+  })
+})

@@ -4078,9 +4078,14 @@ others there earn a month (each friend counts once; at most 3 a year).
   "gated": true,
   "product": "plus",
   "source": "apple",
-  "expiresAt": "2026-11-10T09:00:00.000Z"
+  "expiresAt": "2026-11-10T09:00:00.000Z",
+  "changedAt": "2026-10-27T09:00:00.000Z"
 } }
 ```
+
+`changedAt` is the latest `updated_at` over every `plus` and `night_pass` row the
+person has, **including rows that have not started** (a Night Pass stacked on a
+grant), or `null` with none. Additive: a new value means "ask again".
 
 **`state` and `grant` are optional, and omitted when the data does not say.**
 `state` is where a store subscription or Night Pass stands, read from the newest

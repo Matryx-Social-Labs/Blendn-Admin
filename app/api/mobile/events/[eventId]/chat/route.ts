@@ -729,22 +729,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       const denial = mayWriteToRoom(membershipFresh, roomEvent, chatGroup)
       if (denial) {
         if (denial.reason === "banned") {
-          return errorResponse(bannedRefusal(membershipFresh), 403, ErrorCode.USER_BANNED)
+          return errorResponse(bannedRefusal(membershipFresh), 403, ErrorCode.USER_BANNED, denial.reason)
         }
         if (denial.reason === "muted") {
           return errorResponse(
             "You are muted in this chat.",
             403,
-            ErrorCode.USER_MUTED
+            ErrorCode.USER_MUTED,
+            denial.reason
           )
         }
         if (denial.reason === "left") {
-          return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM)
+          return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM, denial.reason)
         }
         return errorResponse(
           chatClosedMessage(denial.reason),
           403,
-          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
+          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED,
+          denial.reason
         )
       }
     }
