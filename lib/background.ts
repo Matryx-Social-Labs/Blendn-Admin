@@ -11,6 +11,7 @@ import {
 } from "./notification-retention"
 import { startIssueSweeper, stopIssueSweeper } from "./event-issues"
 import { startModerationRecheckSweeper, stopModerationRecheckSweeper } from "./moderation-recheck"
+import { startOrphanPhotoSweeper, stopOrphanPhotoSweeper } from "./photo-orphans"
 import { startPhotoModerationSweeper, stopPhotoModerationSweeper } from "./photo-sweeper"
 import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
 import { startReminderSweeper, stopReminderSweeper } from "./reminder-sweeper"
@@ -70,6 +71,8 @@ export function startBackgroundWork(): void {
   startReminderSweeper()
   // Photos the vendor could not look at the first time (SCRUM-732).
   startPhotoModerationSweeper()
+  // Objects under profile/<uid>/ that no profile points at (SCRUM-730); a dry run unless PHOTO_ORPHAN_SWEEP=delete.
+  startOrphanPhotoSweeper()
   // Room lines OpenAI could not check when they were sent (moderation-degraded policy).
   startModerationRecheckSweeper()
 
@@ -84,6 +87,7 @@ export function startBackgroundWork(): void {
       "issues",
       "reminders",
       "photo-moderation",
+      "photo-orphans",
       "moderation-recheck",
     ],
   })
@@ -104,5 +108,6 @@ export function stopBackgroundWork(): void {
   stopIssueSweeper()
   stopReminderSweeper()
   stopPhotoModerationSweeper()
+  stopOrphanPhotoSweeper()
   stopModerationRecheckSweeper()
 }
