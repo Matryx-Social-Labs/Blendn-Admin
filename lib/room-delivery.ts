@@ -3,6 +3,7 @@ import { db } from "@/lib/db"
 import { keptApartIn } from "@/lib/conversations"
 import { emitChatMessage } from "@/lib/socket-server"
 import { notifyRoomReply } from "@/lib/push-notifications"
+import { crewMemberImages } from "@/lib/identity"
 import { roomHandle, type RoomScope } from "@/lib/room-handle"
 import { roomOwnerDenial, withOwnerDoor } from "@/lib/room-kind"
 import { isRoomMuted } from "@/lib/room-mute"
@@ -99,6 +100,11 @@ export async function deliverToRoom(input: {
   }
 
   try {
+    // A crew's room shows its members' photos, as the history does; no other kind does (`crewMemberImages`).
+    const crewImage =
+      typeof input.scope !== "string" && input.scope.kind === "crew"
+        ? (await crewMemberImages({ id: chatGroupId, kind: "crew" }, [senderId])).get(senderId)
+        : undefined
     emitChatMessage(
       chatGroupId,
       {
@@ -107,7 +113,7 @@ export async function deliverToRoom(input: {
         type: message.type,
         userId: message.user_id,
         userName: senderAnonName,
-        userImage: undefined,
+        userImage: crewImage,
         createdAt: message.created_at.toISOString(),
         parentId: message.parent_id || undefined,
       },

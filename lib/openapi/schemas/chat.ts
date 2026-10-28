@@ -317,6 +317,15 @@ export const GroupChatMessageSchema = z
 
 export const GroupMessagesResponseSchema = z
   .object({
+    status: z.enum(["active", "locked", "archived"]).describe("The room's own state. Additive."),
+    write: z
+      .object({
+        allowed: z.boolean().describe("May you send here now."),
+        reason: z.string().nullable().describe("Why not: `locked`, `archived`, `window_closed`, `not_open_yet`, `hidden`, `not_live`, `muted`, `banned`, `left` or `not_member`."),
+        reasonCode: z.string().nullable().describe("Equal to `reason`, under the name every refusal carries."),
+        message: z.string().nullable().describe("A sentence for a closed room; null for a mute, ban or leave."),
+      })
+      .describe("Whether you may write, for every kind of room (the answer `POST` gives), so the composer needs no second door read. Additive."),
     messages: z.array(GroupChatMessageSchema),
     pagination: z.object({
       hasMore: z.boolean(),

@@ -84,6 +84,8 @@ const envSchema = z.object({
    * Unset: no minimum. Read by `middleware.ts` (Edge) through lib/mobile-gate.ts.
    */
   MOBILE_MIN_APP_VERSION: z.string().optional(),
+  MOBILE_MIN_APP_BUILD_IOS: z.string().optional(),
+  MOBILE_MIN_APP_BUILD_ANDROID: z.string().optional(),
   /** `1` or `true`: every `/api/mobile` request is a 503 `MAINTENANCE`. Unset: off. `/api/health` and the dashboard are never affected. */
   MAINTENANCE_MODE: z.string().optional(),
   /** The `Retry-After` of that 503, in seconds (default 300, at most 3600). */

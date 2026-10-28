@@ -6,9 +6,8 @@ import { db } from "@/lib/db"
 import { closeConversationRoom } from "@/lib/socket-server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { evictBlockedFromBlends } from "@/lib/crews/like"
-import { blockIdFromRef, openRoomHandle, userIdFromRef } from "@/lib/room-handle"
-import { ownerAdmits } from "@/lib/room-kind"
-import { userIdFromDmRef } from "@/lib/conversation-ref"
+import { blockIdFromRef, userIdFromRef } from "@/lib/room-handle"
+import { userTargetFromRef } from "@/lib/user-ref"
 import { isUuid } from "@/lib/api-input"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -23,23 +22,6 @@ interface RouteParams {
   params: Promise<{ userId: string }>
 }
 
-/**
- * Who a block names. A raw id or an event room's handle as `userIdFromRef`
- * reads them; a direct conversation's handle names the other person in it. A handle from a room that is not an event's — a Blend, a crew's
- * chat, a board post's room — names somebody only to a caller that room's
- * door lets in now: blocking somebody from inside a Blend is the one thing a
- * Blend handle may do outside the Blend, and only for the people in it. For
- * anybody else it stays the handle, which names nobody (404, as for an id
- * nobody has).
- */
-async function blockTargetFromRef(viewerId: string, ref: string): Promise<string> {
-  const opened = openRoomHandle(ref)
-  if (!opened || typeof opened.scope === "string") return userIdFromRef(ref)
-  // A conversation's handle: the other person of a DM you are in, whether or not they have revealed.
-  if (opened.scope.kind === "dm") return (await userIdFromDmRef(viewerId, ref)) ?? ref
-  return (await ownerAdmits(opened.scope.groupId, [viewerId]))?.has(viewerId) ? opened.userId : ref
-}
-
 // POST /api/mobile/users/[userId]/block — Block a user
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -52,7 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.
-    const targetId = await blockTargetFromRef(authUser.userId, (await params).userId)
+    const targetId = await userTargetFromRef(authUser.userId, (await params).userId)
 
     if (targetId === authUser.userId) {
       return errorResponse("Cannot block yourself", 400)

@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { BOARD_CLOSED, boardDenialMessage, mayReadBoard } from "@/lib/board"
+import { BOARD_CLOSED, boardRefusal, mayReadBoard } from "@/lib/board"
 import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged, visibleBoardRequests } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
 import { blockCounterparties } from "@/lib/conversations"
@@ -16,7 +16,6 @@ import {
   errorResponse,
   validationErrorResponse,
   unauthorizedResponse,
-  forbiddenResponse,
   notFoundResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
@@ -63,7 +62,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
 
     const denial = mayReadBoard(await entitlementFor(eventId, user.userId))
-    if (denial) return forbiddenResponse(boardDenialMessage(denial))
+    if (denial) {
+      const { message, reasonCode } = boardRefusal(denial, "read")
+      return errorResponse(message, 403, undefined, reasonCode)
+    }
 
     // Both directions, as the ask already is: somebody who blocked you, or whom
     // you blocked, is not on your board.
@@ -201,7 +203,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
 
     const denial = await boardWriteDenial(eventId, user.userId)
-    if (denial) return forbiddenResponse(boardDenialMessage(denial))
+    if (denial) {
+      const { message, reasonCode } = boardRefusal(denial, "write")
+      return errorResponse(message, 403, undefined, reasonCode)
+    }
 
     // Checked before it is stored, as a room message is (SCRUM-301).
     const verdict = await checkBoardText(input.body)

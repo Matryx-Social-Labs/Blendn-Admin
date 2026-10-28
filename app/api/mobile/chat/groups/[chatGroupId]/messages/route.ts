@@ -7,7 +7,7 @@ import { db } from "@/lib/db"
 import { tallyReactions } from "@/lib/reactions"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
-import { namesInRoom } from "@/lib/identity"
+import { crewMemberImages, namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
@@ -74,7 +74,7 @@ export async function GET(
           members: {
             where: { user_id: user.userId },
           },
-          event: { select: { status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
+          event: { select: { start_time: true, end_time: true, status: true, deleted_at: true, kind: true, ...broadcastAuthorSelect } },
         },
       })
     )
@@ -231,11 +231,13 @@ export async function GET(
      * numbers, from the `parent_id` index, beside the read marker and the names,
      * which wait on nothing here.
      */
-    const [, anonMap, repliesByParent] = await Promise.all([
+    const [, anonMap, repliesByParent, crewImages] = await Promise.all([
       markRead,
       // The room's own naming rule: pseudonyms, or first names in a crew's (`namesInRoom`).
       namesInRoom(chatGroup, [...pseudonymFor]),
       replyCounts(messagesToReturn.map((m) => m.id)),
+      // A crew's room shows its members' photos; every other kind, none (SCRUM-812).
+      crewMemberImages(chatGroup, [...pseudonymFor]),
     ])
 
     /*
@@ -247,7 +249,28 @@ export async function GET(
     const scope = roomScope(chatGroup)
     const idFor = (userId: string) => idForViewer(user.userId, scope, userId)
 
+    /*
+     * Whether you may write here now, so the composer knows a room is muted,
+     * locked or closed without a second door read: the same answer, for every
+     * kind of room, the POST below gives (`mayWriteToRoomFor`). An auto-mute
+     * that has run its course is lifted first, as the POST does, so a screen
+     * is never told "muted" about a room whose send would be accepted.
+     */
+    let writeStatus = membership.status as string
+    if (writeStatus === "muted" && (await checkAndAutoUnmute(user.userId, chatGroupId))) writeStatus = "active"
+    const writeDenial = mayWriteToRoomFor(chatGroup, { status: writeStatus, last_allowed_at: membership.last_allowed_at }, user.userId)
+
     return successResponse({
+      status: chatGroup.status,
+      write: {
+        allowed: writeDenial === null,
+        reason: writeDenial?.reason ?? null,
+        reasonCode: writeDenial?.reason ?? null,
+        message:
+          writeDenial && writeDenial.reason !== "muted" && writeDenial.reason !== "banned" && writeDenial.reason !== "left" && writeDenial.reason !== "not_member"
+            ? chatClosedMessage(writeDenial.reason)
+            : null,
+      },
       messages: messagesToReturn.map(({ poll, ...m }) => {
         const isHidden = m.moderation_status === "hidden"
         return {
@@ -272,7 +295,7 @@ export async function GET(
           user: {
             id: idFor(m.user.id),
             name: roomSenderName(m, anonMap.get(m.user.id), chatGroup.event),
-            image: null,
+            image: crewImages.get(m.user.id) ?? null,
           },
           parent_message: m.parent_message
             ? (({ deleted_at, moderation_status, ...parent }) => {
@@ -423,21 +446,22 @@ export async function POST(
     )
     if (denial) {
       if (denial.reason === "not_member") {
-        return forbiddenResponse("You are not a member of this chat group")
+        return errorResponse("You are not a member of this chat group", 403, undefined, denial.reason)
       }
       if (denial.reason === "banned") {
-        return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+        return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED, denial.reason)
       }
       if (denial.reason === "muted") {
-        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
+        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED, denial.reason)
       }
       if (denial.reason === "left") {
-        return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM)
+        return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM, denial.reason)
       }
       return errorResponse(
         chatClosedMessage(denial.reason),
         403,
-        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED,
+        denial.reason
       )
     }
 

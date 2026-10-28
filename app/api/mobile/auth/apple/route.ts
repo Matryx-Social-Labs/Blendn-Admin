@@ -87,6 +87,7 @@ export async function POST(request: NextRequest) {
             location: true,
             interests: true,
             onboarded: true,
+            photos: true,
           },
         },
       },

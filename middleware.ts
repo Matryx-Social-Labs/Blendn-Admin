@@ -67,7 +67,7 @@ function checkHost(pathname: string, host: string | null): HostVerdict {
 function getCorsHeaders(origin: string | null): Record<string, string> {
   const baseHeaders = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Version, X-Channel-Set",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-App-Version, X-App-Build, X-App-Platform, X-Channel-Set",
   }
 
   // Native mobile clients (Expo/React Native fetch) don't send an Origin
@@ -131,11 +131,17 @@ export async function middleware(req: NextRequest) {
    * carries no `X-App-Version` to judge.
    */
   if (pathname.startsWith("/api/mobile") && req.method !== "OPTIONS") {
-    const refusal = mobileGateRefusal(req.headers.get("x-app-version"), {
-      MOBILE_MIN_APP_VERSION: process.env.MOBILE_MIN_APP_VERSION,
-      MAINTENANCE_MODE: process.env.MAINTENANCE_MODE,
-      MAINTENANCE_RETRY_AFTER_SECONDS: process.env.MAINTENANCE_RETRY_AFTER_SECONDS,
-    })
+    const refusal = mobileGateRefusal(
+      req.headers.get("x-app-version"),
+      {
+        MOBILE_MIN_APP_VERSION: process.env.MOBILE_MIN_APP_VERSION,
+        MAINTENANCE_MODE: process.env.MAINTENANCE_MODE,
+        MAINTENANCE_RETRY_AFTER_SECONDS: process.env.MAINTENANCE_RETRY_AFTER_SECONDS,
+        MOBILE_MIN_APP_BUILD_IOS: process.env.MOBILE_MIN_APP_BUILD_IOS,
+        MOBILE_MIN_APP_BUILD_ANDROID: process.env.MOBILE_MIN_APP_BUILD_ANDROID,
+      },
+      { build: req.headers.get("x-app-build"), platform: req.headers.get("x-app-platform"), userAgent: req.headers.get("user-agent") }
+    )
     if (refusal) {
       const refused = NextResponse.json(refusal.body, { status: refusal.status, headers: refusal.headers })
       Object.entries(getCorsHeaders(origin)).forEach(([key, value]) => refused.headers.set(key, value))

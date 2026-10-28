@@ -414,6 +414,17 @@ const userPlus = (userId: string) => ({
   product: { in: ["plus", "night_pass"] as entitlement_product[] },
 })
 
+/**
+ * When the person's Blendn+ standing last changed: the latest `updated_at` over
+ * every `plus` and `night_pass` row they have, started or not -- a Night Pass
+ * stacked on a grant starts later and still changes what the app should say
+ * (`GET /me/plus`). Null with no row ever.
+ */
+export async function plusChangedAt(userId: string): Promise<Date | null> {
+  const latest = await db.entitlements.aggregate({ where: userPlus(userId), _max: { updated_at: true } })
+  return latest._max.updated_at
+}
+
 /** What a person holds now, for saying so (`GET /me/plus`): the live row that lasts longest. Not a gate. */
 export async function livePlus(
   userId: string,

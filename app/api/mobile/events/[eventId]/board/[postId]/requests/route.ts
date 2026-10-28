@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { ALREADY_ASKED, BOARD_CLOSED, boardDenialMessage } from "@/lib/board"
+import { ALREADY_ASKED, BOARD_CLOSED, boardRefusal } from "@/lib/board"
 import { asTheAskerSees, boardWriteDenial, checkBoardText } from "@/lib/board-access"
 import { lockPair, pairIsLinked } from "@/lib/friends"
 import { knownToEachOther } from "@/lib/room-people"
@@ -18,7 +18,6 @@ import {
   errorResponse,
   validationErrorResponse,
   unauthorizedResponse,
-  forbiddenResponse,
   notFoundResponse,
   conflictResponse,
   serverErrorResponse,
@@ -118,7 +117,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (post.spaces_left === 0) return conflictResponse("That offer is full")
 
     const denial = await boardWriteDenial(eventId, user.userId)
-    if (denial) return forbiddenResponse(boardDenialMessage(denial))
+    if (denial) {
+      const { message, reasonCode } = boardRefusal(denial, "write")
+      return errorResponse(message, 403, undefined, reasonCode)
+    }
 
     /*
      * One ask per post, ever — whatever became of it.

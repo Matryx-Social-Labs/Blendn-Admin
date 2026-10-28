@@ -239,6 +239,15 @@ A missing header (every installed build, and the web), `unknown` or an
 unparsable one is **never** refused; neither is a preflight. Unset: no minimum.
 A `MOBILE_MIN_APP_VERSION` that is not a version enforces nothing and logs a warning once.
 
+**Update required, by build number** (SCRUM-851). Every TestFlight build says
+`1.0.0`, so a single broken build cannot be retired by version. The app also
+sends `X-App-Build` (the store build number, a plain integer) and
+`X-App-Platform` (`ios` or `android`; absent, the platform is read from the
+user agent). When `MOBILE_MIN_APP_BUILD_IOS` / `MOBILE_MIN_APP_BUILD_ANDROID`
+is set and the build is below the platform's minimum, the request is refused
+with the same 426 `UPDATE_REQUIRED`. A missing or non-integer header, an
+unknown platform, or an unset or invalid minimum is **never** refused.
+
 **Maintenance.** With `MAINTENANCE_MODE=1` (or `true`) every `/api/mobile`
 request is refused before its route runs, whatever the version:
 
@@ -398,6 +407,24 @@ an opaque, url-safe string. Field names and shapes did not change.
   Otherwise `GET /users/:userId` also sends `work_field`, and, when
   `identityVisible` is false, `blurPhoto` (the stored derivative) in place of
   `image` and `photos` (SCRUM-458).
+- **A raw id of a friend is named** (SCRUM-863): with a friendship row, no block
+  either way and no open pseudonymous conversation between you, `GET /users/:userId`
+  and `GET /profiles/:userId` answer as for somebody you may see
+  (`identityVisible: true`) — the same fields `GET /friends/:userId` sends, so a
+  friend opened from a DM header is the page Me → Friends opens. Room handles
+  are unchanged: a friend stays a pseudonym there unless they turned
+  `friends_see_me_in_rooms` on.
+- **A crew's, Blend's or board post's handle is a room card** (SCRUM-864), for a
+  caller that room admits now and a person it admits now; otherwise 404 as before.
+  `GET /users/:userId` returns `{ id, name, age, location, isOwnProfile: false,
+  identityVisible: false }` and `GET /profiles/:userId` the `{ id, name,
+  profile: { id, age, onboarded, location } }` subset, with `name` the room's own
+  name for them: a crew's first name only, a Blend's or a board post's pseudonym.
+  No photos, bio or interests. A block either way is a 404.
+- `GET /users/:userId` also sends `sharedInterests: string[]` (the names you both
+  picked) for somebody you may see (SCRUM-858), `interests: []` (the key stays)
+  when you may not (SCRUM-827), and `stats.savedCount` on your own profile: how
+  many events your default (upcoming) saved list holds (SCRUM-825).
 - **Echoes stay handles.** `GET /users/:userId`, `GET /profiles/:userId` (`id`
   and `profile.id`) and `POST /message-requests` (`recipientId`, `recipient.id`)
   return the ref you sent — a handle in, the same handle out — except for your
@@ -1885,7 +1912,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 | before | uuid | Cursor: message ID to fetch before |
 | limit | int | Messages per page (default 50) |
 
-**The shape is the stored row, snake_case** — `created_at`, `is_edited`, `edited_at`, `parent_id`, `client_id`, `deleted_at`, `deleted_by`, `moderation_status`, plus `moderation_hidden`, `user`, `reactions` (tallies), `parent_message` (`{ id, type, metadata, content, user: { id, name } }` or null) and `_count.replies`. It is not the camelCase message of `GET /events/:eventId/chat`; `pagination` is `{ hasMore, nextCursor }`.
+**The shape is the stored row, snake_case** — `created_at`, `is_edited`, `edited_at`, `parent_id`, `client_id`, `deleted_at`, `deleted_by`, `moderation_status`, plus `moderation_hidden`, `user`, `reactions` (tallies), `parent_message` (`{ id, type, metadata, content, user: { id, name } }` or null) and `_count.replies`. It is not the camelCase message of `GET /events/:eventId/chat`; `pagination` is `{ hasMore, nextCursor }`. The response also carries `status` (the room's state) and `write: { allowed, reason, reasonCode, message }` — whether you may send now, for every kind of room (event, crew, Blend, board post), the answer `POST` gives (`reason` is `locked`, `archived`, `window_closed`, `not_open_yet`, `hidden`, `not_live`, `muted`, `banned`, `left` or `not_member`; `reasonCode` equals it; `message` is a sentence for a closed room and null for a mute, ban or leave). `GET /events/:eventId/chat`'s `write` carries `reasonCode` too. In a **crew's** room `user.image` (and the participants' `avatar`, and `userImage` on the socket's `chat:message`) is the member's photo, except for a member who chose to keep themselves anonymous; no other kind of room sends one.
 
 **Who may read (SCRUM-205):** an `active`, `muted` or `left` member. A `banned` member gets `403 USER_BANNED` — "The organizer has removed you from this room." when a person pressed Ban. A ban nobody pressed is the one a suspension leaves behind, and only a restored account can reach this point, so it reads "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it." Checking in lifts that ban (SCRUM-291). A draft or deleted event's room (or a closed room of any other kind) answers `404 NOT_FOUND`; when the caller has a membership row it also carries `reasonCode: "ROOM_CLOSED"`, `roomKind` and `roomName`, so the app can say what closed. A caller with no membership row gets the bare 404, so a guessed id never learns a name. The same rule (`roomReadDenial`, `lib/chat-window.ts`) governs `GET …/participants`, `GET /events/:eventId/chat` and the socket's `join:chat`; before it, the three GETs served the room to anybody with a membership row, banned included.
 
@@ -2613,9 +2640,11 @@ here, so a line does not change as each one walks in) in common with your crew h
 with you — `Both crews are into Techno`, `Two RCB crews ❤️`, `This crew picks
 chai over filter coffee, like you` — never a member and never a count;
 languages and home states only between crews of four or more here in a room of
-eight or more, one line at most. `badges` is `N nights out together` (nights
-two or more members checked in at the same occurrence, since they joined) from
-2. Ranked from your side: crew-held interests by rarity across the crews here,
+eight or more, one line at most. `badges` is `Out together often` — a tier, never a count (`kind` stays
+`nights_together`) — once two or more members have checked in at the same
+occurrence on at least 2 nights since they joined. `GET /crews` and
+`GET /crews/:crewId` send it too, with `seatsLeft`: how many more people the
+crew can take, open invites counted (SCRUM-830, SCRUM-836). Ranked from your side: crew-held interests by rarity across the crews here,
 plus shared intent, damped by half when one crew is more than twice the
 other's size here (crew ↔ crew only); then most here, then by id; `limit` 30
 by default, at most 50, `offset`, with `total` and `hasMore`. Hidden from you: a hidden crew, and any crew with a member kept
@@ -4049,9 +4078,14 @@ others there earn a month (each friend counts once; at most 3 a year).
   "gated": true,
   "product": "plus",
   "source": "apple",
-  "expiresAt": "2026-11-10T09:00:00.000Z"
+  "expiresAt": "2026-11-10T09:00:00.000Z",
+  "changedAt": "2026-10-27T09:00:00.000Z"
 } }
 ```
+
+`changedAt` is the latest `updated_at` over every `plus` and `night_pass` row the
+person has, **including rows that have not started** (a Night Pass stacked on a
+grant), or `null` with none. Additive: a new value means "ask again".
 
 **`state` and `grant` are optional, and omitted when the data does not say.**
 `state` is where a store subscription or Night Pass stands, read from the newest

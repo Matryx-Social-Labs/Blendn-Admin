@@ -287,6 +287,10 @@ export const ProfileResponseSchema = z
         .describe(
           "What check-ins earned: \"5+ nights this month\" and, if they turned it on, \"Shows up\". Derived on read. Present (possibly empty) when `show_badges` is not off, for you and for anybody who can see who they are; absent otherwise. \"Regular here\" is never here: it belongs to a card in that venue's room."
         ),
+      earned_badges: z
+        .array(z.object({ kind: z.enum(["shows_up", "nights_out"]), label: z.string() }))
+        .optional()
+        .describe("Your own profile only: what your check-ins earned, whether or not `show_badges` is on, so Me can keep the card. Additive."),
       photo_states: z
         .array(
           z.object({
@@ -357,7 +361,7 @@ export const UserPublicProfileSchema = z
     interests: z
       .array(InterestSchema)
       .optional()
-      .describe("Absent through a room handle for somebody that room keeps anonymous."),
+      .describe("Empty unless `identityVisible` is true (the key stays); absent through a room handle for somebody that room keeps anonymous."),
     memberSince: z
       .string()
       .datetime()
@@ -368,9 +372,17 @@ export const UserPublicProfileSchema = z
         eventsAttended: z.number(),
         eventsFavorited: z.number(),
         eventsOrganized: z.number(),
+        savedCount: z
+          .number()
+          .optional()
+          .describe("Your own profile only: how many events your default (upcoming) saved list holds. Additive."),
       })
       .optional()
       .describe("Absent through a room handle for somebody that room keeps anonymous."),
+    sharedInterests: z
+      .array(z.string())
+      .optional()
+      .describe("The names of the interests you and this person both picked. Only for somebody else you may see (`identityVisible`). Additive."),
     isOwnProfile: z.boolean(),
     identityVisible: z
       .boolean()

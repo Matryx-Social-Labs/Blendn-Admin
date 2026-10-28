@@ -236,6 +236,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const needsJoin =
       !membership || (membership.status !== "active" && membership.status !== "banned" && membership.status !== "muted")
 
+    // The viewer's own pseudonym in this room: the row they have, or the one they are about to be given (SCRUM-807, 808).
+    let ownPseudonym: string | null = membership?.anonymous_name ?? null
+
     if (needsJoin) {
       /*
        * Two ways in now, and they are not equivalent.
@@ -262,7 +265,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         )
       }
 
-      await claimAnonymousName(
+      const joined = await claimAnonymousName(
         chatGroup.id,
         (anonymous_name) =>
           db.chat_group_members.upsert({
@@ -296,6 +299,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           }),
         { eventId, userId: authUser.userId }
       )
+      ownPseudonym = joined.anonymous_name
 
       await db.chat_groups.update({
         where: { id: chatGroup.id },
@@ -459,6 +463,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       chatGroupId: chatGroup.id,
       chatGroupName: chatGroup.name,
+      // You as this room names you: the banner and your own ring say it. Yours only.
+      you: { pseudonym: ownPseudonym },
       /**
        * The room's own state, `active` or `locked` (the organiser's lock), for
        * everyone in it: `write.reason` is this caller's answer and names their
@@ -468,6 +474,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       write: {
         allowed: denial === null,
         reason: denial?.reason ?? null,
+        // The same value under the name every refusal carries (SCRUM-809).
+        reasonCode: denial?.reason ?? null,
         message: denial && denial.reason !== "muted" && denial.reason !== "banned" && denial.reason !== "left"
           ? chatClosedMessage(denial.reason)
           : null,
@@ -723,22 +731,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       const denial = mayWriteToRoom(membershipFresh, roomEvent, chatGroup)
       if (denial) {
         if (denial.reason === "banned") {
-          return errorResponse(bannedRefusal(membershipFresh), 403, ErrorCode.USER_BANNED)
+          return errorResponse(bannedRefusal(membershipFresh), 403, ErrorCode.USER_BANNED, denial.reason)
         }
         if (denial.reason === "muted") {
           return errorResponse(
             "You are muted in this chat.",
             403,
-            ErrorCode.USER_MUTED
+            ErrorCode.USER_MUTED,
+            denial.reason
           )
         }
         if (denial.reason === "left") {
-          return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM)
+          return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM, denial.reason)
         }
         return errorResponse(
           chatClosedMessage(denial.reason),
           403,
-          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
+          denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED,
+          denial.reason
         )
       }
     }

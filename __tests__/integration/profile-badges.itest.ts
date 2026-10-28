@@ -91,14 +91,14 @@ describe("who is given someone's badges", () => {
     for (const viewer of [friend, talker, subject, stranger]) expect(await badgesSeenBy(viewer, subject)).toBeUndefined()
   })
 
-  it("a friend who did NOT choose to be recognised is a stranger here: being friends is not, by itself, a way to see who somebody is", async () => {
+  it("a friend who did NOT choose to be recognised in rooms still sees them by real id, as the friends page does; the room's handle stays a stranger (SCRUM-863)", async () => {
     const host = await person("bd-host2")
     const subject = await person("bd-subject2")
     await attend(subject, host, 5)
     const friend = await person("bd-friend2")
     const [user1_id, user2_id] = [friend, subject].sort()
     await db.friendships.create({ data: { user1_id, user2_id } })
-    expect(await badgesSeenBy(friend, subject)).toBeUndefined()
+    expect(await badgesSeenBy(friend, subject)).toEqual([{ kind: "nights_out", label: "5+ nights this month" }])
   })
 })
 

@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
-import { userIdFromRef } from "@/lib/room-handle"
+import { userTargetFromRef } from "@/lib/user-ref"
 import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import {
@@ -38,10 +38,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       (await rateLimit(request, userLimit("reportDay", "report-user-day", authUser.userId)))
     if (limited) return limited
 
-    // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown.
+    // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown. The same reading as block
+    // (SCRUM-623): a Blend's or a crew's handle names somebody only to the people that room admits.
     const ref = (await params).userId
-    // A direct conversation's handle names the other person in it.
-    const reportedId = (await userIdFromDmRef(authUser.userId, ref)) ?? userIdFromRef(ref)
+    const reportedId = (await userIdFromDmRef(authUser.userId, ref)) ?? (await userTargetFromRef(authUser.userId, ref))
 
     if (reportedId === authUser.userId) {
       return errorResponse("Cannot report yourself", 400)

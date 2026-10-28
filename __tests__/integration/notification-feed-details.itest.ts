@@ -152,6 +152,49 @@ describe("friend_request rows", () => {
   })
 })
 
+describe("reveal_request rows and Clear all (SCRUM-859, SCRUM-860)", () => {
+  async function askedToReveal(label: string) {
+    const me = await person(`${label}-me`)
+    const them = await person(`${label}-them`)
+    const [user1_id, user2_id] = conversationPair(me, them)
+    const mine = user1_id === me ? "user1" : "user2"
+    const conv = await db.private_conversations.create({
+      data: { user1_id, user2_id, user1_pseudonym: "Heron", user2_pseudonym: "Otter", [`${mine === "user1" ? "user1" : "user2"}_reveal_requested`]: false },
+    })
+    await sendPushNotification({ userId: me, title: "A match wants to know you", body: "b", data: { type: "reveal_request", conversationId: conv.id } })
+    return { me, them, conv, mine }
+  }
+
+  it("waits on you until you have revealed, then is closed; so is one whose conversation closed", async () => {
+    const w = await askedToReveal("nf-rr")
+    expect((await rowOf(w.me, "reveal_request")).open).toBe(true)
+    await db.private_conversations.update({ where: { id: w.conv.id }, data: { [`${w.mine}_revealed`]: true } })
+    expect((await rowOf(w.me, "reveal_request")).open).toBe(false)
+
+    const closed = await askedToReveal("nf-rrc")
+    await db.private_conversations.update({ where: { id: closed.conv.id }, data: { closed_at: new Date() } })
+    expect((await rowOf(closed.me, "reveal_request")).open).toBe(false)
+  })
+
+  it("Clear all keeps the requests that are open and deletes the rest, and says so", async () => {
+    const w = await askedToReveal("nf-clr")
+    const asker = await person("nf-clr-asker")
+    const request = await db.friend_requests.create({ data: { sender_id: asker, recipient_id: w.me } })
+    await sendPushNotification({ userId: w.me, title: "t", body: "b", data: { type: "friend_request", requestId: request.id } })
+    await sendPushNotification({ userId: w.me, title: "t", body: "b", data: { type: "announcement", eventId: randomUUID() } })
+    const answered = await askedToReveal("nf-clr2")
+    await db.private_conversations.update({ where: { id: answered.conv.id }, data: { [`${answered.mine}_revealed`]: true } })
+    const kinds = async (u: string) => (await db.notifications.findMany({ where: { user_id: u }, select: { kind: true } })).map((n) => n.kind).sort()
+
+    const res = await feed.DELETE(req("/api/mobile/notifications", tokenOf(w.me), "DELETE"))
+    expect((await res.json()).data).toMatchObject({ clearKeepsRequests: true })
+    expect(await kinds(w.me)).toEqual(["friend_request", "reveal_request"])
+    await feed.DELETE(req("/api/mobile/notifications", tokenOf(answered.me), "DELETE"))
+    expect(await kinds(answered.me)).toEqual([])
+    expect((await items(w.me)).data).toMatchObject({ clearKeepsRequests: true })
+  })
+})
+
 describe("crew rows", () => {
   it("an invite is open until it is declined; it shows the crew's emblem and names the crew that asked (S-2)", async () => {
     const owner = await person("nf-owner")
@@ -335,7 +378,7 @@ describe("the bulk push carries each recipient's own row id", () => {
 })
 
 describe("badgeCount", () => {
-  it("is unseen bell rows plus conversations with something unread, and clearKeepsRequests stays absent", async () => {
+  it("is unseen bell rows plus conversations with something unread, and clearKeepsRequests is sent (SCRUM-860)", async () => {
     const me = await person("nf-badge")
     const them = await person("nf-badge2")
     await sendPushNotification({ userId: me, title: "t", body: "b", data: { type: "announcement", eventId: "e1" } })
@@ -352,7 +395,7 @@ describe("badgeCount", () => {
     const before = await items(me)
     expect(before.data.unreadCount).toBe(2)
     expect(before.data.badgeCount).toBe(3)
-    expect(before.data).not.toHaveProperty("clearKeepsRequests")
+    expect(before.data).toHaveProperty("clearKeepsRequests", true)
 
     await db.private_messages.updateMany({ where: { conversation_id: one.id, moderation_status: null }, data: { is_read: true } })
     expect((await items(me)).data.badgeCount).toBe(2)
@@ -492,14 +535,16 @@ describe("blend rows name the Blend through its own door (S-2)", () => {
     for (const id of [aMember, bMember, solo, stranger]) await notify(id, "blend", { blendId: blend.id, chatGroupId: room.id })
     return { aMember, bMember, solo, stranger, blendId: blend.id, idA, idB }
   }
-  const contextOf = async (id: string) => (await rowOf(id, "blend")).display.context
+  const contextOf = async (id: string) => (await rowOf(id, "blend")).display?.context
 
   it("both sides are told the room's name; a stranger handed the ids is told nothing", async () => {
     const b = await blendOf("nf-bl")
     expect(await contextOf(b.aMember)).toBe("Night Owls × Early Birds")
     expect(await contextOf(b.bMember)).toBe("Night Owls × Early Birds")
     const stranger = await rowOf(b.stranger, "blend")
-    expect(stranger.display).toEqual({ visual: { type: "emblem", seed: b.blendId } })
+    // No invented emblem (SCRUM-861): the app draws the Blend's glyph, and a stranger gets nothing.
+    expect(stranger).not.toHaveProperty("display")
+    expect((await rowOf(b.aMember, "blend")).display).toEqual({ context: "Night Owls × Early Birds" })
     expect(JSON.stringify(stranger)).not.toMatch(/Night Owls|Early Birds/)
   })
 
@@ -545,7 +590,8 @@ describe("emblems and tiles for the other kinds", () => {
     const here = await rowOf(me, "crew_here")
     const blend = await rowOf(me, "blend")
     expect(here.display).toEqual({ visual: { type: "emblem", seed: "seed-here" } })
-    expect(blend.display).toEqual({ visual: { type: "emblem", seed: blendId } })
+    // A Blend carries no visual (SCRUM-861): the app draws its glyph.
+    expect(blend).not.toHaveProperty("display")
     expect(JSON.stringify([here, blend])).not.toContain("Secret Name")
     expect(here).not.toHaveProperty("open")
   })

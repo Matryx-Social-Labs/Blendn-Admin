@@ -101,20 +101,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      */
     const denial = mayWriteToRoomFor(chatGroup, membership, user.userId)
     if (denial) {
-      if (denial.reason === "not_member") return forbiddenResponse("You are not a member of this chat group")
+      if (denial.reason === "not_member") return errorResponse("You are not a member of this chat group", 403, undefined, denial.reason)
       if (denial.reason === "banned") {
-        return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED)
+        return errorResponse(bannedRefusal(membership), 403, ErrorCode.USER_BANNED, denial.reason)
       }
       if (denial.reason === "muted") {
-        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED)
+        return errorResponse(mutedRefusal(membership), 403, ErrorCode.USER_MUTED, denial.reason)
       }
       if (denial.reason === "left") {
-        return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM)
+        return errorResponse(LEFT_ROOM_MESSAGE, 403, ErrorCode.LEFT_ROOM, denial.reason)
       }
       return errorResponse(
         chatClosedMessage(denial.reason),
         403,
-        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED
+        denial.reason === "locked" ? ErrorCode.CHAT_LOCKED : denial.reason === "not_live" ? ErrorCode.NOT_LIVE : ErrorCode.CHAT_CLOSED,
+        denial.reason
       )
     }
 
