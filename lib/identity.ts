@@ -498,9 +498,10 @@ async function isFriendUnblocked(viewerId: string, otherId: string): Promise<boo
  * (SCRUM-864): the person it names and the name that room gives them
  * (`namesInRoom`: a crew's first name, a Blend's or a post's pseudonym).
  *
- * Only for a viewer that room's door lets in now, and only for somebody it
- * lets in too -- a handle outlives the membership it was minted for, and a
- * person who left must not stay nameable by it. Null for anything else (an
+ * Only for a viewer that room's door lets in now and who still holds a seat in
+ * it, and only for somebody it lets in and who holds one too -- a handle
+ * outlives the membership it was minted for, and a person who left or was
+ * banned must not stay nameable by it. Null for anything else (an
  * event's handle, a raw id, a forged or direct-conversation handle, a closed
  * door), which the caller answers as it always has. The card is a room card,
  * not an identity: no photos, bio or interests, and a block still beats it.
@@ -512,6 +513,16 @@ export async function nonEventRoomCard(viewerId: string, ref: string): Promise<{
   if (opened.userId === viewerId) return null
   const admitted = await ownerAdmits(groupId, [viewerId, opened.userId])
   if (!admitted?.has(viewerId) || !admitted.has(opened.userId)) return null
+  /*
+   * And a standing seat in the room itself, for both: the owner's door says who
+   * the crew, the Blend or the post still admits, not who has been banned from
+   * or has left this room, and a handle outlives either. Muted is still a
+   * seat (it reads); `banned` and `left` are the stranger's 404.
+   */
+  const seated = await db.chat_group_members.count({
+    where: { chat_group_id: groupId, user_id: { in: [viewerId, opened.userId] }, status: { notIn: ["banned", "left"] } },
+  })
+  if (seated < 2) return null
   const name = (await namesInRoom({ id: groupId, kind }, [opened.userId])).get(opened.userId)
   return name ? { userId: opened.userId, name } : null
 }
