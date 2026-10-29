@@ -22,6 +22,9 @@ export const PASS_CODE_LENGTH = 6
 /** 32 characters, so a byte's low five bits pick one evenly; no 0/O or 1/I to misread at a door. */
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+/** What the door says when typed characters cannot be a pass — the ones the alphabet leaves out are the ones easiest to mistype (SCRUM-899). */
+export const BAD_CODE_SHAPE = "A pass code is six letters and numbers, never 0, 1, I or O. Check the code and try again."
+
 let derived: { secret: string; key: Buffer } | null = null
 
 function passKey(): Buffer {

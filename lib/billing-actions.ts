@@ -715,7 +715,7 @@ export async function personPlus(userId: string): Promise<{
  * grant and its audit row are one transaction.
  */
 export async function grantPlus(userId: string, months: number, reason: string): Promise<{ expiresAt: string }> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(userIdSchema, userId, "Person not found")
   const length = parse(monthsSchema, months, "A grant runs between 1 and 24 months.")
   const why = parse(reasonSchema, reason, "Record why this person is being given Blendn+ (10 to 500 characters).")
@@ -745,7 +745,7 @@ export async function grantPlus(userId: string, months: number, reason: string):
 
 /** End the person's live admin grant of Blendn+, now. Never a store purchase, a trial or a referral month. */
 export async function endPlusGrant(userId: string, reason: string): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   const id = parse(userIdSchema, userId, "Person not found")
   const why = parse(reasonSchema, reason, "Give a reason for ending this grant (10 to 500 characters).")
   await endGrantAudited(admin.id, { kind: "user", id }, "plus", why)
