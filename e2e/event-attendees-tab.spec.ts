@@ -8,8 +8,8 @@ import { statePathFor } from "./global-setup"
  * The event's Attendees tab, in the browser, on the seeded world (SCRUM-499).
  *
  * It used to redirect to `/messaging?view=attendees` and land on the room
- * chat. Now whoever runs the event gets each person as a label, and the venue
- * the event is held at gets a count and no table.
+ * chat. Now whoever runs the event gets each person as a label once the night
+ * has settled, and the venue the event is held at gets a count and no table.
  *
  * The seeded attendees have real names (`scripts/seed-qa.ts`); none may reach
  * the organiser's page.
@@ -23,7 +23,13 @@ test.afterAll(async () => {
 
 const SEEDED_NAMES = ["Ananya Bhat", "Rohan Desai", "Kavya Nair", "Imran Qureshi", "Sneha Pillai", "Vikram Shetty"]
 
-test("the organiser sees labels and no seeded name", async ({ browser }) => {
+/*
+ * The seeded event is happening now, so its host is told who came after the
+ * night (SCRUM-887: a host's list is the night as it settled, two hours after
+ * it ends), and is shown nobody yet: no table, no label, no name. The label
+ * table itself is `event-attendees-table.test.tsx` and `event-attendee-roster.itest.ts`.
+ */
+test("the organiser of a night still running is told who came shows after it, and sees nobody", async ({ browser }) => {
   const event = await db.events.findFirst({ where: { slug: "founders-filter-coffee", deleted_at: null }, select: { id: true } })
   expect(event, "the seeded event exists").not.toBeNull()
 
@@ -32,10 +38,11 @@ test("the organiser sees labels and no seeded name", async ({ browser }) => {
   await page.goto(`/dashboard/events/${event!.id}?tab=attendees`, { waitUntil: "domcontentloaded" })
 
   expect(page.url()).not.toContain("/messaging")
-  const table = page.getByRole("table", { name: "Attendees of this event" })
-  await expect(table).toBeVisible()
-  await expect(table.getByText(/^attendee-[0-9a-f]{12}$/).first()).toBeVisible()
+  // Visible ones only: the streamed page holds a hidden copy until it swaps in.
+  await expect(page.getByText("After the night", { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(page.getByRole("table", { name: "Attendees of this event" })).toHaveCount(0)
   const text = await page.locator("main").first().innerText()
+  expect(text).not.toMatch(/attendee-[0-9a-f]{12}/)
   for (const name of SEEDED_NAMES) expect(text).not.toContain(name)
   await context.close()
 })
