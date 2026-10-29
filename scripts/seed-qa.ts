@@ -888,6 +888,8 @@ async function main() {
           kind: "attendee",
           status,
           check_in_time: slot.event.start_time,
+          // Written when they arrived, as a real check-in is: it is what settles a night for its hosts (SCRUM-887).
+          created_at: slot.event.start_time,
           check_out_time: status === "checked_out" ? slot.event.end_time : null,
         },
       })
@@ -995,6 +997,7 @@ async function main() {
             kind: "attendee",
             status: "checked_out",
             check_in_time: day.start_time,
+            created_at: day.start_time,
             check_out_time: day.end_time,
           },
         })

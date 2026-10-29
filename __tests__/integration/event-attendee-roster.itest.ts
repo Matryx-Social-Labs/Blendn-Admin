@@ -29,7 +29,6 @@ const venues: string[] = []
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
-const QUARTER = 15 * MINUTE
 
 async function makeOrg(label: string) {
   const org = await db.organisations.create({
@@ -103,6 +102,8 @@ async function checkIn(
       status: opts.status ?? "checked_out",
       check_in_time:
         minutesAfterStart === null ? null : new Date(e.start.getTime() + day * DAY + minutesAfterStart * MINUTE),
+      // Written when they arrived, as a real check-in is: what settles a night (SCRUM-887).
+      created_at: new Date(e.start.getTime() + day * DAY + (minutesAfterStart ?? 0) * MINUTE),
     },
   })
 }
@@ -274,7 +275,7 @@ describe("an event's attendee roster", () => {
       expect(out.rows.map((r) => r.id)).toEqual([...out.rows.map((r) => r.id)].sort())
       for (const row of out.rows) {
         expect(row.id).toMatch(/^attendee-[0-9a-f]{12}$/)
-        expect(Object.keys(row).sort()).toEqual(["arrivedAt", "id", "rsvp", "status"])
+        expect(Object.keys(row).sort()).toEqual(["id", "rsvp", "status"])
       }
       const statuses = out.rows.map((r) => `${r.rsvp}:${r.status}`).sort()
       expect(statuses).toEqual(
@@ -293,14 +294,10 @@ describe("an event's attendee roster", () => {
       expect(out).toMatchObject({ came: 7, walkIns: 3, noShows: 2 })
     })
 
-    it("gives the first arrival of a multi-day stay, to the quarter hour, and none for a row without a time", async () => {
+    it("gives no arrival time at all, only whether each came (SCRUM-887)", async () => {
       const mine = await roster("organizer", hostA, past.id)
-      const priyaRow = mine.rows.find((r) => r.id === atA(priya))!
-      const first = past.start.getTime() + 20 * MINUTE
-      expect(priyaRow.arrivedAt).toBe(new Date(Math.floor(first / QUARTER) * QUARTER).toISOString())
-      for (const row of mine.rows) if (row.arrivedAt) expect(Date.parse(row.arrivedAt) % QUARTER).toBe(0)
-      // Nora's check-in has no time: she came, and there is nothing to round.
-      expect(mine.rows.filter((r) => r.status === "came" && r.arrivedAt === null)).toHaveLength(1)
+      for (const row of mine.rows) expect(Object.keys(row).sort()).toEqual(["id", "rsvp", "status"])
+      expect(mine.rows.find((r) => r.id === atA(priya))?.status).toBe("came")
     })
 
     it("never shows another event's attendees, staff, a pending check-in, or any identity", async () => {
@@ -327,14 +324,14 @@ describe("an event's attendee roster", () => {
       expect(out).toMatchObject({ came: 4, walkIns: null, noShows: null })
       // Only who promised, and nothing about whether they came.
       expect(out.rows).toHaveLength(2)
-      for (const row of out.rows) expect(row).toMatchObject({ arrivedAt: null, status: "held_back" })
+      for (const row of out.rows) expect(row).toMatchObject({ status: "held_back" })
       expect(out.rows.map((r) => r.rsvp).sort()).toEqual(["going", "going"])
     })
 
-    it("does not call anybody a no-show before the event is over", async () => {
+    it("gives a host no list, and so no no-show, before the night has settled (SCRUM-887)", async () => {
       const out = await roster("organizer", hostA, live.id)
-      expect(out.rows.filter((r) => r.status === "expected")).toHaveLength(1)
-      expect(out.noShows).toBe(0)
+      // Five came, over the floor: still no rows, as a label flipping to "came" is an arrival.
+      expect(out).toMatchObject({ view: "labels", rows: [], pending: true, noShows: null })
     })
 
     it("does not call anybody a no-show at a cancelled event", async () => {

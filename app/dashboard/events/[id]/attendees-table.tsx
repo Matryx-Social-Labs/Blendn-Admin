@@ -6,48 +6,38 @@ import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState, MetricTile } from "@/components/dashboard/primitives"
 import type { EventAttendeeRow, EventAttendees } from "@/lib/attendee-roster"
 import { liveCountLabel, MIN_CELL, type LiveCountBucket } from "@/lib/disclosure"
-import { eventClock } from "@/lib/event-phase"
 
 const RSVP_LABEL = { going: "Going", maybe: "Maybe" } as const
-
-const QUARTER_HOUR_MS = 15 * 60_000
 
 /**
  * One event's attendees, by label (SCRUM-499).
  *
  * Labels only (owner ruling R1, SCRUM-383 b). The design kit's version of this
  * tab has names, avatars and a per-person "Now: In the room" column. Each
- * person here is the label the Check-ins export and the organisation's
+ * person here is the label the Attendees export and the organisation's
  * Attendees list use, so one row can be followed across all three.
  *
- * Arrivals are a quarter-hour window, and the rows are in label order. The
- * room announces each check-in under a room pseudonym; an arrival to the
- * minute, or the door's order, would let a host match that pseudonym to this
- * label. Below `MIN_CELL` arrivals the server sends no arrival at all.
+ * Whether each came, never when, and the rows in label order (SCRUM-887). The
+ * room announces each check-in under a room pseudonym; an arrival time, or the
+ * door's order, would let a host match that pseudonym to this label. Below
+ * `MIN_CELL` arrivals the server says nothing about who came.
  *
  * A client file only because the columns carry functions, which cannot cross
  * from the server page. See `app/dashboard/attendees/attendees-table.tsx`.
  */
-export function EventAttendeesTable({
-  roster,
-  timezone,
-  startAt,
-}: {
-  roster: Extract<EventAttendees, { view: "labels" }>
-  timezone: string
-  startAt: string
-}) {
-  // The event's clock, not the browser's (SCRUM-421). The window alone on the
-  // night, plus the day once it falls on another calendar day: day two of a
-  // conference, or after midnight.
-  const clock = eventClock(timezone)
-  const start = new Date(startAt)
-  const arrival = (iso: string) => {
-    const from = new Date(iso)
-    const quarter = `${clock.time(from)}–${clock.time(new Date(from.getTime() + QUARTER_HOUR_MS))}`
-    return clock.daysUntil(from, start) === 0 ? quarter : `${clock.day(from)}, ${quarter}`
-  }
+export function EventAttendeesTable({ roster }: { roster: Extract<EventAttendees, { view: "labels" }> }) {
   const heldBack = roster.walkIns === null
+
+  // Not settled (SCRUM-887): who came is shown once, two hours after the night, as it was then.
+  if (roster.pending) {
+    return (
+      <EmptyState
+        icon={<IconUsers />}
+        title="After the night"
+        description="Who came appears two hours after the night ends, each as a label, never a name. Anyone who checks in later is not added."
+      />
+    )
+  }
 
   const columns: Column<EventAttendeeRow>[] = [
     {
@@ -61,22 +51,20 @@ export function EventAttendeesTable({
       key: "rsvp",
       label: "RSVP",
       sortType: "string",
-      // Hidden on a phone, where the label and the arrival are what matter.
+      // Hidden on a phone, where the label and whether they came are what matter.
       secondary: true,
       // A row with no committed RSVP is somebody who came anyway.
       render: (r) => (r.rsvp ? RSVP_LABEL[r.rsvp] : <span className="text-muted-foreground">Walk-in</span>),
     },
     {
-      key: "arrivedAt",
-      label: "Arrival",
+      // Whether, never when (SCRUM-887): an arrival time lines this label up with the room's pseudonym.
+      key: "status",
+      label: "Status",
       align: "right",
-      sortType: "date",
-      sortValue: (r) => (r.arrivedAt ? new Date(r.arrivedAt) : null),
+      sortType: "string",
       render: (r) =>
         r.status === "held_back" ? (
           <span className="text-faint-foreground">held back</span>
-        ) : r.arrivedAt ? (
-          <span className="whitespace-nowrap tabular-nums">{arrival(r.arrivedAt)}</span>
         ) : r.status === "came" ? (
           "Checked in"
         ) : r.status === "no_show" ? (
@@ -111,9 +99,9 @@ export function EventAttendeesTable({
       footer={
         <span>
           {heldBack
-            ? `${roster.came} came: under ${MIN_CELL}, who came and when is held back`
-            : `${roster.came} came · ${roster.walkIns} walked in · ${roster.noShows} no-shows · arrivals to the quarter hour`}
-          {" · "}each person is a label, never a name, and the same label as the Check-ins export
+            ? `${roster.came} came: under ${MIN_CELL}, who came is held back`
+            : `${roster.came} came · ${roster.walkIns} walked in · ${roster.noShows} no-shows`}
+          {" · "}each person is a label, never a name, and the same label as the Attendees export
         </span>
       }
     />

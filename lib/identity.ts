@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client"
+
 import { firstName, holdingPair, matchSelect, mayShowRealName, UNNAMED } from "./conversation-identity"
 import { blockedEitherWay, conversationPair } from "./conversations"
 import { db } from "./db"
@@ -147,7 +149,7 @@ export async function maySeeIdentityFor(
           // any-kind: a reveal is seen by whoever shared that room, a venue day's included.
           // At a venue day, only while the viewer is live there (`inRoomWhere`):
           // a past window is not a seat from which to watch later reveals.
-          event: { check_ins: { some: { user_id: viewerId, ...inRoomWhere(viewerId) } } },
+          event: { check_ins: { some: { user_id: viewerId, ...inRoomWhere(viewerId) } }, NOT: hostSideOf(viewerId) },
         },
         select: { user_id: true },
       })
@@ -267,6 +269,25 @@ export async function userIdFromRefIfIdentified(viewerId: string, ref: string): 
 }
 
 /**
+ * The events this person is on the host side of: their organisation runs it,
+ * or owns the venue it is held at (SCRUM-887).
+ *
+ * The owner's ruling (2026-10-28): a host sees people only by their room
+ * pseudonym, even somebody who chose to be named — that choice is for the
+ * other people in the room. Organisers and venue staff check in through the
+ * same button as everyone (`lib/checkin-kind.ts`), so a host at their own
+ * night was "in the room" here and saw every reveal and every friend who let
+ * friends recognise them. Membership now, not the check-in's `kind`, which
+ * is stamped at arrival and would miss somebody who joined the organisation
+ * since; and any membership, a suspended organisation's included.
+ * `roomIdentity` asks the same of a room's viewers in one read.
+ */
+function hostSideOf(userId: string): Prisma.eventsWhereInput {
+  const member = { members: { some: { user_id: userId } } }
+  return { OR: [{ organizer_org: { is: member } }, { venue: { is: { owner_org: { is: member } } } }] }
+}
+
+/**
  * Which room's terms to answer in.
  *
  * ## Why a handle is answered in its own room's terms (SCRUM-371 follow-up)
@@ -371,7 +392,7 @@ export async function recognisedInRoomBy(eventId: string, targetId: string, view
 }
 
 /**
- * The room rule over every (viewer, target) pair of two lists, in five reads
+ * The room rule over every (viewer, target) pair of two lists, in six reads
  * however long either list is. Both public forms above are this with one side
  * fixed, so they cannot disagree.
  *
@@ -395,7 +416,18 @@ async function roomIdentity(
   const T = { in: targets }
   const optedIn = { select: { profile: { select: { friends_see_me_in_rooms: true } } } }
 
-  const [present, revealed, blocks, closed, friendships] = await Promise.all([
+  const [hosts, present, revealed, blocks, closed, friendships] = await Promise.all([
+    // The host side of this room is never in it for identity (`hostSideOf`).
+    db.organisation_members
+      .findMany({
+        where: {
+          user_id: V,
+          // any-kind: the room's own event, a venue day's included -- its owner is the host side there too.
+          org: { OR: [{ events: { some: { id: eventId } } }, { venues: { some: { events: { some: { id: eventId } } } } }] },
+        },
+        select: { user_id: true },
+      })
+      .then((rows) => new Set(rows.map((r) => r.user_id))),
     /*
      * Only a viewer who was in the room. The roster refuses anybody without a
      * check-in, and a handle can reach people who never had one (the interest
@@ -442,7 +474,7 @@ async function roomIdentity(
 
   return (viewer, target) => {
     if (viewer === target) return true
-    if (!present.has(viewer) || apart.has(pair(viewer, target))) return false
+    if (!present.has(viewer) || hosts.has(viewer) || apart.has(pair(viewer, target))) return false
     return revealed.has(target) || friendSees.has(`${viewer}>${target}`)
   }
 }

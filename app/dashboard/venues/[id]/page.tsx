@@ -563,8 +563,8 @@ function RegularsOffers({
           ) : (
             <ul className="flex flex-wrap gap-2">
               {offers.known.map((k, i) => (
-                <li key={`${k.firstName}-${i}`} className="rounded-full border border-border px-2.5 py-1 text-[0.8125rem]">
-                  <b className="font-semibold">{k.firstName}</b> · {k.nights} {k.nights === 1 ? "night" : "nights"}
+                <li key={i} className="rounded-full border border-border px-2.5 py-1 text-[0.8125rem]">
+                  <b className="font-semibold">{k.firstName ?? "A regular"}</b> · {k.nights} {k.nights === 1 ? "night" : "nights"}
                 </li>
               ))}
             </ul>

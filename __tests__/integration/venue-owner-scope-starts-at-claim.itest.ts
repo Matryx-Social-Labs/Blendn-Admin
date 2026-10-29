@@ -165,13 +165,14 @@ describe("the venue owner's own events stay theirs to run (SCRUM-320)", () => {
     expect(await listed()).toContain(n.ownBefore.id)
   })
 
-  it("exports its check-ins per guest, by label, as any organiser's", async () => {
+  it("exports its check-ins as arrivals per hour, as any organiser's: counts, never who (SCRUM-887)", async () => {
     const out = await csv("check-ins")
-    expect(lines(out)[0]).toBe("Checked in at,Status,Attendee,Event ID,Event,Event start")
+    expect(lines(out)[0]).toBe("Event ID,Event,Event start,Hour (UTC),Arrivals")
     const labels = await labelsFor("venue_owner", w.owner, n.ownBefore.id)
-    for (const g of n.ownBefore.guests[0]) expect(out).toContain(attendeeLabel(g, labels))
-    expect(rowsFor(out, n.ownBefore.id)).toHaveLength(2)
-    // And only their own: no other host's night is in the per-guest file.
+    for (const g of n.ownBefore.guests[0]) expect(out).not.toContain(attendeeLabel(g, labels))
+    // Two guests: a cell under the floor.
+    expect(rowsFor(out, n.ownBefore.id).map((r) => r.split(",").at(-1))).toEqual(["<5"])
+    // And only their own: no other host's night is in it.
     expect(out).not.toContain(n.after.id)
   })
 
@@ -251,7 +252,9 @@ describe("the venue check-ins export is counts, never people (F5)", () => {
     const shown = Object.fromEntries(reportsFor("venue_owner").map((r) => [r.key, r.description]))
     expect(shown["check-ins"]).toMatch(/your organisation runs/)
     expect(shown["venue-check-ins"]).toMatch(/other hosts’ events at your venues, since your claim/)
-    expect(reportsFor("organizer").find((r) => r.key === "check-ins")?.description).toBe(
+    // A host's is counts, never a row per person (SCRUM-887); the admin's is the rows.
+    expect(reportsFor("organizer").find((r) => r.key === "check-ins")?.description).toMatch(/^Arrivals per hour .* Never who/)
+    expect(reportsFor("app_admin").find((r) => r.key === "check-ins")?.description).toBe(
       "Individual GPS-validated check-ins, one row each."
     )
   })
@@ -292,9 +295,10 @@ describe("other hosts' counts are held back wherever a venue owner sees them", (
     expect(rowsFor(out, n.small.id)[0].split(",").slice(-2)[0]).toBe("2")
     const checkIns = await csv("check-ins")
     const labels = await labelsFor("organizer", w.host, n.before.id)
-    expect(lines(checkIns)[0]).toBe("Checked in at,Status,Attendee,Event ID,Event,Event start")
-    for (const g of n.before.guests[0]) expect(checkIns).toContain(attendeeLabel(g, labels))
-    expect(rowsFor(checkIns, n.before.id)).toHaveLength(6)
+    expect(lines(checkIns)[0]).toBe("Event ID,Event,Event start,Hour (UTC),Arrivals")
+    for (const g of n.before.guests[0]) expect(checkIns).not.toContain(attendeeLabel(g, labels))
+    // Exact above the floor: six guests, all checked in within the hour.
+    expect(rowsFor(checkIns, n.before.id).map((r) => r.split(",").at(-1))).toEqual(["6"])
   })
 })
 

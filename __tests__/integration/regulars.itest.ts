@@ -503,7 +503,7 @@ describe("the person’s side and the pass", () => {
     expect((await after.json()).data).toMatchObject({ known: false, ownerName: expect.stringContaining("venue_org") })
     expect(await db.venue_regular_optins.count({ where: { venue_id: T, user_id: R[0].id, org_id: orgA } })).toBe(1)
     expect((await prefs(R[0].token, T, { known: true })).json.data.known).toBe(true)
-    expect((await venueOffersView(T, asViewer(otherOwner)))?.known.map((k) => k.firstName)).toEqual(["Zqcanary0"])
+    expect((await venueOffersView(T, asViewer(otherOwner)))?.known).toEqual([{ firstName: null, nights: expect.any(Number) }])
   })
 })
 
@@ -541,14 +541,20 @@ describe("being known as a regular (RG-I02, RG-I03, SEC-09)", () => {
     expect(await db.venue_regular_optins.count({ where: { venue_id: A } })).toBe(0)
   })
 
-  it("yes puts them on the venue’s list by first name; taking it back takes them off on the next read; nothing is audited (H1)", async () => {
+  /*
+   * SCRUM-887 (owner, 2026-10-28): a host never learns who someone is, even
+   * somebody who chose to be known. Yes still counts them, with their nights;
+   * the venue reads "A regular", and only the platform's admin the first name.
+   */
+  it("yes puts them on the venue’s list as a regular, never by name; taking it back takes them off on the next read; nothing is audited (H1)", async () => {
     const yes = await prefs(R[1].token, A, { known: true })
     expect(yes).toMatchObject({ status: 200, json: { data: { known: true, offersMuted: false } } })
     as(owner)
-    expect((await venueOffersView(A, asViewer(owner)))?.known).toEqual([{ firstName: "Zqcanary1", nights: 3 }])
+    expect((await venueOffersView(A, asViewer(owner)))?.known).toEqual([{ firstName: null, nights: 3 }])
+    expect((await venueOffersView(A, asViewer(admin, "app_admin")))?.known).toEqual([{ firstName: "Zqcanary1", nights: 3 }])
     const seen = await venueFacing()
-    expect(seen).toContain("Zqcanary1")
-    expect(seen).not.toMatch(/Zqcanary[02-4]/)
+    expect(seen).toContain("A regular")
+    expect(seen).not.toMatch(/Zqcanary/)
     expect(seen).not.toContain(R[1].id)
 
     expect((await prefs(R[1].token, A, { known: false })).json.data.known).toBe(false)

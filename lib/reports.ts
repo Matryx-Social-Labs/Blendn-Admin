@@ -3,8 +3,8 @@ import { toISODate, type DateRange } from "./date-range"
 import type { Prisma, user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
-import { distinctAttendeeCounts, distinctAttendeeCountsByDay } from "./attendee-counts"
-import { discloseGuests, discloseVenueCounts } from "./disclosure"
+import { arrivalsByHour, checkedInBy, distinctAttendeeCounts, distinctAttendeeCountsByDay, hostSettledAt } from "./attendee-counts"
+import { discloseGuests, discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
 import { realEventsWhere } from "./event-kind"
@@ -44,6 +44,8 @@ export interface ReportDef {
   description: string
   /** What a venue owner downloads instead, when it is a different shape. */
   venueDescription?: string
+  /** What any host (anyone but the platform's admin) downloads instead: `check-ins` (SCRUM-887). */
+  hostDescription?: string
   roles: user_role[]
 }
 
@@ -59,14 +61,14 @@ export const REPORTS: ReportDef[] = [
   {
     key: "attendees",
     label: "Attendees",
-    description: "Who attended and how often. Pseudonymous.",
+    description: "Who attended and how often. Pseudonymous. A night is in it from two hours after it ends.",
     roles: ["app_admin", "organizer"],
   },
   {
     key: "check-ins",
     label: "Check-ins",
     description: "Individual GPS-validated check-ins, one row each.",
-    venueDescription: "Check-ins at events your organisation runs, one row each.",
+    hostDescription: `Arrivals per hour at events your organisation runs. Never who, and under ${MIN_CELL} shows as <${MIN_CELL}.`,
     roles: ["app_admin", "organizer", "venue_owner"],
   },
   {
@@ -109,7 +111,11 @@ export const REPORTS: ReportDef[] = [
 
 export function reportsFor(role: user_role): ReportDef[] {
   return REPORTS.filter((r) => r.roles.includes(role)).map((r) =>
-    role === "venue_owner" && r.venueDescription ? { ...r, description: r.venueDescription } : r
+    role === "venue_owner" && r.venueDescription
+      ? { ...r, description: r.venueDescription }
+      : role !== "app_admin" && r.hostDescription
+        ? { ...r, description: r.hostDescription }
+        : r
   )
 }
 
@@ -248,6 +254,63 @@ export async function eventScopeFor(role: user_role, userId: string): Promise<Pr
  */
 export const REPORT_ROW_LIMIT = 10_000
 
+/**
+ * The Check-ins export as a host has it (SCRUM-887): arrivals per event per
+ * hour, never who, and every cell under `MIN_CELL` shown as "<5".
+ *
+ * Shaped this way because coarsening rows did not converge. A row per arrival,
+ * by label, joined that label to the room's pseudonym (the room announces each
+ * arrival under it); rounding the time left the window, the end time a host can
+ * edit and the row limit, each of which let two exports be diffed down to one
+ * arrival. A count says nothing about which label. Nights are settled ones,
+ * chosen whole by start and cut between events, and counted up to their settle
+ * (`hostSettledAt`), so a late arrival changes no cell. A floored cell can be
+ * recovered by subtraction from the Events export's exact attendance; it is a
+ * count with no label, so that names nobody.
+ */
+async function hostArrivals(events: Prisma.eventsWhereInput, inWindow: { gte: Date; lt: Date }): Promise<string> {
+  const { nights: chosen } = await hostNights(events, inWindow)
+  const byEvent = new Map<string, Awaited<ReturnType<typeof arrivalsByHour>>>()
+  for (const c of await arrivalsByHour(chosen.map((e) => e.id))) {
+    const night = byEvent.get(c.event_id) ?? []
+    night.push(c)
+    byEvent.set(c.event_id, night)
+  }
+  const rows: Array<{ event: (typeof chosen)[number]; hour: string; arrivals: number }> = []
+  for (const event of chosen) {
+    const night = (byEvent.get(event.id) ?? []).map((c) => ({ event, hour: c.hour, arrivals: c.arrivals }))
+    // Whole events up to the limit: a cut inside one is a partial night.
+    if (rows.length + night.length > REPORT_ROW_LIMIT) break
+    rows.push(...night)
+  }
+  return toCsv(
+    [
+      { key: "event_id", label: "Event ID", value: (r) => r.event.id },
+      { key: "event", label: "Event", value: (r) => r.event.title },
+      { key: "event_start", label: "Event start", value: (r) => r.event.start_time },
+      { key: "hour", label: "Hour (UTC)" },
+      { key: "arrivals", label: "Arrivals", value: (r) => (r.arrivals < MIN_CELL ? `<${MIN_CELL}` : r.arrivals) },
+    ],
+    rows
+  )
+}
+
+/**
+ * The nights a host's exports may hold: whole events by start in the window,
+ * newest first, settled (`hostSettledAt`), never chosen by check-in time.
+ */
+async function hostNights(events: Prisma.eventsWhereInput, inWindow: { gte: Date; lt: Date }) {
+  // any-kind: `events` is the report's scope (`reportScope`), which already says which kinds.
+  const chosen = await db.events.findMany({
+    where: { AND: [events, { start_time: inWindow }] },
+    orderBy: [{ start_time: "desc" }, { id: "asc" }],
+    take: REPORT_ROW_LIMIT,
+    select: { id: true, title: true, start_time: true },
+  })
+  const settled = await hostSettledAt(chosen.map((e) => e.id))
+  return { nights: chosen.filter((e) => settled.has(e.id)), settled }
+}
+
 /** A report's rows and its header, ready for `toCsv`. */
 export async function buildReport(
   key: ReportKey,
@@ -261,6 +324,7 @@ export async function buildReport(
   const scope = scopes.all
   const labelScope = (eventOrgId: string | null) => labelScopeFor({ ...scopes.actor, role }, eventOrgId)
   const inWindow = { gte: range.from, lt: range.to }
+  const host = role !== "app_admin"
 
   switch (key) {
     case "events": {
@@ -327,13 +391,22 @@ export async function buildReport(
     }
 
     case "attendees": {
-      const checkIns = await db.event_check_ins.findMany({
+      // A host's: check-ins of settled nights up to each settle, never a late one (`checkedInBy`).
+      const settled = host ? (await hostNights(scope, inWindow)).settled : null
+      const fetched = await db.event_check_ins.findMany({
+        /*
+         * A host's by whole settled nights, never by check-in time (SCRUM-887,
+         * security review): windowed on `created_at`, moving its end a minute
+         * at a time and diffing two exports showed whose count dropped, which
+         * is that label's arrival to the minute; a night still filling, or a
+         * late arrival, showed each new label as it walked in. The room
+         * announces each arrival under its pseudonym.
+         */
         where: {
           status: { in: ["checked_in", "checked_out"] },
-          event: scope,
-          created_at: inWindow,
+          ...(settled ? checkedInBy(settled) : { event: scope, created_at: inWindow }),
         },
-        select: { user_id: true, event_id: true, created_at: true, event: { select: { organizer_org_id: true } } },
+        select: { user_id: true, event_id: true, event: { select: { organizer_org_id: true, start_time: true } } },
         /*
          * Bounded, and ordered so the bound is meaningful.
          *
@@ -342,27 +415,34 @@ export async function buildReport(
          * truncated export of the most recent window is a usable answer and a
          * truncated export of an arbitrary slice is not.
          */
-        orderBy: { created_at: "desc" },
-        take: REPORT_ROW_LIMIT,
+        orderBy: host ? { event_id: "asc" } : { created_at: "desc" },
+        // One over, so a host's cut can tell a full export from a truncated one.
+        take: REPORT_ROW_LIMIT + 1,
       })
+      // A host's cut falls between events, never inside one: a partial night is arrivals again.
+      const over = fetched.length > REPORT_ROW_LIMIT
+      const cut = host && over && fetched[REPORT_ROW_LIMIT - 1].event_id === fetched[REPORT_ROW_LIMIT].event_id ? fetched[REPORT_ROW_LIMIT].event_id : null
+      const checkIns = fetched.slice(0, REPORT_ROW_LIMIT).filter((c) => c.event_id !== cut)
       // By label, not by user: one person at two organisations is two rows.
       // Pseudonymous by design: attendees are pseudonymous to hosts everywhere
       // in this product, and an export is not a way around that.
       const byLabel = new Map<string, { events: Set<string>; last: Date }>()
       for (const ci of checkIns) {
         const label = attendeeLabel(ci.user_id, labelScope(ci.event.organizer_org_id))
-        const entry = byLabel.get(label) ?? { events: new Set<string>(), last: ci.created_at }
+        // The night's start, never the check-in's time: a person's arrival is not the export's to tell.
+        const entry = byLabel.get(label) ?? { events: new Set<string>(), last: ci.event.start_time }
         entry.events.add(ci.event_id)
-        if (ci.created_at > entry.last) entry.last = ci.created_at
+        if (ci.event.start_time > entry.last) entry.last = ci.event.start_time
         byLabel.set(label, entry)
       }
       const rows = [...byLabel.entries()].map(([attendee, v]) => ({
         attendee,
         events_attended: v.events.size,
-        last_attended: v.last,
+        last_attended: toISODate(v.last),
         repeat: v.events.size > 1,
       }))
-      rows.sort((a, b) => b.events_attended - a.events_attended)
+      // Ties by label: the fetch's order within a night is the door's.
+      rows.sort((a, b) => b.events_attended - a.events_attended || a.attendee.localeCompare(b.attendee))
       return toCsv(
         [
           { key: "attendee", label: "Attendee" },
@@ -376,11 +456,15 @@ export async function buildReport(
 
     case "check-ins": {
       /*
-       * One row per check-in, by label: the events this actor RUNS. For a venue
-       * owner that is the organiser's view of their own events (SCRUM-320); the
-       * nights other hosts hold in their building are `venue-check-ins`, counts
-       * only (SCRUM-501). For everyone else `hosted` is their whole scope.
+       * The events this actor RUNS. For a venue owner that is the organiser's
+       * view of their own events (SCRUM-320); the nights other hosts hold in
+       * their building are `venue-check-ins`, counts only (SCRUM-501). For
+       * everyone else `hosted` is their whole scope.
+       *
+       * A host gets counts, never a row per arrival (`hostArrivals`). The
+       * platform's admin keeps one row per check-in, by label.
        */
+      if (host) return hostArrivals(scopes.hosted, inWindow)
       const rows = await db.event_check_ins.findMany({
         where: { event: scopes.hosted, created_at: inWindow },
         orderBy: { created_at: "desc" },

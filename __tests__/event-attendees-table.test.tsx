@@ -6,47 +6,36 @@ import type { EventAttendeeRow, EventAttendees } from "@/lib/attendee-roster"
 /*
  * What the event's Attendees tab says for each row and each count (SCRUM-499).
  *
- * The rows come from `eventAttendees`; this holds how they read: a
- * quarter-hour window on the event's own clock, the day once it is another
- * calendar day, "Walk-in" for no RSVP, "No-show" only for a no-show, a dash
- * that a screen reader hears as "Not yet", and "held back" when fewer than
- * five came.
+ * The rows come from `eventAttendees`; this holds how they read: whether each
+ * came and never when (SCRUM-887), "Walk-in" for no RSVP, "No-show" only for a
+ * no-show, a dash that a screen reader hears as "Not yet", and "held back"
+ * when fewer than five came or the night is still settling.
  */
-
-const START = "2026-09-20T13:30:00.000Z" // 19:00 in Kolkata
 
 const roster = (rows: EventAttendeeRow[], over: Partial<Extract<EventAttendees, { view: "labels" }>> = {}) =>
   renderToStaticMarkup(
-    <EventAttendeesTable
-      roster={{ view: "labels", rows, came: 6, walkIns: 1, noShows: 1, ...over }}
-      timezone="Asia/Kolkata"
-      startAt={START}
-    />
+    <EventAttendeesTable roster={{ view: "labels", rows, came: 6, walkIns: 1, noShows: 1, ...over }} />
   )
 
 const row = (id: string, over: Partial<EventAttendeeRow>): EventAttendeeRow => ({
   id: `attendee-${id.padEnd(12, "0")}`,
   rsvp: "going",
-  arrivedAt: null,
   status: "came",
   ...over,
 })
 
-it("tells an arrival as a quarter-hour window on the event's clock, with the day when it is another day", () => {
-  const html = roster([
-    row("a", { arrivedAt: "2026-09-20T14:15:00.000Z" }), // 19:45
-    row("b", { arrivedAt: "2026-09-20T19:00:00.000Z" }), // 00:30 the next day in Kolkata
-  ])
-  expect(html).toContain("19:45–20:00")
-  expect(html).toContain("21 Sept, 00:30–00:45")
+it("tells whether each came, never when (SCRUM-887)", () => {
+  const html = roster([row("a", {}), row("b", { rsvp: null })])
+  expect(html).not.toMatch(/\d\d:\d\d/)
+  expect(html).not.toContain("quarter hour")
 })
 
 it("reads each kind of row in words", () => {
   const html = roster([
-    row("a", { rsvp: null, arrivedAt: "2026-09-20T14:00:00.000Z" }),
+    row("a", { rsvp: null }),
     row("b", { rsvp: "maybe", status: "no_show" }),
     row("c", { rsvp: "going", status: "expected" }),
-    row("d", { rsvp: "going", status: "came", arrivedAt: null }),
+    row("d", { rsvp: "going", status: "came" }),
   ])
   expect(html).toContain("Walk-in")
   expect(html).toContain("Maybe")
@@ -54,14 +43,21 @@ it("reads each kind of row in words", () => {
   expect(html).toMatch(/<span aria-hidden="true"[^>]*>—<\/span><span class="sr-only">Not yet<\/span>/)
   expect(html).toContain(">Checked in<")
   expect(html).toContain('aria-label="Attendees of this event"')
-  expect(html).toContain("arrivals to the quarter hour")
+  expect(html).toContain("6 came · 1 walked in · 1 no-shows")
 })
 
 it("says the rows are held back, and gives no counts it would give away", () => {
   const html = roster([row("a", { status: "held_back" })], { came: 3, walkIns: null, noShows: null })
   expect(html).toContain("held back")
-  expect(html).toContain("3 came: under 5, who came and when is held back")
+  expect(html).toContain("3 came: under 5, who came is held back")
   expect(html).not.toMatch(/walked in|no-shows/)
+})
+
+it("says who came shows after the night, while it has not settled (SCRUM-887)", () => {
+  const html = roster([], { came: 0, walkIns: null, noShows: null, pending: true })
+  expect(html).toContain("After the night")
+  expect(html).not.toContain("Nobody yet")
+  expect(html).not.toContain('aria-label="Attendees of this event"')
 })
 
 it("says what fills an empty list", () => {

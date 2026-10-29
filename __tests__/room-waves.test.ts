@@ -12,6 +12,8 @@ process.env.NEXTAUTH_SECRET = "room-waves-test-secret-at-least-32-chars"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 const mockDb = {
+  // The room's host side (`roomIdentity`, SCRUM-887): nobody here hosts.
+  organisation_members: { findMany: jest.fn(async () => []) },
   event_check_ins: { findFirst: jest.fn(), findMany: jest.fn() },
   chat_group_members: { findFirst: jest.fn() },
   event_match_preferences: { findMany: jest.fn() },
