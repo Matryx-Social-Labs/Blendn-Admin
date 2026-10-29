@@ -2469,6 +2469,12 @@
       "mutation": "M653 both routes put back as on dev 21c2652b (body destructured without ?? {}; limit = Math.min(parseInt(...) || MAX, MAX)).",
       "observed": "M653: 2 of 5 failing (presence null: TypeError; limit=-5: 5 rows for a take of -5); the other 3 stayed green. Restored; 5/5.",
       "date": "2026-10-29"
+    },
+    "unban-keeps-left.itest.ts": {
+      "guards": "SCRUM-522: unban and unmute return a member who had left (left_at set) or whose room is archived to `left`, never to `active`; a live room's never-left member comes back active.",
+      "mutation": "M522 statusMap puts unban and unmute back to the constant `active` (dev 21c2652b).",
+      "observed": "M522: 2 of 3 failing (left by choice came back active; archived room's left member came back active); the control stayed green. Restored; 3/3.",
+      "date": "2026-10-29"
     }
   },
   "grandfathered": [
