@@ -44,6 +44,22 @@ describe("checkSpam", () => {
     expect(links!.retryAfter).toBeUndefined()
   })
 
+  it("gives a refused burst a sentence for a person and a reasonCode, and keeps the developer reason for the audit (SCRUM-624)", async () => {
+    for (let i = 0; i < 5; i++) await checkSpam(userId, chatGroupId, `Message ${i}`)
+    const burst = await checkSpam(userId, chatGroupId, "One more message")
+    expect(burst!.reasonCode).toBe("SPAM_BURST")
+    expect(burst!.message).toBe("Slow down a moment, then try again.")
+    expect(burst!.message).not.toMatch(/burst|rate|\d+ messages|exceeded/i)
+    expect(burst!.reason).toContain("Burst rate")
+  })
+
+  it("says how many links a message may carry, in words a person reads, with SPAM_LINKS (SCRUM-624)", async () => {
+    const links = await checkSpam(userId, chatGroupId, "http://a.example http://b.example http://c.example")
+    expect(links!.reasonCode).toBe("SPAM_LINKS")
+    expect(links!.message).toBe("You can include up to 2 links in one message.")
+    expect(links!.message).not.toMatch(/Too many links \(/)
+  })
+
   it("detects duplicate messages", async () => {
     await checkSpam(userId, chatGroupId, "Buy cheap products now!")
     const result = await checkSpam(userId, chatGroupId, "Buy cheap products now!")

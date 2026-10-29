@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `MODERATION_UNAVAILABLE` (503, a busy event room while moderation is down; see *Moderation (pre-emit)*), `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*. The body can also carry **`reasonCode`** (`ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, `EVENT_CANCELLED`) beside an `errorCode` that keeps its old value
+Error codes: `MODERATION_UNAVAILABLE` (503, a busy event room while moderation is down; see *Moderation (pre-emit)*), `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*. The body can also carry **`reasonCode`** (`ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, `EVENT_CANCELLED`, `SPAM_BURST`, `SPAM_LINKS`) beside an `errorCode` that keeps its old value
 
 A refusal that names no specific code carries the one its status stands for:
 401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
@@ -1948,6 +1948,14 @@ body and in `Retry-After`, as a `RATE_LIMITED` 429 does. A message refused for
 too many links has none: sending it again would not pass. The same on the event
 chat and DM sends (`docs/API.md`, *Direct messages*). `errorCode` is unchanged;
 `retryAfter` is optional and an older client ignores it.
+
+**`SPAM_BLOCKED`'s `error` is a sentence for a person, and `reasonCode` says which
+rule** (SCRUM-624). A burst is `reasonCode: SPAM_BURST` with "Slow down a moment,
+then try again." (the countdown is `retryAfter`; the sentence has no number in it,
+so it never goes stale); too many links is `reasonCode: SPAM_LINKS` with "You can
+include up to 2 links in one message." The detector's developer text ("Burst rate
+exceeded (6 messages in 10s)") now stays in the logs and the audit. Same on the
+event chat and DM sends. A client can show `error` as it is.
 
 **Rate limit:** 30 sends a minute per person, across this route and `POST /events/:eventId/chat` together, whichever token or device they send from → `429 RATE_LIMITED` (SCRUM-439).
 

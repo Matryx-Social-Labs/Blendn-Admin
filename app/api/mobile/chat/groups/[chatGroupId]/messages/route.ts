@@ -486,8 +486,9 @@ export async function POST(
     const spamResult = await checkSpam(user.userId, chatGroupId, content)
     if (spamResult && spamResult.action === "hide") {
       return spamBlockedResponse(
-        spamResult.reason || "Message blocked as spam. Please slow down.",
-        spamResult.retryAfter
+        spamResult.message || "Message blocked as spam. Please slow down.",
+        spamResult.retryAfter,
+        spamResult.reasonCode
       )
     }
 
