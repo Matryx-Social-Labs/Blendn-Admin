@@ -147,8 +147,8 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `event:checkin` | `{ eventId, userId?, checkInTime, hereCount? }` | Someone checked in. No name: this room is open to anyone viewing the event. `userId` is their room handle, **absent on a friend's copy** (a friend knows which pseudonym is theirs, so the handle beside a chat line timed to this arrival would name it); the count still moves. `event:checkout` is the same. |
-| `event:checkout` | `{ eventId, userId, checkOutTime, hereCount? }` | Someone checked out |
+| `event:checkin` | `{ eventId, userId?, checkInTime, hereCount? }` | Someone checked in. No name: this room is open to anyone viewing the event. `userId` is their room handle, **absent on a friend's copy, and on every copy but the arriver's own when the arriver has "Show online status" off** (SCRUM-905: an unlisted arrival carries no handle to anyone else; a friend knows which pseudonym is theirs, so the handle beside a chat line timed to this arrival would name it); the count still moves. `event:checkout` is the same. |
+| `event:checkout` | `{ eventId, userId?, checkOutTime, hereCount? }` | Someone checked out. `userId` is absent on the copies `event:checkin`'s is (a friend's, or a leaver with "Show online status" off); the count still moves. |
 | `event:interestUpdate` | `{ eventId, userId, interested, interestCount }` | Interest toggled |
 
 ### Roster Events (room: `event:room:{eventId}`, checked-in attendees only)
