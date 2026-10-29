@@ -316,6 +316,20 @@ describe("a host's exports cannot be lined up against the room (L3, L4)", () => 
     }
   })
 
+  it("keeps somebody who came before the settle, and only them, when they check in again after it", async () => {
+    const actor = await actorFor({ id: host, role: "organizer" })
+    const lists = async () => [await exports(), await eventAttendees(actor, eventA), (await attendeeRoster("organizer", host)).rows]
+    const before = await lists()
+    // The check-in upsert moves `check_in_time` on a re-check-in; the row's `created_at` stays.
+    const row = await db.event_check_ins.findFirstOrThrow({ where: { event_id: eventA, user_id: ben }, select: { id: true, check_in_time: true } })
+    await db.event_check_ins.update({ where: { id: row.id }, data: { check_in_time: new Date() } })
+    try {
+      expect(await lists()).toEqual(before)
+    } finally {
+      await db.event_check_ins.update({ where: { id: row.id }, data: { check_in_time: row.check_in_time } })
+    }
+  })
+
   it("never re-settles: a late arrival older than the grace stays out of a host's lists", async () => {
     const was = (await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { host_settled_at: true } })).host_settled_at
     // Settled four hours ago; somebody checked in an hour after that.

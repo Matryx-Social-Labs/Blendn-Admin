@@ -84,7 +84,6 @@ export async function attendeeRoster(role: user_role, userId: string, now = new 
       select: {
         user_id: true,
         event_id: true,
-        check_in_time: true,
         created_at: true,
         event: { select: { organizer_org_id: true, start_time: true } },
       },

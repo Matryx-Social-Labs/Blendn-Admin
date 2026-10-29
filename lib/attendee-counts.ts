@@ -279,10 +279,10 @@ export async function arrivalsByHour(
   if (eventIds.length === 0) return []
   return db.$queryRaw<Array<{ event_id: string; hour: string; arrivals: number }>>`
     SELECT c.event_id::text AS event_id,
-           to_char(date_trunc('hour', COALESCE(c.check_in_time, c.created_at) AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
+           to_char(date_trunc('hour', c.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
            COUNT(DISTINCT c.user_id)::int AS arrivals
     FROM event_check_ins c
-    JOIN events e ON e.id = c.event_id AND COALESCE(c.check_in_time, c.created_at) <= e.host_settled_at
+    JOIN events e ON e.id = c.event_id AND c.created_at <= e.host_settled_at
     WHERE c.event_id IN (${Prisma.join(eventIds)})
       AND c.status::text IN (${Prisma.join(ATTENDED)})
       AND c.kind = 'attendee'
@@ -305,6 +305,11 @@ export const SETTLED_AFTER_MS = 2 * 60 * 60_000
  * it. From then on a host's per-person views hold the check-ins up to it
  * (`checkedInBy`) and nothing after: a late arrival, or the host moving the
  * night's end, changes nothing they already saw.
+ *
+ * "Up to it" is the row's `created_at`, a person's first check-in to that day:
+ * written on insert and never touched again, while a re-check-in moves
+ * `check_in_time` (the upsert in lib/check-in-core.ts). Keyed on that, who is
+ * in a settled night could change after it settled.
  */
 export async function hostSettledAt(eventIds: readonly string[], now: Date = new Date()): Promise<Map<string, Date>> {
   if (eventIds.length === 0) return new Map()
@@ -323,18 +328,13 @@ export async function hostSettledAt(eventIds: readonly string[], now: Date = new
   return new Map(rows.map((r) => [r.id, r.host_settled_at!]))
 }
 
-/** Check-ins of settled nights made by the time each settled: what a host's per-person views hold. */
+/** Check-ins of settled nights first made by the time each settled: what a host's per-person views hold. */
 export function checkedInBy(settled: ReadonlyMap<string, Date>): Prisma.event_check_insWhereInput {
-  return {
-    OR: [...settled].map(([event_id, at]) => ({
-      event_id,
-      OR: [{ check_in_time: { lte: at } }, { check_in_time: null, created_at: { lte: at } }],
-    })),
-  }
+  return { OR: [...settled].map(([event_id, at]) => ({ event_id, created_at: { lte: at } })) }
 }
 
 /** `checkedInBy` for rows already read. */
-export const arrivedBy = (settled: ReadonlyMap<string, Date>, row: { event_id: string; check_in_time: Date | null; created_at: Date }) => {
+export const arrivedBy = (settled: ReadonlyMap<string, Date>, row: { event_id: string; created_at: Date }) => {
   const at = settled.get(row.event_id)
-  return at !== undefined && (row.check_in_time ?? row.created_at) <= at
+  return at !== undefined && row.created_at <= at
 }
