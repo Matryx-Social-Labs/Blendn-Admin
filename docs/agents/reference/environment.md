@@ -28,6 +28,8 @@ the seed refuses any database that is not staging or `localhost`.
 | `organizer@blendn.app` | organizer | Arjun Rao, Nightshift Collective |
 | `venue.owner@blendn.app` | venue_owner | Fatima Sheikh, Indiranagar Hospitality Group |
 | `sponsor@blendn.app` | sponsor | Meera Iyer, Blue Tokai Coffee Roasters |
+| `organizer.pro@blendn.app` | organizer | Nisha Pro, Pro Collective (QA): Analytics grant, ended nights (SCRUM-561) |
+| `venue.pro@blendn.app` | venue_owner | Vikram Pro, Pro Hospitality (QA): claimed venue, Venue Pro grant (SCRUM-561) |
 
 The personas were renamed in place from `priya.menon@`, `arjun.rao@`,
 `fatima.sheikh@` and `meera.iyer@` — same ids, same history. Also seeded by
