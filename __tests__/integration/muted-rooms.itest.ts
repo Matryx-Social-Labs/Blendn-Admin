@@ -354,9 +354,11 @@ describe("the partial index", () => {
      */
     const plan = await db.$transaction(async (tx) => {
       await tx.$executeRawUnsafe("CREATE TEMP TABLE muted_probe (LIKE chat_group_members) ON COMMIT DROP")
-      await tx.$executeRawUnsafe(
-        index.def.replace("INDEX chat_group_members_muted_idx", "INDEX muted_probe_muted_idx").replace("ON public.chat_group_members", "ON muted_probe")
-      )
+      const probeDef = index.def.replace("INDEX chat_group_members_muted_idx", "INDEX muted_probe_muted_idx").replace("ON public.chat_group_members", "ON muted_probe")
+      // A rewrite that missed would build the probe index on the real table and commit it.
+      expect(probeDef).toContain("ON muted_probe ")
+      expect(probeDef).not.toContain("chat_group_members")
+      await tx.$executeRawUnsafe(probeDef)
       await tx.$executeRawUnsafe("SET LOCAL enable_seqscan = off")
       return tx.$queryRaw<{ "QUERY PLAN": string }[]>(Prisma.sql`
         EXPLAIN SELECT m.chat_group_id FROM muted_probe m WHERE m.user_id = 'someone' AND m.status IN ('active', 'muted') AND ${mutedNowSql(new Date())}`)
