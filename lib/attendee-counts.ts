@@ -269,45 +269,72 @@ export async function attendedEventIds(
 }
 
 /**
- * Distinct guests arriving per event per UTC hour: the Check-ins export as a
- * host has it (SCRUM-887). Counts, never who; the caller floors each cell.
+ * Distinct guests arriving per event per UTC hour, up to each night's settle
+ * (`hostSettledAt`): the Check-ins export as a host has it (SCRUM-887). Counts,
+ * never who; the caller floors each cell. A night not settled counts nothing.
  */
 export async function arrivalsByHour(
   eventIds: readonly string[]
 ): Promise<Array<{ event_id: string; hour: string; arrivals: number }>> {
   if (eventIds.length === 0) return []
   return db.$queryRaw<Array<{ event_id: string; hour: string; arrivals: number }>>`
-    SELECT event_id::text AS event_id,
-           to_char(date_trunc('hour', COALESCE(check_in_time, created_at) AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
-           COUNT(DISTINCT user_id)::int AS arrivals
-    FROM event_check_ins
-    WHERE event_id IN (${Prisma.join(eventIds)})
-      AND status::text IN (${Prisma.join(ATTENDED)})
-      AND kind = 'attendee'
+    SELECT c.event_id::text AS event_id,
+           to_char(date_trunc('hour', COALESCE(c.check_in_time, c.created_at) AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
+           COUNT(DISTINCT c.user_id)::int AS arrivals
+    FROM event_check_ins c
+    JOIN events e ON e.id = c.event_id AND COALESCE(c.check_in_time, c.created_at) <= e.host_settled_at
+    WHERE c.event_id IN (${Prisma.join(eventIds)})
+      AND c.status::text IN (${Prisma.join(ATTENDED)})
+      AND c.kind = 'attendee'
     GROUP BY 1, 2
     ORDER BY 2
   `
 }
 
-/** How long after a night's last occurrence or last arrival a host's per-person export holds it. */
+/** How long after a night's last occurrence and last arrival it settles for its hosts. */
 export const SETTLED_AFTER_MS = 2 * 60 * 60_000
 
 /**
- * Which of these events are over for a host's exports (SCRUM-887, security
- * review): every occurrence has ended AND nobody has checked in for
- * `SETTLED_AFTER_MS`. On the arrivals too, because the times are the host's to
- * edit: moving the end into the past while people still arrive would otherwise
- * open a night's export to be watched one arrival at a time.
+ * When each of these nights settled for its hosts (SCRUM-887), settling any
+ * that now may. Absent: not settled, and a host gets no per-person list of it.
+ *
+ * Settles the first time every occurrence has ended AND nobody has checked in
+ * for `SETTLED_AFTER_MS` -- the arrivals too, because the times are the host's
+ * to edit. Written once (`events.host_settled_at`): only a row still NULL is
+ * written, so concurrent readers cannot both write it and no later read moves
+ * it. From then on a host's per-person views hold the check-ins up to it
+ * (`checkedInBy`) and nothing after: a late arrival, or the host moving the
+ * night's end, changes nothing they already saw.
  */
-export async function settledEventIds(eventIds: readonly string[], now: Date = new Date()): Promise<Set<string>> {
-  if (eventIds.length === 0) return new Set()
+export async function hostSettledAt(eventIds: readonly string[], now: Date = new Date()): Promise<Map<string, Date>> {
+  if (eventIds.length === 0) return new Map()
   const before = new Date(now.getTime() - SETTLED_AFTER_MS)
-  const rows = await db.$queryRaw<{ id: string }[]>`
-    SELECT e.id::text AS id
-    FROM events e
+  await db.$executeRaw`
+    UPDATE events e SET host_settled_at = ${now}
     WHERE e.id IN (${Prisma.join(eventIds)})
+      AND e.host_settled_at IS NULL
       AND COALESCE((SELECT MAX(o.end_time) FROM event_occurrences o WHERE o.event_id = e.id), e.end_time) <= ${before}
       AND COALESCE((SELECT MAX(COALESCE(c.check_in_time, c.created_at)) FROM event_check_ins c WHERE c.event_id = e.id), '-infinity') <= ${before}
   `
-  return new Set(rows.map((r) => r.id))
+  const rows = await db.events.findMany({
+    where: { id: { in: [...eventIds] }, host_settled_at: { not: null } },
+    select: { id: true, host_settled_at: true },
+  })
+  return new Map(rows.map((r) => [r.id, r.host_settled_at!]))
+}
+
+/** Check-ins of settled nights made by the time each settled: what a host's per-person views hold. */
+export function checkedInBy(settled: ReadonlyMap<string, Date>): Prisma.event_check_insWhereInput {
+  return {
+    OR: [...settled].map(([event_id, at]) => ({
+      event_id,
+      OR: [{ check_in_time: { lte: at } }, { check_in_time: null, created_at: { lte: at } }],
+    })),
+  }
+}
+
+/** `checkedInBy` for rows already read. */
+export const arrivedBy = (settled: ReadonlyMap<string, Date>, row: { event_id: string; check_in_time: Date | null; created_at: Date }) => {
+  const at = settled.get(row.event_id)
+  return at !== undefined && (row.check_in_time ?? row.created_at) <= at
 }

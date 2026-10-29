@@ -53,9 +53,11 @@ it("says the rows are held back, and gives no counts it would give away", () => 
   expect(html).not.toMatch(/walked in|no-shows/)
 })
 
-it("says who came is held back while the night settles, over the floor too", () => {
-  const html = roster([row("a", { status: "held_back" })], { came: 12, walkIns: null, noShows: null })
-  expect(html).toContain("12 came: who came is held back until two hours after the night")
+it("says who came shows after the night, while it has not settled (SCRUM-887)", () => {
+  const html = roster([], { came: 0, walkIns: null, noShows: null, pending: true })
+  expect(html).toContain("After the night")
+  expect(html).not.toContain("Nobody yet")
+  expect(html).not.toContain('aria-label="Attendees of this event"')
 })
 
 it("says what fills an empty list", () => {

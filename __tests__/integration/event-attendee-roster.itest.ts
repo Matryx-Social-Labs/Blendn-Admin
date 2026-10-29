@@ -328,11 +328,10 @@ describe("an event's attendee roster", () => {
       expect(out.rows.map((r) => r.rsvp).sort()).toEqual(["going", "going"])
     })
 
-    it("does not call anybody a no-show before the event is over, and holds back who came while it runs (SCRUM-887)", async () => {
+    it("gives a host no list, and so no no-show, before the night has settled (SCRUM-887)", async () => {
       const out = await roster("organizer", hostA, live.id)
-      // Five came, over the floor: still nobody's status, as a label flipping to "came" is an arrival.
-      expect(out.rows.map((r) => r.status)).toEqual(["held_back"])
-      expect(out).toMatchObject({ came: 5, noShows: null })
+      // Five came, over the floor: still no rows, as a label flipping to "came" is an arrival.
+      expect(out).toMatchObject({ view: "labels", rows: [], pending: true, noShows: null })
     })
 
     it("does not call anybody a no-show at a cancelled event", async () => {

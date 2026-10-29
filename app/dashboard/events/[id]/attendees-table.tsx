@@ -28,6 +28,17 @@ const RSVP_LABEL = { going: "Going", maybe: "Maybe" } as const
 export function EventAttendeesTable({ roster }: { roster: Extract<EventAttendees, { view: "labels" }> }) {
   const heldBack = roster.walkIns === null
 
+  // Not settled (SCRUM-887): who came is shown once, two hours after the night, as it was then.
+  if (roster.pending) {
+    return (
+      <EmptyState
+        icon={<IconUsers />}
+        title="After the night"
+        description="Who came appears two hours after the night ends, each as a label, never a name. Anyone who checks in later is not added."
+      />
+    )
+  }
+
   const columns: Column<EventAttendeeRow>[] = [
     {
       key: "id",
@@ -88,9 +99,7 @@ export function EventAttendeesTable({ roster }: { roster: Extract<EventAttendees
       footer={
         <span>
           {heldBack
-            ? roster.came < MIN_CELL
-              ? `${roster.came} came: under ${MIN_CELL}, who came is held back`
-              : `${roster.came} came: who came is held back until two hours after the night`
+            ? `${roster.came} came: under ${MIN_CELL}, who came is held back`
             : `${roster.came} came · ${roster.walkIns} walked in · ${roster.noShows} no-shows`}
           {" · "}each person is a label, never a name, and the same label as the Attendees export
         </span>

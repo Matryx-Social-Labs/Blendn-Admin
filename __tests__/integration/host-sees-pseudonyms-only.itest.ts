@@ -16,6 +16,7 @@ import { buildFeedbackDigest } from "@/lib/feedback-digest"
 import { maySeeIdentityFor, visibleInRoom } from "@/lib/identity"
 import { buildLiveSnapshot } from "@/lib/live-snapshot"
 import { actorFor } from "@/lib/org-membership"
+import { attendeeLabel } from "@/lib/pseudonym"
 import { buildReport } from "@/lib/reports"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -278,26 +279,46 @@ describe("a host's exports cannot be lined up against the room (L3, L4)", () => 
     expect(moved).toEqual(before)
   })
 
-  it("holds back who came on the Attendees tab and the organisation's list while a night settles", async () => {
-    const actor = await actorFor({ id: host, role: "organizer" })
-    const settled = await eventAttendees(actor, eventA)
-    expect(settled?.view === "labels" && settled.rows.some((r) => r.status === "came")).toBe(true)
+  it("gives the organisation's list a night's start as last attended, never a check-in's time", async () => {
     const listed = await attendeeRoster("organizer", host)
-    const labelsBefore = listed.rows.length
-    // Last attended is a night's start, never a check-in's time.
+    expect(listed.rows.length).toBeGreaterThan(0)
     const starts = (await db.events.findMany({ where: { id: { in: [eventA, eventB] } }, select: { start_time: true } })).map((e) => e.start_time.toISOString())
     for (const r of listed.rows) if (r.lastAttendedAt) expect(starts).toContain(r.lastAttendedAt)
-    // Somebody checks in again, ten minutes ago: the night is not settled.
-    const row = await db.event_check_ins.findFirstOrThrow({ where: { event_id: eventA, user_id: ben }, select: { id: true, check_in_time: true, created_at: true } })
-    const recent = new Date(Date.now() - 10 * MINUTE)
-    await db.event_check_ins.update({ where: { id: row.id }, data: { check_in_time: recent, created_at: recent } })
+  })
+
+  /*
+   * Settle-once (SCRUM-887, security review): a night's host lists close the
+   * first time it settles (`events.host_settled_at`, written once). A check-in
+   * after that, or the host moving the night's times, never changes them.
+   */
+  it("settles a night once: a late check-in and a moved end change no host list or export, and not the admin's", async () => {
+    const actor = await actorFor({ id: host, role: "organizer" })
+    const lists = async () => [await exports(), await eventAttendees(actor, eventA), (await attendeeRoster("organizer", host)).rows]
+    const first = await lists()
+    const settled = await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { host_settled_at: true, end_time: true } })
+    expect(settled.host_settled_at).not.toBeNull()
+
+    const late = await makeUser("hspo-late-a")
+    users.push(late)
+    // After the settle, as every late arrival is.
+    await checkIn(eventA, late, new Date(), "checked_out")
+    await moveEnd(eventA, new Date(Date.now() + 60 * MINUTE))
     try {
-      const settling = await eventAttendees(actor, eventA)
-      expect(settling?.view === "labels" && settling.rows.some((r) => r.status === "came")).toBe(false)
-      expect((await attendeeRoster("organizer", host)).rows.length).toBeLessThan(labelsBefore)
+      expect(await lists()).toEqual(first)
+      // Written once: a second settle neither moves nor clears it.
+      expect((await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { host_settled_at: true } })).host_settled_at).toEqual(settled.host_settled_at)
+      // The admin's rows are the check-ins as they are.
+      const lateLabel = attendeeLabel(late, "platform")
+      expect(await buildReport("attendees", "app_admin", admin, RANGE())).toContain(lateLabel)
     } finally {
-      await db.event_check_ins.update({ where: { id: row.id }, data: { check_in_time: row.check_in_time, created_at: row.created_at } })
+      await moveEnd(eventA, settled.end_time)
+      await db.event_check_ins.deleteMany({ where: { user_id: late } })
     }
+  })
+
+  it("gives a host no per-person list for a night that has not settled, and says when it will", async () => {
+    const out = await eventAttendees(await actorFor({ id: host, role: "organizer" }), eventC)
+    expect(out).toMatchObject({ view: "labels", rows: [], pending: true })
   })
 
   it("keeps a row per check-in, to the second, for the platform's admin", async () => {

@@ -3,7 +3,7 @@ import { toISODate, type DateRange } from "./date-range"
 import type { Prisma, user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
-import { arrivalsByHour, distinctAttendeeCounts, distinctAttendeeCountsByDay, settledEventIds } from "./attendee-counts"
+import { arrivalsByHour, checkedInBy, distinctAttendeeCounts, distinctAttendeeCountsByDay, hostSettledAt } from "./attendee-counts"
 import { discloseGuests, discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
@@ -61,7 +61,7 @@ export const REPORTS: ReportDef[] = [
   {
     key: "attendees",
     label: "Attendees",
-    description: "Who attended and how often. Pseudonymous.",
+    description: "Who attended and how often. Pseudonymous. A night is in it from two hours after it ends.",
     roles: ["app_admin", "organizer"],
   },
   {
@@ -262,13 +262,14 @@ export const REPORT_ROW_LIMIT = 10_000
  * by label, joined that label to the room's pseudonym (the room announces each
  * arrival under it); rounding the time left the window, the end time a host can
  * edit and the row limit, each of which let two exports be diffed down to one
- * arrival. A count says nothing about which label, and a difference of one is
- * either under the floor or inside an hour. Events are chosen whole, by start
- * (also the host's to edit, which moves whole nights, not arrivals), cut
- * between events, and no total is printed that could give a floored cell back.
+ * arrival. A count says nothing about which label. Nights are settled ones,
+ * chosen whole by start and cut between events, and counted up to their settle
+ * (`hostSettledAt`), so a late arrival changes no cell. A floored cell can be
+ * recovered by subtraction from the Events export's exact attendance; it is a
+ * count with no label, so that names nobody.
  */
 async function hostArrivals(events: Prisma.eventsWhereInput, inWindow: { gte: Date; lt: Date }): Promise<string> {
-  const chosen = await hostNights(events, inWindow)
+  const { nights: chosen } = await hostNights(events, inWindow)
   const byEvent = new Map<string, Awaited<ReturnType<typeof arrivalsByHour>>>()
   for (const c of await arrivalsByHour(chosen.map((e) => e.id))) {
     const night = byEvent.get(c.event_id) ?? []
@@ -295,9 +296,8 @@ async function hostArrivals(events: Prisma.eventsWhereInput, inWindow: { gte: Da
 }
 
 /**
- * The nights a host's per-person exports may hold: whole events by start in the
- * window, newest first, and only once settled (`settledEventIds`), never by
- * check-in time and never while anybody could still be arriving.
+ * The nights a host's exports may hold: whole events by start in the window,
+ * newest first, settled (`hostSettledAt`), never chosen by check-in time.
  */
 async function hostNights(events: Prisma.eventsWhereInput, inWindow: { gte: Date; lt: Date }) {
   const chosen = await db.events.findMany({
@@ -306,8 +306,8 @@ async function hostNights(events: Prisma.eventsWhereInput, inWindow: { gte: Date
     take: REPORT_ROW_LIMIT,
     select: { id: true, title: true, start_time: true },
   })
-  const settled = await settledEventIds(chosen.map((e) => e.id))
-  return chosen.filter((e) => settled.has(e.id))
+  const settled = await hostSettledAt(chosen.map((e) => e.id))
+  return { nights: chosen.filter((e) => settled.has(e.id)), settled }
 }
 
 /** A report's rows and its header, ready for `toCsv`. */
@@ -390,19 +390,20 @@ export async function buildReport(
     }
 
     case "attendees": {
-      const nights = host ? (await hostNights(scope, inWindow)).map((e) => e.id) : null
+      // A host's: check-ins of settled nights up to each settle, never a late one (`checkedInBy`).
+      const settled = host ? (await hostNights(scope, inWindow)).settled : null
       const fetched = await db.event_check_ins.findMany({
         /*
-         * A host's by whole settled nights (`hostNights`), never by check-in
-         * time (SCRUM-887, security review): windowed on `created_at`, moving
-         * its end a minute at a time and diffing two exports showed whose count
-         * dropped, which is that label's arrival to the minute; and a night
-         * still filling shows each new label as it walks in. The room announces
-         * each arrival under its pseudonym.
+         * A host's by whole settled nights, never by check-in time (SCRUM-887,
+         * security review): windowed on `created_at`, moving its end a minute
+         * at a time and diffing two exports showed whose count dropped, which
+         * is that label's arrival to the minute; a night still filling, or a
+         * late arrival, showed each new label as it walked in. The room
+         * announces each arrival under its pseudonym.
          */
         where: {
           status: { in: ["checked_in", "checked_out"] },
-          ...(nights ? { event_id: { in: nights } } : { event: scope, created_at: inWindow }),
+          ...(settled ? checkedInBy(settled) : { event: scope, created_at: inWindow }),
         },
         select: { user_id: true, event_id: true, event: { select: { organizer_org_id: true, start_time: true } } },
         /*

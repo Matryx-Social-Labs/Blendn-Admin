@@ -1,7 +1,7 @@
 import { ATTENDED, noShows } from "./counting"
 import type { rsvp_status, user_role } from "@prisma/client"
 
-import { distinctAttendeeCounts, settledEventIds } from "./attendee-counts"
+import { arrivedBy, checkedInBy, distinctAttendeeCounts, hostSettledAt } from "./attendee-counts"
 import { db } from "./db"
 import { discloseVenueCounts, liveCountBucket, MIN_CELL, type LiveCountBucket } from "./disclosure"
 import { attendeeLabel } from "./pseudonym"
@@ -79,8 +79,15 @@ export async function attendeeRoster(role: user_role, userId: string, now = new 
   const [checkIns, rsvps, staff] = await Promise.all([
     db.event_check_ins.findMany({
       where: { status: { in: ATTENDED }, kind: "attendee", event: scope },
-      // The night's start, never the check-in's time: who arrived when is not a host's (SCRUM-887).
-      select: { user_id: true, event_id: true, event: { select: { organizer_org_id: true, start_time: true } } },
+      // The night's start for "last attended", never the check-in's time: who arrived when is not a host's
+      // (SCRUM-887). The check-in's own time only bounds it by the night's settle (`arrivedBy`).
+      select: {
+        user_id: true,
+        event_id: true,
+        check_in_time: true,
+        created_at: true,
+        event: { select: { organizer_org_id: true, start_time: true } },
+      },
     }),
     db.event_rsvps.findMany({
       where: { status: { in: ["going", "maybe"] }, event: { ...scope, ...overAndRanWhere(now) } },
@@ -93,16 +100,16 @@ export async function attendeeRoster(role: user_role, userId: string, now = new 
   ])
 
   /*
-   * Settled nights only (`settledEventIds`, SCRUM-887): while a night still
-   * fills, a label appearing here as somebody walks in lines up with the
-   * pseudonym the room announces them under.
+   * Settled nights only, and their check-ins up to the settle (`hostSettledAt`,
+   * SCRUM-887): a label appearing here as somebody walks in, or late, lines up
+   * with the pseudonym the room announces them under.
    */
-  const settled = await settledEventIds([...new Set([...checkIns, ...rsvps].map((r) => r.event_id))], now)
+  const settled = await hostSettledAt([...new Set([...checkIns, ...rsvps].map((r) => r.event_id))], now)
   // Somebody who RSVP'd and then worked the event did not fail to come.
   const worked = new Set(staff.map((s) => `${s.user_id}|${s.event_id}`))
   const label = (row: { user_id: string; event: { organizer_org_id: string | null } }) =>
     attendeeLabel(row.user_id, labelScope(row.event.organizer_org_id))
-  const came = checkIns.filter((row) => settled.has(row.event_id)).map((row) => ({ ...row, label: label(row) }))
+  const came = checkIns.filter((row) => arrivedBy(settled, row)).map((row) => ({ ...row, label: label(row) }))
   const promised = rsvps
     .filter((r) => settled.has(r.event_id) && !worked.has(`${r.user_id}|${r.event_id}`))
     .map((row) => ({ ...row, label: label(row) }))
@@ -205,19 +212,27 @@ export type EventAttendees =
       /** Null while held back. */
       walkIns: number | null
       noShows: number | null
+      /** Not settled yet (`hostSettledAt`): no rows, and `came` means nothing. Who came shows after the night. */
+      pending?: true
     }
   /** `came` is a range while the event runs: it is still moving (SCRUM-516). */
   | { view: "count"; started: boolean; came: number | LiveCountBucket | null }
 
 /**
- * Everybody on one event's list, as ids: who came and who promised to. Staff are neither: an RSVP from somebody who then worked
- * the event is not a promise to attend it.
+ * Everybody on one event's list, as ids: who came (by `settledAt`, when
+ * given) and who promised to. Staff are neither: an RSVP from somebody who
+ * then worked the event is not a promise to attend it.
  */
-async function eventPeople(eventId: string) {
+async function eventPeople(eventId: string, settledAt?: Date) {
   const [arrivals, rsvps, staff] = await Promise.all([
     db.event_check_ins.groupBy({
       by: ["user_id"],
-      where: { event_id: eventId, kind: "attendee", status: { in: ATTENDED } },
+      where: {
+        event_id: eventId,
+        kind: "attendee",
+        status: { in: ATTENDED },
+        ...(settledAt && checkedInBy(new Map([[eventId, settledAt]]))),
+      },
     }),
     db.event_rsvps.findMany({
       where: { event_id: eventId, status: { in: ["going", "maybe"] } },
@@ -291,17 +306,24 @@ export async function eventAttendees(
     return { view: "count", started: event.start_time <= now, came: running ? counts.cameSoFar : counts.came }
   }
 
+  /*
+   * A host's list is the night as it settled (`hostSettledAt`, SCRUM-887):
+   * nothing before, and nobody who checked in after. The platform's admin
+   * reads the check-ins as they are.
+   */
+  const settledAt = actor.role === "app_admin" ? undefined : (await hostSettledAt([eventId], now)).get(eventId)
+  if (actor.role !== "app_admin" && !settledAt) {
+    return { view: "labels", rows: [], came: 0, walkIns: null, noShows: null, pending: true }
+  }
+
   // Ids and times only. Nothing here may select a name, email, image or phone.
-  const { arrived, committed } = await eventPeople(eventId)
+  const { arrived, committed } = await eventPeople(eventId, settledAt)
 
   const scope = labelScopeFor(actor, event.organizer_org_id)
   const came = arrived.size
   const byLabel = (a: EventAttendeeRow, b: EventAttendeeRow) => a.id.localeCompare(b.id)
 
-  // Under the floor, or a night still settling (`settledEventIds`, SCRUM-887):
-  // a label flipping to "came" as somebody walks in lines up with the
-  // pseudonym the room announces them under.
-  if (came > 0 && (came < MIN_CELL || !(await settledEventIds([eventId], now)).has(eventId))) {
+  if (came > 0 && came < MIN_CELL) {
     // Who promised, and nothing about who came: that would name the few who did.
     return {
       view: "labels",
