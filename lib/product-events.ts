@@ -121,6 +121,31 @@ let seen = new Set<string>()
 let buffer: Pending[] = []
 let lastFlush = 0
 /**
+ * The one timer behind a non-empty buffer (SCRUM-756).
+ *
+ * `record` only decided to flush when it was called, so a signal buffered inside
+ * the window of the last flush waited for the NEXT signal -- minutes on a quiet
+ * replica -- and was lost if the process died first. Now the first signal into
+ * an empty buffer sets a one-shot timer for the end of the window. `unref`'d:
+ * it never keeps the process (or a test) alive, and shutdown drains by hand.
+ */
+let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+function armFlushTimer(): void {
+  if (flushTimer || buffer.length === 0) return
+  const wait = Math.max(FLUSH_MS - (Date.now() - lastFlush), 0)
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    void flushProductEvents()
+  }, wait)
+  flushTimer.unref?.()
+}
+
+function clearFlushTimer(): void {
+  if (flushTimer) clearTimeout(flushTimer)
+  flushTimer = null
+}
+/**
  * The flush currently running, if any.
  *
  * Held as a promise rather than a boolean so a second caller **awaits** the
@@ -138,6 +163,7 @@ export function resetProductEventCache(): void {
   buffer = []
   lastFlush = 0
   flushing = null
+  clearFlushTimer()
 }
 
 /**
@@ -150,6 +176,7 @@ export async function flushProductEvents(): Promise<number> {
   if (flushing) return flushing
   if (buffer.length === 0) return 0
 
+  clearFlushTimer()
   const batch = buffer
   buffer = []
   lastFlush = Date.now()
@@ -174,6 +201,8 @@ export async function flushProductEvents(): Promise<number> {
       return 0
     } finally {
       flushing = null
+      // A signal that arrived while this was writing has no flush behind it yet.
+      armFlushTimer()
     }
   })()
 
@@ -244,6 +273,9 @@ export function record(input: {
     if (Date.now() - lastFlush >= FLUSH_MS) {
       // Fire and forget: the caller is serving a request and must not wait.
       void flushProductEvents()
+    } else {
+      // Inside the window: the end of it, not the next call, writes this.
+      armFlushTimer()
     }
   } catch (error) {
     logger.debug("product event not recorded", { error: String(error) })
