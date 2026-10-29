@@ -50,6 +50,7 @@ let ana = ""
 let ben = ""
 let eventA = ""
 let eventB = ""
+let eventC = ""
 
 const ANA = { name: "", email: "", image: "https://cdn.itest.invalid/zq-ana-face.jpg", phone: "+919800012345" }
 const identityOf = () => [ana, ANA.name, ANA.email, ANA.image, ANA.phone]
@@ -136,6 +137,13 @@ beforeAll(async () => {
   await room(eventA, hostOrg, venue.id, [ben, ...extras], "checked_in")
   // A night Ana came to nearly alone: who came, and when, is held back.
   await room(eventB, hostOrg, venue.id, [], "checked_out")
+  // A night still running: its rows grow with each arrival, so a host's export leaves it out.
+  eventC = await makeEvent(host)
+  events.push(eventC)
+  await db.events.update({ where: { id: eventC }, data: { organizer_org_id: hostOrg } })
+  const late = await makeUser("hspo-late")
+  users.push(late)
+  await checkIn(eventC, late, new Date(Date.now() - 10 * MINUTE), "checked_in")
 })
 
 afterAll(async () => {
@@ -237,6 +245,11 @@ describe("the export's arrival times cannot be lined up against the room (L3, L4
     for (const key of ["check-ins", "attendees"] as const) {
       expect(await buildReport(key, "organizer", host, before)).toBe(await buildReport(key, "organizer", host, after))
     }
+  })
+
+  it("leaves a night that is still running out of a host's export, and not out of the admin's", async () => {
+    expect(await buildReport("check-ins", "organizer", host, RANGE())).not.toContain(eventC)
+    expect(await buildReport("check-ins", "app_admin", admin, RANGE())).toContain(eventC)
   })
 
   it("keeps the exact time for the platform's admin", async () => {
