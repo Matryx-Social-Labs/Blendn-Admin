@@ -96,4 +96,12 @@ describe("unban and unmute put a member back as they were", () => {
       await db.chat_groups.update({ where: { id: groupId }, data: { status: "active" } })
     }
   })
+
+  it("a member whose row says left, with no left_at, is not woken by an unban (swept or erased, not banned)", async () => {
+    const id = await member("ukl-d", { status: "left" })
+    await patch(id, "unban")
+    expect(await statusOf(id)).toBe("left")
+    await patch(id, "unmute")
+    expect(await statusOf(id)).toBe("left")
+  })
 })

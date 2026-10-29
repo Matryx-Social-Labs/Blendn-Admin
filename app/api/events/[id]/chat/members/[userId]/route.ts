@@ -54,7 +54,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     const target = targetUserId
       ? await db.chat_group_members.findUnique({
           where: { chat_group_id_user_id: { chat_group_id: event.chat_group.id, user_id: targetUserId } },
-          select: { role: true, left_at: true },
+          select: { role: true, left_at: true, status: true },
         })
       : null
     if (!targetUserId || !target) return errorResponse("Not a member of this room", 404)
@@ -66,7 +66,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
      * whose room has ended is `left` again, not `active` in a room they are
      * not in. Only a live room and a member who never left come back `active`.
      */
-    const back = target.left_at !== null || event.chat_group.status === "archived" ? ("left" as const) : ("active" as const)
+    const back =
+      target.left_at !== null || target.status === "left" || event.chat_group.status === "archived" ? ("left" as const) : ("active" as const)
     const statusMap = {
       ban: "banned" as const,
       unban: back,
