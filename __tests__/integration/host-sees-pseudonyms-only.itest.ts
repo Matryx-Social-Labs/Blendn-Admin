@@ -282,7 +282,11 @@ describe("a host's exports cannot be lined up against the room (L3, L4)", () => 
     const actor = await actorFor({ id: host, role: "organizer" })
     const settled = await eventAttendees(actor, eventA)
     expect(settled?.view === "labels" && settled.rows.some((r) => r.status === "came")).toBe(true)
-    const labelsBefore = (await attendeeRoster("organizer", host)).rows.length
+    const listed = await attendeeRoster("organizer", host)
+    const labelsBefore = listed.rows.length
+    // Last attended is a night's start, never a check-in's time.
+    const starts = (await db.events.findMany({ where: { id: { in: [eventA, eventB] } }, select: { start_time: true } })).map((e) => e.start_time.toISOString())
+    for (const r of listed.rows) if (r.lastAttendedAt) expect(starts).toContain(r.lastAttendedAt)
     // Somebody checks in again, ten minutes ago: the night is not settled.
     const row = await db.event_check_ins.findFirstOrThrow({ where: { event_id: eventA, user_id: ben }, select: { id: true, check_in_time: true, created_at: true } })
     const recent = new Date(Date.now() - 10 * MINUTE)
