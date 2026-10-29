@@ -269,6 +269,25 @@ export async function userIdFromRefIfIdentified(viewerId: string, ref: string): 
 }
 
 /**
+ * The events this person is on the host side of: their organisation runs it,
+ * or owns the venue it is held at (SCRUM-887).
+ *
+ * The owner's ruling (2026-10-28): a host sees people only by their room
+ * pseudonym, even somebody who chose to be named — that choice is for the
+ * other people in the room. Organisers and venue staff check in through the
+ * same button as everyone (`lib/checkin-kind.ts`), so a host at their own
+ * night was "in the room" here and saw every reveal and every friend who let
+ * friends recognise them. Membership now, not the check-in's `kind`, which
+ * is stamped at arrival and would miss somebody who joined the organisation
+ * since; and any membership, a suspended organisation's included.
+ * `roomIdentity` asks the same of a room's viewers in one read.
+ */
+function hostSideOf(userId: string): Prisma.eventsWhereInput {
+  const member = { members: { some: { user_id: userId } } }
+  return { OR: [{ organizer_org: { is: member } }, { venue: { is: { owner_org: { is: member } } } }] }
+}
+
+/**
  * Which room's terms to answer in.
  *
  * ## Why a handle is answered in its own room's terms (SCRUM-371 follow-up)
@@ -301,25 +320,6 @@ export async function userIdFromRefIfIdentified(viewerId: string, ref: string): 
  *
  * Blocks and closed conversations still beat everything.
  */
-/**
- * The events this person is on the host side of: their organisation runs it,
- * or owns the venue it is held at (SCRUM-887).
- *
- * The owner's ruling (2026-10-28): a host sees people only by their room
- * pseudonym, even somebody who chose to be named — that choice is for the
- * other people in the room. Organisers and venue staff check in through the
- * same button as everyone (`lib/checkin-kind.ts`), so a host at their own
- * night was "in the room" here and saw every reveal and every friend who let
- * friends recognise them. Membership now, not the check-in's `kind`, which
- * is stamped at arrival and would miss somebody who joined the organisation
- * since; and any membership, a suspended organisation's included.
- * `roomIdentity` asks the same of a room's viewers in one read.
- */
-function hostSideOf(userId: string): Prisma.eventsWhereInput {
-  const member = { members: { some: { user_id: userId } } }
-  return { OR: [{ organizer_org: { is: member } }, { venue: { is: { owner_org: { is: member } } } }] }
-}
-
 export interface IdentityScope {
   /** The event whose room the ref came from. */
   room?: string
@@ -392,7 +392,7 @@ export async function recognisedInRoomBy(eventId: string, targetId: string, view
 }
 
 /**
- * The room rule over every (viewer, target) pair of two lists, in five reads
+ * The room rule over every (viewer, target) pair of two lists, in six reads
  * however long either list is. Both public forms above are this with one side
  * fixed, so they cannot disagree.
  *

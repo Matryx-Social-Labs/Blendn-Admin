@@ -11,7 +11,7 @@ import { NextRequest } from "next/server"
 
 import { GET as roomFeed } from "@/app/api/events/[id]/chat/messages/route"
 import { GET as flagQueue } from "@/app/api/events/[id]/chat/moderation/route"
-import { eventAttendees } from "@/lib/attendee-roster"
+import { attendeeRoster, eventAttendees } from "@/lib/attendee-roster"
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
 import { maySeeIdentityFor, visibleInRoom } from "@/lib/identity"
 import { buildLiveSnapshot } from "@/lib/live-snapshot"
@@ -50,6 +50,7 @@ let ana = ""
 let ben = ""
 let eventA = ""
 let eventB = ""
+let eventC = ""
 
 const ANA = { name: "", email: "", image: "https://cdn.itest.invalid/zq-ana-face.jpg", phone: "+919800012345" }
 const identityOf = () => [ana, ANA.name, ANA.email, ANA.image, ANA.phone]
@@ -77,17 +78,18 @@ async function checkIn(eventId: string, userId: string, at: Date, status: "check
 
 /** Ana and four others in the room; the host and their colleague and the venue owner checked in as staff. */
 async function room(eventId: string, hostOrg: string, venueId: string, others: string[], status: "checked_in" | "checked_out") {
-  // Over five minutes ago: a host's per-person exports hold only nights that have ended.
+  // Settled: over, and the last arrival, more than two hours ago (`settledEventIds`).
   // On the hour, so A's five arrivals (28 minutes) share one hour's cell.
-  const start = Math.floor((Date.now() - 120 * MINUTE) / (60 * MINUTE)) * 60 * MINUTE
-  const times = { start_time: new Date(start), end_time: new Date(Date.now() - 5 * MINUTE) }
+  const start = Math.floor((Date.now() - 6 * 60 * MINUTE) / (60 * MINUTE)) * 60 * MINUTE
+  const times = { start_time: new Date(start), end_time: new Date(Date.now() - 3 * 60 * MINUTE) }
   await db.events.update({ where: { id: eventId }, data: { organizer_org_id: hostOrg, venue_id: venueId, ...times } })
   await db.event_occurrences.updateMany({ where: { event_id: eventId }, data: times })
   const group = await db.chat_groups.create({ data: { event_id: eventId, name: "Room" }, select: { id: true } })
   await db.chat_group_members.create({ data: { chat_group_id: group.id, user_id: host, role: "admin" } })
   const people = [ana, ...others]
   for (const [i, user_id] of people.entries()) {
-    await db.chat_group_members.create({ data: { chat_group_id: group.id, user_id, anonymous_name: `Zq Pseudo ${i}` } })
+    // Named against the door's order, so a list in row order is not also in name order.
+    await db.chat_group_members.create({ data: { chat_group_id: group.id, user_id, anonymous_name: `Zq Pseudo ${people.length - i}` } })
     // Seconds off the quarter hour on purpose: the export must not repeat them.
     await checkIn(eventId, user_id, new Date(start + i * 7 * MINUTE + 13_000), status)
   }
@@ -137,6 +139,13 @@ beforeAll(async () => {
   await room(eventA, hostOrg, venue.id, [ben, ...extras], "checked_in")
   // A night Ana came to nearly alone: who came, and when, is held back.
   await room(eventB, hostOrg, venue.id, [], "checked_out")
+  // A night still running, somebody arriving ten minutes ago: no host export holds it.
+  eventC = await makeEvent(host)
+  events.push(eventC)
+  await db.events.update({ where: { id: eventC }, data: { organizer_org_id: hostOrg } })
+  const late = await makeUser("hspo-late")
+  users.push(late)
+  await checkIn(eventC, late, new Date(Date.now() - 10 * MINUTE), "checked_in")
 })
 
 afterAll(async () => {
@@ -167,8 +176,11 @@ describe.each(HOSTS)("%s sees pseudonyms only", (_who, role, id) => {
     const feed = await roomFeed(req(`/api/events/${eventA}/chat/messages`), ctx(eventA))
     expect(feed.status).toBe(200)
     const body = await feed.json()
-    expect(JSON.stringify(body)).toContain("Zq Pseudo 0")
+    expect(JSON.stringify(body)).toContain("Zq Pseudo 5")
     expectNoIdentity("chat feed", body)
+    // The members by pseudonym, never in the order they walked in (SCRUM-887).
+    const names = (body.members as { anonymousName: string | null }[]).map((m) => m.anonymousName).filter(Boolean)
+    expect(names).toEqual([...names].sort())
 
     const flags = await flagQueue(req(`/api/events/${eventA}/chat/moderation?status=all`), ctx(eventA))
     expect(flags.status).toBe(200)
@@ -236,14 +248,52 @@ describe("a host's exports cannot be lined up against the room (L3, L4)", () => 
     }
   })
 
-  it("gives a host the same exports when they move the event's end and back", async () => {
+  const exports = () =>
+    Promise.all((["check-ins", "attendees"] as const).map((key) => buildReport(key, "organizer", host, RANGE())))
+  const moveEnd = async (eventId: string, end_time: Date) => {
+    await db.events.update({ where: { id: eventId }, data: { end_time } })
+    await db.event_occurrences.updateMany({ where: { event_id: eventId }, data: { end_time } })
+  }
+
+  it("leaves a night that is still arriving out of a host's exports, not out of the admin's", async () => {
+    for (const csv of await exports()) expect(csv).not.toContain(eventC)
+    expect(await buildReport("check-ins", "app_admin", admin, RANGE())).toContain(eventC)
+  })
+
+  it("does not open a night's exports when the host moves its end into the past", async () => {
+    const was = await db.events.findUniqueOrThrow({ where: { id: eventC }, select: { end_time: true } })
+    await moveEnd(eventC, new Date(Date.now() - 3 * 60 * MINUTE))
+    const moved = await exports()
+    await moveEnd(eventC, was.end_time)
+    // Somebody arrived ten minutes ago: the arrivals, not the host's times, keep it shut.
+    for (const csv of moved) expect(csv).not.toContain(eventC)
+  })
+
+  it("gives a host the same exports when they move a settled night's end and back", async () => {
     const was = await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { end_time: true } })
-    const read = () => Promise.all((["check-ins", "attendees"] as const).map((key) => buildReport(key, "organizer", host, RANGE())))
-    const ended = await read()
-    await db.events.update({ where: { id: eventA }, data: { end_time: new Date(Date.now() + 60 * MINUTE) } })
-    const running = await read()
-    await db.events.update({ where: { id: eventA }, data: { end_time: was.end_time } })
-    expect(running).toEqual(ended)
+    const before = await exports()
+    await moveEnd(eventA, new Date(was.end_time.getTime() - 60 * MINUTE))
+    const moved = await exports()
+    await moveEnd(eventA, was.end_time)
+    expect(moved).toEqual(before)
+  })
+
+  it("holds back who came on the Attendees tab and the organisation's list while a night settles", async () => {
+    const actor = await actorFor({ id: host, role: "organizer" })
+    const settled = await eventAttendees(actor, eventA)
+    expect(settled?.view === "labels" && settled.rows.some((r) => r.status === "came")).toBe(true)
+    const labelsBefore = (await attendeeRoster("organizer", host)).rows.length
+    // Somebody checks in again, ten minutes ago: the night is not settled.
+    const row = await db.event_check_ins.findFirstOrThrow({ where: { event_id: eventA, user_id: ben }, select: { id: true, check_in_time: true, created_at: true } })
+    const recent = new Date(Date.now() - 10 * MINUTE)
+    await db.event_check_ins.update({ where: { id: row.id }, data: { check_in_time: recent, created_at: recent } })
+    try {
+      const settling = await eventAttendees(actor, eventA)
+      expect(settling?.view === "labels" && settling.rows.some((r) => r.status === "came")).toBe(false)
+      expect((await attendeeRoster("organizer", host)).rows.length).toBeLessThan(labelsBefore)
+    } finally {
+      await db.event_check_ins.update({ where: { id: row.id }, data: { check_in_time: row.check_in_time, created_at: row.created_at } })
+    }
   })
 
   it("keeps a row per check-in, to the second, for the platform's admin", async () => {

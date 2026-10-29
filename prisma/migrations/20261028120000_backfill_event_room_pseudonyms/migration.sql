@@ -1,4 +1,4 @@
--- Every checked-in person has a room pseudonym (SCRUM-887, owner ruling 2026-10-28).
+-- Every member of an event's room has a pseudonym (SCRUM-887, owner ruling 2026-10-28).
 --
 -- Hosts see people only by their room pseudonym. Check-in has always minted one
 -- (`claimAnonymousName`, lib/check-in-core.ts), but member rows written before it
@@ -11,6 +11,14 @@
 -- `generateUniqueAnonymousName` does: `@@unique([chat_group_id, anonymous_name])`
 -- holds. After twenty taken draws a number is added, as the app's fallback does.
 -- Members only: the host's own seat (`admin`) is named "Host", not a pseudonym.
+-- Any NULL-named member of an event's room, checked in or since left, so a
+-- returning one is not a nameless row. No board-derived preference
+-- (`preferredPseudonymFor` is keyed on the server's secret): these rows
+-- predate the board.
+--
+-- Safe beside a release still serving: the UPDATE only names a row still
+-- NULL (a check-in may have named it meanwhile), and a name taken between the
+-- probe and the write is drawn again rather than failing the deploy.
 --
 -- Wrapped: `migrate deploy` applies statement by statement. A handful of rows.
 BEGIN;
@@ -54,13 +62,18 @@ BEGIN
       candidate := adjectives[1 + floor(random() * array_length(adjectives, 1))::int]
         || ' ' || nouns[1 + floor(random() * array_length(nouns, 1))::int]
         || CASE WHEN tries >= 20 THEN ' ' || (tries - 18)::text ELSE '' END;
-      EXIT WHEN NOT EXISTS (
+      tries := tries + 1;
+      CONTINUE WHEN EXISTS (
         SELECT 1 FROM "chat_group_members" WHERE "chat_group_id" = r.chat_group_id AND "anonymous_name" = candidate
       );
-      tries := tries + 1;
+      BEGIN
+        UPDATE "chat_group_members" SET "anonymous_name" = candidate
+         WHERE "chat_group_id" = r.chat_group_id AND "user_id" = r.user_id AND "anonymous_name" IS NULL;
+        EXIT;
+      EXCEPTION WHEN unique_violation THEN
+        -- Taken since the probe: draw again.
+      END;
     END LOOP;
-    UPDATE "chat_group_members" SET "anonymous_name" = candidate
-     WHERE "chat_group_id" = r.chat_group_id AND "user_id" = r.user_id;
   END LOOP;
 END $$;
 

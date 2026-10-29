@@ -278,7 +278,7 @@ export async function arrivalsByHour(
   if (eventIds.length === 0) return []
   return db.$queryRaw<Array<{ event_id: string; hour: string; arrivals: number }>>`
     SELECT event_id::text AS event_id,
-           to_char(date_trunc('hour', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
+           to_char(date_trunc('hour', COALESCE(check_in_time, created_at) AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
            COUNT(DISTINCT user_id)::int AS arrivals
     FROM event_check_ins
     WHERE event_id IN (${Prisma.join(eventIds)})
@@ -287,4 +287,27 @@ export async function arrivalsByHour(
     GROUP BY 1, 2
     ORDER BY 2
   `
+}
+
+/** How long after a night's last occurrence or last arrival a host's per-person export holds it. */
+export const SETTLED_AFTER_MS = 2 * 60 * 60_000
+
+/**
+ * Which of these events are over for a host's exports (SCRUM-887, security
+ * review): every occurrence has ended AND nobody has checked in for
+ * `SETTLED_AFTER_MS`. On the arrivals too, because the times are the host's to
+ * edit: moving the end into the past while people still arrive would otherwise
+ * open a night's export to be watched one arrival at a time.
+ */
+export async function settledEventIds(eventIds: readonly string[], now: Date = new Date()): Promise<Set<string>> {
+  if (eventIds.length === 0) return new Set()
+  const before = new Date(now.getTime() - SETTLED_AFTER_MS)
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT e.id::text AS id
+    FROM events e
+    WHERE e.id IN (${Prisma.join(eventIds)})
+      AND COALESCE((SELECT MAX(o.end_time) FROM event_occurrences o WHERE o.event_id = e.id), e.end_time) <= ${before}
+      AND COALESCE((SELECT MAX(COALESCE(c.check_in_time, c.created_at)) FROM event_check_ins c WHERE c.event_id = e.id), '-infinity') <= ${before}
+  `
+  return new Set(rows.map((r) => r.id))
 }

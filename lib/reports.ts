@@ -3,7 +3,7 @@ import { toISODate, type DateRange } from "./date-range"
 import type { Prisma, user_role } from "@prisma/client"
 import { toCsv, type CsvColumn } from "./csv"
 import { attendeeLabel } from "./pseudonym"
-import { arrivalsByHour, distinctAttendeeCounts, distinctAttendeeCountsByDay } from "./attendee-counts"
+import { arrivalsByHour, distinctAttendeeCounts, distinctAttendeeCountsByDay, settledEventIds } from "./attendee-counts"
 import { discloseGuests, discloseVenueCounts, MIN_CELL } from "./disclosure"
 import { stillArriving } from "./occurrences"
 import { hostNotSuspended } from "./event-access"
@@ -268,14 +268,13 @@ export const REPORT_ROW_LIMIT = 10_000
  * between events, and no total is printed that could give a floored cell back.
  */
 async function hostArrivals(events: Prisma.eventsWhereInput, inWindow: { gte: Date; lt: Date }): Promise<string> {
-  const chosen = await db.events.findMany({
-    where: { AND: [events, { start_time: inWindow }] },
-    orderBy: [{ start_time: "desc" }, { id: "asc" }],
-    take: REPORT_ROW_LIMIT,
-    select: { id: true, title: true, start_time: true },
-  })
+  const chosen = await hostNights(events, inWindow)
   const byEvent = new Map<string, Awaited<ReturnType<typeof arrivalsByHour>>>()
-  for (const c of await arrivalsByHour(chosen.map((e) => e.id))) byEvent.set(c.event_id, [...(byEvent.get(c.event_id) ?? []), c])
+  for (const c of await arrivalsByHour(chosen.map((e) => e.id))) {
+    const night = byEvent.get(c.event_id) ?? []
+    night.push(c)
+    byEvent.set(c.event_id, night)
+  }
   const rows: Array<{ event: (typeof chosen)[number]; hour: string; arrivals: number }> = []
   for (const event of chosen) {
     const night = (byEvent.get(event.id) ?? []).map((c) => ({ event, hour: c.hour, arrivals: c.arrivals }))
@@ -293,6 +292,22 @@ async function hostArrivals(events: Prisma.eventsWhereInput, inWindow: { gte: Da
     ],
     rows
   )
+}
+
+/**
+ * The nights a host's per-person exports may hold: whole events by start in the
+ * window, newest first, and only once settled (`settledEventIds`), never by
+ * check-in time and never while anybody could still be arriving.
+ */
+async function hostNights(events: Prisma.eventsWhereInput, inWindow: { gte: Date; lt: Date }) {
+  const chosen = await db.events.findMany({
+    where: { AND: [events, { start_time: inWindow }] },
+    orderBy: [{ start_time: "desc" }, { id: "asc" }],
+    take: REPORT_ROW_LIMIT,
+    select: { id: true, title: true, start_time: true },
+  })
+  const settled = await settledEventIds(chosen.map((e) => e.id))
+  return chosen.filter((e) => settled.has(e.id))
 }
 
 /** A report's rows and its header, ready for `toCsv`. */
@@ -375,19 +390,21 @@ export async function buildReport(
     }
 
     case "attendees": {
+      const nights = host ? (await hostNights(scope, inWindow)).map((e) => e.id) : null
       const fetched = await db.event_check_ins.findMany({
         /*
-         * A host's by whole events that started in the window, never by
-         * check-in time (SCRUM-887, security review): windowed on `created_at`,
-         * moving its end a minute at a time and diffing two exports showed whose
-         * count dropped, which is that label's arrival to the minute, and the
-         * room announces each arrival under its pseudonym.
+         * A host's by whole settled nights (`hostNights`), never by check-in
+         * time (SCRUM-887, security review): windowed on `created_at`, moving
+         * its end a minute at a time and diffing two exports showed whose count
+         * dropped, which is that label's arrival to the minute; and a night
+         * still filling shows each new label as it walks in. The room announces
+         * each arrival under its pseudonym.
          */
         where: {
           status: { in: ["checked_in", "checked_out"] },
-          ...(host ? { event: { AND: [scope, { start_time: inWindow }] } } : { event: scope, created_at: inWindow }),
+          ...(nights ? { event_id: { in: nights } } : { event: scope, created_at: inWindow }),
         },
-        select: { user_id: true, event_id: true, created_at: true, event: { select: { organizer_org_id: true } } },
+        select: { user_id: true, event_id: true, event: { select: { organizer_org_id: true, start_time: true } } },
         /*
          * Bounded, and ordered so the bound is meaningful.
          *
@@ -396,31 +413,34 @@ export async function buildReport(
          * truncated export of the most recent window is a usable answer and a
          * truncated export of an arbitrary slice is not.
          */
-        orderBy: host ? [{ event: { start_time: "desc" } }, { event_id: "asc" }] : { created_at: "desc" },
-        take: REPORT_ROW_LIMIT,
+        orderBy: host ? { event_id: "asc" } : { created_at: "desc" },
+        // One over, so a host's cut can tell a full export from a truncated one.
+        take: REPORT_ROW_LIMIT + 1,
       })
       // A host's cut falls between events, never inside one: a partial night is arrivals again.
-      const cut = host && fetched.length === REPORT_ROW_LIMIT ? fetched.at(-1)!.event_id : null
-      const checkIns = cut ? fetched.filter((c) => c.event_id !== cut) : fetched
+      const over = fetched.length > REPORT_ROW_LIMIT
+      const cut = host && over && fetched[REPORT_ROW_LIMIT - 1].event_id === fetched[REPORT_ROW_LIMIT].event_id ? fetched[REPORT_ROW_LIMIT].event_id : null
+      const checkIns = fetched.slice(0, REPORT_ROW_LIMIT).filter((c) => c.event_id !== cut)
       // By label, not by user: one person at two organisations is two rows.
       // Pseudonymous by design: attendees are pseudonymous to hosts everywhere
       // in this product, and an export is not a way around that.
       const byLabel = new Map<string, { events: Set<string>; last: Date }>()
       for (const ci of checkIns) {
         const label = attendeeLabel(ci.user_id, labelScope(ci.event.organizer_org_id))
-        const entry = byLabel.get(label) ?? { events: new Set<string>(), last: ci.created_at }
+        // The night's start, never the check-in's time: a person's arrival is not the export's to tell.
+        const entry = byLabel.get(label) ?? { events: new Set<string>(), last: ci.event.start_time }
         entry.events.add(ci.event_id)
-        if (ci.created_at > entry.last) entry.last = ci.created_at
+        if (ci.event.start_time > entry.last) entry.last = ci.event.start_time
         byLabel.set(label, entry)
       }
       const rows = [...byLabel.entries()].map(([attendee, v]) => ({
         attendee,
         events_attended: v.events.size,
-        // The day, not the minute: that night's check-in time is the room's arrival again (SCRUM-887, L4).
         last_attended: toISODate(v.last),
         repeat: v.events.size > 1,
       }))
-      rows.sort((a, b) => b.events_attended - a.events_attended)
+      // Ties by label: the fetch's order within a night is the door's.
+      rows.sort((a, b) => b.events_attended - a.events_attended || a.attendee.localeCompare(b.attendee))
       return toCsv(
         [
           { key: "attendee", label: "Attendee" },
