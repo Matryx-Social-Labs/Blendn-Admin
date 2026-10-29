@@ -133,6 +133,16 @@ export function whenLabel(
 
 /* -------------------------------------------------------------------------- */
 
+const indiaDay = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
+const indiaDayYear = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+const indiaYear = new Intl.DateTimeFormat("en-IN", { year: "numeric", timeZone: "Asia/Kolkata" })
+
+/** "30 Oct", and "30 Oct 2027" when that is not this year: a date a year out must not read as this one. India's calendar. */
+export function dayInIndia(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso)
+  return indiaYear.format(at) === indiaYear.format(now) ? indiaDay.format(at) : indiaDayYear.format(at)
+}
+
 /**
  * What to say after deleting a selection, when some of it failed.
  *

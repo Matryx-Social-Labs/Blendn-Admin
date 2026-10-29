@@ -304,8 +304,9 @@ describe("an event's attendee roster", () => {
       const out = await roster("organizer", hostA, past.id)
       const org = await attendeeRoster("organizer", hostA)
 
-      // Olga came to the other event only; she is on the org roster and not here.
-      expect(org.rows.map((r) => r.id)).toContain(atA(olga))
+      // Olga came to the other event only, where fewer than five came: not here, and not on the
+      // org roster either (SCRUM-889: a night under the floor lists nobody, anywhere).
+      expect(org.rows.map((r) => r.id)).not.toContain(atA(olga))
       const here = out.rows.map((r) => r.id)
       for (const absent of [olga, stan, pat]) expect(here).not.toContain(atA(absent))
       expect(here).toContain(atA(priya))
@@ -377,16 +378,15 @@ describe("an event's attendee roster", () => {
       const tabs = await Promise.all([past, other, live, cancelled, busy, complete, residual, quiet, beforeClaim, upcoming].map((e) => roster("organizer", hostA, e.id)))
       const fromTabs = new Map<string, number>()
       for (const tab of tabs) for (const row of tab.rows) if (row.status === "no_show") fromTabs.set(row.id, (fromTabs.get(row.id) ?? 0) + 1)
-      // `small` is the one event whose tab holds no-shows back; the org roster
-      // still counts its two.
-      const heldBack = new Set((await roster("organizer", hostA, small.id)).rows.map((r) => r.id))
+      // `small` is the one event whose tab holds no-shows back, and the org roster holds it back
+      // whole (SCRUM-889): neither its arrivals nor its no-shows are listed.
       for (const row of org.rows) {
-        expect([row.id, row.noShows]).toEqual([row.id, (fromTabs.get(row.id) ?? 0) + (heldBack.has(row.id) ? 1 : 0)])
+        expect([row.id, row.noShows]).toEqual([row.id, fromTabs.get(row.id) ?? 0])
       }
       // Stan RSVP'd to an event he worked: not on the roster at all.
       expect(org.rows.map((r) => r.id)).not.toContain(atA(stan))
-      // Rahul: past, small and quiet. Not the live one, not the cancelled one.
-      expect(org.rows.find((r) => r.id === atA(rahul))).toMatchObject({ noShows: 4, rsvps: 4 })
+      // Rahul: past, small and quiet. Not the live one, not the cancelled one, and not `small` (held back whole).
+      expect(org.rows.find((r) => r.id === atA(rahul))).toMatchObject({ noShows: 3, rsvps: 3 })
       expect(fromTabs.size).toBeGreaterThan(0)
     })
   })
