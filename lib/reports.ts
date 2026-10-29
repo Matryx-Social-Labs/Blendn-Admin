@@ -422,7 +422,13 @@ export async function buildReport(
       // A host's cut falls between events, never inside one: a partial night is arrivals again.
       const over = fetched.length > REPORT_ROW_LIMIT
       const cut = host && over && fetched[REPORT_ROW_LIMIT - 1].event_id === fetched[REPORT_ROW_LIMIT].event_id ? fetched[REPORT_ROW_LIMIT].event_id : null
-      const checkIns = fetched.slice(0, REPORT_ROW_LIMIT).filter((c) => c.event_id !== cut)
+      const kept = fetched.slice(0, REPORT_ROW_LIMIT).filter((c) => c.event_id !== cut)
+      /*
+       * A host's export lists no night fewer than `MIN_CELL` came to (SCRUM-889): at one, the
+       * single label is the single room pseudonym — that person's history across the org's nights.
+       */
+      const attended = host ? await distinctAttendeeCounts([...new Set(kept.map((c) => c.event_id))]) : null
+      const checkIns = attended ? kept.filter((c) => (attended.get(c.event_id) ?? 0) >= MIN_CELL) : kept // a night with check-ins has n >= 1, so under the floor is held
       // By label, not by user: one person at two organisations is two rows.
       // Pseudonymous by design: attendees are pseudonymous to hosts everywhere
       // in this product, and an export is not a way around that.

@@ -108,9 +108,22 @@ export async function attendeeRoster(role: user_role, userId: string, now = new 
   const worked = new Set(staff.map((s) => `${s.user_id}|${s.event_id}`))
   const label = (row: { user_id: string; event: { organizer_org_id: string | null } }) =>
     attendeeLabel(row.user_id, labelScope(row.event.organizer_org_id))
-  const came = checkIns.filter((row) => arrivedBy(settled, row)).map((row) => ({ ...row, label: label(row) }))
+  /*
+   * A night to which some came but fewer than `MIN_CELL` lists nobody (SCRUM-889),
+   * neither who came nor who did not: at one, the single label IS the single
+   * room pseudonym, and from there it is that person's history across the
+   * organisation's nights. The event's own Attendees tab holds the same night
+   * back, and holding back only the arrivals would turn each of them into a
+   * no-show. A night nobody came to names nobody either way.
+   */
+  const attended = await distinctAttendeeCounts([...new Set(checkIns.map((r) => r.event_id))])
+  const held = (eventId: string) => {
+    const n = attended.get(eventId) ?? 0
+    return n > 0 && n < MIN_CELL
+  }
+  const came = checkIns.filter((row) => arrivedBy(settled, row) && !held(row.event_id)).map((row) => ({ ...row, label: label(row) }))
   const promised = rsvps
-    .filter((r) => settled.has(r.event_id) && !worked.has(`${r.user_id}|${r.event_id}`))
+    .filter((r) => settled.has(r.event_id) && !held(r.event_id) && !worked.has(`${r.user_id}|${r.event_id}`))
     .map((row) => ({ ...row, label: label(row) }))
 
   // Assembled in memory rather than SQL: this is bounded by one organiser's
