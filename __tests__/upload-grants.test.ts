@@ -98,6 +98,15 @@ describe("issuing a grant", () => {
     expect(mockDb.upload_grants.create).not.toHaveBeenCalled()
   })
 
+  it("refuses an admin outright: no grant and no organisation to fall back on (SCRUM-652)", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "admin-1", role: "app_admin" } })
+
+    await expect(requestCreativeUpload(EVENT, image)).rejects.toThrow(/forbidden/i)
+    await expect(attachCreativeMedia(CAMPAIGN, KEY)).rejects.toThrow(/forbidden/i)
+    expect(mockPresign).not.toHaveBeenCalled()
+    expect(mockDb.sponsored_creatives.create).not.toHaveBeenCalled()
+  })
+
   it("records the ceiling on the row, so validation has something to check", async () => {
     await requestCreativeUpload(EVENT, image)
 

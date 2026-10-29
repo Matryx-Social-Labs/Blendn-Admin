@@ -132,7 +132,8 @@ export async function fileSponsorClaim(
   if (!session?.user) throw new Refusal("Unauthorized")
   const user = session.user
 
-  if (user.role !== "sponsor" && user.role !== "app_admin") {
+  // Not an admin: the resolver gives an admin no organisation to file for (SCRUM-652).
+  if (user.role !== "sponsor") {
     throw new Refusal("Only a sponsor account can claim a brand.")
   }
 

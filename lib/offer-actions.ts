@@ -15,7 +15,7 @@ import { checkTextContent } from "@/lib/moderation/openai-moderation"
 import { checkSpam } from "@/lib/moderation/spam-detector"
 import { deliverOffer } from "@/lib/offers/deliver"
 import { regularsActive } from "@/lib/offers/person"
-import { codeMatches, normaliseCode } from "@/lib/offers/pass-code"
+import { BAD_CODE_SHAPE, codeMatches, normaliseCode } from "@/lib/offers/pass-code"
 import { audienceBand, nextOfferAt, OFFERS_PER_WEEK, sentThisWeek, type AudienceBand } from "@/lib/offers/venue"
 import { activeMembership } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
@@ -280,7 +280,7 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
   const parsed = redeemInput.safeParse(input)
   if (!parsed.success) throw new Refusal(NOT_A_PASS_HERE)
   const code = normaliseCode(parsed.data.code)
-  if (!code) throw new Refusal("A pass code is six letters and numbers.")
+  if (!code) throw new Refusal(BAD_CODE_SHAPE)
   const { venueId } = parsed.data
 
   // Staff of this venue's organisation, or the same answer as a wrong code:

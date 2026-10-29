@@ -11,7 +11,7 @@ process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "unit-nextauth-secr
 jest.mock("@/lib/db", () => ({ db: {} }))
 jest.mock("@/lib/entitlements", () => ({ hasEntitlement: jest.fn() }))
 
-import { codeMatches, currentPass, normaliseCode, passCode, passStep, PASS_STEP_MS } from "@/lib/offers/pass-code"
+import { BAD_CODE_SHAPE, codeMatches, currentPass, normaliseCode, passCode, passStep, PASS_STEP_MS } from "@/lib/offers/pass-code"
 import { audienceBand, nextOfferAt, publishedTotals, weekBoundaries, weekStart, type OfferHistory } from "@/lib/offers/venue"
 
 const D = (iso: string) => new Date(iso)
@@ -145,6 +145,10 @@ describe("the door pass's code", () => {
     expect(normaliseCode("K7Q4M")).toBeNull()
     expect(normaliseCode("K7Q4M0")).toBeNull() // 0 is not on a pass
     expect(normaliseCode("K7Q4M2X")).toBeNull()
+    // SCRUM-899: the sentence for a refused shape names the characters that cannot be on a pass.
+    expect(normaliseCode("A1B2C3")).toBeNull()
+    expect(BAD_CODE_SHAPE).toMatch(/0, 1, I or O/)
+    for (const c of "01IO") expect(normaliseCode(`K7Q4M${c}`)).toBeNull()
   })
 
   it("is not computable without the server's secret", () => {

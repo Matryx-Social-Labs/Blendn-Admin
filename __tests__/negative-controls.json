@@ -2457,6 +2457,12 @@
       "mutation": "M2245 venueOffersView hands the first name to every viewer again.",
       "observed": "M2245: 3 of 39 failing. Reverted; 39 of 39.",
       "date": "2026-10-28"
+    },
+    "admin-money-limit-boundary.test.ts": {
+      "guards": "SCRUM-651: every exported grant*/end*/revoke* in lib/billing-actions.ts calls requireAdminWithinLimit and never the bare requireAdmin, so every admin money change has the per-admin ceiling. Fixtures hold a bare-guard writer, an unguarded writer, and a limited writer plus a reader (not flagged).",
+      "mutation": "M651 grantPlus and endPlusGrant put back on the bare requireAdmin() (the code as it was on dev a8e4af7f).",
+      "observed": "M651: 1 of 5 failing, unlimitedWriters = [grantPlus, endPlusGrant]; the other 4 stayed green. Restored; 5/5.",
+      "date": "2026-10-29"
     }
   },
   "grandfathered": [
