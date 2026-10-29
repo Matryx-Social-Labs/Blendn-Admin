@@ -1,4 +1,4 @@
-import { PrismaClient, type connection_intent, type door_policy, type event_status, type venue_type, type visibility_type } from "@prisma/client"
+import { Prisma, PrismaClient, type connection_intent, type door_policy, type event_status, type venue_type, type visibility_type } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
@@ -55,6 +55,8 @@ import { leaveOtherRooms } from "./seed-one-room"
  *   DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts            # dry run
  *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --apply
  *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --refresh-times
+ *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --hours --apply  # opening hours on the test venues below, nothing else (without --apply: lists them)
+ *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --hours --clear --apply  # and back to none (SCRUM-897)
  *
  * Staging or localhost only (`environmentRefusal`).
  */
@@ -65,6 +67,8 @@ const db = new PrismaClient({
 
 const APPLY = process.argv.includes("--apply")
 const REFRESH_TIMES = process.argv.includes("--refresh-times")
+const HOURS = process.argv.includes("--hours")
+const CLEAR = process.argv.includes("--clear")
 
 const CITY = "Bengaluru"
 const STATE = "Karnataka"
@@ -158,6 +162,21 @@ interface VenueSpec {
   /** Owned by the venue test organisation, so "venue owner operates, may not edit" is testable. */
   ownedByVenueOrg?: boolean
   fence: Fence
+}
+
+/**
+ * Opening hours for a few of the scenario venues (SCRUM-897): `venues.hours` has no product writer, so the venue page's OPEN
+ * tile ("Till 4 AM / Opens 6 PM / Closed", OUT-03) could not be driven. Wall clock in the venue's own zone (`TZ`); a close at or
+ * before the open runs past midnight (`lib/venue-hours.ts`). Only these test venues: never the Overture venues.
+ */
+const everyDay = (open: string, close: string, days = [0, 1, 2, 3, 4, 5, 6]) => days.map((day) => ({ day, open, close }))
+const HOURS_BY_VENUE: Partial<Record<keyof typeof VENUES, { day: number; open: string; close: string }[]>> = {
+  bflat: everyDay("18:00", "04:00"), // the OUT-03 case: open at 23:00 IST, "Till 4 AM"
+  kittyKo: everyDay("22:00", "04:00", [4, 5, 6]), // Thu-Sat only: closed the other days
+  thirdWave: everyDay("08:00", "22:00"),
+  blueTokai: everyDay("08:00", "23:00"),
+  arbor: everyDay("12:00", "01:00"),
+  lupa: everyDay("12:00", "23:30", [1, 2, 3, 4, 5, 6]), // closed Sundays
 }
 
 const circle = (lat: number, lng: number, radius: number, buffer = 30): Fence => ({ type: "circle", lat, lng, radius, buffer })
@@ -1302,6 +1321,20 @@ async function refreshTimes() {
   console.log(describeLive(live))
 }
 
+/** `--hours`: write (or with `--clear`, remove) `venues.hours` and the zone on the scenario venues above, and print the ids. */
+async function seedHours() {
+  for (const [key, hours] of Object.entries(HOURS_BY_VENUE)) {
+    const spec = VENUES[key as keyof typeof VENUES]
+    const venue = await db.venues.findFirst({ where: { name: spec.name, city: CITY, deleted_at: null }, select: { id: true } })
+    if (!venue) {
+      console.log(`! ${spec.name} is not on this database — skipped (run --apply first)`)
+      continue
+    }
+    if (APPLY) await db.venues.update({ where: { id: venue.id }, data: { hours: CLEAR ? Prisma.DbNull : hours, ...(CLEAR ? {} : { timezone: TZ }) } })
+    console.log(`${APPLY ? "" : "(dry run) "}${CLEAR ? "cleared" : "hours  "} ${venue.id}  ${spec.name}${CLEAR ? "" : `  ${hours!.length} rows, e.g. ${hours![0].open}-${hours![0].close}`}`)
+  }
+}
+
 async function main() {
   const host = (() => {
     try {
@@ -1323,6 +1356,10 @@ async function main() {
   if (refusal) {
     console.error(`REFUSING: ${refusal}`)
     process.exitCode = 1
+    return
+  }
+  if (HOURS) {
+    await seedHours()
     return
   }
   if (REFRESH_TIMES) {
@@ -1412,6 +1449,8 @@ async function main() {
       claimed_at: owned ? new Date(NOW.getTime() - 60 * 24 * HOUR) : null,
       status: "active" as const,
       deleted_at: null,
+      timezone: TZ,
+      ...(HOURS_BY_VENUE[key] && { hours: HOURS_BY_VENUE[key] }),
     }
     const existing = await db.venues.findFirst({ where: { name: v.name, city: CITY }, select: { id: true } })
     const row = existing
