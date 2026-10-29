@@ -30,6 +30,8 @@ const state = {
 const inList = (value: string, filter: unknown) => (filter as { in: string[] }).in.includes(value)
 
 const mockDb = {
+  // The room's host side (`roomIdentity`, SCRUM-887): nobody here hosts.
+  organisation_members: { findMany: jest.fn(async () => []) },
   event_check_ins: {
     findFirst: jest.fn(async ({ where }: { where: { event_id: string; user_id: string } }) =>
       state.checkIns.find((c) => c.event_id === where.event_id && c.user_id === where.user_id) ? { id: "ci" } : null

@@ -422,6 +422,7 @@ async function roomIdentity(
       .findMany({
         where: {
           user_id: V,
+          // any-kind: the room's own event, a venue day's included -- its owner is the host side there too.
           org: { OR: [{ events: { some: { id: eventId } } }, { venues: { some: { events: { some: { id: eventId } } } } }] },
         },
         select: { user_id: true },

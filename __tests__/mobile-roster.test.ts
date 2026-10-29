@@ -11,6 +11,8 @@
  */
 process.env.NEXTAUTH_SECRET = "mobile-roster-test-secret-of-32-characters"
 const mockDb = {
+  // The room's host side (`roomIdentity`, SCRUM-887): nobody here hosts.
+  organisation_members: { findMany: jest.fn(async () => []) },
   events: { findUnique: jest.fn() },
   event_check_ins: { findFirst: jest.fn(), count: jest.fn(), findMany: jest.fn() },
   // The roster consults blocks now: a block is a safety promise, not a mute,

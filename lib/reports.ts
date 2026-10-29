@@ -300,6 +300,7 @@ async function hostArrivals(events: Prisma.eventsWhereInput, inWindow: { gte: Da
  * newest first, settled (`hostSettledAt`), never chosen by check-in time.
  */
 async function hostNights(events: Prisma.eventsWhereInput, inWindow: { gte: Date; lt: Date }) {
+  // any-kind: `events` is the report's scope (`reportScope`), which already says which kinds.
   const chosen = await db.events.findMany({
     where: { AND: [events, { start_time: inWindow }] },
     orderBy: [{ start_time: "desc" }, { id: "asc" }],

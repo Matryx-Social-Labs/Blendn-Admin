@@ -282,6 +282,7 @@ export async function arrivalsByHour(
            to_char(date_trunc('hour', c.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
            COUNT(DISTINCT c.user_id)::int AS arrivals
     FROM event_check_ins c
+    -- any-kind: the caller's settled nights, by id; this only bounds them by their settle.
     JOIN events e ON e.id = c.event_id AND c.created_at <= e.host_settled_at
     WHERE c.event_id IN (${Prisma.join(eventIds)})
       AND c.status::text IN (${Prisma.join(ATTENDED)})
@@ -314,13 +315,15 @@ export const SETTLED_AFTER_MS = 2 * 60 * 60_000
 export async function hostSettledAt(eventIds: readonly string[], now: Date = new Date()): Promise<Map<string, Date>> {
   if (eventIds.length === 0) return new Map()
   const before = new Date(now.getTime() - SETTLED_AFTER_MS)
+  // any-kind: settles whichever nights a host list asked about; the caller's scope chose their kind.
   await db.$executeRaw`
     UPDATE events e SET host_settled_at = ${now}
     WHERE e.id IN (${Prisma.join(eventIds)})
       AND e.host_settled_at IS NULL
       AND COALESCE((SELECT MAX(o.end_time) FROM event_occurrences o WHERE o.event_id = e.id), e.end_time) <= ${before}
-      AND COALESCE((SELECT MAX(COALESCE(c.check_in_time, c.created_at)) FROM event_check_ins c WHERE c.event_id = e.id), '-infinity') <= ${before}
+      AND COALESCE((SELECT MAX(COALESCE(c.check_in_time, c.created_at)) FROM event_check_ins c WHERE c.event_id = e.id AND c.kind = 'attendee'), '-infinity') <= ${before}
   `
+  // any-kind: the same nights, read back by id.
   const rows = await db.events.findMany({
     where: { id: { in: [...eventIds] }, host_settled_at: { not: null } },
     select: { id: true, host_settled_at: true },
