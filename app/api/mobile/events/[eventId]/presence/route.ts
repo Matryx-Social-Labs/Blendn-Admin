@@ -58,7 +58,8 @@ export async function POST(
     return errorResponse("Invalid JSON body", 400)
   }
 
-  const { latitude, longitude } = body
+  // JSON `null` parses fine and cannot be destructured (SCRUM-653): a body that is not an object is the same 400.
+  const { latitude, longitude } = body ?? {}
   if (typeof latitude !== "number" || typeof longitude !== "number") {
     return errorResponse("latitude and longitude are required", 400)
   }
