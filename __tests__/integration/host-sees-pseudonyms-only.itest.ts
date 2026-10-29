@@ -77,10 +77,13 @@ async function checkIn(eventId: string, userId: string, at: Date, status: "check
 
 /** Ana and four others in the room; the host and their colleague and the venue owner checked in as staff. */
 async function room(eventId: string, hostOrg: string, venueId: string, others: string[], status: "checked_in" | "checked_out") {
-  await db.events.update({ where: { id: eventId }, data: { organizer_org_id: hostOrg, venue_id: venueId } })
+  // Over five minutes ago: a host's per-person exports hold only nights that have ended.
+  const start = Math.floor((Date.now() - 120 * MINUTE) / MINUTE) * MINUTE
+  const times = { start_time: new Date(start), end_time: new Date(Date.now() - 5 * MINUTE) }
+  await db.events.update({ where: { id: eventId }, data: { organizer_org_id: hostOrg, venue_id: venueId, ...times } })
+  await db.event_occurrences.updateMany({ where: { event_id: eventId }, data: times })
   const group = await db.chat_groups.create({ data: { event_id: eventId, name: "Room" }, select: { id: true } })
   await db.chat_group_members.create({ data: { chat_group_id: group.id, user_id: host, role: "admin" } })
-  const start = Math.floor((Date.now() - 50 * MINUTE) / MINUTE) * MINUTE
   const people = [ana, ...others]
   for (const [i, user_id] of people.entries()) {
     await db.chat_group_members.create({ data: { chat_group_id: group.id, user_id, anonymous_name: `Zq Pseudo ${i}` } })
@@ -215,6 +218,25 @@ describe("the export's arrival times cannot be lined up against the room (L3, L4
     const csv = await buildReport("attendees", "organizer", host, RANGE())
     expect(csv.split("\r\n")[0]).toBe("Attendee,Events attended,Last attended,Repeat")
     for (const r of rows(csv)) expect(r[2]).toMatch(/^\d{4}-\d\d-\d\d$/)
+  })
+
+  /*
+   * The security review's attack: move the window's end across one arrival and
+   * diff the two exports. Chosen by check-in time, the row that dropped out was
+   * that arrival, to the minute. Chosen by whole ended events, nothing moves.
+   */
+  it("gives a host the same export whichever minute the window ends on", async () => {
+    const last = await db.event_check_ins.findFirstOrThrow({
+      where: { event_id: eventA, kind: "attendee" },
+      orderBy: { created_at: "desc" },
+      select: { created_at: true },
+    })
+    const from = new Date(Date.now() - 86_400_000)
+    const before = { key: "custom" as const, from, to: new Date(last.created_at.getTime() - MINUTE) }
+    const after = { key: "custom" as const, from, to: new Date(last.created_at.getTime() + MINUTE) }
+    for (const key of ["check-ins", "attendees"] as const) {
+      expect(await buildReport(key, "organizer", host, before)).toBe(await buildReport(key, "organizer", host, after))
+    }
   })
 
   it("keeps the exact time for the platform's admin", async () => {

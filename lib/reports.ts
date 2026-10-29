@@ -287,6 +287,19 @@ export async function buildReport(
   const scope = scopes.all
   const labelScope = (eventOrgId: string | null) => labelScopeFor({ ...scopes.actor, role }, eventOrgId)
   const inWindow = { gte: range.from, lt: range.to }
+  /*
+   * Which check-ins a per-person export holds. A host's are chosen by whole
+   * events that have ended and started in the window, never by check-in time
+   * (SCRUM-887, security review): with the window on `created_at`, a host
+   * moving its end a minute at a time and diffing two exports read the one
+   * arrival that dropped out, to the minute, past every coarsening below. An
+   * event still running is left out for the same reason, since its rows grow
+   * with each arrival. The platform's admin keeps the window on the check-in.
+   */
+  const checkInsIn = (events: Prisma.eventsWhereInput): Prisma.event_check_insWhereInput =>
+    role === "app_admin"
+      ? { event: events, created_at: inWindow }
+      : { event: { AND: [events, { start_time: inWindow, end_time: { lte: new Date() } }] } }
 
   switch (key) {
     case "events": {
@@ -356,8 +369,7 @@ export async function buildReport(
       const checkIns = await db.event_check_ins.findMany({
         where: {
           status: { in: ["checked_in", "checked_out"] },
-          event: scope,
-          created_at: inWindow,
+          ...checkInsIn(scope),
         },
         select: { user_id: true, event_id: true, created_at: true, event: { select: { organizer_org_id: true } } },
         /*
@@ -409,7 +421,7 @@ export async function buildReport(
        * only (SCRUM-501). For everyone else `hosted` is their whole scope.
        */
       const rows = await db.event_check_ins.findMany({
-        where: { event: scopes.hosted, created_at: inWindow },
+        where: checkInsIn(scopes.hosted),
         orderBy: { created_at: "desc" },
         take: REPORT_ROW_LIMIT,
         select: {
