@@ -2409,6 +2409,18 @@
       "mutation": "M1770 the grace window dropped. M1771 User.image not counted as a reference. M1772 blur_photo not counted. M1773 a dry run deletes. M1774 no cap per pass. M1775 the sanity guard dropped. M1776 a URL matched only by one spelling (extractKeyFromUrl dropped). M1777 the key-shape check dropped. M1778 a failed delete aborts the pass. M1779 the cursor never kept. M1781 held (pulled or unjudged) photos not protected. M1782 an old bucket's path-style reference not read. M1783 a bare-key reference not read. M1784 the grace shortened to an hour.",
       "observed": "M1770: 1 of 10 failing. M1771: 1. M1772: 1. M1773: 1. M1774: 1. M1775: 1. M1776: 1. M1777: 1. M1778: 1. M1779: 1. M1781: 1. M1782: 1. M1783: 1. M1784: 1 (after pinning the minimum grace). Each reverted; 13 of 13.",
       "date": "2026-10-28"
+    },
+    "integration/host-sees-pseudonyms-only.itest.ts": {
+      "guards": "SCRUM-887 (owner ruling 2026-10-28): a host -- the organiser, a staff colleague in their organisation, the venue owner -- reads no attendee's real id, name, email, photo or phone in the Room chat feed, the moderation queue, the Attendees tab, the feedback digest, the live snapshot or any export they may run; a host checked in to their own room is never in it for identity (roomIdentity and the unscoped reveal branch), while an ordinary attendee beside them still sees a reveal; the Check-ins export gives a host arrivals to the quarter hour in label order and none for an event under MIN_CELL, Attendees' Last attended is a date; a host's per-person exports choose rows by whole ended events, so two windows a minute apart give the same file and a running night is left out; the admin keeps exact times and real identity.",
+      "mutation": "M2239 roomIdentity's host exclusion dropped. M2240 the unscoped reveal branch's NOT hostSideOf dropped. M2241 the Check-ins export unshaped for hosts. M2242 the MIN_CELL hold-back on arrival times dropped. M2243 Last attended an exact timestamp again. M2244 the chat feed's identity spread given to every viewer. M2246 a host's export windowed on check-in time again (security review). M2247 a running night left in a host's export.",
+      "observed": "M2239: 3 of 19 failing. M2240: 3. M2241: 1. M2242: 1. M2243: 1. M2244: 3. M2246: 1 (the two windows differ). M2247: 1. Each reverted; 19 of 19.",
+      "date": "2026-10-28"
+    },
+    "integration/regulars.itest.ts": {
+      "guards": "SCRUM-887: a regular who said yes to being known is on the venue's list as a regular with their nights, never by first name; only the platform's admin reads the name.",
+      "mutation": "M2245 venueOffersView hands the first name to every viewer again.",
+      "observed": "M2245: 3 of 39 failing. Reverted; 39 of 39.",
+      "date": "2026-10-28"
     }
   },
   "grandfathered": [
