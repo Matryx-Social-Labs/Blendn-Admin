@@ -7,6 +7,7 @@ import { Locked, Panel, PillTabs } from "@/components/dashboard/kit"
 import { EmptyState, HeroMetric } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import { analyticsAccessLine } from "@/lib/access-line-copy"
+import { dayInIndia } from "@/lib/dashboard-format"
 import { getAuth } from "@/lib/auth"
 import { billingOrgFor } from "@/lib/billing"
 import { BILLING_PLANS, grossRupees, rupees } from "@/lib/billing-plans"
@@ -32,8 +33,7 @@ export const dynamic = "force-dynamic"
  * organisation's numbers under a blur (MN-I12; the owner's ruling).
  */
 
-const DAY = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })
-const day = (iso: string) => DAY.format(new Date(iso))
+const day = (iso: string) => dayInIndia(iso)
 const RANGE_LABEL = { "30d": "30 days", "90d": "90 days", all: "All time" } as const
 
 export default async function AnalyticsPage({
