@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
 
     // Bounded so the payload can't grow without limit as events accumulate.
     // Response stays a plain array — callers can raise the window with ?limit.
-    // `?limit=-5` is Prisma's `take: -5`, which reverses the window; 0 or junk is "no usable limit", not "everything".
+    // `?limit=-5` is Prisma's `take: -5`, which reverses the window. Held to [1, MAX]; no limit, or one that is not a number, is MAX.
     const limit = boundedInt(req.nextUrl.searchParams.get("limit"), PAGINATION.MAX_LIMIT, 1, PAGINATION.MAX_LIMIT)
 
     const events = await db.events.findMany({
