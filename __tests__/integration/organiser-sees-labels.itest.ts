@@ -105,6 +105,8 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
   let rahul: string
   let priyaEmail: string
   let rahulEmail: string
+  let fillersA: string[]
+  let fillersB: string[]
   let firstA: Awaited<ReturnType<typeof pastEvent>>
 
   /** Everything that could name either attendee, as it would appear in JSON. */
@@ -117,7 +119,9 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
     admin = await makeUser("admin", "app_admin")
     priya = await makeUser("priya")
     rahul = await makeUser("rahul")
-    users.push(hostA, colleagueA, hostB, admin, priya, rahul)
+    fillersA = await Promise.all([1, 2, 3, 4].map((n) => makeUser(`fillerA${n}`)))
+    fillersB = await Promise.all([1, 2, 3, 4].map((n) => makeUser(`fillerB${n}`)))
+    users.push(hostA, colleagueA, hostB, admin, priya, rahul, ...fillersA, ...fillersB)
     priyaEmail = `${priya}@itest.invalid`
     rahulEmail = `${rahul}@itest.invalid`
     await db.user.update({ where: { id: priya }, data: { name: "Priya Realname", image: "https://img.invalid/priya.jpg" } })
@@ -145,20 +149,30 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
     await rsvped(secondA.id, priya)
     await rsvped(firstA.id, rahul)
     await came(onlyB, priya)
+    /*
+     * Four more at each night: a night fewer than five came to lists nobody on
+     * the roster (SCRUM-889), so the fixture needs nights that are big enough
+     * to list. The same four come to org A's two nights, and four others to B's.
+     */
+    for (const [i, night] of [firstA, secondA, onlyB].entries()) {
+      for (const filler of i < 2 ? fillersA : fillersB) await came(night, filler)
+    }
   })
 
   it("gives the organiser labels and counts, and nothing that names anybody", async () => {
     const roster = await attendeeRoster("organizer", hostA)
 
-    expect(roster.rows).toHaveLength(2)
+    // Priya, Rahul, and the four who filled the nights.
+    expect(roster.rows).toHaveLength(6)
     for (const row of roster.rows) {
       expect(row.id).toMatch(/^attendee-[0-9a-f]{12}$/)
       expect(Object.keys(row).sort()).toEqual(["attended", "id", "lastAttendedAt", "noShows", "repeat", "rsvps"])
     }
-    const [regular, noShow] = roster.rows
+    const regular = roster.rows.find((r) => r.rsvps === 1 && r.attended === 2)
+    const noShow = roster.rows.find((r) => r.noShows === 1)
     expect(regular).toMatchObject({ attended: 2, rsvps: 1, noShows: 0, repeat: true })
     expect(noShow).toMatchObject({ attended: 0, rsvps: 1, noShows: 1, repeat: false, lastAttendedAt: null })
-    expect(roster).toMatchObject({ uniqueAttendees: 1, repeatCount: 1 })
+    expect(roster).toMatchObject({ uniqueAttendees: 5, repeatCount: 5 })
 
     const wire = JSON.stringify(roster)
     for (const secret of [...identityOf(), "img.invalid", "+919800000001"]) {
@@ -175,11 +189,16 @@ describe("an organiser sees labels and counts; an admin sees the person", () => 
   })
 
   it("gives the same person a different label at another organisation", async () => {
-    const atA = (await attendeeRoster("organizer", hostA)).rows.find((r) => r.attended === 2)!.id
+    const atARows = (await attendeeRoster("organizer", hostA)).rows
+    const atA = atARows.find((r) => r.rsvps === 1 && r.attended === 2)!.id
     const atB = await attendeeRoster("organizer", hostB)
-    expect(atB.rows).toHaveLength(1)
-    expect(atB.rows[0]).toMatchObject({ attended: 1 })
-    expect(atB.rows[0].id).not.toBe(atA)
+    // Priya and B's four.
+    expect(atB.rows).toHaveLength(5)
+    for (const row of atB.rows) expect(row).toMatchObject({ attended: 1 })
+    // The same person (Priya) is a different label here than at A, and none of A's labels is B's.
+    const aLabels = new Set(atARows.map((r) => r.id))
+    for (const row of atB.rows) expect(aLabels.has(row.id)).toBe(false)
+    expect(atB.rows.map((r) => r.id)).not.toContain(atA)
   })
 
   it("still gives a platform admin the person, on the admin's own screen", async () => {

@@ -406,7 +406,7 @@ export async function buildReport(
           status: { in: ["checked_in", "checked_out"] },
           ...(settled ? checkedInBy(settled) : { event: scope, created_at: inWindow }),
         },
-        select: { user_id: true, event_id: true, event: { select: { organizer_org_id: true, start_time: true } } },
+        select: { user_id: true, event_id: true, kind: true, event: { select: { organizer_org_id: true, start_time: true } } },
         /*
          * Bounded, and ordered so the bound is meaningful.
          *
@@ -422,7 +422,15 @@ export async function buildReport(
       // A host's cut falls between events, never inside one: a partial night is arrivals again.
       const over = fetched.length > REPORT_ROW_LIMIT
       const cut = host && over && fetched[REPORT_ROW_LIMIT - 1].event_id === fetched[REPORT_ROW_LIMIT].event_id ? fetched[REPORT_ROW_LIMIT].event_id : null
-      const checkIns = fetched.slice(0, REPORT_ROW_LIMIT).filter((c) => c.event_id !== cut)
+      const kept = fetched.slice(0, REPORT_ROW_LIMIT).filter((c) => c.event_id !== cut)
+      /*
+       * A host's export lists no night fewer than `MIN_CELL` came to (SCRUM-889): at one, the
+       * single label is the single room pseudonym — that person's history across the org's nights.
+       */
+      // Counted over the rows the export could show (settled, up to each settle), attendees only: not late arrivals.
+      const shown = new Map<string, Set<string>>()
+      for (const c of kept) if (c.kind === "attendee") shown.set(c.event_id, (shown.get(c.event_id) ?? new Set<string>()).add(c.user_id))
+      const checkIns = host ? kept.filter((c) => (shown.get(c.event_id)?.size ?? 0) >= MIN_CELL) : kept
       // By label, not by user: one person at two organisations is two rows.
       // Pseudonymous by design: attendees are pseudonymous to hosts everywhere
       // in this product, and an export is not a way around that.
