@@ -50,7 +50,6 @@ let ana = ""
 let ben = ""
 let eventA = ""
 let eventB = ""
-let eventC = ""
 
 const ANA = { name: "", email: "", image: "https://cdn.itest.invalid/zq-ana-face.jpg", phone: "+919800012345" }
 const identityOf = () => [ana, ANA.name, ANA.email, ANA.image, ANA.phone]
@@ -79,7 +78,8 @@ async function checkIn(eventId: string, userId: string, at: Date, status: "check
 /** Ana and four others in the room; the host and their colleague and the venue owner checked in as staff. */
 async function room(eventId: string, hostOrg: string, venueId: string, others: string[], status: "checked_in" | "checked_out") {
   // Over five minutes ago: a host's per-person exports hold only nights that have ended.
-  const start = Math.floor((Date.now() - 120 * MINUTE) / MINUTE) * MINUTE
+  // On the hour, so A's five arrivals (28 minutes) share one hour's cell.
+  const start = Math.floor((Date.now() - 120 * MINUTE) / (60 * MINUTE)) * 60 * MINUTE
   const times = { start_time: new Date(start), end_time: new Date(Date.now() - 5 * MINUTE) }
   await db.events.update({ where: { id: eventId }, data: { organizer_org_id: hostOrg, venue_id: venueId, ...times } })
   await db.event_occurrences.updateMany({ where: { event_id: eventId }, data: times })
@@ -137,13 +137,6 @@ beforeAll(async () => {
   await room(eventA, hostOrg, venue.id, [ben, ...extras], "checked_in")
   // A night Ana came to nearly alone: who came, and when, is held back.
   await room(eventB, hostOrg, venue.id, [], "checked_out")
-  // A night still running: its rows grow with each arrival, so a host's export leaves it out.
-  eventC = await makeEvent(host)
-  events.push(eventC)
-  await db.events.update({ where: { id: eventC }, data: { organizer_org_id: hostOrg } })
-  const late = await makeUser("hspo-late")
-  users.push(late)
-  await checkIn(eventC, late, new Date(Date.now() - 10 * MINUTE), "checked_in")
 })
 
 afterAll(async () => {
@@ -204,22 +197,18 @@ describe.each(HOSTS)("%s sees pseudonyms only", (_who, role, id) => {
   })
 })
 
-describe("the export's arrival times cannot be lined up against the room (L3, L4)", () => {
+describe("a host's exports cannot be lined up against the room (L3, L4)", () => {
   const rows = (csv: string) => csv.split("\r\n").slice(1).filter(Boolean).map((l) => l.split(","))
+  const from = () => new Date(Date.now() - 86_400_000)
 
-  it("gives a host arrivals to the quarter hour, in label order, and none for a night of fewer than five", async () => {
+  it("gives a host arrivals per hour as counts, never a row per person, and under five as <5", async () => {
     const csv = await buildReport("check-ins", "organizer", host, RANGE())
-    const [header] = csv.split("\r\n")
-    expect(header).toBe("Checked in at,Status,Attendee,Event ID,Event,Event start")
-    const attendeesOf = (eventId: string) => rows(csv).filter((r) => r[3] === eventId && r[2].startsWith("attendee-"))
-    const a = attendeesOf(eventA)
-    expect(a.length).toBeGreaterThanOrEqual(5)
-    for (const r of a) expect(r[0]).toMatch(/T\d\d:(00|15|30|45):00\.000Z$/)
-    const labels = a.map((r) => r[2])
-    expect(labels).toEqual([...labels].sort())
-    const b = attendeesOf(eventB)
-    expect(b.length).toBeGreaterThan(0)
-    for (const r of b) expect(r[0]).toBe("")
+    expect(csv.split("\r\n")[0]).toBe("Event ID,Event,Event start,Hour (UTC),Arrivals")
+    expect(csv).not.toContain("attendee-")
+    // Five arrived at A inside one hour; the staff who checked in are not guests.
+    expect(rows(csv).filter((r) => r[0] === eventA).map((r) => r.slice(3))).toEqual([[expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:00Z$/), "5"]])
+    // One arrived at B: a cell under the floor.
+    expect(rows(csv).filter((r) => r[0] === eventB).map((r) => r[4])).toEqual(["<5"])
   })
 
   it("gives a host the day of a person's last night, not its minute", async () => {
@@ -229,31 +218,37 @@ describe("the export's arrival times cannot be lined up against the room (L3, L4
   })
 
   /*
-   * The security review's attack: move the window's end across one arrival and
-   * diff the two exports. Chosen by check-in time, the row that dropped out was
-   * that arrival, to the minute. Chosen by whole ended events, nothing moves.
+   * The security review's attacks: move the window's end across one arrival,
+   * or the event's own end time (the host's to edit), and diff the exports.
+   * Chosen by check-in time, the row that moved was that arrival. Chosen by
+   * whole events and counted, nothing moves.
    */
-  it("gives a host the same export whichever minute the window ends on", async () => {
+  it("gives a host the same exports whichever minute the window ends on", async () => {
     const last = await db.event_check_ins.findFirstOrThrow({
       where: { event_id: eventA, kind: "attendee" },
       orderBy: { created_at: "desc" },
       select: { created_at: true },
     })
-    const from = new Date(Date.now() - 86_400_000)
-    const before = { key: "custom" as const, from, to: new Date(last.created_at.getTime() - MINUTE) }
-    const after = { key: "custom" as const, from, to: new Date(last.created_at.getTime() + MINUTE) }
+    const before = { key: "custom" as const, from: from(), to: new Date(last.created_at.getTime() - MINUTE) }
+    const after = { key: "custom" as const, from: from(), to: new Date(last.created_at.getTime() + MINUTE) }
     for (const key of ["check-ins", "attendees"] as const) {
       expect(await buildReport(key, "organizer", host, before)).toBe(await buildReport(key, "organizer", host, after))
     }
   })
 
-  it("leaves a night that is still running out of a host's export, and not out of the admin's", async () => {
-    expect(await buildReport("check-ins", "organizer", host, RANGE())).not.toContain(eventC)
-    expect(await buildReport("check-ins", "app_admin", admin, RANGE())).toContain(eventC)
+  it("gives a host the same exports when they move the event's end and back", async () => {
+    const was = await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { end_time: true } })
+    const read = () => Promise.all((["check-ins", "attendees"] as const).map((key) => buildReport(key, "organizer", host, RANGE())))
+    const ended = await read()
+    await db.events.update({ where: { id: eventA }, data: { end_time: new Date(Date.now() + 60 * MINUTE) } })
+    const running = await read()
+    await db.events.update({ where: { id: eventA }, data: { end_time: was.end_time } })
+    expect(running).toEqual(ended)
   })
 
-  it("keeps the exact time for the platform's admin", async () => {
+  it("keeps a row per check-in, to the second, for the platform's admin", async () => {
     const csv = await buildReport("check-ins", "app_admin", admin, RANGE())
+    expect(csv.split("\r\n")[0]).toBe("Checked in at,Status,Attendee,Event ID,Event,Event start")
     expect(rows(csv).some((r) => r[3] === eventA && /:13\.000Z$/.test(r[0]))).toBe(true)
   })
 })

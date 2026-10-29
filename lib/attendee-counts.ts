@@ -267,3 +267,24 @@ export async function attendedEventIds(
     LIMIT ${opts.limit} OFFSET ${opts.skip}
   `
 }
+
+/**
+ * Distinct guests arriving per event per UTC hour: the Check-ins export as a
+ * host has it (SCRUM-887). Counts, never who; the caller floors each cell.
+ */
+export async function arrivalsByHour(
+  eventIds: readonly string[]
+): Promise<Array<{ event_id: string; hour: string; arrivals: number }>> {
+  if (eventIds.length === 0) return []
+  return db.$queryRaw<Array<{ event_id: string; hour: string; arrivals: number }>>`
+    SELECT event_id::text AS event_id,
+           to_char(date_trunc('hour', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24":00Z"') AS hour,
+           COUNT(DISTINCT user_id)::int AS arrivals
+    FROM event_check_ins
+    WHERE event_id IN (${Prisma.join(eventIds)})
+      AND status::text IN (${Prisma.join(ATTENDED)})
+      AND kind = 'attendee'
+    GROUP BY 1, 2
+    ORDER BY 2
+  `
+}
