@@ -410,7 +410,7 @@ an opaque, url-safe string. Field names and shapes did not change.
 - **A raw id of a friend is named** (SCRUM-863): with a friendship row, no block
   either way and no open pseudonymous conversation between you, `GET /users/:userId`
   and `GET /profiles/:userId` answer as for somebody you may see
-  (`identityVisible: true`) — the same fields `GET /friends/:userId` sends, so a
+  (`identityVisible: true`) — the same fields `GET /friends/:userId` sends (which carries `sharedInterests` too, SCRUM-896), so a
   friend opened from a DM header is the page Me → Friends opens. Room handles
   are unchanged: a friend stays a pseudonym there unless they turned
   `friends_see_me_in_rooms` on.

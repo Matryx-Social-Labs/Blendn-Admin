@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "friends.itest.ts": {
+      "guards": "GET /friends/:userId carries sharedInterests (the names of the friend's interests the viewer holds too), the same as GET /users/:userId, so a friend's page outlines them (SCRUM-896).",
+      "mutation": "M2267 the sharedInterests field removed from the friend route.",
+      "observed": "M2267: 1 of 29 failing (sharedInterests undefined); the other 28 stayed green. Restored; 29 of 29 green.",
+      "date": "2026-10-29"
+    },
     "message-request-decline-is-silent.itest.ts": {
       "guards": "POST /message-requests/:id/respond: a decline (and a block) never calls sendPushNotification and writes no message_request_response bell row; an accept still pushes the sender, naming the accepter (SCRUM-621). The bell row alone is not the guard: a decline's payload carried conversationId: undefined, which Prisma refuses, so the row failed to land by accident while the push still went out.",
       "mutation": "M2263 the decline branch sends its push again (action === 'accept' || action === 'decline').",

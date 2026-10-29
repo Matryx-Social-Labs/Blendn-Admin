@@ -106,6 +106,7 @@ registry.registerPath({
               age: z.number().int().nullable(),
               location: z.string().nullable(),
               interests: z.array(z.object({ id: z.string(), name: z.string(), slug: z.string(), icon: z.string().nullable() })),
+              sharedInterests: z.array(z.string()).describe("The names, out of `interests`, that you hold too (SCRUM-896), exactly as `GET /users/{userId}` sends them, so one person is outlined the same from both doors. Additive."),
               work_field: z.string().nullable().describe("The about line, as `GET /users/{userId}` sends it to somebody who may see who this is. Additive."),
               expertise: z.array(z.string()).describe("Labels. Additive."),
               languages: z.array(z.string()).describe("Labels. Additive."),

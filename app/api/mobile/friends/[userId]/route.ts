@@ -12,6 +12,7 @@ import { userIdFromRefIfIdentified } from "@/lib/identity"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
 import { expertiseLabels } from "@/lib/expertise"
 import { profileBadges } from "@/lib/profile-badges"
+import { sharedInterestNames } from "@/lib/shared-interests"
 import {
   successResponse,
   unauthorizedResponse,
@@ -104,6 +105,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       age: ageFrom(p),
       location: await normalizeLocationToCity(p?.location),
       interests: user.user_interests.map((ui) => ui.category),
+      // The ones you hold too, as `GET /users/:id` sends them: one person, one page from both doors (SCRUM-896).
+      sharedInterests: await sharedInterestNames(me, user.user_interests),
       /*
        * The about line, as `GET /users/:id` sends it to somebody who may see
        * who this is (a friend always may): the field of work and expertise

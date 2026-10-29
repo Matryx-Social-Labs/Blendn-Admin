@@ -9,7 +9,7 @@ import { matchesForEvent } from "@/lib/matches"
 import { conversationPair } from "@/lib/conversations"
 import { resolveUserRef } from "@/lib/room-handle"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
 
 /**
  * Friends, driven through the real handlers against a real database.
@@ -329,6 +329,32 @@ describe("a friend's profile", () => {
     const nobody = await friendProfile(cam, "no-such-user")
     expect(nobody.status).toBe(404)
     expect(await friendProfile(cam, ana.id)).toEqual(nobody)
+  })
+
+  it("names the interests you hold too in sharedInterests, as GET /users/:id does (SCRUM-896)", async () => {
+    const [ana, ben] = [await person("fr-si-a", "Ana"), await person("fr-si-b", "Ben")]
+    await befriend(ana, ben)
+    const [art, coffee, music] = await Promise.all(
+      ["Exhibitions", "Coffee", "Music"].map((n) => db.categories.create({ data: { name: `${n} ${testId("si")}`, slug: testId("fr-si-cat") }, select: { id: true, name: true } }))
+    )
+    await db.user_interests.createMany({
+      data: [
+        { user_id: ana.id, category_id: art.id },
+        { user_id: ben.id, category_id: art.id },
+        { user_id: ben.id, category_id: coffee.id },
+        { user_id: ana.id, category_id: music.id },
+      ],
+    })
+
+    const shown = (await friendProfile(ana, ben.id)).body.data
+    expect(shown.interests.map((i: { name: string }) => i.name).sort()).toEqual([art.name, coffee.name].sort())
+    expect(shown.sharedInterests).toEqual([art.name])
+
+    // Ben looking at Ana: the one they share, and not Music (Ben does not hold it).
+    expect((await friendProfile(ben, ana.id)).body.data.sharedInterests).toEqual([art.name])
+
+    await db.user_interests.deleteMany({ where: { user_id: { in: [ana.id, ben.id] } } })
+    await db.categories.deleteMany({ where: { id: { in: [art.id, coffee.id, music.id] } } })
   })
 
   it("carries the about line and badges, as GET /users/:id sends them to somebody who may see who this is", async () => {
