@@ -2463,6 +2463,12 @@
       "mutation": "M651 grantPlus and endPlusGrant put back on the bare requireAdmin() (the code as it was on dev a8e4af7f). M900 pricePlacement without its `charges:price` counter (the code as it was on dev 365a6057).",
       "observed": "M651: 1 of 5 failing, unlimitedWriters = [grantPlus, endPlusGrant]; the other 4 stayed green. Restored; 5/5. M900: 1 of 7 failing, uncounted = [pricePlacement]; sponsor-payment-links.itest.ts 1 of 56 failing (the 31st raise is not refused). Restored; 7/7 and 56/56.",
       "date": "2026-10-29"
+    },
+    "route-input-gaps.itest.ts": {
+      "guards": "SCRUM-653: a presence ping whose JSON body is null answers 400 (not a 500 from destructuring); GET /api/events takes ?limit through boundedInt, so -5 and 0 give the smallest page, never a reversed window or everything.",
+      "mutation": "M653 both routes put back as on dev 21c2652b (body destructured without ?? {}; limit = Math.min(parseInt(...) || MAX, MAX)).",
+      "observed": "M653: 2 of 5 failing (presence null: TypeError; limit=-5: 5 rows for a take of -5); the other 3 stayed green. Restored; 5/5.",
+      "date": "2026-10-29"
     }
   },
   "grandfathered": [

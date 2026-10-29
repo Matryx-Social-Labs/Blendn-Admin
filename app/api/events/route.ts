@@ -12,6 +12,7 @@ import { owningOrgFor } from "@/lib/event-ownership"
 import { canCreateEvents } from "@/lib/rbac"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { PAGINATION } from "@/lib/constants"
+import { boundedInt } from "@/lib/pagination"
 import { leavesDraft, statusMoveRefusal } from "@/lib/event-status-move"
 import { reviewOrgRefusal } from "@/lib/review-demo-org"
 import { resolveVenueLink, venueFenceToCopy } from "@/lib/venue-link"
@@ -44,11 +45,8 @@ export async function GET(req: NextRequest) {
 
     // Bounded so the payload can't grow without limit as events accumulate.
     // Response stays a plain array — callers can raise the window with ?limit.
-    const limit = Math.min(
-      parseInt(req.nextUrl.searchParams.get("limit") || String(PAGINATION.MAX_LIMIT), 10) ||
-        PAGINATION.MAX_LIMIT,
-      PAGINATION.MAX_LIMIT
-    )
+    // `?limit=-5` is Prisma's `take: -5`, which reverses the window. Held to [1, MAX]; no limit, or one that is not a number, is MAX.
+    const limit = boundedInt(req.nextUrl.searchParams.get("limit"), PAGINATION.MAX_LIMIT, 1, PAGINATION.MAX_LIMIT)
 
     const events = await db.events.findMany({
       where,
