@@ -95,16 +95,20 @@ describe("B3 — the socket roster is for people in the room", () => {
   })
 })
 
-describe("G6 — declining does not name the decliner", () => {
-  it("sends no name on the decline branch", () => {
+describe("G6 — declining says nothing to the sender", () => {
+  it("pushes on accept only, and names the accepter there", () => {
     /*
-     * Both branches carried the responder's real name, so refusing to cross
-     * into real names was the act that published them — to the one person they
-     * had just refused, on a lock screen, and permanently into `notifications`.
+     * Declining used to push "Message request declined" (first nameless, after
+     * the decliner's real name had leaked from here). The product has no
+     * declined state and a no is silent (SCRUM-621, ruling N1): nothing is sent
+     * on a decline. Behaviour is pinned in
+     * integration/message-request-decline-is-silent.itest.ts; this is the
+     * source-shape half.
      */
     const src = code("app/api/mobile/message-requests/[requestId]/respond/route.ts")
-    expect(src).toMatch(/"Your message request was declined"/)
+    expect(src).not.toMatch(/Message request declined|Your message request was declined/)
     expect(src).not.toMatch(/\$\{responderName\} declined/)
+    expect(src).toMatch(/if \(action === "accept"\) \{\s*const responderName/)
     // Accept still names them: it completes the documented crossing, and a live
     // conversation exists by then anyway. docs/API.md:126.
     expect(src).toMatch(/\$\{responderName\} accepted/)
