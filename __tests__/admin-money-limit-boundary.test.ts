@@ -17,11 +17,11 @@ import { stripComments } from "./support/strip-comments"
 
 const WRITER = /^(grant|end|revoke)[A-Z]/
 
-/** Exported async functions with their bodies, comments stripped. */
+/** Exported async functions (declarations and `const x = async`) with their bodies, comments stripped. */
 export function exportedFunctions(source: string): Array<{ name: string; body: string }> {
   const code = stripComments(source)
-  const heads = [...code.matchAll(/export async function (\w+)\(/g)]
-  return heads.map((m, i) => ({ name: m[1], body: code.slice(m.index, heads[i + 1]?.index ?? code.length) }))
+  const heads = [...code.matchAll(/export (?:async function (\w+)\(|const (\w+) = async\b)/g)]
+  return heads.map((m, i) => ({ name: m[1] ?? m[2], body: code.slice(m.index, heads[i + 1]?.index ?? code.length) }))
 }
 
 /** Names of writers whose body does not call the limited guard, or calls the bare one. */
@@ -50,6 +50,9 @@ describe("admin money actions are rate limited per admin (SCRUM-651)", () => {
     })
     it("flags a writer that calls no guard", () => {
       expect(unlimitedWriters("export async function endY() {\n  await db.x()\n}")).toEqual(["endY"])
+    })
+    it("sees a writer declared as an exported async arrow", () => {
+      expect(unlimitedWriters("export const grantQ = async () => {\n  await requireAdmin()\n}")).toEqual(["grantQ"])
     })
     it("passes a limited writer and ignores a reader", () => {
       const ok = "export async function grantZ() {\n  await requireAdminWithinLimit()\n}\nexport async function personPlus() {\n  await requireAdmin()\n}"
