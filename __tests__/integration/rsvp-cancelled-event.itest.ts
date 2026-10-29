@@ -5,6 +5,7 @@ process.env.MOBILE_JWT_SECRET = process.env.MOBILE_JWT_SECRET ?? "itest-mobile-s
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("@/lib/push-notifications", () => ({ sendPushNotification: jest.fn(async () => true) }))
 
+import { sendPushNotification } from "@/lib/push-notifications"
 import { signAccessToken } from "@/lib/mobile-auth"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, onboard } from "./helpers"
@@ -92,5 +93,34 @@ describe("POST /events/:id/rsvp on a cancelled event", () => {
     expect(res.status).toBe(200)
     expect((await res.json()).data.rsvpStatus).toBe("going")
     expect(await rowsFor(eventId, guest)).toBe(1)
+  })
+
+  it("does not promote the waitlist, or push \"a place opened up\", when somebody leaves a night that was called off", async () => {
+    const { eventId, guest, token } = await setup("published")
+    const waiting = await makeUser("rc-wait")
+    users.push(waiting)
+    await db.events.update({ where: { id: eventId }, data: { max_capacity: 1 } })
+    await db.event_rsvps.createMany({
+      data: [
+        { event_id: eventId, user_id: guest, status: "going" },
+        { event_id: eventId, user_id: waiting, status: "waitlisted" },
+      ],
+    })
+    await db.events.update({ where: { id: eventId }, data: { status: "cancelled" } })
+    ;(sendPushNotification as jest.Mock).mockClear()
+
+    expect((await post(eventId, token, { status: "not_going" })).status).toBe(200)
+
+    expect((await db.event_rsvps.findFirstOrThrow({ where: { event_id: eventId, user_id: waiting } })).status).toBe("waitlisted")
+    expect(sendPushNotification).not.toHaveBeenCalled()
+  })
+
+  it("a waitlisted person who asks for going on a cancelled event is refused and keeps their row as it was", async () => {
+    const { eventId, guest, token } = await setup("published")
+    await db.event_rsvps.create({ data: { event_id: eventId, user_id: guest, status: "waitlisted" } })
+    await db.events.update({ where: { id: eventId }, data: { status: "cancelled" } })
+
+    expect((await post(eventId, token, { status: "going" })).status).toBe(409)
+    expect((await db.event_rsvps.findFirstOrThrow({ where: { event_id: eventId, user_id: guest } })).status).toBe("waitlisted")
   })
 })
