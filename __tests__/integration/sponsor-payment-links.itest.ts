@@ -695,6 +695,12 @@ describe("a void or a hand settlement closes the link first (review H1)", () => 
     expect((await chargeRow(chargeId)).status).toBe("agreed")
   })
 
+  it("raising a charge is thirty a minute per admin too, refusals included (SCRUM-900)", async () => {
+    as(admin, "app_admin")
+    for (let i = 0; i < 30; i++) await expect(pricePlacement(randomUUID(), { amount: 100 })).rejects.toThrow("Placement not found")
+    await expect(pricePlacement(randomUUID(), { amount: 100 })).rejects.toThrow("Too many changes in a minute")
+  })
+
   it("Razorpay refuses the cancel: nothing changes, the link stays open, logged", async () => {
     const { chargeId, linkId } = await sentLink()
     as(admin, "app_admin")
