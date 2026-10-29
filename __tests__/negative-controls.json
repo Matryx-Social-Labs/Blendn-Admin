@@ -2466,8 +2466,8 @@
     },
     "small-night-held-back.itest.ts": {
       "guards": "SCRUM-889: a night to which fewer than five came (MIN_CELL) is not on the organisation roster (neither its arrivals nor, so as not to turn them into no-shows, its RSVPs) and not in a host's Attendees export; a night of five still is.",
-      "mutation": "M889a lib/reports.ts attendees without the per-night floor. M889b lib/attendee-roster.ts attendeeRoster without it (dev 21c2652b).",
-      "observed": "M889a: 1 of 2 failing (the solo label in the CSV). M889b: 1 of 2 failing (the solo label on the roster). Restored; 2/2. Four older itests' fixtures needed nights of five (event-attendee-roster, organiser-sees-labels).",
+      "mutation": "M889a lib/reports.ts attendees without the per-night floor. M889b lib/attendee-roster.ts attendeeRoster without it (dev 21c2652b). M889c the floor counted over every attended check-in (distinctAttendeeCounts) instead of the people the list shows (up to the settle).",
+      "observed": "M889a: 1 of 2 failing (the solo label in the CSV). M889b: 1 of 2 failing (the solo label on the roster). M889c: 2 of 2 failing (one on time plus four after the settle listed the one label, on the roster and in the CSV). Restored; 2/2. Four older itests' fixtures needed nights of five (event-attendee-roster, organiser-sees-labels).",
       "date": "2026-10-29"
     }
   },

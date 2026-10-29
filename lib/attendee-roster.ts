@@ -116,9 +116,15 @@ export async function attendeeRoster(role: user_role, userId: string, now = new 
    * back, and holding back only the arrivals would turn each of them into a
    * no-show. A night nobody came to names nobody either way.
    */
-  const attended = await distinctAttendeeCounts([...new Set(checkIns.map((r) => r.event_id))])
+  // Counted over the rows this list could show (up to each night's settle), not every late arrival too:
+  // one on time and four late is one label on the list, and that is the case this floor is for.
+  const shown = new Map<string, Set<string>>()
+  for (const row of checkIns) {
+    if (!arrivedBy(settled, row)) continue
+    shown.set(row.event_id, (shown.get(row.event_id) ?? new Set<string>()).add(row.user_id))
+  }
   const held = (eventId: string) => {
-    const n = attended.get(eventId) ?? 0
+    const n = shown.get(eventId)?.size ?? 0
     return n > 0 && n < MIN_CELL
   }
   const came = checkIns.filter((row) => arrivedBy(settled, row) && !held(row.event_id)).map((row) => ({ ...row, label: label(row) }))
