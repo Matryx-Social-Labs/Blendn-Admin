@@ -1131,6 +1131,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 | categorySlug | string | - | Same, by slug |
 | startDate | ISO date | - | Events starting after |
 | endDate | ISO date | - | Events ending before |
+| startBefore | ISO datetime | - | Events starting at or before this (SCRUM-877). With `startDate` it bounds by **start** on both sides: "the next 7 days" is `startDate=<now>&startBefore=<now + 7 days>`, which `endDate` cannot say (it would list a long event that started weeks ago and runs on). Additive; the not-yet-ended rule still applies unless `includePast`; a value that is not an ISO datetime is a 400 |
 | featured | bool | false | `true`: only the featured events (published, public, within your age, not ended, in `city`), in the day's rotation, **at most 5** however large `limit` is; `sortBy` is ignored, and the response is always page 1 (`page=2` returns the same five, not a second five). Build the Featured section with this, not by filtering a page |
 | status | string | published | Event status filter |
 | sortBy | enum | start_time | `start_time`, `created_at`, `distance` |

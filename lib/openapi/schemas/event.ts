@@ -42,6 +42,14 @@ export const EventQuerySchema = z
     categorySlug: z.string().optional(),
     startDate: z.string().datetime().optional(),
     endDate: z.string().datetime().optional(),
+    startBefore: z
+      .string()
+      .datetime()
+      .optional()
+      .openapi({
+        description:
+          "Only events that START at or before this instant (ISO datetime). Additive. With `startDate` (starts at or after) a caller bounds by start on both sides, e.g. 'the next 7 days' = `startDate=now&startBefore=now+7d`; `endDate` bounds by end, so it cannot do that. The not-yet-ended rule still applies unless `includePast`.",
+      }),
     includePast: z
       .boolean()
       .default(false)

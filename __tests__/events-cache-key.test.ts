@@ -55,6 +55,11 @@ describe("buildEventsCacheKey — inputs that change the result set", () => {
     )
   })
 
+  it("separates one start bound from another, and from none (SCRUM-877)", () => {
+    expect(keyWith({ startBefore: "2026-11-05T00:00:00.000Z" })).not.toBe(keyWith({}))
+    expect(keyWith({ startBefore: "2026-11-05T00:00:00.000Z" })).not.toBe(keyWith({ startBefore: "2026-11-06T00:00:00.000Z" }))
+  })
+
   it("separates pages, and sort direction", () => {
     expect(keyWith({ page: 2 })).not.toBe(keyWith({ page: 1 }))
     expect(keyWith({ sortOrder: "desc" })).not.toBe(keyWith({ sortOrder: "asc" }))
