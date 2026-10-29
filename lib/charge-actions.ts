@@ -8,6 +8,7 @@ import { z } from "zod"
 import { paymentsOn } from "@/lib/billing"
 import { webhookVoider } from "@/lib/charge-void-source"
 import { requireAdmin } from "@/lib/current-user"
+import { requireAdminWithinLimit } from "@/lib/admin-money-limit"
 import { db } from "@/lib/db"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
 import { reachBand, type SponsorReachBand } from "@/lib/billing-plans"
@@ -296,7 +297,7 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
 
 /** Raise a draft charge against a placement. */
 export async function pricePlacement(placementId: string, input: unknown): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   if (!z.uuid().safeParse(placementId).success) throw new Refusal("Placement not found")
 
   const parsed = priceSchema.safeParse(input)
@@ -365,7 +366,7 @@ export async function advanceCharge(
   externalRef?: string,
   reason?: string
 ): Promise<void> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   if (!z.uuid().safeParse(chargeId).success) throw new Refusal("Charge not found")
   // After authorisation, before any Razorpay call (a void or settle cancels a link); refusals count too.
   const { count: moves } = await hit(`charges:advance:${admin.id}`, CHARGE_MOVES.windowMs)
@@ -576,7 +577,7 @@ async function closeAtRazorpay(chargeId: string, linkId: string): Promise<string
  * Razorpay made it, it is cancelled (review H4).
  */
 export async function sendPaymentLink(chargeId: string): Promise<{ linkId: string; payUrl: string | null; reused: boolean }> {
-  const admin = await requireAdmin()
+  const admin = await requireAdminWithinLimit()
   if (!z.uuid().safeParse(chargeId).success) throw new Refusal("Charge not found")
   // After authorisation, before any Razorpay call; refusals count too.
   const { count: sends } = await hit(`charges:link:${admin.id}`, LINK_SENDS.windowMs)

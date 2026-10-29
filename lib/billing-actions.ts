@@ -8,6 +8,7 @@ import { z } from "zod"
 import { analyticsAccess, mayOpenEvent } from "@/lib/analytics-access"
 import { billingOrgFor, ONE_OPEN_PER_ORG, ONE_OPEN_PER_VENUE, OPEN_SUBSCRIPTION_STATUSES } from "@/lib/billing"
 import { BILLING_PLANS, chargeMinor, type BillingPlanKey } from "@/lib/billing-plans"
+import { requireAdminWithinLimit } from "@/lib/admin-money-limit"
 import { currentUser, requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { endGrants, grantEntitlement, hasEntitlement, liveEntitlement, liveGrant, livePlus, revokePaid } from "@/lib/entitlements"
@@ -498,19 +499,6 @@ async function cancelOpen(
 /* -------------------------------------------------------------------------- */
 /* Platform admin: founding grants and revocations                             */
 /* -------------------------------------------------------------------------- */
-
-/** An admin's money actions: grants, ends and revokes, per admin. */
-const ADMIN_ACTIONS = { max: 30, windowMs: 60_000 }
-
-/** `requireAdmin`, then the admin's own limit on money changes. */
-async function requireAdminWithinLimit() {
-  const user = await requireAdmin()
-  // Counted before the action runs, refusals included: a script holding an
-  // admin session cannot loop grants.
-  const { count } = await hit(`billing:admin:${user.id}`, ADMIN_ACTIONS.windowMs)
-  if (count > ADMIN_ACTIONS.max) throw new Refusal("Too many changes in a minute. Wait a moment and try again.")
-  return user
-}
 
 const RESOURCE = { org: "organisation", venue: "venue", user: "user" } as const
 

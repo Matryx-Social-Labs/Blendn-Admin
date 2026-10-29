@@ -2459,9 +2459,9 @@
       "date": "2026-10-28"
     },
     "admin-money-limit-boundary.test.ts": {
-      "guards": "SCRUM-651: every exported grant*/end*/revoke* in lib/billing-actions.ts calls requireAdminWithinLimit and never the bare requireAdmin, so every admin money change has the per-admin ceiling. Fixtures hold a bare-guard writer, an unguarded writer, and a limited writer plus a reader (not flagged).",
-      "mutation": "M651 grantPlus and endPlusGrant put back on the bare requireAdmin() (the code as it was on dev a8e4af7f).",
-      "observed": "M651: 1 of 5 failing, unlimitedWriters = [grantPlus, endPlusGrant]; the other 4 stayed green. Restored; 5/5.",
+      "guards": "SCRUM-651/900: every exported grant*/end*/revoke* in lib/billing-actions.ts, and every exported action but a get* read in lib/charge-actions.ts, calls requireAdminWithinLimit (lib/admin-money-limit.ts) and never the bare requireAdmin, so every admin money change has the per-admin ceiling. Fixtures hold a bare-guard writer, an unguarded writer, and a limited writer plus a reader (not flagged).",
+      "mutation": "M651 grantPlus and endPlusGrant put back on the bare requireAdmin() (the code as it was on dev a8e4af7f). M900 pricePlacement, advanceCharge and sendPaymentLink in lib/charge-actions.ts on the bare requireAdmin() (dev 365a6057).",
+      "observed": "M651: 1 of 5 failing, unlimitedWriters = [grantPlus, endPlusGrant]; the other 4 stayed green. M900: 1 of 7 failing, unlimitedWriters = [pricePlacement, advanceCharge, sendPaymentLink]. Restored; 7/7.",
       "date": "2026-10-29"
     }
   },

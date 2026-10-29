@@ -7,15 +7,18 @@ import { stripComments } from "./support/strip-comments"
  * SCRUM-651: every admin grant, end and revoke in `lib/billing-actions.ts`
  * passes through `requireAdminWithinLimit`, the per-admin ceiling on money
  * changes. `grantPlus` and `endPlusGrant` used the bare `requireAdmin` and were
- * the only entitlement writers with no ceiling.
+ * the only entitlement writers with no ceiling. SCRUM-900: the same for the
+ * sponsor charge ledger, `lib/charge-actions.ts`, where every exported action
+ * but a `get…` read writes or reaches Razorpay.
  *
- * "Writer" is by name: an exported async function starting `grant`, `end` or
- * `revoke`. A new one that calls the bare guard fails here until it is fixed.
+ * "Writer" is by name: in billing-actions an exported async function starting
+ * `grant`, `end` or `revoke`; in charge-actions anything not starting `get`. A new one that calls the bare guard fails here until it is fixed.
  * The fixtures at the bottom hold the shapes this must catch and the one it
  * must not.
  */
 
 const WRITER = /^(grant|end|revoke)[A-Z]/
+const CHARGE_WRITER = /^(?!get[A-Z])/
 
 /** Exported async functions (declarations and `const x = async`) with their bodies, comments stripped. */
 export function exportedFunctions(source: string): Array<{ name: string; body: string }> {
@@ -25,9 +28,9 @@ export function exportedFunctions(source: string): Array<{ name: string; body: s
 }
 
 /** Names of writers whose body does not call the limited guard, or calls the bare one. */
-export function unlimitedWriters(source: string): string[] {
+export function unlimitedWriters(source: string, isWriter: RegExp = WRITER): string[] {
   return exportedFunctions(source)
-    .filter((f) => WRITER.test(f.name))
+    .filter((f) => isWriter.test(f.name))
     .filter((f) => !/\brequireAdminWithinLimit\(\)/.test(f.body) || /\brequireAdmin\(\)/.test(f.body))
     .map((f) => f.name)
 }
@@ -42,6 +45,13 @@ describe("admin money actions are rate limited per admin (SCRUM-651)", () => {
 
   it("no grant, end or revoke uses the bare requireAdmin", () => {
     expect(unlimitedWriters(source)).toEqual([])
+  })
+
+  it("no charge-ledger action but a read uses the bare requireAdmin (SCRUM-900)", () => {
+    const charges = readFileSync(join(__dirname, "..", "lib/charge-actions.ts"), "utf8")
+    const names = exportedFunctions(charges).map((f) => f.name)
+    expect(names).toEqual(expect.arrayContaining(["getChargeLedger", "pricePlacement", "advanceCharge", "sendPaymentLink"]))
+    expect(unlimitedWriters(charges, CHARGE_WRITER)).toEqual([])
   })
 
   describe("fixtures", () => {
