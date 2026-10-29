@@ -164,54 +164,43 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       await evictBlockedFromBlends(authUser.userId, messageRequest.sender_id)
     }
 
-    // Notify the original sender of the response (async, don't await)
-    if (action === "accept" || action === "decline") {
-      /*
-       * The decliner is never named.
-       *
-       * Both branches used to carry the responder's real name, so **declining a
-       * message request disclosed the identity of the person who declined it**
-       * -- to the one person they had just refused, on their lock screen, and
-       * then permanently into `notifications`. Refusing to cross into real
-       * names was the act that published them.
-       *
-       * `docs/API.md:126` makes the accept branch correct: the message request
-       * is the documented crossing from pseudonym to real name, and accepting
-       * completes it -- at which point a live conversation exists and
-       * `maySeeIdentity` returns true anyway. Declining completes nothing, so
-       * there is nothing to disclose.
-       *
-       * This is the same reasoning that produced the deliberately nameless match
-       * notifications three rows down in that table; it was never carried across
-       * to this file.
-       */
+    /*
+     * Only an accept tells the sender anything (SCRUM-621).
+     *
+     * A decline is not delivered: the product has no declined state, and the
+     * owner ruled on 2026-10-09 (N1) that a no is silent -- no push, no bell
+     * row, nothing the sender reads changes. This used to push "Message request
+     * declined" to their devices; its bell row only failed to land by accident
+     * (`conversationId: undefined` is not storable JSON), so the push was the
+     * whole leak. The sender's own list still reads the request as it always
+     * has, and `block` was never announced.
+     *
+     * The accepter is named: the message request is the documented crossing from
+     * pseudonym to real name (`docs/API.md:126`), and a live conversation exists
+     * from here, at which point `maySeeIdentity` returns true anyway. (Declining
+     * used to carry no name for the same reason it now carries no message.)
+     */
+    if (action === "accept") {
       const responderName =
-        action === "accept"
-          ? (await db.user.findUnique({
-              where: { id: authUser.userId },
-              select: { name: true },
-            }))?.name || "Someone"
-          : null
+        (await db.user.findUnique({ where: { id: authUser.userId }, select: { name: true } }))?.name || "Someone"
 
+      // Async, don't await: push is best-effort and must not fail the request.
       sendPushNotification({
         userId: messageRequest.sender_id,
-        title: action === "accept" ? "Message request accepted 🎉" : "Message request declined",
-        body: action === "accept"
-          ? `${responderName} accepted your message request`
-          : "Your message request was declined",
+        title: "Message request accepted 🎉",
+        body: `${responderName} accepted your message request`,
         data: {
           type: "message_request_response",
           requestId,
           conversationId: conversationId ?? undefined,
         },
       }).catch((err: unknown) =>
-      // Push is best-effort and must not fail the request, but swallowing the
-      // error entirely means a broken push pipeline is invisible.
-      logger.warn("Push notification failed", {
-        context: "message request response",
-        error: err instanceof Error ? err.message : String(err),
-      })
-    )
+        // Swallowing the error entirely would make a broken push pipeline invisible.
+        logger.warn("Push notification failed", {
+          context: "message request response",
+          error: err instanceof Error ? err.message : String(err),
+        })
+      )
     }
 
     return successResponse({

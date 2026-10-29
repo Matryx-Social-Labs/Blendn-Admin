@@ -557,7 +557,8 @@ registry.registerPath({
   description:
     PARTICIPATION_GATE +
     "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter); 404 for a draft " +
-    "or a private event you are not on the list for (lib/event-access.ts).",
+    "or a private event you are not on the list for (lib/event-access.ts); 409 `CONFLICT` + `reasonCode` `EVENT_CANCELLED` for a new `going` or " +
+    "`maybe` on a cancelled event (`not_going` and DELETE stay open, so somebody who was in can get out).",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

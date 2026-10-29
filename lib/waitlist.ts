@@ -105,9 +105,11 @@ export async function placeRsvp(
 export async function promoteFromWaitlist(eventId: string): Promise<string[]> {
   const event = await db.events.findUnique({
     where: { id: eventId },
-    select: { max_capacity: true, title: true },
+    select: { max_capacity: true, title: true, status: true },
   })
   if (!event?.max_capacity) return []
+  // A night that was called off has no seat to give: promoting would push "a place opened up" for it (SCRUM-892).
+  if (event.status === "cancelled") return []
 
   const goingCount = await db.event_rsvps.count({
     where: { event_id: eventId, status: "going" },

@@ -380,7 +380,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       text,
     })
     if (screen.verdict === "refuse") {
-      return spamBlockedResponse(screen.reason, screen.retryAfter)
+      return spamBlockedResponse(screen.reason, screen.retryAfter, screen.reasonCode)
     }
     const hidden = screen.verdict === "hide"
 

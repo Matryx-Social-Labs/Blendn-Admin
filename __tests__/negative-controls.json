@@ -35,6 +35,36 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "message-request-decline-is-silent.itest.ts": {
+      "guards": "POST /message-requests/:id/respond: a decline (and a block) never calls sendPushNotification and writes no message_request_response bell row; an accept still pushes the sender, naming the accepter (SCRUM-621). The bell row alone is not the guard: a decline's payload carried conversationId: undefined, which Prisma refuses, so the row failed to land by accident while the push still went out.",
+      "mutation": "M2263 the decline branch sends its push again (action === 'accept' || action === 'decline').",
+      "observed": "M2263 (the state before the fix): 1 of 3 failing, the decline case (sendPushNotification called with 'Message request declined'); block and accept controls stayed green. Restored; 3 of 3 green.",
+      "date": "2026-10-29"
+    },
+    "product-events-flush-timer.test.ts": {
+      "guards": "A signal recorded inside the flush window of the last flush is written when the window ends, without a third record(): one unref'd timer per non-empty buffer, one statement for the burst, cleared by a flush or a reset, re-armed for a signal that arrived while a flush was writing (SCRUM-756).",
+      "mutation": "M2264 armFlushTimer() removed from record() (the state before the fix: a buffered signal waits for the next call).",
+      "observed": "M2264: 3 of 4 failing (the second signal was never written, no timer existed); the shutdown-drain case stayed green. Restored; 4 of 4 green.",
+      "date": "2026-10-29"
+    },
+    "events-list-start-before.itest.ts": {
+      "guards": "GET /events?startBefore= lists what starts at or before the bound, not what starts after it; with startDate it is a start window on both sides; it is in the cache key (another bound is another entry); absent changes nothing; a non-datetime is a 400 (SCRUM-877).",
+      "mutation": "M2265 the startBefore clause removed from the route's where. M2266 startBefore removed from buildEventsCacheKey.",
+      "observed": "M2265 (the state before the fix): 4 of 6 failing (after-the-bound event listed, window returned everything, bad value answered 200); M2266: 1 of 11 failing in events-cache-key.test.ts and 2 of 6 here ('additive' and 'not served from another bound's cache entry', both reading another bound's cached list). Restored; 6 of 6 and 11 of 11 green.",
+      "date": "2026-10-29"
+    },
+    "rsvp-cancelled-event.itest.ts": {
+      "guards": "POST /events/:id/rsvp refuses a new going or maybe (or an empty body, which means going) on a cancelled event with 409 CONFLICT + reasonCode EVENT_CANCELLED and a sentence, and writes no row; not_going and DELETE stay open to somebody who got in before the cancellation; a published event still takes going; leaving a cancelled event promotes nobody off the waitlist and pushes nothing (SCRUM-892).",
+      "mutation": "M2260 the cancelled-event refusal removed from the RSVP route (the state before the fix). M2261 promoteFromWaitlist without its cancelled-event return.",
+      "observed": "M2260: 3 of 5 failing (going, maybe and the empty body each answered 200 and wrote a row); the two controls (leaving, a published event) stayed green. M2261: 1 of 7 failing (the waitlisted person was promoted). Restored; 7 of 7 green.",
+      "date": "2026-10-29"
+    },
+    "spam-blocked-retry-after.itest.ts": {
+      "guards": "A spam refusal (429 SPAM_BLOCKED) on a room, the event chat and a DM says a sentence for a person and a reasonCode (SPAM_BURST, SPAM_LINKS), never the detector's developer text; retryAfter is still on a burst only (SCRUM-624). Pinned in spam-detector.test.ts and spam-blocked-retry-after.itest.ts.",
+      "mutation": "M2262 the detector's results lose message and reasonCode, so the routes fall back to the developer reason / no code.",
+      "observed": "M2262: 2 of 12 failing in spam-detector.test.ts and 4 of 4 in spam-blocked-retry-after.itest.ts (burst answered 'Burst rate exceeded (6 messages in 10s)' with no reasonCode; links 'Too many links (4)'). Restored; 12 of 12 and 4 of 4 green.",
+      "date": "2026-10-29"
+    },
     "submit-as-status.test.ts": {
       "guards": "A refused save puts the event's status back in the form (submitAsStatus), so a refused Publish leaves a draft a draft and Save as draft then works; and the editor reports false on a 401, a refusal and an error.",
       "mutation": "M2232 submitAsStatus stopped restoring after a refused save. M2233 the editor's !response.ok branch returned true; M2233b its catch returned nothing.",

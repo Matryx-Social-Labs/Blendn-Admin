@@ -118,6 +118,7 @@ export async function GET(request: NextRequest) {
       categorySlug,
       startDate,
       endDate,
+      startBefore,
       includePast,
       featured,
       status,
@@ -281,8 +282,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Date filters
-    if (startDate) {
-      where.start_time = { gte: new Date(startDate) }
+    if (startDate || startBefore) {
+      // One object, so the two bounds are a window (`startDate` alone used to be the whole of it).
+      where.start_time = {
+        ...(startDate && { gte: new Date(startDate) }),
+        ...(startBefore && { lte: new Date(startBefore) }),
+      }
     }
     if (endDate) {
       // Merge rather than assign: overwriting would silently drop the
@@ -313,6 +318,7 @@ export async function GET(request: NextRequest) {
       categorySlug,
       startDate,
       endDate,
+      startBefore,
       // Part of the key, not decoration: two requests differing only by this
       // return different event sets, so omitting it would let a history
       // response be served straight back to a discovery request.

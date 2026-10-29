@@ -131,6 +131,12 @@ export const ErrorCode = {
   CANNOT_ADD_SELF: "CANNOT_ADD_SELF",
   /** A page cursor that is not a card from this list (another room's, forged, or an id): start from the top. */
   INVALID_CURSOR: "INVALID_CURSOR",
+  /** A new RSVP to an event that was called off. `reasonCode` beside `CONFLICT`; leaving (`not_going`, DELETE) is never refused. */
+  EVENT_CANCELLED: "EVENT_CANCELLED",
+  /** `reasonCode` beside `SPAM_BLOCKED`: a burst of messages (carries `retryAfter`). */
+  SPAM_BURST: "SPAM_BURST",
+  /** `reasonCode` beside `SPAM_BLOCKED`: more links in one message than the limit. */
+  SPAM_LINKS: "SPAM_LINKS",
   /** 503: a big room's message could not be checked (OpenAI is down). Carries `retryAfter`; nothing was written. */
   MODERATION_UNAVAILABLE: "MODERATION_UNAVAILABLE",
 } as const
@@ -198,14 +204,16 @@ export function errorResponse(
  * is knowable: `retryAfter` seconds in the body and in `Retry-After`, as a
  * `RATE_LIMITED` 429 carries it (SV13). A burst knows when its window ends; a
  * message refused for its links does not, and waiting would not help, so it has
- * no `retryAfter`. The sentence is the detector's own.
+ * no `retryAfter`. The sentence is for a person (`ModerationResult.message`),
+ * never the detector's developer `reason`; `reasonCode` says which rule it was.
  */
-export function spamBlockedResponse(message: string, retryAfter?: number): NextResponse<ApiResponse> {
+export function spamBlockedResponse(message: string, retryAfter?: number, reasonCode?: string): NextResponse<ApiResponse> {
   return NextResponse.json(
     {
       success: false,
       error: message,
       errorCode: ErrorCode.SPAM_BLOCKED,
+      ...(reasonCode && { reasonCode }),
       ...(retryAfter !== undefined && { retryAfter }),
     },
     { status: 429, ...(retryAfter !== undefined && { headers: { "Retry-After": String(retryAfter) } }) }

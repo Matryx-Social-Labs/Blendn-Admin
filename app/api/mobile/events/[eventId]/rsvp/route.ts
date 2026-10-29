@@ -6,12 +6,16 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import {
+  ErrorCode,
   successResponse,
   errorResponse,
   unauthorizedResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+
+/** What the person is told when they try to join a night that was called off. */
+const EVENT_CANCELLED_SENTENCE = "This event has been cancelled, so it isn’t taking RSVPs any more."
 
 export async function POST(
   request: NextRequest,
@@ -39,6 +43,16 @@ export async function POST(
 
     if (!["going", "maybe", "not_going"].includes(status)) {
       return errorResponse("Invalid RSVP status", 400)
+    }
+
+    // A night that was called off takes no new "going" or "maybe". Saying not_going stays open (and so does
+    // DELETE below): somebody who got in before the cancellation must be able to get out. A deleted or draft
+    // event never reaches here: `attendeeEventAccess` answered 404.
+    if (status !== "not_going") {
+      const event = await db.events.findUnique({ where: { id: eventId }, select: { status: true } })
+      if (event?.status === "cancelled") {
+        return errorResponse(EVENT_CANCELLED_SENTENCE, 409, undefined, ErrorCode.EVENT_CANCELLED)
+      }
     }
 
     // Capacity was not enforced here at all: anyone could say "going" to a
