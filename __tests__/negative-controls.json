@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "rsvp-cancelled-event.itest.ts": {
+      "guards": "POST /events/:id/rsvp refuses a new going or maybe (or an empty body, which means going) on a cancelled event with 409 CONFLICT + reasonCode EVENT_CANCELLED and a sentence, and writes no row; not_going and DELETE stay open to somebody who got in before the cancellation; a published event still takes going (SCRUM-892).",
+      "mutation": "M2260 the cancelled-event refusal removed from the RSVP route (the state before the fix).",
+      "observed": "M2260: 3 of 5 failing (going, maybe and the empty body each answered 200 and wrote a row); the two controls (leaving, a published event) stayed green. Restored; 5 of 5 green.",
+      "date": "2026-10-29"
+    },
     "submit-as-status.test.ts": {
       "guards": "A refused save puts the event's status back in the form (submitAsStatus), so a refused Publish leaves a draft a draft and Save as draft then works; and the editor reports false on a 401, a refusal and an error.",
       "mutation": "M2232 submitAsStatus stopped restoring after a refused save. M2233 the editor's !response.ok branch returned true; M2233b its catch returned nothing.",

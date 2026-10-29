@@ -131,6 +131,8 @@ export const ErrorCode = {
   CANNOT_ADD_SELF: "CANNOT_ADD_SELF",
   /** A page cursor that is not a card from this list (another room's, forged, or an id): start from the top. */
   INVALID_CURSOR: "INVALID_CURSOR",
+  /** A new RSVP to an event that was called off. `reasonCode` beside `CONFLICT`; leaving (`not_going`, DELETE) is never refused. */
+  EVENT_CANCELLED: "EVENT_CANCELLED",
   /** 503: a big room's message could not be checked (OpenAI is down). Carries `retryAfter`; nothing was written. */
   MODERATION_UNAVAILABLE: "MODERATION_UNAVAILABLE",
 } as const

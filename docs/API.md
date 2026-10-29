@@ -17,7 +17,7 @@ All endpoints require `Authorization: Bearer <access_token>` unless noted.
 { "success": false, "error": "Validation failed", "errorCode": "VALIDATION_FAILED", "errors": [{ "field": "email", "message": "Required" }] }
 ```
 
-Error codes: `MODERATION_UNAVAILABLE` (503, a busy event room while moderation is down; see *Moderation (pre-emit)*), `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*. The body can also carry **`reasonCode`** (`ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`) beside an `errorCode` that keeps its old value
+Error codes: `MODERATION_UNAVAILABLE` (503, a busy event room while moderation is down; see *Moderation (pre-emit)*), `VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVER_ERROR`, `EVENT_FULL`, `EVENT_NOT_STARTED`, `EVENT_ENDED`, `OUT_OF_RANGE`, `ALREADY_CHECKED_IN`, `STORAGE_UNAVAILABLE`, `USER_MUTED`, `USER_BANNED`, `CHAT_LOCKED`, `NOT_CHECKED_IN`, `SPAM_BLOCKED`, `NOT_LIVE`, `EVENT_LIVE_HERE`, `PLUS_REQUIRED`, `NO_CHECK_IN_AREA`, `GPS_TOO_VAGUE` (those five: Go Live, below), `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, and from the middleware `UPDATE_REQUIRED` (426) and `MAINTENANCE` (503); see *Why an account was refused or a session ended*. The body can also carry **`reasonCode`** (`ACCOUNT_SUSPENDED`, `ACCOUNT_STAFF`, `ACCOUNT_DELETED`, `SESSION_REVOKED_ELSEWHERE`, `PASSWORD_RESET`, `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, `EVENT_CANCELLED`) beside an `errorCode` that keeps its old value
 
 A refusal that names no specific code carries the one its status stands for:
 401 `UNAUTHORIZED`, 403 `FORBIDDEN`, 404 `NOT_FOUND`, 409 `CONFLICT`,
@@ -630,6 +630,7 @@ it in the old kind and shape (`kind` and `data.type` `event_update`, the rest of
 | Event is age-restricted and the viewer's known age is below it | 403 | `AGE_RESTRICTED` | `AGE_RESTRICTED` |
 | Taking part (RSVP, save, board, check-in) in one with no age on file | 403 | `AGE_RESTRICTED` | `AGE_UNKNOWN` |
 | Taking part with an unfinished profile | 403 | `FORBIDDEN` | `PROFILE_INCOMPLETE` |
+| A new `going` or `maybe` RSVP on a cancelled event (`POST /events/:id/rsvp`; SCRUM-892) | 409 | `CONFLICT` | `EVENT_CANCELLED` |
 | The event was live and its organisation was suspended, and you are going (or maybe, or waitlisted) or are of the organisation | 404 | `NOT_FOUND` | `ORGANISER_SUSPENDED` |
 | The same event, and you are a stranger or said `not_going` (public or private alike) | 404 | `NOT_FOUND` | none |
 | The same event, on the door (`POST /events/:id/checkin`) and you have a stake in it | 400 | none | `ORGANISER_SUSPENDED` |
@@ -963,6 +964,13 @@ or moving to `maybe`/`not_going` — promotes whoever has waited longest, and th
 get a push.
 
 An event with no stated capacity is unbounded, exactly as before.
+
+**A cancelled event takes no new RSVP** (SCRUM-892). `going` and `maybe` (and an
+empty body, which means `going`) answer **409** `errorCode: CONFLICT` with
+`reasonCode: EVENT_CANCELLED` and a sentence in `error`; nothing is written.
+`not_going` and `DELETE /events/:eventId/rsvp` are never refused, so somebody who
+said yes before the night was called off can still get out. A draft or deleted
+event is the 404 it always was.
 
 **The waitlist is not a door policy.** Check-in still refuses nobody: someone who
 turns up and is inside the geofence gets in and is counted whether they were
