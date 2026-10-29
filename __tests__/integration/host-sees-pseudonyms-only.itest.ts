@@ -316,6 +316,24 @@ describe("a host's exports cannot be lined up against the room (L3, L4)", () => 
     }
   })
 
+  it("never re-settles: a late arrival older than the grace stays out of a host's lists", async () => {
+    const was = (await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { host_settled_at: true } })).host_settled_at
+    // Settled four hours ago; somebody checked in an hour after that.
+    const settledAt = new Date(Date.now() - 4 * 60 * MINUTE)
+    await db.events.update({ where: { id: eventA }, data: { host_settled_at: settledAt } })
+    const late = await makeUser("hspo-late-b")
+    users.push(late)
+    await checkIn(eventA, late, new Date(settledAt.getTime() + 60 * MINUTE), "checked_out")
+    try {
+      const lateLabel = attendeeLabel(late, (await actorFor({ id: host, role: "organizer" })).orgIds[0])
+      expect(await buildReport("attendees", "organizer", host, RANGE())).not.toContain(lateLabel)
+      expect((await db.events.findUniqueOrThrow({ where: { id: eventA }, select: { host_settled_at: true } })).host_settled_at).toEqual(settledAt)
+    } finally {
+      await db.event_check_ins.deleteMany({ where: { user_id: late } })
+      await db.events.update({ where: { id: eventA }, data: { host_settled_at: was } })
+    }
+  })
+
   it("gives a host no per-person list for a night that has not settled, and says when it will", async () => {
     const out = await eventAttendees(await actorFor({ id: host, role: "organizer" }), eventC)
     expect(out).toMatchObject({ view: "labels", rows: [], pending: true })
