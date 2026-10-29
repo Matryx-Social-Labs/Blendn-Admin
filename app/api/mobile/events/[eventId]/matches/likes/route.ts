@@ -23,7 +23,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { announceRoomMatch } from "@/lib/room-match"
 import { roomMemberFromRef } from "@/lib/room-handle"
-import { knownToEachOther } from "@/lib/room-people"
+import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
 import { readJson, isUuid } from "@/lib/api-input"
 
 interface RouteParams {
@@ -114,6 +114,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           // Staff are working. They are not in the match list, so they cannot be
           // liked through it either.
           kind: "attendee",
+          // Not listed on the roster ("Show online status" off) is not likeable (SCRUM-669).
+          user: LISTED_IN_ROSTER,
         },
         select: { id: true },
       }),

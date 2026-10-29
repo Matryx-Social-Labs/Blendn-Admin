@@ -11,7 +11,7 @@ import { leaveRoomSockets } from "../room-close"
 import { eventRoomBan, ownerAdmits, ownerRoomClosesAt } from "../room-kind"
 import { CREWS_OFF, isRefusal, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
 import { blocksExclude } from "./blocks"
-import { strangersApartBetween } from "../room-people"
+import { LISTED_IN_ROSTER, strangersApartBetween } from "../room-people"
 import {
   crewEvent,
   crewMayMeetSolo,
@@ -189,7 +189,7 @@ export async function likePersonAsCrew(
   if (personId === likerId || mine.members.includes(personId)) return NO_PERSON
 
   const [theirCheckIn, them] = await Promise.all([
-    db.event_check_ins.findFirst({ where: { user_id: personId, kind: "attendee", ...hereNowAt(here.occurrenceId) }, select: { id: true } }),
+    db.event_check_ins.findFirst({ where: { user_id: personId, kind: "attendee", ...hereNowAt(here.occurrenceId), user: LISTED_IN_ROSTER }, select: { id: true } }),
     intentsAt(eventId, personId),
   ])
   if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return { ...NOTHING_TOLD }

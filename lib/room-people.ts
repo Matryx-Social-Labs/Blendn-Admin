@@ -23,6 +23,14 @@ import { db } from "./db"
  * surface does not reference it (`people-surfaces-exclude-friends.test.ts`).
  */
 
+/**
+ * The roster's visibility rule as a `user` filter: "Show online status" off is
+ * counted, listed nowhere, and so not likeable either (SCRUM-669). `is: null`
+ * because a missing profile row must not read as "off". The wave route and the
+ * room preview spell the same clause inline.
+ */
+export const LISTED_IN_ROSTER = { OR: [{ profile: { is: null } }, { profile: { show_online: true } }] } satisfies Prisma.UserWhereInput
+
 type FriendReader = Pick<Prisma.TransactionClient, "friendships" | "ended_friendships">
 
 /** How long an ended friendship keeps the pair apart: the longest a room stays open (D17). */
