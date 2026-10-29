@@ -75,7 +75,7 @@ const priceSchema = z.object({
   note: z.string().trim().max(500).optional(),
 })
 
-/** Moves of a charge per admin a minute: a void or a settle may call Razorpay. */
+/** Moves of a charge per admin a minute: a void or a settle may call Razorpay; raising one is counted the same. */
 const CHARGE_MOVES = { max: 30, windowMs: 60_000 }
 
 /** A UTR is 22 characters, a cheque number fewer; this is room to spare, not a free-text field. */
@@ -298,6 +298,9 @@ export async function getChargeLedger(): Promise<ChargeLedger> {
 export async function pricePlacement(placementId: string, input: unknown): Promise<void> {
   const admin = await requireAdmin()
   if (!z.uuid().safeParse(placementId).success) throw new Refusal("Placement not found")
+  // After authorisation; refusals count too — a script holding an admin session cannot loop charges (SCRUM-900).
+  const { count: raised } = await hit(`charges:price:${admin.id}`, CHARGE_MOVES.windowMs)
+  if (raised > CHARGE_MOVES.max) throw new Refusal("Too many changes in a minute. Wait a moment and try again.")
 
   const parsed = priceSchema.safeParse(input)
   if (!parsed.success) throw new Refusal(parsed.error.issues[0]?.message ?? "Invalid amount")

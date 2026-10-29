@@ -32,6 +32,8 @@ import { roomHandle, userIdFromRef } from "@/lib/room-handle"
 import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const checkin = require("@/app/api/mobile/events/[eventId]/checkin/route") as typeof import("@/app/api/mobile/events/[eventId]/checkin/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const checkout = require("@/app/api/mobile/events/[eventId]/checkout/route") as typeof import("@/app/api/mobile/events/[eventId]/checkout/route")
 
 const LAT = 12.9716
 const LNG = 77.5946
@@ -56,15 +58,17 @@ type Seen = {
   typing: { userId: string; isTyping: boolean }[]
   arrivals: { userId: string }[]
   counts: { userId: string; hereCount?: number }[]
+  outs: { userId?: string; hereCount?: number }[]
 }
 async function listen(userId: string): Promise<Seen> {
   const { port } = httpServer.address() as AddressInfo
   const socket = connect(`http://localhost:${port}`, { auth: { userId }, transports: ["websocket"] })
   clients.push(socket)
-  const seen: Seen = { typing: [], arrivals: [], counts: [] }
+  const seen: Seen = { typing: [], arrivals: [], counts: [], outs: [] }
   socket.on("chat:typing", (p) => seen.typing.push(p))
   socket.on("event:room:checkin", (p) => seen.arrivals.push(p))
   socket.on("event:checkin", (p) => seen.counts.push(p))
+  socket.on("event:checkout", (p) => seen.outs.push(p))
   await new Promise<void>((resolve) => socket.on("connect", () => resolve()))
   return seen
 }
@@ -218,6 +222,10 @@ describe("with \"Show online status\" off (SCRUM-620)", () => {
     expect(inside).toContain(E.id)
     expect(a.arrivals).toEqual([])
     expect(a.counts).toEqual([expect.objectContaining({ hereCount: inside.size })])
+    // SCRUM-905: bare count — no handle, real id or pseudonym on the copy of the arrival the roster hides.
+    expect(Object.keys(a.counts[0]).sort()).toEqual(["checkInTime", "eventId", "hereCount"])
+    expect(JSON.stringify(a.counts)).not.toContain(E.id)
+    expect(JSON.stringify(a.counts)).not.toContain(roomHandle(eventId, E.id))
 
     // Positive control on the same socket: a listed arrival is still announced.
     const F = await person("lrb-f")
@@ -230,5 +238,17 @@ describe("with \"Show online status\" off (SCRUM-620)", () => {
     expect(anonymous_name).toBeTruthy()
     expect(who(a.arrivals)).toEqual([F.id])
     expect(JSON.stringify(a.arrivals)).not.toContain(anonymous_name!)
+
+    // The same on the way out: the hidden person's departure moves the count and names nobody.
+    a.outs.length = 0
+    const out = await checkout.POST(
+      new NextRequest(`http://localhost/api/mobile/events/${eventId}/checkout`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${E.token}` } }),
+      { params: Promise.resolve({ eventId }) }
+    )
+    expect(out.status).toBe(200)
+    await until(() => a.outs.length > 0)
+    expect(a.outs).toHaveLength(1)
+    expect(Object.keys(a.outs[0]).sort()).toEqual(["checkOutTime", "eventId", "hereCount"])
+    expect(JSON.stringify(a.outs)).not.toContain(roomHandle(eventId, E.id))
   })
 })

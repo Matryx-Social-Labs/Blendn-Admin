@@ -13,6 +13,11 @@ import { stripComments } from "./support/strip-comments"
  * `revoke`. A new one that calls the bare guard fails here until it is fixed.
  * The fixtures at the bottom hold the shapes this must catch and the one it
  * must not.
+ *
+ * SCRUM-900: the sponsor charge ledger (`lib/charge-actions.ts`) has its own
+ * per-admin counters (`hit(\`charges:…\`)`), because a void or a settle may call
+ * Razorpay. `advanceCharge` and `sendPaymentLink` had one; `pricePlacement` did
+ * not. Every exported action there but a `get…` read must count.
  */
 
 const WRITER = /^(grant|end|revoke)[A-Z]/
@@ -42,6 +47,14 @@ describe("admin money actions are rate limited per admin (SCRUM-651)", () => {
 
   it("no grant, end or revoke uses the bare requireAdmin", () => {
     expect(unlimitedWriters(source)).toEqual([])
+  })
+
+  it("every charge-ledger action but a read counts against a per-admin ceiling (SCRUM-900)", () => {
+    const charges = readFileSync(join(__dirname, "..", "lib/charge-actions.ts"), "utf8")
+    const actions = exportedFunctions(charges)
+    expect(actions.map((f) => f.name)).toEqual(expect.arrayContaining(["getChargeLedger", "pricePlacement", "advanceCharge", "sendPaymentLink"]))
+    const uncounted = actions.filter((f) => !/^get[A-Z]/.test(f.name) && !/\bhit\(`charges:/.test(f.body)).map((f) => f.name)
+    expect(uncounted).toEqual([])
   })
 
   describe("fixtures", () => {
