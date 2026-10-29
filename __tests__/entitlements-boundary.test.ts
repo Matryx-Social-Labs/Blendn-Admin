@@ -27,6 +27,7 @@ import { stripComments } from "./support/strip-comments"
 
 const ROOT = join(__dirname, "..")
 const QA_SCALE_SEED = "scripts/seed-qa-scale.ts"
+const PRO_PERSONAS_SEED = "scripts/seed-pro-personas.ts"
 const SEARCH = ["app", "components", "lib", "scripts"]
 
 function walk(dir: string): string[] {
@@ -106,8 +107,17 @@ describe("entitlements are read and written in one place", () => {
     expect(rels).toContain("lib/revenuecat-webhook.ts")
   })
 
-  it("only lib/entitlements.ts touches the table, and the QA scale seed for its throwaway comp", () => {
-    expect(files.filter((f) => touchesTable(f.code)).map((f) => f.rel)).toEqual(["lib/entitlements.ts", QA_SCALE_SEED])
+  it("only lib/entitlements.ts touches the table, and the two QA seeds for their comps and grants", () => {
+    expect(files.filter((f) => touchesTable(f.code)).map((f) => f.rel)).toEqual(["lib/entitlements.ts", PRO_PERSONAS_SEED, QA_SCALE_SEED])
+  })
+
+  it("the pro personas seed writes admin-shaped grants for its two products and nothing paid (SCRUM-561)", () => {
+    // Same reason as the scale seed: lib/entitlements.ts cannot load under tsx. Source grant, no reference, two products.
+    const code = files.find((f) => f.rel === PRO_PERSONAS_SEED)?.code ?? ""
+    expect(code).toMatch(/source:\s*"grant"/)
+    expect(code).toMatch(/external_ref:\s*null/)
+    expect(code).not.toMatch(/source:\s*["'](razorpay|apple|google)["']/)
+    expect([...code.matchAll(/"(analytics|venue_pro|plus|night_pass|event_pass)"/g)].map((m) => m[1]).filter((v, i, a) => a.indexOf(v) === i).sort()).toEqual(["analytics", "venue_pro"])
   })
 
   it("the QA scale seed writes a comp for a throwaway and nothing paid: source grant, its own reference, only qa.* addresses", () => {

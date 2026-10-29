@@ -106,7 +106,13 @@ to a file, a flow or a ticket.
 
 **Dashboard roles (shared, re-asserted on every deploy by `scripts/test-accounts.ts`):**
 `admin@` · `organizer@` (Nightshift Collective) · `venue.owner@` (Indiranagar
-Hospitality Group) · `sponsor@` (Blue Tokai). Read and operate freely. **Never
+Hospitality Group) · `sponsor@` (Blue Tokai). Read and operate freely.
+The paid-plan personas (SCRUM-561, `scripts/seed-pro-personas.ts`, re-asserted on
+every deploy): `organizer.pro@` (Pro Collective (QA): a live Analytics **grant**,
+three ended nights of twelve at its venue) and `venue.pro@` (Pro Hospitality (QA):
+a claimed venue with a live Venue Pro grant). A grant, never a payment; `organizer@`
+and `venue.owner@` are the free controls. If an admin ends a grant, the next
+deploy gives a fresh one. **Never
 change their password, role or org** — every session depends on them.
 
 **Attendee lanes.** Two sessions driving the same attendee overwrite each

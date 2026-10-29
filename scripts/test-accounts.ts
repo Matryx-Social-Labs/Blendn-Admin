@@ -49,7 +49,7 @@ import { realEventsWhere } from "../lib/event-kind"
  * every event, venue, claim and audit row pointing at it — stays where it was.
  */
 
-type AccountKey = "admin" | "organiser" | "venue" | "sponsor"
+type AccountKey = "admin" | "organiser" | "venue" | "sponsor" | "organiserPro" | "venuePro"
 type OrgKey = "events" | "venues" | "brands"
 
 export interface TestAccount {
@@ -302,7 +302,7 @@ async function renameFormer(db: PrismaClient, account: TestAccount) {
   console.log(`  renamed ${account.formerly} → ${account.email}`)
 }
 
-async function upsertAccount(db: PrismaClient, account: TestAccount, password: string) {
+export async function upsertAccount(db: PrismaClient, account: TestAccount, password: string) {
   const existing = await db.user.findUnique({
     where: { email: account.email },
     select: { id: true, password: true, emailVerified: true },
@@ -397,6 +397,21 @@ async function main() {
     await ensureTestAccounts(db, process.env.SEED_PASSWORD?.trim() ?? "")
     // The addresses, never the password: this prints into Railway's deploy log.
     for (const a of TEST_ACCOUNTS) console.log(`  ${a.role.padEnd(12)} ${a.email}`)
+    /*
+     * The paid-plan personas (SCRUM-561). After the role accounts, and loud but
+     * not fatal: a history seed that fails must not stop a deploy the way a
+     * password nobody can sign in with should.
+     */
+    try {
+      const { ensureProPersonas, PRO_ACCOUNTS } = await import("./seed-pro-personas")
+      const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out after 60 s")), 60_000).unref())
+      await Promise.race([ensureProPersonas(db, process.env.SEED_PASSWORD?.trim() ?? ""), timeout])
+      for (const a of PRO_ACCOUNTS) console.log(`  ${a.role.padEnd(12)} ${a.email}`)
+    } catch (error) {
+      // The name and code only: a Prisma message can echo the arguments, and a create carries a password hash.
+      const code = (error as { code?: string }).code
+      console.error(`PRO PERSONAS FAILED (deploy continues): ${error instanceof Error ? error.name : "error"}${code ? ` ${code}` : ""}`)
+    }
   } finally {
     await db.$disconnect()
   }
