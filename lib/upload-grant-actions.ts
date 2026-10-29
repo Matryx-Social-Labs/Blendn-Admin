@@ -96,11 +96,12 @@ export async function requestCreativeUpload(
   const actor = await actorFor(session.user)
   const grantHolder = await resolveSponsorGrant(actor, eventId)
   /*
-   * An admin has no grant by design. Everyone else must hold both halves — the
-   * `may_sponsor` flag and an approved placement at this event — on ONE
+   * An admin has no grant by design, and no organisation to fall back on
+   * (`actorFor` gives an admin none): refused here, not half-admitted
+   * (SCRUM-652). Everyone else must hold both halves — the `may_sponsor` flag and an approved placement at this event — on ONE
    * organisation, which is what `resolveSponsorGrant` proves in a single query.
    */
-  const orgId = grantHolder?.orgId ?? (actor.role === "app_admin" ? actor.orgIds[0] : undefined)
+  const orgId = grantHolder?.orgId
   if (!orgId) throw new Refusal("Forbidden")
 
   const ceiling = ceilingFor(contentType)
@@ -167,7 +168,7 @@ export async function attachCreativeMedia(
   const actor = await actorFor(session.user)
   // The campaign's own brand, not any brand placed at its event (SCRUM-319).
   const grantHolder = await resolveSponsorGrant(actor, campaign.event_id, campaign.sponsor_id)
-  const orgId = grantHolder?.orgId ?? (actor.role === "app_admin" ? actor.orgIds[0] : undefined)
+  const orgId = grantHolder?.orgId
   if (!orgId) throw new Refusal("Forbidden")
 
   const grant = await db.upload_grants.findUnique({

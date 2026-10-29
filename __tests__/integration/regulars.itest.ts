@@ -47,7 +47,7 @@ import { OFFER_PUSH_BODY, OFFER_PUSH_TITLE } from "@/lib/offers/deliver"
 import * as entitlementsModule from "@/lib/entitlements"
 import * as passCodeModule from "@/lib/offers/pass-code"
 import * as rateLimitStore from "@/lib/rate-limit-store"
-import { passCode, passStep } from "@/lib/offers/pass-code"
+import { BAD_CODE_SHAPE, passCode, passStep } from "@/lib/offers/pass-code"
 import { venueOffersView, weekStart } from "@/lib/offers/venue"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { venueDayBounds } from "@/lib/venue-day"
@@ -412,6 +412,8 @@ describe("the person’s side and the pass", () => {
 
     as(otherOwner)
     expect(await refusal(actions.redeemPass({ venueId: A, code }))).toBe("That code isn’t a live pass here. Ask them to open the pass again.")
+    // A code with a 0, 1, I or O cannot be a pass: the door says so rather than calling it well-formed (SCRUM-899).
+    expect(await refusal(actions.redeemPass({ venueId: A, code: "A1B2C3" }))).toBe(BAD_CODE_SHAPE)
     // A code from a minute ago: a screenshot.
     as(staff)
     expect(await refusal(actions.redeemPass({ venueId: A, code: passCode(send.id, passStep(new Date()) - 2) }))).toBe(
