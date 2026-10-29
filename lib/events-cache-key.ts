@@ -40,6 +40,8 @@ export interface EventsCacheKeyInput {
   categorySlug?: string
   startDate?: string
   endDate?: string
+  /** A start-based upper bound (SCRUM-877): a different result set from the same page without it. */
+  startBefore?: string
   includePast?: boolean
   /** `featured=true` is a different result set from the same page without it. */
   featured?: boolean
@@ -82,6 +84,7 @@ export function buildEventsCacheKey(input: EventsCacheKeyInput): string {
     categorySlug: input.categorySlug || null,
     startDate: input.startDate || null,
     endDate: input.endDate || null,
+    startBefore: input.startBefore || null,
     includePast: input.includePast,
     featured: input.featured ?? false,
     featuredSeed: input.featured ? (input.featuredSeed ?? null) : null,

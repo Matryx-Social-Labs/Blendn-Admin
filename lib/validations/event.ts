@@ -53,6 +53,8 @@ export const eventQuerySchema = z.object({
   // Date filters
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
+  /** Starts at or before this (SCRUM-877): with `startDate`, a window bounded by start on both sides. */
+  startBefore: z.string().datetime().optional(),
 
   /**
    * Include events that have already finished. Off by default — discovery
