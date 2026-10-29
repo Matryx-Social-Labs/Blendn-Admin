@@ -571,6 +571,12 @@ model events {
   /// Keeping it separate also means "claimed" survives an ownership transfer
   /// between organisations later.
   claimed_at        DateTime?          @db.Timestamptz(6)
+  /// When this night's host-side lists closed (SCRUM-887): written once, by
+  /// the server, the first time the night settled (`hostSettledAt`), and never
+  /// changed or cleared. A host's per-person views hold only the check-ins up
+  /// to it, so a late arrival, or the host moving the night's times, changes
+  /// nothing a host already saw. Null until then: no per-person list at all.
+  host_settled_at   DateTime?          @db.Timestamptz(6)
   /// Which company is accountable. `organizer_id` still records who created
   /// it — a different question, kept for audit and for "my events".
   organizer_org_id  String?            @db.Uuid

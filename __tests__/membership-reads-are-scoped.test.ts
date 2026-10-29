@@ -34,6 +34,10 @@ const ALLOWED = new Set([
   // told why the event went dark (`ORGANISER_SUSPENDED`). It grants nothing: the answer is
   // a reason on a 404, never access.
   "lib/event-access.ts",
+  // "Is this viewer on the host side of this room" (SCRUM-887): any membership, a suspended
+  // organisation's included, because it only ever DENIES (a host sees pseudonyms, never a
+  // reveal). Spreading `activeMembership` would hand a suspended org's staff the reveals.
+  "lib/identity.ts",
 ])
 
 function walk(dir: string, out: string[] = []): string[] {

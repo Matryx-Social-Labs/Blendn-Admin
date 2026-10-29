@@ -202,7 +202,8 @@ export async function GET(request: Request, { params }: RouteContext) {
             : {}),
         },
       })),
-      members: members.map((m) => ({
+      // By pseudonym, never in the order the rows were written: that is the door's (SCRUM-887).
+      members: [...members].sort((a, b) => (a.anonymous_name ?? "\uffff").localeCompare(b.anonymous_name ?? "\uffff")).map((m) => ({
         userId: idFor(m.user_id),
         anonymousName: m.anonymous_name,
         // `admin` is the host (or a colleague) holding the room: not moderated here (SCRUM-466).

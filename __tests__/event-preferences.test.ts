@@ -13,6 +13,8 @@
  */
 process.env.NEXTAUTH_SECRET = "event-preferences-test-secret-32-characters"
 const mockDb = {
+  // The room's host side (`roomIdentity`, SCRUM-887): nobody here hosts.
+  organisation_members: { findMany: jest.fn(async () => []) },
   // `matchesForEvent` runs the co-attendance count as one raw query for the
   // whole room rather than a query per candidate. Returns nothing here: these
   // tests are about day-folding and preferences, and a pair with no shared

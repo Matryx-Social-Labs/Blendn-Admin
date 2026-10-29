@@ -87,7 +87,7 @@ export function AttendeesTable({ rows }: { rows: AttendeeRow[] }) {
       }
       footer={
         <span>
-          attended = GPS check-in · committed RSVPs without a check-in count as no-shows · the same label as the Attendees export
+          attended = GPS check-in · committed RSVPs without a check-in count as no-shows · a night is listed two hours after it ends · the same label as the Attendees export
         </span>
       }
     />

@@ -78,7 +78,7 @@ beforeEach(() => {
 it("renders the label table for whoever runs the event, and does not redirect", async () => {
   mockAttendees = {
     view: "labels",
-    rows: [{ id: "attendee-0123456789ab", rsvp: "going", arrivedAt: "2026-09-20T13:15:00.000Z", status: "came" }],
+    rows: [{ id: "attendee-0123456789ab", rsvp: "going", status: "came" }],
     came: 1,
     walkIns: 0,
     noShows: 0,
@@ -87,8 +87,8 @@ it("renders the label table for whoever runs the event, and does not redirect", 
   expect(mockEventAttendees).toHaveBeenCalledWith(expect.objectContaining({ id: "u1", orgIds: ["org-a"] }), "e1", expect.any(Date))
   expect(html).toContain('aria-label="Attendees of this event"')
   expect(html).toContain("attendee-0123456789ab")
-  // 13:15Z on Kolkata's clock, as a quarter-hour window.
-  expect(html).toContain("18:45–19:00")
+  // Whether they came, never when (SCRUM-887).
+  expect(html).not.toMatch(/\d\d:\d\d–/)
   expect(html).not.toContain(">Came<")
 })
 

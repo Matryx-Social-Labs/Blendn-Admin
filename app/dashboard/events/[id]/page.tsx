@@ -172,11 +172,7 @@ export default async function EventDetailPage({
       <div className="flex flex-col gap-5">
         {header}
         {attendees.view === "labels" ? (
-          <EventAttendeesTable
-            roster={attendees}
-            timezone={event.timezone}
-            startAt={event.start_time.toISOString()}
-          />
+          <EventAttendeesTable roster={attendees} />
         ) : (
           <EventAttendeesCount started={attendees.started} came={attendees.came} />
         )}
