@@ -70,7 +70,7 @@ it("a burst refusal carries retryAfter in the body and the header, and errorCode
   const res = await send("and one more entirely other thing")
   expect(res.status).toBe(429)
   const body = await res.json()
-  expect(body).toMatchObject({ success: false, errorCode: "SPAM_BLOCKED" })
+  expect(body).toMatchObject({ success: false, errorCode: "SPAM_BLOCKED", reasonCode: "SPAM_BURST", error: "Slow down a moment, then try again." })
   expect(body.retryAfter).toBeGreaterThanOrEqual(1)
   expect(body.retryAfter).toBeLessThanOrEqual(10)
   expect(res.headers.get("Retry-After")).toBe(String(body.retryAfter))
@@ -89,14 +89,14 @@ it("the event chat door says the same", async () => {
   for (let i = 0; i < 5; i++) await sendEvent(`event hello ${i} that is not alike`)
   const res = await sendEvent("one too many of them now")
   expect(res.status).toBe(429)
-  expect(await res.json()).toMatchObject({ errorCode: "SPAM_BLOCKED", retryAfter: expect.any(Number) })
+  expect(await res.json()).toMatchObject({ errorCode: "SPAM_BLOCKED", reasonCode: "SPAM_BURST", error: "Slow down a moment, then try again.", retryAfter: expect.any(Number) })
 })
 
 it("a message refused for its links has no retryAfter: waiting would not help", async () => {
   const res = await send("http://a.example http://b.example http://c.example http://d.example")
   expect(res.status).toBe(429)
   const body = await res.json()
-  expect(body.errorCode).toBe("SPAM_BLOCKED")
+  expect(body).toMatchObject({ errorCode: "SPAM_BLOCKED", reasonCode: "SPAM_LINKS", error: "You can include up to 2 links in one message." })
   expect(body).not.toHaveProperty("retryAfter")
   expect(res.headers.get("Retry-After")).toBeNull()
 })
@@ -104,5 +104,5 @@ it("a message refused for its links has no retryAfter: waiting would not help", 
 it("a direct message screened as a burst carries it too", async () => {
   let last: Awaited<ReturnType<typeof screenDirectMessage>> | null = null
   for (let i = 0; i < 6; i++) last = await screenDirectMessage({ senderId: userId, conversationId: "conv-1", text: `dm ${i} of a very different sort` })
-  expect(last).toMatchObject({ verdict: "refuse", code: "spam", retryAfter: expect.any(Number) })
+  expect(last).toMatchObject({ verdict: "refuse", code: "spam", reasonCode: "SPAM_BURST", reason: "Slow down a moment, then try again.", retryAfter: expect.any(Number) })
 })

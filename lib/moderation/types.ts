@@ -6,7 +6,11 @@ export interface ModerationResult {
   categories: Record<string, number>
   confidence: number
   matched?: string[] // for keyword filter
-  reason?: string // for spam detector
+  reason?: string // for spam detector: developer text, goes to logs and the audit, never to a person
+  /** What a person is told when a send is refused as spam (`reason` is not for them). */
+  message?: string
+  /** Which spam rule refused it, in `reasonCode` beside `SPAM_BLOCKED` (SCRUM-624). */
+  reasonCode?: "SPAM_BURST" | "SPAM_LINKS"
   /** Seconds until the burst window ends and a send can go through. Burst blocks only (SV13). */
   retryAfter?: number
 }

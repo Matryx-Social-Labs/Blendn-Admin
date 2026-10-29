@@ -41,6 +41,12 @@
       "observed": "M2260: 3 of 5 failing (going, maybe and the empty body each answered 200 and wrote a row); the two controls (leaving, a published event) stayed green. M2261: 1 of 7 failing (the waitlisted person was promoted). Restored; 7 of 7 green.",
       "date": "2026-10-29"
     },
+    "spam-blocked-retry-after.itest.ts": {
+      "guards": "A spam refusal (429 SPAM_BLOCKED) on a room, the event chat and a DM says a sentence for a person and a reasonCode (SPAM_BURST, SPAM_LINKS), never the detector's developer text; retryAfter is still on a burst only (SCRUM-624). Pinned in spam-detector.test.ts and spam-blocked-retry-after.itest.ts.",
+      "mutation": "M2262 the detector's results lose message and reasonCode, so the routes fall back to the developer reason / no code.",
+      "observed": "M2262: 2 of 12 failing in spam-detector.test.ts and 4 of 4 in spam-blocked-retry-after.itest.ts (burst answered 'Burst rate exceeded (6 messages in 10s)' with no reasonCode; links 'Too many links (4)'). Restored; 12 of 12 and 4 of 4 green.",
+      "date": "2026-10-29"
+    },
     "submit-as-status.test.ts": {
       "guards": "A refused save puts the event's status back in the form (submitAsStatus), so a refused Publish leaves a draft a draft and Save as draft then works; and the editor reports false on a 401, a refusal and an error.",
       "mutation": "M2232 submitAsStatus stopped restoring after a refused save. M2233 the editor's !response.ok branch returned true; M2233b its catch returned nothing.",

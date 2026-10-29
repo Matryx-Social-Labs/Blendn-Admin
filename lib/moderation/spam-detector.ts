@@ -94,6 +94,8 @@ export function checkLinkSpam(content: string): ModerationResult | null {
     categories: { spam: 0.9 },
     confidence: 0.9,
     reason: `Too many links (${linkCount})`,
+    message: `You can include up to ${MAX_LINKS_PER_MESSAGE} links in one message.`,
+    reasonCode: "SPAM_LINKS",
   }
 }
 
@@ -152,6 +154,9 @@ export async function checkSpam(
       categories: { spam: 0.95 },
       confidence: 0.95,
       reason: `Burst rate exceeded (${count} messages in ${SPAM_BURST_WINDOW_MS / 1000}s)`,
+      // Static on purpose: the countdown is `retryAfter`, and a number in the sentence would be stale a second later.
+      message: "Slow down a moment, then try again.",
+      reasonCode: "SPAM_BURST",
       // When the window ends and this person can send again (SV13).
       retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)),
     }
