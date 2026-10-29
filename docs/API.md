@@ -2365,6 +2365,11 @@ un-reveal anything already seen — nothing can.
 | POST | `/message-requests` | Send a message request |
 | POST | `/message-requests/:id/respond` | Accept / decline / block |
 
+**Only an accept tells the sender** (SCRUM-621): a push and a bell row naming the
+accepter. `decline` and `block` send nothing and write nothing the sender reads;
+the product has no declined state and a no is silent. The response to the
+responder is unchanged.
+
 **You can only request someone you have shared an event with** — both of you
 checked in to the same event at some point. Ever, not currently: messaging
 someone the morning after is the ordinary case. An RSVP does not count; only an

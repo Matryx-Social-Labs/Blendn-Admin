@@ -668,7 +668,7 @@ registry.registerPath({
   tags: ["Mobile Message Requests"],
   summary: "Respond to message request",
   description:
-    "Recipient only. A request that is not yours to answer is 404, the same as one that does not exist, so a sender cannot check which request ids are real (SCRUM-371).",
+    "Recipient only. A request that is not yours to answer is 404, the same as one that does not exist, so a sender cannot check which request ids are real (SCRUM-371). **Only `accept` notifies the sender** (a push and a bell row, naming the accepter). `decline` and `block` send nothing: the product has no declined state, and a no is silent (SCRUM-621).",
   security: bearerAuth,
   request: {
     params: z.object({ requestId: z.string().uuid() }),
