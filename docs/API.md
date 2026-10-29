@@ -3465,7 +3465,9 @@ see that you are in a room: `GET /events/:eventId/checkins` (the roster),
 `GET /events/:eventId/matches` (the grid), and the live arrival on the socket —
 no `event:room:checkin` is sent for you (SCRUM-620). With it off you are **counted and
 not listed** — the room's numbers include you, nobody is offered your card, and
-nobody can like you. Chat is unaffected: posting a message is its own choice to
+nobody can like you: `POST /events/:eventId/matches/likes` answers `404 User not found`
+for you, by handle or raw id, as for an id nobody has, and a crew's like of you writes
+nothing (SCRUM-669). Chat is unaffected: posting a message is its own choice to
 be seen.
 
 ---

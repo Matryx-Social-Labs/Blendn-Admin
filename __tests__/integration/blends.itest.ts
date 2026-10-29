@@ -268,6 +268,16 @@ describe("crew ↔ person: the person opts in, the crew has room for one more, d
     await db.private_conversations.deleteMany({ where: { user1_id, user2_id } })
     await db.event_check_ins.updateMany({ where: { event_id: shy.eventId, user_id: shy.solo.id }, data: { status: "checked_out", check_out_time: new Date() } })
     expect(await api.likePerson(shy.crew[0], shy.eventId, roomHandle(shy.eventId, shy.solo.id), shy.C.crewId)).toEqual(nothingTold)
+    // "Show online status" off: not listed, so not likeable by a crew either — the same answer, nothing written (SCRUM-669).
+    const hid = await soloWorld("g5")
+    await api.prefs(hid.solo, hid.eventId, { openToCrews: true })
+    await db.profiles.update({ where: { id: hid.solo.id }, data: { show_online: false } })
+    expect(await api.likePerson(hid.crew[0], hid.eventId, roomHandle(hid.eventId, hid.solo.id), hid.C.crewId)).toEqual(nothingTold)
+    expect(await db.crew_likes.count({ where: { occurrence_id: hid.occurrenceId } })).toBe(0)
+    await db.profiles.update({ where: { id: hid.solo.id }, data: { show_online: true } })
+    // A like that stood answers the same; only the row tells.
+    await api.likePerson(hid.crew[0], hid.eventId, roomHandle(hid.eventId, hid.solo.id), hid.C.crewId)
+    expect(await db.crew_likes.count({ where: { occurrence_id: hid.occurrenceId } })).toBe(1)
     expect(await db.crew_likes.count({ where: { occurrence_id: { in: [closed.occurrenceId, big.occurrenceId, shy.occurrenceId] } } })).toBe(0)
     // And the liker's crew chat is as silent after a refused like as after one that stood.
     expect(await db.chat_messages.count({ where: { chat_group_id: { in: [shy.C.roomId, dating.C.roomId] }, type: "system" } })).toBe(0)
