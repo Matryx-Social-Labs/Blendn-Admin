@@ -3595,7 +3595,7 @@ Messages go through a **pre-emit** pipeline — moderation runs before the messa
 3. **OpenAI Moderation API** (pre-emit, 1s timeout) — Multilingual AI detection for hate, harassment, sexual, violence, self-harm. If caught within 1s, message hidden before broadcast. If timeout, emitted and falls back to async.
 4. **Image moderation** (async, if applicable) — OpenAI omni-moderation for images
 
-Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden messages in 1 hour. Auto-unmute after 1 hour with no new violations (checked on next send attempt).
+Thresholds: `>=0.70` confidence → auto-hide, `>=0.40` → flag for review. Auto-mute after 3 hidden abusive messages in 1 hour (a message hidden only for a contact detail does not count). Auto-unmute after 1 hour with no new violations (checked on next send attempt).
 
 Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent.
 
@@ -3677,7 +3677,7 @@ your incoming list.
 
 **A post is checked before it is stored** (SCRUM-301). The text gets the room's
 checks: the keyword filter, contact details, then OpenAI within one second. A
-room message that fails is stored hidden and counted toward a mute. The board has
+room message that fails is stored hidden and counted toward a mute (except a contact detail, which is hidden but not counted). The board has
 no moderation queue, so a failing post is refused with **422** and never stored.
 Contact details say what was found (*"This looks like a phone number. The board is
 anonymous, so contact details can't go on it."*). Anything else reads

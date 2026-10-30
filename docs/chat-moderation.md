@@ -271,7 +271,7 @@ Same categories and thresholds as text moderation, applied to the image content.
 
 ### Auto-mute (repeated violations)
 
-If a user accumulates **3 or more hidden messages within 1 hour** in the same chat group, they are automatically muted:
+If a user accumulates **3 or more hidden abusive messages within 1 hour** in the same chat group, they are automatically muted. A message hidden only for a contact detail (phone, handle, link) is hidden and flagged for review but does **not** count toward a mute (SCRUM-485); a flag that carries anything besides `contact_*` categories does:
 
 1. `chat_group_members.status` set to `"muted"`
 2. Socket.io emits `chat:memberMuted` with `{ muted: true }` — client disables input
@@ -283,7 +283,7 @@ If a user accumulates **3 or more hidden messages within 1 hour** in the same ch
 
 ### Auto-unmute (mute expiry)
 
-When a muted user tries to send a message, the backend checks if they still have 3+ hidden messages in the last hour:
+When a muted user tries to send a message, the backend checks if they still have 3+ hidden abusive messages (contact-detail hides do not count) in the last hour:
 
 1. If **no** (mute window has passed) → auto-unmute: status set to `"active"`, Socket.io emits `chat:memberMuted` with `{ muted: false, reason: "Auto-mute expired" }`, message send proceeds normally
 2. If **yes** (recent violations still in window) → user stays muted, 403 returned
