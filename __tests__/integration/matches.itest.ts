@@ -144,6 +144,27 @@ describe("who appears in it", () => {
 
     expect(await matchesForEvent(eventId, me)).toEqual([])
   })
+
+  it("hides, for good, the people the viewer reported -- and only for the reporter", async () => {
+    // Report hides like a block does on the reporter's side, without blocking
+    // (SCRUM-229 ruling): a reopened room must not bring the card back.
+    const eventId = await room()
+    const [me, reported, other] = await Promise.all([
+      makeUser("mx-rp-me"),
+      makeUser("mx-rp-reported"),
+      makeUser("mx-rp-other"),
+    ])
+    users.push(me, reported, other)
+    for (const u of [me, reported, other]) await attend(u, eventId)
+    await db.user_reports.create({ data: { reporter_id: me, reported_id: reported, reason: "spam" } })
+
+    const mine = await matchesForEvent(eventId, me)
+    expect(mine!.map((m) => resolveUserRef(m.userId)?.userId)).toEqual([other])
+    // The reported person is not told, and still sees the reporter.
+    const theirs = await matchesForEvent(eventId, reported)
+    expect(theirs!.map((m) => resolveUserRef(m.userId)?.userId).sort()).toEqual([me, other].sort())
+    expect(await db.blocked_users.count({ where: { blocker_id: me } })).toBe(0)
+  })
 })
 
 describe("the card", () => {
