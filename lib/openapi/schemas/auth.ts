@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { ACCOUNT_MAX_AGE } from "@/lib/age"
 import { registry } from "@/lib/openapi/registry"
 import { MIN_PASSWORD_LENGTH } from "@/lib/password"
 import { DeviceInfoSchema } from "./common"
@@ -23,7 +24,7 @@ export const SignupRequestSchema = z
     name: z.string().min(1).max(100),
     // Required, 18 or over: Blend'n is 18+ (SCRUM-330). Missing or under 18 is
     // 400 with the sentence "Blend'n is for people 18 and over." on `errors[].field = "age"`.
-    age: z.number().int().min(18).max(120),
+    age: z.number().int().min(18).max(ACCOUNT_MAX_AGE),
     deviceInfo: DeviceInfoSchema.optional(),
   })
   .openapi("SignupRequest")

@@ -3321,7 +3321,7 @@ Three rules follow from that:
   cleared on account deletion along with the rest of the profile.
 
 Malformed input is **400, not a silent no-op**: a date that does not parse, is
-in the future, or implies an age outside 18–120 is refused, because storing
+in the future, or implies an age outside 18–100 is refused, because storing
 nothing while telling the user their profile saved is the worse failure.
 
 Five consequences worth knowing about:
