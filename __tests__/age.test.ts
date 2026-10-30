@@ -1,5 +1,10 @@
 import {
   ACCOUNT_MAX_AGE,
+  ADULTS_ONLY,
+  AGE_TOO_OLD,
+  DOB_NOT_A_DATE,
+  DOB_TOO_OLD,
+  dateOfBirthRefusal,
   DATING_MIN_AGE,
   ageFrom,
   datingAgeRefusal,
@@ -247,6 +252,25 @@ describe("parseDateOfBirth", () => {
     // The day after turning ACCOUNT_MAX_AGE + 1 is already over the line.
     expect(parseDateOfBirth(born(ACCOUNT_MAX_AGE + 1), NOW)).toBeNull()
     expect(parseDateOfBirth("1912-06-15", NOW)).toBeNull()
+  })
+})
+
+describe("each refusal of a birth date names its own reason (SCRUM-923)", () => {
+  it("says which rule was broken, and nothing else", () => {
+    expect(dateOfBirthRefusal("1995-06-15", NOW)).toBeNull()
+    expect(dateOfBirthRefusal("2013-06-15", NOW)).toBe(ADULTS_ONLY)
+    expect(dateOfBirthRefusal("1912-06-15", NOW)).toBe(DOB_TOO_OLD)
+    expect(dateOfBirthRefusal("2030-01-01", NOW)).toBe(DOB_NOT_A_DATE)
+    expect(dateOfBirthRefusal("2001-02-31", NOW)).toBe(DOB_NOT_A_DATE)
+    expect(dateOfBirthRefusal("15/06/1995", NOW)).toBe(DOB_NOT_A_DATE)
+  })
+
+  it("is what the profile and signup schemas return", () => {
+    const msg = (r: { success: boolean; error?: { issues: { message: string }[] } }) => r.error?.issues[0]?.message
+    expect(msg(updateProfileSchema.safeParse({ dateOfBirth: "1912-06-15" }))).toBe(DOB_TOO_OLD)
+    expect(msg(updateProfileSchema.safeParse({ dateOfBirth: "2013-06-15" }))).toBe(ADULTS_ONLY)
+    expect(msg(updateProfileSchema.safeParse({ age: ACCOUNT_MAX_AGE + 1 }))).toBe(AGE_TOO_OLD)
+    expect(msg(updateProfileSchema.safeParse({ dateOfBirth: "nope" }))).toBe(DOB_NOT_A_DATE)
   })
 })
 

@@ -269,6 +269,31 @@ function wholeYearsBetween(from: Date, to: Date): number {
  * is the day that was typed, wherever the server runs.
  */
 export function parseDateOfBirth(input: unknown, now: Date = new Date()): Date | null {
+  return dateOfBirthRefusal(input, now) === null ? calendarDate(input) : null
+}
+
+/** What a birth date that is not a real past date is told. */
+export const DOB_NOT_A_DATE = "Enter a real date of birth in YYYY-MM-DD form."
+/** What an implausibly old birth date is told (older than `ACCOUNT_MAX_AGE`). */
+export const DOB_TOO_OLD = "Enter your real date of birth."
+/** What an age above `ACCOUNT_MAX_AGE` is told. */
+export const AGE_TOO_OLD = "Enter your real age."
+
+/**
+ * Why this birth date is refused, or `null` when it may be stored. One reason
+ * per rule, so a 114-year-old is not told Blend'n is 18+ (SCRUM-923).
+ */
+export function dateOfBirthRefusal(input: unknown, now: Date = new Date()): string | null {
+  const date = calendarDate(input)
+  if (!date) return DOB_NOT_A_DATE
+  const years = wholeYearsBetween(date, now)
+  if (years < 0) return DOB_NOT_A_DATE
+  if (years < ACCOUNT_MIN_AGE) return ADULTS_ONLY
+  return years > ACCOUNT_MAX_AGE ? DOB_TOO_OLD : null
+}
+
+/** A `YYYY-MM-DD` that is a real calendar day, or `null`. Built with `Date.UTC`, not `new Date(string)`. */
+function calendarDate(input: unknown): Date | null {
   if (typeof input !== "string") return null
 
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.trim())
@@ -291,6 +316,5 @@ export function parseDateOfBirth(input: unknown, now: Date = new Date()): Date |
     return null
   }
 
-  const years = wholeYearsBetween(date, now)
-  return years < ACCOUNT_MIN_AGE || years > ACCOUNT_MAX_AGE ? null : date
+  return date
 }
