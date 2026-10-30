@@ -26,11 +26,11 @@ export interface ClaimDecision {
 
 export async function notifyClaimant(d: ClaimDecision): Promise<boolean> {
   if (!emailConfigured()) {
-    logger.info("Claim decision not emailed — email unconfigured", { to: d.to, what: d.what })
+    logger.info("Claim decision not emailed — email unconfigured", { what: d.what })
     return false
   }
   const result = await sendEmail({ to: d.to, ...claimDecisionEmail(d.name ?? "there", d.what, d.outcome, d.reason, d.link) })
-  if (!result.sent) logger.error("Claim decision email failed", { to: d.to, what: d.what, reason: result.reason })
+  if (!result.sent) logger.error("Claim decision email failed", { what: d.what, reason: result.reason })
   return result.sent
 }
 

@@ -123,6 +123,11 @@ export function beforeSend(event: ErrorEvent, _hint: EventHint): ErrorEvent | nu
   }
 
   if (event.extra) event.extra = scrubRecord(event.extra)
+  // What the app did on the way to the error: console lines and request URLs carry the same emails and tokens.
+  for (const crumb of event.breadcrumbs ?? []) {
+    if (crumb.message) crumb.message = scrubString(crumb.message)
+    if (crumb.data) crumb.data = scrubRecord(crumb.data)
+  }
   if (event.tags) {
     event.tags = scrubRecord(event.tags as Record<string, unknown>) as typeof event.tags
   }

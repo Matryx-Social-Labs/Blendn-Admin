@@ -68,11 +68,14 @@ export async function GET(_: Request, { params }: RouteContext) {
       return errorResponse("Event not found", 404)
     }
 
-    if (!eventPermissions(await actorFor(session.user), event).canOperate) {
+    const { canOperate, canEdit } = eventPermissions(await actorFor(session.user), event)
+    if (!canOperate) {
       return errorResponse("Forbidden", 403)
     }
 
-    return NextResponse.json(event)
+    // A venue owner operates the event but does not edit it: who created it is not theirs to read.
+    const { organizer_id: _creator, ...operable } = event
+    return NextResponse.json(canEdit ? event : operable)
   } catch (error) {
     logger.error("Error fetching event", { error: error instanceof Error ? error.message : String(error) })
     return errorResponse("Internal error", 500)

@@ -1,6 +1,7 @@
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
 import { ageFrom } from "@/lib/age"
 import { browseCities } from "@/lib/address"
@@ -88,6 +89,8 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return unauthorizedResponse("Authentication required")
     }
+    const limited = await rateLimit(request, userLimit("read", "events-cities", user.userId))
+    if (limited) return limited
 
     /*
      * The places Places lists, by the same visibility the venues route applies
