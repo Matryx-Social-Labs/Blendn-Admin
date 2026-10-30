@@ -20,6 +20,7 @@ import {
 import { isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 import { HERE_NOW } from "@/lib/attendee-counts"
+import { inRoomWhere } from "@/lib/event-kind"
 
 interface RouteParams {
   params: Promise<{ chatGroupId: string }>
@@ -112,10 +113,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * A member row outlives the check-in — checkout and expiry close the
      * window and leave the row `active` — so the list said "In the room" over everybody
      * who had ever been in (RC drive 3: 450 listed from 515 members, 483 here).
+     * At a venue day, also only while the window is open (`inRoomWhere`, as the
+     * roster): an ended window the sweeper has not reached is not in the room
+     * (SCRUM-915).
      */
     const insideNow =
       chatGroup.kind === "event" && chatGroup.event_id
-        ? [{ OR: [{ role: { not: "member" as const } }, { user: { event_check_ins: { some: { event_id: chatGroup.event_id, ...HERE_NOW } } } }] }]
+        ? [{ OR: [{ role: { not: "member" as const } }, { user: { event_check_ins: { some: { event_id: chatGroup.event_id, ...HERE_NOW, ...inRoomWhere() } } } }] }]
         : []
     const visibleMembers = {
       chat_group_id: chatGroupId,
