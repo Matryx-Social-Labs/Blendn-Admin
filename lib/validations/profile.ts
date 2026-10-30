@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { ACCOUNT_MAX_AGE, ACCOUNT_MIN_AGE, ADULTS_ONLY, parseDateOfBirth } from "@/lib/age"
+import { ACCOUNT_MAX_AGE, ACCOUNT_MIN_AGE, ADULTS_ONLY, AGE_TOO_OLD, dateOfBirthRefusal } from "@/lib/age"
 import { isOrientation, orientationsAreCoherent } from "@/lib/dating"
 import { isExpertise, MAX_EXPERTISE } from "@/lib/expertise"
 import { isWorkField } from "@/lib/work-fields"
@@ -40,7 +40,7 @@ export const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   phone: z.string().max(20).optional().nullable(),
   // A new age is an adult's (SCRUM-330). A stored one under 18 is left alone.
-  age: z.number().int().min(ACCOUNT_MIN_AGE, ADULTS_ONLY).max(ACCOUNT_MAX_AGE).optional().nullable(),
+  age: z.number().int().min(ACCOUNT_MIN_AGE, ADULTS_ONLY).max(ACCOUNT_MAX_AGE, AGE_TOO_OLD).optional().nullable(),
 
   /*
    * Birth date as `YYYY-MM-DD`. Write-only — no route returns it.
@@ -64,8 +64,9 @@ export const updateProfileSchema = z.object({
    */
   dateOfBirth: z
     .string()
-    .refine((value) => parseDateOfBirth(value) !== null, {
-      message: `Enter a real date of birth in YYYY-MM-DD form. ${ADULTS_ONLY}`,
+    .superRefine((value, ctx) => {
+      const message = dateOfBirthRefusal(value)
+      if (message) ctx.addIssue({ code: "custom", message })
     })
     .optional(),
   location: z.string().max(200).optional().nullable(),

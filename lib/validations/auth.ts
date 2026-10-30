@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { MIN_PASSWORD_LENGTH } from "@/lib/password"
-import { ACCOUNT_MAX_AGE, ACCOUNT_MIN_AGE, ADULTS_ONLY } from "@/lib/age"
+import { ACCOUNT_MAX_AGE, AGE_TOO_OLD, ACCOUNT_MIN_AGE, ADULTS_ONLY } from "@/lib/age"
 
 /** What the app says about the device a sign-in comes from. */
 export const deviceInfoSchema = z.object({
@@ -50,7 +50,7 @@ export const signupSchema = z.object({
     .number({ error: `Enter your age. ${ADULTS_ONLY}` })
     .int()
     .min(ACCOUNT_MIN_AGE, ADULTS_ONLY)
-    .max(ACCOUNT_MAX_AGE),
+    .max(ACCOUNT_MAX_AGE, AGE_TOO_OLD),
   deviceInfo: deviceInfoSchema.optional(),
 })
 

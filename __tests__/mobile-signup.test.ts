@@ -38,7 +38,7 @@ jest.mock("@/lib/location", () => ({
 }))
 
 import { NextRequest } from "next/server"
-import { ACCOUNT_MAX_AGE } from "@/lib/age"
+import { ACCOUNT_MAX_AGE, AGE_TOO_OLD } from "@/lib/age"
 import { POST } from "@/app/api/mobile/auth/signup/route"
 
 const VALID = "correct horse battery staple"
@@ -119,6 +119,7 @@ describe("POST /api/mobile/auth/signup — name and age", () => {
   it("refuses an age past the ceiling (SCRUM-923)", async () => {
     const res = await POST(req({ email: "a@b.com", password: VALID, name: "A", age: ACCOUNT_MAX_AGE + 1 }))
     expect(res.status).toBe(400)
+    expect((await res.json()).errors).toContainEqual({ field: "age", message: AGE_TOO_OLD })
   })
 
   it.each([11, 17])("refuses %i — the floor is 18", async (age) => {
