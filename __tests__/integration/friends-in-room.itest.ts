@@ -175,6 +175,31 @@ describe("a friend leaves every stranger surface, whatever their switch (B1)", (
     await db.categories.delete({ where: { id: category.id } })
   })
 
+  it("the participants list gives the viewer the same identity as the roster for the same person (SCRUM-629)", async () => {
+    const eventId = await liveEvent()
+    const [viewer, shown, covered] = [await person("fir-i-v"), await person("fir-i-s"), await person("fir-i-c")]
+    for (const p of [viewer, shown, covered]) await checkIn(eventId, p)
+    // "Show who I am" at this event: the roster names this person to someone who was in the room.
+    await db.event_match_preferences.upsert({
+      where: { event_id_user_id: { event_id: eventId, user_id: shown.id } },
+      create: { event_id: eventId, user_id: shown.id, revealed: true },
+      update: { revealed: true },
+    })
+
+    const rows = (await roster(eventId, viewer)).body.data.attendees as { userId: string; name: string; image?: string | null }[]
+    const listed = (await participants(eventId, viewer)).participants as { userId: string; name: string; avatar: string | null }[]
+
+    const rosterShown = rows.find((r) => r.userId === roomHandle(eventId, shown.id))!
+    const rosterCovered = rows.find((r) => r.userId === roomHandle(eventId, covered.id))!
+    expect(rosterShown.name).toContain("fir-i-s") // the roster names the revealed person: the premise
+    const listedShown = listed.find((r) => r.userId === rosterShown.userId)!
+    const listedCovered = listed.find((r) => r.userId === rosterCovered.userId)!
+    expect({ name: listedShown.name, avatar: listedShown.avatar }).toEqual({ name: rosterShown.name, avatar: rosterShown.image ?? null })
+    expect(listedShown.avatar).not.toBeNull()
+    // Someone the viewer may not recognise stays a pseudonym with no photo, as on the roster.
+    expect({ name: listedCovered.name, avatar: listedCovered.avatar }).toEqual({ name: rosterCovered.name, avatar: null })
+  })
+
   it("a person with Show online status off is absent from the event room's participants list (SCRUM-141), a crew room unchanged", async () => {
     const eventId = await liveEvent()
     const [viewer, quiet, loud] = [await person("fir-q-v"), await person("fir-q-q", { showOnline: false }), await person("fir-q-l")]
