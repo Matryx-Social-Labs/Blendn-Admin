@@ -18,6 +18,10 @@ import type { ModerationResult } from "./types"
  *
  * `autoMute` is false for contact details: sharing your own number is not
  * abuse, and three of them in an hour is not a reason to silence somebody.
+ * The rule holds beyond this call (SCRUM-485): a contact-only hide does not
+ * count toward the NEXT mute either, and the auto-unmute counts the same way
+ * (`abuseHiddenCount` in `actions.ts`). A hide that carries a contact detail
+ * and anything else counts.
  */
 export function preSaveCheck(content: string): { result: ModerationResult; autoMute: boolean } | null {
   const keyword = checkKeywords(content)

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client"
 import { db } from "./db"
 import { ATTENDED } from "./counting"
+import { inRoomWhere } from "./event-kind"
 
 /**
  * How many *people* attended each of these events.
@@ -118,7 +119,8 @@ export const HERE_NOW = { status: "checked_in", kind: "attendee", user: { suspen
  * and detail, and the Banter's room rows (`hereCount`, through `hereCounts`).
  */
 export async function hereCountFor(eventId: string): Promise<number> {
-  return db.event_check_ins.count({ where: { event_id: eventId, ...HERE_NOW } })
+  // At a venue day, a window still open (`inRoomWhere`), not the sweeper's lag (SCRUM-922); a real event is unchanged.
+  return db.event_check_ins.count({ where: { event_id: eventId, ...HERE_NOW, ...inRoomWhere() } })
 }
 
 type CountRead = { running: Promise<number>; next: Promise<number> | null }
@@ -161,7 +163,7 @@ export async function hereCounts(eventIds: readonly string[]): Promise<Map<strin
   if (eventIds.length === 0) return new Map()
   const rows = await db.event_check_ins.groupBy({
     by: ["event_id"],
-    where: { event_id: { in: [...eventIds] }, ...HERE_NOW },
+    where: { event_id: { in: [...eventIds] }, ...HERE_NOW, ...inRoomWhere() },
     _count: { _all: true },
   })
   return new Map(rows.map((r) => [r.event_id, r._count._all]))
