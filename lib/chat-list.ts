@@ -97,7 +97,7 @@ export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[
         -- metadata (or the sponsored kind), the same marks the history reads.
         AND type <> 'sponsored'
         AND metadata ->> 'sponsored_message_id' IS NULL
-        AND NOT (type = 'poll' AND metadata ->> 'kind' = 'sponsored')
+        AND (type <> 'poll' OR metadata ->> 'kind' IS DISTINCT FROM 'sponsored')
       ORDER BY created_at DESC
       LIMIT 1
     ) cm

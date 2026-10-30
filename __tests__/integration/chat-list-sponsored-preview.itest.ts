@@ -62,6 +62,33 @@ describe("the chat list's last-message preview", () => {
     expect(res.body.data.groups[0].lastMessage).toBeNull()
   })
 
+  it.each([
+    { label: "a poll", metadata: { poll: true, kind: "announcement" } },
+    { label: "a poll with no kind", metadata: { poll: true } },
+    { label: "a poll with no metadata", metadata: undefined },
+  ])("previews $label, which is not an advert", async ({ metadata }) => {
+    const { host, viewer, roomId } = await roomWith("cs-poll")
+    await db.chat_messages.create({
+      data: { chat_group_id: roomId, user_id: host.id, type: "poll", content: "Which set first?", ...(metadata ? { metadata } : {}), created_at: at(1) },
+    })
+
+    const res = await api.chatGroups(viewer)
+
+    expect(res.body.data.groups[0].lastMessage).toMatchObject({ type: "poll", content: "Which set first?" })
+  })
+
+  it("skips an advert that is older than the person's line without losing the line", async () => {
+    const { host, viewer, a, roomId } = await roomWith("cs-old")
+    await db.chat_messages.create({
+      data: { chat_group_id: roomId, user_id: host.id, content: "📣 [Sponsored]\nTry the new brew", metadata: { sponsored_message_id: "33333333-3333-4333-8333-333333333333" }, created_at: at(1) },
+    })
+    await db.chat_messages.create({ data: { chat_group_id: roomId, user_id: a.id, content: "newest line", created_at: at(2) } })
+
+    const res = await api.chatGroups(viewer)
+
+    expect(res.body.data.groups[0].lastMessage).toMatchObject({ content: "newest line" })
+  })
+
   it("still previews an announcement, which is the room's own voice", async () => {
     const { host, viewer, roomId } = await roomWith("cs-ann")
     await db.chat_messages.create({
