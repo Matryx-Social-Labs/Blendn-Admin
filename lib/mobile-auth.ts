@@ -856,6 +856,12 @@ export async function verifyAppleIdToken(
       return null
     }
 
+    // Apple sends the claim as a boolean or as a string, as Google's tokeninfo does (see verifyGoogleIdToken).
+    if (payload.email && payload.email_verified !== true && String(payload.email_verified) !== "true") {
+      logger.warn("Apple email not verified")
+      return null
+    }
+
     return payload as unknown as AppleTokenPayload
   } catch (error) {
     logger.error("Error verifying Apple identity token", { error: error instanceof Error ? error.message : String(error) })

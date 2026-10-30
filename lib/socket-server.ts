@@ -3,6 +3,7 @@ import { Server as HttpServer } from "http"
 import { Server, Socket, type RemoteSocket } from "socket.io"
 import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
+import { socketOriginAllowed } from "./socket-origin"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
 import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
 import { notStrangersTo, notStrangersToMany } from "./room-people"
@@ -876,6 +877,9 @@ export function initSocketServer(httpServer: HttpServer): Server {
       },
       methods: ["GET", "POST"],
     },
+    // CORS covers the polling transport only; a WebSocket upgrade is not bound by it, so the handshake is checked here.
+    allowRequest: (req, callback) =>
+      callback(null, socketOriginAllowed(req.headers.origin, req.headers.host, ALLOWED_ORIGINS)),
     pingTimeout: 60000,
     pingInterval: 25000,
   })

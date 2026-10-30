@@ -37,6 +37,19 @@ describe("beforeSend", () => {
     expect(event.user).toEqual({ id: "user_abc" })
   })
 
+  it("scrubs breadcrumbs: messages, string data, and credential-named keys (SCRUM-946)", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJhYmMifQ.c2lnbmF0dXJl"
+    const event = send({
+      breadcrumbs: [
+        { category: "console", message: "sign-in failed for zaphod@example.com" },
+        { category: "http", data: { url: `https://x.test/a?t=${jwt}`, status_code: 401, authorization: "Bearer abc" } },
+      ],
+    })
+    const [first, second] = event.breadcrumbs!
+    expect(first.message).not.toContain("zaphod@example.com")
+    expect(second.data).toEqual({ url: expect.not.stringContaining(jwt), status_code: 401, authorization: "[redacted]" })
+  })
+
   it("drops cookies and the request body", () => {
     const event = send({
       request: {

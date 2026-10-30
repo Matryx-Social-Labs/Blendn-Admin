@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { blockCounterparties } from "@/lib/conversations"
 import { PAGINATION } from "@/lib/constants"
 import {
@@ -27,6 +28,8 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    const limited = await rateLimit(request, userLimit("read", "chat-groups", authUser.userId))
+    if (limited) return limited
 
     // Archiving moved to app/api/cron/archive-chats. Doing it here meant it
     // only ran when somebody happened to open their chat list, so a room

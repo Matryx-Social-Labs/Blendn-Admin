@@ -4,6 +4,7 @@ import { serverErrorResponse, successResponse, unauthorizedResponse, errorRespon
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { roomPreview } from "@/lib/room-preview"
 import { isUuid } from "@/lib/api-input"
 
@@ -28,6 +29,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    const limited = await rateLimit(request, userLimit("read", "room-preview", authUser.userId))
+    if (limited) return limited
 
     const denied = await attendeeEventAccess(authUser.userId, eventId, "view")
     if (denied) return eventAccessResponse(denied)

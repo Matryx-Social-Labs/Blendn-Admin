@@ -10,6 +10,7 @@ import {
 import { logger } from "@/lib/logger"
 import { matchesForEvent } from "@/lib/matches"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
 import { boundedInt } from "@/lib/pagination"
 import { roomBanRefusal } from "@/lib/room-ban"
@@ -36,6 +37,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    const limited = await rateLimit(request, userLimit("read", "event-matches", authUser.userId))
+    if (limited) return limited
 
     const limit = boundedInt(request.nextUrl.searchParams.get("limit"), 50, 1, 100)
 

@@ -3,6 +3,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
 import { ageFrom } from "@/lib/age"
@@ -89,6 +90,8 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    const limited = await rateLimit(request, userLimit("read", "events-list", authUser.userId))
+    if (limited) return limited
 
     // Parse query parameters
     const searchParams = Object.fromEntries(request.nextUrl.searchParams)
@@ -340,7 +343,7 @@ export async function GET(request: NextRequest) {
       // Build orderBy
       const orderBy: Prisma.eventsOrderByWithRelationInput = shouldSortByDistance
         ? { start_time: "asc" }
-        : { [sortBy]: sortOrder }
+        : { [sortBy === "distance" ? "start_time" : sortBy]: sortOrder }
       /*
        * The page in `orderBy`, and the count beside it. Both at once: `count`
        * needs only `where`, so awaiting the page first added a full sequential
