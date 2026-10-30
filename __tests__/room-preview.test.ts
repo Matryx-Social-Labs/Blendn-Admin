@@ -14,7 +14,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 const mockDb = {
   user_interests: { findMany: jest.fn() },
-  event_check_ins: { findMany: jest.fn(), count: jest.fn() },
+  event_check_ins: { findMany: jest.fn(), count: jest.fn(), findFirst: jest.fn() },
   categories: { findMany: jest.fn() },
   // Friends leave the count (lib/room-people.ts); none here.
   friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
@@ -74,6 +74,7 @@ beforeEach(() => {
     person("p4", []),
   ]
   mockDb.event_check_ins.count.mockImplementation(async () => here)
+  mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "mine" }) // the viewer is inside unless a test says not
   mockDb.event_check_ins.findMany.mockImplementation(async () => pool)
 })
 
@@ -144,6 +145,22 @@ it("answers when the viewer and two visible people make three, hidden people bes
   pool = [person("p1", ["techno"]), person("p2", ["running"])]
   const body = await (await call()).json()
   expect(body.data).toEqual({ hereCount: 5, tasteMatchCount: 1 })
+})
+
+it("does not count a viewer who is not inside toward the floor: two visible people are not a crowd of three", async () => {
+  here = 3 // two visible and one hidden, the viewer outside
+  pool = [person("p1", ["techno"]), person("p2", ["running"])]
+  mockDb.event_check_ins.findFirst.mockResolvedValue(null)
+  const body = await (await call()).json()
+  expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
+})
+
+it("answers a viewer who is outside when three visible people are inside", async () => {
+  here = 4
+  pool = [person("p1", ["techno"]), person("p2", ["running"]), person("p3", ["techno"])]
+  mockDb.event_check_ins.findFirst.mockResolvedValue(null)
+  const body = await (await call()).json()
+  expect(body.data).toEqual({ hereCount: 4, tasteMatchCount: 2 })
 })
 
 it("counts a person once however many rows they have", async () => {

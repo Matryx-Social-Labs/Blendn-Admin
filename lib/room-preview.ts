@@ -37,7 +37,8 @@ export interface RoomPreview {
  * match deck's rule — parent-expanded, via `expandInterests` — so this number
  * and the deck agree about who has something in common.
  *
- * The floor is on the people the count is drawn from, you included (SCRUM-671):
+ * The floor is on the people the count is drawn from, you included if you are
+ * inside (SCRUM-671):
  * `hereCount` alone counts people the count leaves out (show-online off,
  * blocked, friends, suspended), so a room of you, one hidden person and one
  * visible person passes it and the number becomes that one person's overlap
@@ -48,11 +49,16 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
   const hereCount = await hereCountFor(eventId)
   if (hereCount < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
 
-  const [hidden, friends, viewerInterests, inside] = await Promise.all([
+  const [hidden, friends, viewerInterests, viewerInside, inside] = await Promise.all([
     blockCounterparties(viewerId),
     // Friends are never strangers (lib/room-people.ts): not in the count either.
     notStrangersTo(viewerId),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
+    // The preview needs no check-in, so the viewer may or may not be one of `hereCount`.
+    db.event_check_ins.findFirst({
+      where: { event_id: eventId, user_id: viewerId, status: "checked_in", kind: "attendee" },
+      select: { id: true },
+    }),
     db.event_check_ins.findMany({
       where: {
         event_id: eventId,
@@ -77,7 +83,7 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
     if (hiddenSet.has(row.user_id)) continue
     people.set(row.user_id, row.user.user_interests.map((i) => i.category_id))
   }
-  if (people.size + 1 < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
+  if (people.size + (viewerInside ? 1 : 0) < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
   // No interests of your own means nothing can be shared — a true zero, not a
   // reason to hide the number.
   if (viewerInterests.length === 0) return { hereCount, tasteMatchCount: 0 }
