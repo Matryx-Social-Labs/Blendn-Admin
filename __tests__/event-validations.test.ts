@@ -1,5 +1,6 @@
 import { SPONSORSHIP } from "@/lib/constants"
 import {
+  checkinSchema,
   sponsoredMessageCreateSchema,
   sponsoredMessageUpdateSchema,
   announcementSchema,
@@ -136,5 +137,22 @@ describe("announcementSchema", () => {
     const result = announcementSchema.safeParse({ content: "  Doors close at 9  " })
     expect(result.success).toBe(true)
     expect(result.success && result.data.content).toBe("Doors close at 9")
+  })
+})
+
+describe("checkinSchema deviceInfo.gpsAccuracy", () => {
+  const at = { latitude: 12.97, longitude: 77.59 }
+
+  it.each([-1, -0.5, -150])("refuses a negative accuracy (%s): it would pass the 'worse than 150 m' gate as a perfect fix", (gpsAccuracy) => {
+    const r = checkinSchema.safeParse({ ...at, deviceInfo: { gpsAccuracy } })
+    expect(r.success).toBe(false)
+  })
+
+  it.each([0, 5, 150, 999])("accepts %s", (gpsAccuracy) => {
+    expect(checkinSchema.safeParse({ ...at, deviceInfo: { gpsAccuracy } }).success).toBe(true)
+  })
+
+  it("still accepts a body with no accuracy at all", () => {
+    expect(checkinSchema.safeParse(at).success).toBe(true)
   })
 })
