@@ -8,6 +8,7 @@ import { db } from "@/lib/db"
 import { eventNotFoundResponse } from "@/lib/event-access"
 import { inRoomWhere } from "@/lib/event-kind"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { blockCounterparties } from "@/lib/conversations"
 import { geocodeBudget, normalizeLocationToCity } from "@/lib/location"
 import { idForViewer } from "@/lib/room-handle"
@@ -61,6 +62,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    const limited = await rateLimit(request, userLimit("read", "event-checkins", authUser.userId))
+    if (limited) return limited
 
     // Parse pagination params
     const searchParams = request.nextUrl.searchParams

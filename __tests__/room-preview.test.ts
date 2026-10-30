@@ -33,6 +33,7 @@ jest.mock("@/lib/event-access", () => ({
 
 const mockBlocks = jest.fn()
 jest.mock("@/lib/conversations", () => ({ blockCounterparties: (...a: unknown[]) => mockBlocks(...a) }))
+jest.mock("@/lib/rate-limit", () => ({ rateLimit: async () => null, userLimit: () => ({}) }))
 
 import { NextRequest } from "next/server"
 import { GET } from "@/app/api/mobile/events/[eventId]/room-preview/route"

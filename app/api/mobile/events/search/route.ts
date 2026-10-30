@@ -4,6 +4,7 @@ import { z } from "zod"
 import { ageFrom } from "@/lib/age"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
+import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { PRODUCT_EVENTS, record } from "@/lib/product-events"
 import {
   successResponse,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/api-response"
 import { PAGINATION } from "@/lib/constants"
 import { paginationMeta } from "@/lib/pagination"
+import { tsQueryFrom } from "@/lib/search-tsquery"
 
 const searchSchema = z.object({
   q: z.string().min(1).max(200),
@@ -44,6 +46,8 @@ export async function GET(request: NextRequest) {
     if (!authUser) {
       return unauthorizedResponse("Invalid or expired token")
     }
+    const limited = await rateLimit(request, userLimit("read", "events-search", authUser.userId))
+    if (limited) return limited
 
     const params = Object.fromEntries(request.nextUrl.searchParams)
     const parsed = searchSchema.safeParse(params)
@@ -54,18 +58,10 @@ export async function GET(request: NextRequest) {
     const { q, city, page, limit } = parsed.data
     const offset = (page - 1) * limit
 
-    // Sanitize query for PostgreSQL - escape special characters
-    const sanitized = q.replace(/[&|!():*'"\\]/g, " ").trim()
-    if (!sanitized) {
+    const tsquery = tsQueryFrom(q)
+    if (!tsquery) {
       return successResponse({ events: [], pagination: { page, limit, totalCount: 0, totalPages: 0, hasMore: false } })
     }
-
-    // Build tsquery from words (prefix matching with :*)
-    const tsquery = sanitized
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((word) => `${word}:*`)
-      .join(" & ")
 
     /*
      * The same age filter the listing applies — search is the other way in.
