@@ -159,14 +159,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     /*
      * An event's room names who the roster names (SCRUM-629): somebody the
      * viewer may recognise in this room (`visibleInRoom`: they revealed here, or
-     * a friend who allows it), with the photo the roster shows. Everyone else
-     * stays the pseudonym on the row with no photo. Yourself is left as it was,
-     * as the roster leaves you out. Room info and the Room cannot disagree
-     * about a person because both ask the same function.
+     * a friend who allows it) and yourself, with the photo the roster shows.
+     * Everyone else stays the pseudonym on the row with no photo. Room info and
+     * the Room cannot disagree about a person because both ask the same function.
      */
     const recognised =
       chatGroup.kind === "event" && chatGroup.event_id
-        ? await visibleInRoom(authUser.userId, chatGroup.event_id, members.filter((m) => m.user.id !== authUser.userId).map((m) => m.user.id))
+        ? await visibleInRoom(authUser.userId, chatGroup.event_id, members.map((m) => m.user.id))
         : new Set<string>()
     return successResponse({
       participants: members.map((m) => {

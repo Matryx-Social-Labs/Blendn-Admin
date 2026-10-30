@@ -196,6 +196,11 @@ describe("a friend leaves every stranger surface, whatever their switch (B1)", (
     const listedCovered = listed.find((r) => r.userId === rosterCovered.userId)!
     expect({ name: listedShown.name, avatar: listedShown.avatar }).toEqual({ name: rosterShown.name, avatar: rosterShown.image ?? null })
     expect(listedShown.avatar).not.toBeNull()
+    // The viewer's own row is theirs on both reads (the roster names you to yourself).
+    const rosterMine = rows.find((r) => r.userId === viewer.id)!
+    const listedMine = listed.find((r) => r.userId === viewer.id)!
+    expect({ name: listedMine.name, avatar: listedMine.avatar }).toEqual({ name: rosterMine.name, avatar: rosterMine.image ?? null })
+    expect(listedMine.name).toContain("fir-i-v")
     // Someone the viewer may not recognise stays a pseudonym with no photo, as on the roster.
     expect({ name: listedCovered.name, avatar: listedCovered.avatar }).toEqual({ name: rosterCovered.name, avatar: null })
   })
