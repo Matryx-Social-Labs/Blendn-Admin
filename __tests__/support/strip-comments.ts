@@ -19,5 +19,8 @@
  * URL, so it costs nothing here and a real tokeniser is not worth its weight.
  */
 export function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")
+  // One pass, so whichever comment starts first wins: a `/*` inside a `//` line
+  // (`// not "@/lib/*"`) used to open a block comment that swallowed the imports
+  // below it (SCRUM-655).
+  return src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")
 }

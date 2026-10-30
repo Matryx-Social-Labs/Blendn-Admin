@@ -104,11 +104,13 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
 
   // --- Presence sessions: the folds, shipped ahead of their readers ---------
   //
-  // `openSession`, `closeSession`, `insideNow` and `attended` are wired — the
-  // check-in route opens a session and `performCheckout` closes one, so the
-  // table is written by the real paths rather than declared and forgotten.
+  // `openSession` and `closeSession` are wired — the check-in route opens a
+  // session and `performCheckout` closes one, so the table is written by the
+  // real paths rather than declared and forgotten. `attended` and `insideNow` are
+  // called only by their itests (SCRUM-655: the
+  // ratchet used to count a `MatchCard.insideNow` property as a caller).
   //
-  // These two are the folds the cutover needs and nothing reads yet, because
+  // These are the folds the cutover needs and nothing reads yet, because
   // occupancy and dwell still come from `event_check_ins`. Moving those readers
   // is a change that must ship WITH the counting fix, not before it: sessions
   // are many-per-person, so a naive `_count` gets *worse* on the day they
@@ -117,6 +119,8 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   //
   // The staleness half of this ratchet is what makes the entry temporary: wire
   // them and it will tell you to delete these lines.
+  ["attended", "scripts/seed-qa-scale-rows.ts has a local helper of the same name; the presence-sessions fold has only itest callers"],
+  ["insideNow", "the presence-sessions fold of who is inside now; the Room still counts event_check_ins (hereCountFor), called only by itests"],
   ["dwellSeconds", "the fold occupancy/dwell readers move to; they still read event_check_ins"],
   ["departureQuality", "the degraded-occupancy signal R31 wants on the organiser's screen; no screen reads it yet"],
 
@@ -202,10 +206,34 @@ const exports_: Export[] = libFiles.flatMap((file) =>
   }))
 )
 
-/** Which other files name this export. */
+/**
+ * A use of the function, not a mention of its name: the name inside an import
+ * list (`import { name } from`, multi-line too), or destructured from a dynamic
+ * `import()` / `require()`. A bare word match let `insideNow` pass on a
+ * `MatchCard.insideNow` property of the same name, and `attended` pass on a
+ * local helper in a script that happens to share it, while only itests called
+ * the real ones (SCRUM-655). Every real caller imports what it calls.
+ *
+ * Ceiling: the module path is not checked (an import list naming the same word
+ * from another module counts), and `import * as ns` / `m.name` are not seen;
+ * first-party code uses named imports only.
+ */
+const importOf = (name: string) =>
+  new RegExp(
+    [
+      // import { a, name } from "…", across lines
+      `\\{[^{}]*\\b${name}\\b[^{}]*\\}\\s*from\\b`,
+      // const { name } = await import("…") / require("…"), or const [{ name }, …] = await Promise.all([import("…"), …])
+      `\\{[^{}]*\\b${name}\\b[^{}]*\\}(?:\\s*,\\s*\\{[^{}]*\\})*\\s*\\]?\\s*=\\s*(?:await\\s+)?(?:import|require|Promise\\.all)\\b`,
+      // (await import("…")).name(
+      `import\\(\\s*["'][^"']+["']\\s*\\)\\s*\\)?\\.${name}\\b`,
+    ].join("|")
+  )
+
+/** Which other files use this export. */
 function callersOf(exp: Export): string[] {
-  const word = new RegExp(`\\b${exp.name}\\b`)
-  return callerFiles.filter((f) => f !== exp.module && word.test(sources.get(f)!)).map(rel)
+  const use = importOf(exp.name)
+  return callerFiles.filter((f) => f !== exp.module && use.test(sources.get(f)!)).map(rel)
 }
 
 /**
