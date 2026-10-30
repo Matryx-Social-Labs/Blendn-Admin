@@ -208,7 +208,7 @@ export async function matchesForEvent(
   })
   if (!viewerCheckIn) return null
 
-  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, closedPairs, friends, likes] =
+  const [viewerProfile, viewerInterests, checkIns, prefs, blocks, closedPairs, friends, likes, reported] =
     await Promise.all([
     db.profiles.findUnique({
       where: { id: viewerId },
@@ -293,6 +293,14 @@ export async function matchesForEvent(
       where: { event_id: eventId, liker_id: viewerId },
       select: { liked_id: true },
     }),
+    // Whoever the viewer reported stays off their own deck and grid, for good
+    // (SCRUM-229 ruling): a block on the reporter's side, without blocking.
+    // `user_reports` has no event column, so it holds in every room.
+    db.user_reports.findMany({
+      where: { reporter_id: viewerId },
+      select: { reported_id: true },
+      distinct: ["reported_id"],
+    }),
   ])
 
   /*
@@ -309,6 +317,7 @@ export async function matchesForEvent(
     ...blocks.map((b) => (b.blocker_id === viewerId ? b.blocked_id : b.blocker_id)),
     ...closedPairs,
     ...friends,
+    ...reported.map((r) => r.reported_id),
   ])
   const liked = new Set(likes.map((l) => l.liked_id))
 
