@@ -126,3 +126,19 @@ it("still ends the family on a replay long after rotation", async () => {
   // Reuse detection: the legitimate successor is gone too.
   expect((await refresh(pair.refreshToken)).status).toBe(401)
 })
+
+it("leaves one live token when one refresh token is presented many times at once (SCRUM-950)", async () => {
+  const userId = await makeUser("rr-fork")
+  users.push(userId)
+  const { email } = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } })
+  const first = signRefreshToken(userId, email)
+  await storeRefreshToken(userId, first)
+
+  // A stolen token raced against its owner's: neither side presents a revoked token.
+  const results = await Promise.all(Array.from({ length: 6 }, () => refresh(first)))
+  expect(results.every((r) => r.status === 200)).toBe(true)
+
+  // Every request got a pair, but the chain must not fork: one live descendant.
+  const live = await db.mobile_refresh_tokens.findMany({ where: { user_id: userId, revoked_at: null } })
+  expect(live).toHaveLength(1)
+})
