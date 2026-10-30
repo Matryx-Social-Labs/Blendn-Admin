@@ -276,7 +276,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/participants",
   tags: ["Mobile Chat"],
   summary: "List group participants",
-  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies. In a room that is not an event's (a board post's), only the people its owner admits are listed. In an event's room, only the people in it now (checked in to its event) and its hosts: a member who checked out or whose window expired is not listed. `totalCount` is the people listed, not the headcount (`hereCount`).",
+  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies. In a room that is not an event's (a board post's), only the people its owner admits are listed. In an event's room, only the people in it now (checked in to its event) and its hosts: a member who checked out or whose window expired is not listed. `totalCount` is the people listed, not the headcount (`hereCount`). In an event's room a person you may recognise there (they revealed in it, or a friend who allows it: the same rule as `GET /events/:eventId/checkins`) comes with their `name` and their first photo as `avatar`; everyone else is the pseudonym with `avatar` null.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),
