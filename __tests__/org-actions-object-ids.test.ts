@@ -12,6 +12,7 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+jest.mock("@/lib/socket-server", () => ({ evictUserSockets: jest.fn() }))
 
 import { getOrgMembers, removeDomain, removeMember, revokeInvite, setMemberRole } from "@/lib/org-actions"
 import { resolveSponsorGrant } from "@/lib/org-membership"
