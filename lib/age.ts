@@ -39,6 +39,13 @@ export const DATING_MIN_AGE = 18
  */
 export const ACCOUNT_MIN_AGE = 18
 
+/**
+ * The oldest age a new account or profile write may carry (SCRUM-923). 120 let
+ * a typo'd year — 1912 for 1995 — store a 114-year-old; nobody on a networking
+ * app is that. Stored ages above it are left alone (`ageFrom` still reads them).
+ */
+export const ACCOUNT_MAX_AGE = 100
+
 /** What a person under `ACCOUNT_MIN_AGE`, or with no age yet, is told. */
 export const ADULTS_ONLY = `Blend’n is for people ${ACCOUNT_MIN_AGE} and over.`
 
@@ -255,7 +262,7 @@ function wholeYearsBetween(from: Date, to: Date): number {
  * Parse a `YYYY-MM-DD` from a client into a date safe to store.
  *
  * `null` for anything malformed, in the future, or implying an age outside
- * `ACCOUNT_MIN_AGE`–120. The floor is the account floor: a birth date under it
+ * `ACCOUNT_MIN_AGE`–`ACCOUNT_MAX_AGE`. The floor is the account floor: a birth date under it
  * is a person the product no longer admits (SCRUM-330).
  *
  * Built with `Date.UTC` rather than `new Date("YYYY-MM-DD")` so the stored day
@@ -285,5 +292,5 @@ export function parseDateOfBirth(input: unknown, now: Date = new Date()): Date |
   }
 
   const years = wholeYearsBetween(date, now)
-  return years < ACCOUNT_MIN_AGE || years > 120 ? null : date
+  return years < ACCOUNT_MIN_AGE || years > ACCOUNT_MAX_AGE ? null : date
 }
