@@ -323,6 +323,19 @@ describe("the `mutedRooms` count", () => {
     expect(await mutedCount(me)).toBe((await list(me)).rooms.length)
   })
 
+  it("counts the listed rooms past the walk ceiling too, as the list's cursor reaches them (SCRUM-934)", async () => {
+    const host = await person("mc-walk-host")
+    const me = await person("mc-walk")
+    const listed = await eventRoom(host, me, { prefs: mutedAt("2026-09-01T10:00:00.000Z") })
+    for (let i = 0; i < 5; i++) await eventRoom(host, me, { prefs: mutedAt(`2026-09-02T10:0${i}:00.000Z`), room: "archived" })
+
+    // Allowed to examine four, the page stops short with a cursor; the count must not stop there with 0.
+    const short = await mutedRoomPage(me.id, 5, null, new Date(), { batch: 2, maxExamined: 4 })
+    expect(short.rooms).toEqual([])
+    expect(await mutedRoomCount(me.id, new Date(), 1000, { batch: 2, maxExamined: 4 })).toBe(1)
+    expect(listed.roomId).toBeTruthy()
+  })
+
   it("stops at 1000, and counts only that far", async () => {
     expect(MUTED_ROOMS_COUNT_CAP).toBe(1000) // written out: the app says "999+" past it
     const host = await person("mc-cap-host")

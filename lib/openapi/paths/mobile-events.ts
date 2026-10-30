@@ -445,7 +445,7 @@ registry.registerPath({
     "room setting — friends never meet as stranger cards), anyone with Show online status off, a member a host " +
     "banned from the room, a suspended or deleted account. `total` counts who may be listed.\n\n" +
     "Paged by `cursor`: send `nextCursor` (the last card's handle) back; it is valid in this room only. Ordered by " +
-    "first arrival. `limit` 1–50, default 30. 404 for an unknown, draft or deleted event and for a venue's live " +
+    "first arrival. `limit` 1–50, default 30; a value outside that, or one that is not a number, is held to the range (or the default), as on every list route, never refused. 404 for an unknown, draft or deleted event and for a venue's live " +
     "room; 403 if you never checked in, and 403 `USER_BANNED` (the chat's answer) if a host removed you from the room; 400 `INVALID_CURSOR` for a cursor that is not a card from this room.",
   security: bearerAuth,
   request: {

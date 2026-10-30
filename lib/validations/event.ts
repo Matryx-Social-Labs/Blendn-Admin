@@ -108,7 +108,7 @@ export const checkinSchema = z.object({
       platform: z.string().optional(),
       device: z.string().optional(),
       appVersion: z.string().optional(),
-      gpsAccuracy: z.number().optional(), // accuracy radius in metres
+      gpsAccuracy: z.number().min(0).optional(), // accuracy radius in metres; a negative one (iOS "no fix") would pass the vague-fix gate as a perfect fix
     })
     .optional(),
 })
