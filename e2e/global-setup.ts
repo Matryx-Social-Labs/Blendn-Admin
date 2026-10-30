@@ -28,11 +28,10 @@ import { PERSONA_ACCOUNTS, ROLE_ACCOUNTS, type PersonaKey, type RoleKey } from "
  * same cookie NextAuth would have set. Nothing about the session is faked; only
  * the *typing of a password* is skipped.
  *
- * **Sign-in itself is NOT covered by any e2e spec** (SCRUM-655): there is no
- * `sign-in.spec.ts` and never was, so the form (credentials, the error copy,
- * the 5-per-15-minute limit) is only reached by hand and by the API itests.
- * One spec would be the right place for it: it would prove the door works
- * while the other specs do not each queue up at it.
+ * **Sign-in itself is still covered**, by `sign-in.spec.ts`, which drives the
+ * real form once (wrong password, an attendee, a right password, and the sixth
+ * attempt the limit refuses). One spec proves the door works while the other
+ * specs do not each queue up at it.
  */
 export const AUTH_DIR = join(__dirname, ".auth")
 
