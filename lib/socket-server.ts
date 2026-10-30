@@ -17,6 +17,7 @@ import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
 import { readableUrl } from "./tigris"
 import { isUuid } from "./api-input"
+import { createEventBudget } from "./socket-budget"
 import { namesInRoom, recognisedInRoomBy } from "./identity"
 import { forVenue, type LiveSnapshot, type VenueLiveSnapshot } from "./live-metrics"
 import type { user_role } from "@prisma/client"
@@ -347,6 +348,10 @@ interface OpsLoop {
 }
 
 const opsTimers = new Map<string, OpsLoop>()
+/** Events a socket may send per window; a reconnect re-joining dozens of rooms is far below it. */
+const SOCKET_EVENT_BUDGET = 120
+const SOCKET_EVENT_WINDOW_MS = 10_000
+
 const OPS_INTERVAL_MS = 5000
 
 export function startOpsBroadcast(eventId: string): void {
@@ -467,6 +472,13 @@ export async function guardJoin(
   denyMessage: string,
   check: () => Promise<boolean>
 ): Promise<void> {
+  // The room name ends in the id the check looks up. A uuid or nothing: an
+  // object posted where a string belongs would widen the lookup's filter and the
+  // socket would sit in `event:[object Object]` (SCRUM-940).
+  if (!isUuid(room.slice(room.lastIndexOf(":") + 1))) {
+    socket.emit("error", { message: denyMessage, code: "FORBIDDEN" })
+    return
+  }
   try {
     if (await check()) {
       socket.join(room)
@@ -994,6 +1006,13 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     // Send connection confirmation
     authSocket.emit("connected", { userId: authSocket.data.userId })
+
+    // Events past the budget are dropped before any handler (and its queries) runs.
+    const withinBudget = createEventBudget(SOCKET_EVENT_BUDGET, SOCKET_EVENT_WINDOW_MS)
+    authSocket.use((_packet, next) => {
+      if (withinBudget()) next()
+      else logger.warn("Socket event budget exceeded", { userId: authSocket.data.userId, principal: authSocket.data.principal })
+    })
 
     // Join user's personal room for direct notifications, and the one for
     // this kind of session, so ending one kind closes only those (SCRUM-603).
