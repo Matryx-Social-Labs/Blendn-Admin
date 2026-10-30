@@ -118,6 +118,34 @@ it("answers at exactly three", async () => {
   expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: 2 })
 })
 
+/*
+ * SCRUM-671: the floor is on the people the count is drawn from. A room of the
+ * viewer, one hidden person (show_online off, a block, a friend, suspended) and
+ * one visible person has hereCount 3, but the taste number would then be that
+ * one visible person's overlap with you.
+ */
+it("is null when hidden people make up the floor and one visible person is left", async () => {
+  here = 3
+  pool = [person("p1", ["techno"])]
+  const body = await (await call()).json()
+  expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
+})
+
+it("is null when the viewer's blocks leave one visible person in a room of three", async () => {
+  here = 3
+  pool = [person("p1", ["techno"]), person("p2", ["techno"])]
+  mockBlocks.mockResolvedValue(["p2"])
+  const body = await (await call()).json()
+  expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
+})
+
+it("answers when the viewer and two visible people make three, hidden people beside them or not", async () => {
+  here = 5
+  pool = [person("p1", ["techno"]), person("p2", ["running"])]
+  const body = await (await call()).json()
+  expect(body.data).toEqual({ hereCount: 5, tasteMatchCount: 1 })
+})
+
 it("counts a person once however many rows they have", async () => {
   pool = [
     person("p1", ["techno"]),

@@ -37,8 +37,12 @@ export interface RoomPreview {
  * match deck's rule — parent-expanded, via `expandInterests` — so this number
  * and the deck agree about who has something in common.
  *
- * The floor is on `hereCount`, which is the people inside now (you included),
- * so it is a floor on the same population the count is drawn from.
+ * The floor is on the people the count is drawn from, you included (SCRUM-671):
+ * `hereCount` alone counts people the count leaves out (show-online off,
+ * blocked, friends, suspended), so a room of you, one hidden person and one
+ * visible person passes it and the number becomes that one person's overlap
+ * with you. `hereCount` stays as a cheap first check, since the visible people
+ * can only be fewer.
  */
 export async function roomPreview(eventId: string, viewerId: string): Promise<RoomPreview> {
   const hereCount = await hereCountFor(eventId)
@@ -73,6 +77,7 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
     if (hiddenSet.has(row.user_id)) continue
     people.set(row.user_id, row.user.user_interests.map((i) => i.category_id))
   }
+  if (people.size + 1 < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
   // No interests of your own means nothing can be shared — a true zero, not a
   // reason to hide the number.
   if (viewerInterests.length === 0) return { hereCount, tasteMatchCount: 0 }
