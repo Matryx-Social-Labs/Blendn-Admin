@@ -93,9 +93,13 @@ export function txtInstructions(domain: string, token: string) {
 export function isRoleAddressFor(email: string, rawDomain: string): boolean {
   const domain = normaliseDomain(rawDomain)
   if (!domain) return false
-  const [local, emailDomainPart] = email.trim().toLowerCase().split("@")
-  if (!local || !emailDomainPart) return false
-  if (normaliseDomain(emailDomainPart) !== domain) return false
+  // Exactly `<role>@<domain>`: the address is mailed as typed, so anything
+  // `normaliseDomain` would trim off the domain part (a path, a port, a second
+  // `@`) is a second recipient to a mailer (SCRUM-937).
+  const parts = email.trim().toLowerCase().split("@")
+  if (parts.length !== 2) return false
+  const [local, emailDomainPart] = parts
+  if (!local || emailDomainPart !== domain) return false
   return (ROLE_ADDRESSES as readonly string[]).includes(local)
 }
 
