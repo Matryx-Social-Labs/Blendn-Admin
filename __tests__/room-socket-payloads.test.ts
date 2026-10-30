@@ -323,6 +323,18 @@ describe("every recipient gets their own copy (SCRUM-371)", () => {
     expect(inRoom.map((s) => s.data.userId)).not.toContain("pr-banned")
   })
 
+  it("chat:memberBanned on an unban reaches the person the ban took out of the room, once (SCRUM-949)", async () => {
+    // A ban evicts their sockets from `chat:<room>`, so the room is no longer where they listen.
+    const unbanned = await listen("pr-unbanned", [])
+    const witness = await listen("pr-unban-witness", [`chat:${CHAT}`])
+
+    emitChatMemberBanned(CHAT, "pr-unbanned", false)
+    await settle()
+
+    expect(unbanned["chat:memberBanned"]).toEqual([{ chatGroupId: CHAT, userId: "pr-unbanned", banned: false }])
+    expect(witness["chat:memberBanned"]).toEqual([{ chatGroupId: CHAT, userId: handle("pr-unbanned"), banned: false }])
+  })
+
   it("chat:memberLeft: the leaver hears their own id, the room their handle, a blocked member nothing — then the leaver is out", async () => {
     const leaver = await listen("pr-leaver", [`chat:${CHAT}`])
     const witness = await listen("pr-left-witness", [`chat:${CHAT}`])

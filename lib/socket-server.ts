@@ -1841,9 +1841,11 @@ export function emitChatMemberBanned(chatGroupId: string, userId: string, banned
    * before their own copy (with their own real id, so the app knows it is
    * them) was sent. `toChatRoom` never rejects, so the eviction always runs.
    */
+  // Their own sockets too: a ban took them out of `chat:<room>`, so an unban
+  // sent to the room alone never reached the person it restores (SCRUM-949).
   void toChatRoom(
     chatGroupId,
-    io.in(`chat:${chatGroupId}`),
+    io.in([`chat:${chatGroupId}`, `user:${userId}`]),
     "chat:memberBanned",
     (idFor) => ({ chatGroupId, userId: idFor(userId), banned }),
     scope
