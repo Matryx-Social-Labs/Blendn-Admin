@@ -323,6 +323,19 @@ describe("GET /events/:id/people — a concert-sized night", () => {
     expect(seen).toEqual(handles(n, ...crowd))
   })
 
+  it("holds an out-of-range limit to 1..50, as every list route does, rather than refusing it", async () => {
+    const n = await night()
+    const me = await person()
+    await wasThere(n, me)
+    for (let i = 0; i < 3; i++) await wasThere(n, await person())
+
+    for (const [limit, expected] of [["0", 1], ["-5", 1], ["abc", 3], ["9999", 3]] as const) {
+      const { status, json } = await people(n.id, me.token, `?limit=${limit}`)
+      expect(status).toBe(200)
+      expect(json.data.people).toHaveLength(expected)
+    }
+  })
+
   it("refuses a cursor that is not a card from this room", async () => {
     const n = await night()
     const elsewhere = await night()

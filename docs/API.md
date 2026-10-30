@@ -680,7 +680,7 @@ booleans, all `true` by default. `PUT` takes any non-empty subset (a missing key
 left as it is; an unknown key or a non-boolean is a 400 `VALIDATION_FAILED`) and
 answers all three. `GET` also says **`mutedRooms`**, an integer: how many rooms you
 have silenced, exactly the ones `GET /me/muted-rooms` lists, counted up to **1000**
-(show "999+" at 1000). `PUT` does not send it. The send path honours the switches, on
+(show "999+" at 1000); a person with more than 10,000 muted rooms to look through reads a lower bound. `PUT` does not send it. The send path honours the switches, on
 the single and the bulk sender:
 
 | Switch | Stops the push of |
@@ -1105,7 +1105,8 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
   `total` of 0 means nobody to show: leave the row out.
 - **Paged by cursor** for a concert-sized night: ordered by first arrival; send
   `nextCursor` (the last card's handle) back until it is null. `limit` 1–50,
-  default 30. `overlap` is one sentence of what you share, and always null on a
+  default 30; a value outside that, or not a number, is held to the range (or
+  the default), as on every list route, never refused. `overlap` is one sentence of what you share, and always null on a
   night under 8 people.
 
 | Refusal | When |
@@ -1591,6 +1592,7 @@ today (choosing it again does not restart the four hours). Anything else is
 | 403 `FORBIDDEN` (`reasonCode` `PROFILE_INCOMPLETE`) / `AGE_RESTRICTED` (`reasonCode` `AGE_UNKNOWN` when no age is on file) | Not onboarded / no adult age (an unknown age is refused here) |
 | 409 `EVENT_LIVE_HERE` | A public event at this venue (link confirmed, or its own area at the venue) is on, or starts within the hour. The body carries `eventId`: hand off to that event's check-in. Checked before the fence |
 | 400 `GPS_TOO_VAGUE` | A fix worse than 150 m (`deviceInfo.gpsAccuracy`): a better fix where you stand, not directions |
+| 400 `VALIDATION_FAILED` | `deviceInfo.gpsAccuracy` below 0 (a platform's "no fix"): leave the field out instead. Also on `POST /checkins/inside` |
 | 400 `NO_CHECK_IN_AREA` | Nobody has drawn this venue's area: no position fixes it |
 | 400 `OUT_OF_RANGE` | A position outside the area — "You're not at ‹venue› yet.", never a distance. Before step 5 this code also covered the two rows above; the event check-in still uses it for all three. A refusal writes nothing: no venue day is made for it |
 | 403 `PLUS_REQUIRED` | `stay` where Blendn+ is gated in the venue's city and you hold neither Plus nor a live Night Pass — open the paywall. Asked last, so it only stands where "stay" would otherwise have worked. In a city's launch season "stay" is everyone's (see Blendn+, below) |
