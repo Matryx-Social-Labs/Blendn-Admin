@@ -1,4 +1,4 @@
-import { clientIpFrom } from "@/lib/client-ip"
+import { clientNetworkFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import {
   RATE_LIMIT_WINDOW,
@@ -14,7 +14,7 @@ interface RateLimitConfig {
 }
 
 const DEFAULT_KEY_GENERATOR = (req: NextRequest): string => {
-  const ip = clientIpFrom(req.headers)
+  const ip = clientNetworkFrom(req.headers)
   return `${req.method}:${req.nextUrl.pathname}:${ip}`
 }
 
@@ -122,7 +122,7 @@ export function createAuthRateLimit(
       windowMs: RATE_LIMIT_WINDOW.SIGNIN,
       maxRequests: RATE_LIMIT_MAX_REQUESTS.SIGNIN,
       keyGenerator: (req) => {
-        const ip = clientIpFrom(req.headers)
+        const ip = clientNetworkFrom(req.headers)
         /*
          * Per-IP only, and that is all this hook can be: `keyGenerator` is
          * synchronous and runs before the route reads the body, so the email
@@ -137,7 +137,7 @@ export function createAuthRateLimit(
       windowMs: RATE_LIMIT_WINDOW.SIGNUP,
       maxRequests: RATE_LIMIT_MAX_REQUESTS.SIGNUP,
       keyGenerator: (req) => {
-        const ip = clientIpFrom(req.headers)
+        const ip = clientNetworkFrom(req.headers)
         return `auth:signup:${ip}`
       },
     },
@@ -145,7 +145,7 @@ export function createAuthRateLimit(
       windowMs: RATE_LIMIT_WINDOW.GOOGLE_AUTH,
       maxRequests: RATE_LIMIT_MAX_REQUESTS.GOOGLE_AUTH,
       keyGenerator: (req) => {
-        const ip = clientIpFrom(req.headers)
+        const ip = clientNetworkFrom(req.headers)
         return `auth:google:${ip}`
       },
     },
@@ -153,7 +153,7 @@ export function createAuthRateLimit(
       windowMs: RATE_LIMIT_WINDOW.GOOGLE_AUTH,
       maxRequests: RATE_LIMIT_MAX_REQUESTS.GOOGLE_AUTH,
       keyGenerator: (req) => {
-        const ip = clientIpFrom(req.headers)
+        const ip = clientNetworkFrom(req.headers)
         return `auth:apple:${ip}`
       },
     },
@@ -161,7 +161,7 @@ export function createAuthRateLimit(
       windowMs: RATE_LIMIT_WINDOW.REFRESH,
       maxRequests: RATE_LIMIT_MAX_REQUESTS.REFRESH,
       keyGenerator: (req) => {
-        const ip = clientIpFrom(req.headers)
+        const ip = clientNetworkFrom(req.headers)
         return `auth:refresh:${ip}`
       },
     },
@@ -169,7 +169,7 @@ export function createAuthRateLimit(
       windowMs: RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN,
       maxRequests: RATE_LIMIT_MAX_REQUESTS.DASHBOARD_SIGNIN,
       keyGenerator: (req) => {
-        const ip = clientIpFrom(req.headers)
+        const ip = clientNetworkFrom(req.headers)
         return `auth:dashboard-signin:${ip}`
       },
     },

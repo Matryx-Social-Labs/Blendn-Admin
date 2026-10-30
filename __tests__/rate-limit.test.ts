@@ -118,6 +118,26 @@ describe("createAuthRateLimit", () => {
   })
 })
 
+describe("auth limits key an IPv6 client on its /64 (SCRUM-938)", () => {
+  // A provider hands one subscriber a whole /64; a limit keyed on the full
+  // address gives a client that rotates inside it a fresh bucket per request.
+  it("shares one bucket across addresses in the same /64, and splits different networks", () => {
+    for (const type of ["signin", "signup", "google", "apple", "refresh", "dashboard-signin"] as const) {
+      const key = createAuthRateLimit(type).keyGenerator!
+      const a = makeRequest("/x", "2405:201:5c00:1234::1")
+      const b = makeRequest("/x", "2405:201:5c00:1234:aaaa:bbbb:cccc:dddd")
+      const other = makeRequest("/x", "2405:201:5c00:9999::1")
+      expect(key(a)).toBe(key(b))
+      expect(key(a)).not.toBe(key(other))
+    }
+  })
+
+  it("keeps an IPv4 client on its own address", () => {
+    const key = createAuthRateLimit("signin").keyGenerator!
+    expect(key(makeRequest("/x", "203.0.113.7"))).not.toBe(key(makeRequest("/x", "203.0.113.8")))
+  })
+})
+
 describe("createUserRateLimit", () => {
   it("keys on the user, not the IP, so one account cannot flood from many IPs", async () => {
     const config = createUserRateLimit("organiser-broadcast", "user_abc")

@@ -3,6 +3,7 @@
 import { isRazorpayReviewOrg, REVIEW_ORG_REFUSAL } from "./review-demo-org"
 import { Refusal } from "./refusal"
 import { isUuid } from "./api-input"
+import { evictUserSockets } from "./socket-server"
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
 import { getAuth } from "@/lib/auth"
@@ -460,6 +461,9 @@ export async function removeMember(orgId: string, memberId: string): Promise<voi
   }
 
   await db.organisation_members.delete({ where: { id: memberId } })
+  // Their live-operations tab authorised once, at join, and the 5 s tick does not
+  // ask again: drop the dashboard sockets and let the reconnect re-authorise (SCRUM-939).
+  evictUserSockets(member.user_id, "dashboard")
 
   auditLog({
     userId: user.id,
@@ -650,7 +654,7 @@ export async function sendDomainVerifyEmail(
   })
 
   const link = `${appUrl()}/verify-domain?token=${token}`
-  const result = await sendEmail({ to: address, ...domainVerifyEmail(row.domain, link) })
+  const result = await sendEmail({ to: address.trim().toLowerCase(), ...domainVerifyEmail(row.domain, link) })
   if (!result.sent) {
     logger.error("Domain verify email failed", { domainId, reason: result.reason })
     return { ok: false, message: "Could not send just now. Try again, or use the DNS record." }

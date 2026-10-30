@@ -120,6 +120,19 @@ describe("the email fallback only ever targets role addresses", () => {
     expect(isRoleAddressFor("Admin@ACME.com", "acme.com")).toBe(true)
   })
 
+  it("refuses an address with anything after the domain, which a mailer could read as a second recipient (SCRUM-937)", () => {
+    for (const email of [
+      "admin@acme.com/x <attacker@evil.com>",
+      "admin@acme.com@evil.com",
+      "admin@acme.com:25",
+      "admin@acme.com?to=evil.com",
+      "admin@acme.com <attacker@evil.com>",
+      "admin@www.acme.com",
+    ]) {
+      expect(isRoleAddressFor(email, "acme.com")).toBe(false)
+    }
+  })
+
   it("lists the addresses it will send to", () => {
     expect(roleAddressesFor("https://www.acme.com/")).toEqual([
       "admin@acme.com",

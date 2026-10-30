@@ -15,7 +15,10 @@ export const dynamic = "force-dynamic"
 export async function GET(req: NextRequest) {
   const expected = process.env.SENTRY_PROBE_TOKEN
   const given = req.headers.get("x-probe-token") ?? ""
-  const ok = Boolean(expected) && given.length === expected!.length && timingSafeEqual(Buffer.from(given), Buffer.from(expected!))
+  const givenBytes = Buffer.from(given)
+  const expectedBytes = Buffer.from(expected ?? "")
+  // Byte length, not string length: timingSafeEqual throws on unequal byte lengths (SCRUM-941).
+  const ok = Boolean(expected) && givenBytes.length === expectedBytes.length && timingSafeEqual(givenBytes, expectedBytes)
   if (!ok) return notFoundResponse("Not found")
   throw new Error(`sentry-probe: deliberate unhandled error (${req.nextUrl.searchParams.get("run") ?? "no run id"})`)
 }

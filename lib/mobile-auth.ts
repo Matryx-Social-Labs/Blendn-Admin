@@ -457,7 +457,8 @@ export async function revokeUserRefreshTokens(userId: string): Promise<void> {
 export async function revokeRefreshToken(token: string, replacedBy?: string, userId?: string): Promise<void> {
   try {
     const decoded = jwt.decode(token) as DecodedToken | null
-    if (!decoded?.jti) return
+    // The token is unverified: `jti` can be any JSON value, and an object would be a filter.
+    if (typeof decoded?.jti !== "string" || !decoded.jti) return
 
     await db.mobile_refresh_tokens.updateMany({
       where: {

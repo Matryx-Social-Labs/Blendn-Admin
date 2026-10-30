@@ -91,15 +91,15 @@ beforeEach(() => {
 describe("guardJoin", () => {
   it("joins the room when the check authorizes", async () => {
     const { socket, raw } = makeSocket()
-    await guardJoin(socket, "chat:abc", "denied", async () => true)
+    await guardJoin(socket, `chat:${CHAT_ID}`, "denied", async () => true)
 
-    expect(raw.join).toHaveBeenCalledWith("chat:abc")
+    expect(raw.join).toHaveBeenCalledWith(`chat:${CHAT_ID}`)
     expect(raw.emit).not.toHaveBeenCalled()
   })
 
   it("does not join and tells the client when the check denies", async () => {
     const { socket, raw } = makeSocket()
-    await guardJoin(socket, "chat:abc", "Not authorized to join this chat", async () => false)
+    await guardJoin(socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => false)
 
     expect(raw.join).not.toHaveBeenCalled()
     expect(raw.emit).toHaveBeenCalledWith("error", {
@@ -116,7 +116,7 @@ describe("guardJoin", () => {
     const { socket, raw } = makeSocket()
 
     await expect(
-      guardJoin(socket, "chat:bad", "Not authorized to join this chat", async () => {
+      guardJoin(socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => {
         throw new Error("Inconsistent column data: Error creating UUID")
       })
     ).resolves.toBeUndefined()
@@ -128,12 +128,26 @@ describe("guardJoin", () => {
     })
   })
 
+  it("denies a room whose id is not a uuid, without asking the check (SCRUM-940)", async () => {
+    // `{ not: <uuid> }` where an id belongs would widen a findFirst filter and
+    // the socket would join `event:[object Object]`.
+    const check = jest.fn().mockResolvedValue(true)
+    const objectId = { not: EVENT_ID } as unknown as string
+    for (const room of [`event:${objectId}`, `event:room:${objectId}`, "chat:abc", "conversation:"]) {
+      const { socket, raw } = makeSocket()
+      await guardJoin(socket, room, "denied", check)
+      expect(raw.join).not.toHaveBeenCalled()
+      expect(raw.emit).toHaveBeenCalledWith("error", { message: "denied", code: "FORBIDDEN" })
+    }
+    expect(check).not.toHaveBeenCalled()
+  })
+
   it("does not leak whether the room exists — same denial either way", async () => {
     const missing = makeSocket()
-    await guardJoin(missing.socket, "chat:a", "Not authorized to join this chat", async () => false)
+    await guardJoin(missing.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => false)
 
     const throwing = makeSocket()
-    await guardJoin(throwing.socket, "chat:b", "Not authorized to join this chat", async () => {
+    await guardJoin(throwing.socket, `chat:${CHAT_ID}`, "Not authorized to join this chat", async () => {
       throw new Error("boom")
     })
 
