@@ -127,8 +127,15 @@ describe("hereCount", () => {
     expect(watcher["event:checkout"]).toEqual([expect.objectContaining({ hereCount: 6 })])
     // Not `distinctAttendeeCounts` (which keeps checked_out): live rows only.
     // A count in the database (one open check-in per person, SCRUM-705), never the rows.
+    // At a venue day, a window still open too (`inRoomWhere`, SCRUM-922): its real-event arm leaves an event unchanged.
     expect(mockCount).toHaveBeenCalledWith({
-      where: { event_id: EVENT, status: "checked_in", kind: "attendee", user: { suspended_at: null } },
+      where: {
+        event_id: EVENT,
+        status: "checked_in",
+        kind: "attendee",
+        user: { suspended_at: null },
+        AND: [{ OR: [{ event: { kind: "event" } }, { status: "checked_in", expires_at: { gt: expect.any(Date) } }] }],
+      },
     })
   })
 
