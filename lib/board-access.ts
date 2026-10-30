@@ -320,7 +320,8 @@ export interface BoardTextVerdict {
  *
  * The same checks a room message gets before anyone else can see it: the
  * keyword filter, contact details, then OpenAI within the room's one-second
- * bound. The room stores a hit hidden and counts it toward a mute; the board
+ * bound. The room stores a hit hidden and counts it toward a mute (a contact
+ * detail is not abuse and does not count); the board
  * has no moderation queue, so a hit is refused and never stored. Contact
  * details say which — the fix is the poster's to make.
  *

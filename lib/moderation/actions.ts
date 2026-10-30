@@ -100,10 +100,11 @@ async function abuseHiddenCount(userId: string, chatGroupId: string, since: Date
        AND f.chat_group_id = ${chatGroupId}::uuid
        AND f.auto_action = 'hidden'
        AND f.created_at >= ${since}
-       AND NOT (
-         jsonb_typeof(f.categories) = 'object'
-         AND f.categories <> '{}'::jsonb
-         AND NOT EXISTS (SELECT 1 FROM jsonb_object_keys(f.categories) k WHERE left(k, 8) <> 'contact_')
+       AND NOT COALESCE(
+         CASE WHEN jsonb_typeof(f.categories) = 'object' AND f.categories <> '{}'::jsonb
+           THEN NOT EXISTS (SELECT 1 FROM jsonb_object_keys(f.categories) k WHERE left(k, 8) <> 'contact_')
+         END,
+         false
        )`
   return row?.n ?? 0
 }
@@ -191,8 +192,8 @@ export async function recordExamined(messageId: string, examined: boolean): Prom
 /**
  * Check if an **automatic** mute should have expired.
  *
- * Auto-mutes last for AUTO_MUTE_WINDOW_MS (1 hour). If the user's most recent
- * hidden message is older than that window, unmute them.
+ * Auto-mutes last for AUTO_MUTE_WINDOW_MS (1 hour). If fewer than three abusive
+ * hides (`abuseHiddenCount`) remain inside that window, unmute them.
  *
  * ## Only automatic mutes
  *

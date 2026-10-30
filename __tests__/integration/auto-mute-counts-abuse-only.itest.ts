@@ -4,6 +4,7 @@ process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? "itest-nextauth-sec
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { checkAndAutoMute, checkAndAutoUnmute } from "@/lib/moderation/actions"
+import { checkContactInfo } from "@/lib/moderation/contact-info"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -38,12 +39,12 @@ async function room() {
   return { groupId: group.id, userId: sender }
 }
 
-async function flag(r: { groupId: string; userId: string }, categories: Record<string, number>) {
+async function flag(r: { groupId: string; userId: string }, categories: Record<string, number>, createdAt?: Date, groupId = r.groupId, userId = r.userId) {
   const message = await db.chat_messages.create({
-    data: { chat_group_id: r.groupId, user_id: r.userId, content: "x", moderation_status: "hidden" },
+    data: { chat_group_id: groupId, user_id: userId, content: "x", moderation_status: "hidden" },
   })
   await db.moderation_flags.create({
-    data: { message_id: message.id, chat_group_id: r.groupId, user_id: r.userId, source: "auto_keyword", categories, confidence: 1, auto_action: "hidden" },
+    data: { message_id: message.id, chat_group_id: groupId, user_id: userId, source: "auto_keyword", categories, confidence: 1, auto_action: "hidden", ...(createdAt && { created_at: createdAt }) },
   })
 }
 
@@ -53,10 +54,29 @@ const statusOf = async (r: { groupId: string; userId: string }) =>
 describe("the auto-mute count", () => {
   it("does not mute for one abusive message after three contact-detail hides", async () => {
     const r = await room()
-    for (const kind of ["phone", "handle", "link"]) await flag(r, { [`contact_${kind}`]: 1 })
+    // The categories the pipeline really writes for a number, not a hand-typed key.
+    const contact = checkContactInfo("call me on 98765 43210")!.categories as Record<string, number>
+    for (let i = 0; i < 3; i++) await flag(r, contact)
     await flag(r, { profanity: 1 })
     await checkAndAutoMute(r.userId, r.groupId)
     expect(await statusOf(r)).toBe("active")
+  })
+
+  it("counts empty and openai-shaped categories as abuse, and keeps rooms, people and the window apart", async () => {
+    const r = await room()
+    const other = await room()
+    const old = new Date(Date.now() - 2 * 3_600_000)
+    await flag(r, {})
+    await flag(r, { "sexual/minors": 0.9 })
+    // None of these are this person's abuse in this room within the hour.
+    await flag(r, { profanity: 1 }, old)
+    await flag(other, { profanity: 1 })
+    await flag(r, { profanity: 1 }, undefined, r.groupId, other.userId)
+    await checkAndAutoMute(r.userId, r.groupId)
+    expect(await statusOf(r)).toBe("active")
+    await flag(r, { hate: 0.8 })
+    await checkAndAutoMute(r.userId, r.groupId)
+    expect(await statusOf(r)).toBe("muted")
   })
 
   it("mutes at three abusive hides, whatever contact hides sit beside them", async () => {

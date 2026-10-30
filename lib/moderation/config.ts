@@ -10,6 +10,6 @@ export const SPAM_HISTORY_TTL_MS = 5 * 60 * 1000 // 5 minutes
 export const SPAM_MAX_ENTRIES = 5_000
 export const MAX_LINKS_PER_MESSAGE = 2
 
-// Auto-mute: triggered after N hidden messages in a time window
+// Auto-mute: triggered after N hidden abusive messages (contact details do not count, SCRUM-485) in a time window
 export const AUTO_MUTE_HIDDEN_COUNT = 3
 export const AUTO_MUTE_WINDOW_MS = 60 * 60 * 1000 // 1 hour
