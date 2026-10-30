@@ -200,6 +200,19 @@ describe("a friend leaves every stranger surface, whatever their switch (B1)", (
     expect({ name: listedCovered.name, avatar: listedCovered.avatar }).toEqual({ name: rosterCovered.name, avatar: null })
   })
 
+  it("the room preview's taste count is null when hidden people are what lift the room to three (SCRUM-671)", async () => {
+    const eventId = await liveEvent()
+    const [viewer, quiet, loud] = [await person("fir-f-v"), await person("fir-f-q", { showOnline: false }), await person("fir-f-l")]
+    for (const p of [viewer, quiet, loud]) await checkIn(eventId, p)
+    const category = await db.categories.create({ data: { name: testId("fir-fcat"), slug: testId("fir-fcat") }, select: { id: true } })
+    await db.user_interests.createMany({ data: [viewer, quiet, loud].map((p) => ({ user_id: p.id, category_id: category.id })) })
+    const preview = await roomPreview(eventId, viewer.id)
+    // Three inside, but the number would be the one visible person's overlap with the viewer.
+    expect(preview).toEqual({ hereCount: 3, tasteMatchCount: null })
+    await db.user_interests.deleteMany({ where: { category_id: category.id } })
+    await db.categories.delete({ where: { id: category.id } })
+  })
+
   it("a person with Show online status off is absent from the event room's participants list (SCRUM-141), a crew room unchanged", async () => {
     const eventId = await liveEvent()
     const [viewer, quiet, loud] = [await person("fir-q-v"), await person("fir-q-q", { showOnline: false }), await person("fir-q-l")]
