@@ -18,6 +18,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 import { displayNameInConversation, mayShowRealName } from "@/lib/conversation-identity"
 import { screenDirectMessage, VISIBLE_DM } from "@/lib/dm-moderation"
 import { emitPrivateMessage } from "@/lib/socket-server"
@@ -41,7 +42,7 @@ interface RouteParams {
 
 const sendMessageSchema = z.object({
   text: z.string().min(1).max(5000).optional(),
-  mediaUrl: z.string().url().optional(),
+  mediaUrl: httpsUrl().optional(),
   /** A photo is all a DM takes (R9, SCRUM-626); stored as one whether or not this says so. */
   mediaType: z.literal("image").optional(),
   /** The message this one replies to; must be in the same conversation. */

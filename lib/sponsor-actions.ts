@@ -9,6 +9,7 @@ import { getAuth } from "@/lib/auth"
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { actorFor } from "@/lib/org-membership"
+import { httpsUrl } from "@/lib/https-url"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
 import { normaliseSponsorName } from "@/lib/sponsor-name"
 import { SPONSORSHIP } from "@/lib/constants"
@@ -31,8 +32,8 @@ import type { placement_status } from "@prisma/client"
 
 const brandSchema = z.object({
   name: z.string().trim().min(2).max(120),
-  website: z.string().trim().url().max(500).optional().or(z.literal("")),
-  logo_url: z.string().trim().url().max(500).optional().or(z.literal("")),
+  website: httpsUrl(500).optional().or(z.literal("")),
+  logo_url: httpsUrl(500).optional().or(z.literal("")),
 })
 
 export interface SponsorMatch {
@@ -792,17 +793,29 @@ export async function saveMyBrand(input: unknown) {
     select: { id: true },
   })
 
+  /*
+   * Across organisations, not only within this one (SCRUM-956): taking another
+   * organisation's brand name is impersonation, and a sponsored message carries
+   * the name. An unclaimed brand counts too: that name is for its owner to
+   * claim, not for anybody to register beside it. The key already ignores case
+   * and punctuation, so "ACME" and "Acme-" are one name.
+   */
   const clash = await db.sponsors.findFirst({
     where: {
       name_key,
-      org_id: orgId,
       deleted_at: null,
       merged_into: null,
       ...(existing ? { id: { not: existing.id } } : {}),
     },
-    select: { id: true },
+    select: { org_id: true },
   })
-  if (clash) throw new Refusal("Your organisation already has a brand with that name")
+  if (clash) {
+    throw new Refusal(
+      clash.org_id === orgId
+        ? "Your organisation already has a brand with that name"
+        : "That brand name is already on Blend’n. If it is yours, claim it instead."
+    )
+  }
 
   const data = {
     name,

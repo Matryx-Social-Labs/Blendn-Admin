@@ -42,6 +42,9 @@ the route's catch-all called the caller's mistake an outage.
   route's default, and is held to its bounds.
 - A NUL byte (`%00` in a URL, `\u0000` in a body) answers `400`: Postgres text
   cannot hold one, and nothing legitimate sends one (SCRUM-434).
+- A URL field (`mediaUrl`, `photos`, `blur_photo`, an event's `cover_image_url` and
+  `external_link`) must start with `https://`: `javascript:`, `data:` and plain
+  `http:` answer `400` (SCRUM-956).
 
 ---
 

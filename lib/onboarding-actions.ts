@@ -234,6 +234,23 @@ export async function approveOnboardingRequest(
     )
   }
 
+  /*
+   * An organisation name is unique, without regard to case (SCRUM-956): the name
+   * is what a venue, an attendee or a sponsor sees, and a second "Nightshift
+   * Collective" is impersonation. Checked before anything is written, so the
+   * application stays undecided and the admin can ask the applicant for a name
+   * that tells them apart.
+   */
+  const sameName = await db.organisations.findFirst({
+    where: { display_name: { equals: request.display_name.trim(), mode: "insensitive" } },
+    select: { id: true },
+  })
+  if (sameName) {
+    throw new Refusal(
+      `An organisation called “${request.display_name.trim()}” already exists. Ask the applicant for a name that tells them apart.`
+    )
+  }
+
   const hashed = await bcrypt.hash(undisclosedPassword(), 12)
 
   const { orgId, userId, phonesEnded } = await db.$transaction(async (tx) => {

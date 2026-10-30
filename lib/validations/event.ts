@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 
 export const eventQuerySchema = z.object({
   // Pagination
@@ -241,8 +242,8 @@ export const eventWriteSchema = z
     min_age: z.number().int().min(13).max(25).nullish(),
     latitude: z.number().min(-90).max(90).nullish(),
     longitude: z.number().min(-180).max(180).nullish(),
-    cover_image_url: z.string().url().max(2048).nullish(),
-    external_link: z.string().url().max(2048).nullish(),
+    cover_image_url: httpsUrl().nullish(),
+    external_link: httpsUrl().nullish(),
     is_featured: z.boolean().nullish(),
     /** "Allow crews at this event" — on unless the host turns it off (plan v2 §6). */
     crews_enabled: z.boolean().nullish(),

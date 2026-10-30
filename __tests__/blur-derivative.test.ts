@@ -58,7 +58,7 @@ describe("the column says what it is for", () => {
 
   it("is accepted on update, and nullable there too", () => {
     expect(read("lib", "validations", "profile.ts")).toContain(
-      "blur_photo: z.string().url().nullish()"
+      "blur_photo: httpsUrl().nullish()"
     )
   })
 
