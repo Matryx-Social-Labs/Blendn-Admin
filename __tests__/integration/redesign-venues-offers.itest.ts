@@ -316,7 +316,8 @@ describe("GET /venues?order=live, three tiers", () => {
     const live = await venue("zt D live")
     const byHours = await venue("zt C hours", { hours: [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: "10:00", close: "23:00" })) })
     const byEvent = await venue("zt B event")
-    await eventAt(byEvent, 3)
+    // Tonight is the venue's day, which ends at its reset hour: "3 h ahead" is past it for the three hours before 06:00 UTC. Start halfway to the day's end, so it is inside at any hour.
+    await eventAt(byEvent, (venueDayBounds("UTC", 6, new Date()).end.getTime() - Date.now()) / 2 / HOUR)
     const rest1 = await venue("zt A rest")
     const rest2 = await venue("zt E rest")
     // A later event is not tonight; hours on no day are not tonight either.
