@@ -126,15 +126,26 @@ export async function POST(request: NextRequest) {
        *   signed in the same second after the stamp for its whole life. A token
        *   issued after the sign-out has a later `created_at` and refreshes.
        */
+      // The token's own row, locked: `FOR SHARE` on the user does not conflict with another refresh, so without
+      // this two requests with one token both read it unrotated and each stored a live successor (SCRUM-950).
+      await tx.$queryRaw`SELECT 1 FROM mobile_refresh_tokens WHERE id = ${decoded.jti} FOR UPDATE`
       const own = await tx.mobile_refresh_tokens.findUnique({
         where: { id: decoded.jti },
-        select: { created_at: true, revoked_reason: true },
+        select: { created_at: true, revoked_reason: true, replaced_by: true },
       })
       const stamp = current?.mobile_sessions_revoked_at
       if (!own || own.revoked_reason || (stamp && stamp.getTime() >= own.created_at.getTime())) {
         return { kind: "ended" } as const
       }
 
+      // Rotated while we waited for the lock: the winner's successor is live and nobody else holds it. Retire it,
+      // as the grace replay does, so one live token per device holds; its holder trips reuse detection next time.
+      if (own.replaced_by) {
+        await tx.mobile_refresh_tokens.updateMany({
+          where: { id: own.replaced_by, revoked_at: null },
+          data: { revoked_at: new Date() },
+        })
+      }
       await storeRefreshToken(user.id, refreshToken, undefined, { client: tx, tokenHash })
       await tx.mobile_refresh_tokens.updateMany({
         where: { id: decoded.jti },
