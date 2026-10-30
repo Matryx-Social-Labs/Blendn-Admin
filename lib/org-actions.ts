@@ -649,7 +649,7 @@ export async function sendDomainVerifyEmail(
     },
   })
 
-  const link = `${process.env.NEXTAUTH_URL ?? ""}/verify-domain?token=${token}`
+  const link = `${appUrl()}/verify-domain?token=${token}`
   const result = await sendEmail({ to: address, ...domainVerifyEmail(row.domain, link) })
   if (!result.sent) {
     logger.error("Domain verify email failed", { domainId, reason: result.reason })

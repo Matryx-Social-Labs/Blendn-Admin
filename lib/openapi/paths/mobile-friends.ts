@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, UserRefParamSchema, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 
 /*
  * Friends. Two rules shape every route here (see lib/friends.ts):
@@ -9,7 +9,6 @@ import { BadgeSchema, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE,
  * `friends_see_me_in_rooms`.
  */
 
-const bearerAuth = [{ bearerAuth: [] }]
 const tags = ["Mobile Friends"]
 
 /** The invite landing's reasons, beside the errorCodes installed builds match on (SV10). */
