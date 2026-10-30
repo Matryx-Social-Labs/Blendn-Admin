@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE, bearerAuth } from "@/lib/openapi/schemas/common"
 
 /*
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
@@ -9,7 +9,6 @@ import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, stan
  * photo); outside it a crew is an emblem, a name and counts — never a person.
  */
 
-const bearerAuth = [{ bearerAuth: [] }]
 const tags = ["Mobile Crews"]
 const json = (schema: z.ZodTypeAny) => ({ content: { "application/json": { schema } } })
 

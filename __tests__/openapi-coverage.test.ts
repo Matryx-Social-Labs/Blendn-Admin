@@ -186,3 +186,21 @@ describe("spec reflects behaviour we changed", () => {
     expect(organizer).toBeTruthy()
   })
 })
+
+describe("every security requirement names a scheme the spec defines (SCRUM-654)", () => {
+  // `bearerAuth` against the registered `BearerAuth` gave every crews and friends
+  // operation a lock that points nowhere: no padlock in Swagger, no token in a
+  // generated client.
+  it("references only registered security schemes", () => {
+    const doc = generateOpenApiDocument()
+    const defined = new Set(Object.keys(doc.components?.securitySchemes ?? {}))
+    const used = new Set<string>()
+    for (const item of Object.values(doc.paths ?? {})) {
+      for (const op of Object.values(item as Record<string, { security?: Array<Record<string, unknown>> }>)) {
+        for (const requirement of op?.security ?? []) for (const name of Object.keys(requirement)) used.add(name)
+      }
+    }
+    expect([...used].filter((name) => !defined.has(name))).toEqual([])
+    expect(used.has("BearerAuth")).toBe(true)
+  })
+})

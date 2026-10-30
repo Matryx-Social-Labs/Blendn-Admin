@@ -316,7 +316,7 @@ not 400 on the events list.
 
 | Surface | You see |
 |---|---|
-| Event chat, participants, attendee list, sockets | **Pseudonym** — "Cosmic Panda" |
+| Event chat, participants, attendee list, sockets | **Pseudonym** — "Cosmic Panda" (the attendee list and `/participants` name, with a photo, only a person you may recognise in that room: they revealed in it, or a friend who allows it) |
 | Direct messages, message requests | Real name and photo — the **sender's**, to the person asked; the person asked stays an id to the sender until they accept (SCRUM-182) |
 
 The pseudonym is one per person per event, stable for the whole event and across

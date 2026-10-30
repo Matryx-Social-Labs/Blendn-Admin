@@ -15,7 +15,7 @@ const actions = readFileSync(join(root, "lib", "org-actions.ts"), "utf8")
 const pagePath = join(root, "app", "verify-domain", "page.tsx")
 
 describe("the domain-verification link", () => {
-  const link = actions.match(/NEXTAUTH_URL \?\? ""\}(\/[\w-]+)\?token=/)
+  const link = actions.match(/\$\{appUrl\(\)\}(\/[\w-]+)\?token=\$\{token\}/)
 
   it("is built from a path", () => {
     expect(link).not.toBeNull()
