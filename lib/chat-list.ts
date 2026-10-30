@@ -79,7 +79,7 @@ export interface LastMessageRow {
  * The newest message each room shows this viewer, with its sender's pseudonym.
  * One index probe per room (`chat_messages(chat_group_id, created_at)`), not a
  * sort of every message of every room the viewer is in; a room with no visible
- * message is absent, as before.
+ * message is absent, as before. A sponsored send is not a message here.
  */
 export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[]): Promise<LastMessageRow[]> {
   if (chatGroupIds.length === 0) return []
@@ -93,6 +93,11 @@ export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[
       WHERE chat_group_id = g.id
         AND deleted_at IS NULL
         AND NOT (user_id = ANY(${blockedIds}::text[]))
+        -- An advert is never a room's line (SCRUM-625): the scheduler marks one by
+        -- metadata (or the sponsored kind), the same marks the history reads.
+        AND type <> 'sponsored'
+        AND metadata ->> 'sponsored_message_id' IS NULL
+        AND NOT (type = 'poll' AND metadata ->> 'kind' = 'sponsored')
       ORDER BY created_at DESC
       LIMIT 1
     ) cm
