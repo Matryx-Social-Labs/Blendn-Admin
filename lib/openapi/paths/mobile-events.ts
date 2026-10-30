@@ -764,7 +764,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "The room from the door: how many are here, how many share your taste",
   description:
-    "Anyone who can open the event (404 otherwise). `hereCount` is distinct people checked in right now (the socket's `hereCount`, not `checkInCount`). `tasteMatchCount` counts those inside now and visible to you who share at least one interest; `null` when `hereCount` < 3, because a small count identifies people.",
+    "Anyone who can open the event (404 otherwise). `hereCount` is distinct people checked in right now (the socket's `hereCount`, not `checkInCount`). `tasteMatchCount` is a bucket of those inside now and visible to you who share at least one interest, never the count (it could be differenced across a join): `3` for three to nine, `10` for ten or more, `null` for fewer than three (or fewer than three visible, or no interests of your own). An installed client prints it as \"N people here share your taste\".",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {

@@ -1234,6 +1234,33 @@ guessing from the leaf's name. The app's "Best Parties" section used to guess,
 matching `party|night|club|music` as substrings, and therefore filed Classical
 and Carnatic as a party.
 
+### GET /events/:eventId/room-preview — the room from the door
+
+`{ hereCount, tasteMatchCount }` for anyone who can open the event (the gate of
+`GET /events/:id`; a draft or a stranger's private event is a 404). No check-in
+needed. `hereCount` is the Room's own number, inside now.
+
+**`tasteMatchCount` is a bucket, never a count (SCRUM-914).** It is `null`,
+`3` or `10`:
+
+| Value | Means |
+|---|---|
+| `null` | fewer than three people who are visible to you are inside, or fewer than three of them share an interest with you, or you have no interests |
+| `3` | at least three, fewer than ten, share an interest with you |
+| `10` | ten or more share an interest with you |
+
+"Share" is the match deck's rule, over the people the roster would list (not
+you, no block either way, no friends, "Show online status" off left out). The
+exact figure used to be returned, and two reads around one person's join, or a
+viewer swapping their own interests between reads, read out that person's
+overlap. A bucket cannot be differenced except across an edge (the third sharer,
+the tenth); that residual is documented in `lib/room-preview.ts`.
+
+**Installed clients** print the number as "N people here share your taste" and
+nothing for `null`, so they now show "3 people" for three to nine and "10 people"
+for ten or more: true as a floor, understated above it. A client that knows the
+buckets can print "3+" / "10+". No new field, no change of type.
+
 ### GET /events/cities
 
 The city picker's list — every city with upcoming events or listed places.

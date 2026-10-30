@@ -169,8 +169,8 @@ describe("a friend leaves every stranger surface, whatever their switch (B1)", (
     await db.user_interests.createMany({ data: people.map((p) => ({ user_id: p.id, category_id: category.id })) })
     await befriend(people[0], people[1])
     const preview = await roomPreview(eventId, people[0].id)
-    // viewer shares with the two strangers; the friend is not counted.
-    expect(preview.tasteMatchCount).toBe(2)
+    // The viewer shares with the two strangers; the friend is not counted. Counted, the friend would make three: the figure's first bucket.
+    expect(preview.tasteMatchCount).toBeNull()
     await db.user_interests.deleteMany({ where: { category_id: category.id } })
     await db.categories.delete({ where: { id: category.id } })
   })
