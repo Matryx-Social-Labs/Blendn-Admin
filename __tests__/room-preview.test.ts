@@ -14,7 +14,7 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 
 const mockDb = {
   user_interests: { findMany: jest.fn() },
-  event_check_ins: { findMany: jest.fn(), count: jest.fn(), findFirst: jest.fn() },
+  event_check_ins: { findMany: jest.fn(), count: jest.fn() },
   categories: { findMany: jest.fn() },
   // Friends leave the count (lib/room-people.ts); none here.
   friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
@@ -74,17 +74,16 @@ beforeEach(() => {
     person("p4", []),
   ]
   mockDb.event_check_ins.count.mockImplementation(async () => here)
-  mockDb.event_check_ins.findFirst.mockResolvedValue({ id: "mine" }) // the viewer is inside unless a test says not
   mockDb.event_check_ins.findMany.mockImplementation(async () => pool)
 })
 
 it("returns hereCount and the bucket of how many inside share an interest", async () => {
-  pool = [person("p1", ["techno"]), person("p2", ["house"]), person("p3", ["techno"]), person("p4", ["running"]), person("p5", [])]
-  here = 6
+  pool = [person("p1", ["techno"]), person("p2", ["house"]), person("p3", ["techno"]), person("p4", ["techno"]), person("p5", ["techno"]), person("p6", [])]
+  here = 7
   const res = await call()
   expect(res.status).toBe(200)
-  // Three share (techno, house under Music, techno): the bucket from three up, never "3 of 5".
-  expect(await res.json()).toEqual({ success: true, data: { hereCount: 6, tasteMatchCount: 3 } })
+  // Five share (techno, house under Music, techno x3): the bucket's floor, 3, never 5.
+  expect(await res.json()).toEqual({ success: true, data: { hereCount: 7, tasteMatchCount: 3 } })
 })
 
 it("says nothing under three who share, even with a crowd inside (the figure is a bucket's floor, never one or two)", async () => {
@@ -108,7 +107,6 @@ it("uses the roster's exclusions: not me, attendees inside now, show_online on, 
 })
 
 it("leaves out anyone in a block relationship either way", async () => {
-  mockBlocks.mockResolvedValue(["p1"])
   pool = [person("p1", ["techno"]), person("p2", ["techno"]), person("p3", ["techno"]), person("p4", ["techno"])]
   mockBlocks.mockResolvedValue(["p1", "p2"]) // p3 and p4 are two: under the bucket; without the block it would be four: three
   const body = await (await call()).json()
@@ -123,17 +121,12 @@ it("is null when fewer than three are inside now, and does not even look", async
   expect(poolCalls()).toHaveLength(0)
 })
 
-it("answers at exactly three", async () => {
-  here = 3
-  const body = await (await call()).json()
-  expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
-})
-
 /*
- * SCRUM-671: the floor is on the people the count is drawn from. A room of the
- * viewer, one hidden person (show_online off, a block, a friend, suspended) and
- * one visible person has hereCount 3, but the taste number would then be that
- * one visible person's overlap with you.
+ * SCRUM-671: the figure is drawn from the visible people, not from hereCount. A
+ * room of the viewer, one hidden person (show_online off, a block, a friend,
+ * suspended) and one visible person has hereCount 3, but the taste number would
+ * then be that one visible person's overlap with you. The bucket (three or more
+ * sharers, none of them the viewer) is that floor.
  */
 it("is null when hidden people make up the floor and one visible person is left", async () => {
   here = 3
@@ -148,29 +141,6 @@ it("is null when the viewer's blocks leave one visible person in a room of three
   mockBlocks.mockResolvedValue(["p2"])
   const body = await (await call()).json()
   expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
-})
-
-it("answers when the viewer and two visible people make three, hidden people beside them or not", async () => {
-  here = 5
-  pool = [person("p1", ["techno"]), person("p2", ["running"])]
-  const body = await (await call()).json()
-  expect(body.data).toEqual({ hereCount: 5, tasteMatchCount: null })
-})
-
-it("does not count a viewer who is not inside toward the floor: two visible people are not a crowd of three", async () => {
-  here = 3 // two visible and one hidden, the viewer outside
-  pool = [person("p1", ["techno"]), person("p2", ["running"])]
-  mockDb.event_check_ins.findFirst.mockResolvedValue(null)
-  const body = await (await call()).json()
-  expect(body.data).toEqual({ hereCount: 3, tasteMatchCount: null })
-})
-
-it("answers a viewer who is outside when three visible people are inside", async () => {
-  here = 4
-  pool = [person("p1", ["techno"]), person("p2", ["running"]), person("p3", ["techno"])]
-  mockDb.event_check_ins.findFirst.mockResolvedValue(null)
-  const body = await (await call()).json()
-  expect(body.data).toEqual({ hereCount: 4, tasteMatchCount: null })
 })
 
 it("counts a person once however many rows they have", async () => {

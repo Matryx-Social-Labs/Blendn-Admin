@@ -1245,7 +1245,7 @@ needed. `hereCount` is the Room's own number, inside now.
 
 | Value | Means |
 |---|---|
-| `null` | fewer than three people who are visible to you are inside, or fewer than three of them share an interest with you, or you have no interests |
+| `null` | fewer than three of the people visible to you share an interest with you, or you have no interests |
 | `3` | at least three, fewer than ten, share an interest with you |
 | `10` | ten or more share an interest with you |
 

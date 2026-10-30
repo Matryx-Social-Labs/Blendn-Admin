@@ -24,10 +24,19 @@ export const MIN_ROOM_FOR_TASTE_COUNT = 3
  * read out a person's overlap at any room size, and a floor on the room cannot
  * stop that. A bucket moves only at its two edges.
  *
- * Ceiling, deliberately left: when a join crosses an edge (the third sharer,
- * the tenth) a sole joiner's overlap with the viewer is read out. A reader does
- * not know they are at an edge but can walk their own interests to one. Closing
- * that is a per-viewer stability window or a rate limit; neither was chosen.
+ * Ceiling, deliberately left (owner ruling: buckets only). The sharer count
+ * only ever moves with the people inside and the viewer's own interests. A
+ * viewer can edit their interests (up to ten leaves, 30 writes a minute) until
+ * the count sits one under an edge, which reads `null`; from then on each
+ * arrival that shares one of those interests flips the figure, and one that
+ * does not leaves it, so a single joiner (told apart by `hereCount` moving) is
+ * answered "do you overlap this set". Padding the set with interests nobody
+ * inside holds reads out the joiner's interests a bisection at a time. It
+ * needs a real arrival per probe and a visible joiner. Closing it takes a
+ * per-viewer stability window or a read limit on the route; neither was
+ * chosen. `GET /events/:id/matches` (the deck) names shared interests per
+ * pseudonymous card to anyone who has checked in, so "never an exact count" is
+ * this route's rule, not the app's.
  *
  * Installed clients print the number as "N people here share your taste", so
  * they show "3 people" for three to nine and "10 people" for ten or more: true
@@ -35,14 +44,16 @@ export const MIN_ROOM_FOR_TASTE_COUNT = 3
  */
 export const TASTE_MATCH_BUCKET_FLOORS = [MIN_ROOM_FOR_TASTE_COUNT, 10] as const
 
-export function tasteMatchBucket(count: number): number | null {
-  return TASTE_MATCH_BUCKET_FLOORS.reduce<number | null>((bucket, floor) => (count >= floor ? floor : bucket), null)
+export type TasteMatchBucket = (typeof TASTE_MATCH_BUCKET_FLOORS)[number]
+
+export function tasteMatchBucket(count: number): TasteMatchBucket | null {
+  return TASTE_MATCH_BUCKET_FLOORS.reduce<TasteMatchBucket | null>((bucket, floor) => (count >= floor ? floor : bucket), null)
 }
 
 export interface RoomPreview {
   hereCount: number
   /** A bucket's floor or `null`, never the count — see `TASTE_MATCH_BUCKET_FLOORS`. */
-  tasteMatchCount: number | null
+  tasteMatchCount: TasteMatchBucket | null
 }
 
 /**
@@ -60,28 +71,22 @@ export interface RoomPreview {
  * match deck's rule — parent-expanded, via `expandInterests` — so this number
  * and the deck agree about who has something in common.
  *
- * The floor is on the people the count is drawn from, you included if you are
- * inside (SCRUM-671):
- * `hereCount` alone counts people the count leaves out (show-online off,
- * blocked, friends, suspended), so a room of you, one hidden person and one
- * visible person passes it and the number becomes that one person's overlap
- * with you. `hereCount` stays as a cheap first check, since the visible people
- * can only be fewer.
+ * The bucket is also the floor on the people the count is drawn from
+ * (SCRUM-671): the viewer is never one of the sharers, so a figure needs at
+ * least `MIN_ROOM_FOR_TASTE_COUNT` visible people, and a room of you, hidden
+ * people and one visible person (whose overlap the number would have been) is
+ * `null`. `hereCount` stays as a cheap first check: the visible people can only
+ * be fewer.
  */
 export async function roomPreview(eventId: string, viewerId: string): Promise<RoomPreview> {
   const hereCount = await hereCountFor(eventId)
   if (hereCount < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
 
-  const [hidden, friends, viewerInterests, viewerInside, inside] = await Promise.all([
+  const [hidden, friends, viewerInterests, inside] = await Promise.all([
     blockCounterparties(viewerId),
     // Friends are never strangers (lib/room-people.ts): not in the count either.
     notStrangersTo(viewerId),
     db.user_interests.findMany({ where: { user_id: viewerId }, select: { category_id: true } }),
-    // The preview needs no check-in, so the viewer may or may not be one of `hereCount`.
-    db.event_check_ins.findFirst({
-      where: { event_id: eventId, user_id: viewerId, status: "checked_in", kind: "attendee" },
-      select: { id: true },
-    }),
     db.event_check_ins.findMany({
       where: {
         event_id: eventId,
@@ -106,7 +111,6 @@ export async function roomPreview(eventId: string, viewerId: string): Promise<Ro
     if (hiddenSet.has(row.user_id)) continue
     people.set(row.user_id, row.user.user_interests.map((i) => i.category_id))
   }
-  if (people.size + (viewerInside ? 1 : 0) < MIN_ROOM_FOR_TASTE_COUNT) return { hereCount, tasteMatchCount: null }
   // No interests of your own means nothing can be shared: no sharers, so no figure.
   if (viewerInterests.length === 0) return { hereCount, tasteMatchCount: null }
 

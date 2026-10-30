@@ -642,8 +642,8 @@ export const RoomPreviewResponseSchema = z
     hereCount: z.number().int(),
     /**
      * A bucket's floor, never the count: 3 (three to nine inside now share an
-     * interest with you), 10 (ten or more), or null (fewer than three share,
-     * fewer than three are visible, or you have no interests).
+     * interest with you), 10 (ten or more), or null (fewer than three share, or
+     * you have no interests).
      */
     tasteMatchCount: z.union([z.literal(3), z.literal(10)]).nullable(),
   })

@@ -17,8 +17,9 @@ interface RouteParams {
  * Open to anyone who can open the event — the same `attendeeEventAccess(view)`
  * gate as `GET /events/:id`, so a draft or a stranger's private event is a 404
  * here too, not a way to learn it exists. No check-in required: this is what
- * persuades somebody to walk in, and it carries only aggregates. The floor in
- * `lib/room-preview.ts` is what keeps an aggregate from naming anyone.
+ * persuades somebody to walk in, and it carries only aggregates. The bucket in
+ * `lib/room-preview.ts` (null, 3 or 10, never the count) is what keeps an
+ * aggregate from naming anyone.
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
