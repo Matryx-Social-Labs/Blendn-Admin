@@ -1009,9 +1009,11 @@ export function initSocketServer(httpServer: HttpServer): Server {
 
     // Events past the budget are dropped before any handler (and its queries) runs.
     const withinBudget = createEventBudget(SOCKET_EVENT_BUDGET, SOCKET_EVENT_WINDOW_MS)
+    let dropped = 0
     authSocket.use((_packet, next) => {
-      if (withinBudget()) next()
-      else logger.warn("Socket event budget exceeded", { userId: authSocket.data.userId, principal: authSocket.data.principal })
+      if (withinBudget()) return next()
+      // Once per socket: the shedding must not become the log flood.
+      if (dropped++ === 0) logger.warn("Socket event budget exceeded", { userId: authSocket.data.userId, principal: authSocket.data.principal })
     })
 
     // Join user's personal room for direct notifications, and the one for
