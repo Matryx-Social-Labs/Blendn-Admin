@@ -1,4 +1,5 @@
 import {
+  ACCOUNT_MAX_AGE,
   DATING_MIN_AGE,
   ageFrom,
   datingAgeRefusal,
@@ -8,6 +9,7 @@ import {
   parseDateOfBirth,
   stripDating,
 } from "@/lib/age"
+import { updateProfileSchema } from "@/lib/validations/profile"
 
 /**
  * The age rules, and the one that JavaScript gets wrong for free.
@@ -234,6 +236,25 @@ describe("parseDateOfBirth", () => {
   it("rejects the future and the implausible", () => {
     expect(parseDateOfBirth("2030-01-01", NOW)).toBeNull()
     expect(parseDateOfBirth("1850-01-01", NOW)).toBeNull()
+  })
+
+  it("holds the account ceiling (SCRUM-923: 1912 was accepted as 114)", () => {
+    const born = (yearsAgo: number, dayOffset = 0) =>
+      new Date(Date.UTC(NOW.getUTCFullYear() - yearsAgo, NOW.getUTCMonth(), NOW.getUTCDate() + dayOffset))
+        .toISOString()
+        .slice(0, 10)
+    expect(parseDateOfBirth(born(ACCOUNT_MAX_AGE), NOW)).not.toBeNull()
+    // The day after turning ACCOUNT_MAX_AGE + 1 is already over the line.
+    expect(parseDateOfBirth(born(ACCOUNT_MAX_AGE + 1), NOW)).toBeNull()
+    expect(parseDateOfBirth("1912-06-15", NOW)).toBeNull()
+  })
+})
+
+describe("the profile write holds the same ceiling (SCRUM-923)", () => {
+  it("refuses an age or a birth date past ACCOUNT_MAX_AGE", () => {
+    expect(updateProfileSchema.safeParse({ age: ACCOUNT_MAX_AGE }).success).toBe(true)
+    expect(updateProfileSchema.safeParse({ age: ACCOUNT_MAX_AGE + 1 }).success).toBe(false)
+    expect(updateProfileSchema.safeParse({ dateOfBirth: "1912-06-15" }).success).toBe(false)
   })
 })
 

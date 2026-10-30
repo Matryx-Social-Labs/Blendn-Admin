@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { ACCOUNT_MIN_AGE, ADULTS_ONLY, parseDateOfBirth } from "@/lib/age"
+import { ACCOUNT_MAX_AGE, ACCOUNT_MIN_AGE, ADULTS_ONLY, parseDateOfBirth } from "@/lib/age"
 import { isOrientation, orientationsAreCoherent } from "@/lib/dating"
 import { isExpertise, MAX_EXPERTISE } from "@/lib/expertise"
 import { isWorkField } from "@/lib/work-fields"
@@ -40,7 +40,7 @@ export const updateProfileSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   phone: z.string().max(20).optional().nullable(),
   // A new age is an adult's (SCRUM-330). A stored one under 18 is left alone.
-  age: z.number().int().min(ACCOUNT_MIN_AGE, ADULTS_ONLY).max(120).optional().nullable(),
+  age: z.number().int().min(ACCOUNT_MIN_AGE, ADULTS_ONLY).max(ACCOUNT_MAX_AGE).optional().nullable(),
 
   /*
    * Birth date as `YYYY-MM-DD`. Write-only — no route returns it.
@@ -55,7 +55,7 @@ export const updateProfileSchema = z.object({
    *
    * Refused rather than coerced when it does not parse. `parseDateOfBirth`
    * returns `null` for a malformed string, a future date and anything implying
-   * an age outside 18–120 — and returning `null` from here would be
+   * an age outside 18–ACCOUNT_MAX_AGE — and returning `null` from here would be
    * indistinguishable from "not sent", so a typo would silently store nothing
    * and the person would be told their profile saved.
    *
