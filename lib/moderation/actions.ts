@@ -80,7 +80,36 @@ export async function flagForReview(
 }
 
 /**
- * Check if a user should be auto-muted (3+ hidden messages in the last hour)
+ * Hidden messages in the mute window that count toward a mute: abuse, not
+ * contact details (SCRUM-485).
+ *
+ * `preSaveCheck` says sharing your own number is not a reason to silence
+ * somebody (`autoMute: false`), but the count that decides the NEXT mute read
+ * every hidden flag, so three shared numbers and then one abusive message muted
+ * a person on their first abusive message. A flag whose categories are all
+ * `contact_*` (`checkContactInfo`) is left out; a hide that carries a contact
+ * detail AND anything else counts. Raw SQL because a JSON key-prefix test is
+ * not a Prisma filter, and `categories` is NOT NULL so the negation cannot lose
+ * a row to NULL.
+ */
+async function abuseHiddenCount(userId: string, chatGroupId: string, since: Date): Promise<number> {
+  const [row] = await db.$queryRaw<{ n: number }[]>`
+    SELECT count(*)::int AS n
+      FROM moderation_flags f
+     WHERE f.user_id = ${userId}
+       AND f.chat_group_id = ${chatGroupId}::uuid
+       AND f.auto_action = 'hidden'
+       AND f.created_at >= ${since}
+       AND NOT (
+         jsonb_typeof(f.categories) = 'object'
+         AND f.categories <> '{}'::jsonb
+         AND NOT EXISTS (SELECT 1 FROM jsonb_object_keys(f.categories) k WHERE left(k, 8) <> 'contact_')
+       )`
+  return row?.n ?? 0
+}
+
+/**
+ * Check if a user should be auto-muted (3+ hidden abusive messages in the last hour)
  * and apply mute if so.
  */
 export async function checkAndAutoMute(
@@ -90,14 +119,7 @@ export async function checkAndAutoMute(
   try {
     const windowStart = new Date(Date.now() - AUTO_MUTE_WINDOW_MS)
 
-    const hiddenCount = await db.moderation_flags.count({
-      where: {
-        user_id: userId,
-        chat_group_id: chatGroupId,
-        auto_action: "hidden",
-        created_at: { gte: windowStart },
-      },
-    })
+    const hiddenCount = await abuseHiddenCount(userId, chatGroupId, windowStart)
 
     if (hiddenCount >= AUTO_MUTE_HIDDEN_COUNT) {
       await db.chat_group_members.updateMany({
@@ -196,14 +218,7 @@ export async function checkAndAutoUnmute(
     const windowStart = new Date(Date.now() - AUTO_MUTE_WINDOW_MS)
 
     // Count recent violations in the mute window
-    const recentHiddenCount = await db.moderation_flags.count({
-      where: {
-        user_id: userId,
-        chat_group_id: chatGroupId,
-        auto_action: "hidden",
-        created_at: { gte: windowStart },
-      },
-    })
+    const recentHiddenCount = await abuseHiddenCount(userId, chatGroupId, windowStart)
 
     // If no recent violations, the mute window has passed — unmute
     if (recentHiddenCount < AUTO_MUTE_HIDDEN_COUNT) {
