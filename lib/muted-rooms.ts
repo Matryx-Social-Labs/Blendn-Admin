@@ -35,6 +35,8 @@ export const MUTED_ROOMS_DEFAULT_LIMIT = 50
 export const MUTED_ROOMS_MAX_LIMIT = 100
 /** The count stops here; the app shows "999+" (`mutedRooms`). */
 export const MUTED_ROOMS_COUNT_CAP = 1000
+/** Muted rooms the count looks at in all before it answers with what it has: a person with more that are over reads a lower bound. */
+export const COUNT_MAX_EXAMINED = 10_000
 /**
  * How a read walks the candidates: `batch` at a time, and no more than
  * `maxExamined` before it answers with what it has and a cursor to go on from.
@@ -122,8 +124,22 @@ async function listedMuted(userId: string, now: Date, want: number, after: Candi
 }
 
 /** How many rooms the person has silenced, up to `MUTED_ROOMS_COUNT_CAP`. */
-export async function mutedRoomCount(userId: string, now: Date = new Date(), cap: number = MUTED_ROOMS_COUNT_CAP): Promise<number> {
-  return (await listedMuted(userId, now, cap, null)).kept.length
+export async function mutedRoomCount(
+  userId: string,
+  now: Date = new Date(),
+  cap: number = MUTED_ROOMS_COUNT_CAP,
+  walk: WalkOptions = WALK
+): Promise<number> {
+  let counted = 0
+  let after: Candidate | null = null
+  // Follows `resume` as the list's cursor does, so the two agree; only the ceiling below ends it early.
+  for (let examined = 0; examined < COUNT_MAX_EXAMINED && counted < cap; examined += walk.maxExamined) {
+    const { kept, resume } = await listedMuted(userId, now, cap - counted, after, walk)
+    counted += kept.length
+    if (!resume) break
+    after = resume
+  }
+  return counted
 }
 
 /** One page of the rooms the person silenced, each row as a `GET /chat/groups` row. */

@@ -680,7 +680,7 @@ booleans, all `true` by default. `PUT` takes any non-empty subset (a missing key
 left as it is; an unknown key or a non-boolean is a 400 `VALIDATION_FAILED`) and
 answers all three. `GET` also says **`mutedRooms`**, an integer: how many rooms you
 have silenced, exactly the ones `GET /me/muted-rooms` lists, counted up to **1000**
-(show "999+" at 1000). `PUT` does not send it. The send path honours the switches, on
+(show "999+" at 1000); a person with more than 10,000 muted rooms to look through reads a lower bound. `PUT` does not send it. The send path honours the switches, on
 the single and the bulk sender:
 
 | Switch | Stops the push of |
