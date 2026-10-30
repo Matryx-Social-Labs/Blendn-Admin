@@ -67,16 +67,11 @@ describe("who may receive a domain verification link", () => {
     expect(mockSend).toHaveBeenCalledTimes(1)
   })
 
-  it("builds the emailed link from appUrl(), so it is absolute with one slash whatever NEXTAUTH_URL says (SCRUM-654)", async () => {
-    const saved = process.env.NEXTAUTH_URL
-    delete process.env.NEXTAUTH_URL
-    try {
-      await sendDomainVerifyEmail(ORG, "dom_1", "admin@acme.com")
-      const link = mockTemplate.mock.calls.at(-1)![1]
-      expect(link).toMatch(/^http:\/\/localhost\/verify-domain\?token=[^/?]+$/)
-    } finally {
-      if (saved !== undefined) process.env.NEXTAUTH_URL = saved
-    }
+  it("builds the emailed link through appUrl(), not from the raw environment variable (SCRUM-654)", async () => {
+    // appUrl is mocked to a fixed origin: the old `NEXTAUTH_URL ?? ""` gave a relative link here.
+    await sendDomainVerifyEmail(ORG, "dom_1", "admin@acme.com")
+    const link = mockTemplate.mock.calls.at(-1)![1]
+    expect(link).toMatch(/^http:\/\/localhost\/verify-domain\?token=[^/?]+$/)
   })
 
   it("mints a token that is not the published TXT value", async () => {
