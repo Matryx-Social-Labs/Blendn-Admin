@@ -14,6 +14,7 @@ jest.mock("@/lib/db", () => ({ db: mockDb }))
 jest.mock("@/lib/auth", () => ({ getAuth: () => mockAuth() }))
 jest.mock("@/lib/audit-log", () => ({ auditLog: (...a: unknown[]) => mockAudit(...a) }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+jest.mock("@/lib/socket-server", () => ({ evictUserSockets: jest.fn() }))
 jest.mock("@/lib/email", () => ({
   sendEmail: (...args: unknown[]) => mockSend(...args),
   emailConfigured: () => configured,
