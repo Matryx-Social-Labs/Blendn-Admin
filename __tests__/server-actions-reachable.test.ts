@@ -213,6 +213,10 @@ const exports_: Export[] = libFiles.flatMap((file) =>
  * `MatchCard.insideNow` property of the same name, and `attended` pass on a
  * local helper in a script that happens to share it, while only itests called
  * the real ones (SCRUM-655). Every real caller imports what it calls.
+ *
+ * Ceiling: the module path is not checked (an import list naming the same word
+ * from another module counts), and `import * as ns` / `m.name` are not seen;
+ * first-party code uses named imports only.
  */
 const importOf = (name: string) =>
   new RegExp(
@@ -220,7 +224,7 @@ const importOf = (name: string) =>
       // import { a, name } from "…", across lines
       `\\{[^{}]*\\b${name}\\b[^{}]*\\}\\s*from\\b`,
       // const { name } = await import("…") / require("…"), or const [{ name }, …] = await Promise.all([import("…"), …])
-      `\\{[^{}]*\\b${name}\\b[^{}]*\\}[^;=]*=\\s*(?:await\\s+)?(?:import|require|Promise\\.all)\\b`,
+      `\\{[^{}]*\\b${name}\\b[^{}]*\\}(?:\\s*,\\s*\\{[^{}]*\\})*\\s*\\]?\\s*=\\s*(?:await\\s+)?(?:import|require|Promise\\.all)\\b`,
       // (await import("…")).name(
       `import\\(\\s*["'][^"']+["']\\s*\\)\\s*\\)?\\.${name}\\b`,
     ].join("|")
