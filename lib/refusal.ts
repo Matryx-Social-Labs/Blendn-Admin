@@ -90,6 +90,15 @@ export class Refusal extends Error {
 }
 
 /**
+ * Whether `err` is a Refusal: by its digest, which is the class's contract, so a copy of the class from another bundle
+ * (Next builds server code per layer) still counts.
+ */
+export function isRefusal(err: unknown): boolean {
+  const digest = err && typeof err === "object" ? (err as { digest?: unknown }).digest : undefined
+  return typeof digest === "string" && digest.startsWith(REFUSAL_DIGEST)
+}
+
+/**
  * The sentence a server action refused with, or the error's own message, or
  * the fallback.
  *

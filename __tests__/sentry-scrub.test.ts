@@ -2,6 +2,7 @@ import type { ErrorEvent, EventHint } from "@sentry/nextjs"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { beforeSend, scrubString, IGNORED_ERRORS, SENTRY_DATA_COLLECTION } from "@/lib/sentry-scrub"
+import { Refusal } from "@/lib/refusal"
 
 const send = (event: Partial<ErrorEvent>) =>
   beforeSend(event as ErrorEvent, {} as EventHint)!
@@ -101,6 +102,38 @@ describe("beforeSend", () => {
 
   it("survives a sparse event without throwing", () => {
     expect(() => send({})).not.toThrow()
+  })
+})
+
+/*
+ * A Refusal is a server action saying no in a sentence written for the operator ("This person already has a grant…"): the
+ * product working. Next reports every throw from an action through `onRequestError`, so 11 of the 13 open admin issues on
+ * 2026-10-31 were refusals (BLENDN-ADMIN-B alone 29 events), burying the one real error among them.
+ */
+describe("beforeSend and refusals", () => {
+  const event = () => ({ exception: { values: [{ type: "Refusal", value: "x" }] } }) as ErrorEvent
+  it("drops a Refusal", () => {
+    const refusal = new Refusal("This person already has a grant. End it before giving a new one.")
+    expect(beforeSend(event(), { originalException: refusal } as EventHint)).toBeNull()
+  })
+
+  it("drops a Refusal from another bundle's copy of the class (it carries the refusal digest)", () => {
+    const copy = Object.assign(new Error("Too many changes in a minute."), { name: "Refusal", digest: "refusal:Too many changes in a minute." })
+    expect(beforeSend(event(), { originalException: copy } as EventHint)).toBeNull()
+  })
+
+  it("keeps every other error, including one that only shares the name", () => {
+    expect(beforeSend(event(), { originalException: new Error("boom") } as EventHint)).not.toBeNull()
+    expect(beforeSend(event(), { originalException: Object.assign(new Error("x"), { digest: "123456" }) } as EventHint)).not.toBeNull()
+    expect(beforeSend(event(), {} as EventHint)).not.toBeNull()
+  })
+})
+
+/* Staging reported as `production` (every admin issue on 2026-10-31): the SDK's default when nothing names the environment. */
+describe("the environment", () => {
+  it.each(["sentry.server.config.ts", "sentry.edge.config.ts"])("%s names Railway's environment", (file) => {
+    const source = readFileSync(join(process.cwd(), file), "utf8")
+    expect(source).toMatch(/environment:\s*process\.env\.RAILWAY_ENVIRONMENT_NAME/)
   })
 })
 
