@@ -15,6 +15,7 @@ import bcrypt from "bcryptjs"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { clearSigninCounters, KNOWN_PHONE_DAY_MAX, refuseOverKnownPhoneDay } from "@/lib/dashboard-signin-limits"
+import { phoneLimitKey } from "@/lib/known-device"
 import { closeDb, db, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -164,13 +165,35 @@ describe("the per-account sign-in limit", () => {
 
   // Security review: the phone's own window is per 15 minutes, so it also has a day cap of its own, lower than the
   // account's 200: a lifted proof is worth at most KNOWN_PHONE_DAY_MAX guesses a day.
+  /** The key the route counts this phone under, for the account as it stands now. */
+  const phoneKey = async (email: string) => {
+    const u = await db.user.findUniqueOrThrow({ where: { email }, select: { password: true, mobile_sessions_revoked_at: true } })
+    return phoneLimitKey({ email, installationId: PHONE, password: u.password, sessionsRevokedAt: u.mobile_sessions_revoked_at })
+  }
+  const fillPhoneDay = async (email: string) => {
+    const key = await phoneKey(email)
+    for (let i = 0; i < KNOWN_PHONE_DAY_MAX; i++) await refuseOverKnownPhoneDay(email, key)
+  }
+
   it("refuses a known phone past its own daily cap, even with the right password", async () => {
     const email = await account()
     const proof = await proofFor(email)
-    for (let i = 0; i < KNOWN_PHONE_DAY_MAX; i++) await refuseOverKnownPhoneDay(email, PHONE)
+    await fillPhoneDay(email)
     const res = await signin(email, PASSWORD, nextIp(), proof!)
     expect(res.status).toBe(429)
     expect(((await res.json()) as { errorCode?: string }).errorCode).toBe("RATE_LIMITED")
+  })
+
+  // Security review: a reset must not leave the owner's phone behind a day cap a thief filled with the old proof.
+  it("starts a phone on fresh counters after a password reset", async () => {
+    const email = await account()
+    await proofFor(email)
+    await fillPhoneDay(email)
+    const NEW = "a-new-long-password-88"
+    await db.user.update({ where: { email }, data: { password: await bcrypt.hash(NEW, 4), password_changed_at: new Date() } })
+    await clearSigninCounters(email)
+    const fresh = ((await (await signin(email, NEW, nextIp(), "", PHONE)).json()) as { data: { knownDevice: string } }).data.knownDevice
+    expect((await signin(email, NEW, nextIp(), fresh)).status).toBe(200)
   })
 
   it("is not issued to an app that names no installation", async () => {

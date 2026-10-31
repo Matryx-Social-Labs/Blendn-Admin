@@ -30,7 +30,7 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { signinSchema } from "@/lib/validations/auth"
-import { isPhoneKnownDevice, phoneKnownDeviceProof } from "@/lib/known-device"
+import { isPhoneKnownDevice, phoneKnownDeviceProof, phoneLimitKey } from "@/lib/known-device"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
@@ -44,7 +44,7 @@ async function knownPhoneFor(email: string, installationId?: string, proof?: str
   const user = await db.user.findUnique({ where: { email }, select: { password: true, mobile_sessions_revoked_at: true } })
   if (!user) return null
   const subject = { email, installationId, password: user.password, sessionsRevokedAt: user.mobile_sessions_revoked_at }
-  return isPhoneKnownDevice(subject, proof) ? installationId : null
+  return isPhoneKnownDevice(subject, proof) ? phoneLimitKey(subject) : null
 }
 
 export async function POST(request: NextRequest) {

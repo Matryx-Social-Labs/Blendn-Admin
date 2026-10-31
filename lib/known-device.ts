@@ -64,19 +64,20 @@ export interface PhoneProofSubject {
   sessionsRevokedAt: Date | null
 }
 
+/** The account's credential state: changes with a password change and with sign-out everywhere. */
+const generationOf = (s: PhoneProofSubject) =>
+  createHash("sha256").update(`${s.password ?? ""}|${s.sessionsRevokedAt?.getTime() ?? 0}`).digest("hex")
+
 const signPhone = (secret: string, s: PhoneProofSubject, issuedAt: number) =>
   createHmac("sha256", secret)
-    .update(
-      [
-        "mobile-known-device",
-        s.email,
-        s.installationId,
-        createHash("sha256").update(s.password ?? "").digest("hex"),
-        s.sessionsRevokedAt?.getTime() ?? 0,
-        issuedAt,
-      ].join("|")
-    )
+    .update(["mobile-known-device", s.email, s.installationId, generationOf(s), issuedAt].join("|"))
     .digest("base64url")
+
+/**
+ * The name a known phone's sign-in windows count under: the installation and the account's credential state, so a
+ * reset or sign-out everywhere starts the phone on fresh counters with its new proof (security review of SCRUM-944).
+ */
+export const phoneLimitKey = (s: PhoneProofSubject) => `${s.installationId}:${generationOf(s).slice(0, 16)}`
 
 /** The proof to return after a right mobile sign-in; null when there is no secret to sign with. */
 export function phoneKnownDeviceProof(subject: PhoneProofSubject, now: number = Date.now()): string | null {
