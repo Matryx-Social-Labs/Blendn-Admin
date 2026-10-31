@@ -330,6 +330,12 @@ export function installationOf(deviceInfo: Prisma.JsonValue | null | undefined):
   return typeof id === "string" ? id : null
 }
 
+/** Whether a refresh row was ended deliberately (`endPhoneSessions`), not rotated or used. */
+async function endedOnPurpose(id: string): Promise<boolean> {
+  const row = await db.mobile_refresh_tokens.findUnique({ where: { id }, select: { revoked_reason: true } })
+  return row?.revoked_reason != null
+}
+
 export async function verifyRefreshToken(
   token: string,
   installationId?: string
@@ -429,7 +435,7 @@ export async function verifyRefreshToken(
           const successorUnused = await db.mobile_refresh_tokens.count({
             where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
           })
-          if (successorUnused > 0) {
+          if (successorUnused > 0 || (await endedOnPurpose(storedToken.replaced_by))) {
             logger.warn("Rotated bound refresh token replayed with no installation inside the grace, refusing", {
               userId: storedToken.user_id,
               sinceRevokedMs,
@@ -447,6 +453,8 @@ export async function verifyRefreshToken(
           where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
           data: { revoked_at: new Date() },
         })
+        // A successor ended on purpose (sign-out everywhere, a reset) is not a successor somebody used: refuse, end nothing.
+        if (retired.count === 0 && (await endedOnPurpose(storedToken.replaced_by))) return null
         if (retired.count === 0) {
           logger.error("Refresh token replayed after its successor was used, revoking all refresh tokens", {
             userId: storedToken.user_id,

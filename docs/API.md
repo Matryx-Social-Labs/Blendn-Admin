@@ -114,8 +114,8 @@ session answers only that value, for a live token and for a replay inside the 20
 installation it is treated as theft and every session ends; naming none, that one token is refused and nothing else
 ends. A session that recorded no installation (an older app) keeps the old rule; only a sign-in (password, signup,
 Google, Apple) binds one, never a refresh. Keep `installationId` in SecureStore beside the tokens, with the same options,
-so a reinstall that keeps the tokens keeps the id too. The binding protects a token that leaks alone (a log, the
-network), not a phone whose storage is read.
+so a reinstall that keeps the tokens keeps the id too. The binding protects a token that leaks on its own (a
+response log, a crash report), not a captured request body, which carries both, or a phone whose storage is read.
 
 An account created through Google or Apple has no password and returns the same
 generic `401` as a wrong password — deliberately, so the response is not an

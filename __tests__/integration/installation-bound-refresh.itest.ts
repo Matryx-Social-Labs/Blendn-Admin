@@ -108,6 +108,18 @@ describe("a refresh session bound to an installation", () => {
     expect(await live(me.id)).toBe(0)
   })
 
+  // Final review LOW-3: a lost-rotation retry after "sign out of every device" finds its successor ended on purpose,
+  // which is not theft: refuse it, and leave the sessions opened since alone.
+  it("does not end newer sessions when a retry finds its successor ended on purpose", async () => {
+    const me = await signedIn(PHONE)
+    expect((await refresh(me.refreshToken, PHONE)).status).toBe(200)
+    await db.mobile_refresh_tokens.updateMany({ where: { user_id: me.id, revoked_at: null }, data: { revoked_at: new Date(), revoked_reason: "signout_all" } })
+    const user = await db.user.findUniqueOrThrow({ where: { id: me.id }, select: { email: true } })
+    expect((await signinRoute.POST(post("/api/mobile/auth/signin", { email: user.email, password: PASSWORD, deviceInfo: { installationId: PHONE } }))).status).toBe(200)
+    expect((await refresh(me.refreshToken, PHONE)).status).toBe(401)
+    expect(await live(me.id)).toBe(1)
+  })
+
   it("matches the installation whatever its letter case", async () => {
     const me = await signedIn(PHONE.toUpperCase())
     expect((await refresh(me.refreshToken, PHONE)).status).toBe(200)
