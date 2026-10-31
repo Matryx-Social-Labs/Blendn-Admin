@@ -1,4 +1,5 @@
 import type { BrowserOptions, ErrorEvent, EventHint } from "@sentry/nextjs"
+import { isRefusal } from "@/lib/refusal"
 
 /**
  * Shared Sentry `beforeSend` and `ignoreErrors` for all three runtimes.
@@ -99,7 +100,10 @@ export const SENTRY_DATA_COLLECTION = {
   graphQL: { document: false, variables: false },
 } satisfies NonNullable<BrowserOptions["dataCollection"]>
 
-export function beforeSend(event: ErrorEvent, _hint: EventHint): ErrorEvent | null {
+export function beforeSend(event: ErrorEvent, hint: EventHint): ErrorEvent | null {
+  // A server action's Refusal is the product saying no to the operator, already on their screen: not an error.
+  if (isRefusal(hint?.originalException)) return null
+
   // Identify the account without shipping who they are.
   if (event.user) {
     event.user = { id: event.user.id }
