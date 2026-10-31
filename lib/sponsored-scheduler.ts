@@ -523,11 +523,8 @@ async function sendOne(
     },
   })
 
+  // No `last_message_at` bump: an advert never moves a room's place or time in the chat list (SCRUM-924, owner row A-3).
   await Promise.all([
-    db.chat_groups.update({
-      where: { id: groupId },
-      data: { last_message_at: created.created_at },
-    }),
     db.sponsored_message_sends.update({
       where: {
         sponsored_message_id_scheduled_for: {

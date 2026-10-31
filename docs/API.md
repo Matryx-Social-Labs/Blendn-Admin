@@ -1750,6 +1750,10 @@ counted. Your own messages are never unread. Reading a room's newest page
 see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the
 paging order, are still the room's own last message.)
 
+**An advert counts as nothing in the list** (SCRUM-624/625/924): a sponsored send (`metadata.sponsored_message_id`, a
+sponsored poll, or the `sponsored` type) is never `lastMessage`, never in `unreadCount`, and never moves a room's
+`lastMessageAt` or its place in the paging order.
+
 ### POST /message-requests
 **`message` is required.** A request with no message is indistinguishable from a
 like with a reveal stapled to it, and the two are separate actions:
