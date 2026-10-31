@@ -125,7 +125,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // never of `date_of_birth`, which is stripped from both branches below.
     const profileAge = ageFrom(p)
 
-    const { room, identified } = card ? { room: null, identified: false } : await identityForRef(authUser.userId, ref)
+    const { room, identified, askedOnly } = card
+      ? { room: null, identified: false, askedOnly: false }
+      : await identityForRef(authUser.userId, ref)
 
     /*
      * A room card for somebody that room keeps anonymous — the same answer as
@@ -173,7 +175,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       // Identifying free text, same rule as the name. Someone's employer and
       // their photographs single them out as surely as a name does.
       ...(identified
-        ? { bio: p.bio, occupation: p.occupation, education: p.education, photos: p.photos }
+        ? {
+            // Bio and orientation wait for an accepted request when only that request names them (A-32).
+            ...(!askedOnly && { bio: p.bio }),
+            occupation: p.occupation,
+            education: p.education,
+            photos: p.photos,
+          }
         : {
             /*
              * The blurred half of "pseudonyms + blurred photos" — the state the
@@ -205,7 +213,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        * They are matching inputs; the compatibility they compute surfaces as a
        * tag on a card, never as the values behind it.
        */
-      ...(identified && p.show_orientation ? { orientations: p.orientations } : {}),
+      ...(identified && !askedOnly && p.show_orientation ? { orientations: p.orientations } : {}),
       /*
        * Languages, home state and sign — labels, and only to somebody who can
        * see who this is. Before that they are Tier B (plan v2 §8.5): a card
