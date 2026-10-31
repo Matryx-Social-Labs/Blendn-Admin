@@ -27,6 +27,7 @@ import { environmentRefusal } from "./test-accounts"
  *   (i) a video-only event (no cover)          SCRUM-818
  *   (j) an unlisted event at a venue with area SCRUM-823
  *   (k) 54 open crew invites to the driver     SCRUM-835: 18 hosts x 3 crews, through createCrew
+ *   (l) a live event whose venue_name is blank SCRUM-794: only the linked venue has a name
  *
  * `seed-blr-scenarios.ts` soft-deletes every other Bengaluru event, so these
  * are a sibling and touch nothing but their own rows.
@@ -100,6 +101,8 @@ const OVERLAP = {
   point: { lat: 12.95075, lng: 77.585065 },
 }
 const HALL = { name: `${VENUE_PREFIX}Hall`, lat: 12.9611, lng: 77.601, fence: circle(12.9611, 77.601, 50) }
+/** 794: its own fence, clear of the others, so standing in it is unambiguous. */
+const NAMELESS = { name: `${VENUE_PREFIX}Nameless Event Hall`, lat: 12.9719, lng: 77.6412, fence: circle(12.9719, 77.6412, 50) }
 const INDIRANAGAR = { name: `${VENUE_PREFIX}Indiranagar Hall`, lat: 12.9784, lng: 77.6408, fence: circle(12.9784, 77.6408, 50), area: "Indiranagar" }
 const MYSURU = { city: "Mysuru", state: "Karnataka", lat: 12.2958, lng: 76.6394 }
 
@@ -174,6 +177,7 @@ function plan() {
   console.log(`  (g) 797: ${RING_EVENTS} events 2-3 km round ${HUBBALLI.city} over days 1-6, and the nearest one at the centre on day 6.5`)
   console.log(`  (h) 798: ${EMAIL(DRIVER.n)} likes ${INTERESTS.map((i) => `${i.slug} (${i.events} events)`).join(" then ")}`)
   console.log("  (i) 818: a video-only event, no cover; (j) 823: an unlisted event at an Indiranagar venue with an area")
+  console.log(`  (l) 794: a live event at ${NAMELESS.name} (${NAMELESS.lat}, ${NAMELESS.lng}, r50) with a blank venue_name`)
   console.log(`  (k) 835: ${CREW_HOSTS * CREWS_PER_HOST} crews by ${CREW_HOSTS} hosts, each inviting ${EMAIL(DRIVER.n)}, through createCrew`)
   console.log(`  checks: ${SEED_PASSWORD ? "SEED_PASSWORD set" : "SEED_PASSWORD missing (needed for --apply)"}; keyword filter hides the line: ${checkKeywords(BANNED_LINE)?.action === "hide"}`)
 }
@@ -232,6 +236,8 @@ interface EventArgs {
   coverless?: boolean
   /** Not on any list; reached by its link (823). */
   unlisted?: boolean
+  /** The free-text venue_name left blank, so only the linked venue names the place (794). */
+  blankVenueName?: boolean
 }
 async function upsertEvent(e: EventArgs) {
   const fields = {
@@ -241,7 +247,7 @@ async function upsertEvent(e: EventArgs) {
     latitude: e.place.lat,
     longitude: e.place.lng,
     address: `${e.place.name}, ${e.city}`,
-    venue_name: e.place.name,
+    venue_name: e.blankVenueName ? "" : e.place.name,
     venue_id: e.venueId,
     venue_link_status: e.venueId ? ("confirmed" as const) : null,
     city: e.city,
@@ -507,6 +513,8 @@ async function main() {
   const videoOnly = await videoOnlyEvent(base)
   const indiranagar = await ensureVenue(INDIRANAGAR, admin.id)
   const unlisted = await upsertEvent({ ...base, slug: `${SLUG}unlisted-area`, title: "Audit FX Unlisted At Area", start: tomorrowIst(19, 30), end: endOf(tomorrowIst(19, 30)), place: INDIRANAGAR, venueId: indiranagar.id, unlisted: true })
+  const namelessVenue = await ensureVenue(NAMELESS, admin.id)
+  const nameless = await upsertEvent({ ...base, slug: `${SLUG}blank-venue-name`, title: "Audit FX Blank Venue Name", start: liveStart, end: liveEnd, place: NAMELESS, venueId: namelessVenue.id, blankVenueName: true })
   const openInvites = await crewInvites(driverId, accounts.slice(PEOPLE.length + 1))
   if (openInvites <= 50) throw new Error(`the driver has ${openInvites} open crew invites; the fixture needs more than 50`)
 
@@ -528,6 +536,7 @@ async function main() {
   console.log(`  (h) 798 interests   driver ${EMAIL(DRIVER.n)}: ${INTERESTS.map((i) => `${i.slug} x${i.events}`).join(", ")}; events ${interestIds.join(", ")}`)
   console.log(`  (i) 818 video-only  event ${videoOnly.id}  ${KORAMANGALA.lat}, ${KORAMANGALA.lng}`)
   console.log(`  (j) 823 unlisted    event ${unlisted.id}  venue ${indiranagar.id} area "${INDIRANAGAR.area}"  ${INDIRANAGAR.lat}, ${INDIRANAGAR.lng}`)
+  console.log(`  (l) 794 blank name  event ${nameless.id}  venue ${namelessVenue.id} "${NAMELESS.name}"  ${NAMELESS.lat}, ${NAMELESS.lng}  r50`)
   console.log(`  (k) 835 crew invites: ${openInvites} open to ${EMAIL(DRIVER.n)} (driver ${driverId}), from ${CREW_HOSTS} hosts ${EMAIL(HOSTS[0].n)} .. ${EMAIL(HOSTS[HOSTS.length - 1].n)}`)
   console.log("  password: SEED_PASSWORD (Railway staging). Times are now-relative: re-run --apply to bring them back.\n")
 }
