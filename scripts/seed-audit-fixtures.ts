@@ -390,17 +390,33 @@ async function videoOnlyEvent(base: Base) {
   return event
 }
 
+/**
+ * A remote database makes the writers' own 5 s transactions borderline (`createCrew` is about 15 round trips, ~4.5 s from a laptop to
+ * Railway). An expired one (P2028) rolled back whole, so asking again is safe.
+ */
+async function retried<T>(run: () => Promise<T>, attempts = 6): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run()
+    } catch (error) {
+      if (attempt >= attempts || (error as { code?: string }).code !== "P2028") throw error
+    }
+  }
+}
+
 /** 835: every host befriends the driver and makes three crews that invite them, through `createCrew`; a re-run renews through `inviteToCrew`. */
 async function crewInvites(driverId: string, hostIds: string[]) {
   for (const [h, hostId] of hostIds.entries()) {
-    await requestFriend(hostId, driverId)
-    if ((await requestFriend(driverId, hostId)) !== "friends") throw new Error(`${EMAIL(HOSTS[h].n)} and the driver did not become friends`)
+    await retried(() => requestFriend(hostId, driverId))
+    if ((await retried(() => requestFriend(driverId, hostId))) !== "friends") throw new Error(`${EMAIL(HOSTS[h].n)} and the driver did not become friends`)
     for (let k = 0; k < CREWS_PER_HOST; k++) {
       const name = CREW_NAME(h, k)
       const crew = await db.crews.findFirst({ where: { created_by: hostId, name, dissolved_at: null }, select: { id: true } })
-      const made = crew
-        ? await inviteToCrew(hostId, crew.id, [driverId])
-        : await createCrew(hostId, createCrewSchema.parse({ name, inviteUserIds: [driverId], revealConsent: true }))
+      const made = await retried(() =>
+        crew
+          ? inviteToCrew(hostId, crew.id, [driverId])
+          : createCrew(hostId, createCrewSchema.parse({ name, inviteUserIds: [driverId], revealConsent: true }))
+      )
       if (isRefusal(made)) throw new Error(`${name}: ${made.refusal}`)
     }
   }
