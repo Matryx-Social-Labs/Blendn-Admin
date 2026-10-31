@@ -28,7 +28,7 @@ When a message send fails (`POST /api/mobile/chat/groups/{chatGroupId}/messages`
 |-----------|-------------|---------|--------------|
 | `USER_MUTED` | 403 | User is still muted (auto-mute has NOT expired yet). Auto-mutes last 1 hour — if the mute window has passed, the backend auto-unmutes and the send succeeds (you won't see this error). | Show a persistent banner: "You've been muted for policy violations. You can still read messages." Disable the message input. |
 | `USER_BANNED` | 403 | User was banned by admin or auto-system | Show a full-screen overlay or modal: "You've been removed from this chat." Hide the input, optionally navigate back. |
-| `CHAT_LOCKED` | 403 | Organizer locked the chat | Show a banner: "Chat has been locked by the organizer." Disable input. |
+| `CHAT_LOCKED` | 403 | The room is locked (no control sets this today, SCRUM-893) | Show a banner: "This chat is locked." Disable input. |
 | `NOT_CHECKED_IN` | 403 | User checked out or never checked in | Show: "Check in to the event to send messages." |
 | `SPAM_BLOCKED` | 429 | Sending too fast or duplicate messages | Show a brief toast: "Slow down — you're sending messages too quickly." |
 | `MODERATION_UNAVAILABLE` | 503 | A busy event room (more than 200 inside) while the moderation service is down. Nothing was sent or stored; the body carries `retryAfter` (5) and `Retry-After`. Smaller rooms never see it. | Mark the bubble failed with retry and show the server's `error` text ("This room is busy and messages can’t be checked right now. Try again in a few seconds."). Resend with the same `clientId` after `retryAfter` seconds. |
@@ -70,7 +70,7 @@ if (!result.success) {
       break
     case 'CHAT_LOCKED':
       setChatLocked(true)
-      showTray('Chat Locked', 'This chat has been locked by the organizer.')
+      showTray('Chat Locked', 'This chat is locked.')
       break
     case 'NOT_CHECKED_IN':
       showTray('Not Checked In', 'You must be checked in to the event to send messages.')
@@ -218,7 +218,7 @@ const [chatLocked, setChatLocked] = useState(false)
   <View style={styles.restrictedBanner}>
     <IconLock color={APP_COLORS.textSecondary} size={20} />
     <Text style={styles.restrictedText}>
-      Chat has been locked by the organizer
+      This chat is locked.
     </Text>
   </View>
 ) : (
