@@ -1772,7 +1772,7 @@ contact details); a hit is `400` `VALIDATION_FAILED` with `reasonCode:
 "TEXT_NOT_ALLOWED"` and `field: "message"`, its `error` a sentence to show as
 is. Nothing is stored or sent.
 
-Guards, in order: rate limit, self-send, recipient exists, blocks either way,
+Guards, in order: rate limit, self-send, recipient exists **and is listed** (`show_online` on; off answers `404 User not found`, by handle or id, as for an id nobody has: SCRUM-904), blocks either way,
 closed pair (an unmatch — same 404 as a block, so the refusal never says "this
 person ended it"), `haveSharedAnEvent`, existing request, existing
 conversation. And
@@ -3503,8 +3503,9 @@ no `event:room:checkin` is sent for you (SCRUM-620). With it off you are **count
 not listed** — the room's numbers include you, nobody is offered your card, and
 nobody can like you: `POST /events/:eventId/matches/likes` answers `404 User not found`
 for you, by handle or raw id, as for an id nobody has, and a crew's like of you writes
-nothing (SCRUM-669). Chat is unaffected: posting a message is its own choice to
-be seen.
+nothing (SCRUM-669), and nobody can send you a message request: `POST /message-requests`
+answers the same `404` (SCRUM-904), although a chat message hands out your room handle.
+Chat is unaffected: posting a message is its own choice to be seen.
 
 ---
 

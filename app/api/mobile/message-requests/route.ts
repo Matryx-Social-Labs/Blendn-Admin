@@ -6,7 +6,7 @@ import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
 import { identityForRef } from "@/lib/identity"
 import { userIdFromRef } from "@/lib/room-handle"
-import { knownToEachOther } from "@/lib/room-people"
+import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal } from "@/lib/event-access"
@@ -97,9 +97,13 @@ export async function POST(request: NextRequest) {
       return errorResponse("Cannot send a message request to yourself")
     }
 
-    // Check if recipient exists
-    const recipient = await db.user.findUnique({
-      where: { id: recipientId },
+    /*
+     * Someone who exists, and is listed: "Show online status" off is off the roster, and a chat message hands out the
+     * poster's room handle, so a handle alone must not reach them. The same answer as an id nobody has, by handle or by
+     * id (SCRUM-904, owner row A-2, decided by lean 2026-10-31; the likes route's rule, SCRUM-669).
+     */
+    const recipient = await db.user.findFirst({
+      where: { id: recipientId, ...LISTED_IN_ROSTER },
       select: { id: true, name: true },
     })
 

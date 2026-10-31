@@ -12,6 +12,7 @@ import { NextRequest } from "next/server"
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
 import { signAccessToken } from "@/lib/mobile-auth"
+import { roomHandle } from "@/lib/room-handle"
 import { cleanup, closeDb, db, makeEvent, makeUser, onboard, occurrenceOf, putInRoom, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -123,5 +124,49 @@ describe("asking", () => {
       error: "This user has already sent you a request. Check your incoming requests.",
     })
     await reveal(eventId, b.id, false)
+  })
+})
+
+/*
+ * "Show online status" off: not listed on the roster, and so not reachable by a request either (SCRUM-904, owner row A-2,
+ * decided by lean 2026-10-31; reverse if wanted). A chat message hands out the poster's room handle, so a handle alone must
+ * not reach a person who chose not to be listed. The answer is an unknown id's, by handle or by id, and nothing is written.
+ */
+describe("a person who is not listed", () => {
+  let a: { id: string; token: string }
+  let hidden: { id: string; token: string }
+  let eventId: string
+
+  beforeAll(async () => {
+    const host = await makeUser(testId("mr-hid-host"), "organizer")
+    users.push(host)
+    eventId = await makeEvent(host)
+    events.push(eventId)
+    ;[a, hidden] = await Promise.all([person("mr-hid-a"), person("mr-hid-c")])
+    const occ = await occurrenceOf(eventId)
+    await putInRoom({ eventId, occurrenceId: occ, userId: a.id })
+    await putInRoom({ eventId, occurrenceId: occ, userId: hidden.id })
+    await db.profiles.update({ where: { id: hidden.id }, data: { show_online: false } })
+  })
+
+  const nobody = async () => {
+    const res = await ask(a.token, `${testId("nobody")}`)
+    return { status: res.status, body: await res.json() }
+  }
+
+  it.each([
+    ["their room handle", () => roomHandle(eventId, hidden.id)],
+    ["their id", () => hidden.id],
+  ])("is answered as nobody by %s, and no request is written", async (_by, ref) => {
+    const res = await ask(a.token, ref())
+    expect({ status: res.status, body: await res.json() }).toEqual(await nobody())
+    expect(await db.message_requests.count({ where: { sender_id: a.id, recipient_id: hidden.id } })).toBe(0)
+  })
+
+  it("is reachable again once listed (negative control)", async () => {
+    await db.profiles.update({ where: { id: hidden.id }, data: { show_online: true } })
+    const res = await ask(a.token, roomHandle(eventId, hidden.id))
+    expect(res.status).toBe(201)
+    expect(await db.message_requests.count({ where: { sender_id: a.id, recipient_id: hidden.id } })).toBe(1)
   })
 })
