@@ -114,7 +114,7 @@ it("uses the real name only for a sender who revealed in this room", async () =>
   expect(mockDb.event_match_preferences.findMany).toHaveBeenCalledWith(
     expect.objectContaining({ where: expect.objectContaining({ event_id: EVENT, revealed: true }) })
   )
-  expect(mockEmitWave).toHaveBeenCalledWith(THEM, expect.objectContaining({ fromName: "Arjun Rao" }))
+  expect(mockEmitWave).toHaveBeenCalledWith(THEM, expect.objectContaining({ fromName: "Arjun" }))
 })
 
 it("requires both to be inside NOW, not merely to have attended", async () => {

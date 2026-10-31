@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { nameForRef } from "@/lib/conversation-identity"
 import { refRoomBanRefusal } from "@/lib/room-ban"
 import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
@@ -253,7 +254,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return successResponse({
       id: isSelf ? user.id : ref,
       email: isSelf ? user.email : undefined,
-      name: identified ? user.name : "Attendee",
+      // A room handle names its person by first name only (SCRUM-493).
+      name: identified ? nameForRef(room, user.name) : "Attendee",
       ...(identified ? { image: user.image } : {}),
       createdAt: user.createdAt,
       ...(friend && { friend }),

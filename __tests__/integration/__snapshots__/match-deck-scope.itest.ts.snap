@@ -22,7 +22,7 @@ exports[`the match deck names a page of cards, and the cards are what they were 
   {
     "age": 27,
     "badges": [],
-    "displayName": "Name revealed-1",
+    "displayName": "Name",
     "insideNow": true,
     "overlaps": [],
     "photo": "https://img.invalid/revealed-1.jpg",

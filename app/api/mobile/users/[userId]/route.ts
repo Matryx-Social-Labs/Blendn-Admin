@@ -5,7 +5,7 @@ import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
-import { mayShowRealName } from "@/lib/conversation-identity"
+import { mayShowRealName, nameForRef } from "@/lib/conversation-identity"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { profileBadges } from "@/lib/profile-badges"
@@ -197,7 +197,8 @@ export async function GET(
        * `education` go with the name: "Principal @ Arclight Labs" identifies
        * about as well as a photograph does.
        */
-      name: identified ? user.profile?.name || user.name : "Attendee",
+      // A room handle names its person by first name only (SCRUM-493); a raw id, which a match or a conversation reached, the full name.
+      name: identified ? nameForRef(room, user.profile?.name || user.name) : "Attendee",
       /*
        * Outside the gate, as on `/profiles/:id`: "works in design" is an
        * attribute, not an address. The app reads it for the card's subtitle

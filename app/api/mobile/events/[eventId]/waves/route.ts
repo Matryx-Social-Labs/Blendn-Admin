@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { firstName } from "@/lib/conversation-identity"
 import { roomBanRefusal } from "@/lib/room-ban"
 import { eventRoomBan } from "@/lib/room-kind"
 import { z } from "zod"
@@ -183,7 +184,7 @@ async function roomNameOf(eventId: string, fromUserId: string, toUserId: string)
   if (visible.has(fromUserId)) {
     const user = await db.user.findUnique({ where: { id: fromUserId }, select: { name: true } })
     const name = user?.name?.trim()
-    if (name) return name
+    if (name) return firstName(name)
   }
   return pseudonym
 }
