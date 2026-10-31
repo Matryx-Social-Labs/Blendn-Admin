@@ -209,7 +209,7 @@ export async function GET(
         ? {
             image: user.image,
             photos,
-            // Not to somebody only their pending request names: the list's name and photo, no more (A-32).
+            // Not to somebody only their pending request names: bio and orientation wait for the accept (A-32).
             ...(!askedOnly && { bio: user.profile?.bio || null }),
             occupation: user.profile?.occupation || null,
             education: user.profile?.education || null,
