@@ -34,12 +34,20 @@ export function knownDeviceCookie(email: string, now: number = Date.now()): { na
 
 /** Whether the request's Cookie header carries a valid, unexpired proof for exactly this email. */
 export function isKnownDevice(email: string, cookieHeader: unknown, now: number = Date.now()): boolean {
-  const secret = process.env.NEXTAUTH_SECRET
-  if (!secret || typeof cookieHeader !== "string") return false
+  if (typeof cookieHeader !== "string") return false
   const name = nameFor(email)
   const pair = cookieHeader.split(";").map((p) => p.trim()).find((p) => p.startsWith(`${name}=`))
-  if (!pair) return false
-  const [issued, mac, ...rest] = pair.slice(name.length + 1).split(".")
+  return pair !== undefined && isKnownDeviceProof(email, pair.slice(name.length + 1), now)
+}
+
+/**
+ * The same proof without the cookie: the phone keeps the value a sign-in returned (`knownDevice`) and sends it back
+ * with the next one (mobile sign-in, owner ruling A-18 (1)).
+ */
+export function isKnownDeviceProof(email: string, value: unknown, now: number = Date.now()): boolean {
+  const secret = process.env.NEXTAUTH_SECRET
+  if (!secret || typeof value !== "string") return false
+  const [issued, mac, ...rest] = value.split(".")
   const issuedAt = Number(issued)
   if (rest.length || !mac || !Number.isInteger(issuedAt)) return false
   if (issuedAt > now + SKEW_MS || now - issuedAt > MAX_AGE_SECONDS * 1000) return false

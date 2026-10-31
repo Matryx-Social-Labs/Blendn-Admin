@@ -324,8 +324,15 @@ export function signInMethodOf(user: { password: string | null; oauth_accounts: 
  * Verify a refresh token against the database
  * Returns the decoded token if valid, null otherwise
  */
+/** The installation a refresh session recorded (`deviceInfo.installationId`), if the app sent one. */
+export function installationOf(deviceInfo: Prisma.JsonValue | null | undefined): string | null {
+  const id = deviceInfo && typeof deviceInfo === "object" && !Array.isArray(deviceInfo) ? deviceInfo.installationId : null
+  return typeof id === "string" ? id : null
+}
+
 export async function verifyRefreshToken(
-  token: string
+  token: string,
+  installationId?: string
 ): Promise<DecodedToken | null> {
   try {
     // First verify the JWT signature and expiry
@@ -388,6 +395,19 @@ export async function verifyRefreshToken(
         // The lost-response case has one shape: the successor nobody stored
         // is still live and was never itself rotated. `updateMany` retiring
         // it returns 0 when it is not — somebody used it — and that is reuse.
+        /*
+         * Only the installation that held it gets the grace (owner ruling A-18 (2)): another one, or a replay naming
+         * none, is somebody else holding a copy. A session that recorded no installation (an older app) keeps the rule.
+         */
+        const bound = installationOf(storedToken.device_info)
+        if (bound !== null && bound !== installationId) {
+          logger.error("Refresh token replayed from another installation, revoking all refresh tokens", {
+            userId: storedToken.user_id,
+            sinceRevokedMs,
+          })
+          await revokeUserRefreshTokens(storedToken.user_id)
+          return null
+        }
         const retired = await db.mobile_refresh_tokens.updateMany({
           where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
           data: { revoked_at: new Date() },

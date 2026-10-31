@@ -42,12 +42,12 @@ async function account() {
 const net = `10.${Math.floor(Math.random() * 200) + 50}`
 let n = 0
 const nextIp = () => `${net}.0.${++n}`
-const signin = (email: string, password: string, ip = nextIp()) =>
+const signin = (email: string, password: string, ip = nextIp(), knownDevice?: string) =>
   signinRoute.POST(
     new NextRequest("http://localhost/api/mobile/auth/signin", {
       method: "POST",
       headers: { "content-type": "application/json", "x-real-ip": ip },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, ...(knownDevice !== undefined && { knownDevice }) }),
     })
   )
 
@@ -103,5 +103,30 @@ describe("the per-account sign-in limit", () => {
     await expectAccountLimited(await signin(email, PASSWORD))
     await clearSigninCounters(email)
     expect((await signin(email, PASSWORD)).status).toBe(200)
+  })
+
+  /*
+   * The known-device escape (owner ruling A-18, 2026-11-01): a phone that has signed in to this account before is not
+   * locked out by strangers' wrong guesses. A right sign-in returns `knownDevice`, a signed proof for that email only;
+   * presenting it skips the account's window (the per-IP limit still applies, and the password is still needed).
+   */
+  it("lets a phone that signed in before past a lockout strangers caused", async () => {
+    const email = await account()
+    const proof = ((await (await signin(email, PASSWORD)).json()) as { data: { knownDevice?: string } }).data.knownDevice
+    expect(typeof proof).toBe("string")
+    for (let i = 0; i < 10; i++) expect((await signin(email, "wrong-guess")).status).toBe(401)
+    await expectAccountLimited(await signin(email, PASSWORD))
+
+    expect((await signin(email, PASSWORD, nextIp(), proof)).status).toBe(200)
+    // Still a password check: the proof waives the window, not the credential.
+    expect((await signin(email, "wrong-guess", nextIp(), proof)).status).toBe(401)
+  })
+
+  it("does not accept one account's proof for another, or a forged one", async () => {
+    const [mine, theirs] = [await account(), await account()]
+    const proof = ((await (await signin(mine, PASSWORD)).json()) as { data: { knownDevice: string } }).data.knownDevice
+    for (let i = 0; i < 10; i++) expect((await signin(theirs, "wrong-guess")).status).toBe(401)
+    await expectAccountLimited(await signin(theirs, PASSWORD, nextIp(), proof))
+    await expectAccountLimited(await signin(theirs, PASSWORD, nextIp(), `${Date.now()}.forged`))
   })
 })

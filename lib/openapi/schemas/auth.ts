@@ -34,6 +34,7 @@ export const SigninRequestSchema = z
     email: z.string().email(),
     password: z.string().min(1),
     deviceInfo: DeviceInfoSchema.optional(),
+    knownDevice: z.string().max(200).optional().describe("The knownDevice proof an earlier sign-in to this account returned: skips the per-email windows (per-IP still applies)."),
   })
   .openapi("SigninRequest")
 
@@ -47,6 +48,7 @@ export const GoogleAuthRequestSchema = z
 export const RefreshTokenRequestSchema = z
   .object({
     refreshToken: z.string().min(1),
+    installationId: z.string().uuid().optional().describe("The installation the session was signed in from (deviceInfo.installationId)."),
   })
   .openapi("RefreshTokenRequest")
 
@@ -86,6 +88,7 @@ export const AuthTokenResponseSchema = z
     user: AuthUserSchema,
     accessToken: z.string(),
     refreshToken: z.string(),
+    knownDevice: z.string().nullable().optional().describe("Sign-in only: keep it and send it with the next sign-in to this account."),
   })
   .openapi("AuthTokenResponse")
 
