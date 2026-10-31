@@ -55,7 +55,7 @@ describe("visibleEventsWhere", () => {
       kind: "event",
       OR: [
         { organizer_org_id: { in: ["org-1", "org-2"] } },
-        { organizer_id: "user-1", ...hostNotSuspended },
+        { organizer_id: "user-1", organizer_org_id: null, ...hostNotSuspended },
       ],
     })
   })
@@ -84,7 +84,7 @@ describe("visibleEventsWhere", () => {
     expect(where.OR).toEqual([
       { organizer_org_id: { in: ["org-9"] } },
       { venue_id: "venue-1", start_time: { gte: claimedAt } },
-      { organizer_id: "owner-1", ...hostNotSuspended },
+      { organizer_id: "owner-1", organizer_org_id: null, ...hostNotSuspended },
     ])
   })
 
@@ -111,7 +111,7 @@ describe("visibleEventsWhere", () => {
 
     const where = await visibleEventsWhere({ id: "lonely-1", role: "organizer" })
 
-    expect(where.OR).toEqual([{ organizer_id: "lonely-1", ...hostNotSuspended }])
+    expect(where.OR).toEqual([{ organizer_id: "lonely-1", organizer_org_id: null, ...hostNotSuspended }])
   })
 
   it("gives a sponsor nothing but their own authorship, even inside an organising org", async () => {
@@ -133,7 +133,7 @@ describe("visibleEventsWhere", () => {
 
     const where = await visibleEventsWhere({ id: "sponsor-1", role: "sponsor" })
 
-    expect(where.OR).toEqual([{ organizer_id: "sponsor-1", ...hostNotSuspended }])
+    expect(where.OR).toEqual([{ organizer_id: "sponsor-1", organizer_org_id: null, ...hostNotSuspended }])
     // No org SCOPE — the only organizer_org_id left is the creator floor's
     // "legacy event with no org" arm, which admits nothing of the org's.
     expect(JSON.stringify(where)).not.toContain('"organizer_org_id":{"in"')

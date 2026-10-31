@@ -211,7 +211,8 @@ export async function reportScope(role: user_role, userId: string): Promise<Repo
 
   const hostedArms: Prisma.eventsWhereInput[] = [
     { organizer_org_id: { in: orgIds } },
-    { organizer_id: userId, ...hostNotSuspended },
+    // The creator arm, for events with no organisation only: one that has an org is its members' (SCRUM-942).
+    { organizer_id: userId, organizer_org_id: null, ...hostNotSuspended },
   ]
   const venueArms = role === "venue_owner" ? await claimedVenueEventsWhere(orgIds) : []
 
