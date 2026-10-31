@@ -20,8 +20,10 @@ const LOOKALIKE_SCRIPTS = [
   /\p{Script=Lisu}/u,
 ]
 
+// NFKC first: that is what the name key sees, and bold-math or full-width letters are
+// Script=Common until it turns them into Latin.
 export const hasMixedScripts = (name: string): boolean =>
-  LOOKALIKE_SCRIPTS.filter((script) => script.test(name)).length > 1
+  LOOKALIKE_SCRIPTS.filter((script) => script.test(name.normalize("NFKC"))).length > 1
 
 export function refuseMixedScript(name: string): void {
   if (hasMixedScripts(name)) {

@@ -16,6 +16,8 @@ describe("hasMixedScripts", () => {
     ["ᎪBC Coffee", "Cherokee Ꭺ"],
     ["ᑕafe Noir", "Canadian syllabics ᑕ"],
     ["ꓚafe Noir", "Lisu ꓚ"],
+    ["𝐓𝐡і𝐫𝐝 𝐖𝐚𝐯𝐞", "bold-math letters (Common) plus one Cyrillic і: the key folds them to Latin"],
+    ["Ｔｈіrd Ｗave", "full-width Latin plus Cyrillic і"],
   ])("flags %s (%s)", (name) => {
     expect(hasMixedScripts(name)).toBe(true)
   })
