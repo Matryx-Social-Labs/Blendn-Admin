@@ -167,6 +167,43 @@ describe("a brand's name across organisations", () => {
   })
 })
 
+describe("a lookalike name from another script (SCRUM-959)", () => {
+  const cyrillicI = "\u0456"
+  const lookalike = (n: string) => n.replace("i", cyrillicI)
+
+  it("refuses a brand name that mixes Latin and Cyrillic, new or renamed, and writes nothing", async () => {
+    const mine = await sponsorOrg("ms-me")
+    as(mine.user)
+    const own = unique()
+    const saved = await saveMyBrand({ name: own })
+    brands.push(saved.id)
+    await expect(saveMyBrand({ name: `Th${cyrillicI}rd Wave ${own}` })).rejects.toThrow(/one alphabet/i)
+    expect((await db.sponsors.findUniqueOrThrow({ where: { id: saved.id }, select: { name: true } })).name).toBe(own)
+    const fresh = await sponsorOrg("ms-new")
+    as(fresh.user)
+    await expect(saveMyBrand({ name: `Th${cyrillicI}rd Wave ${own}` })).rejects.toThrow(/one alphabet/i)
+    expect(await db.sponsors.count({ where: { org_id: fresh.org } })).toBe(0)
+  })
+
+  it("lets a brand that predates the rule keep saving its logo", async () => {
+    const mine = await sponsorOrg("ms-old")
+    const old = `Th${cyrillicI}rd Old ${unique()}`
+    const id = await brandOf(mine.org, old)
+    as(mine.user)
+    await expect(saveMyBrand({ name: old, logo_url: "https://example.com/l.png" })).resolves.toBeTruthy()
+    expect((await db.sponsors.findUniqueOrThrow({ where: { id }, select: { logo_url: true } })).logo_url).toBe("https://example.com/l.png")
+  })
+
+  it("refuses an organisation application whose name mixes scripts, leaving it undecided", async () => {
+    const admin = await makeUser("ms-admin", "app_admin")
+    users.push(admin)
+    session = { user: { id: admin, role: "app_admin" } }
+    const id = await application(lookalike(testId("Nightshift Collective")))
+    await expect(approveOnboardingRequest(id)).rejects.toThrow(/one alphabet/i)
+    expect((await db.organiser_onboarding_requests.findUniqueOrThrow({ where: { id }, select: { status: true } })).status).toBe("pending")
+  })
+})
+
 describe("an organisation's name", () => {
   it("is refused at approval when another organisation has it, in any case", async () => {
     const admin = await makeUser("on-admin", "app_admin")

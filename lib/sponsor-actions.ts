@@ -12,6 +12,7 @@ import { httpsUrl } from "@/lib/https-url"
 import { actorFor } from "@/lib/org-membership"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
+import { refuseMixedScript } from "@/lib/name-script"
 import { normaliseSponsorName } from "@/lib/sponsor-name"
 import { SPONSORSHIP } from "@/lib/constants"
 import { placementPhase, type PlacementPhase } from "@/lib/placement-phase"
@@ -148,6 +149,7 @@ export async function createUnclaimedSponsor(eventId: string, input: unknown) {
   const { name, website, logo_url } = parsed.data
   const name_key = normaliseSponsorName(name)
   if (!name_key) throw new Refusal("That name has no letters or digits in it")
+  refuseMixedScript(name)
 
   const clash = await db.sponsors.findFirst({
     where: { name_key, deleted_at: null, merged_into: null },
@@ -805,6 +807,8 @@ export async function saveMyBrand(input: unknown) {
     where: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
     select: { id: true, name_key: true },
   })
+  // Only a new or changing name: a brand that predates the rule keeps saving its logo.
+  if (existing?.name_key !== name_key) refuseMixedScript(name)
 
   /*
    * Across organisations, not only within this one (SCRUM-956): taking another
