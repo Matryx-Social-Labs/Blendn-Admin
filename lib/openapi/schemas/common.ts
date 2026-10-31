@@ -184,6 +184,7 @@ export const DeviceInfoSchema = z
     platform: z.string().optional(),
     device: z.string().optional(),
     appVersion: z.string().optional(),
+    installationId: z.string().uuid().optional().describe("One install of the app (a UUID it makes once). Binds the refresh session at sign-in: a refresh from another installation ends every session."),
   })
   .openapi("DeviceInfo")
 

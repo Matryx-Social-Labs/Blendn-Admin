@@ -39,7 +39,6 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import bcrypt from "bcryptjs"
-import { occurrencesForSpan } from "../lib/occurrences"
 import { checkPassword } from "../lib/password"
 import { syncOccurrences } from "../lib/occurrences"
 import { realEventsWhere } from "../lib/event-kind"
@@ -150,74 +149,10 @@ async function main() {
         data: { email: `demo-organiser@${email.split("@")[1]}`, name: "Blend'n Demo", role: "organizer" },
       }))
 
-    const start = new Date(Date.now() + 26 * 60 * 60 * 1000)
-    const event = await db.events.create({
-      data: {
-        slug: `review-demo-event-${start.toISOString().slice(0, 10)}`,
-        title: "Rooftop Sessions: Live Set",
-        description:
-          "An evening of live music on a rooftop in the city centre. Doors at 7, first set at 8. " +
-          "Check in when you arrive to see who else is here.",
-        short_description: "Live music, rooftop, city centre",
-        latitude: CITY.latitude,
-        longitude: CITY.longitude,
-        address: `MG Road, ${CITY.name}`,
-        venue_name: "The Rooftop",
-        city: CITY.name,
-        state: CITY.state,
-        country: CITY.country,
-        start_time: start,
-        end_time: new Date(start.getTime() + 4 * 60 * 60 * 1000),
-        timezone: CITY.timezone,
-        status: "published",
-        visibility: "public",
-        max_capacity: 120,
-        organizer_id: organizer.id,
-        check_in_radius: 150,
-        // A REVIEW_ACCOUNT_IDS account may check in here from anywhere (lib/review-accounts.ts).
-        review_demo: true,
-      },
-    })
-
-    /*
-     * Occurrences, or nobody can check in.
-     *
-     * `resolveOccurrence` returns `none` for an event with no occurrence rows,
-     * and the check-in route reads `none` as `too_late` — "Event has already
-     * ended", however far in the future the event sits. Reusing the product's
-     * own writer rather than inserting rows keeps this fixture honest; a
-     * fixture that hand-rolls what production computes is a second
-     * implementation and will drift.
-     */
-    await syncOccurrences(event.id, start, new Date(start.getTime() + 4 * 60 * 60 * 1000), "Asia/Kolkata")
-
-    /*
-     * Without this, App Review cannot check in to the account we built for
-     * them.
-     *
-     * `event_check_ins.occurrence_id` is NOT NULL, and `resolveOccurrence`
-     * returns `none` for an event with no occurrence rows — which the check-in
-     * route reports as **"Event has already ended"**, on an event starting
-     * tomorrow. The reviewer would tap the one button the app is for and be
-     * told the event is over.
-     *
-     * Every event created through the dashboard gets its occurrences from
-     * `syncOccurrences`; this script wrote the `events` row directly and
-     * skipped it. Nothing in a unit test could catch that, because the failure
-     * is a missing row rather than a wrong one.
-     */
-    const days = occurrencesForSpan(event.start_time, event.end_time, event.timezone)
-    await db.event_occurrences.createMany({
-      data: days.map((d) => ({
-        event_id: event.id,
-        occurs_on: d.occursOn,
-        start_time: d.startTime,
-        end_time: d.endTime,
-      })),
-    })
+    const { event, occurrences } = await createReviewDemoEvent(db, organizer.id)
     eventNote =
       `created "${event.title}" (${event.id}) starting ${event.start_time.toISOString()}` +
-      ` — ${days.length} occurrence(s)`
+      ` — ${occurrences} occurrence(s)`
   }
 
   console.log("Review account ready.")
@@ -231,7 +166,8 @@ async function main() {
   console.log("\nPut these credentials in App Store Connect → App Review Information → Sign-In Information.")
 }
 
-main()
+if (require.main === module) {
+  main()
   .catch((e) => {
     console.error("Error:", e)
     process.exit(1)
@@ -239,3 +175,57 @@ main()
   .finally(async () => {
     await db.$disconnect()
   })
+}
+
+/** The demo event a reviewer checks in to, with its occurrences. Exported for its itest (SCRUM-976). */
+export async function createReviewDemoEvent(
+  client: Pick<PrismaClient, "events" | "event_occurrences">,
+  organizerId: string,
+  slug?: string
+) {
+  const start = new Date(Date.now() + 26 * 60 * 60 * 1000)
+  const event = await client.events.create({
+    data: {
+      slug: slug ?? `review-demo-event-${start.toISOString().slice(0, 10)}`,
+      title: "Rooftop Sessions: Live Set",
+      description:
+        "An evening of live music on a rooftop in the city centre. Doors at 7, first set at 8. " +
+        "Check in when you arrive to see who else is here.",
+      short_description: "Live music, rooftop, city centre",
+      latitude: CITY.latitude,
+      longitude: CITY.longitude,
+      address: `MG Road, ${CITY.name}`,
+      venue_name: "The Rooftop",
+      city: CITY.name,
+      state: CITY.state,
+      country: CITY.country,
+      start_time: start,
+      end_time: new Date(start.getTime() + 4 * 60 * 60 * 1000),
+      timezone: CITY.timezone,
+      status: "published",
+      visibility: "public",
+      max_capacity: 120,
+      organizer_id: organizerId,
+      check_in_radius: 150,
+      // A REVIEW_ACCOUNT_IDS account may check in here from anywhere (lib/review-accounts.ts).
+      review_demo: true,
+    },
+  })
+
+  /*
+   * Occurrences, or nobody can check in.
+   *
+   * `resolveOccurrence` returns `none` for an event with no occurrence rows,
+   * and the check-in route reads `none` as `too_late` — "Event has already
+   * ended", however far in the future the event sits. Reusing the product's
+   * own writer rather than inserting rows keeps this fixture honest; a
+   * fixture that hand-rolls what production computes is a second
+   * implementation and will drift.
+   */
+  await syncOccurrences(event.id, start, new Date(start.getTime() + 4 * 60 * 60 * 1000), "Asia/Kolkata")
+
+  // `syncOccurrences` above is the only writer: a second, hand-rolled insert of the same days broke
+  // @@unique(event_id, occurs_on) and killed the seed on a database with no upcoming event (SCRUM-976).
+  const occurrences = await client.event_occurrences.count({ where: { event_id: event.id } })
+  return { event, occurrences }
+}

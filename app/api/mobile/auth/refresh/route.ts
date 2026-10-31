@@ -55,10 +55,10 @@ export async function POST(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { refreshToken: oldRefreshToken } = parsed.data
+    const { refreshToken: oldRefreshToken, installationId } = parsed.data
 
     // Verify the refresh token
-    const decoded = await verifyRefreshToken(oldRefreshToken)
+    const decoded = await verifyRefreshToken(oldRefreshToken, installationId)
     if (!decoded) return refusedRefresh(oldRefreshToken)
 
     // Check if user still exists
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
       await tx.$queryRaw`SELECT 1 FROM mobile_refresh_tokens WHERE id = ${decoded.jti} FOR UPDATE`
       const own = await tx.mobile_refresh_tokens.findUnique({
         where: { id: decoded.jti },
-        select: { created_at: true, revoked_reason: true, replaced_by: true },
+        select: { created_at: true, revoked_reason: true, replaced_by: true, device_info: true },
       })
       const stamp = current?.mobile_sessions_revoked_at
       if (!own || own.revoked_reason || (stamp && stamp.getTime() >= own.created_at.getTime())) {
@@ -146,7 +146,8 @@ export async function POST(request: NextRequest) {
           data: { revoked_at: new Date() },
         })
       }
-      await storeRefreshToken(user.id, refreshToken, undefined, { client: tx, tokenHash })
+      // The device the session came from goes with it, so the next refresh still knows its installation (A-18 (2)).
+      await storeRefreshToken(user.id, refreshToken, own.device_info ?? undefined, { client: tx, tokenHash })
       await tx.mobile_refresh_tokens.updateMany({
         where: { id: decoded.jti },
         data: { revoked_at: new Date(), ...(newJti ? { replaced_by: newJti } : {}) },
