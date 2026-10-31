@@ -256,6 +256,8 @@ describe("POST /venues/:id/live", () => {
     // person can fix say so in `reasonCode` (Flow 15), and a known age under 18 has none.
     expect(json.errorCode).toBe(code)
     expect(json.reasonCode).toBe(reason)
+    // Only an age that is not on file is the person's to add; telling a 17-year-old to add a birth date is wrong (SCRUM-558).
+    expect(/date of birth/i.test(json.error)).toBe(reason === "AGE_UNKNOWN")
     expect(await db.event_check_ins.count({ where: { user_id: p.id } })).toBe(0)
     expect((await venueDetail(p.token, v)).status).toBe(403)
   })

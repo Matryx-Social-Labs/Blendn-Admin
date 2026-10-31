@@ -101,7 +101,8 @@ export async function personAtTheDoor(
     // Only an age that is not on file is the person's to fix; a known age under 18 is a no.
     // `errorCode` stays `AGE_RESTRICTED`, which installed builds match on; the fixable case is `reasonCode`.
     const reason = profileAge == null ? ErrorCode.AGE_UNKNOWN : undefined
-    return { refusal: errorResponse(`${ADULTS_ONLY} Add your date of birth to your profile to go live.`, 403, ErrorCode.AGE_RESTRICTED, reason) }
+    const sentence = reason ? `${ADULTS_ONLY} Add your date of birth to your profile to go live.` : ADULTS_ONLY
+    return { refusal: errorResponse(sentence, 403, ErrorCode.AGE_RESTRICTED, reason) }
   }
 
   const ageRefusal = room && minAgeRefusal(profileAge, room.minAge)
