@@ -132,15 +132,15 @@ beforeEach(() => {
 
 describe("the staging case: revealed at A and B, anonymous at C", () => {
   it("C's handle does not identify her", async () => {
-    expect(await identityForRef(VIEWER, roomHandle(C, TANVI))).toEqual({ userId: TANVI, room: C, identified: false })
+    expect(await identityForRef(VIEWER, roomHandle(C, TANVI))).toEqual({ userId: TANVI, room: C, identified: false, askedOnly: false })
   })
 
   it("A's handle does — she chose to be named in that room", async () => {
-    expect(await identityForRef(VIEWER, roomHandle(A, TANVI))).toEqual({ userId: TANVI, room: A, identified: true })
+    expect(await identityForRef(VIEWER, roomHandle(A, TANVI))).toEqual({ userId: TANVI, room: A, identified: true, askedOnly: false })
   })
 
   it("her raw id keeps the unscoped answer, which a reveal anywhere shared satisfies", async () => {
-    expect(await identityForRef(VIEWER, TANVI)).toEqual({ userId: TANVI, room: null, identified: true })
+    expect(await identityForRef(VIEWER, TANVI)).toEqual({ userId: TANVI, room: null, identified: true, askedOnly: false })
   })
 
   it("the scoped read asks for exactly that event, not any the viewer attended", async () => {
@@ -196,14 +196,14 @@ describe("in a room's terms, only what that room shows", () => {
   })
 
   it("your own handle is you", async () => {
-    expect(await identityForRef(VIEWER, roomHandle(C, VIEWER))).toEqual({ userId: VIEWER, room: C, identified: true })
+    expect(await identityForRef(VIEWER, roomHandle(C, VIEWER))).toEqual({ userId: VIEWER, room: C, identified: true, askedOnly: false })
     expect(mockDb.event_match_preferences.findMany).not.toHaveBeenCalled()
   })
 
   it("a forged handle is answered as the unknown id it is", async () => {
     const real = roomHandle(A, TANVI)
     const forged = real.slice(0, -2) + (real.endsWith("AA") ? "AB" : "AA")
-    expect(await identityForRef(VIEWER, forged)).toEqual({ userId: forged, room: null, identified: false })
+    expect(await identityForRef(VIEWER, forged)).toEqual({ userId: forged, room: null, identified: false, askedOnly: false })
   })
 })
 

@@ -2493,6 +2493,12 @@
       "mutation": "M944a lib/mobile-auth.ts verifyRefreshToken installation check disabled (if (false && ...)).",
       "observed": "M944a: 3 of 8 failing (live token from another installation, grace replay from another, replay naming none: all 200). Restored; 8/8. Review 2: a deliberately ended row skips the check (test red first: its replay revoked the newer session).",
       "date": "2026-10-31"
+    },
+    "profile-card-fields.itest.ts": {
+      "guards": "SCRUM-975 / owner ruling A-32: a sender named only by their pending request shows the recipient name and photo on GET /users/:id and GET /profiles/:id, never bio or orientation; a friend who also asked keeps both.",
+      "mutation": "M975a lib/identity.ts identityForRef returned askedOnly: false for every visible target.",
+      "observed": "M975a: 1 of 6 failing (\"shows name and photo, never bio or orientation\": bio \"Sunday potter\" returned). Restored; 6/6.",
+      "date": "2026-10-31"
     }
   },
   "grandfathered": [
