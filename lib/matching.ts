@@ -1,5 +1,6 @@
 import type { connection_intent } from "@prisma/client"
 
+import { firstName } from "./conversation-identity"
 import { matchCompatibleForDating, type DatingProfile } from "@/lib/dating"
 import { MIN_ROOM_FOR_WORK_FIELD } from "@/lib/work-fields"
 
@@ -610,7 +611,7 @@ export function rankMatches(
     userId: candidate.userId,
     // The reveal decision is enforced here rather than at the route, so no
     // caller can forget it and no second implementation can disagree.
-    displayName: candidate.revealed && candidate.name ? candidate.name : candidate.pseudonym,
+    displayName: candidate.revealed && candidate.name ? firstName(candidate.name) : candidate.pseudonym,
     photo: candidate.revealed ? candidate.photo : null,
     sharedInterestIds,
     sharedIntents,

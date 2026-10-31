@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { firstName } from "@/lib/conversation-identity"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -177,7 +178,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         return {
           // Yours real; everyone else's as their handle in this room (SCRUM-371).
           userId: idForViewer(authUser.userId, scope, m.user.id),
-          name: shown ? m.user.name : names?.get(m.user.id) ?? (m.anonymous_name || "Anonymous"),
+          name: shown ? firstName(shown) : names?.get(m.user.id) ?? (m.anonymous_name || "Anonymous"),
           avatar: shown ? (m.user.profile?.photos?.[0] ?? null) : (images.get(m.user.id) ?? null),
           role: m.role,
           status: m.status,

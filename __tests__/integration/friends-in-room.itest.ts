@@ -191,7 +191,7 @@ describe("a friend leaves every stranger surface, whatever their switch (B1)", (
 
     const rosterShown = rows.find((r) => r.userId === roomHandle(eventId, shown.id))!
     const rosterCovered = rows.find((r) => r.userId === roomHandle(eventId, covered.id))!
-    expect(rosterShown.name).toContain("fir-i-s") // the roster names the revealed person: the premise
+    expect(rosterShown.name).toBe("Test") // the roster names the revealed person, by first name (SCRUM-493): the premise
     const listedShown = listed.find((r) => r.userId === rosterShown.userId)!
     const listedCovered = listed.find((r) => r.userId === rosterCovered.userId)!
     expect({ name: listedShown.name, avatar: listedShown.avatar }).toEqual({ name: rosterShown.name, avatar: rosterShown.image ?? null })
@@ -200,7 +200,7 @@ describe("a friend leaves every stranger surface, whatever their switch (B1)", (
     const rosterMine = rows.find((r) => r.userId === viewer.id)!
     const listedMine = listed.find((r) => r.userId === viewer.id)!
     expect({ name: listedMine.name, avatar: listedMine.avatar }).toEqual({ name: rosterMine.name, avatar: rosterMine.image ?? null })
-    expect(listedMine.name).toContain("fir-i-v")
+    expect(listedMine.name).toBe("Test") // as the room sees you: first name only
     // Someone the viewer may not recognise stays a pseudonym with no photo, as on the roster.
     expect({ name: listedCovered.name, avatar: listedCovered.avatar }).toEqual({ name: rosterCovered.name, avatar: null })
   })
@@ -349,6 +349,24 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     expect(to(stranger, "event:room:checkin")).toHaveLength(1)
     expect(to(stranger, "event:checkin")[0].payload.userId).toBe(roomHandle(eventId, arriver.id))
     expect(to(arriver, "event:checkin")[0].payload.userId).toBe(arriver.id)
+  })
+
+  it("an arrival of somebody who revealed here names them by first name only to those in the room (SCRUM-493)", async () => {
+    const eventId = await liveEvent()
+    const [arriver, watcher] = [await person("fir-n-a"), await person("fir-n-w")]
+    for (const p of [arriver, watcher]) await checkIn(eventId, p)
+    await db.event_match_preferences.upsert({
+      where: { event_id_user_id: { event_id: eventId, user_id: arriver.id } },
+      create: { event_id: eventId, user_id: arriver.id, revealed: true },
+      update: { revealed: true },
+    })
+    await install([arriver, watcher].map((p) => ({ userId: p.id, rooms: [`event:${eventId}`, `event:room:${eventId}`, `user:${p.id}`] })))
+    await emitEventCheckIn(eventId, arriver.id, "Otter", { name: "Asha Rao Nair", image: null }, [], true)
+
+    const copy = emitted.filter((e) => e.to === watcher.id && e.event === "event:room:checkin")
+    expect(copy).toHaveLength(1)
+    expect(copy[0].payload.userName).toBe("Asha")
+    expect(JSON.stringify(copy)).not.toContain("Rao")
   })
 
   it("a departure: a friend's copy is the bare count; a stranger's carries the handle only if the roster showed them; the leaver sees their own id", async () => {

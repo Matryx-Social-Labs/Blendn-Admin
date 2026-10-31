@@ -176,7 +176,8 @@ describe("anonymity is enforced in the ranking, not by the caller", () => {
     const [m] = rank([
       candidate({ userId: "open", name: "Priya Raman", photo: "https://x/p.jpg", revealed: true }),
     ])
-    expect(m.displayName).toBe("Priya Raman")
+    // First name only: the full name is for people they match or talk with (SCRUM-493).
+    expect(m.displayName).toBe("Priya")
     expect(m.photo).toBe("https://x/p.jpg")
   })
 

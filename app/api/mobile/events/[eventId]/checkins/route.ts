@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { firstName } from "@/lib/conversation-identity"
 import { roomBanRefusal } from "@/lib/room-ban"
 import { notHostBannedFrom } from "@/lib/room-kind"
 import { NextRequest } from "next/server"
@@ -43,7 +44,7 @@ import { isUuid } from "@/lib/api-input"
  * leaves you off your own roster.
  *
  * Age and city remain because they are what someone decides to say hello with,
- * and neither identifies. Real name and photo appear only for somebody the
+ * and neither identifies. First name (SCRUM-493) and photo appear only for somebody the
  * viewer may recognise in this room (`visibleInRoom`): they revealed here, or
  * they are the viewer's friend and turned on "Friends can see who I am in
  * rooms" — never by default, and the handle stays the id either way.
@@ -220,7 +221,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             // A message request, a block and a report all need to name a
             // person; this names them only inside this room (SCRUM-371).
             userId: idForViewer(authUser.userId, eventId, c.user.id),
-            name: shown ? c.user.name : pseudonyms.get(c.user.id) ?? "Attendee",
+            name: shown ? firstName(shown) : pseudonyms.get(c.user.id) ?? "Attendee",
             // Present only for somebody the viewer may recognise here; the
             // header explains why it is otherwise absent.
             ...(shown && { image: c.user.profile?.photos?.[0] ?? null }),

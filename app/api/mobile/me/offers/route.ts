@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic"
  * GET / PUT /api/mobile/me/offers — a person's two offer settings.
  *
  *   - `enabled` — "Offers from places", one switch for every venue (step 12
- *     review M6). On unless turned off; off, no venue's offer reaches you (the
+ *     review M6). Off until turned on (default false); off, no venue's offer reaches you (the
  *     send leaves you out of every audience).
  *   - `pushes` — offer notifications (SCRUM-628). A venue's offer is a
  *     promotion, and App Store guideline 4.5.4 allows its push only after a
