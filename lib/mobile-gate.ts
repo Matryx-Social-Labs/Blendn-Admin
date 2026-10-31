@@ -180,6 +180,13 @@ export function sendsUploadSize(appVersionHeader: string | null | undefined): bo
   return Boolean(sent && from && compareVersions(sent, from) >= 0)
 }
 
+/** True once MOBILE_MIN_APP_VERSION is at or past `version`: every supported build has what that version shipped. */
+export function minimumAtLeast(version: string, configured: string | undefined = process.env.MOBILE_MIN_APP_VERSION): boolean {
+  const minimum = parseAppVersion(configured?.trim())
+  const from = parseAppVersion(version)
+  return Boolean(minimum && from && compareVersions(minimum, from) >= 0)
+}
+
 /** Maintenance first: while the server is down, "update the app" would be the wrong thing to say. */
 export function mobileGateRefusal(
   appVersionHeader: string | null,

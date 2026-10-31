@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger"
+import { deletionReauthRefusal } from "@/lib/deletion-reauth"
 import { Prisma } from "@prisma/client"
 import { NextRequest, after } from "next/server"
 import { db } from "@/lib/db"
@@ -34,6 +35,10 @@ import { z } from "zod"
 const deleteAccountSchema = z
   .object({
     appleAuthorizationCode: z.string().trim().min(1).max(2048).optional(),
+    // Who is deleting (SCRUM-944 (3), lib/deletion-reauth.ts): one of these.
+    password: z.string().min(1).max(200).optional(),
+    googleIdToken: z.string().min(1).max(4096).optional(),
+    appleIdentityToken: z.string().min(1).max(4096).optional(),
   })
   .strict()
 
@@ -61,6 +66,8 @@ export async function DELETE(request: NextRequest) {
 
     const parsed = deleteAccountSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
+    const refused = await deletionReauthRefusal(authUser.userId, parsed.data)
+    if (refused) return refused
     // Read before the erasure, which deletes the link: whether there is an Apple grant to revoke.
     // Every Apple link, not the first: the code's Apple ID is checked against all of them (review L1).
     const appleSubs = new Set(
