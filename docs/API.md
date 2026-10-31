@@ -53,7 +53,7 @@ the route's catch-all called the caller's mistake an outage.
 | Method | Endpoint | Description | Rate Limit |
 |--------|----------|-------------|------------|
 | POST | `/auth/signup` | Register with email/password | 3/hr |
-| POST | `/auth/signin` | Login with email/password | 5/15min per IP, 10/15min per email |
+| POST | `/auth/signin` | Login with email/password | 5/15min per IP; 10/15min per email, wrong passwords only, cleared by a password reset (SCRUM-944) |
 | POST | `/auth/google` | Google OAuth login | 10/15min |
 | POST | `/auth/apple` | Apple Sign In | 10/15min |
 | POST | `/auth/refresh` | Refresh access token | 20/15min |
@@ -1750,6 +1750,10 @@ counted. Your own messages are never unread. Reading a room's newest page
 see, and the list is ordered by it. (A `groups` row's `lastMessageAt`, and the
 paging order, are still the room's own last message.)
 
+**An advert counts as nothing in the list** (SCRUM-624/625/924): a sponsored send (`metadata.sponsored_message_id`, a
+sponsored poll, or the `sponsored` type) is never `lastMessage`, never in `unreadCount`, and never moves a room's
+`lastMessageAt` or its place in the paging order.
+
 ### POST /message-requests
 **`message` is required.** A request with no message is indistinguishable from a
 like with a reveal stapled to it, and the two are separate actions:
@@ -1772,7 +1776,7 @@ contact details); a hit is `400` `VALIDATION_FAILED` with `reasonCode:
 "TEXT_NOT_ALLOWED"` and `field: "message"`, its `error` a sentence to show as
 is. Nothing is stored or sent.
 
-Guards, in order: rate limit, self-send, recipient exists, blocks either way,
+Guards, in order: rate limit, self-send, recipient exists **and is listed** (`show_online` on; off answers `404 User not found`, by handle or id, as for an id nobody has: SCRUM-904), blocks either way,
 closed pair (an unmatch — same 404 as a block, so the refusal never says "this
 person ended it"), `haveSharedAnEvent`, existing request, existing
 conversation. And
@@ -3503,8 +3507,9 @@ no `event:room:checkin` is sent for you (SCRUM-620). With it off you are **count
 not listed** — the room's numbers include you, nobody is offered your card, and
 nobody can like you: `POST /events/:eventId/matches/likes` answers `404 User not found`
 for you, by handle or raw id, as for an id nobody has, and a crew's like of you writes
-nothing (SCRUM-669). Chat is unaffected: posting a message is its own choice to
-be seen.
+nothing (SCRUM-669), and nobody can send you a message request: `POST /message-requests`
+answers the same `404` (SCRUM-904), although a chat message hands out your room handle.
+Chat is unaffected: posting a message is its own choice to be seen.
 
 ---
 

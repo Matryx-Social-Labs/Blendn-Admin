@@ -147,10 +147,13 @@ export async function createPoll(eventId: string, input: unknown): Promise<Creat
       select: { id: true },
     })
 
-    await tx.chat_groups.update({
-      where: { id: event.chat_group!.id },
-      data: { last_message_at: message.created_at },
-    })
+    // A sponsored poll is an advert: it never moves the room's place in the chat list (SCRUM-924, owner row A-3).
+    if (kind !== "sponsored") {
+      await tx.chat_groups.update({
+        where: { id: event.chat_group!.id },
+        data: { last_message_at: message.created_at },
+      })
+    }
 
     return { messageId: message.id, pollId: poll.id, createdAt: message.created_at }
   })

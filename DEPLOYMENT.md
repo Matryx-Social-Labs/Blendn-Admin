@@ -287,8 +287,9 @@ what every environment has by default. This creates one event running thirty
 days with twenty-five people in it, shaped so each of those behaviours shows up
 on a screen rather than in a query plan.
 
-`/api/health` is the check that it worked: `matching.status` moves from
-`no_signal` to `ok` with a `rankableShare` around 0.8.
+`/api/health/matching` (signed in as an app admin; since SCRUM-946 the public
+`/api/health` carries no product metrics) is the check that it worked: `status`
+moves from `no_signal` to `ok` with a `rankableShare` around 0.8.
 
 **Two guards, and the second is the one that matters.** `SEED_ROOM=yes` is
 required, and the script prints the host it resolved from `DATABASE_URL` before

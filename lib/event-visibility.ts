@@ -96,8 +96,11 @@ export async function visibleEventsScope(user: {
      * already drops a suspended org's events because `actorFor` no longer
      * loads that membership, and this arm would put them straight back for
      * whoever created them — a list full of rows that do not open.
+     *
+     * Only for an event with no organisation (SCRUM-942, owner row A-16, decided by lean on 2026-10-31): an event that
+     * has one is its members', and a creator who left that org must lose it, as `eventPermissions` already says.
      */
-    { organizer_id: user.id, ...hostNotSuspended },
+    { organizer_id: user.id, organizer_org_id: null, ...hostNotSuspended },
   ]
   return { where, actor: { id: user.id, orgIds: actor.orgIds } }
 }

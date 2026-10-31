@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client"
 import { hereCounts } from "@/lib/attendee-counts"
-import { lastMessagesOf, unreadAfterMarkers, type OtherMemberRow } from "@/lib/chat-list"
+import { lastMessagesOf, unreadAfterMarkers, unreadTotalsOf, type OtherMemberRow } from "@/lib/chat-list"
 import { db } from "@/lib/db"
 import { inRoomWhere, realEventsWhere } from "@/lib/event-kind"
 import { namesInRoom } from "@/lib/identity"
@@ -111,14 +111,8 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
   const chatGroupIds = allRooms.map((m) => m.chat_group_id)
   const eventIds = memberships.map((m) => m.chat_group.event.id)
   const [totals, lastMessagesRaw, unread, activeCheckIns, here] = await Promise.all([
-    // Every visible message per room: what is unread for a member who has read nothing.
-    chatGroupIds.length > 0
-      ? db.chat_messages.groupBy({
-          by: ["chat_group_id"],
-          where: { chat_group_id: { in: chatGroupIds }, deleted_at: null, user_id: { notIn: notUnread } },
-          _count: { _all: true },
-        })
-      : [],
+    // Every visible message per room that is not an advert: what is unread for a member who has read nothing.
+    unreadTotalsOf(chatGroupIds, notUnread),
     lastMessagesOf(chatGroupIds, blockedIds),
     unreadAfterMarkers(allRooms, notUnread),
     /*
@@ -159,7 +153,7 @@ export async function buildChatRows({ userId, memberships, others, notUnread, bl
     hereCounts(memberships.filter((m) => m.chat_group.event.kind !== "venue_day").map((m) => m.chat_group.event.id)),
   ])
   const { lastReadMessageMap, unreadCountMap } = unread
-  const totalOf = new Map(totals.map((r) => [r.chat_group_id, r._count._all]))
+  const totalOf = totals
   const lastMessageMap = new Map(lastMessagesRaw.map((m) => [m.chat_group_id, m]))
   const checkedInEventIds = new Set(activeCheckIns.map((c) => c.event_id))
 

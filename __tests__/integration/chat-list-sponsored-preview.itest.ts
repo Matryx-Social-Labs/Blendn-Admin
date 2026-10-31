@@ -100,3 +100,40 @@ describe("the chat list's last-message preview", () => {
     expect(res.body.data.groups[0].lastMessage).toMatchObject({ type: "announcement", content: "📢 [Announcement from Toit]\nDoors at 8" })
   })
 })
+
+/*
+ * Nor is an advert unread (SCRUM-924, owner row A-3, decided by lean 2026-10-31; reverse if wanted): a room never reads
+ * "1 unread" for a line its preview does not show. Both counts: from the read marker, and everything for a member who has
+ * read nothing.
+ */
+describe("the chat list's unread count", () => {
+  it.each(SPONSORED_SENDS)("does not count $label, with no read marker", async ({ type, metadata }) => {
+    const { host, viewer, a, roomId } = await roomWith(`cu-${type}`)
+    await db.chat_messages.create({ data: { chat_group_id: roomId, user_id: a.id, content: "see you at eight", created_at: at(1) } })
+    await db.chat_messages.create({ data: { chat_group_id: roomId, user_id: host.id, type, metadata, content: "📣 [Sponsored]\nTry the new brew", created_at: at(2) } })
+
+    const res = await api.chatGroups(viewer)
+
+    expect(res.body.data.groups[0].unreadCount).toBe(1)
+  })
+
+  it.each(SPONSORED_SENDS)("does not count $label after the read marker", async ({ type, metadata }) => {
+    const { host, viewer, a, roomId } = await roomWith(`cm-${type}`)
+    const read = await db.chat_messages.create({ data: { chat_group_id: roomId, user_id: a.id, content: "read this", created_at: at(1) } })
+    await db.chat_group_members.updateMany({ where: { chat_group_id: roomId, user_id: viewer.id }, data: { last_read_message_id: read.id } })
+    await db.chat_messages.create({ data: { chat_group_id: roomId, user_id: host.id, type, metadata, content: "📣 [Sponsored]\nTry the new brew", created_at: at(2) } })
+
+    const res = await api.chatGroups(viewer)
+
+    expect(res.body.data.groups[0].unreadCount).toBe(0)
+  })
+
+  it("still counts a host's ordinary poll (negative control)", async () => {
+    const { host, viewer, roomId } = await roomWith("cu-poll")
+    await db.chat_messages.create({ data: { chat_group_id: roomId, user_id: host.id, type: "poll", content: "Which set first?", metadata: { poll: true, kind: "announcement" }, created_at: at(1) } })
+
+    const res = await api.chatGroups(viewer)
+
+    expect(res.body.data.groups[0].unreadCount).toBe(1)
+  })
+})
