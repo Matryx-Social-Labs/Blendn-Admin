@@ -288,10 +288,10 @@
       "date": "2026-09-27"
     },
     "sentry-scrub.test.ts": {
-      "guards": "Sentry 11 dataCollection: every Sentry.init site (instrumentation-client.ts, sentry.server.config.ts, sentry.edge.config.ts) passes SENTRY_DATA_COLLECTION and none uses the removed sendDefaultPii; the baseline keeps userInfo, cookies, http bodies, database query data, queues, genAI and GraphQL collection off (v10's sendDefaultPii:false behaviour)",
-      "mutation": "M1 `dataCollection: SENTRY_DATA_COLLECTION` deleted from sentry.edge.config.ts; M2 `cookies: true` in SENTRY_DATA_COLLECTION (both 2026-09-27).",
-      "observed": "M1: 1 failing (\"is what sentry.edge.config.ts passes to Sentry.init\"). M2: 1 failing (the v10 baseline test). Both reverted from copies; 16/16 after.",
-      "date": "2026-09-27"
+      "guards": "Sentry 11 dataCollection: every Sentry.init site (instrumentation-client.ts, sentry.server.config.ts, sentry.edge.config.ts) passes SENTRY_DATA_COLLECTION and none uses the removed sendDefaultPii; the baseline keeps userInfo, cookies, http bodies, database query data, queues, genAI and GraphQL collection off (v10's sendDefaultPii:false behaviour). Since 2026-10-31 (Sentry triage) also: beforeSend drops a server action's Refusal (by its refusal: digest, so another bundle's copy of the class counts) and keeps every other error; the server and edge inits name RAILWAY_ENVIRONMENT_NAME",
+      "mutation": "M1 `dataCollection: SENTRY_DATA_COLLECTION` deleted from sentry.edge.config.ts; M2 `cookies: true` in SENTRY_DATA_COLLECTION (both 2026-09-27). M3 the isRefusal(hint.originalException) early return in lib/sentry-scrub.ts beforeSend removed (2026-10-31).",
+      "observed": "M1: 1 failing (\"is what sentry.edge.config.ts passes to Sentry.init\"). M2: 1 failing (the v10 baseline test). Both reverted from copies; 16/16 after. M3: 2 of 23 failing (both refusal-drop cases); restored, 23/23.",
+      "date": "2026-10-31"
     },
     "participation-needs-onboarding.itest.ts": {
       "guards": "SCRUM-331: a profile that is neither onboarded nor of a known adult age cannot RSVP, save, read the board, check in, start a conversation, send a message request or send a DM (403 FINISH_ONBOARDING, nothing written) but can still view the event; an onboarded no-age account, an adult mid-onboarding and an onboarded pre-ruling under-18 can take part; an under-18 who never finished onboarding cannot",
