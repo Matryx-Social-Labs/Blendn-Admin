@@ -19,6 +19,7 @@ import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { notifyEventUpdate } from "@/lib/push-notifications"
+import { orgNameTaken, orgNameTakenRefusal, refuseIfOrgNameTaken } from "@/lib/org-name-key"
 import { realEventsWhere } from "./event-kind"
 import { liveAnalyticsByOrg } from "./entitlements"
 
@@ -234,6 +235,16 @@ export async function approveOnboardingRequest(
     )
   }
 
+  /*
+   * An organisation name is unique, without regard to case (SCRUM-956): the name
+   * is what a venue, an attendee or a sponsor sees, and a second "Nightshift
+   * Collective" is impersonation. Checked before anything is written, so the
+   * application stays undecided and the admin can ask the applicant for a name
+   * that tells them apart.
+   */
+  const displayName = request.display_name.trim()
+  if (await orgNameTaken(displayName)) throw orgNameTakenRefusal(displayName)
+
   const hashed = await bcrypt.hash(undisclosedPassword(), 12)
 
   const { orgId, userId, phonesEnded } = await db.$transaction(async (tx) => {
@@ -253,7 +264,7 @@ export async function approveOnboardingRequest(
     const org = await tx.organisations.create({
       data: {
         kind: request.kind,
-        display_name: request.display_name,
+        display_name: displayName,
         legal_name: request.legal_name,
         gstin: request.gstin,
         address: request.address,
@@ -341,7 +352,7 @@ export async function approveOnboardingRequest(
 
     const phonesEnded = takeOver ? await endPhoneSessions(tx, user.id, "password_reset") : null
     return { orgId: org.id, userId: user.id, phonesEnded }
-  })
+  }).catch((e: unknown) => refuseIfOrgNameTaken(e, displayName))
   if (phonesEnded) phoneSessionsEnded(userId, phonesEnded.at)
 
   const setPasswordLink = existing && !takeOver ? "" : await issuePasswordResetLink(userId, SET_PASSWORD_TTL_MS)

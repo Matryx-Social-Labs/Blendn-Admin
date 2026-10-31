@@ -1,4 +1,5 @@
 import * as z from "zod"
+import { httpsUrl } from "@/lib/https-url"
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -59,8 +60,8 @@ export const eventFormSchema = z.object({
   door_policy: z.enum(["open", "guest_list", "members_only", "invite_only"]).optional(),
   /** Blank for almost every event; 13–25 when it matters. See `lib/age.ts`. */
   min_age: z.number().int().min(13).max(25).optional(),
-  cover_image_url: z.string().url().optional().or(z.literal("")),
-  external_link: z.string().url().optional().or(z.literal("")),
+  cover_image_url: httpsUrl().optional().or(z.literal("")),
+  external_link: httpsUrl().optional().or(z.literal("")),
   is_featured: z.boolean().optional(),
   /** "Allow crews at this event" (plan v2 §6). On unless the host turns it off. */
   crews_enabled: z.boolean().optional(),
@@ -86,10 +87,10 @@ export const eventFormSchema = z.object({
       z.object({
         id: z.string(),
         type: z.enum(["image", "video", "document"]),
-        url: z.string().url(),
-        thumbnail_url: z.string().url().optional().or(z.literal("")),
-        title: z.string().optional(),
-        description: z.string().optional(),
+        url: httpsUrl(),
+        thumbnail_url: httpsUrl().optional().or(z.literal("")),
+        title: z.string().max(200).optional(),
+        description: z.string().max(2000).optional(),
       })
     )
     .optional(),

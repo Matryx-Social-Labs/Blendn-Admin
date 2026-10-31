@@ -3,6 +3,7 @@
 import { Refusal } from "./refusal"
 import { cancelPreviousOwnersMandates, endPreviousOwnersPro } from "./subscription-cancel"
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 
 import { revalidatePath } from "next/cache"
 import { db } from "@/lib/db"
@@ -82,19 +83,12 @@ export interface FileClaimInput {
  */
 const evidenceSchema = z
   .object({
-    tradeLicence: z.string().url().max(2048).optional(),
-    fssai: z.string().url().max(2048).optional(),
-    liquor: z.string().url().max(2048).optional(),
-    photo: z.string().url().max(2048).optional(),
+    tradeLicence: httpsUrl().optional(),
+    fssai: httpsUrl().optional(),
+    liquor: httpsUrl().optional(),
+    photo: httpsUrl().optional(),
   })
   .strict()
-  .refine(
-    (e) =>
-      Object.values(e).every(
-        (u) => u === undefined || u.startsWith("https://") || u.startsWith("http://")
-      ),
-    { message: "Evidence links must be http(s) URLs" }
-  )
 
 export async function fileVenueClaim(
   input: FileClaimInput

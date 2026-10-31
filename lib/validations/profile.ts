@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 
 import { ACCOUNT_MAX_AGE, ACCOUNT_MIN_AGE, ADULTS_ONLY, AGE_TOO_OLD, dateOfBirthRefusal } from "@/lib/age"
 import { isOrientation, orientationsAreCoherent } from "@/lib/dating"
@@ -74,7 +75,7 @@ export const updateProfileSchema = z.object({
   occupation: z.string().max(100).optional().nullable(),
   education: z.string().max(100).optional().nullable(),
   interests: z.array(z.string()).optional(),
-  photos: z.array(z.string().url()).max(6).optional(),
+  photos: z.array(httpsUrl()).max(6).optional(),
   /*
    * The tiny copy of `photos[0]` shown to viewers who have not earned the real
    * one. `createBlurDerivative` makes it client-side at 40px; the PUT stores it
@@ -85,7 +86,7 @@ export const updateProfileSchema = z.object({
    * moderated because nothing proves it is a blur *of their photo* — it could be
    * any small image, which is why it is screened like one.
    */
-  blur_photo: z.string().url().nullish(),
+  blur_photo: httpsUrl().nullish(),
   goals: z.array(z.string()).optional(),
   looking_for: z.array(z.string()).optional(),
   onboarded: z.boolean().optional(),

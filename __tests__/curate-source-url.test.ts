@@ -23,11 +23,11 @@ const input = (source_url: string): CurateInput => ({
   source_url,
 })
 
-it.each(["javascript:alert(document.cookie)", "data:text/html,<script>alert(1)</script>", "ftp://example.com/listing"])(
+it.each(["javascript:alert(document.cookie)", "data:text/html,<script>alert(1)</script>", "ftp://example.com/listing", "http://example.com/listing"])(
   "refuses %s as a source, and creates nothing",
   async (url) => {
     const result = await curateEvent(input(url))
-    expect(result).toEqual({ ok: false, error: "The source must be a web address (http or https)." })
+    expect(result).toEqual({ ok: false, error: "Use a web address that starts with https://" })
     expect(mockCreate).not.toHaveBeenCalled()
   }
 )
