@@ -19,6 +19,7 @@ import { sendEmail, approvedEmail, declinedEmail, emailConfigured } from "@/lib/
 import { issuePasswordResetLink } from "@/lib/password-reset"
 import { endPhoneSessions, phoneSessionsEnded } from "@/lib/session-end"
 import { notifyEventUpdate } from "@/lib/push-notifications"
+import { refuseMixedScript } from "@/lib/name-script"
 import { orgNameTaken, orgNameTakenRefusal, refuseIfOrgNameTaken } from "@/lib/org-name-key"
 import { realEventsWhere } from "./event-kind"
 import { liveAnalyticsByOrg } from "./entitlements"
@@ -243,6 +244,7 @@ export async function approveOnboardingRequest(
    * that tells them apart.
    */
   const displayName = request.display_name.trim()
+  refuseMixedScript(displayName)
   if (await orgNameTaken(displayName)) throw orgNameTakenRefusal(displayName)
 
   const hashed = await bcrypt.hash(undisclosedPassword(), 12)
