@@ -25,6 +25,7 @@ const mockDb = {
   event_likes: { findFirst: jest.fn(), findMany: jest.fn() },
   event_match_preferences: { findFirst: jest.fn(), findMany: jest.fn() },
   blocked_users: { findFirst: jest.fn(), findMany: jest.fn() },
+  message_requests: { findMany: jest.fn(async () => []) },
   // Friends who let friends recognise them in rooms — none in these tests.
   friendships: { findMany: jest.fn().mockResolvedValue([]) },
 }

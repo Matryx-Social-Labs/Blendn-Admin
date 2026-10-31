@@ -94,16 +94,13 @@ export function pickOccurrence(slots: readonly OccurrenceSlot[], now: Date): Occ
   if (slots.length === 0) return { ok: false, reason: "none", occurrence: null }
 
   const lead = CHECK_IN_LEAD_MINUTES * 60_000
-  const open = slots.find(
-    (s) => now.getTime() >= s.startTime.getTime() - lead && now <= s.endTime
-  )
-
-  if (open) {
-    // A cancelled day is not a window you can walk into, even though its times
-    // still say so.
-    if (open.cancelledAt) return { ok: false, reason: "cancelled", occurrence: open }
-    return { ok: true, occurrence: open }
-  }
+  const covering = slots.filter((s) => now.getTime() >= s.startTime.getTime() - lead && now <= s.endTime)
+  // A session going ahead wins over a cancelled one covering the same moment: moving a live event's times cancels the
+  // old session and adds an overlapping new one (SCRUM-974), and the door must open on the new one.
+  const open = covering.find((s) => !s.cancelledAt)
+  if (open) return { ok: true, occurrence: open }
+  // A cancelled day is not a window you can walk into, even though its times still say so.
+  if (covering.length > 0) return { ok: false, reason: "cancelled", occurrence: covering[0] }
 
   const upcoming = slots.filter((s) => now.getTime() < s.startTime.getTime() - lead)
   const next = upcoming.find((s) => !s.cancelledAt)

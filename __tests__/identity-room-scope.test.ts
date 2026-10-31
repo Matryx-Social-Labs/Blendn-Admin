@@ -76,6 +76,8 @@ const mockDb = {
     ),
   },
   blocked_users: { findMany: jest.fn(async () => state.blocks) },
+  // No pending message requests here (the SCRUM-975 branch).
+  message_requests: { findMany: jest.fn(async () => []) },
   friendships: {
     /*
      * The room read selects both people's switches and decides the direction

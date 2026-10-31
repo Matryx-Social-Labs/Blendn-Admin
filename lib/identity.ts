@@ -59,6 +59,9 @@ import { ownerAdmits } from "./room-kind"
  * - **You are friends and they let friends recognise them in rooms**
  *   (`profiles.friends_see_me_in_rooms`, default off). Friendship alone is not
  *   a branch, and neither is a DM opened between friends — see `lib/friends.ts`.
+ * - **They sent you a message request that is still pending.** The request
+ *   list already shows its sender's name and photo to you (and only to you);
+ *   the profile agrees with it (SCRUM-975). Never the other way round.
  *
  * Co-presence alone is deliberately *not* enough. Sharing a room is what lets
  * you send a request; it is not consent to be identified.
@@ -86,7 +89,7 @@ import { ownerAdmits } from "./room-kind"
  * module exists to fix, and it would arrive here first: the singular is the one
  * everybody reaches for, so it is the one that would drift.
  *
- * Four queries regardless of how many people are asked about.
+ * Five queries regardless of how many people are asked about.
  */
 export async function maySeeIdentityFor(
   viewerId: string,
@@ -108,7 +111,7 @@ export async function maySeeIdentityFor(
   if (targetIds.includes(viewerId)) visible.add(viewerId)
   if (others.length === 0) return visible
 
-  const [conversations, revealedTo, blocks, friendsOptedIn] = await Promise.all([
+  const [conversations, revealedTo, blocks, friendsOptedIn, askedViewer] = await Promise.all([
     /*
      * Open and closed in one read, because the fold needs both and they differ
      * only by a predicate. `closed_at` overrides every positive branch — see
@@ -188,12 +191,28 @@ export async function maySeeIdentityFor(
       },
       select: { user1_id: true, user2_id: true },
     }),
+
+    /*
+     * They sent the viewer a message request that is still waiting. A request names its sender to its recipient by
+     * design (`sender.name` and `sender.image` in the request list: "anonymous plus unsolicited is the harassment
+     * shape"), so the profile says what the list already says, and offers Accept/Decline there (SCRUM-975). One way:
+     * it never names the recipient to the sender. Pending only: the stricter answer (the declined list still shows a name).
+     */
+    db.message_requests
+      .findMany({
+        where: { recipient_id: viewerId, sender_id: { in: others }, status: "pending" },
+        select: { sender_id: true },
+      })
+      .then((rows) => new Set(rows.map((r) => r.sender_id))),
   ])
 
   const open = new Set<string>()
   const closed = new Set<string>()
+  /** A pseudonymous conversation still holding between the pair: only their own reveal names them there (SCRUM-752). */
+  const holding = new Set<string>()
   for (const c of conversations) {
     const other = c.user1_id === viewerId ? c.user2_id : c.user1_id
+    if (holdingPair(c)) holding.add(other)
     if (c.closed_at !== null) closed.add(other)
     /*
      * A DM two friends opened from the friends list is not "in a
@@ -224,7 +243,10 @@ export async function maySeeIdentityFor(
    */
   for (const id of others) {
     if (blocked.has(id) || closed.has(id)) continue
-    if (open.has(id) || revealedTo.has(id) || friendVisible.has(id)) visible.add(id)
+    // A request names its sender, except across a pseudonymous chat still holding: the profile would hand over that
+    // chat's id and tie the name to its pseudonym, which only their own reveal may do (review of #873).
+    const askedOpenly = askedViewer.has(id) && !holding.has(id)
+    if (open.has(id) || revealedTo.has(id) || friendVisible.has(id) || askedOpenly) visible.add(id)
   }
   return visible
 }
