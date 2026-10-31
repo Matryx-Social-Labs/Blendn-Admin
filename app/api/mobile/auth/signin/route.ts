@@ -7,6 +7,8 @@ import {
   emailKeysFor,
   mobileAccountKey,
   refuseOverEmailLimits,
+  refuseOverKnownPhoneDay,
+  releaseKnownPhoneDay,
   releaseMobileAccountAttempt,
   settleSigninSuccess,
 } from "@/lib/dashboard-signin-limits"
@@ -100,7 +102,9 @@ export async function POST(request: NextRequest) {
      */
     const emailKeys = emailKeysFor(email)
     try {
-      if (!knownPhone) await refuseOverEmailLimits(emailKeys)
+      // A known phone has its own day cap in place of the account's (security review of SCRUM-944).
+      if (knownPhone) await refuseOverKnownPhoneDay(email, knownPhone)
+      else await refuseOverEmailLimits(emailKeys)
     } catch (error) {
       if (error instanceof Error && error.message === SIGNIN_ACCOUNT_LOCKED) {
         return errorResponse("Too many sign-in attempts. Try again later.", 429, ErrorCode.RATE_LIMITED)
@@ -119,11 +123,14 @@ export async function POST(request: NextRequest) {
     // Always a comparison, so an unknown address takes as long as a known one.
     const isValidPassword = await bcrypt.compare(password, user?.password ?? DUMMY_HASH)
     if (!user?.password || !isValidPassword) {
+      // A wrong password from a phone that holds a valid proof is either its owner mistyping or a lifted proof: worth
+      // seeing at the account level, since it is counted in the phone's windows, not the account's.
+      if (knownPhone) logger.warn("Wrong password from a known phone", { userId: user?.id ?? null })
       return unauthorizedResponse("Invalid email or password")
     }
     // Only wrong passwords stay counted, in both windows (SCRUM-944 part 1, owner row A-18).
     // A known phone took a slot only in its own window, so that is the one it gives back.
-    if (knownPhone) await releaseMobileAccountAttempt(email, knownPhone)
+    if (knownPhone) await Promise.all([releaseMobileAccountAttempt(email, knownPhone), releaseKnownPhoneDay(email, knownPhone)])
     else await Promise.all([settleSigninSuccess(emailKeys), releaseMobileAccountAttempt(email)])
 
     /*

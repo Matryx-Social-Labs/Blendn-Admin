@@ -103,8 +103,8 @@ Returns: `{ accessToken, refreshToken, knownDevice, user: { id, email, name, pro
 **Known device (owner ruling A-18 (1)).** `knownDevice` is a signed proof that this installation signed in to this
 account; it is returned only when the sign-in sent `deviceInfo.installationId`, otherwise `null`. Keep it, and send it
 with the next sign-in to the same address from the same installation: that sign-in is counted in the phone's own window
-(10 in 15 minutes) instead of the account's and the per-email windows, so strangers' wrong guesses cannot lock its owner
-out while the phone's own still count. The per-IP limit still applies and the password is still checked. The proof dies
+(10 in 15 minutes, and 50 a day) instead of the account's and the per-email windows, so strangers' wrong guesses cannot
+lock its owner out while the phone's own still count, and each one is logged against the account. The per-IP limit still applies and the password is still checked. The proof dies
 with a password change and with "sign out of every device"; one for another address or installation, or a forged one,
 is ignored.
 

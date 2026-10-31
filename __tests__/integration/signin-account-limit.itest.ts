@@ -14,7 +14,7 @@ import bcrypt from "bcryptjs"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
-import { clearSigninCounters } from "@/lib/dashboard-signin-limits"
+import { clearSigninCounters, KNOWN_PHONE_DAY_MAX, refuseOverKnownPhoneDay } from "@/lib/dashboard-signin-limits"
 import { closeDb, db, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -160,6 +160,17 @@ describe("the per-account sign-in limit", () => {
     for (const email of [changed, signedOut]) for (let i = 0; i < 10; i++) expect((await signin(email, "wrong-guess")).status).toBe(401)
     await expectAccountLimited(await signin(changed, "a-new-long-password-77", nextIp(), p1!))
     await expectAccountLimited(await signin(signedOut, PASSWORD, nextIp(), p2!))
+  })
+
+  // Security review: the phone's own window is per 15 minutes, so it also has a day cap of its own, lower than the
+  // account's 200: a lifted proof is worth at most KNOWN_PHONE_DAY_MAX guesses a day.
+  it("refuses a known phone past its own daily cap, even with the right password", async () => {
+    const email = await account()
+    const proof = await proofFor(email)
+    for (let i = 0; i < KNOWN_PHONE_DAY_MAX; i++) await refuseOverKnownPhoneDay(email, PHONE)
+    const res = await signin(email, PASSWORD, nextIp(), proof!)
+    expect(res.status).toBe(429)
+    expect(((await res.json()) as { errorCode?: string }).errorCode).toBe("RATE_LIMITED")
   })
 
   it("is not issued to an app that names no installation", async () => {
