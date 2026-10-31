@@ -1,7 +1,6 @@
 import { logger } from "@/lib/logger"
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { MIN_INTERESTS_TO_RANK, interestCoverage } from "@/lib/interest-coverage"
 
 export const dynamic = "force-dynamic"
 
@@ -13,10 +12,11 @@ export const dynamic = "force-dynamic"
  *
  * `status` is **infrastructure only**, because Railway gates deploys on this
  * endpoint: a 503 here stops the rollout. Matching coverage being poor is a
- * product problem, not a reason to refuse to deploy the fix for it, so it lives
- * under `matching` and never changes the status code.
+ * product problem, not a reason to refuse to deploy the fix for it. It was
+ * under `matching` here until SCRUM-946: this endpoint is public, unlimited and
+ * uncached, so product metrics moved to `/api/health/matching` (app admins).
  *
- * ## Why matching coverage is here at all
+ * ## Why matching coverage exists at all
  *
  * `user_interests` has been empty in production while every test stayed green,
  * so every match card returned "no shared interests" for everyone and nobody
@@ -45,19 +45,6 @@ export async function GET() {
     health.status = "degraded"
     health.database = "disconnected"
     logger.error("Health check - Database error", { error: error instanceof Error ? error.message : String(error) })
-  }
-
-  if (health.database === "connected") {
-    try {
-      health.matching = await interestCoverage()
-    } catch (error) {
-      // Never let this break the health check. A deploy must not fail because
-      // a diagnostic query did.
-      health.matching = { status: "unknown", minInterestsToRank: MIN_INTERESTS_TO_RANK }
-      logger.warn("Health check - interest coverage query failed", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
   }
 
   const statusCode = health.status === "ok" ? 200 : 503
