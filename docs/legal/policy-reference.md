@@ -224,7 +224,7 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 |--------|---------|--------------|
 | **Auto-hide** | Confidence ≥ 0.7 | Message hidden from all users; sender sees "This message was removed" placeholder |
 | **Flag for review** | Confidence 0.4–0.7 | Message visible but flagged for admin review |
-| **Auto-mute** | 3+ hidden messages in 1 hour | User muted from chat; can read but not send |
+| **Auto-mute** | 3 abusive messages in 1 hour (a message hidden only for a contact detail does not count) | User muted from chat; can read but not send |
 | **Spam block** | Rate/duplicate/link threshold exceeded | Message rejected with error code |
 
 ### Human Review
@@ -501,7 +501,7 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 - Burst detection: 5+ messages in 10 seconds
 - Duplicate detection: >80% text similarity between recent messages
 - Link density: >2 links per message blocked
-- Auto-mute after 3 moderation violations in 1 hour
+- Auto-mute after 3 abusive messages in 1 hour (contact-detail hides do not count)
 
 ---
 

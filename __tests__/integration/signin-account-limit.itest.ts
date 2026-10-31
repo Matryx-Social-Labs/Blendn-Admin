@@ -14,7 +14,8 @@ import bcrypt from "bcryptjs"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
-import { clearSigninCounters } from "@/lib/dashboard-signin-limits"
+import { clearSigninCounters, KNOWN_PHONE_DAY_MAX, refuseOverKnownPhoneDay } from "@/lib/dashboard-signin-limits"
+import { phoneLimitKey } from "@/lib/known-device"
 import { closeDb, db, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -42,14 +43,26 @@ async function account() {
 const net = `10.${Math.floor(Math.random() * 200) + 50}`
 let n = 0
 const nextIp = () => `${net}.0.${++n}`
-const signin = (email: string, password: string, ip = nextIp()) =>
+const PHONE = "7c2f8f0e-4c1e-4c55-9c62-0f3a8a1b2c3d"
+const OTHER = "1d9e6b4a-2f7c-4e8b-a1d3-5c6e7f8a9b0c"
+const signin = (email: string, password: string, ip = nextIp(), knownDevice?: string, installationId = PHONE) =>
   signinRoute.POST(
     new NextRequest("http://localhost/api/mobile/auth/signin", {
       method: "POST",
       headers: { "content-type": "application/json", "x-real-ip": ip },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({
+        email,
+        password,
+        ...(knownDevice !== undefined && { knownDevice, deviceInfo: { installationId } }),
+      }),
     })
   )
+/** A right sign-in from PHONE, returning the proof it hands back. */
+const proofFor = async (email: string) => {
+  const res = await signin(email, PASSWORD, nextIp(), "", PHONE)
+  expect(res.status).toBe(200)
+  return ((await res.json()) as { data: { knownDevice: string | null } }).data.knownDevice
+}
 
 /** Refused by the account's limit (10, for 15 minutes), not the address's (5). */
 async function expectAccountLimited(res: Response) {
@@ -103,5 +116,88 @@ describe("the per-account sign-in limit", () => {
     await expectAccountLimited(await signin(email, PASSWORD))
     await clearSigninCounters(email)
     expect((await signin(email, PASSWORD)).status).toBe(200)
+  })
+
+  /*
+   * The known-device escape (owner ruling A-18, 2026-11-01): a phone that has signed in to this account before is not
+   * locked out by strangers' wrong guesses. A right sign-in returns `knownDevice`, a proof bound to the address, the
+   * installation and the account's current password and sessions. Presenting it moves the attempt from the account's
+   * window to the phone's own (the same 10 in 15 minutes), so the holder's own wrong guesses still count.
+   */
+  it("lets a phone that signed in before past a lockout strangers caused", async () => {
+    const email = await account()
+    const proof = await proofFor(email)
+    expect(typeof proof).toBe("string")
+    for (let i = 0; i < 10; i++) expect((await signin(email, "wrong-guess")).status).toBe(401)
+    await expectAccountLimited(await signin(email, PASSWORD))
+
+    expect((await signin(email, PASSWORD, nextIp(), proof!)).status).toBe(200)
+    // Still a password check: the proof waives the strangers' window, not the credential.
+    expect((await signin(email, "wrong-guess", nextIp(), proof!)).status).toBe(401)
+  })
+
+  it("still counts the holder's own wrong guesses, in the phone's window", async () => {
+    const email = await account()
+    const proof = await proofFor(email)
+    for (let i = 0; i < 10; i++) expect((await signin(email, "wrong-guess", nextIp(), proof!)).status).toBe(401)
+    await expectAccountLimited(await signin(email, PASSWORD, nextIp(), proof!))
+  })
+
+  it("does not accept the proof from another installation, for another account, or forged", async () => {
+    const [mine, theirs] = [await account(), await account()]
+    const proof = await proofFor(mine)
+    for (let i = 0; i < 10; i++) expect((await signin(mine, "wrong-guess")).status).toBe(401)
+    await expectAccountLimited(await signin(mine, PASSWORD, nextIp(), proof!, OTHER))
+    for (let i = 0; i < 10; i++) expect((await signin(theirs, "wrong-guess")).status).toBe(401)
+    await expectAccountLimited(await signin(theirs, PASSWORD, nextIp(), proof!))
+    await expectAccountLimited(await signin(theirs, PASSWORD, nextIp(), `${Date.now()}.forged`))
+  })
+
+  it("dies with a password change and with sign-out everywhere", async () => {
+    const [changed, signedOut] = [await account(), await account()]
+    const [p1, p2] = [await proofFor(changed), await proofFor(signedOut)]
+    await db.user.update({ where: { email: changed }, data: { password: await bcrypt.hash("a-new-long-password-77", 4) } })
+    await db.user.update({ where: { email: signedOut }, data: { mobile_sessions_revoked_at: new Date() } })
+    for (const email of [changed, signedOut]) for (let i = 0; i < 10; i++) expect((await signin(email, "wrong-guess")).status).toBe(401)
+    await expectAccountLimited(await signin(changed, "a-new-long-password-77", nextIp(), p1!))
+    await expectAccountLimited(await signin(signedOut, PASSWORD, nextIp(), p2!))
+  })
+
+  // Security review: the phone's own window is per 15 minutes, so it also has a day cap of its own, lower than the
+  // account's 200: a lifted proof is worth at most KNOWN_PHONE_DAY_MAX guesses a day.
+  /** The key the route counts this phone under, for the account as it stands now. */
+  const phoneKey = async (email: string) => {
+    const u = await db.user.findUniqueOrThrow({ where: { email }, select: { password: true, mobile_sessions_revoked_at: true } })
+    return phoneLimitKey({ email, installationId: PHONE, password: u.password, sessionsRevokedAt: u.mobile_sessions_revoked_at })
+  }
+  const fillPhoneDay = async (email: string) => {
+    const key = await phoneKey(email)
+    for (let i = 0; i < KNOWN_PHONE_DAY_MAX; i++) await refuseOverKnownPhoneDay(email, key)
+  }
+
+  it("refuses a known phone past its own daily cap, even with the right password", async () => {
+    const email = await account()
+    const proof = await proofFor(email)
+    await fillPhoneDay(email)
+    const res = await signin(email, PASSWORD, nextIp(), proof!)
+    expect(res.status).toBe(429)
+    expect(((await res.json()) as { errorCode?: string }).errorCode).toBe("RATE_LIMITED")
+  })
+
+  // Security review: a reset must not leave the owner's phone behind a day cap a thief filled with the old proof.
+  it("starts a phone on fresh counters after a password reset", async () => {
+    const email = await account()
+    await proofFor(email)
+    await fillPhoneDay(email)
+    const NEW = "a-new-long-password-88"
+    await db.user.update({ where: { email }, data: { password: await bcrypt.hash(NEW, 4), password_changed_at: new Date() } })
+    await clearSigninCounters(email)
+    const fresh = ((await (await signin(email, NEW, nextIp(), "", PHONE)).json()) as { data: { knownDevice: string } }).data.knownDevice
+    expect((await signin(email, NEW, nextIp(), fresh)).status).toBe(200)
+  })
+
+  it("is not issued to an app that names no installation", async () => {
+    const res = await signin(await account(), PASSWORD)
+    expect(((await res.json()) as { data: { knownDevice: string | null } }).data.knownDevice).toBeNull()
   })
 })

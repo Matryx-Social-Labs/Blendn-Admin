@@ -146,7 +146,8 @@ export function chatClosedMessage(
 ): string {
   if (reason === "not_live") return NOT_LIVE_MESSAGE
   if (reason === "hidden") return "This event is no longer available."
-  if (reason === "locked") return "This chat has been locked by the organizer"
+  // No one can lock a room today (SCRUM-893: organizers have no lock control), so the copy names nobody.
+  if (reason === "locked") return "This chat is locked."
   // Says when, not just no. "Closed" for a room that has never opened reads as
   // a fault, and the person asking is someone who RSVP'd and is keen.
   if (reason === "not_open_yet") return "This chat opens 24 hours before the event starts."

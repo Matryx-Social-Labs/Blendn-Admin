@@ -90,6 +90,7 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   // they are recorded here rather than removed blind by a merge.
   ["placesAtEventBulk", "the bulk sibling of a per-event check nothing batches yet; H-section item"],
   ["isSameSponsorName", "re-exported by lib/sponsor-merge.ts and called through neither path; H-section item"],
+  ["maySeeIdentity", "the one-person wrapper over maySeeIdentityFor, kept for its five test files; routes ask identityForRef, which also needs askedOnly (SCRUM-975, A-32)"],
 
   // --- Venues: rows can be created and then never corrected -----------------
 

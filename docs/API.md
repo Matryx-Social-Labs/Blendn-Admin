@@ -96,9 +96,26 @@ setting passwords they could never restore.
 
 ### POST /auth/signin
 ```json
-{ "email": "string", "password": "string" }
+{ "email": "string", "password": "string", "deviceInfo": { "installationId": "uuid" }, "knownDevice": "string" }
 ```
-Returns: `{ accessToken, refreshToken, user: { id, email, name, profile } }`
+Returns: `{ accessToken, refreshToken, knownDevice, user: { id, email, name, profile } }`
+
+**Known device (owner ruling A-18 (1)).** `knownDevice` is a signed proof that this installation signed in to this
+account; it is returned only when the sign-in sent `deviceInfo.installationId`, otherwise `null`. Keep it, and send it
+with the next sign-in to the same address from the same installation: that sign-in is counted in the phone's own window
+(10 in 15 minutes, and 50 a day) instead of the account's and the per-email windows, so strangers' wrong guesses cannot
+lock its owner out while the phone's own still count, and each one is logged against the account. The per-IP limit still applies and the password is still checked. The proof dies
+with a password change and with "sign out of every device"; one for another address or installation, or a forged one,
+is ignored.
+
+**Installation (A-18 (2)).** `deviceInfo.installationId` is a UUID the app makes once per install. The refresh session
+keeps it through every rotation; send the same value as `installationId` on **every** `POST /auth/refresh`. A bound
+session answers only that value, for a live token and for a replay inside the 20-minute grace alike; from another
+installation it is treated as theft and every session ends; naming none, that one token is refused and nothing else
+ends. A session that recorded no installation (an older app) keeps the old rule; only a sign-in (password, signup,
+Google, Apple) binds one, never a refresh. Keep `installationId` in SecureStore beside the tokens, with the same options,
+so a reinstall that keeps the tokens keeps the id too. The binding protects a token that leaks on its own (a
+response log, a crash report), not a captured request body, which carries both, or a phone whose storage is read.
 
 An account created through Google or Apple has no password and returns the same
 generic `401` as a wrong password — deliberately, so the response is not an
@@ -1783,7 +1800,7 @@ conversation. And
 `@@unique([sender_id, recipient_id])` means **one request per pair for all
 time** — decline it and that person can never send another.
 
-**A pending request names its sender to its recipient** beyond the request list too: `GET /users/:userId` answers them with the sender's identified profile (more than the list's name and photo: bio, photos, interests) and `connection.request: "received"`, so the profile offers Accept/Decline (SCRUM-975). Never the recipient to the sender; a block or a decline ends it; and not while a pseudonymous conversation between the two still holds (that chat's id would tie the name to its pseudonym).
+**A pending request names its sender to its recipient** beyond the request list too: `GET /users/:userId` answers them with the sender's identified profile and `connection.request: "received"`, so the profile offers Accept/Decline (SCRUM-975). Never the recipient to the sender; a block or a decline ends it; and not while a pseudonymous conversation between the two still holds (that chat's id would tie the name to its pseudonym). Until the request is accepted, a sender named only by it has no `bio` on `GET /users/:userId` and no `profile.bio` or `profile.orientations` on `GET /profiles/:userId` (owner ruling A-32); a friend who also asked keeps both.
 
 **The last two refusals are said only to someone who can see who this is**
 (SCRUM-371). An existing request or conversation is a fact about the pair, and a

@@ -324,8 +324,21 @@ export function signInMethodOf(user: { password: string | null; oauth_accounts: 
  * Verify a refresh token against the database
  * Returns the decoded token if valid, null otherwise
  */
+/** The installation a refresh session recorded (`deviceInfo.installationId`), if the app sent one. */
+export function installationOf(deviceInfo: Prisma.JsonValue | null | undefined): string | null {
+  const id = deviceInfo && typeof deviceInfo === "object" && !Array.isArray(deviceInfo) ? deviceInfo.installationId : null
+  return typeof id === "string" ? id : null
+}
+
+/** Whether a refresh row was ended deliberately (`endPhoneSessions`), not rotated or used. */
+async function endedOnPurpose(id: string): Promise<boolean> {
+  const row = await db.mobile_refresh_tokens.findUnique({ where: { id }, select: { revoked_reason: true } })
+  return row?.revoked_reason != null
+}
+
 export async function verifyRefreshToken(
-  token: string
+  token: string,
+  installationId?: string
 ): Promise<DecodedToken | null> {
   try {
     // First verify the JWT signature and expiry
@@ -340,6 +353,35 @@ export async function verifyRefreshToken(
     })
 
     if (!storedToken) {
+      return null
+    }
+
+    /*
+     * A session bound to an installation answers only that installation (owner ruling A-18 (2)), live or replayed
+     * inside the grace: another one is somebody else holding a copy, and the family ends; a request naming none is
+     * refused alone (final security review: an app path that forgot the field must not sign its owner out everywhere).
+     * The JWT is already verified, so this costs a thief their stolen token and nobody else anything. A session that
+     * recorded no installation (an older app) keeps the old rule; only a sign-in binds one (never a refresh, or a thief
+     * could claim an unbound session first).
+     */
+    // A session ended on purpose (a reset, sign-out everywhere) is dead, not stolen: refused below, and never a reason
+    // to end the sessions opened since (security review of SCRUM-944).
+    const bound = storedToken.revoked_reason ? null : installationOf(storedToken.device_info)
+    /*
+     * Naming none is the owner's own app on a path that forgot it far more often than a thief. A LIVE token is refused
+     * alone; a revoked one goes on to the reuse rules below (past the grace, or after its successor was used, the
+     * family ends) and is never re-issued (review 5 of SCRUM-944).
+     */
+    const unnamed = bound !== null && installationId === undefined
+    if (unnamed && !storedToken.revoked_at) {
+      logger.warn("Bound refresh token presented with no installation, refusing", { userId: storedToken.user_id })
+      return null
+    }
+    if (bound !== null && installationId !== undefined && bound !== installationId) {
+      logger.error("Refresh token presented from another installation, revoking all refresh tokens", {
+        userId: storedToken.user_id,
+      })
+      await revokeUserRefreshTokens(storedToken.user_id)
       return null
     }
 
@@ -388,10 +430,31 @@ export async function verifyRefreshToken(
         // The lost-response case has one shape: the successor nobody stored
         // is still live and was never itself rotated. `updateMany` retiring
         // it returns 0 when it is not — somebody used it — and that is reuse.
+        if (unnamed) {
+          // Never re-issued without its installation: refused while the successor is unused, theft once it was used.
+          const successorUnused = await db.mobile_refresh_tokens.count({
+            where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
+          })
+          if (successorUnused > 0 || (await endedOnPurpose(storedToken.replaced_by))) {
+            logger.warn("Rotated bound refresh token replayed with no installation inside the grace, refusing", {
+              userId: storedToken.user_id,
+              sinceRevokedMs,
+            })
+            return null
+          }
+          logger.error("Rotated bound refresh token replayed with no installation after its successor was used, revoking all", {
+            userId: storedToken.user_id,
+            sinceRevokedMs,
+          })
+          await revokeUserRefreshTokens(storedToken.user_id)
+          return null
+        }
         const retired = await db.mobile_refresh_tokens.updateMany({
           where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
           data: { revoked_at: new Date() },
         })
+        // A successor ended on purpose (sign-out everywhere, a reset) is not a successor somebody used: refuse, end nothing.
+        if (retired.count === 0 && (await endedOnPurpose(storedToken.replaced_by))) return null
         if (retired.count === 0) {
           logger.error("Refresh token replayed after its successor was used, revoking all refresh tokens", {
             userId: storedToken.user_id,

@@ -62,6 +62,7 @@ import { ownerAdmits } from "./room-kind"
  * - **They sent you a message request that is still pending.** The request
  *   list already shows its sender's name and photo to you (and only to you);
  *   the profile agrees with it (SCRUM-975). Never the other way round.
+ *   Bio and orientation wait for the accept (`askedOnly`, A-32).
  *
  * Co-presence alone is deliberately *not* enough. Sharing a room is what lets
  * you send a request; it is not consent to be identified.
@@ -96,20 +97,33 @@ export async function maySeeIdentityFor(
   targetIds: string[],
   scope: IdentityScope = {}
 ): Promise<Set<string>> {
+  return (await identityFor(viewerId, targetIds, scope)).visible
+}
+
+/**
+ * The rule itself, and which of the visible ones only their own pending request names (`askedOnly`): those get the
+ * profile without bio or orientation until the request is accepted (owner ruling A-32).
+ */
+async function identityFor(
+  viewerId: string,
+  targetIds: string[],
+  scope: IdentityScope
+): Promise<{ visible: Set<string>; askedOnly: Set<string> }> {
   /*
    * In one room, only what that room shows — and in exactly the terms every
    * room surface uses, because it is the same function (`visibleInRoom`). See
    * `IdentityScope`: the open conversation is a fact about
    * a pair, not about this room, and the reveal branch narrows to this event.
    */
-  if (scope.room) return visibleInRoom(viewerId, scope.room, targetIds)
+  if (scope.room) return { visible: await visibleInRoom(viewerId, scope.room, targetIds), askedOnly: new Set() }
 
   const visible = new Set<string>()
+  const askedOnly = new Set<string>()
   const others = [...new Set(targetIds)].filter((id) => id !== viewerId)
   // It is always you. Added unconditionally so a caller passing only themselves
   // does no queries at all.
   if (targetIds.includes(viewerId)) visible.add(viewerId)
-  if (others.length === 0) return visible
+  if (others.length === 0) return { visible, askedOnly }
 
   const [conversations, revealedTo, blocks, friendsOptedIn, askedViewer] = await Promise.all([
     /*
@@ -246,9 +260,11 @@ export async function maySeeIdentityFor(
     // A request names its sender, except across a pseudonymous chat still holding: the profile would hand over that
     // chat's id and tie the name to its pseudonym, which only their own reveal may do (review of #873).
     const askedOpenly = askedViewer.has(id) && !holding.has(id)
-    if (open.has(id) || revealedTo.has(id) || friendVisible.has(id) || askedOpenly) visible.add(id)
+    const otherwise = open.has(id) || revealedTo.has(id) || friendVisible.has(id)
+    if (otherwise || askedOpenly) visible.add(id)
+    if (!otherwise && askedOpenly) askedOnly.add(id)
   }
-  return visible
+  return { visible, askedOnly }
 }
 
 export async function maySeeIdentity(
@@ -516,10 +532,15 @@ async function roomIdentity(
 export async function identityForRef(
   viewerId: string,
   ref: string
-): Promise<{ userId: string; room: string | null; identified: boolean }> {
+): Promise<{ userId: string; room: string | null; identified: boolean; askedOnly: boolean }> {
   const { userId, eventId: room } = resolveUserRef(ref) ?? { userId: ref, eventId: null }
-  if (userId === viewerId) return { userId, room, identified: true }
-  if (await maySeeIdentity(viewerId, userId, room ? { room } : {})) return { userId, room, identified: true }
+  if (userId === viewerId) return { userId, room, identified: true, askedOnly: false }
+  const { visible, askedOnly } = await identityFor(viewerId, [userId], room ? { room } : {})
+  if (visible.has(userId)) {
+    // Named by their request alone: no bio or orientation yet (A-32). A friend who also asked is still a friend (below).
+    const onlyAsked = askedOnly.has(userId) && !(await isFriendUnblocked(viewerId, userId))
+    return { userId, room, identified: true, askedOnly: onlyAsked }
+  }
   /*
    * A friend, asked about by their real id: the friends surface's answer, so
    * one person is one page (SCRUM-863). `maySeeIdentityFor` is a room gate --
@@ -528,8 +549,8 @@ export async function identityForRef(
    * `GET /friends/:id` already returns these fields to this viewer, so this
    * names nobody the friends list does not. A block either way still beats it.
    */
-  if (room !== null || isRoomHandle(ref)) return { userId, room, identified: false }
-  return { userId, room, identified: await isFriendUnblocked(viewerId, userId) }
+  if (room !== null || isRoomHandle(ref)) return { userId, room, identified: false, askedOnly: false }
+  return { userId, room, identified: await isFriendUnblocked(viewerId, userId), askedOnly: false }
 }
 
 async function isFriendUnblocked(viewerId: string, otherId: string): Promise<boolean> {

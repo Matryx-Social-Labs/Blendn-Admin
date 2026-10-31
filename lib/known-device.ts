@@ -47,3 +47,53 @@ export function isKnownDevice(email: string, cookieHeader: unknown, now: number 
   const expected = Buffer.from(sign(secret, email, issuedAt))
   return given.length === expected.length && timingSafeEqual(given, expected)
 }
+
+/*
+ * The phone's version of the same escape (mobile sign-in, owner ruling A-18 (1)). Returned by a right sign-in as a
+ * value, kept by the app, sent with its next sign-in. Narrower than the cookie on purpose, because a value in app storage
+ * is easier to lift than an httpOnly cookie:
+ * - its own HMAC domain, so it is never a dashboard cookie or the other way round;
+ * - bound to one installation (`deviceInfo.installationId`), so it works only from the phone it was given to;
+ * - bound to the account's password and its last sign-out everywhere, so a reset or "sign out of every device" kills it.
+ * It does not lift the limit: the sign-in moves to the phone's own window instead of the account's (the route).
+ */
+export interface PhoneProofSubject {
+  email: string
+  installationId: string
+  password: string | null
+  sessionsRevokedAt: Date | null
+}
+
+/** The account's credential state: changes with a password change and with sign-out everywhere. */
+const generationOf = (s: PhoneProofSubject) =>
+  createHash("sha256").update(`${s.password ?? ""}|${s.sessionsRevokedAt?.getTime() ?? 0}`).digest("hex")
+
+const signPhone = (secret: string, s: PhoneProofSubject, issuedAt: number) =>
+  createHmac("sha256", secret)
+    .update(["mobile-known-device", s.email, s.installationId, generationOf(s), issuedAt].join("|"))
+    .digest("base64url")
+
+/**
+ * The name a known phone's sign-in windows count under: the installation and the account's credential state, so a
+ * reset or sign-out everywhere starts the phone on fresh counters with its new proof (security review of SCRUM-944).
+ */
+export const phoneLimitKey = (s: PhoneProofSubject) => `${s.installationId}:${generationOf(s).slice(0, 16)}`
+
+/** The proof to return after a right mobile sign-in; null when there is no secret to sign with. */
+export function phoneKnownDeviceProof(subject: PhoneProofSubject, now: number = Date.now()): string | null {
+  const secret = process.env.NEXTAUTH_SECRET
+  return secret ? `${now}.${signPhone(secret, subject, now)}` : null
+}
+
+/** Whether `value` is a valid, unexpired proof for exactly this account, installation and credential state. */
+export function isPhoneKnownDevice(subject: PhoneProofSubject, value: unknown, now: number = Date.now()): boolean {
+  const secret = process.env.NEXTAUTH_SECRET
+  if (!secret || typeof value !== "string") return false
+  const [issued, mac, ...rest] = value.split(".")
+  const issuedAt = Number(issued)
+  if (rest.length || !mac || !Number.isInteger(issuedAt)) return false
+  if (issuedAt > now + SKEW_MS || now - issuedAt > MAX_AGE_SECONDS * 1000) return false
+  const given = Buffer.from(mac)
+  const expected = Buffer.from(signPhone(secret, subject, issuedAt))
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}

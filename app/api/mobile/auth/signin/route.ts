@@ -7,6 +7,8 @@ import {
   emailKeysFor,
   mobileAccountKey,
   refuseOverEmailLimits,
+  refuseOverKnownPhoneDay,
+  releaseKnownPhoneDay,
   releaseMobileAccountAttempt,
   settleSigninSuccess,
 } from "@/lib/dashboard-signin-limits"
@@ -28,9 +30,22 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { signinSchema } from "@/lib/validations/auth"
+import { isPhoneKnownDevice, phoneKnownDeviceProof, phoneLimitKey } from "@/lib/known-device"
 import { rateLimit, createAuthRateLimit } from "@/lib/rate-limit"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
+
+/**
+ * The installation, when this sign-in carries a valid known-phone proof for the account as it stands now (its password
+ * and its last sign-out everywhere are in the proof, so either change kills it). One read, and only when a proof is sent.
+ */
+async function knownPhoneFor(email: string, installationId?: string, proof?: string): Promise<string | null> {
+  if (!installationId || !proof) return null
+  const user = await db.user.findUnique({ where: { email }, select: { password: true, mobile_sessions_revoked_at: true } })
+  if (!user) return null
+  const subject = { email, installationId, password: user.password, sessionsRevokedAt: user.mobile_sessions_revoked_at }
+  return isPhoneKnownDevice(subject, proof) ? phoneLimitKey(subject) : null
+}
 
 export async function POST(request: NextRequest) {
   // Apply rate limiting
@@ -49,6 +64,12 @@ export async function POST(request: NextRequest) {
     }
 
     const { email, password, deviceInfo } = parsed.data
+    /*
+     * A phone that has signed in to this account before skips the two per-email windows below, so a stranger's wrong
+     * guesses cannot lock its owner out (owner ruling A-18 (1); the dashboard's cookie, lib/known-device.ts). The per-IP
+     * limit above still applies, and the password is still checked.
+     */
+    const knownPhone = await knownPhoneFor(email, deviceInfo?.installationId, parsed.data.knownDevice)
 
     /*
      * A second limit, keyed on the account rather than the caller.
@@ -68,7 +89,8 @@ export async function POST(request: NextRequest) {
       windowMs: 15 * 60 * 1000,
       maxRequests: 10,
       // The key `mobileAccountKey` names, so a right password and a reset can give it back (SCRUM-944 part 1).
-      keyGenerator: () => mobileAccountKey(email),
+      // A known phone counts in its own window: strangers' guesses cannot lock it, and its own still count.
+      keyGenerator: () => mobileAccountKey(email, knownPhone ?? undefined),
     })
     if (perAccount) return perAccount
 
@@ -80,7 +102,9 @@ export async function POST(request: NextRequest) {
      */
     const emailKeys = emailKeysFor(email)
     try {
-      await refuseOverEmailLimits(emailKeys)
+      // A known phone has its own day cap in place of the account's (security review of SCRUM-944).
+      if (knownPhone) await refuseOverKnownPhoneDay(email, knownPhone)
+      else await refuseOverEmailLimits(emailKeys)
     } catch (error) {
       if (error instanceof Error && error.message === SIGNIN_ACCOUNT_LOCKED) {
         return errorResponse("Too many sign-in attempts. Try again later.", 429, ErrorCode.RATE_LIMITED)
@@ -99,10 +123,15 @@ export async function POST(request: NextRequest) {
     // Always a comparison, so an unknown address takes as long as a known one.
     const isValidPassword = await bcrypt.compare(password, user?.password ?? DUMMY_HASH)
     if (!user?.password || !isValidPassword) {
+      // A wrong password from a phone that holds a valid proof is either its owner mistyping or a lifted proof: worth
+      // seeing at the account level, since it is counted in the phone's windows, not the account's.
+      if (knownPhone) logger.warn("Wrong password from a known phone", { userId: user?.id ?? null })
       return unauthorizedResponse("Invalid email or password")
     }
     // Only wrong passwords stay counted, in both windows (SCRUM-944 part 1, owner row A-18).
-    await Promise.all([settleSigninSuccess(emailKeys), releaseMobileAccountAttempt(email)])
+    // A known phone took a slot only in its own window, so that is the one it gives back.
+    if (knownPhone) await Promise.all([releaseMobileAccountAttempt(email, knownPhone), releaseKnownPhoneDay(email, knownPhone)])
+    else await Promise.all([settleSigninSuccess(emailKeys), releaseMobileAccountAttempt(email)])
 
     /*
      * Checked after the password, deliberately.
@@ -146,6 +175,15 @@ export async function POST(request: NextRequest) {
       },
       accessToken,
       refreshToken,
+      // Kept by the app and sent with its next sign-in to this account (`knownDevice` above). Null without a secret.
+      knownDevice: deviceInfo?.installationId
+        ? phoneKnownDeviceProof({
+            email,
+            installationId: deviceInfo.installationId,
+            password: user.password,
+            sessionsRevokedAt: user.mobile_sessions_revoked_at,
+          })
+        : null,
     })
   } catch (error) {
     logger.error("Signin error", { error: error instanceof Error ? error.message : String(error) })
