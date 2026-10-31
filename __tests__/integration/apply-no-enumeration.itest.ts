@@ -148,3 +148,19 @@ it("keeps a header on one line", () => {
   expect(headerSafe("About you\r\nBcc: x@y.z")).toBe("About you Bcc: x@y.z")
   expect(headerSafe("a b")).toBe("a b")
 })
+
+describe("an application whose name mixes lookalike scripts (SCRUM-959)", () => {
+  it("is refused when it is submitted, with a 400 and no row", async () => {
+    const email = `m4-${testId("ms")}@example.test`
+    const res = await POST(
+      new NextRequest("http://localhost/api/onboarding/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": `198.51.100.${++n}` },
+        body: JSON.stringify({ kind: "company", requested_role: "organizer", display_name: "Th\u0456rd Wave Events", legal_name: "M4 Events Pvt Ltd", contact_name: "Pat", contact_email: email }),
+      })
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/one alphabet/i)
+    expect(await db.organiser_onboarding_requests.count({ where: { contact_email: email } })).toBe(0)
+  })
+})

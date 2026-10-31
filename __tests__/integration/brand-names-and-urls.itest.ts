@@ -20,13 +20,14 @@ jest.mock("@/lib/email", () => {
 import { approveOnboardingRequest } from "@/lib/onboarding-actions"
 import { violatedConstraint } from "@/lib/prisma-errors"
 import { normaliseSponsorName } from "@/lib/sponsor-name"
-import { saveMyBrand } from "@/lib/sponsor-actions"
-import { closeDb, db, makeUser, testId } from "./helpers"
+import { createUnclaimedSponsor, saveMyBrand } from "@/lib/sponsor-actions"
+import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 const users: string[] = []
 const orgs: string[] = []
 const brands: string[] = []
 const requests: string[] = []
+const events: string[] = []
 
 afterAll(async () => {
   await db.audit_logs.deleteMany({ where: { OR: [{ resource_id: { in: [...brands, ...requests] } }, { user_id: { in: users } }] } })
@@ -34,7 +35,7 @@ afterAll(async () => {
   await db.organiser_onboarding_requests.deleteMany({ where: { id: { in: requests } } })
   await db.organisation_members.deleteMany({ where: { org_id: { in: orgs } } })
   await db.organisations.deleteMany({ where: { id: { in: orgs } } })
-  await db.user.deleteMany({ where: { id: { in: users } } })
+  await cleanup(users, events)
   await closeDb()
 })
 
@@ -183,6 +184,19 @@ describe("a lookalike name from another script (SCRUM-959)", () => {
     as(fresh.user)
     await expect(saveMyBrand({ name: `Th${cyrillicI}rd Wave ${own}` })).rejects.toThrow(/one alphabet/i)
     expect(await db.sponsors.count({ where: { org_id: fresh.org } })).toBe(0)
+  })
+
+  it("refuses an unclaimed brand a host names with mixed scripts, and writes no row", async () => {
+    const admin = await makeUser("ms-un", "app_admin")
+    users.push(admin)
+    const event = await makeEvent(admin)
+    events.push(event)
+    session = { user: { id: admin, role: "app_admin" } }
+    const name = `Th${cyrillicI}rd Wave ${unique()}`
+    await expect(createUnclaimedSponsor(event, { name })).rejects.toThrow(/one alphabet/i)
+    expect(await db.sponsors.count({ where: { name_key: normaliseSponsorName(name) } })).toBe(0)
+    const ok = await createUnclaimedSponsor(event, { name: unique() })
+    brands.push(ok.id)
   })
 
   it("lets a brand that predates the rule keep saving its logo", async () => {
