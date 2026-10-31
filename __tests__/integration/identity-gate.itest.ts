@@ -146,3 +146,39 @@ describe("identity is visible once someone has opted in", () => {
     expect(await maySeeIdentity(outsider, them)).toBe(false)
   })
 })
+
+/*
+ * A message request names its sender to its recipient: the request list already shows them `sender.name` and
+ * `sender.image` (docs/API.md, "the reveal is deliberate"), so the profile must agree, or the recipient sees a name in
+ * the list and "Attendee" + Connect on the profile, with no Accept/Decline (SCRUM-975). One way only, while pending,
+ * and a block still beats it.
+ */
+describe("a pending message request", () => {
+  const ask = (sender: string, recipient: string, status: "pending" | "declined" = "pending") =>
+    db.message_requests.create({ data: { sender_id: sender, recipient_id: recipient, message: "coffee?", status } })
+
+  it("names the sender to the recipient", async () => {
+    const [sender, recipient] = [await guest("ig-mr-s"), await guest("ig-mr-r")]
+    await ask(sender, recipient)
+    expect(await maySeeIdentity(recipient, sender)).toBe(true)
+  })
+
+  it("does not name the recipient to the sender", async () => {
+    const [sender, recipient] = [await guest("ig-mr-s2"), await guest("ig-mr-r2")]
+    await ask(sender, recipient)
+    expect(await maySeeIdentity(sender, recipient)).toBe(false)
+  })
+
+  it("names nobody once declined", async () => {
+    const [sender, recipient] = [await guest("ig-mr-s3"), await guest("ig-mr-r3")]
+    await ask(sender, recipient, "declined")
+    expect(await maySeeIdentity(recipient, sender)).toBe(false)
+  })
+
+  it("is beaten by a block either way", async () => {
+    const [sender, recipient] = [await guest("ig-mr-s4"), await guest("ig-mr-r4")]
+    await ask(sender, recipient)
+    await db.blocked_users.create({ data: { blocker_id: recipient, blocked_id: sender } })
+    expect(await maySeeIdentity(recipient, sender)).toBe(false)
+  })
+})
