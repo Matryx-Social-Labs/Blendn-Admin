@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 
 export const eventQuerySchema = z.object({
   // Pagination
@@ -133,6 +134,22 @@ export const ratingSchema = z.object({
  */
 export const SPONSORED_MESSAGE_INTERVALS = [20, 30, 60] as const
 
+/**
+ * One media item of an event (SCRUM-956). The routes read `url` and
+ * `thumbnail_url` as strings and store them as given, so each is an https link
+ * here. Unknown keys are dropped, not refused: the editor round-trips whatever
+ * the page loaded.
+ */
+const mediaItemSchema = z.object({
+  id: z.string().max(100).optional(),
+  type: z.enum(["image", "video", "document"]),
+  url: httpsUrl(),
+  thumbnail_url: httpsUrl().nullish().or(z.literal("")),
+  title: z.string().max(200).nullish(),
+  description: z.string().max(2000).nullish(),
+  order: z.number().int().min(0).max(1000).nullish(),
+})
+
 export const sponsoredMessageCreateSchema = z.object({
   /*
    * Required, not optional. `sponsored_active_needs_sponsor` is a CHECK on
@@ -241,8 +258,8 @@ export const eventWriteSchema = z
     min_age: z.number().int().min(13).max(25).nullish(),
     latitude: z.number().min(-90).max(90).nullish(),
     longitude: z.number().min(-180).max(180).nullish(),
-    cover_image_url: z.string().url().max(2048).nullish(),
-    external_link: z.string().url().max(2048).nullish(),
+    cover_image_url: httpsUrl().nullish(),
+    external_link: httpsUrl().nullish(),
     is_featured: z.boolean().nullish(),
     /** "Allow crews at this event" — on unless the host turns it off (plan v2 §6). */
     crews_enabled: z.boolean().nullish(),
@@ -267,7 +284,7 @@ export const eventWriteSchema = z
      * so anything near the cap is a client bug, not a thorough organiser.
      */
     amenity_ids: z.array(z.string().uuid()).max(20).nullish(),
-    media_items: z.array(z.record(z.string(), z.unknown())).max(50).nullish(),
+    media_items: z.array(mediaItemSchema).max(50).nullish(),
     geofence: z.unknown().nullish(),
   })
   .partial()

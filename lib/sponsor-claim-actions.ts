@@ -3,6 +3,7 @@
 import { Refusal } from "./refusal"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 
 import { auditInTx, auditLog } from "@/lib/audit-log"
 import { ALREADY_DECIDED, decisionFrom, reasonFrom, refuseUnlessDecided } from "@/lib/decision"
@@ -51,18 +52,11 @@ export interface SponsorClaimEvidence {
 
 const evidenceSchema = z
   .object({
-    authorisation: z.string().url().max(2048).optional(),
-    incorporation: z.string().url().max(2048).optional(),
-    other: z.string().url().max(2048).optional(),
+    authorisation: httpsUrl().optional(),
+    incorporation: httpsUrl().optional(),
+    other: httpsUrl().optional(),
   })
   .strict()
-  .refine(
-    (e) =>
-      Object.values(e).every(
-        (u) => u === undefined || u.startsWith("https://") || u.startsWith("http://")
-      ),
-    { message: "Evidence links must be http(s) URLs" }
-  )
 
 export interface ClaimableBrand {
   id: string

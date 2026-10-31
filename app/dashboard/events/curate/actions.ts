@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 
 import { auditLog } from "@/lib/audit-log"
 import { requireAdmin } from "@/lib/current-user"
@@ -48,13 +49,8 @@ const curateSchema = z.object({
   end_time: z.string().datetime(),
   timezone: z.string().trim().min(1).max(60),
   /** The public listing. Recorded, never rendered as prose. */
-  // http(s) only (step 18, L7): it is rendered as a link on the public claim
-  // page, and `z.url()` alone takes `javascript:` and `data:` too.
-  source_url: z
-    .string()
-    .url()
-    .max(2000)
-    .refine((u) => /^https?:\/\//i.test(u), "The source must be a web address (http or https)."),
+  // https only (step 18, L7; SCRUM-956): it is rendered as a link on the public claim page.
+  source_url: httpsUrl(2000),
   max_capacity: z.number().int().positive().max(100_000).nullable().optional(),
   min_age: z.number().int().min(0).max(99).nullable().optional(),
   category_ids: z.array(z.string().uuid()).max(5).optional(),
