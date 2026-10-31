@@ -53,8 +53,8 @@ export async function GET(
      * (SCRUM-864): it names its person only to somebody that room admits.
      */
     const card = await nonEventRoomCard(authUser.userId, ref)
-    const { userId, room, identified } = card
-      ? { userId: card.userId, room: null, identified: false }
+    const { userId, room, identified, askedOnly } = card
+      ? { userId: card.userId, room: null, identified: false, askedOnly: false }
       : await identityForRef(authUser.userId, ref)
     // The owner of every venue day is not a person anyone can look at; its
     // "events organised" would be a count of every venue day ever made.
@@ -209,7 +209,8 @@ export async function GET(
         ? {
             image: user.image,
             photos,
-            bio: user.profile?.bio || null,
+            // Not to somebody only their pending request names: the list's name and photo, no more (A-32).
+            ...(!askedOnly && { bio: user.profile?.bio || null }),
             occupation: user.profile?.occupation || null,
             education: user.profile?.education || null,
             // Tier B (plan v2 §8.5): the whole set only once they are known to you.

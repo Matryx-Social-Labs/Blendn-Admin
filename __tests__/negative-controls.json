@@ -2487,6 +2487,12 @@
       "mutation": "M956a lib/org-name-key.ts normalize(..., NFKC) changed to NFC, so the pre-check and the index disagree.",
       "observed": "M956a: 1 of 1 failing (the migration no longer contains the application's expression). Restored; 1/1.",
       "date": "2026-10-31"
+    },
+    "profile-card-fields.itest.ts": {
+      "guards": "SCRUM-975 / owner ruling A-32: a sender named only by their pending request shows the recipient name and photo on GET /users/:id and GET /profiles/:id, never bio or orientation; a friend who also asked keeps both.",
+      "mutation": "M975a lib/identity.ts identityForRef returned askedOnly: false for every visible target.",
+      "observed": "M975a: 1 of 6 failing (\"shows name and photo, never bio or orientation\": bio \"Sunday potter\" returned). Restored; 6/6.",
+      "date": "2026-10-31"
     }
   },
   "grandfathered": [
