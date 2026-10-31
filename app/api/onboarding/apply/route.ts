@@ -11,6 +11,7 @@ import { canSubmitApplication, onboardingTier, hashInviteToken, newInviteToken }
 import { validateGstin } from "@/lib/gstin"
 import { sendEmail, onboardingVerifyEmail, applyAgainEmail, applyUrl, appUrl, emailConfigured } from "@/lib/email"
 import { readJson } from "@/lib/api-input"
+import { hasMixedScripts, MIXED_SCRIPT_MESSAGE } from "@/lib/name-script"
 
 /**
  * The public host application.
@@ -33,7 +34,8 @@ import { readJson } from "@/lib/api-input"
 const applySchema = z.object({
   kind: z.enum(["individual", "company"]).default("company"),
   requested_role: z.enum(["organizer", "venue_owner", "sponsor"]).default("organizer"),
-  display_name: z.string().trim().min(2).max(120),
+  // Refused here, not at approval (SCRUM-959): the applicant can fix it while they are still on the form.
+  display_name: z.string().trim().min(2).max(120).refine((n) => !hasMixedScripts(n), MIXED_SCRIPT_MESSAGE),
   legal_name: z.string().trim().max(200).optional(),
   gstin: z.string().trim().max(20).optional(),
   website: z.string().trim().max(200).optional(),
