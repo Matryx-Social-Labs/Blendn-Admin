@@ -175,6 +175,17 @@ describe("a pending message request", () => {
     expect(await maySeeIdentity(recipient, sender)).toBe(false)
   })
 
+  // Review of #873: a request, then a mutual like, opens a pseudonymous chat; naming the sender on the profile would hand
+  // over that chat's id and so tie the real name to its pseudonym, which only their own reveal may do (SCRUM-752).
+  it("does not name the sender while a pseudonymous conversation between them still holds", async () => {
+    const [sender, recipient] = [await guest("ig-mr-s5"), await guest("ig-mr-r5")]
+    await ask(sender, recipient)
+    await db.private_conversations.create({
+      data: { user1_id: sender, user2_id: recipient, user1_pseudonym: "Heron", user2_pseudonym: "Otter", user1_revealed: false, user2_revealed: false },
+    })
+    expect(await maySeeIdentity(recipient, sender)).toBe(false)
+  })
+
   it("is beaten by a block either way", async () => {
     const [sender, recipient] = [await guest("ig-mr-s4"), await guest("ig-mr-r4")]
     await ask(sender, recipient)

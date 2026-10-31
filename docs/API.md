@@ -1783,7 +1783,7 @@ conversation. And
 `@@unique([sender_id, recipient_id])` means **one request per pair for all
 time** — decline it and that person can never send another.
 
-**A pending request names its sender to its recipient** beyond the request list too: `GET /users/:userId` answers them with the sender's identity and `connection.request: "received"`, so the profile offers Accept/Decline (SCRUM-975). Never the recipient to the sender, and a block or a decline ends it.
+**A pending request names its sender to its recipient** beyond the request list too: `GET /users/:userId` answers them with the sender's identified profile (more than the list's name and photo: bio, photos, interests) and `connection.request: "received"`, so the profile offers Accept/Decline (SCRUM-975). Never the recipient to the sender; a block or a decline ends it; and not while a pseudonymous conversation between the two still holds (that chat's id would tie the name to its pseudonym).
 
 **The last two refusals are said only to someone who can see who this is**
 (SCRUM-371). An existing request or conversation is a fact about the pair, and a
