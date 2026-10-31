@@ -110,20 +110,20 @@ describe("asking", () => {
   })
 
   it("a pending request still blocks the other direction (negative control)", async () => {
-    // b → a is pending from the previous test; a asking b writes nothing.
+    // b → a is pending from the previous test. Its recipient sees who sent it (SCRUM-975: the request names its
+    // sender to them), so a asking b back is told why, and nothing is written.
     await db.message_requests.deleteMany({ where: { sender_id: a.id, recipient_id: b.id } })
     const res = await ask(a.token, b.id)
-    expect(res.status).toBe(201)
-    expect(await db.message_requests.count({ where: { sender_id: a.id, recipient_id: b.id } })).toBe(0)
-
-    // And to someone who can see b, it says why: the sentence is true.
-    await reveal(eventId, b.id, true)
-    const seen = await ask(a.token, b.id)
-    expect(seen.status).toBe(409)
-    expect(await seen.json()).toMatchObject({
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({
       error: "This user has already sent you a request. Check your incoming requests.",
     })
-    await reveal(eventId, b.id, false)
+    expect(await db.message_requests.count({ where: { sender_id: a.id, recipient_id: b.id } })).toBe(0)
+
+    // The sender is not named the recipient by it: b asking a again, unseen, is the silent 201 that writes nothing.
+    const again = await ask(b.token, a.id)
+    expect(again.status).toBe(201)
+    expect(await db.message_requests.count({ where: { sender_id: b.id, recipient_id: a.id } })).toBe(1)
   })
 })
 
