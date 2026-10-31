@@ -65,6 +65,15 @@ export async function crewAndBlendRooms(userId: string, only: Prisma.chat_group_
   return rooms.filter((m) => roomOwnerDenial({ ...m.chat_group, event: null }, userId) === null)
 }
 
+/**
+ * Not an advert: the scheduler marks a sponsored send by `metadata.sponsored_message_id`, as a poll of the sponsored kind,
+ * or (older) by the sponsored type, the same marks the history reads. An advert is never a room's line (SCRUM-625) and
+ * counts as nothing in unread (SCRUM-924).
+ */
+const NOT_AN_ADVERT = Prisma.sql`type <> 'sponsored'
+  AND metadata ->> 'sponsored_message_id' IS NULL
+  AND (type <> 'poll' OR metadata ->> 'kind' IS DISTINCT FROM 'sponsored')`
+
 export interface LastMessageRow {
   id: string
   chat_group_id: string
@@ -93,11 +102,7 @@ export async function lastMessagesOf(chatGroupIds: string[], blockedIds: string[
       WHERE chat_group_id = g.id
         AND deleted_at IS NULL
         AND NOT (user_id = ANY(${blockedIds}::text[]))
-        -- An advert is never a room's line (SCRUM-625): the scheduler marks one by
-        -- metadata (or the sponsored kind), the same marks the history reads.
-        AND type <> 'sponsored'
-        AND metadata ->> 'sponsored_message_id' IS NULL
-        AND (type <> 'poll' OR metadata ->> 'kind' IS DISTINCT FROM 'sponsored')
+        AND ${NOT_AN_ADVERT}
       ORDER BY created_at DESC
       LIMIT 1
     ) cm
@@ -131,12 +136,28 @@ export async function unreadAfterMarkers(rooms: { chat_group_id: string; last_re
       FROM chat_messages
       WHERE deleted_at IS NULL
         AND NOT (user_id = ANY(${notUnread}::text[]))
+        AND ${NOT_AN_ADVERT}
         AND (${Prisma.join(conditions, " OR ")})
       GROUP BY chat_group_id
     `
     for (const row of counts) unreadCountMap.set(row.chat_group_id, Number(row.unread_count))
   }
   return { lastReadMessageMap, unreadCountMap }
+}
+
+/** Every message per room that can be unread: what is unread for a member who has read nothing. */
+export async function unreadTotalsOf(chatGroupIds: string[], notUnread: string[]): Promise<Map<string, number>> {
+  if (chatGroupIds.length === 0) return new Map()
+  const rows = await db.$queryRaw<Array<{ chat_group_id: string; total: bigint }>>`
+    SELECT chat_group_id, COUNT(*) AS total
+    FROM chat_messages
+    WHERE chat_group_id = ANY(${chatGroupIds}::uuid[])
+      AND deleted_at IS NULL
+      AND NOT (user_id = ANY(${notUnread}::text[]))
+      AND ${NOT_AN_ADVERT}
+    GROUP BY chat_group_id
+  `
+  return new Map(rows.map((r) => [r.chat_group_id, Number(r.total)]))
 }
 
 export type OtherMemberRow = Awaited<ReturnType<typeof crewAndBlendRooms>>[number]

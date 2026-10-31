@@ -127,6 +127,15 @@ describe("the happy path", () => {
     expect(call.data.chat_message_id).toBe("message-1")
   })
 
+  // SCRUM-924 (owner row A-3, decided by lean 2026-10-31): an advert counts as nothing in the chat list, its order included.
+  it("never moves the room's place in the chat list", async () => {
+    await sweepSponsored(NOW)
+
+    expect(mockDb.chat_messages.create).toHaveBeenCalledTimes(1)
+    const bumps = mockDb.chat_groups.update.mock.calls.filter(([args]) => args?.data && "last_message_at" in args.data)
+    expect(bumps).toEqual([])
+  })
+
   it("marks the live payload as sponsored, because `type` is busy being the media kind", async () => {
     /*
      * The row carries `metadata.sponsored_message_id`; the wire carried
