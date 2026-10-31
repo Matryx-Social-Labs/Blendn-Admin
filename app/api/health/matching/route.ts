@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic"
 /**
  * Matching coverage: the share of people who turned up who have enough structured interests to be ranked (why it exists:
  * `app/api/health/route.ts`). It was in the public health body, which is unlimited and read by anyone; Railway needs only
- * the status code there (SCRUM-946, owner row 20). An app admin reads it here; anyone else gets the 404 an unknown path gets.
+ * the status code there (SCRUM-946, owner row 20). An app admin reads it here; anyone else gets a 404 (the route is named
+ * in DEPLOYMENT.md, so it hides nothing about existing: it hides the numbers).
  * The role is the database's, not the cookie's (`currentUser`).
  */
 export async function GET() {
