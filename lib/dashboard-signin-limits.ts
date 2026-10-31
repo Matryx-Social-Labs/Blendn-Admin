@@ -93,8 +93,21 @@ export async function settleSigninSuccess(keys: Pick<SigninKeys, "account" | "ac
   await Promise.all([release(keys.account), release(keys.accountDay)])
 }
 
-/** A completed password reset proved control of the mailbox: that email's counters start over. */
+/**
+ * The mobile door's own per-account window (10 in 15 minutes): its `rateLimit` key (stored under `rl:`). Failures only:
+ * a right password gives its attempt back (`releaseMobileAccountAttempt`), and a reset forgets it (SCRUM-944 part 1).
+ */
+export const mobileAccountKey = (email: string) => `auth:signin:acct:${email.trim().toLowerCase()}`
+const storedMobileAccountKey = (email: string) => `rl:${mobileAccountKey(email)}`
+
+/** The right password at the mobile door: its attempt is not held against the account. */
+export async function releaseMobileAccountAttempt(email: string): Promise<void> {
+  await release(storedMobileAccountKey(email))
+}
+
+/** A completed password reset proved control of the mailbox: that email's counters start over, at both doors. */
 export async function clearSigninCounters(email: string): Promise<void> {
-  const { account, accountDay } = signinKeys(email.trim().toLowerCase(), undefined)
-  await Promise.all([forget(account), forget(accountDay)])
+  const normalised = email.trim().toLowerCase()
+  const { account, accountDay } = signinKeys(normalised, undefined)
+  await Promise.all([forget(account), forget(accountDay), forget(storedMobileAccountKey(normalised))])
 }

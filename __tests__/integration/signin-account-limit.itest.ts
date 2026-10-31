@@ -14,6 +14,7 @@ import bcrypt from "bcryptjs"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 
+import { clearSigninCounters } from "@/lib/dashboard-signin-limits"
 import { closeDb, db, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -82,6 +83,25 @@ describe("the per-account sign-in limit", () => {
   it("lets the 10th attempt through, so a person who mistyped nine times still gets in", async () => {
     const email = await account()
     for (let i = 0; i < 9; i++) expect((await signin(email, "wrong-guess")).status).toBe(401)
+    expect((await signin(email, PASSWORD)).status).toBe(200)
+  })
+
+  /*
+   * Only failures are counted, and a reset starts the account over (SCRUM-944 part 1, owner row A-18, decided by lean on
+   * 2026-10-31; reverse if wanted). Successes used to count, so two bursts of wrong guesses from strangers plus the owner's
+   * own sign-ins kept the right password at 429, and a completed reset did not clear this window.
+   */
+  it("does not count a right password", async () => {
+    const email = await account()
+    for (let i = 0; i < 12; i++) expect((await signin(email, PASSWORD)).status).toBe(200)
+    expect((await signin(email, "wrong-guess")).status).toBe(401)
+  })
+
+  it("starts over after a completed password reset", async () => {
+    const email = await account()
+    for (let i = 0; i < 10; i++) expect((await signin(email, "wrong-guess")).status).toBe(401)
+    await expectAccountLimited(await signin(email, PASSWORD))
+    await clearSigninCounters(email)
     expect((await signin(email, PASSWORD)).status).toBe(200)
   })
 })

@@ -53,7 +53,7 @@ the route's catch-all called the caller's mistake an outage.
 | Method | Endpoint | Description | Rate Limit |
 |--------|----------|-------------|------------|
 | POST | `/auth/signup` | Register with email/password | 3/hr |
-| POST | `/auth/signin` | Login with email/password | 5/15min per IP, 10/15min per email |
+| POST | `/auth/signin` | Login with email/password | 5/15min per IP; 10/15min per email, wrong passwords only, cleared by a password reset (SCRUM-944) |
 | POST | `/auth/google` | Google OAuth login | 10/15min |
 | POST | `/auth/apple` | Apple Sign In | 10/15min |
 | POST | `/auth/refresh` | Refresh access token | 20/15min |

@@ -2,7 +2,14 @@ import { logger } from "@/lib/logger"
 import { accountRefusal } from "@/lib/account-refusal"
 import { NextRequest } from "next/server"
 import bcrypt from "bcryptjs"
-import { DUMMY_HASH, emailKeysFor, refuseOverEmailLimits, settleSigninSuccess } from "@/lib/dashboard-signin-limits"
+import {
+  DUMMY_HASH,
+  emailKeysFor,
+  mobileAccountKey,
+  refuseOverEmailLimits,
+  releaseMobileAccountAttempt,
+  settleSigninSuccess,
+} from "@/lib/dashboard-signin-limits"
 import { SIGNIN_ACCOUNT_LOCKED } from "@/lib/rbac"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { db } from "@/lib/db"
@@ -60,7 +67,8 @@ export async function POST(request: NextRequest) {
     const perAccount = await rateLimit(request, {
       windowMs: 15 * 60 * 1000,
       maxRequests: 10,
-      keyGenerator: () => `auth:signin:acct:${email.trim().toLowerCase()}`,
+      // The key `mobileAccountKey` names, so a right password and a reset can give it back (SCRUM-944 part 1).
+      keyGenerator: () => mobileAccountKey(email),
     })
     if (perAccount) return perAccount
 
@@ -93,7 +101,8 @@ export async function POST(request: NextRequest) {
     if (!user?.password || !isValidPassword) {
       return unauthorizedResponse("Invalid email or password")
     }
-    await settleSigninSuccess(emailKeys)
+    // Only wrong passwords stay counted, in both windows (SCRUM-944 part 1, owner row A-18).
+    await Promise.all([settleSigninSuccess(emailKeys), releaseMobileAccountAttempt(email)])
 
     /*
      * Checked after the password, deliberately.
