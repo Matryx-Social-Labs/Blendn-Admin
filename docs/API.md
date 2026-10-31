@@ -100,16 +100,19 @@ setting passwords they could never restore.
 ```
 Returns: `{ accessToken, refreshToken, knownDevice, user: { id, email, name, profile } }`
 
-**Known device (owner ruling A-18 (1)).** `knownDevice` is a signed proof that this phone signed in to this account
-(the dashboard's known-device cookie, as a value). Keep it, and send it with the next sign-in to the same address: that
-sign-in skips the per-email windows, so strangers' wrong guesses cannot lock its owner out. The per-IP limit still
-applies and the password is still checked. A proof for another address, or a forged one, is ignored.
+**Known device (owner ruling A-18 (1)).** `knownDevice` is a signed proof that this installation signed in to this
+account; it is returned only when the sign-in sent `deviceInfo.installationId`, otherwise `null`. Keep it, and send it
+with the next sign-in to the same address from the same installation: that sign-in is counted in the phone's own window
+(10 in 15 minutes) instead of the account's and the per-email windows, so strangers' wrong guesses cannot lock its owner
+out while the phone's own still count. The per-IP limit still applies and the password is still checked. The proof dies
+with a password change and with "sign out of every device"; one for another address or installation, or a forged one,
+is ignored.
 
 **Installation (A-18 (2)).** `deviceInfo.installationId` is a UUID the app makes once per install. The refresh session
-keeps it through every rotation; send the same value as `installationId` on `POST /auth/refresh`. A replay of a
-just-rotated token inside the 20-minute grace is accepted only with that value; from another installation, or naming
-none, it is treated as theft and every session ends. A session that recorded no installation keeps the old rule, and
-takes one on at its next refresh that names one.
+keeps it through every rotation; send the same value as `installationId` on **every** `POST /auth/refresh`. A bound
+session answers only that value, for a live token and for a replay inside the 20-minute grace alike; from another
+installation, or naming none, it is treated as theft and every session ends. A session that recorded no installation
+(an older app) keeps the old rule; only a sign-in binds one, never a refresh.
 
 An account created through Google or Apple has no password and returns the same
 generic `401` as a wrong password — deliberately, so the response is not an

@@ -80,10 +80,25 @@ describe("a refresh session bound to an installation", () => {
     expect(await live(me.id)).toBe(0)
   })
 
+  it("refuses a live token from another installation, and ends every session", async () => {
+    const me = await signedIn(PHONE)
+    expect((await refresh(me.refreshToken, OTHER)).status).toBe(401)
+    expect(await live(me.id)).toBe(0)
+  })
+
   it("accepts a replay as before for a session that recorded no installation", async () => {
     const me = await signedIn()
     expect((await refresh(me.refreshToken)).status).toBe(200)
     expect((await refresh(me.refreshToken, OTHER)).status).toBe(200)
     expect(await live(me.id)).toBe(1)
+  })
+
+  // Only a sign-in binds: a refresh naming an installation must not claim an unbound session, or a thief holding its
+  // token could bind it to their phone first and have the owner's next replay treated as the theft.
+  it("does not let a refresh bind a session that recorded none", async () => {
+    const me = await signedIn()
+    expect((await refresh(me.refreshToken, OTHER)).status).toBe(200)
+    const rows = await db.mobile_refresh_tokens.findMany({ where: { user_id: me.id, revoked_at: null } })
+    expect(rows.map((r) => (r.device_info as { installationId?: string } | null)?.installationId ?? null)).toEqual([null])
   })
 })

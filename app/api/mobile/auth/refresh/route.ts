@@ -11,7 +11,6 @@ import {
   signRefreshToken,
   storeRefreshToken,
   verifyRefreshToken,
-  installationOf,
 } from "@/lib/mobile-auth"
 import {
   successResponse,
@@ -147,13 +146,8 @@ export async function POST(request: NextRequest) {
           data: { revoked_at: new Date() },
         })
       }
-      /*
-       * The device the session came from goes with it, so the next rotation still knows its installation (A-18 (2)).
-       * A session from an older app that now names one takes it on here, rather than waiting for a new sign-in.
-       */
-      const carried = own.device_info && typeof own.device_info === "object" && !Array.isArray(own.device_info) ? own.device_info : {}
-      const deviceInfo = installationOf(own.device_info) === null && installationId ? { ...carried, installationId } : own.device_info
-      await storeRefreshToken(user.id, refreshToken, deviceInfo ?? undefined, { client: tx, tokenHash })
+      // The device the session came from goes with it, so the next refresh still knows its installation (A-18 (2)).
+      await storeRefreshToken(user.id, refreshToken, own.device_info ?? undefined, { client: tx, tokenHash })
       await tx.mobile_refresh_tokens.updateMany({
         where: { id: decoded.jti },
         data: { revoked_at: new Date(), ...(newJti ? { replaced_by: newJti } : {}) },
