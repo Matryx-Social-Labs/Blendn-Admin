@@ -2499,6 +2499,12 @@
       "mutation": "M975a lib/identity.ts identityForRef returned askedOnly: false for every visible target.",
       "observed": "M975a: 1 of 6 failing (\"shows name and photo, never bio or orientation\": bio \"Sunday potter\" returned). Restored; 6/6.",
       "date": "2026-10-31"
+    },
+    "seed-review-account.itest.ts": {
+      "guards": "SCRUM-976: the App Review seed's demo event gets one set of occurrences (syncOccurrences only), so the seed runs to the end on a database with no upcoming event.",
+      "mutation": "M976a the hand-rolled event_occurrences.createMany after syncOccurrences put back (the pre-fix seed).",
+      "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
+      "date": "2026-11-01"
     }
   },
   "grandfathered": [
