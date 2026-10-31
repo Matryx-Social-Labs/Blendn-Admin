@@ -124,3 +124,27 @@ describe("check-in lead time", () => {
     expect(CHECK_IN_LEAD_MINUTES).toBeLessThanOrEqual(180)
   })
 })
+
+/*
+ * SCRUM-974: moving a live event's times (an organizer's edit, or the audit seed re-applied) makes `syncOccurrences`
+ * cancel the old session and add the new one, and the two overlap. The door took the first slot covering now, the
+ * cancelled one, and told everybody "The rest of this event has been cancelled." while the new session was running.
+ */
+describe("pickOccurrence with a cancelled session overlapping a live one (SCRUM-974)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { pickOccurrence } = require("@/lib/occurrences") as typeof import("@/lib/occurrences")
+  const now = new Date("2026-10-31T21:00:00Z")
+  const slot = (id: string, start: string, end: string, cancelledAt: Date | null) => ({
+    id, occursOn: new Date("2026-10-31"), startTime: new Date(start), endTime: new Date(end), capacity: null, cancelledAt,
+  })
+  const old = slot("old", "2026-10-31T16:41:00Z", "2026-10-31T22:41:00Z", new Date("2026-10-31T20:51:54Z"))
+  const live = slot("live", "2026-10-31T19:51:00Z", "2026-11-01T01:51:00Z", null)
+
+  it("checks in to the live session, not the cancelled one that starts first", () => {
+    expect(pickOccurrence([old, live], now)).toEqual({ ok: true, occurrence: live })
+  })
+
+  it("still says cancelled when only a cancelled session covers now (negative control)", () => {
+    expect(pickOccurrence([old], now)).toEqual({ ok: false, reason: "cancelled", occurrence: old })
+  })
+})
