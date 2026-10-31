@@ -4069,8 +4069,9 @@ not move the answer.
 
 **Who is deleting (SCRUM-944 (3)).** The body carries one of `password` (a password account), `googleIdToken` or
 `appleIdentityToken` (an SSO account: a token issued in the last 15 minutes, linked to this account). A wrong password
-is **403** `PASSWORD_INCORRECT` (5 tries per 15 minutes, then **429** `RATE_LIMITED`, as at sign-in); a stale or
-unlinked token is **403** `REAUTH_REQUIRED`. Apple accounts still send
+is **403** `PASSWORD_INCORRECT`, counted in sign-in's own windows (they share one budget; over it, **429**
+`RATE_LIMITED`), and audited; a stale, unlinked or already-used token is **403** `REAUTH_REQUIRED` (a provider token
+is taken once). Apple accounts still send
 `appleAuthorizationCode` beside it for the revoke. A request with **no** proof deletes as before until
 `MOBILE_MIN_APP_VERSION` reaches 1.0.1 (`DELETION_REAUTH_FROM_VERSION`, the first build that sends one), and is then
 **403** `REAUTH_REQUIRED`: older builds must keep in-app deletion until they are retired.

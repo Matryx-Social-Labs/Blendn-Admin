@@ -13,10 +13,13 @@ jest.mock("next/server", () => ({ ...jest.requireActual("next/server"), after: j
 
 import { jwtVerify } from "jose"
 import { signAccessToken } from "@/lib/mobile-auth"
+import { deletionReauthRefusal } from "@/lib/deletion-reauth"
 import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const accountRoute = require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const signinRoute = require("@/app/api/mobile/auth/signin/route") as typeof import("@/app/api/mobile/auth/signin/route")
 
 const PASSWORD = "orchard-lantern-quiet-42"
 const users: string[] = []
@@ -70,14 +73,34 @@ describe("deleting an account asks who is deleting", () => {
     expect(await gone(id)).toBe(false)
   })
 
-  // Security review: a stolen bearer token must not make this route a password oracle (the user limit allows 10 a
-  // minute). Wrong passwords here get sign-in's numbers: 5 in 15 minutes, then 429 even for the right one.
-  it("stops guessing after 5 wrong passwords in 15 minutes", async () => {
+  // Security review: a stolen bearer token must not make this route a password oracle. Its wrong passwords count in
+  // sign-in's own windows (10 per 15 minutes per account), so the two doors share one budget; each is audited.
+  it("counts wrong passwords in sign-in's windows, then refuses even the right one, and audits each", async () => {
     const id = await person()
-    for (let i = 0; i < 5; i++) expect(await codeOf(await del(id, { password: `guess-${i}-xxxxxx` }))).toBe("PASSWORD_INCORRECT")
+    for (let i = 0; i < 10; i++) expect(await codeOf(await del(id, { password: `guess-${i}-xxxxxx` }))).toBe("PASSWORD_INCORRECT")
     const res = await del(id, { password: PASSWORD })
     expect(res.status).toBe(429)
     expect(await gone(id)).toBe(false)
+    const { email } = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true } })
+    const signin = await signinRoute.POST(
+      new NextRequest("http://localhost/api/mobile/auth/signin", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-real-ip": "10.77.0.9" },
+        body: JSON.stringify({ email, password: PASSWORD }),
+      })
+    )
+    expect(signin.status).toBe(429)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(await db.audit_logs.count({ where: { resource_id: id, action: "account.delete_reauth_failed" } })).toBe(10)
+  })
+
+  it("takes a provider token once", async () => {
+    const sub = testId("asub")
+    const id = await person({ password: false, appleSub: sub })
+    apple(sub, 30)
+    const token = `once-${testId("t")}`
+    expect(await deletionReauthRefusal(id, { appleIdentityToken: token })).toBeNull()
+    expect((await deletionReauthRefusal(id, { appleIdentityToken: token }))?.status).toBe(403)
   })
 
   it("deletes an Apple account with a fresh identity token linked to it", async () => {
