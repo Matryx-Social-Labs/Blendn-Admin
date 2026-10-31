@@ -25,8 +25,8 @@ const LOOKALIKE_SCRIPTS = [
 export const hasMixedScripts = (name: string): boolean =>
   LOOKALIKE_SCRIPTS.filter((script) => script.test(name.normalize("NFKC"))).length > 1
 
+export const MIXED_SCRIPT_MESSAGE = "Use one alphabet in the name: it mixes letters that look alike, such as Latin and Cyrillic."
+
 export function refuseMixedScript(name: string): void {
-  if (hasMixedScripts(name)) {
-    throw new Refusal("Use one alphabet in the name: it mixes letters that look alike, such as Latin and Cyrillic.")
-  }
+  if (hasMixedScripts(name)) throw new Refusal(MIXED_SCRIPT_MESSAGE)
 }
