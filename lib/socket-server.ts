@@ -5,7 +5,7 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { socketOriginAllowed } from "./socket-origin"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
-import { displayNameInConversation, mayShowRealName } from "./conversation-identity"
+import { displayNameInConversation, firstName, mayShowRealName } from "./conversation-identity"
 import { notStrangersTo, notStrangersToMany } from "./room-people"
 import { idInConversation } from "./conversation-handle"
 import { blockCounterpartiesMany, keptApartIn } from "./conversations"
@@ -1485,7 +1485,7 @@ export function emitEventCheckIn(
         eventId,
         "event:room:checkin",
         (idFor, recognises) => {
-          const named = recognises && identity?.name?.trim()
+          const named = recognises && identity?.name?.trim() ? firstName(identity.name) : undefined
           return {
             eventId,
             userId: idFor(userId),

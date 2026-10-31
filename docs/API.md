@@ -2216,6 +2216,10 @@ conversation made with pseudonyms is pseudonymous on both sides: a side the room
 never named is `Attendee`, never null (null reads as real names). A handle
 carries no photo, ever: the stored blur is one URL for every room.
 
+**In a room, a recognised person is named by first name only** (SCRUM-493): the roster,
+room info, an arrival, a wave, a deck card, and a profile opened by a room handle. The full
+name is for people who matched or talked (a raw id, a conversation).
+
 Like the room handles, a conversation handle is keyed to the server secret:
 rotating `NEXTAUTH_SECRET` retires every one a client holds, and the next inbox
 fetch hands back fresh ones (the DM itself is addressed by `conversationId`,

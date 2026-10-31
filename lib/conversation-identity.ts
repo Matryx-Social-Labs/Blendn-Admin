@@ -61,6 +61,11 @@ export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name
 }
 
+/** A person's name as a profile reads it: first name only when the ref was a room's handle (SCRUM-493), else as stored. */
+export function nameForRef(room: unknown, name: string | null | undefined): string | null | undefined {
+  return room && name ? firstName(name) : name
+}
+
 /**
  * What `subjectId` is called inside this conversation.
  *

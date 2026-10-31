@@ -44,6 +44,8 @@ interface Person {
 const LAT = 12.9716
 const LNG = 77.5946
 const REAL_NAME = "Tanvi Fixture Kulkarni"
+// In a room a recognised person is named by first name only (SCRUM-493): the full name is for people they match or talk with.
+const FIRST_NAME = "Tanvi"
 const PHOTO = "https://cdn.itest.invalid/tanvi-1.jpg"
 const BLUR = "https://cdn.itest.invalid/tanvi-blur.jpg"
 const BIO = "Type designer, Indiranagar regular"
@@ -209,8 +211,8 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
   })
 
   it("the roster: named with a photo at A, a pseudonym without one at C", async () => {
-    expect(seen.get(A)).toMatchObject({ name: REAL_NAME, image: PHOTO })
-    expect(seen.get(C)!.name).not.toBe(REAL_NAME)
+    expect(seen.get(A)).toMatchObject({ name: FIRST_NAME, image: PHOTO })
+    expect(seen.get(C)!.name).not.toBe(FIRST_NAME)
     expect(seen.get(C)).not.toHaveProperty("image")
   })
 
@@ -226,7 +228,7 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
       identityVisible: false,
     })
     const wire = JSON.stringify(res.body)
-    for (const secret of [REAL_NAME, PHOTO, BLUR, BIO, tanvi.id, "Letterpress"]) expect(wire).not.toContain(secret)
+    for (const secret of [REAL_NAME, FIRST_NAME, PHOTO, BLUR, BIO, tanvi.id, "Letterpress"]) expect(wire).not.toContain(secret)
   })
 
   it("so does /profiles by C's handle, the screen's fallback", async () => {
@@ -238,7 +240,7 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
       profile: { id: hC, age: 22, onboarded: true, location: expect.any(String) },
     })
     const wire = JSON.stringify(res.body)
-    for (const secret of [REAL_NAME, PHOTO, BLUR, BIO, tanvi.id, "Letterpress", "design"]) expect(wire).not.toContain(secret)
+    for (const secret of [REAL_NAME, FIRST_NAME, PHOTO, BLUR, BIO, tanvi.id, "Letterpress", "design"]) expect(wire).not.toContain(secret)
   })
 
   it("and the interest list by C's handle is withheld", async () => {
@@ -247,8 +249,8 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
 
   it("by A's handle she is who A's roster says she is", async () => {
     const res = await card(hA, viewer)
-    expect(res.body.data).toMatchObject({ id: hA, name: REAL_NAME, photos: [PHOTO], bio: BIO, identityVisible: true })
-    expect((await profile(hA, viewer)).body.data).toMatchObject({ name: REAL_NAME, profile: { photos: [PHOTO], bio: BIO } })
+    expect(res.body.data).toMatchObject({ id: hA, name: FIRST_NAME, photos: [PHOTO], bio: BIO, identityVisible: true })
+    expect((await profile(hA, viewer)).body.data).toMatchObject({ name: FIRST_NAME, profile: { photos: [PHOTO], bio: BIO } })
     const list = (await interests(hA, viewer)).body.data.interests as { name: string }[]
     expect(list.map((i) => i.name)).toEqual(["Letterpress"])
   })
@@ -283,7 +285,7 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
       const res = await card(row.userId, viewer)
       expect({ room: e, identified: res.body.data.identityVisible, name: res.body.data.name }).toEqual({
         room: e,
-        identified: row.name === REAL_NAME,
+        identified: row.name === FIRST_NAME,
         name: row.name,
       })
     }

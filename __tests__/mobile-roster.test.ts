@@ -198,7 +198,7 @@ describe("GET /events/:id/checkins — what it discloses", () => {
     mockDb.event_match_preferences.findMany.mockResolvedValue([{ user_id: "u2" }])
     const body = await (await GET(req(), { params })).json()
     const [a] = body.data.attendees
-    expect(a.name).toBe("Ananya Bhat")
+    expect(a.name).toBe("Ananya")
     expect(a.image).toBe("https://cdn/a.jpg")
     const where = mockDb.event_match_preferences.findMany.mock.calls[0][0].where
     expect(where).toMatchObject({ event_id: EVENT, revealed: true })
@@ -224,7 +224,7 @@ describe("GET /events/:id/checkins — what it discloses", () => {
 
     mockDb.friendships.findMany.mockResolvedValue(friends(true))
     let [a] = (await (await GET(req(), { params })).json()).data.attendees
-    expect(a.name).toBe("Ananya Bhat")
+    expect(a.name).toBe("Ananya")
     expect(a.image).toBe("https://cdn/a.jpg")
     expect(a.userId.startsWith("rh_")).toBe(true)
 
