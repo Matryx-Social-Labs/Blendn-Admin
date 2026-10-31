@@ -2509,7 +2509,7 @@
     "deletion-reauth.itest.ts": {
       "guards": "SCRUM-944 (3) / owner ruling A-18: account deletion needs the password (wrong → 403 PASSWORD_INCORRECT) or a linked Google/Apple token issued within 15 minutes (else 403 REAUTH_REQUIRED); no proof deletes as before until MOBILE_MIN_APP_VERSION ≥ 1.0.1, then REAUTH_REQUIRED.",
       "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",
-      "observed": "M944h: 1 of 6 failing (a wrong password deleted the account). Restored; 6/6.",
+      "observed": "M944h: 1 of 6 failing (a wrong password deleted the account). Restored; 6/6. Review: wrong passwords here are limited at sign-in's numbers (5 / 15 min, then 429); test red first (the 6th try deleted the account). 7/7.",
       "date": "2026-11-01"
     }
   },

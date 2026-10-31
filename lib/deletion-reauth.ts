@@ -4,6 +4,7 @@ import { errorResponse, ErrorCode } from "./api-response"
 import { db } from "./db"
 import { logger } from "./logger"
 import { minimumAtLeast } from "./mobile-gate"
+import { hit } from "./rate-limit-store"
 import { verifyAppleIdToken, verifyGoogleIdToken } from "./mobile-auth"
 
 /*
@@ -16,6 +17,9 @@ import { verifyAppleIdToken, verifyGoogleIdToken } from "./mobile-auth"
  */
 export const DELETION_REAUTH_FROM_VERSION = "1.0.1"
 const FRESH_SECONDS = 15 * 60
+/** Sign-in's numbers, so a stolen bearer token does not make this route the softer password oracle (review). */
+const PASSWORD_TRIES = 5
+const PASSWORD_WINDOW_MS = 15 * 60 * 1000
 
 export interface DeletionProof {
   password?: string
@@ -28,9 +32,17 @@ const reauth = () => errorResponse("Sign in again to delete your account.", 403,
 /** Null when the deletion may go ahead; otherwise the refusal to send. */
 export async function deletionReauthRefusal(userId: string, proof: DeletionProof): Promise<Response | null> {
   if (proof.password !== undefined) {
+    // Every try takes a slot; a right one deletes the account, so there is nothing to give back.
+    const tries = await hit(`rl:account-delete:password:${userId}`, PASSWORD_WINDOW_MS, { failClosed: true })
+    if (tries.count > PASSWORD_TRIES) {
+      logger.warn("Account deletion: too many wrong passwords", { userId })
+      return errorResponse("Too many tries. Try again later.", 429, ErrorCode.RATE_LIMITED)
+    }
     const user = await db.user.findUnique({ where: { id: userId }, select: { password: true } })
     const right = user?.password ? await bcrypt.compare(proof.password, user.password) : false
-    return right ? null : errorResponse("That password is not right.", 403, ErrorCode.PASSWORD_INCORRECT)
+    if (right) return null
+    logger.warn("Account deletion: wrong password", { userId })
+    return errorResponse("That password is not right.", 403, ErrorCode.PASSWORD_INCORRECT)
   }
   if (proof.appleIdentityToken !== undefined || proof.googleIdToken !== undefined) {
     const provider = proof.appleIdentityToken !== undefined ? "apple" : "google"
@@ -39,12 +51,17 @@ export async function deletionReauthRefusal(userId: string, proof: DeletionProof
         ? await verifyAppleIdToken(proof.appleIdentityToken!)
         : await verifyGoogleIdToken(proof.googleIdToken!)
     const issuedAt = Number(payload?.iat)
-    if (!payload?.sub || !Number.isFinite(issuedAt) || Date.now() / 1000 - issuedAt > FRESH_SECONDS) return reauth()
+    if (!payload?.sub || !Number.isFinite(issuedAt) || Date.now() / 1000 - issuedAt > FRESH_SECONDS) {
+      logger.warn("Account deletion: provider token refused (invalid or stale)", { userId, provider })
+      return reauth()
+    }
     const linked = await db.user_oauth_accounts.findFirst({
       where: { user_id: userId, provider, provider_id: payload.sub },
       select: { id: true },
     })
-    return linked ? null : reauth()
+    if (linked) return null
+    logger.warn("Account deletion: provider token not linked to this account", { userId, provider })
+    return reauth()
   }
   if (minimumAtLeast(DELETION_REAUTH_FROM_VERSION)) return reauth()
   logger.info("Account deleted with no re-auth proof (a build older than the one that sends it)", { userId })

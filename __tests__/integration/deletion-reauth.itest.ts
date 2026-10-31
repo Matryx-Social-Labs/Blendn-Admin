@@ -70,6 +70,16 @@ describe("deleting an account asks who is deleting", () => {
     expect(await gone(id)).toBe(false)
   })
 
+  // Security review: a stolen bearer token must not make this route a password oracle (the user limit allows 10 a
+  // minute). Wrong passwords here get sign-in's numbers: 5 in 15 minutes, then 429 even for the right one.
+  it("stops guessing after 5 wrong passwords in 15 minutes", async () => {
+    const id = await person()
+    for (let i = 0; i < 5; i++) expect(await codeOf(await del(id, { password: `guess-${i}-xxxxxx` }))).toBe("PASSWORD_INCORRECT")
+    const res = await del(id, { password: PASSWORD })
+    expect(res.status).toBe(429)
+    expect(await gone(id)).toBe(false)
+  })
+
   it("deletes an Apple account with a fresh identity token linked to it", async () => {
     const sub = testId("asub")
     const id = await person({ password: false, appleSub: sub })
