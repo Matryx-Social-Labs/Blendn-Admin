@@ -140,7 +140,9 @@ function apiBase(): string {
 
 async function clean() {
   const events = await db.events.findMany({ where: { slug: { startsWith: SLUG }, ...realEventsWhere }, select: { id: true } })
-  const users = await db.user.findMany({ where: { email: { startsWith: "qa.auditfx.", endsWith: "@blendn.app" } }, select: { id: true } })
+  // Only the accounts above: other fixtures live in the same qa.auditfx.* namespace (801, 802).
+  const owned = Array.from({ length: HOSTS[HOSTS.length - 1].n }, (_, i) => EMAIL(i + 1))
+  const users = await db.user.findMany({ where: { email: { in: owned } }, select: { id: true } })
   const userIds = users.map((u) => u.id)
   const venues = await db.venues.findMany({ where: { name: { startsWith: VENUE_PREFIX } }, select: { id: true } })
   const crewIds = (await db.crews.findMany({ where: { created_by: { in: userIds } }, select: { id: true } })).map((c) => c.id)
