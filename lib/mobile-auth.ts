@@ -361,9 +361,17 @@ export async function verifyRefreshToken(
     // A session ended on purpose (a reset, sign-out everywhere) is dead, not stolen: refused below, and never a reason
     // to end the sessions opened since (security review of SCRUM-944).
     const bound = storedToken.revoked_reason ? null : installationOf(storedToken.device_info)
-    // Naming none is the owner's own app on a path that forgot it far more often than a thief: refuse this token only.
-    if (bound !== null && installationId === undefined) return null
-    if (bound !== null && bound !== installationId) {
+    /*
+     * Naming none is the owner's own app on a path that forgot it far more often than a thief. A LIVE token is refused
+     * alone; a revoked one goes on to the reuse rules below (past the grace, or after its successor was used, the
+     * family ends) and is never re-issued (review 5 of SCRUM-944).
+     */
+    const unnamed = bound !== null && installationId === undefined
+    if (unnamed && !storedToken.revoked_at) {
+      logger.warn("Bound refresh token presented with no installation, refusing", { userId: storedToken.user_id })
+      return null
+    }
+    if (bound !== null && installationId !== undefined && bound !== installationId) {
       logger.error("Refresh token presented from another installation, revoking all refresh tokens", {
         userId: storedToken.user_id,
       })
@@ -416,6 +424,25 @@ export async function verifyRefreshToken(
         // The lost-response case has one shape: the successor nobody stored
         // is still live and was never itself rotated. `updateMany` retiring
         // it returns 0 when it is not — somebody used it — and that is reuse.
+        if (unnamed) {
+          // Never re-issued without its installation: refused while the successor is unused, theft once it was used.
+          const successorUnused = await db.mobile_refresh_tokens.count({
+            where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
+          })
+          if (successorUnused > 0) {
+            logger.warn("Rotated bound refresh token replayed with no installation inside the grace, refusing", {
+              userId: storedToken.user_id,
+              sinceRevokedMs,
+            })
+            return null
+          }
+          logger.error("Rotated bound refresh token replayed with no installation after its successor was used, revoking all", {
+            userId: storedToken.user_id,
+            sinceRevokedMs,
+          })
+          await revokeUserRefreshTokens(storedToken.user_id)
+          return null
+        }
         const retired = await db.mobile_refresh_tokens.updateMany({
           where: { id: storedToken.replaced_by, revoked_at: null, replaced_by: null },
           data: { revoked_at: new Date() },

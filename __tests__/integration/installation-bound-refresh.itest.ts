@@ -82,6 +82,32 @@ describe("a refresh session bound to an installation", () => {
     expect(await live(me.id)).toBe(1)
   })
 
+  it("refuses a live bound token that names no installation, ending nothing", async () => {
+    const me = await signedIn(PHONE)
+    expect((await refresh(me.refreshToken)).status).toBe(401)
+    expect(await live(me.id)).toBe(1)
+  })
+
+  // Review 5: a stolen, rotated-out token replayed without the field must still meet reuse detection.
+  it("ends the family for a headerless replay after the successor was used", async () => {
+    const me = await signedIn(PHONE)
+    const r1 = (await (await refresh(me.refreshToken, PHONE)).json()) as { data: { refreshToken: string } }
+    expect((await refresh(r1.data.refreshToken, PHONE)).status).toBe(200)
+    expect((await refresh(me.refreshToken)).status).toBe(401)
+    expect(await live(me.id)).toBe(0)
+  })
+
+  it("ends the family for a headerless replay past the grace", async () => {
+    const me = await signedIn(PHONE)
+    expect((await refresh(me.refreshToken, PHONE)).status).toBe(200)
+    await db.mobile_refresh_tokens.updateMany({
+      where: { user_id: me.id, revoked_at: { not: null } },
+      data: { revoked_at: new Date(Date.now() - 30 * 60 * 1000) },
+    })
+    expect((await refresh(me.refreshToken)).status).toBe(401)
+    expect(await live(me.id)).toBe(0)
+  })
+
   it("matches the installation whatever its letter case", async () => {
     const me = await signedIn(PHONE.toUpperCase())
     expect((await refresh(me.refreshToken, PHONE)).status).toBe(200)
