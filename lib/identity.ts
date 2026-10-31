@@ -62,7 +62,7 @@ import { ownerAdmits } from "./room-kind"
  * - **They sent you a message request that is still pending.** The request
  *   list already shows its sender's name and photo to you (and only to you);
  *   the profile agrees with it (SCRUM-975). Never the other way round.
- *   By name and photo only: bio and orientation wait for the accept (`askedOnly`, A-32).
+ *   Bio and orientation wait for the accept (`askedOnly`, A-32).
  *
  * Co-presence alone is deliberately *not* enough. Sharing a room is what lets
  * you send a request; it is not consent to be identified.
@@ -102,7 +102,7 @@ export async function maySeeIdentityFor(
 
 /**
  * The rule itself, and which of the visible ones only their own pending request names (`askedOnly`): those get the
- * request list's name and photo, never bio or orientation, until the request is accepted (owner ruling A-32).
+ * profile without bio or orientation until the request is accepted (owner ruling A-32).
  */
 async function identityFor(
   viewerId: string,
@@ -537,7 +537,7 @@ export async function identityForRef(
   if (userId === viewerId) return { userId, room, identified: true, askedOnly: false }
   const { visible, askedOnly } = await identityFor(viewerId, [userId], room ? { room } : {})
   if (visible.has(userId)) {
-    // Named by their request alone: name and photo only (A-32). A friend who also asked is still a friend (below).
+    // Named by their request alone: no bio or orientation yet (A-32). A friend who also asked is still a friend (below).
     const onlyAsked = askedOnly.has(userId) && !(await isFriendUnblocked(viewerId, userId))
     return { userId, room, identified: true, askedOnly: onlyAsked }
   }
