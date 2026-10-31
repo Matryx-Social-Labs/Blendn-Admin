@@ -357,7 +357,9 @@ export async function verifyRefreshToken(
      * recorded no installation (an older app) keeps the old rule; only a sign-in binds one (never a refresh, or a thief
      * could claim an unbound session first).
      */
-    const bound = installationOf(storedToken.device_info)
+    // A session ended on purpose (a reset, sign-out everywhere) is dead, not stolen: refused below, and never a reason
+    // to end the sessions opened since (security review of SCRUM-944).
+    const bound = storedToken.revoked_reason ? null : installationOf(storedToken.device_info)
     if (bound !== null && bound !== installationId) {
       logger.error("Refresh token presented from another installation, revoking all refresh tokens", {
         userId: storedToken.user_id,

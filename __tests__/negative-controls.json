@@ -2491,7 +2491,7 @@
     "installation-bound-refresh.itest.ts": {
       "guards": "SCRUM-944 (2) / owner ruling A-18 + security review: a refresh session bound at sign-in answers only its installation, live or replayed in the grace; another installation, or none named, revokes the family; a session with no installation keeps the old rule and is never bound by a refresh; rotation carries the installation.",
       "mutation": "M944a lib/mobile-auth.ts verifyRefreshToken installation check disabled (if (false && ...)).",
-      "observed": "M944a: 3 of 7 failing (live token from another installation, grace replay from another, replay naming none: all 200). Restored; 7/7.",
+      "observed": "M944a: 3 of 8 failing (live token from another installation, grace replay from another, replay naming none: all 200). Restored; 8/8. Review 2: a deliberately ended row skips the check (test red first: its replay revoked the newer session).",
       "date": "2026-10-31"
     }
   },

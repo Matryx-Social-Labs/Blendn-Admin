@@ -86,6 +86,17 @@ describe("a refresh session bound to an installation", () => {
     expect(await live(me.id)).toBe(0)
   })
 
+  // Security review: a session ended on purpose (a reset, sign-out everywhere) is dead, not stolen. Presenting its token
+  // from anywhere must not end the sessions the person opened since.
+  it("lets a deliberately ended session's token kill nothing newer", async () => {
+    const me = await signedIn(PHONE)
+    await db.mobile_refresh_tokens.updateMany({ where: { user_id: me.id }, data: { revoked_at: new Date(), revoked_reason: "signout_all" } })
+    const user = await db.user.findUniqueOrThrow({ where: { id: me.id }, select: { email: true } })
+    expect((await signinRoute.POST(post("/api/mobile/auth/signin", { email: user.email, password: PASSWORD, deviceInfo: { installationId: PHONE } }))).status).toBe(200)
+    expect((await refresh(me.refreshToken)).status).toBe(401)
+    expect(await live(me.id)).toBe(1)
+  })
+
   it("accepts a replay as before for a session that recorded no installation", async () => {
     const me = await signedIn()
     expect((await refresh(me.refreshToken)).status).toBe(200)
