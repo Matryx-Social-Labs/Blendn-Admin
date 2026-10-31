@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
+import { httpsUrl } from "@/lib/https-url"
 import { IconMapPin } from "@tabler/icons-react"
 import { toast } from "sonner"
 
@@ -60,7 +61,7 @@ import { curateEvent } from "./actions"
 const formSchema = z
   .object({
     title: z.string().trim().min(3, "Give it the title on the listing.").max(200),
-    source_url: z.string().url("Paste the full listing URL, including https://"),
+    source_url: httpsUrl(2000),
     start_time: z.string().min(1, "When does it start?"),
     end_time: z.string().min(1, "When does it end?"),
     /**

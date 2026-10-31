@@ -8,8 +8,9 @@ import { auditLog } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
-import { actorFor } from "@/lib/org-membership"
 import { httpsUrl } from "@/lib/https-url"
+import { actorFor } from "@/lib/org-membership"
+import { violatedConstraint } from "@/lib/prisma-errors"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
 import { normaliseSponsorName } from "@/lib/sponsor-name"
 import { SPONSORSHIP } from "@/lib/constants"
@@ -156,16 +157,18 @@ export async function createUnclaimedSponsor(eventId: string, input: unknown) {
     throw new Refusal(`“${clash.name}” already exists — pick it from the list instead`)
   }
 
-  const sponsor = await db.sponsors.create({
-    data: {
-      name,
-      name_key,
-      website: website || null,
-      logo_url: logo_url || null,
-      created_by: session.user.id,
-    },
-    select: { id: true, name: true },
-  })
+  const sponsor = await db.sponsors
+    .create({
+      data: {
+        name,
+        name_key,
+        website: website || null,
+        logo_url: logo_url || null,
+        created_by: session.user.id,
+      },
+      select: { id: true, name: true },
+    })
+    .catch((e: unknown) => refuseIfBrandNameTaken(e, `“${name}” already exists — pick it from the list instead`))
 
   auditLog({
     userId: session.user.id,
@@ -757,6 +760,16 @@ export async function getMyBrand(): Promise<MyBrand | null> {
  * the constraint exists to prevent, and arriving there by rename is no better
  * than arriving by creation.
  */
+const BRAND_NAME_TAKEN = "That brand name is already on Blend’n. If it is yours, claim it instead."
+
+/** A lost race on the unique indexes (SCRUM-956) gets the answer the check gives. */
+function refuseIfBrandNameTaken(error: unknown, message: string): never {
+  if (["sponsors_name_key_active_uniq", "sponsor_org_name_key_idx"].some((n) => violatedConstraint(error, n))) {
+    throw new Refusal(message)
+  }
+  throw error
+}
+
 export async function saveMyBrand(input: unknown) {
   const session = await getAuth()
   if (!session?.user) throw new Refusal("Unauthorized")
@@ -790,7 +803,7 @@ export async function saveMyBrand(input: unknown) {
 
   const existing = await db.sponsors.findFirst({
     where: { org_id: { in: actor.orgIds }, deleted_at: null, merged_into: null },
-    select: { id: true },
+    select: { id: true, name_key: true },
   })
 
   /*
@@ -798,22 +811,27 @@ export async function saveMyBrand(input: unknown) {
    * organisation's brand name is impersonation, and a sponsored message carries
    * the name. An unclaimed brand counts too: that name is for its owner to
    * claim, not for anybody to register beside it. The key already ignores case
-   * and punctuation, so "ACME" and "Acme-" are one name.
+   * and punctuation, so "ACME" and "Acme-" are one name. Only when the name is
+   * new or changing: a brand that predates the rule keeps saving its logo. The
+   * unique index is what holds this under a race; this is the polite answer.
    */
-  const clash = await db.sponsors.findFirst({
-    where: {
-      name_key,
-      deleted_at: null,
-      merged_into: null,
-      ...(existing ? { id: { not: existing.id } } : {}),
-    },
-    select: { org_id: true },
-  })
+  const clash =
+    existing?.name_key === name_key
+      ? null
+      : await db.sponsors.findFirst({
+          where: {
+            name_key,
+            deleted_at: null,
+            merged_into: null,
+            ...(existing ? { id: { not: existing.id } } : {}),
+          },
+          select: { org_id: true },
+        })
   if (clash) {
     throw new Refusal(
       clash.org_id === orgId
         ? "Your organisation already has a brand with that name"
-        : "That brand name is already on Blend’n. If it is yours, claim it instead."
+        : BRAND_NAME_TAKEN
     )
   }
 
@@ -824,13 +842,13 @@ export async function saveMyBrand(input: unknown) {
     logo_url: logo_url || null,
   }
 
-  const brand = existing
-    ? await db.sponsors.update({
+  const written = existing
+    ? db.sponsors.update({
         where: { id: existing.id },
         data,
         select: { id: true, name: true },
       })
-    : await db.sponsors.create({
+    : db.sponsors.create({
         data: {
           ...data,
           org_id: orgId,
@@ -841,6 +859,7 @@ export async function saveMyBrand(input: unknown) {
         },
         select: { id: true, name: true },
       })
+  const brand = await written.catch((e: unknown) => refuseIfBrandNameTaken(e, BRAND_NAME_TAKEN))
 
   auditLog({
     userId: session.user.id,

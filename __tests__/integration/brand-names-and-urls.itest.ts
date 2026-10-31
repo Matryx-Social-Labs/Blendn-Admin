@@ -18,6 +18,7 @@ jest.mock("@/lib/email", () => {
 })
 
 import { approveOnboardingRequest } from "@/lib/onboarding-actions"
+import { violatedConstraint } from "@/lib/prisma-errors"
 import { normaliseSponsorName } from "@/lib/sponsor-name"
 import { saveMyBrand } from "@/lib/sponsor-actions"
 import { closeDb, db, makeUser, testId } from "./helpers"
@@ -62,6 +63,20 @@ async function brandOf(org: string | null, name: string, over: { deleted?: boole
 }
 const unique = () => `Zq${Math.random().toString(36).slice(2, 8)}`
 const rowsNamed = (key: string) => db.sponsors.count({ where: { name_key: key, deleted_at: null, merged_into: null } })
+
+async function application(displayName: string) {
+  const r = await db.organiser_onboarding_requests.create({
+    data: {
+      kind: "company", display_name: displayName, contact_name: "New Host",
+      contact_email: `${testId("h")}@example.test`, tier: "needs_proof", status: "pending",
+      email_verified_at: new Date(), requested_role: "organizer",
+    },
+    select: { id: true },
+  })
+  requests.push(r.id)
+  return r.id
+}
+
 
 describe("a brand's links", () => {
   it.each([
@@ -153,19 +168,6 @@ describe("a brand's name across organisations", () => {
 })
 
 describe("an organisation's name", () => {
-  async function application(displayName: string) {
-    const r = await db.organiser_onboarding_requests.create({
-      data: {
-        kind: "company", display_name: displayName, contact_name: "New Host",
-        contact_email: `${testId("h")}@example.test`, tier: "needs_proof", status: "pending",
-        email_verified_at: new Date(), requested_role: "organizer",
-      },
-      select: { id: true },
-    })
-    requests.push(r.id)
-    return r.id
-  }
-
   it("is refused at approval when another organisation has it, in any case", async () => {
     const admin = await makeUser("on-admin", "app_admin")
     users.push(admin)
@@ -174,6 +176,10 @@ describe("an organisation's name", () => {
     const existing = await db.organisations.create({ data: { display_name: name, status: "verified" } })
     orgs.push(existing.id)
 
+    for (const lookalike of [name.toUpperCase(), name.replace(" ", "  "), `${name.slice(0, 3)}\u200B${name.slice(3)}`, ` ${name} `]) {
+      const refused = await application(lookalike)
+      await expect(approveOnboardingRequest(refused)).rejects.toThrow(/already/i)
+    }
     const id = await application(name.toUpperCase())
     await expect(approveOnboardingRequest(id)).rejects.toThrow(/already/i)
     expect((await db.organiser_onboarding_requests.findUniqueOrThrow({ where: { id }, select: { status: true } })).status).toBe("pending")
@@ -187,5 +193,64 @@ describe("an organisation's name", () => {
     const result = await approveOnboardingRequest(await application(testId("Fresh Org")))
     orgs.push(result.orgId)
     expect(result.orgId).toBeTruthy()
+  })
+})
+
+describe("the database holds the line when two requests race (lookalike names)", () => {
+  const fullWidth = (t: string) => t.replace(/[a-z0-9]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0))
+  it.each([
+    ["a zero-width space", (t: string) => `${t.slice(0, 2)}\u200B${t.slice(2)}`],
+    ["full-width letters", fullWidth],
+    ["case and punctuation", (t: string) => `${t.toUpperCase()}.`],
+  ])("lets one of two simultaneous brand saves win, whatever the lookalike (%s)", async (_label, lookalike) => {
+    const x = await sponsorOrg("race-x")
+    const y = await sponsorOrg("race-y")
+    const mine = unique().toLowerCase()
+    const saveAs = (user: string, name: string) => {
+      session = { user: { id: user, role: "sponsor" } }
+      return saveMyBrand({ name })
+    }
+    const results = await Promise.allSettled([saveAs(x.user, mine), saveAs(y.user, lookalike(mine))])
+    for (const r of results) if (r.status === "fulfilled") brands.push(r.value.id)
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1)
+    const lost = results.find((r) => r.status === "rejected") as PromiseRejectedResult
+    expect(String(lost.reason)).toMatch(/already/i)
+    expect(await rowsNamed(normaliseSponsorName(mine))).toBe(1)
+  })
+
+  it("refuses a second active brand with the same key at the index, by name", async () => {
+    const org = await sponsorOrg("idx")
+    const key = normaliseSponsorName(unique())
+    await brandOf(org.org, key)
+    const err = await db.sponsors
+      .create({ data: { name: key.toUpperCase(), name_key: key, org_id: null }, select: { id: true } })
+      .then(() => null, (e: unknown) => e)
+    expect(violatedConstraint(err, "sponsors_name_key_active_uniq")).toBe(true)
+  })
+
+  it("lets one of two simultaneous approvals of lookalike organisation names win", async () => {
+    const admin = await makeUser("race-admin", "app_admin")
+    users.push(admin)
+    session = { user: { id: admin, role: "app_admin" } }
+    const base = testId("Raceco")
+    const first = await application(base)
+    const second = await application(`${base.slice(0, 4)}\u200B${base.slice(4).toUpperCase()}`)
+    const results = await Promise.allSettled([approveOnboardingRequest(first), approveOnboardingRequest(second)])
+    for (const r of results) if (r.status === "fulfilled") orgs.push(r.value.orgId)
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1)
+    const lost = results.find((r) => r.status === "rejected") as PromiseRejectedResult
+    expect(String(lost.reason)).toMatch(/already exists/i)
+    const loserId = results[0].status === "rejected" ? first : second
+    expect((await db.organiser_onboarding_requests.findUniqueOrThrow({ where: { id: loserId }, select: { status: true } })).status).toBe("pending")
+  })
+
+  it("refuses a second organisation with the same key at the index, by name", async () => {
+    const name = testId("Idxco")
+    const one = await db.organisations.create({ data: { display_name: name } })
+    orgs.push(one.id)
+    const err = await db.organisations
+      .create({ data: { display_name: `${name.toUpperCase()}  ` } })
+      .then((o) => { orgs.push(o.id); return null }, (e: unknown) => e)
+    expect(violatedConstraint(err, "organisations_name_key_uniq")).toBe(true)
   })
 })

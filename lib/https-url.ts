@@ -14,3 +14,5 @@ export const httpsUrl = (max = 2048) =>
     .url()
     .max(max)
     .refine((u) => /^https:\/\//i.test(u), "Use a web address that starts with https://")
+    // `https://trusted.example@evil.example/` reads as the first host and goes to the second.
+    .refine((u) => !/^https:\/\/[^/?#]*@/i.test(u), "Leave the user name and password out of the address")
