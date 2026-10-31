@@ -73,11 +73,18 @@ describe("a refresh session bound to an installation", () => {
     expect(await live(me.id)).toBe(0)
   })
 
-  it("treats a replay that names no installation as another one", async () => {
+  // Final review: a request naming no installation is most likely the owner's own app on a path that forgot it (or a
+  // rolled-back build). Refuse that token, end nothing: a thief gains nothing from it, and the owner is not signed out.
+  it("refuses a bound token that names no installation, without ending any session", async () => {
     const me = await signedIn(PHONE)
     expect((await refresh(me.refreshToken, PHONE)).status).toBe(200)
     expect((await refresh(me.refreshToken)).status).toBe(401)
-    expect(await live(me.id)).toBe(0)
+    expect(await live(me.id)).toBe(1)
+  })
+
+  it("matches the installation whatever its letter case", async () => {
+    const me = await signedIn(PHONE.toUpperCase())
+    expect((await refresh(me.refreshToken, PHONE)).status).toBe(200)
   })
 
   it("refuses a live token from another installation, and ends every session", async () => {

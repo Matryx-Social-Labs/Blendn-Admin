@@ -352,7 +352,8 @@ export async function verifyRefreshToken(
 
     /*
      * A session bound to an installation answers only that installation (owner ruling A-18 (2)), live or replayed
-     * inside the grace: another one, or a request naming none, is somebody else holding a copy, and the family ends.
+     * inside the grace: another one is somebody else holding a copy, and the family ends; a request naming none is
+     * refused alone (final security review: an app path that forgot the field must not sign its owner out everywhere).
      * The JWT is already verified, so this costs a thief their stolen token and nobody else anything. A session that
      * recorded no installation (an older app) keeps the old rule; only a sign-in binds one (never a refresh, or a thief
      * could claim an unbound session first).
@@ -360,6 +361,8 @@ export async function verifyRefreshToken(
     // A session ended on purpose (a reset, sign-out everywhere) is dead, not stolen: refused below, and never a reason
     // to end the sessions opened since (security review of SCRUM-944).
     const bound = storedToken.revoked_reason ? null : installationOf(storedToken.device_info)
+    // Naming none is the owner's own app on a path that forgot it far more often than a thief: refuse this token only.
+    if (bound !== null && installationId === undefined) return null
     if (bound !== null && bound !== installationId) {
       logger.error("Refresh token presented from another installation, revoking all refresh tokens", {
         userId: storedToken.user_id,

@@ -11,7 +11,7 @@ export const deviceInfoSchema = z.object({
    * One install of the app: a random UUID the app makes once and keeps. A refresh session remembers it, and a grace
    * replay from any other installation is theft (owner ruling A-18 (2)). Absent on older apps, which keep today's rule.
    */
-  installationId: z.string().uuid().optional(),
+  installationId: z.string().toLowerCase().uuid().optional(), // lowercased: one install compares equal however it is spelt
 })
 
 export const signupSchema = z.object({
@@ -70,7 +70,7 @@ export const signinSchema = z.object({
 
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, "Refresh token is required"),
-  installationId: z.string().uuid().optional(),
+  installationId: z.string().toLowerCase().uuid().optional(), // lowercased: one install compares equal however it is spelt
 })
 
 export type SignupInput = z.infer<typeof signupSchema>

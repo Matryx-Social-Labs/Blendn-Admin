@@ -111,8 +111,11 @@ is ignored.
 **Installation (A-18 (2)).** `deviceInfo.installationId` is a UUID the app makes once per install. The refresh session
 keeps it through every rotation; send the same value as `installationId` on **every** `POST /auth/refresh`. A bound
 session answers only that value, for a live token and for a replay inside the 20-minute grace alike; from another
-installation, or naming none, it is treated as theft and every session ends. A session that recorded no installation
-(an older app) keeps the old rule; only a sign-in binds one, never a refresh.
+installation it is treated as theft and every session ends; naming none, that one token is refused and nothing else
+ends. A session that recorded no installation (an older app) keeps the old rule; only a sign-in (password, signup,
+Google, Apple) binds one, never a refresh. Keep `installationId` in SecureStore beside the tokens, with the same options,
+so a reinstall that keeps the tokens keeps the id too. The binding protects a token that leaks alone (a log, the
+network), not a phone whose storage is read.
 
 An account created through Google or Apple has no password and returns the same
 generic `401` as a wrong password — deliberately, so the response is not an
