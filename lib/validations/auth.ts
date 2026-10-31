@@ -7,6 +7,11 @@ export const deviceInfoSchema = z.object({
   platform: z.string().optional(),
   device: z.string().optional(),
   appVersion: z.string().optional(),
+  /*
+   * One install of the app: a random UUID the app makes once and keeps. A refresh session remembers it, and a grace
+   * replay from any other installation is theft (owner ruling A-18 (2)). Absent on older apps, which keep today's rule.
+   */
+  installationId: z.string().toLowerCase().uuid().optional(), // lowercased: one install compares equal however it is spelt
 })
 
 export const signupSchema = z.object({
@@ -59,10 +64,13 @@ export const signinSchema = z.object({
   email: z.string().max(254, "Invalid email address").trim().toLowerCase().email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
   deviceInfo: deviceInfoSchema.optional(),
+  /** The `knownDevice` proof an earlier sign-in to this account returned (lib/known-device.ts). */
+  knownDevice: z.string().max(200).optional(),
 })
 
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, "Refresh token is required"),
+  installationId: z.string().toLowerCase().uuid().optional(), // lowercased: one install compares equal however it is spelt
 })
 
 export type SignupInput = z.infer<typeof signupSchema>

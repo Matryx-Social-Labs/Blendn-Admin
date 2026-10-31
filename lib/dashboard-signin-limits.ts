@@ -97,12 +97,31 @@ export async function settleSigninSuccess(keys: Pick<SigninKeys, "account" | "ac
  * The mobile door's own per-account window (10 in 15 minutes): its `rateLimit` key (stored under `rl:`). Failures only:
  * a right password gives its attempt back (`releaseMobileAccountAttempt`), and a reset forgets it (SCRUM-944 part 1).
  */
-export const mobileAccountKey = (email: string) => `auth:signin:acct:${email.trim().toLowerCase()}`
-const storedMobileAccountKey = (email: string) => `rl:${mobileAccountKey(email)}`
+/** The account's window, or with `phone` the window of one known phone on it (owner ruling A-18 (1)). */
+export const mobileAccountKey = (email: string, phone?: string) =>
+  `auth:signin:acct:${email.trim().toLowerCase()}${phone ? `:phone:${phone}` : ""}`
+const storedMobileAccountKey = (email: string, phone?: string) => `rl:${mobileAccountKey(email, phone)}`
 
 /** The right password at the mobile door: its attempt is not held against the account. */
-export async function releaseMobileAccountAttempt(email: string): Promise<void> {
-  await release(storedMobileAccountKey(email))
+export async function releaseMobileAccountAttempt(email: string, phone?: string): Promise<void> {
+  await release(storedMobileAccountKey(email, phone))
+}
+
+/**
+ * A known phone's day cap (security review of SCRUM-944). Its 15-minute window is its own, so without this a lifted
+ * proof would be worth 960 guesses a day; the account's own day cap is 200. Counted like the per-email windows: every
+ * attempt takes a slot, a right password gives it back.
+ */
+export const KNOWN_PHONE_DAY_MAX = 50
+const knownPhoneDayKey = (email: string, phone: string) => `${PREFIX}:phone-day:${email.trim().toLowerCase()}:${phone}`
+
+export async function refuseOverKnownPhoneDay(email: string, phone: string): Promise<void> {
+  const day = await hit(knownPhoneDayKey(email, phone), RATE_LIMIT_WINDOW.DASHBOARD_SIGNIN_ACCOUNT_DAY, FAIL_CLOSED)
+  if (day.count > KNOWN_PHONE_DAY_MAX) throw new Error(SIGNIN_ACCOUNT_LOCKED)
+}
+
+export async function releaseKnownPhoneDay(email: string, phone: string): Promise<void> {
+  await release(knownPhoneDayKey(email, phone))
 }
 
 /** A completed password reset proved control of the mailbox: that email's counters start over, at both doors. */
