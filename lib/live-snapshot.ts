@@ -4,6 +4,7 @@
 // MODULE_NOT_FOUND. Everything reachable from server.ts must use relative
 // paths.
 import { db } from "./db"
+import { discloseCategories } from "./disclosure"
 import { occupancyFrom } from "./occupancy"
 import { headcount } from "./presence-sessions"
 import { escalates } from "./sentiment/taxonomy"
@@ -93,7 +94,7 @@ export async function buildLiveSnapshot(eventId: string, held?: { current?: Held
 export async function readLiveSnapshot(
   eventId: string,
   held?: { current?: HeldEvent }
-): Promise<{ snapshot: LiveSnapshot; event: { start_time: Date; end_time: Date }; occurrenceId: string | null } | null> {
+): Promise<{ snapshot: LiveSnapshot; figures: LiveFigures; event: { start_time: Date; end_time: Date }; occurrenceId: string | null } | null> {
   const now = new Date()
   const read = await eventAndSlots(eventId, now, held)
   if (!read) return null
@@ -140,6 +141,7 @@ export async function readLiveSnapshot(
     [chat],
     openFlags,
     feedback,
+    roomSize,
   ] = await Promise.all([
     /*
      * One query where there were four.
@@ -205,8 +207,10 @@ export async function readLiveSnapshot(
       : Promise.resolve(0),
     db.event_feedback.findMany({
       where: { event_id: eventId, created_at: { gte: thirtyMinutesAgo } },
-      select: { sentiment: true, category: true },
+      select: { sentiment: true, category: true, message: { select: { user_id: true } } },
     }),
+    // Who a complaint could be from, as the digest counts them: everyone with a member row, any status.
+    chatGroupId ? db.chat_group_members.count({ where: { chat_group_id: chatGroupId } }) : Promise.resolve(0),
   ])
 
   /*
@@ -282,6 +286,7 @@ export async function readLiveSnapshot(
 
   const sentiment = { positive: 0, neutral: 0, negative: 0 }
   const categoryCounts = new Map<string, number>()
+  const categoryContributors = new Map<string, Set<string>>()
   for (const row of feedback) {
     sentiment[row.sentiment] += 1
     // Only what needs attention: positives by category are noise on a live
@@ -291,6 +296,9 @@ export async function readLiveSnapshot(
     // three of them keep the old answer and nobody finds out.
     if (row.sentiment === "negative" || escalates(row.category)) {
       categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
+      const people = categoryContributors.get(row.category) ?? new Set<string>()
+      people.add(row.message.user_id)
+      categoryContributors.set(row.category, people)
     }
   }
 
@@ -334,9 +342,12 @@ export async function readLiveSnapshot(
   return {
     snapshot: {
       ...figures,
+      categories: discloseCategories(categoryCounts, categoryContributors, roomSize),
       view: "host",
       alerts: deriveAlerts(figures, { scheduledEnd: event.end_time, scheduledStart: event.start_time, now }),
     },
+    // The exact counts behind `snapshot.categories`, for the alerts the issue sweep records. Never sent.
+    figures,
     event: { start_time: event.start_time, end_time: event.end_time },
     occurrenceId: slot.occurrence?.id ?? null,
   }

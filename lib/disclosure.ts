@@ -281,7 +281,41 @@ export function discloseStarsAcross(perEvent: StarSpread[]): ReturnType<typeof d
   return { ...stars, ratingCount: perEvent.flat().reduce((a, b) => a + b, 0) }
 }
 
-type RatingGroupRow = { event_id: string; rating: number; _count: { _all: number } }
+export type RatingGroupRow = { event_id: string; rating: number; _count: { _all: number } }
+
+/** Bars move every this many new raters past the floor (SCRUM-472, owner row A-7). */
+export const RATING_BATCH = 3
+
+/** How many of a night's raters a host's figures include: all under the floor, then the floor plus whole batches. */
+export function publishedRaters(raters: number): number {
+  return raters < MIN_CELL ? raters : MIN_CELL + Math.floor((raters - MIN_CELL) / RATING_BATCH) * RATING_BATCH
+}
+
+export interface DisclosedCategory {
+  category: string
+  /** Null when held back. The category is still listed. */
+  count: number | null
+  suppressed: boolean
+  suppressionReason: SuppressionReason | null
+}
+
+/**
+ * Complaint categories as a host may read them. A category stays listed so a host knows it was raised; its number goes
+ * below the floor, because "1 safety_conduct" in a room of six is a sentence with an author. Shared by the digest and
+ * the live snapshot (SCRUM-890).
+ */
+export function discloseCategories(
+  counts: ReadonlyMap<string, number>,
+  contributors: ReadonlyMap<string, ReadonlySet<string>>,
+  population: number
+): DisclosedCategory[] {
+  return Array.from(counts.entries())
+    .map(([category, count]) => {
+      const disclosure = discloseFigure({ count, contributors: contributors.get(category)?.size ?? 0, population })
+      return { category, count: disclosure.value, suppressed: disclosure.suppressed, suppressionReason: disclosure.reason }
+    })
+    .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
+}
 
 /** `groupBy(["event_id", "rating"])` rows as one star spread per event. */
 export function spreadsByEvent(rows: RatingGroupRow[]): StarSpread[] {

@@ -32,7 +32,7 @@ import { notHostBannedFrom } from "../room-kind"
 
 /** Checked in at this occurrence now. Spread into an `event_check_ins` filter. */
 export function hereNowAt(occurrenceId: string, now: Date = new Date()) {
-  return { occurrence_id: occurrenceId, status: "checked_in" as const, check_out_time: null, ...inRoomWhere(undefined, now) }
+  return { occurrence_id: occurrenceId, kind: "attendee" as const, status: "checked_in" as const, check_out_time: null, ...inRoomWhere(undefined, now) }
 }
 
 /**
@@ -64,7 +64,8 @@ export async function presentMembersAt(occurrenceId: string, crewIds?: readonly 
 /** The occurrence this person is checked in at now, at this event, or null. */
 export async function occurrenceHereNow(eventId: string, userId: string): Promise<string | null> {
   const row = await db.event_check_ins.findFirst({
-    where: { event_id: eventId, user_id: userId, status: "checked_in", check_out_time: null, ...inRoomWhere(userId) },
+    // A guest: staff are out of matching, a crew's included (SCRUM-891).
+    where: { event_id: eventId, user_id: userId, kind: "attendee", status: "checked_in", check_out_time: null, ...inRoomWhere(userId) },
     select: { occurrence_id: true },
     orderBy: { check_in_time: "desc" },
   })

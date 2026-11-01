@@ -394,6 +394,9 @@ an opaque, url-safe string. Field names and shapes did not change.
   (`otherUserId`), `POST /friends/requests` (`userId`), `GET|DELETE
   /friends/:userId` and `POST /friends/:userId/conversation`. Raw ids still work
   on these.
+- **Staff are out of matching (SCRUM-891).** Somebody checked in as staff has no deck (`GET /events/:id/matches`), no
+  `GET /events/:id/people` (`not_attended`), an empty `GET /events/:id/checkins`, and `POST /events/:id/matches/likes` and `/waves`
+  answer 403 (or a crew refusal with `asCrewId`). Their latest check-in decides. Nobody can wave at them.
 - **Likes and waves take only this event's handles.** `POST /events/:id/matches/likes`
   (`userId`) and `POST /events/:id/waves` (`toUserId`) name somebody only by the
   handle that event's roster or deck gave you — or you by your own id, which is
@@ -898,8 +901,8 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
 | GET | `/events/:eventId/interested-users` | `{ interestedCount, users: [], pagination }` — a count. `users` is always empty: who favourited an event is not disclosed |
-| GET | `/events/:eventId/rating` | Your own rating → `{ rating: 1..5 \| null, review, ratedAt }`; null when you have not rated. Nobody else's is ever returned. 404 `NOT_FOUND` for an unknown or deleted event |
-| POST | `/events/:eventId/rating` | Rate an event — stars 1–5, optional review; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it. A refusal is `403 FORBIDDEN` with `reasonCode` `NOT_ATTENDED` (no check-in) or `NOT_ENDED` (still running). Answers `eventStats: { ratingCount }` and no average, and the event's `stats` carry none either: an attendee who can poll an average reads each new score from its change (SCRUM-437) |
+| GET | `/events/:eventId/rating` | Your own rating → `{ rating: 1..5 \| null, ratedAt }`; null when you have not rated. Nobody else's is ever returned. 404 `NOT_FOUND` for an unknown or deleted event |
+| POST | `/events/:eventId/rating` | Rate an event — stars 1–5; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it. A refusal is `403 FORBIDDEN` with `reasonCode` `NOT_ATTENDED` (no check-in) or `NOT_ENDED` (still running). Answers `eventStats: { ratingCount }` and no average, and the event's `stats` carry none either: an attendee who can poll an average reads each new score from its change (SCRUM-437) |
 | POST | `/events/:eventId/rsvp` | RSVP — waitlists when full |
 | POST | `/events/:eventId/announce` | Send announcement |
 | GET | `/events/:eventId/chat` | Get event chat group |

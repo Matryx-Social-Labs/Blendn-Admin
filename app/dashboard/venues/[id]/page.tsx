@@ -29,6 +29,7 @@ import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
 import { discloseStarsAcross, discloseVenueCounts, spreadsByEvent } from "@/lib/disclosure"
+import { publishedRatingGroups } from "@/lib/rating-batches"
 import { stillArriving } from "@/lib/occurrences"
 import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { distinctAttendeeCounts } from "@/lib/attendee-counts"
@@ -211,14 +212,9 @@ export default async function VenueDetailPage({
       },
     }),
     // Per event, so the total pools only events that could show their own.
-    db.event_ratings.groupBy({
-      by: ["event_id", "rating"],
-      where:
-        since === null
-          ? { id: { in: [] } }
-          : { event: { venue_id: id, deleted_at: null, ...realEventsWhere, ...(since ? { start_time: since } : {}) } },
-      _count: { _all: true },
-    }),
+    publishedRatingGroups(
+      since === null ? { id: { in: [] } } : { venue_id: id, deleted_at: null, ...realEventsWhere, ...(since ? { start_time: since } : {}) }
+    ),
   ])
 
   // Withheld under five raters, and pooled only from events that pass alone,
@@ -559,7 +555,7 @@ function RegularsOffers({
         <div className="flex min-w-0 flex-col gap-2.5">
           <span className="text-[0.75rem] text-muted-foreground">They let you know</span>
           {offers.known.length === 0 ? (
-            <p className="text-[0.8125rem] text-muted-foreground">Nobody yet. Anyone can choose to let {venueName} know they&apos;re a regular, in the app.</p>
+            <p className="text-[0.8125rem] text-muted-foreground">You&apos;ll see this once five people have told you they&apos;re regulars. Fewer than that could point at someone.</p>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {offers.known.map((k, i) => (

@@ -1,6 +1,5 @@
 import { MAX_MESSAGES_PER_SWEEP, SCAN_WINDOW_MS, sweepSentiment } from "@/lib/sentiment-sweeper"
 import { buildLiveSnapshot } from "@/lib/live-snapshot"
-import { deriveAlerts } from "@/lib/live-metrics"
 
 import { classifyMessages } from "@/lib/sentiment/classify"
 
@@ -97,10 +96,9 @@ describe("the sweeper writes what the live screen reads", () => {
 
     const snapshot = await buildLiveSnapshot(eventId)
     expect(snapshot).not.toBeNull()
-    expect(snapshot!.categories).toContainEqual({ category: "safety_conduct", count: 1 })
-
-    const alerts = deriveAlerts(snapshot!, { scheduledEnd: new Date(Date.now() + 3_600_000) })
-    expect(alerts.map((a) => a.kind)).toContain("safety")
+    // Listed with no number: one complaint in a room is a sentence with an author (SCRUM-890). The alert still fires.
+    expect(snapshot!.categories).toContainEqual(expect.objectContaining({ category: "safety_conduct", count: null, suppressed: true }))
+    expect(snapshot!.alerts.map((a) => a.kind)).toContain("safety")
   })
 
   it("routes a safety message to the moderation queue, flagged and never hidden", async () => {

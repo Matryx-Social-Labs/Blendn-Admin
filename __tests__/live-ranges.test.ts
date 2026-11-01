@@ -55,7 +55,7 @@ function hostSnapshot(over: Partial<LiveSnapshot> = {}): LiveSnapshot {
     activeChatters30m: 7,
     openFlags: 2,
     sentiment: { positive: 6, neutral: 3, negative: 1 },
-    categories: [{ category: "entry_queue", count: 3 }],
+    categories: [{ category: "entry_queue", count: null, suppressed: true, suppressionReason: "min_cell" }],
     alerts: [
       {
         kind: "over_capacity",

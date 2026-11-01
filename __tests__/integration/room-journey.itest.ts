@@ -229,11 +229,11 @@ describe("your own event rating", () => {
 
     const before = await call(rating.GET as Handler, path, me, { params: { eventId } })
     expect(before.status).toBe(200)
-    expect(before.json.data).toEqual({ rating: null, review: null, ratedAt: null })
+    expect(before.json.data).toEqual({ rating: null, ratedAt: null })
 
-    await db.event_ratings.create({ data: { event_id: eventId, user_id: me.id, rating: 5, review: "Loved it" } })
+    await db.event_ratings.create({ data: { event_id: eventId, user_id: me.id, rating: 5 } })
     const after = await call(rating.GET as Handler, path, me, { params: { eventId } })
-    expect(after.json.data).toMatchObject({ rating: 5, review: "Loved it" })
+    expect(after.json.data).toMatchObject({ rating: 5 })
     expect(typeof after.json.data.ratedAt).toBe("string")
   })
 })

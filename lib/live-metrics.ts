@@ -8,7 +8,7 @@
  * server-only.
  */
 
-import { liveCountBucket, type LiveCountBucket } from "./disclosure"
+import { liveCountBucket, type DisclosedCategory, type LiveCountBucket } from "./disclosure"
 
 /** The exact figures, and what the alert rules read. Never sent to a venue. */
 export interface LiveFigures {
@@ -54,8 +54,13 @@ export interface LiveFigures {
 }
 
 /** What whoever runs the event (or an admin) is sent: the figures, and their alerts. */
-export interface LiveSnapshot extends LiveFigures {
+export interface LiveSnapshot extends Omit<LiveFigures, "categories"> {
   view: "host"
+  /**
+   * Floored like the digest's (SCRUM-890): a complaint going 0 to 1 lands in the same 5-second tick as one pseudonym's
+   * message. The exact counts stay in `LiveFigures`, for the alerts, and never leave the server.
+   */
+  categories: DisclosedCategory[]
   alerts: LiveAlert[]
 }
 
@@ -169,7 +174,8 @@ export function deriveAlerts(
       kind: "safety",
       severity: "critical",
       title: "Safety",
-      body: `${safety} safety_conduct message${safety === 1 ? "" : "s"} in chat. Routed to moderation regardless of sentiment.`,
+      // No number: the alert is the point, and a count would undo `discloseCategories` (SCRUM-890).
+      body: "Safety messages in chat. Routed to moderation regardless of sentiment.",
     })
   }
 
@@ -182,7 +188,7 @@ export function deriveAlerts(
       kind: "entry_backing_up",
       severity: "warning",
       title: "Entry backing up",
-      body: `Check-in rate ${snapshot.checkInRate10m}/10min (×${(snapshot.checkInRate10m / snapshot.medianRate10m).toFixed(1)} median) and ${entryComplaints} entry-queue messages. Neither signal alone fires this.`,
+      body: `Check-in rate ${snapshot.checkInRate10m}/10min (×${(snapshot.checkInRate10m / snapshot.medianRate10m).toFixed(1)} median) and entry-queue messages. Neither signal alone fires this.`,
     })
   }
 
@@ -341,7 +347,7 @@ export function forVenue(s: LiveSnapshot): VenueLiveSnapshot {
       neutral: liveCountBucket(s.sentiment.neutral),
       negative: liveCountBucket(s.sentiment.negative),
     },
-    categories: s.categories.map((c) => ({ category: c.category, count: liveCountBucket(c.count) })),
+    categories: s.categories.map((c) => ({ category: c.category, count: liveCountBucket(c.count ?? 0) })),
     alerts: alertsForVenue(s.alerts),
   }
 }

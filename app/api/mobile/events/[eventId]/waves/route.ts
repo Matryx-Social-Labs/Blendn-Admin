@@ -87,7 +87,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const [mine, theirs] = await Promise.all([
       db.event_check_ins.findFirst({
         // At a venue day, a window still open (`inRoomWhere`), not the sweeper's lag.
-        where: { event_id: eventId, user_id: fromUserId, status: "checked_in", ...inRoomWhere(fromUserId) },
+        // As a guest: staff are out of matching (SCRUM-891).
+        where: { event_id: eventId, user_id: fromUserId, kind: "attendee", status: "checked_in", ...inRoomWhere(fromUserId) },
         select: { id: true },
       }),
       toUserId && db.event_check_ins.findFirst({
@@ -96,6 +97,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           user_id: toUserId,
           status: "checked_in",
           ...inRoomWhere(),
+          // Staff are working: nobody waves at them either (SCRUM-891).
+          kind: "attendee",
           // The roster's visibility rule, so you can only wave at someone the
           // roster would show you. `is: null` as there: a missing profile row
           // must not read as "show online" off.

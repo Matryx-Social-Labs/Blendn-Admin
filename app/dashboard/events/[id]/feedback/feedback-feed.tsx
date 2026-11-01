@@ -44,7 +44,7 @@ function toneClass(sentiment: feedback_sentiment) {
  * minutes" is a routine case rather than an edge one. Friction here means
  * hosts stop correcting and the digest quietly drifts from the truth.
  */
-export function FeedbackFeed({ messages, timezone }: { messages: FeedbackMessage[]; timezone: string }) {
+export function FeedbackFeed({ total, messages, timezone }: { total: number | null; messages: FeedbackMessage[]; timezone: string }) {
   const clock = eventClock(timezone)
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -71,8 +71,8 @@ export function FeedbackFeed({ messages, timezone }: { messages: FeedbackMessage
 
   if (messages.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-        Nothing classified yet. What people say while still outside the venue lands here.
+      <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
+        Nothing to quote yet. The {total} message{total === 1 ? " is" : "s are"} counted above; none can be shown without pointing at someone.
       </p>
     )
   }
@@ -83,23 +83,12 @@ export function FeedbackFeed({ messages, timezone }: { messages: FeedbackMessage
         {messages.map((m) => (
           <li key={m.id} className="flex flex-col gap-1 py-3 first:pt-0">
             <span className="flex flex-wrap items-center gap-2 text-[0.75rem] text-muted-foreground">
-              {/*
-                * Suppressed messages keep their label and lose their author.
-                *
-                * The organiser still learns that somebody raised this, in this
-                * category — which is the actionable half — without learning
-                * who. Below the disclosure floor the pseudonym is as
-                * identifying as a name, because it is stable for the whole
-                * room and they have seen it all night.
-                */}
               <b className="font-medium text-foreground">
-                {m.suppressed ? "Someone" : m.pseudonym}
+                {m.pseudonym}
               </b>
-              {m.at ? (
-                <span>
-                  {clock.time(new Date(m.at))}
-                </span>
-              ) : null}
+              <span>
+                {clock.time(new Date(m.at))}
+              </span>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -141,14 +130,7 @@ export function FeedbackFeed({ messages, timezone }: { messages: FeedbackMessage
                 </Badge>
               ) : null}
             </span>
-            {m.suppressed ? (
-              <span className="text-sm leading-relaxed text-muted-foreground">
-                Held back — too few people raised this for the message to be
-                shown without identifying them.
-              </span>
-            ) : (
-              <span className="text-sm leading-relaxed">{m.text}</span>
-            )}
+            <span className="text-sm leading-relaxed">{m.text}</span>
           </li>
         ))}
       </ul>
