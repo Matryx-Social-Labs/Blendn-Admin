@@ -1,7 +1,8 @@
 // Relative, not "@/lib/…": the purge (`lib/deleted-account-records.ts`) is
 // reachable from server.ts, which plain tsc compiles without the alias.
 import { db } from "./db"
-import { deleteFile, deletePrefix, ownedObjectKey, ownedPhotoKey, sealedChatKey } from "./tigris"
+import { logger } from "./logger"
+import { deleteFile, deletePrefix, isConfigured, ownedObjectKey, ownedPhotoKey, sealedChatKey } from "./tigris"
 
 /**
  * A person's chat images that must outlive their account (SCRUM-428).
@@ -58,6 +59,95 @@ export async function retainedChatMediaKeys(userId: string): Promise<Set<string>
 function chatKeyOf(url: string | null, userId: string): string | null {
   if (!url) return null
   return sealedChatKey(url) ?? ownedObjectKey(url, userId, "chat")
+}
+
+/**
+ * How long past the 180-day purge a pending report can hold its image: the fifteen days IT Rules 2021 r.3(2)(a)(i) gives a
+ * grievance to be resolved. Nothing else in docs/RETENTION.md or the policy allows longer, so it ends here whatever is
+ * still open (SCRUM-955, owner row A-24).
+ */
+export const REPORT_HOLD_DAYS = 15
+const REPORT_HOLD_WARN_MS = 5 * 86_400_000
+const DAY_MS = 86_400_000
+
+/** Images with a report filed before the deletion and still pending. One filed after cannot hold anything: it is gone. */
+async function heldChatMedia(userId: string, deletedAt: Date) {
+  const rows = await db.$queryRaw<{ url: string | null; message_id: string; message_type: string }[]>`
+    SELECT m.metadata->>'mediaUrl' AS url, m.id AS message_id, 'group' AS message_type
+      FROM chat_messages m
+      JOIN message_reports r ON r.message_id = m.id AND r.message_type = 'group'
+     WHERE m.user_id = ${userId} AND r.status = 'pending' AND r.reporter_id <> m.user_id AND r.created_at < ${deletedAt}
+       AND m.metadata->>'mediaUrl' IS NOT NULL
+    UNION
+    SELECT p.media_url AS url, p.id AS message_id, 'private' AS message_type
+      FROM private_messages p
+      JOIN message_reports r ON r.message_id = p.id AND r.message_type = 'private'
+     WHERE p.sender_id = ${userId} AND r.status = 'pending' AND r.reporter_id <> p.sender_id AND r.created_at < ${deletedAt}
+       AND p.media_url IS NOT NULL
+  `
+  return rows.flatMap((r) => {
+    const object_key = chatKeyOf(r.url, userId)
+    return object_key ? [{ object_key, message_id: r.message_id, message_type: r.message_type }] : []
+  })
+}
+
+/**
+ * The purge's chat erasure: everything of the person's but the images a report still holds, each left on a pointer
+ * written first, so a failure below leaves nothing unaccounted for. The record itself goes on schedule regardless.
+ */
+export async function erasePurgedChatMedia(record: { user_id: string; deleted_at: Date; purge_after: Date }): Promise<void> {
+  const held = await heldChatMedia(record.user_id, record.deleted_at)
+  if (held.length > 0) {
+    await db.retained_report_media.createMany({
+      data: held.map((h) => ({
+        ...h,
+        user_id: record.user_id,
+        account_deleted_at: record.deleted_at,
+        erase_by: new Date(record.purge_after.getTime() + REPORT_HOLD_DAYS * DAY_MS),
+      })),
+      skipDuplicates: true,
+    })
+  }
+  await eraseChatMedia(record.user_id, new Set(held.map((h) => h.object_key)))
+}
+
+/** Erase each held image whose report is decided or whose cap has passed; warn about those nearing it undecided. */
+export async function releaseHeldReportMedia(now: Date): Promise<void> {
+  const held = await db.retained_report_media.findMany()
+  if (held.length > 0 && !isConfigured()) {
+    logger.error("Held report images not erased: storage not configured", { held: held.length })
+    return
+  }
+  for (const row of held) {
+    try {
+      // The same reports `heldChatMedia` counts: a later one, or the author's own, cannot extend the hold.
+      const pending = await db.message_reports.count({
+        where: {
+          message_id: row.message_id,
+          message_type: row.message_type,
+          status: "pending",
+          created_at: { lt: row.account_deleted_at },
+          reporter_id: { not: row.user_id },
+        },
+      })
+      if (pending > 0 && row.erase_by > now) {
+        if (row.erase_by.getTime() - now.getTime() <= REPORT_HOLD_WARN_MS) {
+          logger.warn("A reported image's report must be decided before its hold ends", {
+            pointerId: row.id,
+            eraseBy: row.erase_by.toISOString(),
+          })
+        }
+        continue
+      }
+      await deleteFile(row.object_key)
+      await db.retained_report_media.delete({ where: { id: row.id } })
+    } catch (error) {
+      logger.error("Held report image NOT erased; pointer kept for the next sweep", {
+        pointerId: row.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
 }
 
 /** Every sealed chat copy the person's own messages point at, in rooms and DMs. */
