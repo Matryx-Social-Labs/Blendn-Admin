@@ -36,10 +36,10 @@ beforeEach(() => {
 
 it("returns your rating and when you last set it", async () => {
   const at = new Date("2026-09-28T23:10:00Z")
-  mockDb.event_ratings.findUnique.mockResolvedValue({ rating: 4, review: "Great crowd", updated_at: at })
+  mockDb.event_ratings.findUnique.mockResolvedValue({ rating: 4, updated_at: at })
   const res = await call()
   expect(res.status).toBe(200)
-  expect(res.json.data).toEqual({ rating: 4, review: "Great crowd", ratedAt: at.toISOString() })
+  expect(res.json.data).toEqual({ rating: 4, ratedAt: at.toISOString() })
 })
 
 it("is keyed on the caller, never on anybody else", async () => {
@@ -52,7 +52,7 @@ it("is keyed on the caller, never on anybody else", async () => {
 it("answers null when you have not rated", async () => {
   const res = await call()
   expect(res.status).toBe(200)
-  expect(res.json.data).toEqual({ rating: null, review: null, ratedAt: null })
+  expect(res.json.data).toEqual({ rating: null, ratedAt: null })
 })
 
 it("404s NOT_FOUND an unknown, deleted or malformed event", async () => {

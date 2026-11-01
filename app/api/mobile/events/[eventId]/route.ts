@@ -373,7 +373,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         isCheckedIn: userCheckIn?.status === "checked_in",
         checkInStatus: userCheckIn?.status || null,
         userRating: userRating?.rating || null,
-        userReview: userRating?.review || null,
         rsvpStatus: userRsvp?.status || null,
       },
       distance,

@@ -663,7 +663,6 @@ registry.registerPath({
           schema: wrap(
             z.object({
               rating: z.number().int().min(1).max(5).nullable(),
-              review: z.string().nullable(),
               ratedAt: z.string().datetime().nullable(),
             })
           ),
