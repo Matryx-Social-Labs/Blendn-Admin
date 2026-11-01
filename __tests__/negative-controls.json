@@ -2512,6 +2512,12 @@
       "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
       "date": "2026-11-01"
     },
+    "reported-image.itest.ts": {
+      "guards": "SCRUM-955 / owner row A-24: the reports screen shows a reported image or names its erasure; a report filed before the deletion holds that image on a pointer, the rest of the person goes on schedule, and the hold ends at the decision or the cap.",
+      "mutation": "M955b the erased branch removed from reportedImages. M955c the before-deletion filter removed from heldChatMedia. M955d the cap removed from releaseHeldReportMedia.",
+      "observed": "M955b: 'shows the image, signed' failing. M955c: 'a report filed after the deletion creates no hold' failing. M955d: 'erases it at the cap' failing.",
+      "date": "2026-11-01"
+    },
     "host-privacy-batch.itest.ts": {
       "guards": "SCRUM-890/891/943/472 (owner rows A-5..A-7, A-17): a quote that cannot be shown is no row; the live snapshot floors a complaint's count and its alerts say no number; bars move every 3 raters; staff are out of matching by their latest check-in.",
       "mutation": "M472a rating-batches orders newest first. M891a night-people drops the staff check. M890a the live snapshot sends exact categories. M890b the digest keeps every row.",

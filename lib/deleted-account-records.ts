@@ -2,7 +2,7 @@
 // and `build:server` cannot resolve the alias (server-import-boundary.test.ts).
 import { db } from "./db"
 import { logger } from "./logger"
-import { eraseChatMedia } from "./retained-media"
+import { erasePurgedChatMedia, releaseHeldReportMedia } from "./retained-media"
 import { deletePrefix, isConfigured } from "./tigris"
 
 /**
@@ -78,8 +78,9 @@ export function recordDeletedAccount(userId: string, deletedAt: Date) {
 export async function purgeDeletedAccountRecords(now: Date = new Date()): Promise<number> {
   const due = await db.deleted_account_records.findMany({
     where: { purge_after: { lt: now } },
-    select: { id: true, user_id: true },
+    select: { id: true, user_id: true, deleted_at: true, purge_after: true },
   })
+  await releaseHeldReportMedia(now)
   if (due.length === 0) return 0
   /*
    * Storage unset means the erasure cannot be done or checked. Keep the records
@@ -99,7 +100,8 @@ export async function purgeDeletedAccountRecords(now: Date = new Date()): Promis
        * empty id would make the prefix every person's.
        */
       if (record.user_id) {
-        await eraseChatMedia(record.user_id, new Set())
+        // A reported image waits on its own pointer (A-24); the rest of the person goes on schedule.
+        await erasePurgedChatMedia(record)
         // Both buckets: a photo moderation pulled was kept in the private one (SCRUM-479).
         await deletePrefix(`profile/${record.user_id}/`)
         await db.photo_checks.deleteMany({ where: { user_id: record.user_id } })
