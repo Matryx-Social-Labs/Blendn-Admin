@@ -69,13 +69,6 @@ describe("accepting an invite as an attendee", () => {
     expect((await post(token)).status).toBe(200)
     expect(await standing(attendee, org)).toEqual({ role, members: 1 })
   })
-
-  it("the role is the invite's, not the sender's today", async () => {
-    const { attendee, org, token, inviter } = await invitedBy("venue_owner")
-    await db.user.update({ where: { id: inviter }, data: { role: "organizer" } })
-    expect((await post(token)).status).toBe(200)
-    expect(await standing(attendee, org)).toEqual({ role: "venue_owner", members: 1 })
-  })
 })
 
 describe("an invite fails closed, and nobody is promoted", () => {
@@ -90,6 +83,7 @@ describe("an invite fails closed, and nobody is promoted", () => {
     ["suspended", (id: string) => db.user.update({ where: { id }, data: { suspended_at: new Date() } })],
     ["deleted", (id: string) => db.user.update({ where: { id }, data: { deletedAt: new Date() } })],
     ["demoted to attendee", (id: string) => db.user.update({ where: { id }, data: { role: "attendee" } })],
+    ["moved to another dashboard role", (id: string) => db.user.update({ where: { id }, data: { role: "sponsor" } })],
     ["demoted to staff in the org", (id: string, org: string) => db.organisation_members.update({ where: { org_id_user_id: { org_id: org, user_id: id } }, data: { role: "staff" } })],
   ])("when the sender was %s", async (_label, change) => {
     const { attendee, inviter, org, token } = await invitedBy("organizer")

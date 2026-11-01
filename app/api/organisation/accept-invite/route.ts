@@ -4,7 +4,7 @@ import { db } from "@/lib/db"
 import { invitedUser } from "@/lib/current-user"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
-import type { org_role, Prisma } from "@prisma/client"
+import type { org_role, Prisma, user_role } from "@prisma/client"
 
 import { auditInTx, getRequestIp } from "@/lib/audit-log"
 import { orgPermissions } from "@/lib/org-permissions"
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
 
     await db.$transaction(async (tx) => {
       // Fail closed on who sent it: an invite carries its sender's standing, so it ends with it (SCRUM-984).
-      if (!(await senderStillStands(tx, invite.invited_by, invite.org_id, invite.role))) throw new Error("INVITE_STALE")
+      if (!(await senderStillStands(tx, invite.invited_by, invite.org_id, invite.role, invite.grants_role))) throw new Error("INVITE_STALE")
 
       // updateMany with accepted_at: null in the filter is the concurrency
       // guard — the second of two simultaneous clicks matches zero rows.
@@ -191,7 +191,13 @@ export async function POST(req: NextRequest) {
 const INVITE_STALE = "This invite is no longer valid. Ask them to send a new one."
 
 /** May the person who sent this invite still send it? An admin always; otherwise a live member who manages members, and an owner for an owner's invite. */
-async function senderStillStands(tx: Prisma.TransactionClient, senderId: string, orgId: string, invitedAs: org_role): Promise<boolean> {
+async function senderStillStands(
+  tx: Prisma.TransactionClient,
+  senderId: string,
+  orgId: string,
+  invitedAs: org_role,
+  grants: user_role | null
+): Promise<boolean> {
   const sender = await tx.user.findUnique({
     where: { id: senderId },
     select: { role: true, suspended_at: true, deletedAt: true },
@@ -199,6 +205,8 @@ async function senderStillStands(tx: Prisma.TransactionClient, senderId: string,
   if (!sender || sender.suspended_at || sender.deletedAt) return false
   if (sender.role === "app_admin") return true
   if (!canAccessDashboard(sender.role)) return false
+  // Moved to another dashboard role since: nothing above what they hold now.
+  if (grants && sender.role !== grants) return false
   const member = await tx.organisation_members.findUnique({
     where: { org_id_user_id: { org_id: orgId, user_id: senderId } },
     select: { role: true },

@@ -162,7 +162,7 @@ const envSchema = z.object({
   RAZORPAY_WEBHOOK_SECRET: z.string().min(32, "RAZORPAY_WEBHOOK_SECRET must be at least 32 characters").optional(),
   /** Railway's name for the environment; "production" is the only one where a live key belongs. */
   RAILWAY_ENVIRONMENT_NAME: z.string().optional(),
-  /** Staging only: QA user ids whose messages and photos moderation judges `hide` (lib/moderation/staging-override.ts). Ignored on production. */
+  /** Staging only: QA user ids whose messages and photos moderation judges `hide` (lib/moderation/staging-override.ts). Ignored unless RAILWAY_ENVIRONMENT_NAME is staging. */
   MODERATION_FORCE_HIDE_USER_IDS: z.string().optional(),
 
   /**
