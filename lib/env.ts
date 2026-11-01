@@ -316,8 +316,8 @@ export function googleSignInConfigWarning(
 }
 
 /**
- * One name per city, whatever spelling a venue or event was saved with. The
- * one alias map; add a city's old or local names here.
+ * One name per city for the Plus launch-season list, whatever spelling a venue
+ * or event was saved with. Browsing has its own, as data: `cities.match_names`.
  */
 const CITY_ALIASES: Record<string, string> = {
   bangalore: "bengaluru",

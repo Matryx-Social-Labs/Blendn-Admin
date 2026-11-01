@@ -1,3 +1,4 @@
+import { mayOpenCity } from "@/lib/browse-scope"
 import { NextRequest } from "next/server"
 
 import { ageFrom } from "@/lib/age"
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
       },
     })
-    if (!venue) return notFoundResponse("Venue not found")
+    if (!venue || !(await mayOpenCity(userId, venue.city))) return notFoundResponse("Venue not found")
 
     // A live room is somewhere to take part; the same 18+ gate as its door.
     const person = await personAtTheDoor(userId, null)

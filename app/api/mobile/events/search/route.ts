@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
      * branch keeps a row with no city through an exclusion.
      */
     const cityFilter = (only: number, except: number) =>
-      `AND ($${only}::text[] IS NULL OR lower(city) = ANY($${only}::text[])) AND (city IS NULL OR lower(city) <> ALL($${except}::text[]))`
+      `AND ($${only}::text[] IS NULL OR lower(btrim(city)) = ANY($${only}::text[])) AND (city IS NULL OR lower(btrim(city)) <> ALL($${except}::text[]))`
     const cityRule = await viewerCityRule(authUser.userId, city)
     const onlyParam = "only" in cityRule ? cityRule.only : null
     const exceptParam = "except" in cityRule ? cityRule.except : []

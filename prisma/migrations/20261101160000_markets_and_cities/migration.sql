@@ -69,26 +69,21 @@ INSERT INTO "markets" ("code", "name", "currency", "locale", "launch_state", "so
   ('IN', 'India', 'INR', 'en-IN', 'live', 0),
   ('CA', 'Canada', 'CAD', 'en-CA', 'preview', 1);
 
--- Boxes for the five map cities are scripts/map-buildings/cities.json's. Every Indian city here
+-- Boxes for the map cities are scripts/map-buildings/cities.json's, except Delhi NCR, widened to hold
+-- every name in its match_names. Boxes overlap (Thane in Mumbai): the smallest one holding a point wins. Every Indian city here
 -- has listed events or places on staging on 2026-11-01. A city with no rows is not listed however
 -- it is set, so `live` here cannot open an empty city.
 INSERT INTO "cities" ("market_code", "slug", "name", "match_names", "region", "timezone", "launch_state", "is_default", "centre_lat", "centre_lon", "min_lat", "min_lon", "max_lat", "max_lon", "default_licensed_min_age", "sort") VALUES
-  ('IN', 'bengaluru', 'Bengaluru', ARRAY['bengaluru','bangalore'], 'KA', 'Asia/Kolkata', 'live', true, 12.9716, 77.5946, 12.83, 77.45, 13.14, 77.78, NULL, 0),
+  ('IN', 'bengaluru', 'Bengaluru', ARRAY['bengaluru','bangalore','bengaluru urban'], 'KA', 'Asia/Kolkata', 'live', true, 12.9716, 77.5946, 12.83, 77.45, 13.14, 77.78, NULL, 0),
   ('IN', 'mumbai', 'Mumbai', ARRAY['mumbai','bombay'], 'MH', 'Asia/Kolkata', 'live', false, 19.0760, 72.8777, 18.89, 72.77, 19.28, 73.03, NULL, 1),
-  ('IN', 'delhi-ncr', 'Delhi NCR', ARRAY['delhi ncr','delhi','new delhi','gurugram','gurgaon','noida','faridabad','ghaziabad'], 'DL', 'Asia/Kolkata', 'live', false, 28.6139, 77.2090, 28.40, 76.84, 28.88, 77.35, NULL, 2),
+  ('IN', 'delhi-ncr', 'Delhi NCR', ARRAY['delhi ncr','delhi','new delhi','gurugram','gurgaon','noida','faridabad','ghaziabad'], 'DL', 'Asia/Kolkata', 'live', false, 28.6139, 77.2090, 28.30, 76.84, 28.88, 77.55, NULL, 2),
   ('IN', 'hyderabad', 'Hyderabad', ARRAY['hyderabad','secunderabad'], 'TG', 'Asia/Kolkata', 'live', false, 17.3850, 78.4867, 17.30, 78.30, 17.56, 78.60, NULL, 3),
-  ('IN', 'pune', 'Pune', ARRAY['pune'], 'MH', 'Asia/Kolkata', 'live', false, 18.5204, 73.8567, 18.43, 73.74, 18.64, 73.98, NULL, 4),
+  ('IN', 'pune', 'Pune', ARRAY['pune','poona'], 'MH', 'Asia/Kolkata', 'live', false, 18.5204, 73.8567, 18.43, 73.74, 18.64, 73.98, NULL, 4),
   ('IN', 'thane', 'Thane', ARRAY['thane'], 'MH', 'Asia/Kolkata', 'live', false, 19.2183, 72.9781, 19.15, 72.93, 19.32, 73.10, NULL, 5),
   ('IN', 'navi-mumbai', 'Navi Mumbai', ARRAY['navi mumbai'], 'MH', 'Asia/Kolkata', 'live', false, 19.0330, 73.0297, 18.95, 72.95, 19.20, 73.12, NULL, 6),
   ('IN', 'mysuru', 'Mysuru', ARRAY['mysuru','mysore'], 'KA', 'Asia/Kolkata', 'live', false, 12.2958, 76.6394, 12.22, 76.55, 12.40, 76.75, NULL, 7),
   ('IN', 'hubballi', 'Hubballi', ARRAY['hubballi','hubli'], 'KA', 'Asia/Kolkata', 'live', false, 15.3647, 75.1240, 15.25, 75.03, 15.50, 75.25, NULL, 8),
-  ('CA', 'toronto', 'Toronto', ARRAY['toronto'], 'ON', 'America/Toronto', 'preview', true, 43.6532, -79.3832, 43.58, -79.64, 43.86, -79.11, 19, 0),
-  ('CA', 'vancouver', 'Vancouver', ARRAY['vancouver'], 'BC', 'America/Vancouver', 'preview', false, 49.2827, -123.1207, 49.20, -123.27, 49.32, -123.02, 19, 1);
-
--- Last: the lock on `profiles` is held until COMMIT, so nothing else runs under it.
--- Nullable with no default: metadata only on `profiles`. City level, set by the person, never shown to anybody else.
-ALTER TABLE "profiles" ADD COLUMN "home_city_id" UUID;
-ALTER TABLE "profiles" ADD CONSTRAINT "profiles_home_city_id_fkey" FOREIGN KEY ("home_city_id") REFERENCES "cities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-CREATE INDEX "profiles_home_city_id_idx" ON "profiles"("home_city_id");
+  ('CA', 'toronto', 'Toronto', ARRAY['toronto','north york','scarborough','etobicoke','east york','york','mississauga','brampton','vaughan','markham','richmond hill'], 'ON', 'America/Toronto', 'preview', true, 43.6532, -79.3832, 43.58, -79.64, 43.86, -79.11, 19, 0),
+  ('CA', 'vancouver', 'Vancouver', ARRAY['vancouver','north vancouver','west vancouver','burnaby','richmond','surrey','coquitlam','new westminster'], 'BC', 'America/Vancouver', 'preview', false, 49.2827, -123.1207, 49.20, -123.27, 49.32, -123.02, 19, 1);
 
 COMMIT;

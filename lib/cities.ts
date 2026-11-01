@@ -107,9 +107,12 @@ export function buildCatalogue(marketRows: readonly MarketRow[], cityRows: reado
     }
   }
 
+  // A name a city lost is not its name: its exclusion must not take the winner's rows with it.
+  const claimed = cities.map((c) => ({ ...c, matchKeys: c.matchKeys.filter((key) => cityByKey.get(key)?.slug === c.slug) }))
+
   return {
-    cities,
-    cityByKey,
+    cities: claimed,
+    cityByKey: new Map([...cityByKey].map(([key, city]) => [key, claimed.find((c) => c.slug === city.slug)!])),
     markets: markets.map((m) => {
       const open = cities.filter((c) => c.country === m.code && c.launchState !== "hidden")
       return {

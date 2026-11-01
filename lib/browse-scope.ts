@@ -44,6 +44,19 @@ export async function viewerCityRule(userId: string, city: string | undefined): 
   return cityRule(catalogue, city, await previewMarketsFor(userId, catalogue))
 }
 
+/**
+ * The same gate for a read by id, so a closed city's row is not one link away.
+ * `userId` null is somebody signed out (a public share page): no previews. A NULL
+ * or uncatalogued city has no signal to gate on, and opens as it lists.
+ */
+export async function mayOpenCity(userId: string | null, city: string | null | undefined): Promise<boolean> {
+  const catalogue = await cityCatalogue()
+  const found = cityFor(catalogue, city)
+  if (!found) return true
+  const previewMarkets = userId ? await previewMarketsFor(userId, catalogue) : new Set<string>()
+  return cityAccess(found, previewMarkets) === "full"
+}
+
 const isName = (key: string) => ({ city: { equals: likeLiteral(key), mode: "insensitive" as const } })
 
 /** The rule as a `where` fragment that fits events and venues alike. Put it under `AND`: a search assigns `OR` outright. */
@@ -138,19 +151,20 @@ export function citiesResponse(input: CitiesResponseInput) {
   const withRows = browseCities(foldable(input.events), foldable(input.places)).map((row) => {
     return pickerRow(row, cityFor(catalogue, row.city), "full")
   })
+  const liveCities = catalogue.cities.filter((c) => c.launchState === "live")
+  const fallback = liveCities.find((c) => c.isDefault) ?? liveCities[0]
   const listed = new Set(withRows.map((c) => c.slug))
   const withoutRows = catalogue.cities
     .filter((c) => !listed.has(c.slug))
     .flatMap((c) => {
       const access = cityAccess(c, previewMarkets)
-      const named = catalogue.markets.some((m) => m.defaultCitySlug === c.slug)
+      const named = c.slug === fallback?.slug || catalogue.markets.some((m) => m.defaultCitySlug === c.slug)
       const lists = access === "comingSoon" ? wantsPreview : access === "full" && (named || c.launchState === "preview")
       return lists ? [pickerRow({ city: c.name, eventCount: 0, placeCount: 0, centre: null }, c, access)] : []
     })
 
   const served = catalogue.markets.filter((m) => m.launchState !== "hidden" && m.defaultCitySlug !== null)
   const bySlug = (slug: string | null) => catalogue.cities.find((c) => c.slug === slug)
-  const fallback = served.find((m) => m.launchState === "live" && bySlug(m.defaultCitySlug)?.launchState === "live")
   const here = deviceCountry === null ? undefined : served.find((m) => m.code === deviceCountry)
   const hereCity = bySlug(here?.defaultCitySlug ?? null)
 
@@ -158,7 +172,7 @@ export function citiesResponse(input: CitiesResponseInput) {
     cities: [...withRows, ...withoutRows],
     countries: served.map((m) => ({ code: m.code, name: m.name, launchState: m.launchState, defaultCitySlug: m.defaultCitySlug })),
     /** A live market's default: where to browse with no device country, or from a country we do not serve. */
-    defaultCitySlug: fallback?.defaultCitySlug ?? null,
+    defaultCitySlug: fallback?.slug ?? null,
     device:
       deviceCountry === null
         ? null

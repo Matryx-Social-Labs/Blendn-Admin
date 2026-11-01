@@ -13,6 +13,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { publicBucketHosts } from "@/lib/tigris"
 import { venueTypeLabel } from "@/lib/venue-types"
+import { mayOpenCity } from "@/lib/browse-scope"
 import { atTheVenue, atTheVenueWhere, eventArea, eventVenue, takeoverSelect } from "@/lib/venue-visibility"
 import { upcomingEventsWhere } from "@/lib/venue-listing"
 
@@ -286,7 +287,7 @@ export async function readShareEvent(eventId: string, now: Date = new Date()) {
       venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true } },
     },
   })
-  if (!row) return null
+  if (!row || !(await mayOpenCity(null, row.city))) return null
 
   // Only a venue the event is confirmed at, and only for a public event: an unlisted page names no place.
   const venue = row.visibility === "public" ? eventVenue(row) : null
@@ -301,7 +302,7 @@ export async function readShareVenue(venueId: string, now: Date = new Date()) {
     where: { id: venueId, deleted_at: null, status: "active" },
     select: { id: true, name: true, venue_type: true, area: true, address: true, city: true, owner_org_id: true, open_on_blendn: true, geofence: true },
   })
-  if (!venue) return null
+  if (!venue || !(await mayOpenCity(null, venue.city))) return null
   const upcoming = await upcomingAt(venue.id, venue.geofence, now, VENUE_UPCOMING)
   // Claimed, and its owner turned Open on Blendn off (`openOnBlendnWhere`'s other half).
   const takenOffBlendn = venue.owner_org_id !== null && !venue.open_on_blendn

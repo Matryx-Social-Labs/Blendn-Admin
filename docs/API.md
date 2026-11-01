@@ -1332,9 +1332,15 @@ geocoding; the server does not store it.
 
 | `device.access` | Means | What to do |
 |---|---|---|
-| `full` | We are open in that country | Browse the city whose `bounds` hold the device's point, else `citySlug` |
+| `full` | We are open in that country | Browse the city whose `bounds` hold the device's point (boxes overlap: the smallest box holding it), else `citySlug` |
 | `comingSoon` | That country is in preview | The coming-soon screen for `citySlug` (the bounds' city first), and record demand |
 | `none` | We are not there, or that country is hidden | Say so and record demand. `citySlug` is null. May browse the top-level `defaultCitySlug`, **never described as near them** |
+
+**Reads by id follow the same gate.** `GET /events/:id`, `GET /venues/:id`,
+`GET /venues/:id/upcoming`, `POST /venues/:id/live` and the places offered by
+`POST /checkins/inside` answer 404 (or leave the row out) for a hidden city, and for
+a preview city unless you preview it; the public share pages answer unavailable
+for both. A row with a NULL or uncatalogued city has nothing to gate on and opens.
 
 `citySlug` is only ever a city in `device.country`. The top-level
 `defaultCitySlug` (a live country's default) is for no device country, or for

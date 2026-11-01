@@ -99,5 +99,7 @@ describe("two cities claiming one name", () => {
     const catalogue = buildCatalogue([MARKET], [twin, CITY])
     expect(catalogue.cityByKey.get("alpha")?.slug).toBe("alpha")
     expect(logError).toHaveBeenCalledWith("Two cities claim one name", { key: "alpha", kept: "alpha", ignored: "twin" })
+    // The lost name is gone from the loser, or closing it would close the winner's rows too.
+    expect(catalogue.cities.find((c) => c.slug === "twin")?.matchKeys).toEqual(["twin"])
   })
 })

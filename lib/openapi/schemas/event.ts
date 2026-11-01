@@ -192,7 +192,7 @@ export const EventCitiesResponseSchema = z
         access: z.enum(["full", "comingSoon", "none"]).openapi({
           description: "`full`: open `citySlug`. `comingSoon`: a preview country; open that city's coming-soon screen. `none`: we are not there; say so, and name no city as near.",
         }),
-        citySlug: z.string().nullable().openapi({ description: "Only ever a city in `country`; null for `none`. Prefer a city whose `bounds` hold the device's point." }),
+        citySlug: z.string().nullable().openapi({ description: "Only ever a city in `country`; null for `none`. Prefer the smallest box in `cities` holding the device's point." }),
       })
       .nullable()
       .openapi({ description: "Null when the client sent no valid `X-Country`." }),

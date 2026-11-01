@@ -1,3 +1,4 @@
+import { mayOpenCity } from "@/lib/browse-scope"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { db } from "@/lib/db"
@@ -210,7 +211,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }),
       ])
 
-    if (!event) {
+    if (!event || !(await mayOpenCity(authUser?.userId ?? null, event.city))) {
       return notFoundResponse("Event not found")
     }
 
