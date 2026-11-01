@@ -119,7 +119,6 @@ export const MAX_GPS_ACCURACY_METERS = 150
 
 export const ratingSchema = z.object({
   rating: z.number().int().min(1).max(5),
-  review: z.string().max(1000).optional(),
 })
 
 // Organiser broadcast messaging. Both of these fan out to every attendee of an

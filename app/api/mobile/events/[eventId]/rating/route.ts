@@ -46,12 +46,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const mine = await db.event_ratings.findUnique({
       where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
-      select: { rating: true, review: true, updated_at: true },
+      select: { rating: true, updated_at: true },
     })
 
     return successResponse({
       rating: mine?.rating ?? null,
-      review: mine?.review ?? null,
       // When it was last set: rating again edits the one row.
       ratedAt: mine?.updated_at.toISOString() ?? null,
     })
@@ -83,7 +82,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { rating, review } = parsed.data
+    const { rating } = parsed.data
 
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
@@ -153,11 +152,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         event_id: eventId,
         user_id: authUser.userId,
         rating,
-        review: review ?? null,
       },
       update: {
         rating,
-        review: review ?? null,
         updated_at: new Date(),
       },
     })
@@ -169,7 +166,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       rating: {
         id: eventRating.id,
         rating: eventRating.rating,
-        review: eventRating.review,
         createdAt: eventRating.created_at,
         updatedAt: eventRating.updated_at,
       },
