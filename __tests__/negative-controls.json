@@ -348,9 +348,9 @@
       "date": "2026-09-25"
     },
     "trust.itest.ts": {
-      "guards": "ratablePeers offers only mutually-connected people after the event, drops those already rated, and drops anyone blocked either way, with the pair shown ratable before the block (SCRUM-304); safety-writes.itest.ts pins the POST refusing a blocked person's rating (403, no rating and no harassment report written)",
-      "mutation": "M1 (2026-09-25): `&& !blocked.has(id)` removed from ratablePeers' filter in lib/trust.ts.",
-      "observed": "M1: 2 failing of 15 across trust.itest.ts and safety-writes.itest.ts (the blocked person still sees and rates the blocker; the harassment rating is accepted, 200).",
+      "guards": "ratablePeers offers only mutually-connected people after the event, drops those already rated, and drops anyone blocked either way, with the pair shown ratable before the block (SCRUM-304); safety-writes.itest.ts pins the POST refusing a blocked person's rating (403, no rating and no harassment report written); and leaves out a person who has deleted their account (SCRUM-989)",
+      "mutation": "M1 (2026-09-25): `&& !blocked.has(id)` removed from ratablePeers' filter in lib/trust.ts. M989a (2026-11-01): the user1/user2 deletedAt: null filter removed from ratablePeers.",
+      "observed": "M1: 2 failing of 15 across trust.itest.ts and safety-writes.itest.ts (the blocked person still sees and rates the blocker; the harassment rating is accepted, 200). M989a: 1 of 11 failing (the deleted account was offered); restored, 11/11.",
       "date": "2026-09-25"
     },
     "deleted-event-room-is-closed.itest.ts": {
