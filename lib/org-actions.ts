@@ -374,6 +374,7 @@ export async function inviteMember(
       inviteId: invite.id,
       email: target,
       role,
+      grantsRole,
       reason: policy.requiresReason ? (reason ?? "").trim() : null,
       emailSent: sent,
       ...(sent ? {} : { emailFailure }),

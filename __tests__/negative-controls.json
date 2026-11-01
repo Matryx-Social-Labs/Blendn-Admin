@@ -2513,9 +2513,9 @@
       "date": "2026-11-01"
     },
     "invite-accept-attendee.itest.ts": {
-      "guards": "SCRUM-984: an attendee accepting an invite becomes the inviter's role, never organizer by default, and a session held only for the invite reaches no join-request route.",
-      "mutation": "M984a accept-invite always promotes to organizer.",
-      "observed": "M984a: 2 failing of 4 (comes out venue_owner, comes out sponsor).",
+      "guards": "SCRUM-984: an attendee accepting an invite comes out as the role fixed at send, and every accept is refused when the sender lost their standing in the org.",
+      "mutation": "M984b the owner check in senderStillStands removed. M984c its canManageMembers check removed.",
+      "observed": "M984b: 'an owner's invite from an owner who is now an admin' failing. M984c: 'demoted to staff in the org' failing.",
       "date": "2026-11-01"
     },
     "deletion-reauth.itest.ts": {

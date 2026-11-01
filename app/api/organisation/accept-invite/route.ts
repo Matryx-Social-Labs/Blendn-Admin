@@ -4,7 +4,10 @@ import { db } from "@/lib/db"
 import { invitedUser } from "@/lib/current-user"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
-import { auditLog, getRequestIp } from "@/lib/audit-log"
+import type { org_role, Prisma } from "@prisma/client"
+
+import { auditInTx, getRequestIp } from "@/lib/audit-log"
+import { orgPermissions } from "@/lib/org-permissions"
 import { hashInviteToken, inviteState } from "@/lib/org-invites"
 import { readJson } from "@/lib/api-input"
 import { canAccessDashboard } from "@/lib/rbac"
@@ -118,22 +121,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    /*
-     * Fail closed on who sent it (SCRUM-984). An invite carries the sender's standing, so it ends with it: a sender who
-     * was removed, suspended, deleted or demoted cannot still let somebody in. An attendee also needs the role fixed at
-     * send; an invite from before that column asks for a new one.
-     */
+    // An attendee comes out as the role fixed at send; an invite from before that column asks for a new one (SCRUM-984).
     const grantsRole = invite.grants_role
-    const STALE = "This invite is no longer valid. Ask them to send a new one."
-    if (!(await inviterStillStands(invite.invited_by, invite.org_id))) {
-      return NextResponse.json({ success: false, error: STALE }, { status: 400 })
-    }
     if (user.role === "attendee" && !(grantsRole === "organizer" || grantsRole === "venue_owner" || grantsRole === "sponsor")) {
-      return NextResponse.json({ success: false, error: STALE }, { status: 400 })
+      return NextResponse.json({ success: false, error: INVITE_STALE }, { status: 400 })
     }
-
 
     await db.$transaction(async (tx) => {
+      // Fail closed on who sent it: an invite carries its sender's standing, so it ends with it (SCRUM-984).
+      if (!(await senderStillStands(tx, invite.invited_by, invite.org_id, invite.role))) throw new Error("INVITE_STALE")
+
       // updateMany with accepted_at: null in the filter is the concurrency
       // guard — the second of two simultaneous clicks matches zero rows.
       const claimed = await tx.organisation_invites.updateMany({
@@ -150,18 +147,20 @@ export async function POST(req: NextRequest) {
       // gated on the User role rather than on membership. Only ever a promotion
       // out of `attendee` — an existing organizer is not demoted or changed.
       // To the role fixed when the invite was sent (SCRUM-984).
-      if (user.role === "attendee") {
-        await tx.user.update({ where: { id: user.id }, data: { role: grantsRole! } })
-      }
-    })
+      // Only out of `attendee`: `where` holds that against whatever changed since the read above.
+      const promoted = user.role === "attendee"
+        ? await tx.user.updateMany({ where: { id: user.id, role: "attendee" }, data: { role: grantsRole! } })
+        : { count: 0 }
 
-    auditLog({
-      userId: user.id,
-      action: "org.invite.accepted",
-      resource: "organisation",
-      resourceId: invite.org_id,
-      details: { inviteId: invite.id, role: invite.role },
-      ipAddress: getRequestIp(req),
+      // In the transaction: a role change this large has a record, or it did not happen.
+      await auditInTx(tx, {
+        userId: user.id,
+        action: "org.invite.accepted",
+        resource: "organisation",
+        resourceId: invite.org_id,
+        details: { inviteId: invite.id, role: invite.role, invitedBy: invite.invited_by, ...(promoted.count > 0 ? { dashboardRole: grantsRole } : {}) },
+        ipAddress: getRequestIp(req),
+      })
     })
 
     return NextResponse.json({
@@ -173,6 +172,9 @@ export async function POST(req: NextRequest) {
       roleChanged: user.role === "attendee",
     })
   } catch (err) {
+    if (err instanceof Error && err.message === "INVITE_STALE") {
+      return NextResponse.json({ success: false, error: INVITE_STALE }, { status: 400 })
+    }
     if (err instanceof Error && err.message === "ALREADY_ACCEPTED") {
       return NextResponse.json(
         { success: false, error: "This invite has already been used." },
@@ -186,13 +188,21 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function inviterStillStands(inviterId: string, orgId: string): Promise<boolean> {
-  const inviter = await db.user.findUnique({
-    where: { id: inviterId },
+const INVITE_STALE = "This invite is no longer valid. Ask them to send a new one."
+
+/** May the person who sent this invite still send it? An admin always; otherwise a live member who manages members, and an owner for an owner's invite. */
+async function senderStillStands(tx: Prisma.TransactionClient, senderId: string, orgId: string, invitedAs: org_role): Promise<boolean> {
+  const sender = await tx.user.findUnique({
+    where: { id: senderId },
     select: { role: true, suspended_at: true, deletedAt: true },
   })
-  if (!inviter || inviter.suspended_at || inviter.deletedAt) return false
-  if (inviter.role === "app_admin") return true
-  if (!canAccessDashboard(inviter.role)) return false
-  return (await db.organisation_members.count({ where: { org_id: orgId, user_id: inviterId } })) > 0
+  if (!sender || sender.suspended_at || sender.deletedAt) return false
+  if (sender.role === "app_admin") return true
+  if (!canAccessDashboard(sender.role)) return false
+  const member = await tx.organisation_members.findUnique({
+    where: { org_id_user_id: { org_id: orgId, user_id: senderId } },
+    select: { role: true },
+  })
+  if (!member || !orgPermissions(member.role).canManageMembers) return false
+  return invitedAs !== "owner" || member.role === "owner"
 }

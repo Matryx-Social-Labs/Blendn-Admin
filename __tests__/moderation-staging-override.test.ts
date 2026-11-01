@@ -75,11 +75,18 @@ describe("textCheckFor", () => {
   })
 
   it("answers a listed user's text with a hide, without asking the vendor", async () => {
+    process.env.RAILWAY_ENVIRONMENT_NAME = "staging"
     process.env.MODERATION_FORCE_HIDE_USER_IDS = "qa-1"
     const asked = jest.fn()
     const check = await textCheckFor("qa-1", "hello", asked)
     expect(check).toMatchObject({ checked: true, result: { action: "hide", source: "openai_text" } })
     expect(asked).not.toHaveBeenCalled()
+  })
+
+  it("needs staging named: unset is not staging", async () => {
+    process.env.MODERATION_FORCE_HIDE_USER_IDS = "qa-1"
+    delete process.env.RAILWAY_ENVIRONMENT_NAME
+    expect(forcedHide("qa-1")).toBeNull()
   })
 
   it("asks the vendor for everybody else", async () => {
