@@ -66,7 +66,7 @@ export async function DELETE(request: NextRequest) {
 
     const parsed = deleteAccountSchema.safeParse(await readOptionalJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const refused = await deletionReauthRefusal(authUser.userId, parsed.data)
+    const refused = await deletionReauthRefusal(authUser.userId, parsed.data, getRequestIp(request))
     if (refused) return refused
     // Read before the erasure, which deletes the link: whether there is an Apple grant to revoke.
     // Every Apple link, not the first: the code's Apple ID is checked against all of them (review L1).
