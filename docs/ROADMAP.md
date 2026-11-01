@@ -429,6 +429,11 @@ Treat the moderation surface as a first-class product area with its own budget.
 
 ---
 
+### Organizer and venue-owner docs
+
+Organizer and venue-owner docs on Mintlify at organizers.blendn.app/docs, after
+testing is complete; branded to the product; developer docs later and private.
+
 ## Next — supporting
 
 ### 4. Designed features still in scope
