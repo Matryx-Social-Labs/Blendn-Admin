@@ -120,7 +120,8 @@ describe("the venue page shows the venue from its claim on", () => {
     expect(text).toContain("Nobody has rated an event here yet.")
 
     as(await w.user("vss-admin2", "organizer"), "app_admin")
-    expect(find<{ counts: number[] }>(await venuePage(), RatingBars)[0]?.counts[0]).toBe(6)
+    // Six raters publish as five: the bars move every three past the floor (SCRUM-472).
+    expect(find<{ counts: number[] }>(await venuePage(), RatingBars)[0]?.counts[0]).toBe(5)
   })
 })
 
