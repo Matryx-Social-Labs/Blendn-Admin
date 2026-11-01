@@ -2530,17 +2530,16 @@
       "observed": "M472a 3 failing (bars, venue, shared read). M891a 'has no deck' fails. M890a 'lists it with no number' fails. M890b 'drops the row' fails.",
       "date": "2026-11-01"
     },
-<<<<<<< HEAD
     "safety-writes.itest.ts": {
       "guards": "SCRUM-980: a harassment peer rating's note reaches the user_reports row a moderator reads (the form says 'Only we read this').",
       "mutation": "M980a app/api/mobile/events/[eventId]/peer-ratings/route.ts the description back to the fixed 'Reported via peer rating after event <id>.' with no note.",
       "observed": "M980a: 1 of 6 failing (description held no note). Restored; 6/6.",
-=======
+      "date": "2026-11-01"
+    },
     "venue-amenities.itest.ts": {
       "guards": "SCRUM-979: venue_amenities is written by setVenueAmenities: the owner's organisation or an admin only (not the org that only added an unclaimed venue, not another owner), active vocabulary only, the list replaces the old one, audited in the same transaction.",
       "mutation": "M979a lib/venue-actions.ts the owner-or-admin gate removed. M979b the is_active filter on the vocabulary count removed.",
       "observed": "M979a: 1 of 4 failing (the adding org wrote an unclaimed venue's list). M979b: 1 of 4 failing (a retired amenity was written). Restored; 4/4.",
->>>>>>> 589d0965 (feat(venues): the owner's organisation or an admin ticks a venue's Good to know (SCRUM-979))
       "date": "2026-11-01"
     },
     "deletion-reauth.itest.ts": {
