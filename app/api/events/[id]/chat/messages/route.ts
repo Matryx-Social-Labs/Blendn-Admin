@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
 import { isUuid } from "@/lib/api-input"
+import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
 import { idForViewer } from "@/lib/room-handle"
 
 interface RouteContext {
@@ -49,7 +50,8 @@ export async function GET(request: Request, { params }: RouteContext) {
       select: { kind: true, organizer_org_id: true, start_time: true, venue: { select: { owner_org_id: true, claimed_at: true } }, chat_group: { select: { id: true } } },
     })
     if (!event) return errorResponse("Not found", 404)
-    if (!eventPermissions(await actorFor(session.user), event).canOperate) {
+    const permissions = eventPermissions(await actorFor(session.user), event)
+    if (!permissions.canOperate) {
       return errorResponse("Forbidden", 403)
     }
     // The full shape even when there is no room yet — the feed types
@@ -178,7 +180,8 @@ export async function GET(request: Request, { params }: RouteContext) {
     return NextResponse.json({
       chatGroupId: event.chat_group.id,
       pendingFlags,
-      activeCount,
+      // A venue reads rooms as ranges (SCRUM-516, SCRUM-891). Its Members tab still lists whom it moderates.
+      activeCount: permissions.canEdit ? activeCount : liveCountLabel(liveCountBucket(activeCount)),
       messages: messages.reverse().map((m) => ({
         id: m.id,
         content: m.content,

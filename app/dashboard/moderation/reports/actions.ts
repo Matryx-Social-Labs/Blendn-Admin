@@ -7,7 +7,11 @@ import type { report_status } from "@prisma/client"
 import { auditInTx } from "@/lib/audit-log"
 import { ALREADY_DECIDED, decisionFrom, refuseUnlessDecided } from "@/lib/decision"
 import { requireAdmin } from "@/lib/current-user"
+import { REGISTRATION_RETENTION_DAYS } from "@/lib/deleted-account-records"
+import { REPORT_HOLD_DAYS } from "@/lib/retained-media"
 import { readableUrl } from "@/lib/tigris"
+
+const DAY_MS = 86_400_000
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
 import { tellAuthorPostTakenDown } from "@/lib/board-takedown"
@@ -281,7 +285,7 @@ export async function getReportQueue(status: report_status = "pending") {
   const boardRequestById = new Map(boardRequests.map((r) => [r.id, r]))
   const crewById = new Map(crews.map((c) => [c.id, c]))
   const offerById = new Map(offers.map((o) => [o.id, o]))
-  const imageByReport = await reportedImages(messageReports, groupById, privateById)
+  const imageByReport = await reportedImages(messageReports, groupById, privateById, status)
 
   /*
    * How many reports in this tab name the same thing. Grouped by subject so a
@@ -824,7 +828,8 @@ async function messageSubject(report: {
 async function reportedImages(
   reports: { id: string; message_id: string; created_at: Date }[],
   groupById: Map<string, { metadata: unknown; user: { deletedAt: Date | null } | null }>,
-  privateById: Map<string, { media_url: string | null; sender: { deletedAt: Date | null } | null }>
+  privateById: Map<string, { media_url: string | null; sender: { deletedAt: Date | null } | null }>,
+  status: report_status
 ): Promise<Map<string, ReportRow["image"]>> {
   const found = reports.flatMap((report) => {
     const group = groupById.get(report.message_id)
@@ -836,8 +841,10 @@ async function reportedImages(
     await Promise.all(
       found.map(async ({ report, url, gone }) => {
         // Kept when reported before the deletion (`retainedChatMediaKeys`); erased with the account when after.
+        // Past the purge too: decided, it went at 180 days; undecided, at the cap (`REPORT_HOLD_DAYS`).
+        const purged = gone && Date.now() > gone.getTime() + (REGISTRATION_RETENTION_DAYS + (status === "pending" ? REPORT_HOLD_DAYS : 0)) * DAY_MS
         const image: ReportRow["image"] =
-          gone && report.created_at > gone ? { erasedOn: gone.toISOString() } : { url: await readableUrl(url) }
+          gone && (report.created_at > gone || purged) ? { erasedOn: gone.toISOString() } : { url: await readableUrl(url) }
         return [report.id, image] as const
       })
     )

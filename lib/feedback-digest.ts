@@ -3,7 +3,8 @@ import type { feedback_sentiment, issue_category } from "@prisma/client"
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseBreakdown, discloseFigure, discloseHeadcount, discloseStars, mayQuote, type SuppressionReason } from "./disclosure"
+import { discloseBreakdown, discloseCategories, discloseHeadcount, discloseStars, mayQuote, publishedRaters, spreadsByEventId, type DisclosedCategory, type StarSpread } from "./disclosure"
+import { publishedRatingGroups } from "./rating-batches"
 import { escalates } from "./sentiment/taxonomy"
 
 /*
@@ -16,20 +17,10 @@ import { escalates } from "./sentiment/taxonomy"
 
 export interface FeedbackMessage {
   id: string
-  /**
-   * Pseudonym only, and **null when the quote is suppressed**.
-   *
-   * The real name never leaves the server for a host. Below the disclosure
-   * floor the pseudonym goes too: it is room-stable, so an organiser who has
-   * seen it all night learns as much from the label as from the name.
-   */
-  pseudonym: string | null
-  /** Null with the text. A timestamp plus a room-stable pseudonym identifies. */
-  at: string | null
-  /** Null when the category has too few contributors to quote from. */
-  text: string | null
-  /** The label survives suppression; the organiser still learns it was raised. */
-  suppressed: boolean
+  /** Pseudonym only: the real name never leaves the server for a host. */
+  pseudonym: string
+  at: string
+  text: string
   sentiment: feedback_sentiment
   category: issue_category
   confidence: number
@@ -55,18 +46,18 @@ export interface FeedbackDigest {
   counts: { positive: number | null; neutral: number | null; negative: number | null }
   /** Messages classified, or null for a venue once any mood is held back. */
   total: number | null
-  categories: Array<{
-    category: string
-    /** Null when suppressed. The category is still listed. */
-    count: number | null
-    suppressed: boolean
-    suppressionReason: SuppressionReason | null
-  }>
+  categories: DisclosedCategory[]
   /** All zero, and the average null, until `MIN_CELL` people have rated. */
   ratings: [number, number, number, number, number]
   averageRating: number | null
   /** How many rated, so a screen can say "not enough yet" — null under the floor for a venue. */
   ratingCount: number | null
+  /**
+   * New ratings not in the bars yet, of the `RATING_BATCH` that move them (SCRUM-472): 0, 1 or 2 from the floor up, for
+   * a host. Null under the floor and for a venue, whose count stays at the published figure.
+   */
+  ratingsTowardNextUpdate: number | null
+  /** Only what can be quoted: a row held back would still say its mood and category, in feed order (SCRUM-890). */
   messages: FeedbackMessage[]
 }
 
@@ -75,7 +66,10 @@ export async function buildFeedbackDigest(
   view: "host" | "venue"
 ): Promise<FeedbackDigest> {
   const eventId = event.id
-  const ratingRows = await db.event_ratings.findMany({ where: { event_id: eventId }, select: { rating: true } })
+  const [ratingGroups, raters] = await Promise.all([
+    publishedRatingGroups({ id: eventId }),
+    db.event_ratings.count({ where: { event_id: eventId } }),
+  ])
   const feedback = await db.event_feedback.findMany({
     where: { event_id: eventId },
     orderBy: { created_at: "asc" },
@@ -139,10 +133,7 @@ export async function buildFeedbackDigest(
     }
   }
 
-  const ratings: [number, number, number, number, number] = [0, 0, 0, 0, 0]
-  for (const { rating } of ratingRows) {
-    if (rating >= 1 && rating <= 5) ratings[rating - 1] += 1
-  }
+  const ratings: StarSpread = spreadsByEventId(ratingGroups).get(eventId) ?? [0, 0, 0, 0, 0]
 
   const closesAt = chatClosesAt({ end_time: event.end_time })
 
@@ -175,26 +166,11 @@ export async function buildFeedbackDigest(
      * a safety concern was raised -- but the number is null, because "1
      * safety_conduct" in a room of six is a sentence with an author.
      */
-    categories: Array.from(categoryCounts.entries())
-      .map(([category, count]) => {
-        const disclosure = discloseFigure({
-          count,
-          contributors: categoryContributors.get(category)?.size ?? 0,
-          population,
-        })
-        // Already floored at five for everybody, a venue included: a count
-        // can't clear the floor with fewer than five contributors.
-        return {
-          category,
-          count: disclosure.value,
-          suppressed: disclosure.suppressed,
-          suppressionReason: disclosure.reason,
-        }
-      })
-      .sort((a, b) => (b.count ?? 0) - (a.count ?? 0)),
+    categories: discloseCategories(categoryCounts, categoryContributors, population),
     // The stars too: under five raters they are individual scores (SCRUM-437).
     ...stars,
-    ratingCount: venue ? discloseHeadcount(stars.ratingCount) : stars.ratingCount,
+    ratingCount: venue ? discloseHeadcount(stars.ratingCount) : raters,
+    ratingsTowardNextUpdate: !venue && stars.averageRating !== null ? raters - publishedRaters(raters) : null,
     /*
      * The sharpest finding in the audit, and the one this module was written
      * for.
@@ -205,11 +181,9 @@ export async function buildFeedbackDigest(
      * somebody who has seen that pseudonym all night -- and a safety concern is
      * the one thing an attendee most needs not to be identified for raising.
      *
-     * A quote cannot be partially suppressed, so the text goes and the label
-     * stays: the organiser still learns that somebody raised it, in which
-     * category, without learning who. The timestamp goes with the text, because
-     * "22:14" plus a room-stable pseudonym is the same identification by
-     * another route.
+     * A quote cannot be partially suppressed, so its whole row goes: its mood in
+     * feed order ties each message to a place in the room's feed (SCRUM-890). The
+     * organiser still learns it was raised, from the category's total above.
      */
     /*
      * None for a venue. Each row carries its mood and its category even when
@@ -217,23 +191,23 @@ export async function buildFeedbackDigest(
      * row. The venue reads what was said where it was said: the Room chat it
      * moderates.
      */
-    messages: venue ? [] : feedback.map((row) => {
-      const quotable = mayQuote({
-        contributors: categoryContributors.get(row.category)?.size ?? 0,
-        population,
-      })
-      return {
-        id: row.id,
-        pseudonym: quotable ? (pseudonyms.get(row.message.user_id) ?? "Attendee") : null,
-        at: quotable ? row.message.created_at.toISOString() : null,
-        text: quotable ? row.message.content : null,
-        suppressed: !quotable,
-        sentiment: row.sentiment,
-        category: row.category,
-        confidence: row.confidence,
-        corrected: row.corrected_at !== null,
-      }
-    }),
+    messages: venue
+      ? []
+      : feedback.flatMap((row) => {
+          if (!mayQuote({ contributors: categoryContributors.get(row.category)?.size ?? 0, population })) return []
+          return [
+            {
+              id: row.id,
+              pseudonym: pseudonyms.get(row.message.user_id) ?? "Attendee",
+              at: row.message.created_at.toISOString(),
+              text: row.message.content,
+              sentiment: row.sentiment,
+              category: row.category,
+              confidence: row.confidence,
+              corrected: row.corrected_at !== null,
+            },
+          ]
+        }),
   }
 }
 

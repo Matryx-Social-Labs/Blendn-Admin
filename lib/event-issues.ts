@@ -90,9 +90,9 @@ export async function recordIssuesFor(eventId: string, now: Date = new Date()): 
   // The snapshot's own reads of the event and its day, not a second set of them.
   const read = await readLiveSnapshot(eventId)
   if (!read) return { opened: 0, stillOpen: 0, resolved: 0 }
-  const { snapshot, event, occurrenceId } = read
+  const { figures, event, occurrenceId } = read
 
-  const alerts: LiveAlert[] = deriveAlerts(snapshot, {
+  const alerts: LiveAlert[] = deriveAlerts(figures, {
     scheduledEnd: event.end_time,
     scheduledStart: event.start_time ?? undefined,
     now,

@@ -11,9 +11,10 @@ const mockDb = {
   events: { findUnique: jest.fn() },
   event_rsvps: { count: jest.fn() },
   event_check_ins: { count: jest.fn(), findMany: jest.fn() },
-  event_ratings: { findMany: jest.fn() },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
+const mockPublished = jest.fn()
+jest.mock("@/lib/rating-batches", () => ({ publishedRatingGroups: (...a: unknown[]) => mockPublished(...a) }))
 
 import { getEventOverview } from "@/lib/event-overview"
 
@@ -52,7 +53,12 @@ function arrange(opts: {
     .mockResolvedValueOnce(opts.maybe ?? 0)
   mockDb.event_check_ins.count.mockResolvedValue(opts.checkedInNow ?? 0)
   mockDb.event_check_ins.findMany.mockResolvedValue(opts.attended ?? [])
-  mockDb.event_ratings.findMany.mockResolvedValue((opts.ratings ?? []).map((rating) => ({ rating })))
+  mockPublished.mockResolvedValue(
+    [1, 2, 3, 4, 5].flatMap((rating) => {
+      const n = (opts.ratings ?? []).filter((r) => r === rating).length
+      return n ? [{ event_id: "e1", rating, _count: { _all: n } }] : []
+    })
+  )
 }
 
 describe("getEventOverview — upcoming", () => {

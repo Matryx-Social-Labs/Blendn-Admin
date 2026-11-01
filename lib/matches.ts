@@ -202,11 +202,12 @@ export async function matchesForEvent(
     // query returns an arbitrary one of their check-in rows.
     // At a venue day, only while live (`inRoomWhere`): the grid is reciprocal.
     where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null }, ...inRoomWhere(viewerId) },
-    // Their latest: whether their own Tier B predates it (`viewerTierB`, step 10 review H1).
-    select: { id: true, check_in_time: true },
+    // Their latest: whether their own Tier B predates it (`viewerTierB`, step 10 review H1), and whether they are at work.
+    select: { id: true, check_in_time: true, kind: true },
     orderBy: { check_in_time: "desc" },
   })
-  if (!viewerCheckIn) return null
+  // Staff are working, not mingling: no deck of their own room either (SCRUM-891, owner row A-6). The latest row decides.
+  if (!viewerCheckIn || viewerCheckIn.kind === "staff") return null
 
   const [viewerProfile, viewerInterests, checkIns, prefs, blocks, closedPairs, friends, likes, reported] =
     await Promise.all([

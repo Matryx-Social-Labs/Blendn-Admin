@@ -394,6 +394,9 @@ an opaque, url-safe string. Field names and shapes did not change.
   (`otherUserId`), `POST /friends/requests` (`userId`), `GET|DELETE
   /friends/:userId` and `POST /friends/:userId/conversation`. Raw ids still work
   on these.
+- **Staff are out of matching (SCRUM-891).** Somebody checked in as staff has no deck (`GET /events/:id/matches`), no
+  `GET /events/:id/people` (`not_attended`), an empty `GET /events/:id/checkins`, and `POST /events/:id/matches/likes` and `/waves`
+  answer 403 (or a crew refusal with `asCrewId`). Their latest check-in decides. Nobody can wave at them.
 - **Likes and waves take only this event's handles.** `POST /events/:id/matches/likes`
   (`userId`) and `POST /events/:id/waves` (`toUserId`) name somebody only by the
   handle that event's roster or deck gave you — or you by your own id, which is

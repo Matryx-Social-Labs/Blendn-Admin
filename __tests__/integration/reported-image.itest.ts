@@ -2,23 +2,27 @@
  * A reported image, for the person who reviews it (SCRUM-955, owner row A-24).
  *
  * The reports screen showed text only, so an image message read "The message no longer exists". It shows the image now,
- * or the date it was erased when the report came after the sender left. And the 180-day purge waits for a report still pending.
+ * or the date it was erased when the report came after the sender left. And a report filed before the deletion keeps
+ * that one image, on a pointer, past the purge: never the person's other data, and never past the cap.
  */
 const SESSION: { user: { id: string; role: string; signedInAt: number } | null } = { user: null }
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 jest.mock("@/lib/auth", () => ({ getAuth: async () => SESSION }))
 const mockDeletePrefix = jest.fn(async (_prefix: string, _keep?: ReadonlySet<string>) => 0)
+const mockDeleteFile = jest.fn(async (_key: string) => undefined)
 jest.mock("@/lib/tigris", () => ({
   ...jest.requireActual("@/lib/tigris"),
   isConfigured: () => true,
   deletePrefix: (p: string, k?: ReadonlySet<string>) => mockDeletePrefix(p, k),
-  deleteFile: jest.fn(async () => undefined),
+  deleteFile: (k: string) => mockDeleteFile(k),
   readableUrl: async (u: string) => `${u}?signed=1`,
 }))
 
 import { getReportQueue } from "@/app/dashboard/moderation/reports/actions"
 import { purgeDeletedAccountRecords } from "@/lib/deleted-account-records"
+import { logger } from "@/lib/logger"
+import { REPORT_HOLD_DAYS } from "@/lib/retained-media"
 import { closeDb, db, makeEvent, makeUser, testId, cleanup } from "./helpers"
 
 const users: string[] = []
@@ -27,6 +31,7 @@ const HOST = `https://${process.env.TIGRIS_BUCKET || "blendn-media"}.fly.storage
 const DAY = 86_400_000
 
 afterAll(async () => {
+  await db.retained_report_media.deleteMany({ where: { user_id: { in: users } } })
   await db.message_reports.deleteMany({ where: { reporter_id: { in: users } } })
   await db.deleted_account_records.deleteMany({ where: { user_id: { in: users } } })
   await db.chat_messages.deleteMany({ where: { chat_group: { event_id: { in: events } } } })
@@ -77,21 +82,67 @@ describe("the reports screen", () => {
   })
 })
 
-describe("the 180-day purge", () => {
-  it("keeps a pending report's image and the record, and goes once it is decided", async () => {
+describe("the 180-day purge and a pending report's image (A-24)", () => {
+  const passed = () => new Date(Date.now() - DAY)
+  const keyOf = (id: string, name: string) => `chat/${id}/1790641297767-abc123-${name}.jpg`
+  async function reportedThenGone(name: string, reportedDaysAgo = 200) {
     const [reporter, sender] = [await person("ri-rep2"), await person("ri-sender")]
-    const message = await imageIn(sender, "held")
-    const reported = await report(message.id, reporter, new Date(Date.now() - 200 * DAY))
-    await left(sender, new Date(Date.now() - 181 * DAY), new Date(Date.now() - DAY))
-    const key = `chat/${sender}/1790641297767-abc123-held.jpg`
+    const message = await imageIn(sender, name)
+    const reported = await report(message.id, reporter, new Date(Date.now() - reportedDaysAgo * DAY))
+    await left(sender, new Date(Date.now() - 181 * DAY), passed())
+    return { sender, reported, key: keyOf(sender, name) }
+  }
+
+  it("purges the person on schedule, profile media included; only the image waits, on a pointer", async () => {
+    const { sender, key } = await reportedThenGone("held")
 
     await purgeDeletedAccountRecords()
-    expect(await db.deleted_account_records.count({ where: { user_id: sender } })).toBe(1)
+
+    expect(await db.deleted_account_records.count({ where: { user_id: sender } })).toBe(0)
+    expect(mockDeletePrefix).toHaveBeenCalledWith(`profile/${sender}/`, undefined)
     const keep = mockDeletePrefix.mock.calls.find(([p]) => p === `chat/${sender}/`)?.[1]
     expect(keep?.has(key)).toBe(true)
+    const [pointer] = await db.retained_report_media.findMany({ where: { user_id: sender } })
+    expect(pointer.object_key).toBe(key)
+    expect(pointer.erase_by.getTime() - passed().getTime()).toBeCloseTo(REPORT_HOLD_DAYS * DAY, -4)
+  })
+
+  it("a report filed after the deletion creates no hold", async () => {
+    const { sender } = await reportedThenGone("late", 1)
+    await purgeDeletedAccountRecords()
+    expect(await db.retained_report_media.count({ where: { user_id: sender } })).toBe(0)
+    expect(mockDeletePrefix.mock.calls.find(([p]) => p === `chat/${sender}/`)?.[1]?.size ?? 0).toBe(0)
+  })
+
+  it("erases the image when the report is decided", async () => {
+    const { sender, reported, key } = await reportedThenGone("decided")
+    await purgeDeletedAccountRecords()
+    mockDeleteFile.mockClear()
+
+    await purgeDeletedAccountRecords()
+    expect(mockDeleteFile).not.toHaveBeenCalledWith(key)
 
     await db.message_reports.update({ where: { id: reported.id }, data: { status: "reviewed" } })
     await purgeDeletedAccountRecords()
-    expect(await db.deleted_account_records.count({ where: { user_id: sender } })).toBe(0)
+    expect(mockDeleteFile).toHaveBeenCalledWith(key)
+    expect(await db.retained_report_media.count({ where: { user_id: sender } })).toBe(0)
+  })
+
+  it("erases it at the cap whatever is pending, and warns as the cap nears", async () => {
+    const { sender, key } = await reportedThenGone("capped")
+    await purgeDeletedAccountRecords()
+    mockDeleteFile.mockClear()
+    const warn = jest.spyOn(logger, "warn")
+
+    await db.retained_report_media.updateMany({ where: { user_id: sender }, data: { erase_by: new Date(Date.now() + DAY) } })
+    await purgeDeletedAccountRecords()
+    expect(mockDeleteFile).not.toHaveBeenCalledWith(key)
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/report.*decided/i), expect.objectContaining({ objectKey: key }))
+
+    await db.retained_report_media.updateMany({ where: { user_id: sender }, data: { erase_by: new Date(Date.now() - 1000) } })
+    await purgeDeletedAccountRecords()
+    expect(mockDeleteFile).toHaveBeenCalledWith(key)
+    expect(await db.retained_report_media.count({ where: { user_id: sender } })).toBe(0)
+    warn.mockRestore()
   })
 })
