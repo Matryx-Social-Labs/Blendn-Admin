@@ -167,6 +167,49 @@ describe("the Feedback tab's page", () => {
     expect(html).toContain("4.1 · 10 ratings")
   })
 
+  it("shows the count without an average under five raters, with nothing classified", async () => {
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({ ...emptyDigest(), ratingCount: 3 })
+    const html = renderToStaticMarkup(await feedback())
+    expect(html).toContain("No messages were classified")
+    expect(html).toContain("3 ratings")
+    expect(html).toContain("Not enough ratings yet.")
+  })
+
+  it("keeps the stars, once, beside the messages when some were classified", async () => {
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({
+      ...emptyDigest(),
+      counts: { positive: 6, neutral: 2, negative: 0 },
+      total: 8,
+      ratings: [0, 1, 1, 4, 4],
+      averageRating: 4.1,
+      ratingCount: 10,
+      ratingsTowardNextUpdate: null,
+    })
+    const html = renderToStaticMarkup(await feedback())
+    expect(html).toContain("4.1 · 10 ratings")
+    expect(html.match(/>Stars</g)).toHaveLength(1)
+    expect(html).not.toContain("No messages were classified")
+  })
+
+  it("keeps a venue's held-back stars in the split view (total held back, not zero)", async () => {
+    mockSession.user.role = "venue_owner"
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-b" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({
+      ...emptyDigest(),
+      view: "venue",
+      counts: { positive: null, neutral: null, negative: null },
+      total: null,
+      ratingCount: null,
+      averageRating: null,
+    })
+    const html = renderToStaticMarkup(await feedback())
+    expect(html).toContain("counts held back")
+    expect(html).toContain("fewer than five ratings")
+    expect(html.match(/>Stars</g)).toHaveLength(1)
+  })
+
   it("shows no stars panel when nobody rated and nothing was classified", async () => {
     mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
     jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue(emptyDigest())

@@ -38,7 +38,7 @@
     "event-pages-doors.test.tsx": {
       "guards": "SCRUM-993: an event's Feedback tab shows its Stars panel when people rated but no message was classified (it was hidden behind the empty state).",
       "mutation": "M993a app/dashboard/events/[id]/feedback/page.tsx as on origin/dev (Stars rendered only when total > 0).",
-      "observed": "M993a: 1 of 14 failing (the stars test; the no-ratings control passes either way). Restored; 14 of 14 green.",
+      "observed": "M993a: 2 of 17 failing (the stars test and the under-five test; the split-view, venue and no-ratings controls pass either way). M993b: the right-column {stars} removed: 2 of 17 failing (split view, venue). Restored; 17 of 17 green.",
       "date": "2026-11-01"
     },
     "friends.itest.ts": {
