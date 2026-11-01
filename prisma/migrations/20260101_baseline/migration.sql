@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS "event_ratings" (
     "event_id" UUID NOT NULL,
     "user_id" TEXT NOT NULL,
     "rating" INTEGER NOT NULL,
-    "review" TEXT,
+    -- `review` is deliberately absent: 20261101090000 dropped it (baseline-resurrection.test.ts).
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
