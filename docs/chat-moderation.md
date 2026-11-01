@@ -57,7 +57,7 @@ gives them owners (`chat_groups.kind`, `lib/room-kind.ts`). What applies where:
 Staging cannot make the vendor return a real `hide`. `MODERATION_FORCE_HIDE_USER_IDS` (comma-separated user ids, QA
 accounts only) makes every checked chat message and profile/blur photo of those accounts a `hide`, through the same
 path a real verdict takes: the message is hidden, flagged and counted toward the auto-mute; the photo is pulled and
-withdrawn from the public bucket. Refused on production (`RAILWAY_ENVIRONMENT_NAME=production`) whatever is set.
+withdrawn from the public bucket. Only where `RAILWAY_ENVIRONMENT_NAME=staging`: anywhere else, or unset, it does nothing whatever is set.
 
 ## Layer 1: Spam Detector
 

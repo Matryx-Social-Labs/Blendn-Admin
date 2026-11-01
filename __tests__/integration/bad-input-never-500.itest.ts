@@ -26,7 +26,7 @@ import { NextRequest } from "next/server"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
 const mockGetAuth = jest.fn()
-jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth() }))
+jest.mock("@/lib/auth", () => ({ getAuth: () => mockGetAuth(), getInviteAuth: () => mockGetAuth() }))
 jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
 
 import { signAccessToken } from "@/lib/mobile-auth"

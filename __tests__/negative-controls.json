@@ -2512,6 +2512,12 @@
       "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
       "date": "2026-11-01"
     },
+    "invite-accept-attendee.itest.ts": {
+      "guards": "SCRUM-984: an attendee accepting an invite comes out as the role fixed at send, and every accept is refused when the sender lost their standing in the org.",
+      "mutation": "M984b the owner check in senderStillStands removed. M984c its canManageMembers check removed.",
+      "observed": "M984b: 'an owner's invite from an owner who is now an admin' failing. M984c: 'demoted to staff in the org' failing.",
+      "date": "2026-11-01"
+    },
     "reported-image.itest.ts": {
       "guards": "SCRUM-955 / owner row A-24: the reports screen shows a reported image or names its erasure; a report filed before the deletion holds that image on a pointer, the rest of the person goes on schedule, and the hold ends at the decision or the cap.",
       "mutation": "M955b the erased branch removed from reportedImages. M955c the before-deletion filter removed from heldChatMedia. M955d the cap removed from releaseHeldReportMedia.",

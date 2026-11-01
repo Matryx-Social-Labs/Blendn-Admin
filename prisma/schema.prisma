@@ -1924,6 +1924,9 @@ model organisation_invites {
   token_hash             String
   expires_at             DateTime  @db.Timestamptz(6)
   invited_by             String
+  /// The dashboard role an attendee accepting this comes out as, fixed when it is sent (SCRUM-984). Null on older
+  /// invites: an attendee cannot accept one, and is asked for a new one.
+  grants_role            user_role?
   accepted_at            DateTime? @db.Timestamptz(6)
   revoked_at             DateTime? @db.Timestamptz(6)
   /// Non-null when the invited address is outside the org's verified domain.

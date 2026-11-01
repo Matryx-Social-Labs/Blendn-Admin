@@ -11,7 +11,7 @@ jest.mock("next-auth/jwt", () => ({ decode: (...a: unknown[]) => mockDecode(...a
 const mockFindUnique = jest.fn()
 jest.mock("@/lib/db", () => ({ db: { user: { findUnique: (...a: unknown[]) => mockFindUnique(...a) } } }))
 jest.mock("@/lib/logger", () => ({ logger: { debug: jest.fn(), warn: jest.fn(), error: jest.fn(), info: jest.fn() } }))
-jest.mock("@/lib/rbac", () => ({ eventPermissions: jest.fn() }))
+jest.mock("@/lib/rbac", () => ({ eventPermissions: jest.fn(), canAccessDashboard: (role: string) => role !== "attendee" }))
 jest.mock("@/lib/org-membership", () => ({ actorFor: jest.fn() }))
 
 import { authenticateDashboardSocket } from "@/lib/socket-ops-auth"
@@ -67,4 +67,9 @@ it("refuses a session that signed in before the password changed", async () => {
 it("lets in a session that signed in after it", async () => {
   mockFindUnique.mockResolvedValue({ ...live, password_changed_at: new Date(SIGNED_IN - 1_000) })
   await expect(authenticateDashboardSocket(COOKIE)).resolves.toMatchObject({ userId: "u1" })
+})
+
+it("refuses a session held only to accept an invite (SCRUM-984)", async () => {
+  mockFindUnique.mockResolvedValue({ ...live, role: "attendee" })
+  await expect(authenticateDashboardSocket(COOKIE)).resolves.toBeNull()
 })

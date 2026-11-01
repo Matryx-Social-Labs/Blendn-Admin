@@ -17,7 +17,7 @@ jest.mock("@/lib/tigris", () => ({ readableUrl: jest.fn(async (u: string) => u) 
 
 import { checkAndAutoMute, hideMessage } from "@/lib/moderation/actions"
 import { moderateMessage } from "@/lib/moderation"
-import { forcedHide } from "@/lib/moderation/staging-override"
+import { forcedHide, textCheckFor } from "@/lib/moderation/staging-override"
 
 const ENV = { ...process.env }
 afterEach(() => {
@@ -66,3 +66,33 @@ describe("a listed account's chat message", () => {
     expect(hideMessage).not.toHaveBeenCalled()
   })
 })
+
+// The send routes take the inline verdict first, so without this a forced hide reached only a timed-out check (SCRUM-479 drive: 2 of 4 stayed clean).
+describe("textCheckFor", () => {
+  const ORIGINAL = process.env.MODERATION_FORCE_HIDE_USER_IDS
+  afterEach(() => {
+    process.env.MODERATION_FORCE_HIDE_USER_IDS = ORIGINAL
+  })
+
+  it("answers a listed user's text with a hide, without asking the vendor", async () => {
+    process.env.RAILWAY_ENVIRONMENT_NAME = "staging"
+    process.env.MODERATION_FORCE_HIDE_USER_IDS = "qa-1"
+    const asked = jest.fn()
+    const check = await textCheckFor("qa-1", "hello", asked)
+    expect(check).toMatchObject({ checked: true, result: { action: "hide", source: "openai_text" } })
+    expect(asked).not.toHaveBeenCalled()
+  })
+
+  it("needs staging named: unset is not staging", async () => {
+    process.env.MODERATION_FORCE_HIDE_USER_IDS = "qa-1"
+    delete process.env.RAILWAY_ENVIRONMENT_NAME
+    expect(forcedHide("qa-1")).toBeNull()
+  })
+
+  it("asks the vendor for everybody else", async () => {
+    process.env.MODERATION_FORCE_HIDE_USER_IDS = "qa-1"
+    const verdict = { checked: true, result: null }
+    await expect(textCheckFor("someone", "hello", async () => verdict as never)).resolves.toBe(verdict)
+  })
+})
+

@@ -136,7 +136,10 @@ export default async function globalSetup(config: FullConfig) {
       const session = await page.evaluate(
         async () => (await (await fetch("/api/auth/session")).json()) as { user?: { role?: string } }
       )
-      if (session.user?.role !== expected) {
+      // An attendee's cookie is no session at all unless an invite is waiting for them (SCRUM-984): the
+      // dashboard ends it on read. The access matrix still drives it, to prove it opens nothing.
+      const accepted = expected === "attendee" ? session.user === undefined : session.user?.role === expected
+      if (!accepted) {
         throw new Error(
           `Minted session for ${role} was not accepted. Expected role ${expected}, got ` +
             `${JSON.stringify(session)}. Does NEXTAUTH_SECRET match the running server's?`
