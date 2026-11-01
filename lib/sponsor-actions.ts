@@ -595,7 +595,7 @@ export async function getSponsorOverview(): Promise<SponsorOverview> {
     // sends" read as something the sponsor had forgotten to do.
     else if (phase === "ended") blocker = null
     else if (!r.event.chat_group) blocker = "The event has no chatroom yet"
-    else if (campaigns.length === 0) blocker = "No creative yet"
+    else if (campaigns.length === 0) blocker = "Waiting for the organizer to add a creative"
     else if (campaigns.every((c) => c.moderation_status === "pending"))
       blocker = "Creative is in review"
     else if (campaigns.every((c) => c.moderation_status === "rejected"))
