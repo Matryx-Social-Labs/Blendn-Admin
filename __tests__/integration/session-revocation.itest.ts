@@ -325,7 +325,7 @@ describe("Settings → Sessions ends what it says (SCRUM-603)", () => {
   it("a password change ends the same: the cookie, the dashboard's socket, and every phone", async () => {
     // An attendee: the app refuses a staff token at the handshake, so only an
     // attendee can hold a phone socket for this to close.
-    const id = await makeUser("m6_pw")
+    const id = await makeUser("m6_pw", "organizer")
     users.push(id)
     await db.user.update({ where: { id }, data: { password: await bcrypt.hash(OLD, 4) } })
     const cookie = await signedInCookie(id)
@@ -344,7 +344,7 @@ describe("Settings → Sessions ends what it says (SCRUM-603)", () => {
   })
 
   it("and so does a reset link", async () => {
-    const id = await makeUser("m6_reset")
+    const id = await makeUser("m6_reset", "organizer")
     users.push(id)
     const cookie = await signedInCookie(id)
     const browser = await live({ cookie })
