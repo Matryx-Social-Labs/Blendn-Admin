@@ -41,11 +41,7 @@ export async function deletionReauthRefusal(userId: string, proof: DeletionProof
   if (proof.password !== undefined) {
     const user = await db.user.findUnique({ where: { id: userId }, select: { password: true, email: true } })
     if (!user) return reauth()
-    /*
-     * In sign-in's own windows (the mobile per-account one and the shared per-email ones), counted before the check as
-     * sign-in counts them: a stolen bearer token gets no more guesses here than at the sign-in door, and they share one
-     * budget. A right password deletes the account, so there is nothing to give back.
-     */
+    // Sign-in's own windows, so both doors share one budget; a right password deletes the account, nothing to give back.
     // The per-account window first, as at sign-in: past it, an attempt never spends the per-email windows that the
     // dashboard and every other device share, so one bearer token cannot lock the account's sign-in for a day.
     const account = await hit(`rl:${mobileAccountKey(user.email)}`, ACCOUNT_WINDOW_MS, { failClosed: true })
@@ -89,7 +85,7 @@ export async function deletionReauthRefusal(userId: string, proof: DeletionProof
       return reauth()
     }
     /*
-     * Once: the token's hash is held for its 15 minutes, taken atomically before the erasure, so a captured token cannot
+     * Once: its verified claims are held for its 15 minutes, taken atomically before the erasure, so a captured token cannot
      * be replayed (a server nonce is the post-launch follow-up, SCRUM-944). Audience and issuer are the verifiers' checks.
      */
     // Keyed on the verified claims, not the bytes: a re-encoded copy of one token is the same token (review).
