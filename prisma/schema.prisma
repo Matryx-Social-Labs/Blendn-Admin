@@ -780,8 +780,8 @@ model event_amenities {
 }
 
 /// What a venue offers, from the same vocabulary events tick from (`amenities`).
-/// Shown on the venue page; nothing writes it yet (no dashboard field), so a
-/// venue lists none until one does. `Restrict` for the same reason as
+/// Shown on the venue page ("Good to know"); written by the venue record's
+/// ticks, the owner's organisation or an admin (`setVenueAmenities`, SCRUM-979). `Restrict` for the same reason as
 /// `event_amenities`: retiring an amenity is `is_active`, not a delete.
 model venue_amenities {
   venue_id   String   @db.Uuid

@@ -9,9 +9,10 @@ import type { venue_type } from "@prisma/client"
 import { Panel } from "@/components/dashboard/kit"
 import { VenueArea } from "@/components/venue-area"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { assignVenueOwner, restoreVenue, retireVenue, updateVenue } from "@/lib/venue-actions"
+import { assignVenueOwner, restoreVenue, retireVenue, setVenueAmenities, updateVenue } from "@/lib/venue-actions"
 import { validateGeofence, type Geofence } from "@/lib/geofence"
 import { refusalMessage } from "@/lib/refusal"
 import { floorsHeightMetres } from "@/lib/venue-floors"
@@ -45,6 +46,7 @@ export function VenueManage({
   venue,
   isAdmin,
   orgs,
+  amenityOptions = [],
   canRetire = true,
 }: {
   venue: {
@@ -61,8 +63,12 @@ export function VenueManage({
     retired: boolean
     ownerOrg: string | null
     floors: number | null
+    /** What the building has, from the shared vocabulary (SCRUM-979). */
+    amenityIds: string[]
   }
   isAdmin: boolean
+  /** The active vocabulary, in its own order. */
+  amenityOptions?: { id: string; name: string; subtitle: string | null }[]
   /** Owner candidates. Empty for a non-admin, and for an already-owned venue. */
   orgs: { rows: { id: string; name: string }[]; total: number }
   /**
@@ -93,6 +99,9 @@ export function VenueManage({
     venue.lat !== null && venue.lng !== null ? { lat: venue.lat, lng: venue.lng } : null
   )
   const [moved, setMoved] = useState(false)
+  const [amenityIds, setAmenityIds] = useState<string[]>(venue.amenityIds)
+  const amenitiesChanged =
+    amenityIds.length !== venue.amenityIds.length || amenityIds.some((a) => !venue.amenityIds.includes(a))
 
   const field = (key: keyof typeof form) => ({
     id: key,
@@ -118,6 +127,8 @@ export function VenueManage({
           // for a rename, until the area is put back (SCRUM-204).
           ...(fence ? { geofence: fence } : {}),
         })
+        // Same rule as floors: the owner's organisation or an admin (`setVenueAmenities` refuses anyone else).
+        if (canSetFloors && amenitiesChanged) await setVenueAmenities(venue.id, amenityIds)
         toast.success("Saved")
         router.refresh()
       } catch (error) {
@@ -240,6 +251,10 @@ export function VenueManage({
           />
         </div>
 
+        {canSetFloors && amenityOptions.length > 0 ? (
+          <GoodToKnow options={amenityOptions} value={amenityIds} onChange={setAmenityIds} disabled={venue.retired} />
+        ) : null}
+
         {/*
           Assigning an owner is the admin-side counterpart to a claim, for when
           ownership is settled over email rather than through the queue. Only
@@ -315,5 +330,47 @@ function FloorsField(props: React.ComponentProps<typeof Input> & { value: string
             : "Empty: the app's map uses its own height."}
       </p>
     </div>
+  )
+}
+
+/**
+ * "Good to know" on the venue's page in the app (SCRUM-979): what the building has on any night, ticked from the
+ * shared vocabulary as the event editor's "What's included" is. An event still ticks its own.
+ */
+function GoodToKnow({
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  options: { id: string; name: string; subtitle: string | null }[]
+  value: string[]
+  onChange: (next: string[]) => void
+  disabled: boolean
+}) {
+  return (
+    <fieldset className="flex flex-col gap-1.5 @2xl/main:col-span-5" disabled={disabled}>
+      <legend className="text-sm font-medium">Good to know</legend>
+      <p className="text-[0.75rem] text-faint-foreground">
+        On this venue&apos;s page in the app. Tick what the place has on any night
+        {value.length > 0 ? ` — ${value.length} ticked` : ""}.
+      </p>
+      <div className="grid grid-cols-2 gap-2 @2xl/main:grid-cols-3">
+        {options.map((a) => (
+          <label key={a.id} className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm hover:bg-muted/50">
+            <Checkbox
+              className="mt-0.5"
+              checked={value.includes(a.id)}
+              onCheckedChange={(on) => onChange(on ? [...value, a.id] : value.filter((id) => id !== a.id))}
+              aria-label={a.name}
+            />
+            <span>
+              <span className="block">{a.name}</span>
+              {a.subtitle ? <span className="block text-xs text-muted-foreground">{a.subtitle}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   )
 }
