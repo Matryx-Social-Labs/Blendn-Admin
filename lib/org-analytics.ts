@@ -6,7 +6,8 @@ import { analyticsAccess, mayOpenEvent, type AnalyticsAccess } from "./analytics
 import { planBadgeFor, type PlanDate } from "./billing"
 import { ATTENDED } from "./counting"
 import { db } from "./db"
-import { discloseRating, heldPart, MIN_CELL } from "./disclosure"
+import { discloseStars, heldPart, MIN_CELL, spreadsByEventId } from "./disclosure"
+import { publishedRatingGroups } from "./rating-batches"
 import type { PacingPoint } from "./dashboard-types"
 import { realEventsWhere } from "./event-kind"
 import { buildPacing, pacingWindowDays } from "./pacing"
@@ -260,19 +261,19 @@ async function comparisonRows(orgId: string, from: Date, now: Date): Promise<Com
     GROUP BY a.event_id
     `,
     stayByEvent(ids),
-    db.event_ratings.groupBy({ by: ["event_id"], where: { event_id: { in: ids } }, _avg: { rating: true }, _count: { _all: true } }),
+    publishedRatingGroups({ id: { in: ids } }),
   ])
   const goingBy = new Map(going.map((g) => [g.event_id, g._count._all]))
   const firstsBy = new Map(firsts.map((f) => [f.event_id, f]))
   const stayBy = new Map(stays.map((s) => [s.event_id, s]))
-  const ratingBy = new Map(ratings.map((r) => [r.event_id, r]))
+  const spreads = spreadsByEventId(ratings)
 
   return events.map((e) => {
     const came = Number(firstsBy.get(e.id)?.came ?? 0)
     const firstTimers = Number(firstsBy.get(e.id)?.first_timers ?? 0)
     const g = goingBy.get(e.id) ?? 0
     const stay = stayBy.get(e.id)
-    const rating = ratingBy.get(e.id)
+    const spread = spreads.get(e.id)
     return {
       eventId: e.id,
       title: e.title,
@@ -283,10 +284,7 @@ async function comparisonRows(orgId: string, from: Date, now: Date): Promise<Com
       turnUpPct: g === 0 ? null : Math.round((Math.min(came, g) / g) * 100),
       firstTimePct: pct(heldPart(firstTimers, came), came),
       medianStayMin: stay && Number(stay.people) >= MIN_CELL ? Math.round(Number(stay.p50) / 60) : null,
-      rating:
-        rating?._avg.rating === null || rating?._avg.rating === undefined
-          ? null
-          : discloseRating(Math.round(rating._avg.rating * 10) / 10, rating._count._all),
+      rating: spread ? discloseStars(spread).averageRating : null,
     }
   })
 }

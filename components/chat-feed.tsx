@@ -69,7 +69,8 @@ interface ChatFeedData {
   chatGroupId: string
   pendingFlags: number
   /** Members in the room now: the header's number, whichever slice of the roster `members` is. */
-  activeCount: number
+  /** A label ("Under 5") for a venue owner, who reads rooms as ranges. */
+  activeCount: number | string
   messages: ChatMessage[]
   members: ChatMember[]
 }

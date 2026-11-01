@@ -1,6 +1,7 @@
 import { venueCounts } from "@/lib/attendee-roster"
 import { db } from "@/lib/db"
-import { discloseHeadcount, discloseRating, liveCountBucket, liveCountLabel, MIN_CELL } from "@/lib/disclosure"
+import { discloseHeadcount, discloseStars, liveCountBucket, liveCountLabel, MIN_CELL, spreadsByEventId } from "@/lib/disclosure"
+import { publishedRatingGroups } from "@/lib/rating-batches"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
 import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
@@ -76,7 +77,7 @@ export async function getEventOverview(
 
   const state = eventStateFor(event)
 
-  const [going, maybe, checkedIn, everCheckedIn, ratings] = await Promise.all([
+  const [going, maybe, checkedIn, everCheckedIn, ratingGroups] = await Promise.all([
     db.event_rsvps.count({ where: { event_id: eventId, status: "going" } }),
     db.event_rsvps.count({ where: { event_id: eventId, status: "maybe" } }),
     db.event_check_ins.count({ where: { event_id: eventId, status: "checked_in" } }),
@@ -93,7 +94,7 @@ export async function getEventOverview(
       where: { event_id: eventId, check_in_time: { not: null } },
       select: { user_id: true, kind: true },
     }),
-    db.event_ratings.findMany({ where: { event_id: eventId }, select: { rating: true } }),
+    publishedRatingGroups({ id: eventId }),
   ])
 
   const capacity = event.max_capacity
@@ -115,10 +116,7 @@ export async function getEventOverview(
    * Held back with either side: a percentage and one count give the other.
    */
   const turnUpPct = attendedPeople === null || goingN === null ? null : turnUp(attendedPeople, goingN)
-  const avgRating = discloseRating(
-    Math.round((ratings.reduce((s, r) => s + r.rating, 0) / ratings.length) * 10) / 10,
-    ratings.length
-  )
+  const { averageRating: avgRating, ratingCount: raters } = discloseStars(spreadsByEventId(ratingGroups).get(eventId) ?? [0, 0, 0, 0, 0])
 
   const blockers = publishBlockers({
     ...event,
@@ -225,11 +223,11 @@ export async function getEventOverview(
                 label: "Rating",
                 value: avgRating === null ? null : `${avgRating}`,
                 hint:
-                  ratings.length === 0
+                  raters === 0
                     ? "nobody rated it"
                     : avgRating === null
                       ? "not enough ratings yet"
-                      : `${ratings.length} ratings`,
+                      : `${raters} ratings`,
               },
             ]
 

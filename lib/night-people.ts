@@ -111,13 +111,13 @@ export async function nightPeople(
   })
   if (!event || event.kind !== "event" || eventHidesRoom(event)) return { refused: "not_found" }
 
-  // A night you attended: any check-in, staff's included, as the deck asks (`matchesForEvent`).
+  // A night you attended, as a guest by your latest row, as the deck asks (`matchesForEvent`): staff are out of matching (SCRUM-891, SCRUM-943).
   const viewerCheckIn = await db.event_check_ins.findFirst({
     where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null } },
     orderBy: { check_in_time: "desc" },
-    select: { check_in_time: true },
+    select: { check_in_time: true, kind: true },
   })
-  if (!viewerCheckIn) return { refused: "not_attended" }
+  if (!viewerCheckIn || viewerCheckIn.kind === "staff") return { refused: "not_attended" }
   // A host's ban closes the room's people as it closes its chat.
   const ban = await eventRoomBan(eventId, viewerId)
   if (ban) return { refused: "banned", banned_by: ban.banned_by }

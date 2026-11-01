@@ -107,7 +107,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       roomBanRefusal(eventId, authUser.userId),
       db.event_check_ins.findFirst({
         where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
-        select: { id: true },
+        orderBy: { check_in_time: "desc" },
+        select: { kind: true },
       }),
       blockCounterparties(authUser.userId),
       notStrangersTo(authUser.userId),
@@ -116,6 +117,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     if (!attended) {
       return forbiddenResponse("Check in to see who else is here")
+    }
+    /*
+     * Staff are working (SCRUM-891). This list is the room's guests with their age and arrival order, by pseudonym, which
+     * is what a host must not hold (SCRUM-943, owner row A-17). An empty page rather than a refusal: their Room still opens.
+     */
+    if (attended.kind === "staff") {
+      return successResponse({ attendees: [], pagination: paginationMeta(page, limit, 0) })
     }
 
     /*

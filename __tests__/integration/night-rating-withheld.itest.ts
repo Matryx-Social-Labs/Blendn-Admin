@@ -89,10 +89,10 @@ describe("the feedback digest, as a venue reads another host's night (step 15)",
     expect(venue).toMatchObject({ view: "venue", total: null, counts: { positive: null, neutral: null, negative: null } })
     expect(venue.categories.every((c) => c.count === null && c.suppressed)).toBe(true)
     expect(venue.messages).toEqual([])
-    // The organiser reads the same night exactly, row by row.
+    // The organiser reads the same night's counts exactly. No rows: three people cannot be quoted (SCRUM-890).
     const host = await digest(eventId, "host")
     expect(host).toMatchObject({ view: "host", total: 3, counts: { positive: 1, neutral: 0, negative: 2 } })
-    expect(host.messages).toHaveLength(3)
+    expect(host.messages).toEqual([])
   })
 
   it("never lets the total give a held-back mood back: 19 neutral and 1 positive show no total and no lone 19", async () => {
