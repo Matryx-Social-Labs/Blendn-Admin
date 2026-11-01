@@ -121,6 +121,45 @@ it("rates a connected peer with no note and writes the row", async () => {
   expect(row).toMatchObject({ rated_id: them.id, rating: 4, issue: "none", note: null })
 })
 
+it("puts a harassment note in the report a moderator reads (SCRUM-980)", async () => {
+  const host = await makeUser("sw-host-note", "organizer")
+  users.push(host)
+  const eventId = await makeEvent(host)
+  events.push(eventId)
+  const now = Date.now()
+  await db.events.update({
+    where: { id: eventId },
+    data: { start_time: new Date(now - 4 * 3600_000), end_time: new Date(now - 3600_000) },
+  })
+  const me = await person("sw-note-rater")
+  const them = await person("sw-note-rated")
+  await db.event_likes.createMany({
+    data: [
+      { event_id: eventId, liker_id: me.id, liked_id: them.id },
+      { event_id: eventId, liker_id: them.id, liked_id: me.id },
+    ],
+  })
+  const [c1, c2] = [me.id, them.id].sort()
+  await db.private_conversations.create({
+    data: { user1_id: c1, user2_id: c2, origin_event_id: eventId, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
+  })
+
+  const res = await ratingRoute.POST(
+    post(`/api/mobile/events/${eventId}/peer-ratings`, me.token, {
+      userId: them.id,
+      rating: 1,
+      issue: "harassment",
+      note: "  Followed me to the bar after I said no.  ",
+    }),
+    { params: Promise.resolve({ eventId }) }
+  )
+  expect([200, 201]).toContain(res.status)
+  const report = await db.user_reports.findFirstOrThrow({ where: { reporter_id: me.id, reported_id: them.id } })
+  expect(report.reason).toBe("harassment")
+  expect(report.description).toContain("Followed me to the bar after I said no.")
+  expect(report.description).toContain(eventId)
+})
+
 it("refuses a rating across a block, as for someone never connected with (SCRUM-304)", async () => {
   const host = await makeUser("sw-host-blk", "organizer")
   users.push(host)

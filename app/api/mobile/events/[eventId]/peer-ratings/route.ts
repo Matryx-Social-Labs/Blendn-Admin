@@ -162,7 +162,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             reporter_id: authUser.userId,
             reported_id: target.userId,
             reason: "harassment",
-            description: `Reported via peer rating after event ${eventId}.`,
+            // The note is what the form promises a moderator reads ("Only we read this", SCRUM-980). One line: the
+            // queue prints the description as a paragraph. 1000 + the prefix stays inside REPORT_DESCRIPTION_MAX.
+            description: `Reported via peer rating after event ${eventId}.${note?.trim() ? ` Their note: ${note.trim()}` : ""}`,
           },
         })
         .catch((error) => {

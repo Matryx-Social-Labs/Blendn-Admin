@@ -2530,6 +2530,12 @@
       "observed": "M472a 3 failing (bars, venue, shared read). M891a 'has no deck' fails. M890a 'lists it with no number' fails. M890b 'drops the row' fails.",
       "date": "2026-11-01"
     },
+    "safety-writes.itest.ts": {
+      "guards": "SCRUM-980: a harassment peer rating's note reaches the user_reports row a moderator reads (the form says 'Only we read this').",
+      "mutation": "M980a app/api/mobile/events/[eventId]/peer-ratings/route.ts the description back to the fixed 'Reported via peer rating after event <id>.' with no note.",
+      "observed": "M980a: 1 of 6 failing (description held no note). Restored; 6/6.",
+      "date": "2026-11-01"
+    },
     "deletion-reauth.itest.ts": {
       "guards": "SCRUM-944 (3) / owner ruling A-18: account deletion needs the password (wrong → 403 PASSWORD_INCORRECT) or a linked Google/Apple token issued within 15 minutes (else 403 REAUTH_REQUIRED); no proof deletes as before until MOBILE_MIN_APP_VERSION ≥ 1.0.1, then REAUTH_REQUIRED.",
       "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",
