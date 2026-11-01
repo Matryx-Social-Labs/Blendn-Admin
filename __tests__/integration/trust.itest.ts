@@ -141,6 +141,17 @@ describe("who you may rate", () => {
     expect(await peers(eventId, blocked)).toEqual([])
     expect(await peers(eventId, blocker)).toEqual([friend])
   })
+
+  it("not someone who has deleted their account (SCRUM-989)", async () => {
+    // The rate-the-night screen offered a deleted account: nobody is there to rate, and a rating would land on an
+    // anonymised row.
+    const eventId = await pastEvent()
+    const [me, gone, stays] = await Promise.all([guest("tr-m"), guest("tr-n"), guest("tr-o")])
+    await connect(eventId, me, gone)
+    await connect(eventId, me, stays)
+    await db.user.update({ where: { id: gone }, data: { deletedAt: new Date() } })
+    expect(await peers(eventId, me)).toEqual([stays])
+  })
 })
 
 describe("the signal", () => {

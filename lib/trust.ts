@@ -182,7 +182,13 @@ export async function ratablePeers(
 
   const [conversations, already, blocks, friends] = await Promise.all([
     db.private_conversations.findMany({
-      where: { origin_event_id: eventId, OR: [{ user1_id: raterId }, { user2_id: raterId }] },
+      // Both parties live: a deleted account is nobody to rate (SCRUM-989); the rater is live by being signed in.
+      where: {
+        origin_event_id: eventId,
+        OR: [{ user1_id: raterId }, { user2_id: raterId }],
+        user1: { deletedAt: null },
+        user2: { deletedAt: null },
+      },
       select: {
         id: true,
         user1_id: true,
