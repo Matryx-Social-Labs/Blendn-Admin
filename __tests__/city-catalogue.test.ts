@@ -58,6 +58,11 @@ describe("cityFor", () => {
     expect(cityFor(catalogue, undefined)).toBeNull()
   })
 
+  it("reads a suffix and a zero-width character as the city", () => {
+    expect(cityFor(catalogue, "Beta, XY")?.slug).toBe("beta")
+    expect(cityFor(catalogue, "Beta\u200b")?.slug).toBe("beta")
+  })
+
   it("does not substring-match: a name is one key", () => {
     expect(cityFor(catalogue, "alph")).toBeNull()
   })
@@ -262,6 +267,13 @@ describe("the /events/cities answer", () => {
     expect(body.defaultCitySlug).toBe("alpha")
     expect(body.device?.citySlug).toBe("alpha")
     expect(body.cities.map((c) => c.slug)).toEqual(["alpha"])
+  })
+
+  it("a live market whose default is only in preview falls back to a live city, and lists it", () => {
+    const mixed = buildCatalogue([market({})], [city({ slug: "p", name: "P", launch_state: "preview", is_default: true }), city({ slug: "l", name: "L", sort: 1 })])
+    const body = citiesResponse({ catalogue: mixed, events: [], places: [], previewMarkets: NONE, wantsPreview: false, deviceCountry: null })
+    expect(body.defaultCitySlug).toBe("l")
+    expect(body.cities.map((c) => c.slug)).toContain("l")
   })
 
   it("does not list any other live city with no rows", () => {

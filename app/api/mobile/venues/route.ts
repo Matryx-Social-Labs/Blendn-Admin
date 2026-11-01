@@ -128,7 +128,8 @@ export async function GET(request: NextRequest) {
      * one filter, written in lib/venue-listing.ts beside the summary's.
      */
     const now = new Date()
-    const upcomingEventFilter = upcomingEventsWhere(typeof viewerAge === "number" ? viewerAge : null, now)
+    const closedCities = await viewerCityRule(authUser.userId, undefined)
+    const upcomingEventFilter = upcomingEventsWhere(typeof viewerAge === "number" ? viewerAge : null, now, closedCities)
 
     const cityRule = await viewerCityRule(authUser.userId, city)
     const where = listedVenuesWhere(cityRule)
@@ -206,7 +207,7 @@ export async function GET(request: NextRequest) {
      * repeats or skips a venue. Disjoint by construction (tonight excludes live).
      */
     // What the open-tonight read depends on besides time: the query's own scope and the viewer's age rule.
-    const tonightScope = JSON.stringify({ search, city: cityRule, types, area, lat, lon, radius, viewerAge, taken })
+    const tonightScope = JSON.stringify({ search, city: cityRule, closedCities, types, area, lat, lon, radius, viewerAge, taken })
     const liveTier = order === "live" && mayCountLive ? await liveVenueIds(where, authUser.userId, now) : new Set<string>()
     const tonightTier =
       order === "live" ? await openTonightVenueIds(where, upcomingEventFilter, now, liveTier, tonightScope) : new Set<string>()

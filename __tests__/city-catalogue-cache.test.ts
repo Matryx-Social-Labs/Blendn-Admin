@@ -13,6 +13,7 @@ jest.mock("@/lib/db", () => ({
 jest.mock("@/lib/logger", () => ({ logger: { error: (...a: unknown[]) => logError(...a) } }))
 
 import { buildCatalogue, cityCatalogue, previewMarketsFor } from "@/lib/cities"
+import { mayOpenCity, viewerCityRule } from "@/lib/browse-scope"
 import { clearCityCatalogue } from "./support/city-catalogue"
 
 const MARKET = { code: "AA", name: "Aland", launch_state: "preview" as const, sort: 0 }
@@ -90,6 +91,16 @@ describe("previewMarketsFor", () => {
     previewers.mockRejectedValueOnce(new Error("down"))
     await expect(previewMarketsFor("u1", preview)).rejects.toThrow("down")
     expect(await previewMarketsFor("u1", preview)).toEqual(new Set(["AA"]))
+  })
+})
+
+describe("a catalogue that cannot be read closes, it does not open", () => {
+  it("viewerCityRule and mayOpenCity both reject, so the route answers 500 and shows nothing", async () => {
+    cities.mockRejectedValueOnce(new Error("down"))
+    await expect(viewerCityRule("u", undefined)).rejects.toThrow("down")
+    clearCityCatalogue()
+    cities.mockRejectedValueOnce(new Error("down"))
+    await expect(mayOpenCity("u", "Alpha")).rejects.toThrow("down")
   })
 })
 

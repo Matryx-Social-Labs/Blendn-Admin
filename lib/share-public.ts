@@ -13,7 +13,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { publicBucketHosts } from "@/lib/tigris"
 import { venueTypeLabel } from "@/lib/venue-types"
-import { mayOpenCity } from "@/lib/browse-scope"
+import { mayOpenCity, viewerCityRule } from "@/lib/browse-scope"
 import { atTheVenue, atTheVenueWhere, eventArea, eventVenue, takeoverSelect } from "@/lib/venue-visibility"
 import { upcomingEventsWhere } from "@/lib/venue-listing"
 
@@ -227,7 +227,7 @@ async function upcomingAt(venueId: string, venueGeofence: unknown, now: Date, ta
   const pageSize = take * AT_VENUE_OVERFETCH
   const where = {
     AND: [
-      upcomingEventsWhere(null, now),
+      upcomingEventsWhere(null, now, await viewerCityRule(null, undefined)),
       hostNotSuspended,
       hostPersonActive,
       atTheVenueWhere(venueGeofence),
@@ -257,7 +257,7 @@ async function upcomingAt(venueId: string, venueGeofence: unknown, now: Date, ta
 /** Null is "unavailable", whatever the reason. A throw is a failed read and is the caller's 503. */
 export async function readShareEvent(eventId: string, now: Date = new Date()) {
   if (!isUuid(eventId)) return null
-  const row = await db.events.findFirst({
+  const found = await db.events.findFirst({
     where: {
       id: eventId,
       deleted_at: null,
@@ -284,10 +284,12 @@ export async function readShareEvent(eventId: string, now: Date = new Date()) {
       geofence: true,
       latitude: true,
       longitude: true,
-      venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true } },
+      venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true, city: true } },
     },
   })
-  if (!row || !(await mayOpenCity(null, row.city))) return null
+  if (!found || !(await mayOpenCity(null, found.city))) return null
+  // An open event is not one link from a closed venue: its page names none.
+  const row = found.venue && !(await mayOpenCity(null, found.venue.city)) ? { ...found, venue: null } : found
 
   // Only a venue the event is confirmed at, and only for a public event: an unlisted page names no place.
   const venue = row.visibility === "public" ? eventVenue(row) : null

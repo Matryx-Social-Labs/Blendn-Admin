@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
     const summary = await venueSummary(
       {
         cityRule: await viewerCityRule(authUser.userId, parsed.data.city),
+        closedCities: await viewerCityRule(authUser.userId, undefined),
         userId: authUser.userId,
         viewerAge: typeof viewerAge === "number" ? viewerAge : null,
         // The venue page's own gate, as the list's `liveNow`: anyone else is counted no live venue.

@@ -1336,11 +1336,20 @@ geocoding; the server does not store it.
 | `comingSoon` | That country is in preview | The coming-soon screen for `citySlug` (the bounds' city first), and record demand |
 | `none` | We are not there, or that country is hidden | Say so and record demand. `citySlug` is null. May browse the top-level `defaultCitySlug`, **never described as near them** |
 
-**Reads by id follow the same gate.** `GET /events/:id`, `GET /venues/:id`,
-`GET /venues/:id/upcoming`, `POST /venues/:id/live` and the places offered by
-`POST /checkins/inside` answer 404 (or leave the row out) for a hidden city, and for
-a preview city unless you preview it; the public share pages answer unavailable
-for both. A row with a NULL or uncatalogued city has nothing to gate on and opens.
+**The gate holds by id too.** Everything under `/events/:id` that goes through
+event access (the page, RSVP, favourite, interest, board, rating), the check-in
+door, `/venues/:id` and its `upcoming`, `live` and `regular`, and the places offered
+by `POST /checkins/inside` answer 404 (or leave the row out) for a hidden city, and
+for a preview city unless you preview it; public share pages answer unavailable.
+Room routes need a live check-in, whose door is gated. **Somebody checked in when a
+city closes keeps the event and its room until the check-in ends.** Upcoming lists
+at a venue leave out an event in a closed city, and an event names no closed venue.
+
+A city is read through one normaliser, on every write: surrounding whitespace,
+zero-width characters and anything after a comma go, so `Toronto, ON` is Toronto.
+A row with a NULL city, or a spelling nothing matches (`Toronto Downtown`), has no
+signal: it opens and lists under Elsewhere. The gate is launch visibility, and an
+unknown city in a served country must not vanish.
 
 `citySlug` is only ever a city in `device.country`. The top-level
 `defaultCitySlug` (a live country's default) is for no device country, or for

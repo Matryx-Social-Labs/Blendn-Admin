@@ -1,3 +1,5 @@
+import { mayOpenCity } from "@/lib/browse-scope"
+import { db } from "@/lib/db"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
@@ -48,6 +50,11 @@ const putSchema = z
   .strict()
   .refine((b) => b.known !== undefined || b.offersMuted !== undefined, { message: "Say what to change" })
 
+async function inClosedCity(userId: string, venueId: string): Promise<boolean> {
+  const venue = await db.venues.findUnique({ where: { id: venueId }, select: { city: true } })
+  return !!venue && !(await mayOpenCity(userId, venue.city))
+}
+
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { venueId } = await params
@@ -55,7 +62,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
     const limited = await rateLimit(request, userLimit("read", "venue-regular", authUser.userId))
     if (limited) return limited
-    if (!isUuid(venueId)) return notFoundResponse("Venue not found")
+    if (!isUuid(venueId) || (await inClosedCity(authUser.userId, venueId))) return notFoundResponse("Venue not found")
 
     const prefs = await regularPrefs(authUser.userId, venueId)
     if (!prefs) return notFoundResponse("Venue not found")
@@ -75,7 +82,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
     const limited = await rateLimit(request, userLimit("write", "venue-regular", authUser.userId))
     if (limited) return limited
-    if (!isUuid(venueId)) return notFoundResponse("Venue not found")
+    if (!isUuid(venueId) || (await inClosedCity(authUser.userId, venueId))) return notFoundResponse("Venue not found")
     const parsed = putSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
 

@@ -105,7 +105,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         organizer_org: { select: { display_name: true } },
         details: true,
         // `eventArea` reads the venue's area, and `eventVenue` its link test.
-        venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true } },
+        venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true, city: true } },
         // What `session` below is computed from. See `eventSession`.
         occurrences: dayOccurrencesSelect,
         categories: {
@@ -160,7 +160,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    const [event, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
+    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
       await Promise.all([
         eventRead,
         // Counted from check-in rows rather than a stored column. Just the
@@ -211,9 +211,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }),
       ])
 
-    if (!event || !(await mayOpenCity(authUser?.userId ?? null, event.city))) {
+    if (!found) {
       return notFoundResponse("Event not found")
     }
+    // An open event is not one link from a closed venue: it just names none.
+    const event = found.venue && !(await mayOpenCity(authUser.userId, found.venue.city)) ? { ...found, venue: null } : found
 
     // Calculate distance if coordinates provided
     let distance: number | null = null

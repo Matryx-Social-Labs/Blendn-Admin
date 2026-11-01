@@ -133,7 +133,7 @@ Historical note, because this paragraph used to say otherwise: `canManageEvent` 
 
 ### Countries and cities are data
 
-`markets` and `cities` are the countries and cities Blendn serves; adding one is rows, and code on this path names none (`__tests__/city-catalogue.test.ts` fails if it does). `lib/cities.ts` loads them (`cityCatalogue`, `globalThis`, 60 s) and `cityFor(catalogue, name)` maps any spelling through `match_names`. `lib/browse-scope.ts` is the one rule for which cities' rows a viewer sees: use `viewerCityRule` + `cityRuleWhere` in anything that lists events or places, and put the rule in any cache key, because it differs for a `market_previewers` member. Reads by id ask `mayOpenCity`: a hidden city, and a preview city for anybody but its previewers, is a 404. Writes by id (RSVP, favourite, check-in) are not gated yet. A city's state is the lower of its own and its market's. `events.city` stays free text.
+`markets` and `cities` are the countries and cities Blendn serves; adding one is rows, and code on this path names none (`__tests__/city-catalogue.test.ts` fails if it does). `lib/cities.ts` loads them (`cityCatalogue`, `globalThis`, 60 s) and `cityFor(catalogue, name)` maps any spelling through `match_names`. `lib/browse-scope.ts` is the one rule for which cities' rows a viewer sees: use `viewerCityRule` + `cityRuleWhere` in anything that lists events or places, and put the rule in any cache key, because it differs for a `market_previewers` member. By id, an event's gate is inside `attendeeEventAccess` and the check-in door (`mayOpenEvent`: somebody with a live check-in keeps their access) and a venue's is `mayOpenCity`: a hidden city, and a preview city for anybody but its previewers, is a 404. `__tests__/city-gate-routes.test.ts` makes a new route under `events/[eventId]` or `venues/[venueId]` say which gate it has. A spelling nothing matches ("Toronto Downtown") stays uncatalogued and is shown under Elsewhere: the gate is launch visibility, and an unknown city in a served country must not vanish. A city's state is the lower of its own and its market's. `events.city` stays free text.
 
 ### Mobile API conventions
 
@@ -201,7 +201,7 @@ crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
 `cities_one_default_per_market`, the seeded `markets` and `cities` rows (on a
 `db push` database the catalogue is empty and every city reads as uncatalogued,
 so nothing is hidden or in preview), the
-`events_city_trimmed` and `venues_city_trimmed` triggers (no padded city, which the city rule could not match), the
+`events_city_clean` and `venues_city_clean` triggers (`clean_city_text`, the database's half of `cityKey`, so a padded or "Toronto, ON" city cannot pass the city rule), the
 system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its
 deletion. On a `db push` database `venueDayFor` fails for want of that user,

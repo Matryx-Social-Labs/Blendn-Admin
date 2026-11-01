@@ -278,6 +278,7 @@ export const ProfileResponseSchema = z
       sign_system: z.enum(["western", "rashi"]).nullable().optional(),
       shows_up_badge: z.boolean().optional(),
       show_badges: z.boolean().optional(),
+      homeCitySlug: z.string().nullable().optional().describe("Your own profile only: where you go out normally, a `slug` from GET /events/cities."),
       tier_b_changed_at: z
         .string()
         .datetime()

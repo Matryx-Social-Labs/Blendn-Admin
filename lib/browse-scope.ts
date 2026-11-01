@@ -39,9 +39,9 @@ export function cityRule(catalogue: Catalogue, city: string | undefined, preview
 }
 
 /** The rule for this viewer and this `city` parameter. */
-export async function viewerCityRule(userId: string, city: string | undefined): Promise<CityRule> {
+export async function viewerCityRule(userId: string | null, city: string | undefined): Promise<CityRule> {
   const catalogue = await cityCatalogue()
-  return cityRule(catalogue, city, await previewMarketsFor(userId, catalogue))
+  return cityRule(catalogue, city, userId ? await previewMarketsFor(userId, catalogue) : new Set<string>())
 }
 
 /**

@@ -6,7 +6,11 @@ import { signAccessToken } from "@/lib/mobile-auth"
 
 import { readShareEvent, readShareVenue } from "@/lib/share-public"
 
-import { db, closeDb, makeUser, makeEvent, testId } from "./helpers"
+import { EventCitiesResponseSchema } from "@/lib/openapi/schemas/event"
+import { ProfileResponseSchema } from "@/lib/openapi/schemas/profile"
+import { cityKey } from "@/lib/address"
+
+import { db, closeDb, makeUser, makeEvent, testId, occurrenceOf } from "./helpers"
 import { clearCityPlaces } from "../support/city-places"
 import { clearCityCatalogue } from "../support/city-catalogue"
 
@@ -26,6 +30,16 @@ const venueRoute = require("@/app/api/mobile/venues/[venueId]/route") as typeof 
 const upcomingRoute = require("@/app/api/mobile/venues/[venueId]/upcoming/route") as typeof import("@/app/api/mobile/venues/[venueId]/upcoming/route")
 const liveRoute = require("@/app/api/mobile/venues/[venueId]/live/route") as typeof import("@/app/api/mobile/venues/[venueId]/live/route")
 const insideRoute = require("@/app/api/mobile/checkins/inside/route") as typeof import("@/app/api/mobile/checkins/inside/route")
+const rsvpRoute = require("@/app/api/mobile/events/[eventId]/rsvp/route") as typeof import("@/app/api/mobile/events/[eventId]/rsvp/route")
+const favoriteRoute = require("@/app/api/mobile/events/[eventId]/favorite/route") as typeof import("@/app/api/mobile/events/[eventId]/favorite/route")
+const interestRoute = require("@/app/api/mobile/events/[eventId]/interest/route") as typeof import("@/app/api/mobile/events/[eventId]/interest/route")
+const checkinRoute = require("@/app/api/mobile/events/[eventId]/checkin/route") as typeof import("@/app/api/mobile/events/[eventId]/checkin/route")
+const peopleRoute = require("@/app/api/mobile/events/[eventId]/people/route") as typeof import("@/app/api/mobile/events/[eventId]/people/route")
+const crewsRoute = require("@/app/api/mobile/events/[eventId]/crews/route") as typeof import("@/app/api/mobile/events/[eventId]/crews/route")
+const chatRoute = require("@/app/api/mobile/events/[eventId]/chat/route") as typeof import("@/app/api/mobile/events/[eventId]/chat/route")
+const matchesRoute = require("@/app/api/mobile/events/[eventId]/matches/route") as typeof import("@/app/api/mobile/events/[eventId]/matches/route")
+const pollRoute = require("@/app/api/mobile/events/[eventId]/polls/[pollId]/route") as typeof import("@/app/api/mobile/events/[eventId]/polls/[pollId]/route")
+const regularRoute = require("@/app/api/mobile/venues/[venueId]/regular/route") as typeof import("@/app/api/mobile/venues/[venueId]/regular/route")
 const accountRoute = require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -83,6 +97,15 @@ const searchIds = async (token: string, city: string | null) => {
   const data = await get(searchRoute, `events/search?q=${WORD}&limit=50${q}`, token)
   return (data.events as { id: string }[]).map((e) => e.id)
 }
+// The list filtered to this file's rows, so a row cannot be off the page: not.toContain means left out.
+const searched = async (token: string) => {
+  const data = await get(eventsRoute, `events?search=${WORD}&limit=${limitSeq++}`, token)
+  return (data.events as { id: string }[]).map((e) => e.id)
+}
+const venuesSearched = async (token: string) => {
+  const data = await get(venuesRoute, `venues?search=${tag}&limit=100`, token)
+  return ((data.venues ?? data) as { id: string }[]).map((v) => v.id)
+}
 const cities = (token: string, headers: Record<string, string> = {}) => get(citiesRoute, "events/cities", token, headers)
 type CityRow = { city: string; slug: string | null; access: string; eventCount: number; placeCount: number; launchState: string | null }
 const findCity = (body: { cities: CityRow[] }, slug: string) => body.cities.find((c) => c.slug === slug)
@@ -115,9 +138,9 @@ beforeAll(async () => {
   bangaloreEvent = await eventIn("Bangalore")
   bengaluruEvent = await eventIn("Bengaluru")
   const venue = async (name: string, city: string) => (await db.venues.create({ data: { name, city } })).id
-  torontoVenue = await venue(testId("tc-to"), "Toronto")
-  hiddenVenue = await venue(testId("tc-hid"), HIDDEN)
-  bangaloreVenue = await venue(testId("tc-blr"), "Bangalore")
+  torontoVenue = await venue(`tc-to-${tag}`, "Toronto")
+  hiddenVenue = await venue(`tc-hid-${tag}`, HIDDEN)
+  bangaloreVenue = await venue(`tc-blr-${tag}`, "Bangalore")
   venues.push(torontoVenue, hiddenVenue, bangaloreVenue)
   clearCityCatalogue()
   clearCityPlaces()
@@ -190,6 +213,8 @@ describe("a preview city", () => {
     expect(await eventIds(plain, "Toronto")).toEqual([])
     expect(await venueIds(plain, "Toronto")).toEqual([])
     expect(await searchIds(plain, "Toronto")).toEqual([])
+    expect(await searched(preview)).toContain(torontoEvent)
+    expect(await searched(plain)).not.toContain(torontoEvent)
     expect(await eventIds(plain, null)).not.toContain(torontoEvent)
     expect(await venueIds(plain, null)).not.toContain(torontoVenue)
     expect(await searchIds(plain, null)).not.toContain(torontoEvent)
@@ -229,6 +254,58 @@ describe("a preview city", () => {
     const b = await get(summaryRoute, "venues/summary?city=Toronto", plain)
     expect(a.total).toBe(1)
     expect(b.total).toBe(0)
+  })
+})
+
+describe("the list's own search box", () => {
+  it.each([[WORD], [WORD.slice(0, 1)]])("keeps the rule on the events list with search=%s (ranked and date paths)", async (q) => {
+    const ask = async (token: string) => ((await get(eventsRoute, `events?search=${encodeURIComponent(q)}&limit=${limitSeq++}`, token)).events as { id: string }[]).map((e) => e.id)
+    if (q === WORD) expect(await ask(preview)).toContain(torontoEvent)
+    expect(await ask(plain)).not.toContain(torontoEvent)
+    expect(await ask(plain)).not.toContain(hiddenEvent)
+  })
+
+  it("keeps the rule on the venues list, with the control on the same page", async () => {
+    const asPlain = await venuesSearched(plain)
+    expect(asPlain).toContain(bangaloreVenue)
+    expect(asPlain).not.toContain(torontoVenue)
+    expect(asPlain).not.toContain(hiddenVenue)
+    expect(await venuesSearched(preview)).toContain(torontoVenue)
+  })
+
+  it("keeps a venue with no city", async () => {
+    const none = await db.venues.create({ data: { name: `tc-none-${tag}`, city: null } })
+    venues.push(none.id)
+    expect(await venuesSearched(plain)).toContain(none.id)
+  })
+
+  it("/events/search's total counts what the page may show", async () => {
+    const ask = async (token: string) => get(searchRoute, `events/search?q=${WORD}&limit=50`, token)
+    const [a, b] = [await ask(plain), await ask(preview)]
+    expect(a.pagination.totalCount).toBe(a.events.length)
+    expect(b.pagination.totalCount).toBeGreaterThan(a.pagination.totalCount)
+  })
+})
+
+describe("the unscoped summary and the tonight tier", () => {
+  it("counts a closed city's venue only for its previewer", async () => {
+    const [a, b] = [await get(summaryRoute, "venues/summary", preview), await get(summaryRoute, "venues/summary", plain)]
+    expect(a.total).toBeGreaterThan(b.total)
+  })
+
+  it("a previewer's open-tonight count does not reach anybody else, in either order", async () => {
+    const hours = [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, open: "00:00", close: "23:59" }))
+    await db.venues.update({ where: { id: torontoVenue }, data: { hours } })
+    const city = "venues/summary?city=Vancouver"
+    await db.venues.create({ data: { name: `tc-van-${tag}`, city: "Vancouver", hours } }).then((v) => venues.push(v.id))
+    const asPlain = await get(summaryRoute, city, plain)
+    const asPreview = await get(summaryRoute, city, preview)
+    expect(asPlain.total).toBe(0)
+    expect(asPlain.openTonightCount ?? 0).toBe(0)
+    expect(asPreview.total).toBe(1)
+    const live = await get(venuesRoute, "venues?limit=100&order=live&city=Toronto", preview)
+    expect(((live.venues ?? live) as { id: string }[]).map((v) => v.id)).toContain(torontoVenue)
+    expect((await get(venuesRoute, "venues?limit=100&order=live&city=Toronto", plain)).venues ?? []).toEqual([])
   })
 })
 
@@ -281,6 +358,31 @@ describe("a city's spelling cannot get a row past the gate", () => {
     expect(await venueIds(plain, null)).not.toContain(created.id)
     const moved = await db.venues.update({ where: { id: created.id }, data: { city: "  Vancouver" } })
     expect(moved.city).toBe("Vancouver")
+  })
+
+  it.each([["Toronto, ON"], ["Toronto\u200b"], ["\ufeffToronto"], ["Toronto\u2003"], ["TORONTO, Ontario, Canada"]])("%j is Toronto, on a direct create", async (spelled) => {
+    const made = await db.events.create({
+      data: { slug: testId("sp"), title: `${WORD} sp`, description: "x", start_time: new Date(Date.now() - 3_600_000), end_time: new Date(Date.now() + 3_600_000), timezone: "UTC", status: "published", organizer_id: organiser, visibility: "public", city: spelled, curated_at: new Date() },
+    })
+    events.push(made.id)
+    expect(cityKey(made.city)).toBe("toronto")
+    expect(await searched(plain)).not.toContain(made.id)
+    expect(await searched(preview)).toContain(made.id)
+  })
+
+  it("the database's normaliser and cityKey agree, so a stored row and the catalogue cannot differ", async () => {
+    const cases = [" a ", "a\t", "\n a", "\u00a0a", "\ufeffa", "\u2003a\u2003", "a\u200b b", "a, b", ", b", "", "Saint John", "São Paulo"]
+    for (const value of cases) {
+      const [{ cleaned }] = await db.$queryRaw<{ cleaned: string }[]>`SELECT clean_city_text(${value}) AS cleaned`
+      expect([value, cleaned.toLowerCase()]).toEqual([value, cityKey(value)])
+    }
+  })
+
+  it("a spelling nothing matches is not closed: it opens under Elsewhere rather than vanishing. The known limit", async () => {
+    const id = await eventIn(`Toronto Downtown${tag}`)
+    expect(await searched(plain)).toContain(id)
+    const row = (await cities(plain, NEW_CLIENT)).cities.find((c: CityRow) => c.city === `Toronto Downtown${tag}`)
+    expect(row).toMatchObject({ slug: null, country: null, access: "full" })
   })
 
   it("a suburb the seed names is the city, so it is closed with it", async () => {
@@ -346,6 +448,107 @@ describe("reads by id", () => {
   })
 })
 
+describe("the event's own sub-routes", () => {
+  const req = (token: string, method = "GET", body?: object) =>
+    new NextRequest("http://localhost/api/mobile/x", {
+      method,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
+  const ctx = (eventId: string) => ({ params: Promise.resolve({ eventId }) })
+
+  it("RSVP, favourite, interest and check-in are 404 in a closed city, and write nothing", async () => {
+    for (const eventId of [torontoEvent, hiddenEvent]) {
+      expect((await rsvpRoute.POST(req(plain, "POST", { status: "going" }), ctx(eventId))).status).toBe(404)
+      expect((await favoriteRoute.POST(req(plain, "POST"), ctx(eventId))).status).toBe(404)
+      expect((await interestRoute.POST(req(plain, "POST", { intent: "friendship" }), ctx(eventId))).status).toBe(404)
+      expect((await checkinRoute.POST(req(plain, "POST", { latitude: 1, longitude: 1 }), ctx(eventId))).status).toBe(404)
+    }
+    const on = { user_id: plainUser, event_id: { in: [torontoEvent, hiddenEvent] } }
+    expect(await db.event_rsvps.count({ where: on })).toBe(0)
+    expect(await db.event_favorites.count({ where: on })).toBe(0)
+    expect(await db.event_check_ins.count({ where: on })).toBe(0)
+  })
+
+  it("past the gate for a previewer: RSVP works", async () => {
+    expect((await rsvpRoute.POST(req(preview, "POST", { status: "going" }), ctx(torontoEvent))).status).toBe(200)
+    await db.event_rsvps.deleteMany({ where: { user_id: previewer, event_id: torontoEvent } })
+  })
+
+  it("the room's reads give a stranger to the room nothing", async () => {
+    const shown = async (res: Response) => {
+      const body = await res.json()
+      return res.status === 200 ? JSON.stringify(body.data) : null
+    }
+    for (const res of [await peopleRoute.GET(req(plain), ctx(torontoEvent)), await chatRoute.GET(req(plain), ctx(torontoEvent)), await matchesRoute.GET(req(plain), ctx(torontoEvent))]) {
+      expect(await shown(res)).toBeNull()
+    }
+    const crews = await crewsRoute.GET(req(plain), ctx(torontoEvent))
+    expect(crews.status).not.toBe(200)
+    void pollRoute
+  })
+
+  it("somebody checked in when the city closes keeps the event and the door; leaving ends it", async () => {
+    const insider = await makeUser(testId("tc_in"))
+    users.push(insider)
+    await db.profiles.create({ data: { id: insider, onboarded: true, date_of_birth: new Date("1990-01-01") } })
+    const { email } = await db.user.findUniqueOrThrow({ where: { id: insider }, select: { email: true } })
+    const token = signAccessToken(insider, email)
+    expect((await eventRoute.GET(new NextRequest("http://localhost/x", { headers: { authorization: `Bearer ${token}` } }), ctx(torontoEvent))).status).toBe(404)
+    const checkIn = await db.event_check_ins.create({
+      data: { event_id: torontoEvent, occurrence_id: await occurrenceOf(torontoEvent), user_id: insider, status: "checked_in", expires_at: new Date(Date.now() + 3_600_000) },
+    })
+    expect((await eventRoute.GET(new NextRequest("http://localhost/x", { headers: { authorization: `Bearer ${token}` } }), ctx(torontoEvent))).status).toBe(200)
+    await db.event_check_ins.update({ where: { id: checkIn.id }, data: { status: "checked_out" } })
+    expect((await eventRoute.GET(new NextRequest("http://localhost/x", { headers: { authorization: `Bearer ${token}` } }), ctx(torontoEvent))).status).toBe(404)
+    await db.event_check_ins.delete({ where: { id: checkIn.id } })
+  })
+
+  it("/venues/:id/regular is 404 in a closed city, read and write", async () => {
+    const vctx = { params: Promise.resolve({ venueId: torontoVenue }) }
+    expect((await regularRoute.GET(req(plain), vctx)).status).toBe(404)
+    expect((await regularRoute.PUT(req(plain, "PUT", { offers: true }), vctx)).status).toBe(404)
+  })
+})
+
+describe("what is nested in an open page", () => {
+  it("an open venue's upcoming lists leave out an event in a closed city", async () => {
+    const eventId = await eventIn("Toronto")
+    const openEvent = await eventIn("Bengaluru")
+    await db.events.updateMany({ where: { id: { in: [eventId, openEvent] } }, data: { venue_id: bangaloreVenue, venue_link_status: "confirmed", start_time: new Date(Date.now() + 86_400_000), end_time: new Date(Date.now() + 90_000_000) } })
+    const ids = async (token: string) => {
+      const body = await get({ GET: (r) => upcomingRoute.GET(r, { params: Promise.resolve({ venueId: bangaloreVenue }) }) }, "x", token)
+      return (body.events as { id: string }[]).map((e) => e.id)
+    }
+    expect(await ids(preview)).toContain(eventId)
+    const asPlain = await ids(plain)
+    expect(asPlain).toContain(openEvent)
+    expect(asPlain).not.toContain(eventId)
+    const detail = await get({ GET: (r) => venueRoute.GET(r, { params: Promise.resolve({ venueId: bangaloreVenue }) }) }, "x", plain)
+    expect(JSON.stringify(detail)).not.toContain(eventId)
+    expect(JSON.stringify(detail)).toContain(openEvent)
+    const shared = await readShareVenue(bangaloreVenue)
+    expect(JSON.stringify(shared)).not.toContain(eventId)
+    expect(JSON.stringify(shared)).toContain(openEvent)
+    await db.events.updateMany({ where: { id: { in: [eventId, openEvent] } }, data: { venue_id: null, venue_link_status: null } })
+  })
+
+  it("an open event names no closed venue, on its page or its share page", async () => {
+    const eventId = await eventIn("Bengaluru")
+    const fence = { type: "circle", lat: 43.6532, lng: -79.3832, radius: 200 }
+    const area = `Qaarea${tag}`
+    await db.venues.update({ where: { id: torontoVenue }, data: { geofence: fence, area } })
+    await db.events.update({ where: { id: eventId }, data: { venue_id: torontoVenue, venue_link_status: "confirmed", latitude: 43.6532, longitude: -79.3832 } })
+    const page = async (token: string) => get({ GET: (r) => eventRoute.GET(r, { params: Promise.resolve({ eventId }) }) }, "x", token)
+    expect(JSON.stringify(await page(preview))).toContain(area)
+    expect(JSON.stringify(await page(plain))).not.toContain(area)
+    const shared = JSON.stringify(await readShareEvent(eventId))
+    expect(shared).not.toContain(torontoVenue)
+    expect(shared).not.toContain(area)
+    await db.events.update({ where: { id: eventId }, data: { venue_id: null, venue_link_status: null } })
+  })
+})
+
 describe("the places a person is standing in", () => {
   it("does not offer a closed city's event or venue; offers them to a previewer", async () => {
     const lat = 43.6532
@@ -393,6 +596,17 @@ describe("where the device is", () => {
     expect(await device(plain, "IN")).toEqual({ country: "IN", access: "full", citySlug: "bengaluru" })
     expect(await device(plain)).toBeNull()
     expect((await cities(plain, NEW_CLIENT)).defaultCitySlug).toBe("bengaluru")
+  })
+})
+
+describe("the API contract", () => {
+  it("the real /events/cities answer is exactly the OpenAPI schema", async () => {
+    const body = await cities(preview, { ...NEW_CLIENT, "x-country": "CA" })
+    expect(EventCitiesResponseSchema.parse(body)).toEqual(body)
+  })
+
+  it("the profile response documents homeCitySlug", () => {
+    expect(Object.keys(ProfileResponseSchema.shape.profile.unwrap().shape)).toContain("homeCitySlug")
   })
 })
 
@@ -456,7 +670,7 @@ describe("homeCitySlug", () => {
     for (const slug of ["atlantis", HIDDEN_SLUG, `qa-hm-${tag}`]) {
       const res = await put(plain, plainUser, { homeCitySlug: slug })
       expect(res.status).toBe(400)
-      expect((await res.json()).code ?? "").toBeDefined()
+      expect((await res.json()).errorCode).toBe("VALIDATION_ERROR")
     }
     expect(await stored(plainUser)).toBe("bengaluru")
   })

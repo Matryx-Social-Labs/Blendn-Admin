@@ -23,7 +23,7 @@ import { tonightHours } from "@/lib/venue-tonight"
  * purpose. When these were allowed to drift on the events side, a card could
  * say "3 upcoming" and then headline an event that was not one of them.
  */
-export function upcomingEventsWhere(viewerAge: number | null, now: Date): Prisma.eventsWhereInput {
+export function upcomingEventsWhere(viewerAge: number | null, now: Date, closedCities: CityRule): Prisma.eventsWhereInput {
   return {
     deleted_at: null,
     // A venue's own live room is not an event at it: counted, it would make
@@ -37,7 +37,7 @@ export function upcomingEventsWhere(viewerAge: number | null, now: Date): Prisma
      * where the takeover reads them. A link the venue's owner disputed is the
      * owner saying the event is not here, so it is no headline here either.
      */
-    AND: [undisputedLinkWhere, ...(typeof viewerAge === "number" ? [mayAttendWhere(viewerAge)] : [])],
+    AND: [undisputedLinkWhere, cityRuleWhere(closedCities), ...(typeof viewerAge === "number" ? [mayAttendWhere(viewerAge)] : [])],
   }
 }
 

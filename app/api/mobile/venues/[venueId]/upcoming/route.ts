@@ -1,4 +1,4 @@
-import { mayOpenCity } from "@/lib/browse-scope"
+import { mayOpenCity, viewerCityRule } from "@/lib/browse-scope"
 import { NextRequest } from "next/server"
 
 import { ageFrom } from "@/lib/age"
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const limit = boundedInt(request.nextUrl.searchParams.get("limit"), PAGE, 1, LIST_PAGE.MAX)
     const viewerAge = ageFrom(person.profile)
-    const page = await venueUpcoming(venueId, new Date(), typeof viewerAge === "number" ? viewerAge : null, {
+    const page = await venueUpcoming(venueId, new Date(), typeof viewerAge === "number" ? viewerAge : null, await viewerCityRule(authUser.userId, undefined), {
       limit,
       cursor: request.nextUrl.searchParams.get("cursor"),
     })

@@ -24,7 +24,7 @@ export interface VenueSummary {
 const shared = globalThis as typeof globalThis & { __blendnVenueSummary?: Map<string, { value: VenueSummary; at: number }> }
 const cache = (shared.__blendnVenueSummary ??= new Map())
 
-type Viewer = { userId: string; viewerAge: number | null; mayCountLive: boolean; cityRule: CityRule }
+type Viewer = { userId: string; viewerAge: number | null; mayCountLive: boolean; cityRule: CityRule; closedCities: CityRule }
 
 /**
  * Counts of places, never of people, for one city: how many venues Places
@@ -43,7 +43,7 @@ type Viewer = { userId: string; viewerAge: number | null; mayCountLive: boolean;
  * a count of venues and says nothing about who.
  */
 export async function venueSummary(viewer: Viewer, now: Date): Promise<VenueSummary> {
-  const key = JSON.stringify({ city: viewer.cityRule, age: viewer.viewerAge, live: viewer.mayCountLive })
+  const key = JSON.stringify({ city: viewer.cityRule, closed: viewer.closedCities, age: viewer.viewerAge, live: viewer.mayCountLive })
   const hit = cache.get(key)
   if (hit && now.getTime() - hit.at < SUMMARY_TTL_MS) return hit.value
 
@@ -60,10 +60,10 @@ export async function venueSummary(viewer: Viewer, now: Date): Promise<VenueSumm
   const live = viewer.mayCountLive ? await liveVenueIds(where, viewer.userId, now) : new Set<string>()
   const tonight = await openTonightVenueIds(
     where,
-    upcomingEventsWhere(viewer.viewerAge, now),
+    upcomingEventsWhere(viewer.viewerAge, now, viewer.closedCities),
     now,
     live,
-    JSON.stringify({ summary: true, city: viewer.cityRule, age: viewer.viewerAge, live: viewer.mayCountLive })
+    JSON.stringify({ summary: true, city: viewer.cityRule, closed: viewer.closedCities, age: viewer.viewerAge, live: viewer.mayCountLive })
   )
   const liveByArea =
     live.size === 0

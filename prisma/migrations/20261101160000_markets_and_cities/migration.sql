@@ -83,7 +83,7 @@ INSERT INTO "cities" ("market_code", "slug", "name", "match_names", "region", "t
   ('IN', 'navi-mumbai', 'Navi Mumbai', ARRAY['navi mumbai'], 'MH', 'Asia/Kolkata', 'live', false, 19.0330, 73.0297, 18.95, 72.95, 19.20, 73.12, NULL, 6),
   ('IN', 'mysuru', 'Mysuru', ARRAY['mysuru','mysore'], 'KA', 'Asia/Kolkata', 'live', false, 12.2958, 76.6394, 12.22, 76.55, 12.40, 76.75, NULL, 7),
   ('IN', 'hubballi', 'Hubballi', ARRAY['hubballi','hubli'], 'KA', 'Asia/Kolkata', 'live', false, 15.3647, 75.1240, 15.25, 75.03, 15.50, 75.25, NULL, 8),
-  ('CA', 'toronto', 'Toronto', ARRAY['toronto','north york','scarborough','etobicoke','east york','york','mississauga','brampton','vaughan','markham','richmond hill'], 'ON', 'America/Toronto', 'preview', true, 43.6532, -79.3832, 43.58, -79.64, 43.86, -79.11, 19, 0),
-  ('CA', 'vancouver', 'Vancouver', ARRAY['vancouver','north vancouver','west vancouver','burnaby','richmond','surrey','coquitlam','new westminster'], 'BC', 'America/Vancouver', 'preview', false, 49.2827, -123.1207, 49.20, -123.27, 49.32, -123.02, 19, 1);
+  ('CA', 'toronto', 'Toronto', ARRAY['toronto','north york','scarborough','etobicoke','east york','mississauga','brampton','vaughan','markham','richmond hill'], 'ON', 'America/Toronto', 'preview', true, 43.6532, -79.3832, 43.58, -79.64, 43.86, -79.11, 19, 0),
+  ('CA', 'vancouver', 'Vancouver', ARRAY['vancouver','north vancouver','west vancouver','burnaby','coquitlam','new westminster'], 'BC', 'America/Vancouver', 'preview', false, 49.2827, -123.1207, 49.20, -123.27, 49.32, -123.02, 19, 1);
 
 COMMIT;
