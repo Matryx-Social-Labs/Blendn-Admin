@@ -462,6 +462,7 @@ All chat messages pass through an **automated multi-layer moderation pipeline** 
 |-----------|-----------|-----------------|
 | **User account** | Until deletion requested | Soft delete (deleted_at timestamp) |
 | **Registration details of a deleted account** (name, email, phone, date of birth, sign-up method) | 180 days after deletion (IT Rules 2021 r.3(1)(h)) | Hard delete by the retention sweeper; see `docs/RETENTION.md` |
+| **Chat images of a deleted account in removed or reported messages** | 180 days after deletion; an image whose report was filed before the deletion and is still pending is kept until that report is decided, and at most 15 days past the 180 (IT Rules 2021 r.3(2)(a)(i)) | Hard delete from storage by the retention sweeper; the account's other chat images go at deletion (SCRUM-428, SCRUM-955) |
 | **Chat messages** | Indefinite | Soft delete; moderation-hidden messages retained for review |
 | **Private messages** | Until conversation deleted | Hard delete (cascade) |
 | **Event check-ins** (incl. GPS) | Indefinite | Retained for event analytics |

@@ -348,9 +348,9 @@
       "date": "2026-09-25"
     },
     "trust.itest.ts": {
-      "guards": "ratablePeers offers only mutually-connected people after the event, drops those already rated, and drops anyone blocked either way, with the pair shown ratable before the block (SCRUM-304); safety-writes.itest.ts pins the POST refusing a blocked person's rating (403, no rating and no harassment report written)",
-      "mutation": "M1 (2026-09-25): `&& !blocked.has(id)` removed from ratablePeers' filter in lib/trust.ts.",
-      "observed": "M1: 2 failing of 15 across trust.itest.ts and safety-writes.itest.ts (the blocked person still sees and rates the blocker; the harassment rating is accepted, 200).",
+      "guards": "ratablePeers offers only mutually-connected people after the event, drops those already rated, and drops anyone blocked either way, with the pair shown ratable before the block (SCRUM-304); safety-writes.itest.ts pins the POST refusing a blocked person's rating (403, no rating and no harassment report written); and leaves out a person who has deleted their account (SCRUM-989)",
+      "mutation": "M1 (2026-09-25): `&& !blocked.has(id)` removed from ratablePeers' filter in lib/trust.ts. M989a (2026-11-01): the user1/user2 deletedAt: null filter removed from ratablePeers.",
+      "observed": "M1: 2 failing of 15 across trust.itest.ts and safety-writes.itest.ts (the blocked person still sees and rates the blocker; the harassment rating is accepted, 200). M989a: 1 of 11 failing (the deleted account was offered); restored, 11/11.",
       "date": "2026-09-25"
     },
     "deleted-event-room-is-closed.itest.ts": {
@@ -2528,6 +2528,18 @@
       "guards": "SCRUM-890/891/943/472 (owner rows A-5..A-7, A-17): a quote that cannot be shown is no row; the live snapshot floors a complaint's count and its alerts say no number; bars move every 3 raters; staff are out of matching by their latest check-in.",
       "mutation": "M472a rating-batches orders newest first. M891a night-people drops the staff check. M890a the live snapshot sends exact categories. M890b the digest keeps every row.",
       "observed": "M472a 3 failing (bars, venue, shared read). M891a 'has no deck' fails. M890a 'lists it with no number' fails. M890b 'drops the row' fails.",
+      "date": "2026-11-01"
+    },
+    "safety-writes.itest.ts": {
+      "guards": "SCRUM-980: a harassment peer rating's note reaches the user_reports row a moderator reads (the form says 'Only we read this').",
+      "mutation": "M980a app/api/mobile/events/[eventId]/peer-ratings/route.ts the description back to the fixed 'Reported via peer rating after event <id>.' with no note.",
+      "observed": "M980a: 1 of 6 failing (description held no note). Restored; 6/6.",
+      "date": "2026-11-01"
+    },
+    "venue-amenities.itest.ts": {
+      "guards": "SCRUM-979: venue_amenities is written by setVenueAmenities: the owner's organisation or an admin only (not the org that only added an unclaimed venue, not another owner), active vocabulary only, the list replaces the old one, audited in the same transaction.",
+      "mutation": "M979a lib/venue-actions.ts the owner-or-admin gate removed. M979b the is_active filter on the vocabulary count removed.",
+      "observed": "M979a: 1 of 4 failing (the adding org wrote an unclaimed venue's list). M979b: 1 of 4 failing (a retired amenity was written). Restored; 4/4.",
       "date": "2026-11-01"
     },
     "deletion-reauth.itest.ts": {

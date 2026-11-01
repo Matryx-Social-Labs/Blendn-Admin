@@ -161,7 +161,7 @@ describe("the organiser asserts; nothing is inherited or assumed", () => {
   })
 })
 
-describe("the venue layer is read-only until owners can curate it", () => {
+describe("the venue layer has one writer, gated to the owner's organisation or an admin (SCRUM-979)", () => {
   const sources = (dir: string): string[] =>
     readdirSync(join(__dirname, "..", dir), { withFileTypes: true }).flatMap((e) => {
       const rel = join(dir, e.name)
@@ -174,11 +174,18 @@ describe("the venue layer is read-only until owners can curate it", () => {
     expect(model.slice(0, model.indexOf("\n}"))).toContain("onDelete: Restrict")
   })
 
-  it("has no writer: `venuePermissions` has to land with one, or any venue owner can edit any building's list", () => {
+  it("is written only by setVenueAmenities, which takes the venue's own write check and refuses a non-owner org", () => {
     const writers = ["app", "lib", "scripts"]
       .flatMap(sources)
       .filter((f) => /\bvenue_amenities\.(?:create|createMany|upsert|update|updateMany|delete|deleteMany)\(|(?:INSERT INTO|UPDATE|DELETE FROM) "?venue_amenities\b/.test(readFileSync(join(__dirname, "..", f), "utf8")))
-    expect(writers).toEqual([])
+    expect(writers).toEqual([join("lib", "venue-actions.ts")])
+    const src = readFileSync(join(__dirname, "..", "lib", "venue-actions.ts"), "utf8")
+    const fn = src.slice(src.indexOf("export async function setVenueAmenities"))
+    const body = fn.slice(0, fn.indexOf("\n}\n"))
+    // Without these, any venue owner (or the org that only added a venue) could edit any building's list.
+    expect(body).toContain("await venueForWrite(id, user)")
+    expect(body).toMatch(/user\.role !== "app_admin" && !writable\.owner_org_id/)
+    expect(body).toContain("is_active: true")
   })
 })
 
