@@ -8,6 +8,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
+import { viewerCityRule } from "@/lib/browse-scope"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -47,8 +48,9 @@ export async function GET(request: NextRequest) {
     })
     const viewerAge = ageFrom(viewer)
     const summary = await venueSummary(
-      parsed.data.city,
       {
+        cityRule: await viewerCityRule(authUser.userId, parsed.data.city),
+        closedCities: await viewerCityRule(authUser.userId, undefined),
         userId: authUser.userId,
         viewerAge: typeof viewerAge === "number" ? viewerAge : null,
         // The venue page's own gate, as the list's `liveNow`: anyone else is counted no live venue.

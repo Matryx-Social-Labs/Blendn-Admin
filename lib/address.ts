@@ -139,10 +139,13 @@ export function extractAddress(
  * `"Bengaluru"` are the same place and must group as one in the picker. It
  * deliberately does **not** map aliases — "Bangalore" and "Bengaluru" stay
  * distinct, because guessing at synonyms silently merges places that are
- * genuinely different (there are two Springfields in most countries).
+ * genuinely different (there are two Springfields in most countries). Aliases
+ * are data: `cities.match_names`, read through `cityFor` in lib/cities.ts.
  */
 export function cityKey(city: string | null | undefined): string {
-  return city?.trim().toLowerCase() ?? ""
+  // The one normaliser: the database's `clean_city_text` does the same to every written row
+  // (pinned by travel-catalogue.itest.ts), so "Toronto, ON" is Toronto whoever typed it.
+  return city?.replace(/[\u200B-\u200D\uFEFF]/g, "").split(",")[0].trim().toLowerCase() ?? ""
 }
 
 export interface CityCount {

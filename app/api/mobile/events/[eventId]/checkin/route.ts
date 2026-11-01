@@ -1,3 +1,4 @@
+import { mayOpenEvent } from "@/lib/event-access"
 import { closedDoorMessage } from "@/lib/checkin-messages"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * id here, it does not exist: it is `unlisted`, not `private`, and would
      * otherwise pass every check below.
      */
-    if (!event || event.kind === "venue_day") {
+    if (!event || event.kind === "venue_day" || !(await mayOpenEvent(authUser.userId, eventId, event.city))) {
       return notFoundResponse("Event not found")
     }
 

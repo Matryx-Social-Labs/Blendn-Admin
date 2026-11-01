@@ -22,6 +22,7 @@ import { blockedEitherWay } from "@/lib/conversations"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { identityForRef, nonEventRoomCard } from "@/lib/identity"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
+import { citySlugFor, cityCatalogue } from "@/lib/cities"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { userIdFromRef } from "@/lib/room-handle"
@@ -238,7 +239,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * is one name long.
      */
     // `tier_b_changes` is the cooldown's ledger (lib/tier-b.ts), withheld with the birth date.
-    const { date_of_birth: _dob, tier_b_changes: _ledger, ...selfProfileFields } = {
+    const { date_of_birth: _dob, tier_b_changes: _ledger, home_city_id: homeCityId, ...selfProfileFields } = {
       ...p,
       age: profileAge,
       // The editor's prefill, never stored until they pick it (lib/about-you.ts).
@@ -280,7 +281,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
              * Self still gets everything else, including the free text and the
              * dating fields the public branch withholds.
              */
-            ...(isSelf ? selfProfileFields : publicProfileFields),
+            ...(isSelf ? { ...selfProfileFields, homeCitySlug: citySlugFor(await cityCatalogue(), homeCityId) } : publicProfileFields),
             location: normalizedLocation,
             ...(badges && { badges }),
             ...(earnedBadges && { earned_badges: earnedBadges }),
@@ -332,10 +333,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       goals, looking_for, onboarded, reveal_by_default,
       intent_default, gender, interested_in, work_field, expertise, show_orientation,
       push_enabled, show_online, read_receipts, share_location, friends_see_me_in_rooms,
-      languages, home_state, sun_sign, sign_system, shows_up_badge, show_badges,
+      languages, home_state, sun_sign, sign_system, shows_up_badge, show_badges, homeCitySlug,
     } = parsed.data
     const signRefusal = signPairRefusal(parsed.data)
     if (signRefusal) return errorResponse(signRefusal, 400, "VALIDATION_ERROR")
+
+    // A preview city is a fine home: someone in a city we have not opened yet still lives there.
+    const catalogue = await cityCatalogue()
+    const homeCity = homeCitySlug ? catalogue.cities.find((c) => c.slug === homeCitySlug && c.launchState !== "hidden") : null
+    if (homeCitySlug && !homeCity) return errorResponse("That city isn’t available.", 400, "VALIDATION_ERROR")
+    const homeCityData = homeCitySlug !== undefined ? { home_city_id: homeCity?.id ?? null } : {}
 
     // What strangers read on the card is screened before anything is written (App Store 1.2).
     // `location` too: the free text the room card shows.
@@ -749,6 +756,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         looking_for: looking_for || [],
         onboarded: onboarded ?? false,
         ...(reveal_by_default !== undefined && { reveal_by_default }),
+        ...homeCityData,
         // Conditional for the same reason as the four switches below: absent
         // must mean "unset", not "cleared". Writing `[]` here would look
         // identical to someone deliberately choosing nothing.
@@ -807,6 +815,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         // A suggestion the room re-asks by way of a tap — check-in still
         // creates the row with `revealed: false` whatever this says.
         ...(reveal_by_default !== undefined && { reveal_by_default }),
+        ...homeCityData,
         ...(intent_default !== undefined && { intent_default }),
         // Only when an age change has invalidated a tag they already had.
         ...(stripsDating && { intent_default: demotedIntents! }),
@@ -886,7 +895,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
        *
        * It was caught by making a real PUT to staging and reading the body.
        */
-      profile: profileForSelfResponse(user!.profile),
+      profile: { ...profileForSelfResponse(user!.profile), homeCitySlug: citySlugFor(catalogue, user!.profile?.home_city_id) },
       interests: user!.user_interests.map((ui) => ({
         id: ui.category.id,
         name: ui.category.name,

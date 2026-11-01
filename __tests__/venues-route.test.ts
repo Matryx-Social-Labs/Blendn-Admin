@@ -1,3 +1,4 @@
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 /*
  * Hotspots — the venue feed behind the Pulse/Hotspots switch.
  *

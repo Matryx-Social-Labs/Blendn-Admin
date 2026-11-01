@@ -71,6 +71,8 @@ export const updateProfileSchema = z.object({
     })
     .optional(),
   location: z.string().max(200).optional().nullable(),
+  // Where the person goes out normally, from `GET /events/cities`; null clears it. City level, the owner's only.
+  homeCitySlug: z.string().min(1).max(64).optional().nullable(),
   bio: z.string().max(500).optional().nullable(),
   occupation: z.string().max(100).optional().nullable(),
   education: z.string().max(100).optional().nullable(),

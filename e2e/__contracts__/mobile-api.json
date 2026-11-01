@@ -65,7 +65,10 @@
       "success"
     ],
     "data": [
-      "cities"
+      "cities",
+      "countries",
+      "defaultCitySlug",
+      "device"
     ]
   },
   "/api/mobile/events/search?q=sessions": {
@@ -551,6 +554,7 @@
         "friends_see_me_in_rooms",
         "gender",
         "goals",
+        "homeCitySlug",
         "home_state",
         "id",
         "intent_default",

@@ -1,3 +1,4 @@
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 /*
  * GET /venues made eight statements in a row (profile, takeover check, page,
  * count, live guests, behind a rate limit). Each is a Singapore round trip, so

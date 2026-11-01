@@ -263,8 +263,14 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Cities you can browse",
   description:
-    "The cities that have upcoming events or listed places: event cities first, busiest first, then cities with places only, by place count. Feeds the city picker: the client shows this immediately rather than reverse-geocoding on first launch, so a cold install with no location still has somewhere to browse. A city listed with N events opens with N events — the counts apply the same visibility and age rules as GET /api/mobile/events.",
+    "The cities that have upcoming events or listed places: event cities first, busiest first, then cities with places only, by place count. Feeds the city picker: the client shows this immediately rather than reverse-geocoding on first launch, so a cold install with no location still has somewhere to browse. A city listed with N events opens with N events — the counts apply the same visibility and age rules as GET /api/mobile/events. Spellings that mean one catalogued city are one row. A hidden city is never listed. A preview city is listed as `access: comingSoon`, at zero, only for a client declaring `X-Client-Features: travel1`; its previewers get it open on either client. An uncatalogued city with rows is listed with null `slug` and `country`. Send `X-Country` (the device's ISO country, from reverse geocoding) to get `device`, which says whether we serve the person's country and names only a city in it.",
   security: bearerAuth,
+  request: {
+    headers: z.object({
+      "X-Client-Features": z.string().optional().openapi({ description: "Comma-separated. `travel1`: this build can show a coming-soon city." }),
+      "X-Country": z.string().optional().openapi({ description: "The device's ISO 3166-1 alpha-2 country. Not stored." }),
+    }),
+  },
   responses: {
     200: {
       description: "Cities with event counts",

@@ -1,3 +1,4 @@
+import { cityRuleWhere, type CityRule } from "./browse-scope"
 import { db } from "./db"
 import { realEventsWhere } from "./event-kind"
 import { decodeKeyset, encodeKeyset, type Keyset } from "./pagination"
@@ -11,7 +12,7 @@ export const UPCOMING_LIMIT = 5
  * (`GET /venues`), so the page, the card and the full list agree on what is
  * coming. Never the venue's own live rooms (F3): they are not events at it.
  */
-function upcomingWhere(venueId: string, now: Date, viewerAge: number | null | undefined) {
+function upcomingWhere(venueId: string, now: Date, viewerAge: number | null | undefined, closedCities: CityRule) {
   return {
     venue_id: venueId,
     deleted_at: null,
@@ -19,7 +20,7 @@ function upcomingWhere(venueId: string, now: Date, viewerAge: number | null | un
     status: "published" as const,
     visibility: "public" as const,
     end_time: { gte: now },
-    AND: [undisputedLinkWhere, ...(typeof viewerAge === "number" ? [mayAttendWhere(viewerAge)] : [])],
+    AND: [undisputedLinkWhere, cityRuleWhere(closedCities), ...(typeof viewerAge === "number" ? [mayAttendWhere(viewerAge)] : [])],
   }
 }
 
@@ -50,13 +51,14 @@ export async function venueUpcoming(
   venueId: string,
   now: Date,
   viewerAge: number | null | undefined,
+  closedCities: CityRule,
   opts: { limit?: number; cursor?: string | null } = {}
 ): Promise<UpcomingPage | "bad_cursor"> {
   const limit = opts.limit ?? UPCOMING_LIMIT
   const after = opts.cursor ? decodeKeyset(opts.cursor) : null
   if (opts.cursor && !after) return "bad_cursor"
 
-  const base = upcomingWhere(venueId, now, viewerAge)
+  const base = upcomingWhere(venueId, now, viewerAge, closedCities)
   const [total, rows] = await Promise.all([
     db.events.count({ where: base }),
     db.events.findMany({

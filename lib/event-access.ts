@@ -1,5 +1,6 @@
 // Relative imports — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
+import { mayOpenCity } from "@/lib/browse-scope"
 import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal } from "./age"
 import { ErrorCode, errorResponse, notFoundResponse } from "./api-response"
 import { db } from "./db"
@@ -53,6 +54,19 @@ export type EventAccessDenial =
  * an adult age on file. It is asked before the event's own age rule because it
  * is about the person, not the event, and it holds everywhere.
  */
+/**
+ * The launch gate for one event: its city is open to this person, or they are
+ * inside it right now. Somebody checked in when a city closes keeps the room
+ * until their check-in ends; only then does the event read as not found.
+ */
+export async function mayOpenEvent(userId: string, eventId: string, city: string | null): Promise<boolean> {
+  if (await mayOpenCity(userId, city)) return true
+  const inside = await db.event_check_ins.count({
+    where: { event_id: eventId, user_id: userId, status: "checked_in", expires_at: { gt: new Date() } },
+  })
+  return inside > 0
+}
+
 export async function attendeeEventAccess(
   userId: string,
   eventId: string,
@@ -60,7 +74,7 @@ export async function attendeeEventAccess(
 ): Promise<EventAccessDenial | null> {
   const event = await db.events.findUnique({
     where: { id: eventId, deleted_at: null },
-    select: { status: true, visibility: true, min_age: true, kind: true, pre_suspension_status: true, organizer_id: true, organizer_org_id: true },
+    select: { status: true, visibility: true, min_age: true, kind: true, pre_suspension_status: true, organizer_id: true, organizer_org_id: true, city: true },
   })
   /*
    * A venue day is not an event anybody opens, RSVPs to, saves or reads the
@@ -74,6 +88,7 @@ export async function attendeeEventAccess(
   if (event.visibility === "private" && !(await canJoinEvent(userId, eventId))) {
     return { kind: "not_found" }
   }
+  if (!(await mayOpenEvent(userId, eventId, event.city))) return { kind: "not_found" }
   if (event.min_age == null && intent === "view") return null
 
   const profile = await db.profiles.findUnique({

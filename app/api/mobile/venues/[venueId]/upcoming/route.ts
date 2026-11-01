@@ -1,3 +1,4 @@
+import { mayOpenCity, viewerCityRule } from "@/lib/browse-scope"
 import { NextRequest } from "next/server"
 
 import { ageFrom } from "@/lib/age"
@@ -48,16 +49,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const venue = await db.venues.findFirst({
       where: { id: venueId, deleted_at: null, status: "active" },
-      select: { id: true },
+      select: { id: true, city: true },
     })
-    if (!venue) return notFoundResponse("Venue not found")
+    if (!venue || !(await mayOpenCity(authUser.userId, venue.city))) return notFoundResponse("Venue not found")
 
     const person = await personAtTheDoor(authUser.userId, null)
     if ("refusal" in person) return person.refusal
 
     const limit = boundedInt(request.nextUrl.searchParams.get("limit"), PAGE, 1, LIST_PAGE.MAX)
     const viewerAge = ageFrom(person.profile)
-    const page = await venueUpcoming(venueId, new Date(), typeof viewerAge === "number" ? viewerAge : null, {
+    const page = await venueUpcoming(venueId, new Date(), typeof viewerAge === "number" ? viewerAge : null, await viewerCityRule(authUser.userId, undefined), {
       limit,
       cursor: request.nextUrl.searchParams.get("cursor"),
     })

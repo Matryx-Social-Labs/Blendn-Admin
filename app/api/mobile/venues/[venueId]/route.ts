@@ -1,3 +1,4 @@
+import { cityRuleWhere, mayOpenCity, viewerCityRule } from "@/lib/browse-scope"
 import { NextRequest } from "next/server"
 
 import { ageFrom } from "@/lib/age"
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         },
       },
     })
-    if (!venue) return notFoundResponse("Venue not found")
+    if (!venue || !(await mayOpenCity(userId, venue.city))) return notFoundResponse("Venue not found")
 
     // A live room is somewhere to take part; the same 18+ gate as its door.
     const person = await personAtTheDoor(userId, null)
@@ -99,6 +100,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const viewerAge = ageFrom(person.profile)
     const dayEnd = venueDayBounds(venue.timezone, venue.day_reset_hour, now).end
 
+    const closedCities = await viewerCityRule(userId, undefined)
     const [takeover, tonight, mine, today, upcomingPage] = await Promise.all([
       eventTakingOver(venueId, now, { viewerAge }),
       eventTakingOver(venueId, now, { viewerAge, leadMinutes: (dayEnd.getTime() - now.getTime()) / 60_000 }),
@@ -107,7 +109,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         select: { event_id: true, expires_at: true, stay: true, stay_until: true, kind: true },
       }),
       venueDayAt(venueId, now),
-      venueUpcoming(venueId, now, typeof viewerAge === "number" ? viewerAge : null),
+      venueUpcoming(venueId, now, typeof viewerAge === "number" ? viewerAge : null, closedCities),
     ])
     // No cursor was passed, so never `bad_cursor`.
     const upcoming = upcomingPage as Exclude<typeof upcomingPage, "bad_cursor">
@@ -115,7 +117,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       mine ? db.chat_groups.findUnique({ where: { event_id: mine.event_id }, select: { id: true } }) : null,
       tonight
         ? db.events.findUnique({
-            where: { id: tonight.id },
+            where: { id: tonight.id, AND: [cityRuleWhere(closedCities)] },
             select: { id: true, title: true, slug: true, cover_image_url: true, start_time: true, end_time: true, timezone: true },
           })
         : null,

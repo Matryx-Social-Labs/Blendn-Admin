@@ -1,3 +1,4 @@
+import { cityRuleWhere, viewerCityRule } from "@/lib/browse-scope"
 import { ageFrom, isAdult, mayParticipate, minAgeRefusal } from "@/lib/age"
 import { db } from "@/lib/db"
 import { eventDisplayTitle, inRoomWhere, realEventsWhere, venueDaysWhere } from "@/lib/event-kind"
@@ -133,7 +134,9 @@ export async function placesInside(
   if (vague || !mayParticipate(profile)) return { places: [], total: 0, current }
   const age = ageFrom(profile)
 
-  const [events, venues] = await Promise.all([eventsInside(userId, point, accuracy, age, now), isAdult(age) ? venuesInside(point, accuracy, age, now) : []])
+  // A closed city's rows are not offered: the gate the lists and the by-id reads use.
+  const cityWhere = cityRuleWhere(await viewerCityRule(userId, undefined))
+  const [events, venues] = await Promise.all([eventsInside(userId, cityWhere, point, accuracy, age, now), isAdult(age) ? venuesInside(cityWhere, point, accuracy, age, now) : []])
   // Where you are now: an event by its id; a venue by the venue your live day is at.
   const here = (p: Ranked) =>
     p.kind === "venue" ? current?.kind === "venue_day" && current.venueId === p.venueId : p.eventId === current?.eventId
@@ -154,7 +157,9 @@ export async function placesInside(
   }
 }
 
-async function eventsInside(userId: string, point: LatLng, accuracy: number | undefined, age: number | null, now: Date): Promise<Ranked[]> {
+type CityWhere = ReturnType<typeof cityRuleWhere>
+
+async function eventsInside(userId: string, cityWhere: CityWhere, point: LatLng, accuracy: number | undefined, age: number | null, now: Date): Promise<Ranked[]> {
   const lead = new Date(now.getTime() + CHECK_IN_LEAD_MINUTES * 60_000)
   const rows = await db.events.findMany({
     where: {
@@ -166,6 +171,7 @@ async function eventsInside(userId: string, point: LatLng, accuracy: number | un
       // A polygon-only event may have no pin: kept for the fence test rather than lost to the box.
       OR: [box(point), { latitude: null }, { longitude: null }],
       occurrences: { some: { start_time: { lte: lead }, end_time: { gte: now } } },
+      AND: [cityWhere],
     },
     take: CANDIDATE_CEILING,
     select: {
@@ -220,9 +226,9 @@ async function eventsInside(userId: string, point: LatLng, accuracy: number | un
   return out
 }
 
-async function venuesInside(point: LatLng, accuracy: number | undefined, age: number | null, now: Date): Promise<Ranked[]> {
+async function venuesInside(cityWhere: CityWhere, point: LatLng, accuracy: number | undefined, age: number | null, now: Date): Promise<Ranked[]> {
   const venues = await db.venues.findMany({
-    where: { deleted_at: null, status: "active", ...box(point) },
+    where: { deleted_at: null, status: "active", ...box(point), AND: [cityWhere] },
     take: CANDIDATE_CEILING,
     select: { id: true, name: true, geofence: true },
   })

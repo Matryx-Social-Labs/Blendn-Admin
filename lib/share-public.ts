@@ -13,6 +13,7 @@ import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { publicBucketHosts } from "@/lib/tigris"
 import { venueTypeLabel } from "@/lib/venue-types"
+import { mayOpenCity, viewerCityRule } from "@/lib/browse-scope"
 import { atTheVenue, atTheVenueWhere, eventArea, eventVenue, takeoverSelect } from "@/lib/venue-visibility"
 import { upcomingEventsWhere } from "@/lib/venue-listing"
 
@@ -226,7 +227,7 @@ async function upcomingAt(venueId: string, venueGeofence: unknown, now: Date, ta
   const pageSize = take * AT_VENUE_OVERFETCH
   const where = {
     AND: [
-      upcomingEventsWhere(null, now),
+      upcomingEventsWhere(null, now, await viewerCityRule(null, undefined)),
       hostNotSuspended,
       hostPersonActive,
       atTheVenueWhere(venueGeofence),
@@ -256,7 +257,7 @@ async function upcomingAt(venueId: string, venueGeofence: unknown, now: Date, ta
 /** Null is "unavailable", whatever the reason. A throw is a failed read and is the caller's 503. */
 export async function readShareEvent(eventId: string, now: Date = new Date()) {
   if (!isUuid(eventId)) return null
-  const row = await db.events.findFirst({
+  const found = await db.events.findFirst({
     where: {
       id: eventId,
       deleted_at: null,
@@ -283,10 +284,12 @@ export async function readShareEvent(eventId: string, now: Date = new Date()) {
       geofence: true,
       latitude: true,
       longitude: true,
-      venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true } },
+      venue: { select: { id: true, name: true, status: true, deleted_at: true, geofence: true, area: true, city: true } },
     },
   })
-  if (!row) return null
+  if (!found || !(await mayOpenCity(null, found.city))) return null
+  // An open event is not one link from a closed venue: its page names none.
+  const row = found.venue && !(await mayOpenCity(null, found.venue.city)) ? { ...found, venue: null } : found
 
   // Only a venue the event is confirmed at, and only for a public event: an unlisted page names no place.
   const venue = row.visibility === "public" ? eventVenue(row) : null
@@ -301,7 +304,7 @@ export async function readShareVenue(venueId: string, now: Date = new Date()) {
     where: { id: venueId, deleted_at: null, status: "active" },
     select: { id: true, name: true, venue_type: true, area: true, address: true, city: true, owner_org_id: true, open_on_blendn: true, geofence: true },
   })
-  if (!venue) return null
+  if (!venue || !(await mayOpenCity(null, venue.city))) return null
   const upcoming = await upcomingAt(venue.id, venue.geofence, now, VENUE_UPCOMING)
   // Claimed, and its owner turned Open on Blendn off (`openOnBlendnWhere`'s other half).
   const takenOffBlendn = venue.owner_org_id !== null && !venue.open_on_blendn
