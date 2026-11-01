@@ -12,6 +12,7 @@ import { MIN_CELL, RATING_BATCH, type RatingGroupRow } from "./disclosure"
  * that; add it if ratings ever become editable in the app's flow past the first submit.
  */
 export async function publishedRatingGroups(events: Prisma.eventsWhereInput): Promise<RatingGroupRow[]> {
+  // any-kind: the caller's scope decides which events; a venue day that is rated is rated.
   const rated = await db.events.findMany({ where: { ...events, ratings: { some: {} } }, select: { id: true } })
   if (rated.length === 0) return []
   const rows = await db.$queryRaw<{ event_id: string; rating: number; n: number }[]>`

@@ -121,26 +121,21 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      */
     const src = code("lib/feedback-digest.ts")
     expect(src).toMatch(
-      /const quotable = mayQuote\(\{\s*contributors: categoryContributors\.get\(row\.category\)\?\.size \?\? 0,\s*population,\s*\}\)/
+      /if \(!mayQuote\(\{\s*contributors: categoryContributors\.get\(row\.category\)\?\.size \?\? 0,\s*population,?\s*\}\)\) return \[\]/
     )
   })
 
-  it("drops the timestamp with the text", () => {
-    /*
-     * "22:14" plus a room-stable pseudonym is the same identification by
-     * another route, so suppressing the text alone would have left the hole
-     * open.
-     */
+  it("drops the whole row with the text: its mood in feed order still points somewhere (SCRUM-890)", () => {
     const src = code("lib/feedback-digest.ts")
-    expect(src).toMatch(/at: quotable \? row\.message\.created_at\.toISOString\(\) : null/)
-    expect(src).toMatch(/text: quotable \? row\.message\.content : null/)
-    expect(src).toMatch(/pseudonym: quotable \?/)
+    expect(src).not.toMatch(/suppressed: !quotable/)
+    expect(src).toMatch(/feedback\.flatMap/)
   })
 
   it("suppresses the category count without hiding the category", () => {
     // An organiser still needs to know a safety concern was raised.
-    const src = code("lib/feedback-digest.ts")
-    // In lib/feedback-digest.ts since step 15.
+    // Shared with the live snapshot since SCRUM-890.
+    expect(code("lib/feedback-digest.ts")).toMatch(/discloseCategories\(categoryCounts, categoryContributors, population\)/)
+    const src = code("lib/disclosure.ts")
     expect(src).toMatch(/count: disclosure\.value/)
     expect(src).toMatch(/suppressed: disclosure\.suppressed/)
   })
