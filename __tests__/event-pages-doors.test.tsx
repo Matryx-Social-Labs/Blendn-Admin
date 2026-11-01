@@ -149,6 +149,32 @@ describe("the Feedback tab's page", () => {
     expect(await door(feedback())).toBe("redirect /dashboard/events/e1")
   })
 
+  // SCRUM-993: ten ratings in the DB, no classified message, and the page said
+  // only "No feedback was captured" — the stars sat behind the message count.
+  it("shows the stars when people rated but no message was classified", async () => {
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({
+      ...emptyDigest(),
+      ratings: [0, 1, 1, 4, 4],
+      averageRating: 4.1,
+      ratingCount: 10,
+      ratingsTowardNextUpdate: null,
+    })
+    const html = renderToStaticMarkup(await feedback())
+    expect(html).toContain("No messages were classified")
+    expect(html).not.toContain("No feedback was captured")
+    expect(html).toContain("Stars")
+    expect(html).toContain("4.1 · 10 ratings")
+  })
+
+  it("shows no stars panel when nobody rated and nothing was classified", async () => {
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue(emptyDigest())
+    const html = renderToStaticMarkup(await feedback())
+    expect(html).toContain("No feedback was captured")
+    expect(html).not.toContain("Stars")
+  })
+
   it("builds a venue's digest as the venue's, and the host's as the host's", async () => {
     const build = jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest as jest.Mock
     build.mockResolvedValue(emptyDigest())

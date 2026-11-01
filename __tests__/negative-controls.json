@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "event-pages-doors.test.tsx": {
+      "guards": "SCRUM-993: an event's Feedback tab shows its Stars panel when people rated but no message was classified (it was hidden behind the empty state).",
+      "mutation": "M993a app/dashboard/events/[id]/feedback/page.tsx as on origin/dev (Stars rendered only when total > 0).",
+      "observed": "M993a: 1 of 14 failing (the stars test; the no-ratings control passes either way). Restored; 14 of 14 green.",
+      "date": "2026-11-01"
+    },
     "friends.itest.ts": {
       "guards": "GET /friends/:userId carries sharedInterests (the names of the friend's interests the viewer holds too), the same as GET /users/:userId, so a friend's page outlines them (SCRUM-896).",
       "mutation": "M2267 the sharedInterests field removed from the friend route.",
