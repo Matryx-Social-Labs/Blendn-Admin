@@ -2500,6 +2500,12 @@
       "observed": "M975a: 1 of 6 failing (\"shows name and photo, never bio or orientation\": bio \"Sunday potter\" returned). Restored; 6/6.",
       "date": "2026-10-31"
     },
+    "moderation-staging-override.test.ts": {
+      "guards": "SCRUM-479 / owner ruling A-13: MODERATION_FORCE_HIDE_USER_IDS judges a listed account's messages hide (hidden + auto-mute counted) on staging, and does nothing on production.",
+      "mutation": "M479a lib/moderation/staging-override.ts production guard removed.",
+      "observed": "M479a: 2 of 5 failing (production judged hide, and the message was hidden). Restored; 5/5.",
+      "date": "2026-11-01"
+    },
     "seed-review-account.itest.ts": {
       "guards": "SCRUM-976: the App Review seed's demo event gets one set of occurrences (syncOccurrences only), so the seed runs to the end on a database with no upcoming event.",
       "mutation": "M976a the hand-rolled event_occurrences.createMany after syncOccurrences put back (the pre-fix seed).",
