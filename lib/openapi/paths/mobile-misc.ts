@@ -1291,6 +1291,9 @@ registry.registerPath({
               .max(2048)
               .optional()
               .describe("A fresh `authorizationCode` from Sign in with Apple (valid 5 minutes). Send it when the account signed in with Apple; it is exchanged and revoked, never stored or logged. Omitted: the revoke is skipped and audited."),
+            password: z.string().min(1).max(200).optional().describe("Who is deleting (SCRUM-944 (3)): a password account's password. Wrong → 403 PASSWORD_INCORRECT."),
+            googleIdToken: z.string().min(1).max(4096).optional().describe("An SSO account's Google ID token, issued within 15 minutes and linked to it. Otherwise 403 REAUTH_REQUIRED."),
+            appleIdentityToken: z.string().min(1).max(4096).optional().describe("An SSO account's Apple identity token, issued within 15 minutes and linked to it. Otherwise 403 REAUTH_REQUIRED."),
           }).strict().describe("Strict: an unknown key or a wrong type is a 400 and erases nothing."),
         },
       },

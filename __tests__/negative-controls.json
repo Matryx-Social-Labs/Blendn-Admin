@@ -2511,6 +2511,12 @@
       "mutation": "M976a the hand-rolled event_occurrences.createMany after syncOccurrences put back (the pre-fix seed).",
       "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
       "date": "2026-11-01"
+    },
+    "deletion-reauth.itest.ts": {
+      "guards": "SCRUM-944 (3) / owner ruling A-18: account deletion needs the password (wrong → 403 PASSWORD_INCORRECT) or a linked Google/Apple token issued within 15 minutes (else 403 REAUTH_REQUIRED); no proof deletes as before until MOBILE_MIN_APP_VERSION ≥ 1.0.1, then REAUTH_REQUIRED.",
+      "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",
+      "observed": "M944h: 1 of 6 failing (a wrong password deleted the account). Restored; 6/6. Review: wrong passwords count in sign-in's own windows (mobile per-account 10/15 min + per-email), shared with the sign-in door, then 429, each audited (test red first: the 11th try deleted the account); a provider token is taken once, keyed on its verified claims (test red first: a re-encoded copy passed); the per-account window answers before the per-email ones (test red first: 25 refused tries filled the per-email cap). 9/9.",
+      "date": "2026-11-01"
     }
   },
   "grandfathered": [
