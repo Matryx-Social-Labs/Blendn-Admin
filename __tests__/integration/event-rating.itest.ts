@@ -92,6 +92,10 @@ describe("rating an event", () => {
     // A count and no average: one rating is this person's score (SCRUM-437).
     const body = await res.json()
     expect(body.data.eventStats).toEqual({ ratingCount: 1 })
+    // An old build's `review` is dropped: the column is gone (SCRUM-442), and text with no reader has no place here.
+    expect(body.data.rating).not.toHaveProperty("review")
+    const [column] = await db.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM information_schema.columns WHERE table_name = 'event_ratings' AND column_name = 'review'`
+    expect(column.n).toBe(0)
 
     // Rating again edits the one row rather than adding a second.
     const again = await rate(fan.token, eventId, { rating: 5 })

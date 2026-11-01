@@ -898,8 +898,8 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
 | DELETE | `/events/:eventId/favorite` | Remove favorite |
 | GET | `/events/:eventId/interested-users` | `{ interestedCount, users: [], pagination }` — a count. `users` is always empty: who favourited an event is not disclosed |
-| GET | `/events/:eventId/rating` | Your own rating → `{ rating: 1..5 \| null, review, ratedAt }`; null when you have not rated. Nobody else's is ever returned. 404 `NOT_FOUND` for an unknown or deleted event |
-| POST | `/events/:eventId/rating` | Rate an event — stars 1–5, optional review; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it. A refusal is `403 FORBIDDEN` with `reasonCode` `NOT_ATTENDED` (no check-in) or `NOT_ENDED` (still running). Answers `eventStats: { ratingCount }` and no average, and the event's `stats` carry none either: an attendee who can poll an average reads each new score from its change (SCRUM-437) |
+| GET | `/events/:eventId/rating` | Your own rating → `{ rating: 1..5 \| null, ratedAt }`; null when you have not rated. Nobody else's is ever returned. 404 `NOT_FOUND` for an unknown or deleted event |
+| POST | `/events/:eventId/rating` | Rate an event — stars 1–5; anyone with a check-in row, **once it has ended** (attendance, not presence: leaving does not forfeit it — SCRUM-181); one row per person, rating again edits it. A refusal is `403 FORBIDDEN` with `reasonCode` `NOT_ATTENDED` (no check-in) or `NOT_ENDED` (still running). Answers `eventStats: { ratingCount }` and no average, and the event's `stats` carry none either: an attendee who can poll an average reads each new score from its change (SCRUM-437) |
 | POST | `/events/:eventId/rsvp` | RSVP — waitlists when full |
 | POST | `/events/:eventId/announce` | Send announcement |
 | GET | `/events/:eventId/chat` | Get event chat group |
