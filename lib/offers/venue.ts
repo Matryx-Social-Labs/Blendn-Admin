@@ -266,7 +266,7 @@ export async function venueOffersView(
          AND r.org_id = ${venue.owner_org_id}::uuid
          AND u."deletedAt" IS NULL
          AND u.suspended_at IS NULL
-       ORDER BY nights DESC, first_name
+       ORDER BY nights DESC, ${viewer.role === "app_admin" ? Prisma.sql`first_name` : Prisma.sql`random()`}
        LIMIT ${KNOWN_SHOWN}`,
   ])
 
@@ -285,6 +285,15 @@ export async function venueOffersView(
       reached: audienceBand(o.audience_size),
     })),
     totals: publishedTotals(boundaries, await histories(venueId, venue.owner_org_id, boundaries)),
-    known: known.map((k) => ({ firstName: viewer.role === "app_admin" ? k.first_name || "Someone" : null, nights: k.nights })),
+    /*
+     * Nothing under five for the venue (SCRUM-943, owner row A-17), and random among a tie: first_name gave each entry a
+     * stable place to watch its nights rise (SCRUM-891). The admin's list answers a support question: names, in order.
+     */
+    known:
+      viewer.role === "app_admin"
+        ? known.map((k) => ({ firstName: k.first_name || "Someone", nights: k.nights }))
+        : known.length < MIN_CELL
+          ? []
+          : known.map((k) => ({ firstName: null, nights: k.nights })),
   }
 }

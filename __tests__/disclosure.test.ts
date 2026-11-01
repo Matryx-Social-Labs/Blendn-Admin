@@ -6,6 +6,7 @@ import {
   discloseStarsAcross,
   MIN_CELL,
   poolStars,
+  publishedRaters,
   spreadsByEvent,
   suppressedLabel,
 } from "@/lib/disclosure"
@@ -216,5 +217,11 @@ describe("SCRUM-437 — a night's rating", () => {
       [0, 2, 0, 0, 3],
       [1, 0, 0, 0, 0],
     ])
+  })
+})
+
+describe("publishedRaters (SCRUM-472)", () => {
+  it.each([[0, 0], [4, 4], [5, 5], [6, 5], [7, 5], [8, 8], [10, 8], [11, 11]])("%i raters publish %i", (raters, shown) => {
+    expect(publishedRaters(raters)).toBe(shown)
   })
 })

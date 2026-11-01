@@ -86,7 +86,6 @@ export const CheckinRequestSchema = z
 export const RatingRequestSchema = z
   .object({
     rating: z.number().int().min(1).max(5),
-    review: z.string().max(1000).optional(),
   })
   .openapi("RatingRequest")
 
@@ -208,7 +207,6 @@ const UserStatusSchema = z.object({
   isCheckedIn: z.boolean(),
   checkInStatus: z.string().nullable(),
   userRating: z.number().nullable(),
-  userReview: z.string().nullable(),
   rsvpStatus: z.string().nullable(),
 })
 
@@ -511,7 +509,6 @@ export const RatingResponseSchema = z
     rating: z.object({
       id: z.string().uuid(),
       rating: z.number(),
-      review: z.string().nullable(),
       createdAt: z.string().datetime(),
       updatedAt: z.string().datetime(),
     }),

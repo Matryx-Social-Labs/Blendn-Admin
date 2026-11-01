@@ -189,7 +189,7 @@ export async function likePersonAsCrew(
   if (personId === likerId || mine.members.includes(personId)) return NO_PERSON
 
   const [theirCheckIn, them] = await Promise.all([
-    db.event_check_ins.findFirst({ where: { user_id: personId, kind: "attendee", ...hereNowAt(here.occurrenceId), user: LISTED_IN_ROSTER }, select: { id: true } }),
+    db.event_check_ins.findFirst({ where: { user_id: personId, ...hereNowAt(here.occurrenceId), user: LISTED_IN_ROSTER }, select: { id: true } }),
     intentsAt(eventId, personId),
   ])
   if (!theirCheckIn || !them.openToCrews || !crewMayMeetSolo(mine, mine.members.length, them.intents)) return { ...NOTHING_TOLD }

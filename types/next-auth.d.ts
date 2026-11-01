@@ -8,6 +8,8 @@ declare module "next-auth" {
       role: user_role
       /** The token's `signedInAt`, for `currentUser`'s own revocation check. */
       signedInAt?: number
+      /** Held only to accept an org invite: `getAuth` answers null for it (SCRUM-984). */
+      inviteOnly?: boolean
     } & DefaultSession["user"]
   }
 }
@@ -21,5 +23,6 @@ declare module "next-auth/jwt" {
      * re-encode, so it cannot say when the person last proved the password.
      */
     signedInAt?: number
+    inviteOnly?: boolean
   }
 }

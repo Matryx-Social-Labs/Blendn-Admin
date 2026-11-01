@@ -70,7 +70,8 @@ describe("the chat figures", () => {
     try {
       const { sql } = await counter.during(() => buildLiveSnapshot(eventId))
       console.info(`buildLiveSnapshot: ${sql.length} statements`)
-      expect(sql.filter((s) => /chat_messages/.test(s))).toHaveLength(1)
+      // Not the look-up by id behind the complaint floor (SCRUM-890): feedback rows' authors, bounded by the window's feedback.
+      expect(sql.filter((s) => /chat_messages/.test(s) && !/"chat_messages"\."id" IN/.test(s))).toHaveLength(1)
     } finally {
       await counter.stop()
     }

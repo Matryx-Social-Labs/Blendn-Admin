@@ -9,7 +9,7 @@
  * `currentUser()` now, and their address from the row.
  */
 let mockSession: unknown = null
-jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(mockSession) }))
+jest.mock("@/lib/auth", () => ({ getAuth: () => Promise.resolve(mockSession), getInviteAuth: () => Promise.resolve(mockSession) }))
 
 import { NextRequest } from "next/server"
 
@@ -35,6 +35,7 @@ async function invitedTo(email: string) {
   users.push(owner)
   const org = await db.organisations.create({ data: { display_name: `L4 ${testId("o")}`, kind: "company" } })
   orgs.push(org.id)
+  await db.organisation_members.create({ data: { org_id: org.id, user_id: owner, role: "owner" } })
   const token = testId("tok")
   await db.organisation_invites.create({
     data: { org_id: org.id, email, token_hash: hashInviteToken(token), expires_at: new Date(Date.now() + 86_400_000), invited_by: owner },

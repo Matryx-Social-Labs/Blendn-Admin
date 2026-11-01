@@ -1,6 +1,6 @@
 import type { user_role } from "@prisma/client"
 
-import { getAuth } from "@/lib/auth"
+import { getAuth, getInviteAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { Refusal } from "@/lib/refusal"
 import { isRevoked } from "@/lib/session-revocation"
@@ -18,31 +18,26 @@ import { isRevoked } from "@/lib/session-revocation"
  * its id and when it signed in. A read that fails throws — never a user made
  * from the session's claims.
  */
-export async function currentUser(): Promise<{ id: string; role: user_role } | null> {
-  const session = await getAuth()
+async function accountOf(session: Awaited<ReturnType<typeof getInviteAuth>>): Promise<{ id: string; role: user_role } | null> {
   const id = session?.user?.id
   if (!id) return null
   const account = await db.user.findUnique({
     where: { id },
     select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
   })
-  if (!account || isRevoked({ sub: id, signedInAt: session.user.signedInAt }, account)) return null
+  if (!account || isRevoked({ sub: id, signedInAt: session?.user?.signedInAt }, account)) return null
   return { id, role: account.role }
 }
 
-/**
- * A platform admin, on the role the database holds now, or a `Refusal`.
- *
- * Every admin-only server action gates on this, never on
- * `session.user.role`: an action is a POST endpoint, and the claim in the
- * cookie is only as fresh as whatever built the session. A demoted, suspended
- * or deleted admin is refused on their next click, not at their next sign-in.
- * Defined once, here, so there is one rule rather than a copy per file that
- * can drift back to the claim — six files kept their own. This module is not
- * `"use server"`, so it may export it; the actions import it and never
- * re-export it. `__tests__/admin-gate-reads-database.test.ts` holds them to
- * that.
- */
+export async function currentUser(): Promise<{ id: string; role: user_role } | null> {
+  return accountOf(await getAuth())
+}
+
+/** `currentUser` for the accept route alone: a session held only to accept an invite counts here (SCRUM-984). */
+export async function invitedUser(): Promise<{ id: string; role: user_role } | null> {
+  return accountOf(await getInviteAuth())
+}
+
 export async function requireAdmin(): Promise<{ id: string; role: user_role }> {
   const user = await currentUser()
   if (!user || user.role !== "app_admin") throw new Refusal("Forbidden")

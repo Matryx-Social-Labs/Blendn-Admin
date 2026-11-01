@@ -1075,7 +1075,6 @@ model event_ratings {
   event_id   String   @db.Uuid
   user_id    String
   rating     Int
-  review     String?
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
@@ -1925,6 +1924,9 @@ model organisation_invites {
   token_hash             String
   expires_at             DateTime  @db.Timestamptz(6)
   invited_by             String
+  /// The dashboard role an attendee accepting this comes out as, fixed when it is sent (SCRUM-984). Null on older
+  /// invites: an attendee cannot accept one, and is asked for a new one.
+  grants_role            user_role?
   accepted_at            DateTime? @db.Timestamptz(6)
   revoked_at             DateTime? @db.Timestamptz(6)
   /// Non-null when the invited address is outside the org's verified domain.
@@ -3361,6 +3363,23 @@ model audit_logs {
 ///
 /// No foreign key, deliberately: nothing may cascade this away before its time,
 /// and `user_id` points at a row that has already been anonymised.
+/// A chat image the 180-day purge left because a report from before the deletion is still pending (SCRUM-955, A-24).
+/// Only the pointer outlives the person's record. Erased when the report is decided, or at `erase_by`.
+model retained_report_media {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// The anonymised `User` row's id; no relation, this outlives what it points at.
+  user_id      String
+  object_key   String   @unique
+  message_id   String   @db.Uuid
+  message_type String
+  /// Only a report from before this can hold the image.
+  account_deleted_at DateTime @db.Timestamptz(6)
+  erase_by     DateTime @db.Timestamptz(6)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([erase_by])
+}
+
 model deleted_account_records {
   id                 String    @id @default(uuid()) @db.Uuid
   /// The anonymised `User` row's id.

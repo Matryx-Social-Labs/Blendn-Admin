@@ -1,4 +1,6 @@
 import { createHash, randomBytes } from "crypto"
+import type { user_role } from "@prisma/client"
+
 import { validateGstin } from "./gstin"
 
 /**
@@ -220,4 +222,19 @@ export function canSubmitApplication(input: ApplicationInput): { ok: boolean; re
     reason:
       "Applying from a personal email address, so we need one more thing: a GSTIN or your website. A company email address needs neither.",
   }
+}
+
+/**
+ * The dashboard role an invite hands an attendee: the inviter's, since `organizer` opens event creation and must not
+ * reach a sponsor's or venue's invitee. An admin invites on an org's behalf, so its kind of business decides. Null
+ * for anybody else: fail closed.
+ */
+export function roleForInvite(
+  inviterRole: user_role,
+  org: { may_sponsor: boolean; venueCount: number }
+): "organizer" | "venue_owner" | "sponsor" | null {
+  if (inviterRole === "organizer" || inviterRole === "venue_owner" || inviterRole === "sponsor") return inviterRole
+  if (inviterRole !== "app_admin") return null
+  if (org.may_sponsor) return "sponsor"
+  return org.venueCount > 0 ? "venue_owner" : "organizer"
 }

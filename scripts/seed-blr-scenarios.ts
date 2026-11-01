@@ -1730,16 +1730,16 @@ async function seedSocial(
     })
   }
 
-  for (const [person, rating, review] of s.ratings ?? []) {
+  for (const [person, rating] of s.ratings ?? []) {
     const [user_id] = ctx.ids([person])
     if (!user_id) continue
     const at = new Date(end.getTime() + 90 * MIN)
-    await db.event_ratings.create({ data: { event_id: eventId, user_id, rating, review, created_at: at, updated_at: at } })
+    await db.event_ratings.create({ data: { event_id: eventId, user_id, rating, created_at: at, updated_at: at } })
   }
   for (const [i, user_id] of crowdRated.entries()) {
-    const [rating, review] = CROWD_REVIEWS[(i + offset) % CROWD_REVIEWS.length]
+    const [rating] = CROWD_REVIEWS[(i + offset) % CROWD_REVIEWS.length]
     const at = new Date(end.getTime() + (2 + i * 3) * HOUR)
-    await db.event_ratings.create({ data: { event_id: eventId, user_id, rating, review: i % 4 === 3 ? null : review, created_at: at, updated_at: at } })
+    await db.event_ratings.create({ data: { event_id: eventId, user_id, rating, created_at: at, updated_at: at } })
   }
 
   if (s.room) {
