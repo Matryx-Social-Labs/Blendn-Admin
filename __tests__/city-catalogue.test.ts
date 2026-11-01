@@ -256,6 +256,14 @@ describe("the /events/cities answer", () => {
     expect(body.defaultCitySlug).toBe("alpha")
   })
 
+  it("a market with no default row still resolves: its first open city is named, so it is listed", () => {
+    const noDefault = buildCatalogue([market({})], [city({ slug: "alpha" }), city({ slug: "other", name: "Other", sort: 1 })])
+    const body = citiesResponse({ catalogue: noDefault, events: [], places: [], previewMarkets: NONE, wantsPreview: true, deviceCountry: "AA" })
+    expect(body.defaultCitySlug).toBe("alpha")
+    expect(body.device?.citySlug).toBe("alpha")
+    expect(body.cities.map((c) => c.slug)).toEqual(["alpha"])
+  })
+
   it("does not list any other live city with no rows", () => {
     const withEmpty = buildCatalogue([market({})], [city({ slug: "alpha", is_default: true }), city({ slug: "empty", name: "Empty", sort: 1 })])
     const body = citiesResponse({ catalogue: withEmpty, events: [], places: [], previewMarkets: NONE, wantsPreview: true, deviceCountry: null })

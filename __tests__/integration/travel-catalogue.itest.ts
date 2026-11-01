@@ -186,6 +186,8 @@ describe("a preview city", () => {
     expect(await eventIds(plain, null)).not.toContain(torontoEvent)
     expect(await venueIds(plain, null)).not.toContain(torontoVenue)
     expect(await searchIds(plain, null)).not.toContain(torontoEvent)
+    const live = await get(venuesRoute, "venues?limit=100&order=live&city=Toronto", plain)
+    expect(live.venues ?? live).toEqual([])
   })
 
   it("is not listed at all for an old client, whose list stays every field it reads", async () => {
@@ -305,6 +307,16 @@ describe("homeCitySlug", () => {
   it("takes a preview city: a person in Toronto can say they live there", async () => {
     expect((await put(plain, plainUser, { homeCitySlug: "toronto" })).status).toBe(200)
     expect(await stored(plainUser)).toBe("toronto")
+  })
+
+  it("writes it on a person's first profile write too: the upsert's other branch", async () => {
+    const fresh = await makeUser(testId("tc_fresh"))
+    users.push(fresh)
+    const { email } = await db.user.findUniqueOrThrow({ where: { id: fresh }, select: { email: true } })
+    expect(await db.profiles.count({ where: { id: fresh } })).toBe(0)
+    const res = await put(signAccessToken(fresh, email), fresh, { homeCitySlug: "toronto" })
+    expect(res.status).toBe(200)
+    expect(await stored(fresh)).toBe("toronto")
   })
 
   it("leaves it alone when another field is written", async () => {

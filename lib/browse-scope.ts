@@ -143,7 +143,8 @@ export function citiesResponse(input: CitiesResponseInput) {
     .filter((c) => !listed.has(c.slug))
     .flatMap((c) => {
       const access = cityAccess(c, previewMarkets)
-      const lists = access === "comingSoon" ? wantsPreview : access === "full" && (c.isDefault || c.launchState === "preview")
+      const named = catalogue.markets.some((m) => m.defaultCitySlug === c.slug)
+      const lists = access === "comingSoon" ? wantsPreview : access === "full" && (named || c.launchState === "preview")
       return lists ? [pickerRow({ city: c.name, eventCount: 0, placeCount: 0, centre: null }, c, access)] : []
     })
 
