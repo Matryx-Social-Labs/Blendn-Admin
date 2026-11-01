@@ -107,5 +107,7 @@ it("refuses an unknown or retired amenity and writes nothing", async () => {
   await setVenueAmenities(v, [live])
   await expect(setVenueAmenities(v, [retired])).rejects.toThrow(/amenit/i)
   await expect(setVenueAmenities(v, ["not-a-uuid"])).rejects.toThrow(/amenit/i)
+  // A malformed call is refused, not read as "none" (review): the list must survive it.
+  await expect(setVenueAmenities(v, null as unknown as string[])).rejects.toThrow(/amenit/i)
   expect(await ticked(v)).toEqual([live])
 })

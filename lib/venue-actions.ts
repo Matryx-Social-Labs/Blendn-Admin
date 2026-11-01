@@ -456,7 +456,9 @@ export async function setVenueAmenities(id: string, amenityIds: string[]): Promi
   if (user.role !== "app_admin" && !writable.owner_org_id) {
     throw new Refusal("Only the venue’s owner or an admin sets what it has.")
   }
-  const ids = [...new Set(Array.isArray(amenityIds) ? amenityIds : [])]
+  // Not an array is refused, never read as "none": a malformed call must not empty the list (review).
+  if (!Array.isArray(amenityIds)) throw new Refusal("Choose amenities from the list.")
+  const ids = [...new Set(amenityIds)]
   if (ids.length > MAX_VENUE_AMENITIES || ids.some((a) => typeof a !== "string" || !UUID.test(a))) {
     throw new Refusal("Choose amenities from the list.")
   }
@@ -464,14 +466,15 @@ export async function setVenueAmenities(id: string, amenityIds: string[]): Promi
   if (known !== ids.length) throw new Refusal("Choose amenities from the list.")
 
   await db.$transaction(async (tx) => {
+    const before = await tx.venue_amenities.findMany({ where: { venue_id: id }, select: { amenity_id: true } })
     await tx.venue_amenities.deleteMany({ where: { venue_id: id } })
-    if (ids.length > 0) await tx.venue_amenities.createMany({ data: ids.map((amenity_id) => ({ venue_id: id, amenity_id })) })
+    if (ids.length > 0) await tx.venue_amenities.createMany({ data: ids.map((amenity_id) => ({ venue_id: id, amenity_id })), skipDuplicates: true })
     await auditInTx(tx, {
       userId: user.id,
       action: "venue.amenities_set",
       resource: "venue",
       resourceId: id,
-      details: { amenityIds: ids },
+      details: { before: before.map((r) => r.amenity_id), amenityIds: ids },
     })
   })
   revalidatePath(`/dashboard/venues/${id}`)

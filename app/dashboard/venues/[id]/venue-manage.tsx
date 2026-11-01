@@ -99,7 +99,10 @@ export function VenueManage({
     venue.lat !== null && venue.lng !== null ? { lat: venue.lat, lng: venue.lng } : null
   )
   const [moved, setMoved] = useState(false)
-  const [amenityIds, setAmenityIds] = useState<string[]>(venue.amenityIds)
+  // Ticks on a retired amenity are not on screen, so they are not sent: a save drops them rather than being
+  // refused for an id nobody can untick (review M1).
+  const shownTicks = venue.amenityIds.filter((a) => amenityOptions.some((o) => o.id === a))
+  const [amenityIds, setAmenityIds] = useState<string[]>(shownTicks)
   const amenitiesChanged =
     amenityIds.length !== venue.amenityIds.length || amenityIds.some((a) => !venue.amenityIds.includes(a))
 
@@ -127,13 +130,19 @@ export function VenueManage({
           // for a rename, until the area is put back (SCRUM-204).
           ...(fence ? { geofence: fence } : {}),
         })
-        // Same rule as floors: the owner's organisation or an admin (`setVenueAmenities` refuses anyone else).
-        if (canSetFloors && amenitiesChanged) await setVenueAmenities(venue.id, amenityIds)
-        toast.success("Saved")
-        router.refresh()
       } catch (error) {
         toast.error(refusalMessage(error, "Could not save"))
+        return
       }
+      // Same rule as floors: the owner's organisation or an admin (`setVenueAmenities` refuses anyone else). Its own
+      // message, so a refusal here does not read as the record not saving (review L4).
+      try {
+        if (canSetFloors && amenitiesChanged) await setVenueAmenities(venue.id, amenityIds)
+        toast.success("Saved")
+      } catch (error) {
+        toast.error(`Saved the record, but not Good to know: ${refusalMessage(error, "try again")}`)
+      }
+      router.refresh()
     })
 
   const retire = () =>
