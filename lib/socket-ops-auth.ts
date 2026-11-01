@@ -1,3 +1,4 @@
+import { canAccessDashboard } from "./rbac"
 import { decode } from "next-auth/jwt"
 import type { user_role } from "@prisma/client"
 
@@ -87,6 +88,8 @@ export async function authenticateDashboardSocket(
     // password changed (step 18, M6). The cookie here is the raw one, never
     // re-minted, so a session from before `signedInAt` is judged by its iat.
     if (!user || isRevoked(token, user)) return null
+    // A session held only to accept an invite is no dashboard session (SCRUM-984).
+    if (!canAccessDashboard(user.role)) return null
 
     return { userId: user.id, email: user.email, role: user.role }
   } catch (error) {

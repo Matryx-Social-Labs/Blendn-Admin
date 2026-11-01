@@ -31,8 +31,9 @@ async function rememberDevice(email: string): Promise<void> {
 
 /**
  * An attendee an organisation invited may sign in, or the invite could never be accepted: `/invite` needs a session and
- * accepting it is what moves them out of `attendee`. Their session opens nothing else: the middleware and `lib/rbac.ts`
- * still read the role.
+ * accepting it is what moves them out of `attendee`. That session is `inviteOnly`: `getAuth` answers null for it, so no
+ * route or action sees it, only the accept route through `getInviteAuth`. The jwt callback asks this again on every read,
+ * so it ends with the invite.
  *
  * ponytail: one who signs in at /login rather than through the link lands back on the form; the mail is the way in.
  */
@@ -120,7 +121,10 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async session({ session, token }) {
       if (!token || !session.user) return session
-      return { ...session, user: { ...session.user, id: token.sub!, role: token.role, signedInAt: token.signedInAt } }
+      return {
+        ...session,
+        user: { ...session.user, id: token.sub!, role: token.role, signedInAt: token.signedInAt, inviteOnly: token.inviteOnly === true },
+      }
     },
     /*
      * Every read of a session answers to the database, and ends it when
@@ -151,22 +155,33 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         // A new session, from whichever provider: it has just proved who it is.
-        return { ...token, sub: user.id, role: (user as User & { role: user_role }).role, signedInAt: Date.now() }
+        const role = (user as User & { role: user_role }).role
+        return { ...token, sub: user.id, role, signedInAt: Date.now(), inviteOnly: !canAccessDashboard(role) }
       }
 
       const account = token.sub
         ? await db.user.findUnique({
             where: { id: token.sub },
-            select: { role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
+            select: { email: true, role: true, suspended_at: true, deletedAt: true, password_changed_at: true, sessions_revoked_at: true },
           })
         : null
       if (!account || isRevoked(token, account)) throw new SessionEnded()
+      // No dashboard role is an invite's session or none: it ends with the invite, and a demoted host's ends at once.
+      const inviteOnly = !canAccessDashboard(account.role)
+      if (inviteOnly && !(account.email && (await hasLiveInvite(account.email)))) throw new SessionEnded()
 
       // `provenAt` written back, so a session that only had `iat` keeps the
       // first one it was judged by rather than its next re-encode's.
-      return { ...token, role: account.role, signedInAt: provenAt(token)! }
+      return { ...token, role: account.role, signedInAt: provenAt(token)!, inviteOnly }
     },
   },
 }
 
-export const getAuth = () => getServerSession(authOptions)
+/** The session every route and action reads. Null for an `inviteOnly` one: all it may do is accept (`getInviteAuth`). */
+export const getAuth = async () => {
+  const session = await getServerSession(authOptions)
+  return session?.user?.inviteOnly ? null : session
+}
+
+/** For the accept route alone: the same session, an invite's included. */
+export const getInviteAuth = () => getServerSession(authOptions)

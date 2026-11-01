@@ -41,6 +41,8 @@ beforeEach(() => {
     .mockResolvedValueOnce({ role: "owner" }) // requireOrgRole
     .mockResolvedValueOnce(null) // not already a member
   mockDb.organisations.findUniqueOrThrow.mockResolvedValue({
+    may_sponsor: false,
+    _count: { venues: 0 },
     display_name: "Nightshift",
     domains: [{ domain: "blendn.app" }],
   })

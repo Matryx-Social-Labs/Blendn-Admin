@@ -1,12 +1,13 @@
 import { clientIpFrom } from "@/lib/client-ip"
 import { NextRequest, NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { currentUser } from "@/lib/current-user"
+import { invitedUser } from "@/lib/current-user"
 import { logger } from "@/lib/logger"
 import { rateLimit } from "@/lib/rate-limit"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { hashInviteToken, inviteState } from "@/lib/org-invites"
 import { readJson } from "@/lib/api-input"
+import { canAccessDashboard } from "@/lib/rbac"
 
 /**
  * Accepting an invitation to an organisation.
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
      * minted at sign-in, and an address changed since then is not the one
      * the invitation was sent to.
      */
-    const caller = await currentUser()
+    const caller = await invitedUser()
     const user = caller
       ? { ...caller, email: (await db.user.findUniqueOrThrow({ where: { id: caller.id }, select: { email: true } })).email }
       : null
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest) {
         accepted_at: true,
         revoked_at: true,
         invited_by: true,
+        grants_role: true,
         org: { select: { display_name: true, status: true } },
       },
     })
@@ -116,6 +118,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    /*
+     * Fail closed on who sent it (SCRUM-984). An invite carries the sender's standing, so it ends with it: a sender who
+     * was removed, suspended, deleted or demoted cannot still let somebody in. An attendee also needs the role fixed at
+     * send; an invite from before that column asks for a new one.
+     */
+    const grantsRole = invite.grants_role
+    const STALE = "This invite is no longer valid. Ask them to send a new one."
+    if (!(await inviterStillStands(invite.invited_by, invite.org_id))) {
+      return NextResponse.json({ success: false, error: STALE }, { status: 400 })
+    }
+    if (user.role === "attendee" && !(grantsRole === "organizer" || grantsRole === "venue_owner" || grantsRole === "sponsor")) {
+      return NextResponse.json({ success: false, error: STALE }, { status: 400 })
+    }
+
 
     await db.$transaction(async (tx) => {
       // updateMany with accepted_at: null in the filter is the concurrency
@@ -133,12 +149,9 @@ export async function POST(req: NextRequest) {
       // An attendee accepting a host invite needs dashboard access, which is
       // gated on the User role rather than on membership. Only ever a promotion
       // out of `attendee` — an existing organizer is not demoted or changed.
-      // As the person who invited them: a sponsor or venue org's invite must not
-      // open event creation, which `organizer` would (security review of SCRUM-984).
+      // To the role fixed when the invite was sent (SCRUM-984).
       if (user.role === "attendee") {
-        const inviter = await tx.user.findUnique({ where: { id: invite.invited_by }, select: { role: true } })
-        const role = inviter?.role === "venue_owner" || inviter?.role === "sponsor" ? inviter.role : "organizer"
-        await tx.user.update({ where: { id: user.id }, data: { role } })
+        await tx.user.update({ where: { id: user.id }, data: { role: grantsRole! } })
       }
     })
 
@@ -171,4 +184,15 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json({ success: false, error: "Something went wrong." }, { status: 500 })
   }
+}
+
+async function inviterStillStands(inviterId: string, orgId: string): Promise<boolean> {
+  const inviter = await db.user.findUnique({
+    where: { id: inviterId },
+    select: { role: true, suspended_at: true, deletedAt: true },
+  })
+  if (!inviter || inviter.suspended_at || inviter.deletedAt) return false
+  if (inviter.role === "app_admin") return true
+  if (!canAccessDashboard(inviter.role)) return false
+  return (await db.organisation_members.count({ where: { org_id: orgId, user_id: inviterId } })) > 0
 }
