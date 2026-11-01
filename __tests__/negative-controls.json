@@ -2536,6 +2536,12 @@
       "observed": "M980a: 1 of 6 failing (description held no note). Restored; 6/6.",
       "date": "2026-11-01"
     },
+    "venue-amenities.itest.ts": {
+      "guards": "SCRUM-979: venue_amenities is written by setVenueAmenities: the owner's organisation or an admin only (not the org that only added an unclaimed venue, not another owner), active vocabulary only, the list replaces the old one, audited in the same transaction.",
+      "mutation": "M979a lib/venue-actions.ts the owner-or-admin gate removed. M979b the is_active filter on the vocabulary count removed.",
+      "observed": "M979a: 1 of 4 failing (the adding org wrote an unclaimed venue's list). M979b: 1 of 4 failing (a retired amenity was written). Restored; 4/4.",
+      "date": "2026-11-01"
+    },
     "deletion-reauth.itest.ts": {
       "guards": "SCRUM-944 (3) / owner ruling A-18: account deletion needs the password (wrong → 403 PASSWORD_INCORRECT) or a linked Google/Apple token issued within 15 minutes (else 403 REAUTH_REQUIRED); no proof deletes as before until MOBILE_MIN_APP_VERSION ≥ 1.0.1, then REAUTH_REQUIRED.",
       "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",

@@ -103,9 +103,16 @@ export default async function VenueDetailPage({
       open_on_blendn: true,
       created_by_org_id: true,
       owner_org: { select: { id: true, display_name: true } },
+      amenity_links: { select: { amenity_id: true } },
     },
   })
   if (!venue) notFound()
+  // The vocabulary the "Good to know" ticks come from (SCRUM-979): active only, in its own order, as the event editor.
+  const amenityOptions = await db.amenities.findMany({
+    where: { is_active: true },
+    select: { id: true, name: true, subtitle: true },
+    orderBy: { sort_order: "asc" },
+  })
 
   const isAdmin = session.user.role === "app_admin"
   const memberOf = (orgId: string) =>
@@ -126,6 +133,7 @@ export default async function VenueDetailPage({
     retired: venue.deleted_at !== null,
     ownerOrg: venue.owner_org?.display_name ?? null,
     floors: venue.floors,
+    amenityIds: venue.amenity_links.map((a) => a.amenity_id),
   }
 
   const ownerMember = venue.owner_org && !isAdmin ? await memberOf(venue.owner_org.id) : null
@@ -151,6 +159,7 @@ export default async function VenueDetailPage({
           key={venue.updated_at.toISOString()}
           orgs={{ rows: [], total: 0 }}
           venue={record}
+          amenityOptions={amenityOptions}
           isAdmin={false}
           canRetire={false}
         />
@@ -376,6 +385,7 @@ export default async function VenueDetailPage({
         key={venue.updated_at.toISOString()}
         orgs={ownerOptions}
         venue={record}
+        amenityOptions={amenityOptions}
         isAdmin={isAdmin}
       />
     </div>
