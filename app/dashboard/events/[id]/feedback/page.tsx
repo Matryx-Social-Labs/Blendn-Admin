@@ -79,6 +79,37 @@ export default async function FeedbackPage({
     : "feedback window closed"
   const { ratingCount } = digest
 
+  /* Stars only when somebody gave one. Five empty bars under "No ratings" is a
+     chart of nothing. They stand apart from the messages: a night with ratings
+     and nothing classified still shows them (SCRUM-993). */
+  const stars =
+    ratingCount === null || ratingCount > 0 ? (
+      <Panel
+        title="Stars"
+        hint={
+          ratingCount === null
+            ? "fewer than five ratings"
+            : `${digest.averageRating === null ? "" : `${digest.averageRating} · `}${ratingCount} rating${ratingCount === 1 ? "" : "s"}`
+        }
+      >
+        {/* Withheld under five raters: each score is somebody's (SCRUM-437). */}
+        {digest.averageRating === null ? (
+          <p className="text-[0.8125rem] text-muted-foreground">Not enough ratings yet.</p>
+        ) : (
+          <>
+            <RatingBars counts={digest.ratings} />
+            <p className="text-[0.75rem] text-faint-foreground">Stars say how much; the messages say what.</p>
+            {digest.ratingsTowardNextUpdate === null ? null : (
+              <BatchMeter
+                pending={digest.ratingsTowardNextUpdate}
+                published={(ratingCount ?? 0) - digest.ratingsTowardNextUpdate}
+              />
+            )}
+          </>
+        )}
+      </Panel>
+    ) : null
+
   return (
     <div className="flex flex-col gap-5">
       {/* Owned header (`OWNED_HEADERS`): the event's own, with its tabs. */}
@@ -90,15 +121,24 @@ export default async function FeedbackPage({
       </p>
 
       {total === 0 ? (
-        <EmptyState
-          icon={<IconMessages />}
-          title={digest.windowOpen ? "Nothing yet — the window is open" : "No feedback was captured"}
-          description={
-            digest.windowOpen
-              ? "What people say while still outside the venue lands here, labelled positive, negative or neutral and by what it was about."
-              : "The chat window closed without anything being classified."
-          }
-        />
+        <>
+          <EmptyState
+            icon={<IconMessages />}
+            title={
+              digest.windowOpen
+                ? "Nothing yet — the window is open"
+                : stars
+                  ? "No messages were classified"
+                  : "No feedback was captured"
+            }
+            description={
+              digest.windowOpen
+                ? "What people say while still outside the venue lands here, labelled positive, negative or neutral and by what it was about."
+                : "The chat window closed without anything being classified."
+            }
+          />
+          {stars ? <div className="max-w-xl">{stars}</div> : null}
+        </>
       ) : (
         <>
           {/*
@@ -185,38 +225,7 @@ export default async function FeedbackPage({
                 </Panel>
               ) : null}
 
-              {/* Stars only when somebody gave one. Five empty bars under
-                  "No ratings" is a chart of nothing. */}
-              {ratingCount === null || ratingCount > 0 ? (
-                <Panel
-                  title="Stars"
-                  hint={
-                    ratingCount === null
-                      ? "fewer than five ratings"
-                      : `${digest.averageRating === null ? "" : `${digest.averageRating} · `}${ratingCount} rating${ratingCount === 1 ? "" : "s"}`
-                  }
-                >
-                  {/* Withheld under five raters: each score is somebody's (SCRUM-437). */}
-                  {digest.averageRating === null ? (
-                    <p className="text-[0.8125rem] text-muted-foreground">
-                      Not enough ratings yet.
-                    </p>
-                  ) : (
-                    <>
-                      <RatingBars counts={digest.ratings} />
-                      <p className="text-[0.75rem] text-faint-foreground">
-                        Stars say how much; the messages say what.
-                      </p>
-                      {digest.ratingsTowardNextUpdate === null ? null : (
-                        <BatchMeter
-                          pending={digest.ratingsTowardNextUpdate}
-                          published={(ratingCount ?? 0) - digest.ratingsTowardNextUpdate}
-                        />
-                      )}
-                    </>
-                  )}
-                </Panel>
-              ) : null}
+              {stars}
             </div>
           </div>
         </>
