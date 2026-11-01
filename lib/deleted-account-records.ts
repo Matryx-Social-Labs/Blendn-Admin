@@ -80,7 +80,7 @@ export async function purgeDeletedAccountRecords(now: Date = new Date()): Promis
     where: { purge_after: { lt: now } },
     select: { id: true, user_id: true, deleted_at: true, purge_after: true },
   })
-  if (isConfigured()) await releaseHeldReportMedia(now)
+  await releaseHeldReportMedia(now)
   if (due.length === 0) return 0
   /*
    * Storage unset means the erasure cannot be done or checked. Keep the records

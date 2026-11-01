@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS "retained_report_media" (
   "object_key" TEXT NOT NULL,
   "message_id" UUID NOT NULL,
   "message_type" TEXT NOT NULL,
+  "account_deleted_at" TIMESTAMPTZ(6) NOT NULL,
   "erase_by" TIMESTAMPTZ(6) NOT NULL,
   "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT now(),
   CONSTRAINT "retained_report_media_pkey" PRIMARY KEY ("id")

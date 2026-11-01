@@ -3369,6 +3369,8 @@ model retained_report_media {
   object_key   String   @unique
   message_id   String   @db.Uuid
   message_type String
+  /// Only a report from before this can hold the image.
+  account_deleted_at DateTime @db.Timestamptz(6)
   erase_by     DateTime @db.Timestamptz(6)
   created_at   DateTime @default(now()) @db.Timestamptz(6)
 

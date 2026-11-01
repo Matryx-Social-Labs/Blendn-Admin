@@ -203,10 +203,10 @@ function ReportCard({
 
 /** The image a report is about, or why it isn't here (SCRUM-955). */
 function ReportedImage({ image }: { image: NonNullable<ReportRow["image"]> }) {
-  if ("erasedOn" in image) {
+  if ("senderLeftOn" in image) {
     return (
       <p className="text-[0.8125rem] text-faint-foreground">
-        The sender deleted their account; this image was erased on {new Date(image.erasedOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}.
+        The sender deleted their account on {new Date(image.senderLeftOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}, and this image is no longer kept.
       </p>
     )
   }

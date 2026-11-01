@@ -2,7 +2,7 @@
 // reachable from server.ts, which plain tsc compiles without the alias.
 import { db } from "./db"
 import { logger } from "./logger"
-import { deleteFile, deletePrefix, ownedObjectKey, ownedPhotoKey, sealedChatKey } from "./tigris"
+import { deleteFile, deletePrefix, isConfigured, ownedObjectKey, ownedPhotoKey, sealedChatKey } from "./tigris"
 
 /**
  * A person's chat images that must outlive their account (SCRUM-428).
@@ -102,6 +102,7 @@ export async function erasePurgedChatMedia(record: { user_id: string; deleted_at
       data: held.map((h) => ({
         ...h,
         user_id: record.user_id,
+        account_deleted_at: record.deleted_at,
         erase_by: new Date(record.purge_after.getTime() + REPORT_HOLD_DAYS * DAY_MS),
       })),
       skipDuplicates: true,
@@ -113,26 +114,36 @@ export async function erasePurgedChatMedia(record: { user_id: string; deleted_at
 /** Erase each held image whose report is decided or whose cap has passed; warn about those nearing it undecided. */
 export async function releaseHeldReportMedia(now: Date): Promise<void> {
   const held = await db.retained_report_media.findMany()
+  if (held.length > 0 && !isConfigured()) {
+    logger.error("Held report images not erased: storage not configured", { held: held.length })
+    return
+  }
   for (const row of held) {
-    const pending = await db.message_reports.count({
-      where: { message_id: row.message_id, message_type: row.message_type, status: "pending" },
-    })
-    if (pending > 0 && row.erase_by > now) {
-      if (row.erase_by.getTime() - now.getTime() <= REPORT_HOLD_WARN_MS) {
-        logger.warn("A reported image's report must be decided before its hold ends", {
-          objectKey: row.object_key,
-          messageId: row.message_id,
-          eraseBy: row.erase_by.toISOString(),
-        })
-      }
-      continue
-    }
     try {
+      // The same reports `heldChatMedia` counts: a later one, or the author's own, cannot extend the hold.
+      const pending = await db.message_reports.count({
+        where: {
+          message_id: row.message_id,
+          message_type: row.message_type,
+          status: "pending",
+          created_at: { lt: row.account_deleted_at },
+          reporter_id: { not: row.user_id },
+        },
+      })
+      if (pending > 0 && row.erase_by > now) {
+        if (row.erase_by.getTime() - now.getTime() <= REPORT_HOLD_WARN_MS) {
+          logger.warn("A reported image's report must be decided before its hold ends", {
+            pointerId: row.id,
+            eraseBy: row.erase_by.toISOString(),
+          })
+        }
+        continue
+      }
       await deleteFile(row.object_key)
       await db.retained_report_media.delete({ where: { id: row.id } })
     } catch (error) {
       logger.error("Held report image NOT erased; pointer kept for the next sweep", {
-        objectKey: row.object_key,
+        pointerId: row.id,
         error: error instanceof Error ? error.message : String(error),
       })
     }

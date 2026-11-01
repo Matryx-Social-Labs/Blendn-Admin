@@ -56,10 +56,10 @@ export interface ReportRow {
   /** Message reports only — a board post's body and a board ask's message included. */
   excerpt: string | null
   /**
-   * The reported image, signed for this screen, or the date it was erased: a report filed after the sender deleted
-   * their account finds it gone (SCRUM-955). Null when the message has no image.
+   * The reported image, signed for this screen, or the date its sender left when it is no longer kept: a report filed
+   * after the deletion finds it gone (SCRUM-955). Null when the message has no image.
    */
-  image: { url: string } | { erasedOn: string } | null
+  image: { url: string } | { senderLeftOn: string } | null
   messageType: "group" | "private" | "board_post" | "board_request" | "crew" | "venue_offer" | null
   /**
    * Crew reports only (C12): the crew's state now. The subject is the crew's
@@ -844,7 +844,7 @@ async function reportedImages(
         // Past the purge too: decided, it went at 180 days; undecided, at the cap (`REPORT_HOLD_DAYS`).
         const purged = gone && Date.now() > gone.getTime() + (REGISTRATION_RETENTION_DAYS + (status === "pending" ? REPORT_HOLD_DAYS : 0)) * DAY_MS
         const image: ReportRow["image"] =
-          gone && (report.created_at > gone || purged) ? { erasedOn: gone.toISOString() } : { url: await readableUrl(url) }
+          gone && (report.created_at > gone || purged) ? { senderLeftOn: gone.toISOString() } : { url: await readableUrl(url) }
         return [report.id, image] as const
       })
     )

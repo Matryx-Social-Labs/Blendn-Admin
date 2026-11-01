@@ -78,7 +78,7 @@ describe("the reports screen", () => {
 
     const rowOf = (name: string) => rows.find((r) => r.subjectId === name)!
     expect(rowOf(stays).image).toEqual({ url: expect.stringMatching(/kept\.jpg\?signed=1$/) })
-    expect(rowOf(gone).image).toEqual({ erasedOn: goneOn.toISOString() })
+    expect(rowOf(gone).image).toEqual({ senderLeftOn: goneOn.toISOString() })
   })
 })
 
@@ -114,6 +114,18 @@ describe("the 180-day purge and a pending report's image (A-24)", () => {
     expect(mockDeletePrefix.mock.calls.find(([p]) => p === `chat/${sender}/`)?.[1]?.size ?? 0).toBe(0)
   })
 
+  it("a later report, or the author's own, does not extend the hold once the first is decided", async () => {
+    const { sender, reported, key } = await reportedThenGone("later")
+    await purgeDeletedAccountRecords()
+    const message = await db.message_reports.findUniqueOrThrow({ where: { id: reported.id }, select: { message_id: true } })
+    await report(message.message_id, await person("ri-rep3"))
+    await report(message.message_id, sender, new Date(Date.now() - 300 * DAY))
+    await db.message_reports.update({ where: { id: reported.id }, data: { status: "reviewed" } })
+    mockDeleteFile.mockClear()
+    await purgeDeletedAccountRecords()
+    expect(mockDeleteFile).toHaveBeenCalledWith(key)
+  })
+
   it("erases the image when the report is decided", async () => {
     const { sender, reported, key } = await reportedThenGone("decided")
     await purgeDeletedAccountRecords()
@@ -137,7 +149,7 @@ describe("the 180-day purge and a pending report's image (A-24)", () => {
     await db.retained_report_media.updateMany({ where: { user_id: sender }, data: { erase_by: new Date(Date.now() + DAY) } })
     await purgeDeletedAccountRecords()
     expect(mockDeleteFile).not.toHaveBeenCalledWith(key)
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/report.*decided/i), expect.objectContaining({ objectKey: key }))
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/report.*decided/i), expect.objectContaining({ pointerId: expect.any(String) }))
 
     await db.retained_report_media.updateMany({ where: { user_id: sender }, data: { erase_by: new Date(Date.now() - 1000) } })
     await purgeDeletedAccountRecords()
