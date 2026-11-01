@@ -99,6 +99,37 @@ const imageOf = async (id: string) => (await db.user.findUniqueOrThrow({ where: 
 const hiddenOf = async (id: string) =>
   (await db.photo_checks.findMany({ where: { user_id: id, hidden: true }, select: { url: true } })).map((r) => r.url).sort()
 
+/*
+ * The staging override (SCRUM-479, A-13): the vendor says clean, the account is listed, and on staging the photo is
+ * pulled exactly as a real `hide` would pull it. On production the same setting does nothing.
+ */
+describe("the staging moderation override", () => {
+  const ENV = { ...process.env }
+  afterEach(() => {
+    process.env = { ...ENV }
+  })
+  const CLEAN = { checked: true, result: null }
+
+  it("pulls a listed account's photo on staging", async () => {
+    const { id, q, r } = await person()
+    process.env.RAILWAY_ENVIRONMENT_NAME = "staging"
+    process.env.MODERATION_FORCE_HIDE_USER_IDS = id
+    ;(checkImageContent as jest.Mock).mockResolvedValue(CLEAN)
+    const { p } = { p: (await rowOf(id)).photos[0] }
+    await moderateProfilePhoto(p, id)
+    expect((await rowOf(id)).photos).toEqual([q, r])
+  })
+
+  it("does nothing on production", async () => {
+    const { id, p, q, r } = await person()
+    process.env.RAILWAY_ENVIRONMENT_NAME = "production"
+    process.env.MODERATION_FORCE_HIDE_USER_IDS = id
+    ;(checkImageContent as jest.Mock).mockResolvedValue(CLEAN)
+    await moderateProfilePhoto(p, id)
+    expect((await rowOf(id)).photos).toEqual([p, q, r])
+  })
+})
+
 describe("a pulled primary photo", () => {
   it("leaves the row with its blur, is recorded as pulled, and leaves the public bucket", async () => {
     const { id, key, p, q, r, blur } = await person()

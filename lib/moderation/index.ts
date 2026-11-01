@@ -3,6 +3,7 @@ import { checkKeywords } from "./keyword-filter"
 import { checkTextContent, checkImageContent, type ModerationCheck } from "./openai-moderation"
 import { hideMessage, flagForReview, checkAndAutoMute, recordExamined } from "./actions"
 import { checkContactInfo } from "./contact-info"
+import { forcedHide } from "./staging-override"
 import { readableUrl } from "@/lib/tigris"
 import type { ModerationResult } from "./types"
 
@@ -97,6 +98,16 @@ export async function moderateMessage(
     }
 
     // 2. Keyword filter (sync)
+    // Staging's QA accounts, through the path a real verdict takes (lib/moderation/staging-override.ts).
+    const forced = forcedHide(userId)
+    if (forced?.checked && forced.result) {
+      const result = { ...forced.result, source: mediaUrl ? ("openai_image" as const) : ("openai_text" as const) }
+      await hideMessage(messageId, chatGroupId, userId, result)
+      await flagForReview(messageId, chatGroupId, userId, result)
+      await checkAndAutoMute(userId, chatGroupId)
+      return
+    }
+
     const keywordResult = checkKeywords(content)
     if (keywordResult && keywordResult.action === "hide") {
       await hideMessage(messageId, chatGroupId, userId, keywordResult)

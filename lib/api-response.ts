@@ -44,6 +44,10 @@ export const ErrorCode = {
   USER_MUTED: "USER_MUTED",
   USER_BANNED: "USER_BANNED",
   CHAT_LOCKED: "CHAT_LOCKED",
+  /** Account deletion: the password sent with it is not this account's (SCRUM-944 (3)). */
+  PASSWORD_INCORRECT: "PASSWORD_INCORRECT",
+  /** Account deletion: no proof, or a provider token that is stale or not this account's (SCRUM-944 (3)). */
+  REAUTH_REQUIRED: "REAUTH_REQUIRED",
   /** Window closed: the event ended more than CHAT_WINDOW_HOURS ago. */
   CHAT_CLOSED: "CHAT_CLOSED",
   NOT_CHECKED_IN: "NOT_CHECKED_IN",

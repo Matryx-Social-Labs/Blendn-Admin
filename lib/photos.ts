@@ -1,4 +1,5 @@
 import { checkImageContent } from "./moderation/openai-moderation"
+import { forcedHide } from "./moderation/staging-override"
 import { deleteFile, ownedPhotoKey, sealUpload, withdrawFromPublic, type SealRefusal } from "./tigris"
 import { db } from "./db"
 import { logger } from "./logger"
@@ -201,7 +202,7 @@ const PHOTO_CHECK = { retries: 2 } as const
  */
 export async function moderateProfilePhoto(url: string, userId: string): Promise<void> {
   try {
-    const check = await checkImageContent(url, PHOTO_CHECK)
+    const check = forcedHide(userId) ?? (await checkImageContent(url, PHOTO_CHECK))
     if (check.checked && check.result?.action === "hide") {
       await pullPhoto(url, userId)
       return
@@ -227,7 +228,7 @@ export async function moderateProfilePhoto(url: string, userId: string): Promise
  */
 export async function moderateBlurPhoto(url: string, userId: string): Promise<void> {
   try {
-    const check = await checkImageContent(url, PHOTO_CHECK)
+    const check = forcedHide(userId) ?? (await checkImageContent(url, PHOTO_CHECK))
     if (check.checked && check.result?.action === "hide") {
       await recordPhotoPulled(url, userId)
       await db.profiles.updateMany({ where: { id: userId, blur_photo: url }, data: { blur_photo: null } })
