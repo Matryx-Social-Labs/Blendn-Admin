@@ -3,6 +3,7 @@ import { IconMessages } from "@tabler/icons-react"
 
 import { EventHeader } from "@/components/dashboard/event-header"
 import { Panel } from "@/components/dashboard/kit"
+import { RATING_BATCH } from "@/lib/disclosure"
 import { loadEventPage } from "@/lib/event-page"
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
 
@@ -169,7 +170,7 @@ export default async function FeedbackPage({
               </Panel>
             ) : (
               <Panel title="What people said" hint="tap a label to correct it — the classifier misses sarcasm">
-                <FeedbackFeed messages={digest.messages} timezone={digest.timezone} />
+                <FeedbackFeed total={total} messages={digest.messages} timezone={digest.timezone} />
               </Panel>
             )}
 
@@ -206,6 +207,12 @@ export default async function FeedbackPage({
                       <p className="text-[0.75rem] text-faint-foreground">
                         Stars say how much; the messages say what.
                       </p>
+                      {digest.ratingsTowardNextUpdate === null ? null : (
+                        <BatchMeter
+                          pending={digest.ratingsTowardNextUpdate}
+                          published={(ratingCount ?? 0) - digest.ratingsTowardNextUpdate}
+                        />
+                      )}
                     </>
                   )}
                 </Panel>
@@ -214,6 +221,22 @@ export default async function FeedbackPage({
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/** How close the bars are to moving: they update every `RATING_BATCH` ratings so no one's score shows (SCRUM-472). */
+function BatchMeter({ pending, published }: { pending: number; published: number }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-[0.75rem] text-faint-foreground">
+        {pending > 0 ? `From the first ${published}. ` : ""}The bars move every {RATING_BATCH} ratings, so no one&apos;s score shows.
+      </p>
+      <span className="flex shrink-0 gap-[3px]" aria-hidden="true">
+        {Array.from({ length: RATING_BATCH }, (_, i) => (
+          <i key={i} className={i < pending ? "h-1 w-[18px] rounded-sm bg-muted-foreground" : "h-1 w-[18px] rounded-sm bg-surface-raised"} />
+        ))}
+      </span>
     </div>
   )
 }

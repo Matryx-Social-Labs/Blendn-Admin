@@ -100,10 +100,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * from an event neither of them shared.
      */
     const [mine, theirs] = await Promise.all([
-      // Both in the room — at a venue day, both live there now (`inRoomWhere`).
+      // Both in the room — at a venue day, both live there now (`inRoomWhere`). You as a guest by your latest row: staff are out of matching (SCRUM-891).
       db.event_check_ins.findFirst({
         where: { event_id: eventId, user_id: authUser.userId, check_in_time: { not: null }, ...inRoomWhere(authUser.userId) },
-        select: { id: true },
+        orderBy: { check_in_time: "desc" },
+        select: { kind: true },
       }),
       likedId && db.event_check_ins.findFirst({
         where: {
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }),
     ])
 
-    if (!mine) return forbiddenResponse("Check in before liking anyone here")
+    if (!mine || mine.kind === "staff") return forbiddenResponse("Check in before liking anyone here")
     // Not "they weren't here" — that would confirm who did and did not attend to
     // anyone probing user ids.
     if (!theirs || !likedId) return notFoundResponse("User not found")

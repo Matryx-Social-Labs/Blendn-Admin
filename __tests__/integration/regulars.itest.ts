@@ -505,7 +505,9 @@ describe("the person’s side and the pass", () => {
     expect((await after.json()).data).toMatchObject({ known: false, ownerName: expect.stringContaining("venue_org") })
     expect(await db.venue_regular_optins.count({ where: { venue_id: T, user_id: R[0].id, org_id: orgA } })).toBe(1)
     expect((await prefs(R[0].token, T, { known: true })).json.data.known).toBe(true)
-    expect((await venueOffersView(T, asViewer(otherOwner)))?.known).toEqual([{ firstName: null, nights: expect.any(Number) }])
+    // One yes is under the venue's floor (SCRUM-943): the admin's list says the new owner's yes landed.
+    expect((await venueOffersView(T, asViewer(otherOwner)))?.known).toEqual([])
+    expect((await venueOffersView(T, asViewer(admin, "app_admin")))?.known).toEqual([{ firstName: expect.any(String), nights: expect.any(Number) }])
   })
 })
 
@@ -552,10 +554,11 @@ describe("being known as a regular (RG-I02, RG-I03, SEC-09)", () => {
     const yes = await prefs(R[1].token, A, { known: true })
     expect(yes).toMatchObject({ status: 200, json: { data: { known: true, offersMuted: false } } })
     as(owner)
-    expect((await venueOffersView(A, asViewer(owner)))?.known).toEqual([{ firstName: null, nights: 3 }])
+    // Under five there is no list at all (SCRUM-943, A-17); the admin's stays, it answers a support question.
+    expect((await venueOffersView(A, asViewer(owner)))?.known).toEqual([])
     expect((await venueOffersView(A, asViewer(admin, "app_admin")))?.known).toEqual([{ firstName: "Zqcanary1", nights: 3 }])
     const seen = await venueFacing()
-    expect(seen).toContain("A regular")
+    expect(seen).not.toContain("A regular")
     expect(seen).not.toMatch(/Zqcanary/)
     expect(seen).not.toContain(R[1].id)
 
@@ -564,6 +567,19 @@ describe("being known as a regular (RG-I02, RG-I03, SEC-09)", () => {
     expect(await venueFacing()).not.toMatch(/Zqcanary/)
     // Nothing of either choice in the audit log (H1); the row's created_at was the consent.
     expect(await db.audit_logs.count({ where: { user_id: R[1].id } })).toBe(0)
+  })
+
+  it("from five yeses the venue reads the list, nights only, and a tie has no stable place (SCRUM-943, SCRUM-891)", async () => {
+    for (const r of R) await prefs(r.token, A, { known: true })
+    as(owner)
+    const list = (await venueOffersView(A, asViewer(owner)))?.known
+    expect(list).toEqual(R.map(() => ({ firstName: null, nights: 3 })))
+    expect(await venueFacing()).toContain("A regular")
+    expect(await venueFacing()).not.toMatch(/Zqcanary/)
+    // One taken back: four is under the floor again, and the list goes, not one row of it.
+    await prefs(R[0].token, A, { known: false })
+    expect((await venueOffersView(A, asViewer(owner)))?.known).toEqual([])
+    for (const r of R) await prefs(r.token, A, { known: false })
   })
 
   it("a person’s choice written before this rule never reaches an organisation’s audit log; an admin still sees it (H1)", async () => {

@@ -1625,9 +1625,9 @@
       "date": "2026-09-29"
     },
     "rating-disclosure-boundary.test.ts": {
-      "guards": "SCRUM-437: any file in app/, lib/ or components/ that reads rating scores in bulk (event_ratings aggregate/groupBy/findMany, a ratings { select { rating } } include, or _avg of rating) calls discloseRating, discloseStars, discloseStarsAcross or poolStars, except the admin-only export and the push-audience select; and no app/api/mobile file returns averageRating or averages ratings.",
-      "mutation": "M255 the rating reply carries an average. M256 the mobile event page carries an average. M259 the venue page reads the spread without a disclosure call.",
-      "observed": "M255: 1 of 3 failing (the mobile no-average case). M256: 1 of 3 failing (the same). M259: 1 of 3 failing (app/dashboard/venues/[id]/page.tsx listed as an undisclosed reader). All reverted.",
+      "guards": "SCRUM-437, SCRUM-472: any file in app/, lib/ or components/ that reads rating scores in bulk (event_ratings aggregate/groupBy/findMany, a ratings { select { rating } } include, or _avg of rating) is refused, so every host read goes through publishedRatingGroups, except the allow-list.",
+      "mutation": "M472b a bare event_ratings.groupBy added to lib/org-analytics.ts.",
+      "observed": "M472b 'every bulk read of scores goes through publishedRatingGroups' fails naming lib/org-analytics.ts (2026-11-01).",
       "date": "2026-09-29"
     },
     "city-filter-literal.itest.ts": {
@@ -2511,6 +2511,11 @@
       "mutation": "M976a the hand-rolled event_occurrences.createMany after syncOccurrences put back (the pre-fix seed).",
       "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
       "date": "2026-11-01"
+    },
+    "host-privacy-batch.itest.ts": {
+      "guards": "SCRUM-890/891/943/472 (owner rows A-5..A-7, A-17): a quote that cannot be shown is no row; the live snapshot floors a complaint's count and its alerts say no number; bars move every 3 raters; staff are out of matching by their latest check-in.",
+      "mutation": "M472a rating-batches orders newest first. M891a night-people drops the staff check. M890a the live snapshot sends exact categories. M890b the digest keeps every row.",
+      "observed": "M472a 3 failed (bars, venue, shared read). M891a 'has no deck' failed. M890a 'lists it with no number' failed. M890b 'drops the row' failed (2026-11-01)."
     },
     "deletion-reauth.itest.ts": {
       "guards": "SCRUM-944 (3) / owner ruling A-18: account deletion needs the password (wrong → 403 PASSWORD_INCORRECT) or a linked Google/Apple token issued within 15 minutes (else 403 REAUTH_REQUIRED); no proof deletes as before until MOBILE_MIN_APP_VERSION ≥ 1.0.1, then REAUTH_REQUIRED.",

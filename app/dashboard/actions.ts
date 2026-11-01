@@ -17,6 +17,7 @@ import { canAccessDashboard } from "@/lib/rbac"
 import { db } from "@/lib/db"
 import { rsvpCounts } from "@/lib/event-tallies"
 import { discloseStarsAcross, discloseVenueCounts, spreadsByEventId } from "@/lib/disclosure"
+import { publishedRatingGroups } from "@/lib/rating-batches"
 import { ATTENDED } from "@/lib/counting"
 import { loopClosure } from "@/lib/loop-closure"
 import { activeSince } from "@/lib/product-events"
@@ -158,11 +159,7 @@ async function buildOrganizerOverview(userId: string, role: user_role): Promise<
       },
     }),
     // Per event, so the total pools only events that could show their own.
-    db.event_ratings.groupBy({
-      by: ["event_id", "rating"],
-      where: { event: scope },
-      _count: { _all: true },
-    }),
+    publishedRatingGroups(scope),
     liveEventFor(scope, now),
     setupFactsFor(userId, scope),
     comingUpFor(scope, now),
@@ -694,7 +691,7 @@ async function buildVenueOverview(userId: string, role: user_role): Promise<Venu
         },
         orderBy: { start_time: "asc" },
       }),
-      db.event_ratings.groupBy({ by: ["event_id", "rating"], where: { event: eventsWhere }, _count: { _all: true } }),
+      publishedRatingGroups(eventsWhere),
       db.venues.findMany({
         where: { owner_org_id: { in: actor.orgIds } },
         select: { id: true, name: true },

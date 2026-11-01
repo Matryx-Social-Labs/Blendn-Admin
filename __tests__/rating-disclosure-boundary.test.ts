@@ -12,12 +12,12 @@ import { stripComments } from "./support/strip-comments"
  * was an ordinary `aggregate` or `groupBy`, invisible to tsc and to a reviewer.
  *
  * This makes the rule a boundary: a file that reads scores in bulk must go
- * through `discloseRating`, `discloseStars` or `discloseStarsAcross`, and the mobile API
+ * through `publishedRatingGroups` (bars in batches, SCRUM-472) and then `discloseStars` or `discloseStarsAcross`, and the mobile API
  * hands attendees no average at all, since an attendee who can poll one reads
  * each new score from its change.
  *
- * If you are here because this failed: `discloseStars(spread)` for one event,
- * `discloseStarsAcross(spreadsByEvent(rows))` across several.
+ * If you are here because this failed: `rows = await publishedRatingGroups(eventsWhere)`, then
+ * `discloseStars(spread)` for one event, `discloseStarsAcross(spreadsByEvent(rows))` across several.
  */
 
 const ROOT = join(__dirname, "..")
@@ -31,6 +31,8 @@ const ALLOWED = new Set([
   "lib/services/event-notifications.service.ts",
   // Counts raters per event (`_count` only, never a rating value): `ratingCount`, which the `_count` relation it replaced already exposed.
   "lib/event-tallies.ts",
+  // The one reader every host surface goes through: raters published in batches (SCRUM-472).
+  "lib/rating-batches.ts",
 ])
 
 const READS_SCORES = [
@@ -38,7 +40,6 @@ const READS_SCORES = [
   /ratings:\s*\{\s*select:\s*\{\s*rating:\s*true/,
   /_avg:\s*\{\s*rating\b/,
 ]
-const DISCLOSES = /\b(discloseRating|discloseStars|discloseStarsAcross|poolStars)\(/
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -59,9 +60,9 @@ describe("ratings leave only through lib/disclosure.ts (SCRUM-437)", () => {
     expect(files.length).toBeGreaterThan(100)
   })
 
-  it("every bulk read of scores is disclosed", () => {
+  it("every bulk read of scores goes through publishedRatingGroups, so a reload cannot difference the newest one", () => {
     const offenders = files
-      .filter(([rel, src]) => !ALLOWED.has(rel) && READS_SCORES.some((p) => p.test(src)) && !DISCLOSES.test(src))
+      .filter(([rel, src]) => !ALLOWED.has(rel) && READS_SCORES.some((p) => p.test(src)))
       .map(([rel]) => rel)
     expect(offenders).toEqual([])
   })
