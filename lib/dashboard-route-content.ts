@@ -148,6 +148,10 @@ export const routeContent: Record<string, RouteContent> = {
     description:
       "What an event offers. Retiring one stops it being offered for new events without rewriting the ones that already list it.",
   },
+  "/dashboard/markets": {
+    title: "Markets",
+    description: "The countries and cities people can see in the app, and who sees a preview early.",
+  },
   "/dashboard/reports": {
     title: "Reports",
     description: "Download events, attendance, ratings and moderation as CSV.",

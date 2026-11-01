@@ -1,0 +1,132 @@
+import { cityKey } from "./address"
+import type { LaunchState } from "./cities"
+import { Refusal } from "./refusal"
+
+/*
+ * What an admin types on /dashboard/markets, checked before anything is written.
+ * Pure, so `market-actions.ts` stays the database half. The CHECKs in the
+ * markets_and_cities migration hold the same shapes; these say why in words.
+ */
+
+export const LAUNCH_STATES: readonly LaunchState[] = ["live", "preview", "hidden"]
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/
+const LICENSED_AGE = { min: 18, max: 21 }
+
+export function launchStateFrom(value: unknown): LaunchState {
+  if (!LAUNCH_STATES.includes(value as LaunchState)) throw new Refusal("Choose Live, Preview or Hidden.")
+  return value as LaunchState
+}
+
+/** A real IANA zone, as Intl knows it; `UTC` included. */
+export function isKnownTimezone(zone: string): boolean {
+  if (!/^(UTC|[A-Za-z]+(\/[A-Za-z0-9_+-]+)+)$/.test(zone)) return false
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export interface CityInput {
+  marketCode: string
+  slug: string
+  name: string
+  /** Comma-separated spellings. */
+  matchNames: string
+  region?: string | null
+  timezone: string
+  centreLat: number | string
+  centreLon: number | string
+  minLat: number | string
+  minLon: number | string
+  maxLat: number | string
+  maxLon: number | string
+  /** Empty for none. */
+  licensedMinAge?: number | string | null
+}
+
+export interface CityRowInput {
+  market_code: string
+  slug: string
+  name: string
+  match_names: string[]
+  region: string | null
+  timezone: string
+  centre_lat: number
+  centre_lon: number
+  min_lat: number
+  min_lon: number
+  max_lat: number
+  max_lon: number
+  default_licensed_min_age: number | null
+}
+
+const coordinate = (value: number | string, limit: number, axis: "Latitude" | "Longitude") => {
+  const n = typeof value === "number" ? value : Number(String(value).trim() || Number.NaN)
+  if (!Number.isFinite(n) || Math.abs(n) > limit) throw new Refusal(`${axis} is between -${limit} and ${limit}.`)
+  return n
+}
+
+export function cityRowFrom(input: CityInput): CityRowInput {
+  const name = input.name.trim()
+  if (!name) throw new Refusal("Name the city.")
+  const slug = input.slug.trim()
+  if (!SLUG.test(slug)) throw new Refusal("Lowercase letters, numbers and hyphens, like toronto.")
+  const matchNames = [...new Set(input.matchNames.split(",").map(cityKey).filter(Boolean))]
+  if (matchNames.length === 0) throw new Refusal("At least one spelling, comma-separated.")
+  const timezone = input.timezone.trim()
+  if (!isKnownTimezone(timezone)) throw new Refusal("Not a timezone we know. Use the IANA name, like America/Toronto.")
+
+  const lat = (v: number | string) => coordinate(v, 90, "Latitude")
+  const lon = (v: number | string) => coordinate(v, 180, "Longitude")
+  const [centreLat, minLat, maxLat] = [lat(input.centreLat), lat(input.minLat), lat(input.maxLat)]
+  const [centreLon, minLon, maxLon] = [lon(input.centreLon), lon(input.minLon), lon(input.maxLon)]
+  if (!(minLat < maxLat && minLon < maxLon)) throw new Refusal("Min must be less than max.")
+  if (centreLat < minLat || centreLat > maxLat || centreLon < minLon || centreLon > maxLon) {
+    throw new Refusal("The centre must sit inside the bounds.")
+  }
+
+  const ageText = String(input.licensedMinAge ?? "").trim()
+  const age = ageText === "" ? null : Number(ageText)
+  if (age !== null && !(Number.isInteger(age) && age >= LICENSED_AGE.min && age <= LICENSED_AGE.max)) {
+    throw new Refusal("A whole number from 18 to 21, or leave it empty.")
+  }
+
+  return {
+    market_code: input.marketCode.trim(),
+    slug,
+    name,
+    match_names: matchNames,
+    region: input.region?.trim() || null,
+    timezone,
+    centre_lat: centreLat,
+    centre_lon: centreLon,
+    min_lat: minLat,
+    min_lon: minLon,
+    max_lat: maxLat,
+    max_lon: maxLon,
+    default_licensed_min_age: age,
+  }
+}
+
+export interface MarketInput {
+  code: string
+  name: string
+  currency: string
+  locale: string
+}
+
+export function marketRowFrom(input: MarketInput): MarketInput {
+  const code = input.code.trim()
+  if (!/^[A-Z]{2}$/.test(code)) throw new Refusal("Two capital letters, like DE.")
+  const name = input.name.trim()
+  if (!name) throw new Refusal("Name the country.")
+  const currency = input.currency.trim()
+  if (!/^[A-Z]{3}$/.test(currency) || !Intl.supportedValuesOf("currency").includes(currency)) {
+    throw new Refusal("Three capital letters, like EUR.")
+  }
+  const locale = input.locale.trim()
+  if (!/^[a-z]{2,3}-[A-Z]{2}$/.test(locale)) throw new Refusal("A language and region, like de-DE.")
+  return { code, name, currency, locale }
+}
