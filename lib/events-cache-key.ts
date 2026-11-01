@@ -1,4 +1,5 @@
 import { cityKey } from "./address"
+import type { CityRule } from "./browse-scope"
 
 /**
  * The cache key for a page of `GET /api/mobile/events`.
@@ -31,6 +32,8 @@ export interface EventsCacheKeyInput {
   limit: number
   search?: string
   city?: string
+  /** What `city` resolved to for this viewer: the same `city` is a different result set for a previewer. */
+  cityRule?: CityRule
   /** `null` when the viewer has no age on file — itself a distinct result set. */
   viewerAge: number | null
   lat?: number
@@ -60,6 +63,7 @@ export function buildEventsCacheKey(input: EventsCacheKeyInput): string {
     // Normalised the same way the filter matches, so "Bengaluru" and
     // "bengaluru" share an entry instead of caching the same list twice.
     city: cityKey(input.city) || null,
+    cityRule: input.cityRule ?? null,
     viewerAge: input.viewerAge,
     /*
      * Coordinates only enter the key when they change the query.

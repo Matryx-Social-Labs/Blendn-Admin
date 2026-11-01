@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 import { ageFrom } from "@/lib/age"
+import { viewerCityRule } from "@/lib/browse-scope"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -93,13 +94,17 @@ export async function GET(request: NextRequest) {
      * interpolated, and written to pass everything when the parameter is null
      * so an absent `city` widens the search instead of emptying it.
      *
-     * `lower(...)` on both sides matches the case-insensitive filter in
-     * `../route.ts`. It costs a sequential scan on `city`, which is fine here —
-     * the tsquery predicate is what selects rows, and this only narrows them.
+     * `lower(...)` matches the case-insensitive filter in `../route.ts`. It costs
+     * a sequential scan on `city`, which is fine here — the tsquery predicate is
+     * what selects rows, and this only narrows them. The city rule's lists are of
+     * trimmed, lower-cased keys. `<> ALL` is true for an empty list, and the NULL
+     * branch keeps a row with no city through an exclusion.
      */
-    const cityFilter = (n: number) =>
-      `AND ($${n}::text IS NULL OR lower(city) = lower($${n}::text))`
-    const cityParam = city ?? null
+    const cityFilter = (only: number, except: number) =>
+      `AND ($${only}::text[] IS NULL OR lower(btrim(city)) = ANY($${only}::text[])) AND (city IS NULL OR lower(btrim(city)) <> ALL($${except}::text[]))`
+    const cityRule = await viewerCityRule(authUser.userId, city)
+    const onlyParam = "only" in cityRule ? cityRule.only : null
+    const exceptParam = "except" in cityRule ? cityRule.except : []
 
     // Full-text search with ranking
     const events = await db.$queryRawUnsafe<Array<{
@@ -127,7 +132,7 @@ export async function GET(request: NextRequest) {
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(4)}
-         ${cityFilter(5)}
+         ${cityFilter(5, 6)}
          AND to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(venue_name, '') || ' ' || coalesce(city, ''))
              @@ to_tsquery('english', $1)
        ORDER BY rank DESC, start_time ASC
@@ -136,7 +141,8 @@ export async function GET(request: NextRequest) {
       limit,
       offset,
       viewerAge,
-      cityParam
+      onlyParam,
+      exceptParam
     )
 
     const countResult = await db.$queryRawUnsafe<Array<{ count: bigint }>>(
@@ -147,12 +153,13 @@ export async function GET(request: NextRequest) {
          AND status = 'published'
          AND visibility = 'public'
          ${ageFilter(2)}
-         ${cityFilter(3)}
+         ${cityFilter(3, 4)}
          AND to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(venue_name, '') || ' ' || coalesce(city, ''))
              @@ to_tsquery('english', $1)`,
       tsquery,
       viewerAge,
-      cityParam
+      onlyParam,
+      exceptParam
     )
 
     const totalCount = Number(countResult[0]?.count ?? 0)

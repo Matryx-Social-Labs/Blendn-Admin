@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 
 const profile = jest.fn()
 const events = jest.fn()

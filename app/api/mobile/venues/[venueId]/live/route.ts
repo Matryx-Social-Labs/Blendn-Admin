@@ -1,3 +1,4 @@
+import { mayOpenCity } from "@/lib/browse-scope"
 import { NextRequest, NextResponse } from "next/server"
 
 import { ageFrom } from "@/lib/age"
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       where: { id: venueId, deleted_at: null, status: "active" },
       select: { id: true, name: true, city: true, geofence: true, timezone: true, day_reset_hour: true },
     })
-    if (!venue) return notFoundResponse("Venue not found")
+    if (!venue || !(await mayOpenCity(userId, venue.city))) return notFoundResponse("Venue not found")
 
     // Strictly 18+, with a known age (`personAtTheDoor`).
     const person = await personAtTheDoor(userId, null)

@@ -4,7 +4,8 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { db } from "@/lib/db"
 import { ageFrom } from "@/lib/age"
-import { browseCities } from "@/lib/address"
+import { citiesResponse, deviceCountryFrom, wantsPreviewRows } from "@/lib/browse-scope"
+import { cityCatalogue, previewMarketsFor } from "@/lib/cities"
 import {
   successResponse,
   unauthorizedResponse,
@@ -80,8 +81,9 @@ async function viewerEvents(userId: string) {
  * the same normalisation as a functional index, which is a migration to solve
  * a problem the backfill removes.
  *
- * The folding rules live in `lib/address.ts` so they can be tested without a
- * database; this route is the query and the age gate.
+ * The folding rules live in `lib/address.ts`, and the catalogue's (aliases,
+ * launch state, preview, the unserved country) in `lib/browse-scope.ts`, so they
+ * can be tested without a database; this route is the query and the age gate.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -100,9 +102,17 @@ export async function GET(request: NextRequest) {
      * right now, so a city's placeCount can run a few above what opens; group
      * in SQL with that rule if the table outgrows a scan of three columns.
      */
-    const [places, rows] = await Promise.all([cityPlaces(), viewerEvents(user.userId)])
-    // Where the home map goes when the city is picked (step 2): its events' points, else its places'.
-    return successResponse({ cities: browseCities(rows, places) })
+    const [places, events, catalogue] = await Promise.all([cityPlaces(), viewerEvents(user.userId), cityCatalogue()])
+    return successResponse(
+      citiesResponse({
+        catalogue,
+        events,
+        places,
+        previewMarkets: await previewMarketsFor(user.userId, catalogue),
+        wantsPreview: wantsPreviewRows(request.headers.get("x-client-features")),
+        deviceCountry: deviceCountryFrom(request.headers.get("x-country")),
+      })
+    )
   } catch (error) {
     logger.error("Failed to list event cities", { error })
     return serverErrorResponse("Failed to load cities")

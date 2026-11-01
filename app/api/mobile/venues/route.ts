@@ -14,7 +14,7 @@ import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { venueQuerySchema } from "@/lib/validations/venue"
 import { venueTypeLabel } from "@/lib/venue-types"
-import { cityKey } from "@/lib/address"
+import { viewerCityRule } from "@/lib/browse-scope"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { venuesTakenOver } from "@/lib/venue-visibility"
 import { paginationMeta } from "@/lib/pagination"
@@ -128,9 +128,11 @@ export async function GET(request: NextRequest) {
      * one filter, written in lib/venue-listing.ts beside the summary's.
      */
     const now = new Date()
-    const upcomingEventFilter = upcomingEventsWhere(typeof viewerAge === "number" ? viewerAge : null, now)
+    const closedCities = await viewerCityRule(authUser.userId, undefined)
+    const upcomingEventFilter = upcomingEventsWhere(typeof viewerAge === "number" ? viewerAge : null, now, closedCities)
 
-    const where = listedVenuesWhere(city)
+    const cityRule = await viewerCityRule(authUser.userId, city)
+    const where = listedVenuesWhere(cityRule)
 
     if (search) {
       where.OR = [
@@ -141,8 +143,6 @@ export async function GET(request: NextRequest) {
         { area: { contains: search, mode: "insensitive" } },
       ]
     }
-
-    const cityScope = cityKey(city)
 
     if (types.length > 0) {
       where.venue_type = { in: types }
@@ -207,7 +207,7 @@ export async function GET(request: NextRequest) {
      * repeats or skips a venue. Disjoint by construction (tonight excludes live).
      */
     // What the open-tonight read depends on besides time: the query's own scope and the viewer's age rule.
-    const tonightScope = JSON.stringify({ search, city: cityScope, types, area, lat, lon, radius, viewerAge, taken })
+    const tonightScope = JSON.stringify({ search, city: cityRule, closedCities, types, area, lat, lon, radius, viewerAge, taken })
     const liveTier = order === "live" && mayCountLive ? await liveVenueIds(where, authUser.userId, now) : new Set<string>()
     const tonightTier =
       order === "live" ? await openTonightVenueIds(where, upcomingEventFilter, now, liveTier, tonightScope) : new Set<string>()

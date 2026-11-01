@@ -168,6 +168,7 @@ model User {
   message_reports       message_reports[]
   photo_checks          photo_checks[]
   city_demand           city_demand[]
+  market_previewers     market_previewers[]
   leads_assigned        leads[]
   lead_notes            lead_notes[]
   checkInRefusals       check_in_refusals[]
@@ -223,6 +224,9 @@ model VerificationToken {
 // Application models
 model profiles {
   id            String    @id
+  /// Where the person goes out normally: city level, set by them, never shown to anybody else (lib/cities.ts).
+  home_city_id  String?   @db.Uuid
+  home_city     cities?   @relation(fields: [home_city_id], references: [id], onDelete: SetNull)
   phone         String?
   // Canonical display name — always read from here, not from User.name
   name          String?
@@ -457,6 +461,8 @@ model profiles {
   /// Also unindexed. The admin funnel semi-joins into this table three times
   /// per load on `profile: { onboarded: true }`, which scanned it each time.
   @@index([onboarded])
+
+  @@index([home_city_id])
 }
 
 model events {
@@ -4497,4 +4503,73 @@ model venue_offer_mutes {
 
   @@id([venue_id, user_id])
   @@index([user_id])
+}
+
+/// Whether a country or city is open. A city's effective state is the lower of its own and its market's (lib/cities.ts).
+enum launch_state {
+  /// Listed for everyone.
+  live
+  /// Listed as coming soon; opens fully for `market_previewers`.
+  preview
+  /// Not listed, and its events and places are never returned.
+  hidden
+}
+
+/// A country Blendn serves. `currency` is text so a new country is a row, not a schema change;
+/// CHECKs on code and currency shape are in migration SQL only.
+model markets {
+  code         String       @id
+  name         String
+  currency     String
+  locale       String
+  launch_state launch_state @default(hidden)
+  sort         Int          @default(0)
+  updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
+
+  cities     cities[]
+  previewers market_previewers[]
+}
+
+/// A city in a market. `events.city` and `venues.city` stay free text: `match_names` says which
+/// spellings mean this city (`cityFor`). One default per market is a partial unique index and the
+/// shape, bounds and timezone rules are CHECKs: all migration SQL only, see CLAUDE.md.
+model cities {
+  id                       String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  market_code              String
+  slug                     String       @unique
+  name                     String
+  match_names              String[]     @default([])
+  region                   String?
+  timezone                 String
+  launch_state             launch_state @default(hidden)
+  is_default               Boolean      @default(false)
+  centre_lat               Float
+  centre_lon               Float
+  min_lat                  Float
+  min_lon                  Float
+  max_lat                  Float
+  max_lon                  Float
+  /// 19 where a licensed venue's door is 19+. Read by the dashboard's event form later; null is no pre-fill.
+  default_licensed_min_age Int?
+  sort                     Int          @default(0)
+  created_at               DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
+
+  market        markets    @relation(fields: [market_code], references: [code], onDelete: Restrict)
+  home_profiles profiles[]
+
+  @@index([market_code, launch_state])
+}
+
+/// Who sees a preview market fully (the beta). Set by an admin.
+model market_previewers {
+  user_id     String
+  market_code String
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  user   User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  market markets @relation(fields: [market_code], references: [code], onDelete: Cascade)
+
+  @@id([user_id, market_code])
+  @@index([market_code])
 }

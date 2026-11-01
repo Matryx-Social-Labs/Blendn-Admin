@@ -292,6 +292,6 @@ describe("the middleware", () => {
 
   it("allows X-App-Version in CORS preflight", async () => {
     const res = await call("/api/mobile/events", { origin: "https://blendn.app" }, "OPTIONS")
-    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, Authorization, X-App-Version, X-App-Build, X-App-Platform, X-Channel-Set")
+    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, Authorization, X-App-Version, X-App-Build, X-App-Platform, X-Channel-Set, X-Client-Features, X-Country")
   })
 })

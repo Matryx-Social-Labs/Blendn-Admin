@@ -25,7 +25,7 @@ export const EventQuerySchema = z
       .optional()
       .openapi({
         description:
-          "Scope the list to one city, matched case-insensitively against the event's city. This is how a browse screen is scoped; `search` is a fuzzy match across four columns and is not a scope. Pick a value from GET /api/mobile/events/cities.",
+          "Scope the list to one city, matched case-insensitively against the event's city and, for a catalogued city, against every spelling that means it (`Bangalore` finds Bengaluru). A hidden city, or a preview city you are not a previewer of, answers an empty list; with no `city`, their rows are left out. This is how a browse screen is scoped; `search` is a fuzzy match across four columns and is not a scope. Pick a value from GET /api/mobile/events/cities.",
       }),
     lat: z.number().min(-90).max(90).optional(),
     lon: z.number().min(-180).max(180).optional(),
@@ -151,7 +151,17 @@ export const EventCitiesResponseSchema = z
   .object({
     cities: z.array(
       z.object({
-        city: z.string().openapi({ description: "Pass this back as the `city` query parameter." }),
+        city: z.string().openapi({ description: "Pass this back as the `city` query parameter. The catalogue's name when the city is catalogued, however its rows spell it." }),
+        slug: z.string().nullable().openapi({ description: "The catalogue's id for this city; what `homeCitySlug` takes. Null when uncatalogued (file it under Elsewhere)." }),
+        country: z.string().nullable().openapi({ description: "ISO 3166-1 alpha-2. Null when uncatalogued." }),
+        launchState: z.enum(["live", "preview"]).nullable().openapi({ description: "The lower of the city's own state and its country's. A hidden city is never listed. Null when uncatalogued." }),
+        access: z.enum(["full", "comingSoon"]).openapi({ description: "`comingSoon`: a preview city this viewer cannot open; its counts are 0 and its lists empty. Show the coming-soon screen and record demand. Only sent to a client declaring `X-Client-Features: travel1`." }),
+        timezone: z.string().nullable().openapi({ description: "IANA zone to show this city's times in. Null when uncatalogued." }),
+        bounds: z
+          .object({ minLat: z.number(), minLon: z.number(), maxLat: z.number(), maxLon: z.number() })
+          .nullable()
+          .openapi({ description: "The city's box: what a map fits, and the test for whether a point is in the city. Null when uncatalogued." }),
+        isDefault: z.boolean().openapi({ description: "This country's default city." }),
         eventCount: z.number().int().openapi({ description: "Upcoming events this city opens with; 0 for a city with places only." }),
         placeCount: z.number().int().openapi({ description: "Listed places (venues) in the city: what Places opens with." }),
         centre: z
@@ -159,10 +169,33 @@ export const EventCitiesResponseSchema = z
           .nullable()
           .openapi({
             description:
-              "Where to point a map for this city: the mean of its listed events' points, or of its places' points when it has no events (rows with no point, or 0,0, left out). Null when none has a point; keep the map where it is.",
+              "Where to point a map for this city: the mean of its listed events' points, or of its places' points when it has no events (rows with no point, or 0,0, left out). A catalogued city with none falls back to its catalogue centre. Null only for an uncatalogued city with no point; keep the map where it is.",
           }),
       })
     ),
+    countries: z
+      .array(
+        z.object({
+          code: z.string(),
+          name: z.string(),
+          launchState: z.enum(["live", "preview"]),
+          defaultCitySlug: z.string().nullable(),
+        })
+      )
+      .openapi({ description: "The countries served, in picker order. A hidden country is never listed." }),
+    defaultCitySlug: z.string().nullable().openapi({
+      description: "A live country's default city: where to browse with no device country, or from a country we do not serve. Never call it near the person. Listed in `cities` whenever it is not null.",
+    }),
+    device: z
+      .object({
+        country: z.string().openapi({ description: "`X-Country`, upper-cased." }),
+        access: z.enum(["full", "comingSoon", "none"]).openapi({
+          description: "`full`: open `citySlug`. `comingSoon`: a preview country; open that city's coming-soon screen. `none`: we are not there; say so, and name no city as near.",
+        }),
+        citySlug: z.string().nullable().openapi({ description: "Only ever a city in `country`; null for `none`. Prefer the smallest box in `cities` holding the device's point." }),
+      })
+      .nullable()
+      .openapi({ description: "Null when the client sent no valid `X-Country`." }),
   })
   .openapi("EventCitiesResponse")
 

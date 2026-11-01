@@ -1,3 +1,4 @@
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 process.env.MOBILE_JWT_SECRET = "test-secret-at-least-32-characters-long!!"
 
 /*

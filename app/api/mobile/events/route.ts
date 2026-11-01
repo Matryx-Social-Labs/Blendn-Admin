@@ -25,8 +25,7 @@ import {
 } from "@/lib/services/events.service"
 import { EVENTS_CACHE_TTL_MS, EVENTS_CACHE_MAX_SIZE } from "@/lib/constants"
 import { buildEventsCacheKey } from "@/lib/events-cache-key"
-import { likeLiteral } from "@/lib/like-literal"
-import { cityKey } from "@/lib/address"
+import { cityRuleWhere, viewerCityRule } from "@/lib/browse-scope"
 import { realEventsWhere } from "@/lib/event-kind"
 import { paginationMeta } from "@/lib/pagination"
 import { FEATURED_MAX, featuredSeed, rotated } from "@/lib/featured"
@@ -234,13 +233,11 @@ export async function GET(request: NextRequest) {
      * find, so a city can never show a count and then open empty.
      * `scripts/backfill-event-cities.ts` is what gives the older rows a city.
      */
-    // The value the cache key holds (`cityKey`: trimmed, lower-cased), or
-    // " Bengaluru" finds nothing and caches that empty page under Bengaluru's
-    // key for everyone (SCRUM-474). Blank once trimmed is no filter, as in the key.
-    const cityScope = cityKey(city)
-    if (cityScope) {
-      where.city = { equals: likeLiteral(cityScope), mode: "insensitive" }
-    }
+    // Trimmed and lower-cased inside the rule, or " Bengaluru" finds nothing and
+    // caches that empty page for everyone (SCRUM-474). Blank is no filter. With or
+    // without a city, rows in a city this viewer may not open are out (lib/browse-scope.ts).
+    const cityRule = await viewerCityRule(authUser.userId, city)
+    where.AND = [...((where.AND as Prisma.eventsWhereInput[] | undefined) ?? []), cityRuleWhere(cityRule)]
 
     /*
      * A bounding box **only when the caller asked for one.**
@@ -310,6 +307,8 @@ export async function GET(request: NextRequest) {
       limit: pageSize,
       search,
       city,
+      // What the city filter resolved to: a previewer's page must not reach anybody else.
+      cityRule,
       // The DERIVED age, matching the filter above. Keying on the stored number
       // would let two viewers with the same signup-day age but different
       // birthdays share an entry — and on a birthday, serve yesterday's list.
