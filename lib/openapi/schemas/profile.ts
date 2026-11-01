@@ -40,6 +40,10 @@ export const UpdateProfileRequestSchema = z
       .openapi({ example: "1998-04-17", description: "YYYY-MM-DD. Write-only." }),
 
     location: z.string().max(200).optional().nullable(),
+    homeCitySlug: z.string().min(1).max(64).optional().nullable().openapi({
+      description:
+        "Where the person goes out normally: a `slug` from GET /events/cities. A preview city is accepted; an unknown or hidden one is 400. `null` clears it. Your own, never shown to anybody else; read it back as `profile.homeCitySlug` on GET and PUT of your own profile.",
+    }),
     bio: z.string().max(500).optional().nullable(),
     occupation: z.string().max(100).optional().nullable(),
     education: z.string().max(100).optional().nullable(),

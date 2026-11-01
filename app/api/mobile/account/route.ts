@@ -183,6 +183,7 @@ export async function DELETE(request: NextRequest) {
           // to whoever gets the database than the age beside it.
           date_of_birth: null,
           location: null,
+          home_city_id: null,
           bio: null,
           occupation: null,
           education: null,
@@ -282,6 +283,7 @@ export async function DELETE(request: NextRequest) {
       // on the foreign key too; this is explicit so the deletion path lists
       // everything it removes rather than relying on a constraint to be read.
       db.city_demand.deleteMany({ where: { user_id: authUser.userId } }),
+      db.market_previewers.deleteMany({ where: { user_id: authUser.userId } }),
       /*
        * Friends, requests either way, and the invite link. Nothing cascades
        * (the `User` row is kept), and a deleted account left on somebody's

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "fs"
 import { join } from "path"
 
 import { stripComments } from "./support/strip-comments"
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 
 /**
  * Every export in `lib/` is called by something.

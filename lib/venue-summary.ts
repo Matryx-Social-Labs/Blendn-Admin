@@ -2,7 +2,7 @@ import type { venue_type } from "@prisma/client"
 
 import { db } from "@/lib/db"
 import { liveVenueIds, listedVenuesWhere, openTonightVenueIds, upcomingEventsWhere } from "@/lib/venue-listing"
-import { cityKey } from "@/lib/address"
+import type { CityRule } from "@/lib/browse-scope"
 import { venuesTakenOver } from "@/lib/venue-visibility"
 import { venueTypeLabel } from "@/lib/venue-types"
 
@@ -24,7 +24,7 @@ export interface VenueSummary {
 const shared = globalThis as typeof globalThis & { __blendnVenueSummary?: Map<string, { value: VenueSummary; at: number }> }
 const cache = (shared.__blendnVenueSummary ??= new Map())
 
-type Viewer = { userId: string; viewerAge: number | null; mayCountLive: boolean }
+type Viewer = { userId: string; viewerAge: number | null; mayCountLive: boolean; cityRule: CityRule }
 
 /**
  * Counts of places, never of people, for one city: how many venues Places
@@ -36,18 +36,18 @@ type Viewer = { userId: string; viewerAge: number | null; mayCountLive: boolean 
  * reads (`liveVenueIds`, `openTonightVenueIds`), the first only for somebody
  * the venue page would answer, as `liveNow` is.
  *
- * Kept 60 s per city, per viewer age and per whether the viewer may count
+ * Kept 60 s per city rule, per viewer age and per whether the viewer may count
  * live: the three things that change the answer. The viewer who fills an entry
  * is the one `liveVenueIds` leaves out of the count, so a venue sitting on the
  * edge of a bucket can differ by one person between two readers; the figure is
  * a count of venues and says nothing about who.
  */
-export async function venueSummary(city: string | undefined, viewer: Viewer, now: Date): Promise<VenueSummary> {
-  const key = JSON.stringify({ city: cityKey(city) || null, age: viewer.viewerAge, live: viewer.mayCountLive })
+export async function venueSummary(viewer: Viewer, now: Date): Promise<VenueSummary> {
+  const key = JSON.stringify({ city: viewer.cityRule, age: viewer.viewerAge, live: viewer.mayCountLive })
   const hit = cache.get(key)
   if (hit && now.getTime() - hit.at < SUMMARY_TTL_MS) return hit.value
 
-  const where = listedVenuesWhere(city)
+  const where = listedVenuesWhere(viewer.cityRule)
   const taken = await venuesTakenOver(now, where, { viewerAge: viewer.viewerAge })
   if (taken.length > 0) where.id = { notIn: taken }
 
@@ -63,7 +63,7 @@ export async function venueSummary(city: string | undefined, viewer: Viewer, now
     upcomingEventsWhere(viewer.viewerAge, now),
     now,
     live,
-    JSON.stringify({ summary: true, city: cityKey(city), age: viewer.viewerAge, live: viewer.mayCountLive })
+    JSON.stringify({ summary: true, city: viewer.cityRule, age: viewer.viewerAge, live: viewer.mayCountLive })
   )
   const liveByArea =
     live.size === 0

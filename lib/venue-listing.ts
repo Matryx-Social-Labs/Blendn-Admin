@@ -1,10 +1,9 @@
 import { Prisma } from "@prisma/client"
 
-import { cityKey } from "@/lib/address"
+import { cityRuleWhere, type CityRule } from "@/lib/browse-scope"
 import { db } from "@/lib/db"
 import { realEventsWhere } from "@/lib/event-kind"
 import type { LiveCountBucket } from "@/lib/disclosure"
-import { likeLiteral } from "@/lib/like-literal"
 import { liveGuestIds, staleVenueIds, venueLiveBucket } from "@/lib/live-count"
 import { logger } from "@/lib/logger"
 import { mayAttendWhere, openOnBlendnWhere, undisputedLinkWhere } from "@/lib/venue-visibility"
@@ -46,17 +45,14 @@ export function upcomingEventsWhere(viewerAge: number | null, now: Date): Prisma
  * The venues Places lists, before the caller's own filters: active and not
  * deleted (`archived` is how a venue is retired without deleting the events
  * that happened in it), not a claimed venue its owner took off Blendn (D-13),
- * and in `city` (trimmed like the events filter, so the two agree on what a
- * city is) when one was given. The `AND` is the owner's switch on its own, so
- * a caller's search `OR` does not replace it.
+ * and within the city rule (the events filter's, so the two agree on what a
+ * city is). Both are under `AND`, so a caller's search `OR` replaces neither.
  */
-export function listedVenuesWhere(city: string | undefined): Prisma.venuesWhereInput {
-  const cityScope = cityKey(city)
+export function listedVenuesWhere(cityRule: CityRule): Prisma.venuesWhereInput {
   return {
     deleted_at: null,
     status: "active",
-    AND: [openOnBlendnWhere],
-    ...(cityScope && { city: { equals: likeLiteral(cityScope), mode: "insensitive" } }),
+    AND: [openOnBlendnWhere, cityRuleWhere(cityRule)],
   }
 }
 

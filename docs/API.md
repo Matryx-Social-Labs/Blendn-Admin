@@ -1147,7 +1147,7 @@ GET /events/:eventId/people?limit=30&cursor=rh_…
 | page | int | 1 | Page number |
 | limit | int | 20 | Items per page (max 100) |
 | search | string | - | Fuzzy match across title, description, venue, city. **Not a scope** — "Bengaluru" also matches an event *titled* "Bengaluru Meetup" held in Delhi. Trimmed; empty is no search. At most 100 characters, else `400 VALIDATION_FAILED` with `reasonCode: SEARCH_TOO_LONG`. One character is answered, filtered in date order (not ranked). From 2 characters, with the default `sortBy=start_time`, results are ranked by where the word is: title, then venue, then city, then only the description; by start time within each (S-6). Past 500 matches the search is in date order instead, with the true `totalCount` (never a capped one). `sortBy=distance` or `created_at` orders as asked |
-| city | string | - | **Scope the list to one city.** Exact, case-insensitive. Values come from `GET /events/cities` |
+| city | string | - | **Scope the list to one city.** Exact, case-insensitive; a catalogued city matches every spelling that means it (`Bangalore` finds Bengaluru). A hidden city, or a preview city you do not preview, is an empty list; with no `city` their rows are left out. Values come from `GET /events/cities` |
 | lat | float | - | Latitude — sorts and labels by distance, never excludes |
 | lon | float | - | Longitude |
 | radius | float | **none** | Hard limit in **km**. No default: sending coordinates alone no longer filters |
@@ -1292,11 +1292,55 @@ Cities with events come first, busiest first; then cities with places only, by
 place count.
 
 ```json
-{ "success": true, "data": { "cities": [
-  { "city": "Bengaluru", "eventCount": 12, "placeCount": 1505, "centre": { "latitude": 12.9716, "longitude": 77.5946 } },
-  { "city": "Mumbai", "eventCount": 0, "placeCount": 1206, "centre": { "latitude": 19.0612, "longitude": 72.8521 } }
-] } }
+{ "success": true, "data": {
+  "cities": [
+    { "city": "Bengaluru", "eventCount": 12, "placeCount": 1505, "centre": { "latitude": 12.9716, "longitude": 77.5946 },
+      "slug": "bengaluru", "country": "IN", "launchState": "live", "timezone": "Asia/Kolkata",
+      "bounds": { "minLat": 12.83, "minLon": 77.45, "maxLat": 13.14, "maxLon": 77.78 }, "isDefault": true, "access": "full" },
+    { "city": "Toronto", "eventCount": 0, "placeCount": 0, "centre": { "latitude": 43.6532, "longitude": -79.3832 },
+      "slug": "toronto", "country": "CA", "launchState": "preview", "timezone": "America/Toronto",
+      "bounds": { "minLat": 43.58, "minLon": -79.64, "maxLat": 43.86, "maxLon": -79.11 }, "isDefault": true, "access": "comingSoon" }
+  ],
+  "countries": [
+    { "code": "IN", "name": "India", "launchState": "live", "defaultCitySlug": "bengaluru" },
+    { "code": "CA", "name": "Canada", "launchState": "preview", "defaultCitySlug": "toronto" }
+  ],
+  "defaultCitySlug": "bengaluru",
+  "device": { "country": "DE", "access": "none", "citySlug": null }
+} }
 ```
+
+**The catalogue.** Cities and countries are rows (`cities`, `markets`), so a new
+country needs no code. A city's state is the lower of its own and its country's.
+
+| State | `/events/cities` | Its events and places |
+|---|---|---|
+| `live` | Listed once it has rows (a country's default always) | Everyone |
+| `preview` | `access: comingSoon`, counts 0, only with `X-Client-Features: travel1`; `access: full`, real counts, for a previewer on any client | Empty for everyone but `market_previewers` |
+| `hidden` | Never | Never |
+
+A row in no catalogued city is listed with `slug`, `country`, `launchState`,
+`timezone` and `bounds` all null: show it under "Elsewhere". Spellings in
+`match_names` are one row under the catalogue's name.
+
+**Request headers.** `X-Client-Features: travel1` says this build can show a
+coming-soon city; installed builds never sent it, so a city they would open empty
+is left out for them. `X-Country` is the device's ISO country, from reverse
+geocoding; the server does not store it.
+
+**Where the person is.** `device` is null without a valid `X-Country`. Otherwise:
+
+| `device.access` | Means | What to do |
+|---|---|---|
+| `full` | We are open in that country | Browse the city whose `bounds` hold the device's point, else `citySlug` |
+| `comingSoon` | That country is in preview | The coming-soon screen for `citySlug` (the bounds' city first), and record demand |
+| `none` | We are not there, or that country is hidden | Say so and record demand. `citySlug` is null. May browse the top-level `defaultCitySlug`, **never described as near them** |
+
+`citySlug` is only ever a city in `device.country`. The top-level
+`defaultCitySlug` (a live country's default) is for no device country, or for
+`none`; it is null only when no live country has a city, and always in `cities`
+otherwise. Do not fall back to the first row of `cities`: that is the busiest
+city in the world.
 
 Pass `city` straight back to `GET /events`, `GET /events/search` or
 `GET /venues`. A city with `eventCount: 0` is still a city: its Places list is
@@ -1306,7 +1350,8 @@ event has taken over right now is still counted.
 **`centre` is where the home map goes when the city is picked** (plan v2
 step 2): the mean of the city's listed events' points, folded on the same key
 as the counts. Events with no point, or the 0,0 an unset point reads as, are
-left out; `null` when none has a point, and the app leaves its map where it
+left out. A catalogued city with none falls back to its catalogue centre; `null`
+only for an uncatalogued city with none, and the app leaves its map where it
 is. A mean rather than a stored point, so it follows where the city's events
 actually are (`cityCentres`, lib/address.ts).
 
@@ -2852,6 +2897,7 @@ reveal already made is not undone. Deleting your account deletes your reveals.
 | `work_field` | a slug from `GET /work-fields` | anyone who can see the profile |
 | `languages` | up to five slugs from `GET /profile-options` (besides English; `kannada_learning` is "Learning Kannada") | as a shared line on a card (Tier B); the labels to whoever can see who you are |
 | `home_state` | a state / union territory slug, or `abroad` | the same |
+| `homeCitySlug` | a `slug` from `GET /events/cities`, or `null` to clear. A preview city is accepted; an unknown or hidden one is 400 `VALIDATION_ERROR` and nothing is written. Read back as `profile.homeCitySlug` on your own GET and PUT | **nobody but the owner** |
 | `sun_sign` + `sign_system` | opt-in: a sign slug and `western` or `rashi`, **both or neither** (400 otherwise; `profiles_sign_shape` in the table). Null both to take it off | the same, plus your own `sign` chip on cards |
 | `shows_up_badge` | boolean, default false | turns on the "Shows up" badge |
 | `show_badges` | boolean, default true | off: no badges on your card at all |

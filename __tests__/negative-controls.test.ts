@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "fs"
 import { join } from "path"
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 
 /**
  * R16, made enforceable.

@@ -131,6 +131,10 @@ Historical note, because this paragraph used to say otherwise: `canManageEvent` 
 
 **A chat room has a kind** (`chat_groups.kind`: `event`, `board_post`, and `crew` / `blend` from step 8) and one owner of that kind. Who may enter — socket join, every `/chat/groups/:id` read and write, typing — is `lib/room-kind.ts` (`roomOwnerDenial`, `roomReadDenialFor`, `mayWriteToRoomFor`): an event's room is today's rule unchanged; any other asks its owner, and a member row alone is never enough. A room's handles are minted in `roomScope(room)` — its event for an event's room (unchanged for installed clients), its own id and kind otherwise — so a handle never resolves in another room. A room that is not an event's is re-asked on every delivery, and a writer that closes its owner empties it (`lib/room-close.ts`). `board_post_id` is ON DELETE RESTRICT: a post with a room is never deleted, only taken off the board. A new reader of `chat_group.event` must decide what it does for a room with none: `__tests__/chat-group-event-readers.test.ts` counts them.
 
+### Countries and cities are data
+
+`markets` and `cities` are the countries and cities Blendn serves; adding one is rows, and code on this path names none (`__tests__/city-catalogue.test.ts` fails if it does). `lib/cities.ts` loads them (`cityCatalogue`, `globalThis`, 60 s) and `cityFor(catalogue, name)` maps any spelling through `match_names`. `lib/browse-scope.ts` is the one rule for which cities' rows a viewer sees: use `viewerCityRule` + `cityRuleWhere` in anything that lists events or places, and put the rule in any cache key, because it differs for a `market_previewers` member. A city's state is the lower of its own and its market's. `events.city` stays free text.
+
 ### Mobile API conventions
 
 Mobile-facing routes live under `app/api/mobile/*` and follow a consistent shape: JWT auth via `lib/mobile-auth.ts`, responses normalized through `lib/api-response.ts`, pagination via `lib/pagination.ts`. OpenAPI spec generation lives in `lib/openapi/`; served at `app/api/docs` and `app/api-docs` (Swagger UI). When adding or changing a mobile endpoint, update the OpenAPI schema and `docs/API.md` together — both are checked into the repo and expected to stay in sync with actual route behavior.
@@ -154,7 +158,7 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while twenty exist in
+express a CHECK constraint, so `db push` creates none — while twenty-seven exist in
 migration SQL and therefore in every deployed environment:
 
 | Constraint | What it enforces |
@@ -178,6 +182,12 @@ migration SQL and therefore in every deployed environment:
 | `blends_one_b` | a Blend's side B is a crew or one person (side A is always a crew) |
 | `ended_friendships_canonical_pair` | a friendship that ended is stored once, `user1_id < user2_id` in the `C` collation, like `friendships` — read by `lib/room-people.ts` for the 24 h an unfriend keeps the pair apart in rooms |
 | `blends_pair_order` | two crews in one order only (`a_crew_id < b_crew_id`, uuid order — no collation), so a pair is one Blend |
+| `markets_code_shape` / `markets_currency_shape` | a market is an ISO-shaped country code (two capitals) with an ISO-shaped currency (three) |
+| `cities_slug_shape` | a city slug is lower-case words joined by hyphens |
+| `cities_timezone_known` | `cities.timezone` has the shape of an IANA name, as `venues_timezone_known` |
+| `cities_bounds_order` | `min_lat < max_lat` and `min_lon < max_lon` |
+| `cities_centre_in_bounds` | a city's centre is inside its box |
+| `cities_licensed_min_age_floor` | a city's licensed-venue age default is never under the 18+ floor |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
@@ -187,7 +197,10 @@ venue per local day — `lib/venue-day.ts` recovers a lost race by that name),
 open check-in per person — `lib/check-in-core.ts` recovers a lost race by that
 name), `crew_members_one_owner` (one owner per
 crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
-`venues_one_per_source_record` (a seeded venue's dataset record, once), the
+`venues_one_per_source_record` (a seeded venue's dataset record, once),
+`cities_one_default_per_market`, the seeded `markets` and `cities` rows (on a
+`db push` database the catalogue is empty and every city reads as uncatalogued,
+so nothing is hidden or in preview), the
 system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its
 deletion. On a `db push` database `venueDayFor` fails for want of that user,

@@ -1,3 +1,4 @@
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 process.env.MOBILE_JWT_SECRET = "test-secret-at-least-32-characters-long!!"
 
 /*
@@ -30,6 +31,7 @@ const mockDb = {
   push_tokens: { deleteMany: jest.fn() },
   photo_checks: { deleteMany: jest.fn() },
   city_demand: { deleteMany: jest.fn() },
+  market_previewers: { deleteMany: jest.fn() },
   friendships: { deleteMany: jest.fn() },
   friend_requests: { deleteMany: jest.fn() },
   friend_invites: { deleteMany: jest.fn() },
@@ -168,6 +170,7 @@ describe("deleting an account scrubs the matching inputs", () => {
     // well; asserted here so the deletion path stays a readable list of
     // everything it removes rather than a set of constraints to go and check.
     expect(mockDb.city_demand.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    expect(mockDb.market_previewers.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
     // Off every friends list, every request gone, and the link stops opening.
     expect(mockDb.friendships.deleteMany).toHaveBeenCalledWith({
       where: { OR: [{ user1_id: USER }, { user2_id: USER }] },
@@ -350,6 +353,7 @@ describe("no field on the profile survives deletion unnoticed", () => {
    * until it is either scrubbed or named below with a reason.
    */
   const KEPT: Record<string, string> = {
+    home_city: "the relation over home_city_id, which is scrubbed",
     id: "the FK to User, which is kept so other people's history survives",
     created_at: "when the row was made — not about the person",
     updated_at: "bookkeeping",

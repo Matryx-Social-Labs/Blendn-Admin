@@ -1,3 +1,4 @@
+jest.mock("@/lib/cities", () => jest.requireActual("./support/empty-catalogue"))
 const mockDb = {
   profiles: { findUnique: jest.fn() },
   venues: { groupBy: jest.fn(), findMany: jest.fn() },
@@ -92,7 +93,8 @@ describe("GET /api/mobile/venues/summary", () => {
     expect(mockDb.venues.groupBy).toHaveBeenCalledTimes(1)
     const arg = mockDb.venues.groupBy.mock.calls[0][0]
     expect(arg.by).toEqual(["venue_type", "area", "area_slug"])
-    expect(arg.where).toMatchObject({ deleted_at: null, status: "active", city: { equals: "summarytestcity", mode: "insensitive" } })
+    expect(arg.where).toMatchObject({ deleted_at: null, status: "active" })
+    expect(arg.where.AND).toContainEqual({ city: { equals: "summarytestcity", mode: "insensitive" } })
     const body = await res.json()
     expect(body.success).toBe(true)
     expect(body.data).toMatchObject({ total: 2, liveCount: 0, openTonightCount: 0 })
