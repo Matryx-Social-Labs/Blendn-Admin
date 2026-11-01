@@ -1,5 +1,5 @@
 import { logger } from "../logger"
-import type { ModerationCheck } from "./openai-moderation"
+import { checkTextContent, type ModerationCheck } from "./openai-moderation"
 
 /*
  * A staging-only moderation override (SCRUM-479, owner ruling A-13, 2026-11-01).
@@ -19,4 +19,15 @@ export function forcedHide(userId: string): ModerationCheck | null {
     checked: true,
     result: { action: "hide", source: "openai_image", categories: { staging_override: 1 }, confidence: 1, reason: "staging moderation override" },
   }
+}
+
+/**
+ * A send route's inline text check, through the override: the routes take this verdict first, and only a timed-out one
+ * reaches the pipeline, so a hide forced only there held for just the slow sends.
+ */
+export function textCheckFor(userId: string, content: string, ask = checkTextContent): Promise<ModerationCheck> {
+  const forced = forcedHide(userId)
+  return forced?.checked && forced.result
+    ? Promise.resolve({ checked: true, result: { ...forced.result, source: "openai_text" } })
+    : ask(content)
 }

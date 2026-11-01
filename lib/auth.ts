@@ -29,6 +29,28 @@ async function rememberDevice(email: string): Promise<void> {
   }
 }
 
+/**
+ * An attendee an organisation invited may sign in, or the invite could never be accepted: `/invite` needs a session and
+ * accepting it is what moves them out of `attendee`. Their session opens nothing else: the middleware and `lib/rbac.ts`
+ * still read the role.
+ *
+ * ponytail: one who signs in at /login rather than through the link lands back on the form; the mail is the way in.
+ */
+async function hasLiveInvite(email: string): Promise<boolean> {
+  const invite = await db.organisation_invites.findFirst({
+    where: {
+      // Exact, both sides lowercase: `mode: "insensitive"` is ILIKE, where `_` in a sign-up address matches any character.
+      email: email.trim().toLowerCase(),
+      accepted_at: null,
+      revoked_at: null,
+      expires_at: { gt: new Date() },
+      org: { status: { not: "suspended" } },
+    },
+    select: { id: true },
+  })
+  return Boolean(invite)
+}
+
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db),
   session: { strategy: "jwt" },
@@ -87,7 +109,7 @@ export const authOptions: NextAuthOptions = {
          * attempts" (SCRUM-172). Naming the role is safe only after the
          * password check above; a wrong password never reaches this line.
          */
-        if (!canAccessDashboard(user.role)) {
+        if (!canAccessDashboard(user.role) && !(await hasLiveInvite(user.email))) {
           throw new Error(APP_ONLY_SIGNIN)
         }
 

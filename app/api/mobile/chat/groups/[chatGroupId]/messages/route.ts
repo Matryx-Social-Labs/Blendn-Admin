@@ -11,7 +11,8 @@ import { crewMemberImages, namesInRoom } from "@/lib/identity"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
-import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
+import { notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
+import { textCheckFor } from "@/lib/moderation/staging-override"
 import { discardAndRefuse, refuseBigRoomWhileDown, verdictForBigRoom } from "@/lib/moderation/degraded-room"
 import {
   successResponse,
@@ -551,7 +552,7 @@ export async function POST(
     const refusedWhileDown = await refuseBigRoomWhileDown(roomEventId)
     if (refusedWhileDown) return refusedWhileDown
 
-    const pendingText = checkTextContent(content)
+    const pendingText = textCheckFor(user.userId, content)
     const blocked = keptApartIn(user.userId, chatGroup.kind)
     const namesPending = namesInRoom(chatGroup, parentAuthorId ? [user.userId, parentAuthorId] : [user.userId])
     blocked.catch(() => undefined)

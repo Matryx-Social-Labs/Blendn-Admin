@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
         expires_at: true,
         accepted_at: true,
         revoked_at: true,
+        invited_by: true,
         org: { select: { display_name: true, status: true } },
       },
     })
@@ -132,8 +133,12 @@ export async function POST(req: NextRequest) {
       // An attendee accepting a host invite needs dashboard access, which is
       // gated on the User role rather than on membership. Only ever a promotion
       // out of `attendee` — an existing organizer is not demoted or changed.
+      // As the person who invited them: a sponsor or venue org's invite must not
+      // open event creation, which `organizer` would (security review of SCRUM-984).
       if (user.role === "attendee") {
-        await tx.user.update({ where: { id: user.id }, data: { role: "organizer" } })
+        const inviter = await tx.user.findUnique({ where: { id: invite.invited_by }, select: { role: true } })
+        const role = inviter?.role === "venue_owner" || inviter?.role === "sponsor" ? inviter.role : "organizer"
+        await tx.user.update({ where: { id: user.id }, data: { role } })
       }
     })
 

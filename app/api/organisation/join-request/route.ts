@@ -4,6 +4,7 @@ import { getAuth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { canAccessDashboard } from "@/lib/rbac"
 import { auditLog, getRequestIp } from "@/lib/audit-log"
 import { emailDomain } from "@/lib/org-invites"
 import { isUuid, readJson } from "@/lib/api-input"
@@ -26,6 +27,8 @@ import { isUuid, readJson } from "@/lib/api-input"
 export async function GET() {
   const session = await getAuth()
   if (!session?.user?.email) return errorResponse("Unauthorized", 401)
+  // An attendee's session exists only to accept an invite (SCRUM-984), and their address was never proved.
+  if (!canAccessDashboard(session.user.role)) return NextResponse.json({ matches: [], domain: null })
 
   const domain = emailDomain(session.user.email)
   if (!domain) return NextResponse.json({ matches: [], domain: null })
@@ -60,6 +63,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getAuth()
     if (!session?.user?.email) return errorResponse("Unauthorized", 401)
+    if (!canAccessDashboard(session.user.role)) return errorResponse("Forbidden", 403)
 
     const limited = await rateLimit(req, userLimit("heavy", "org:join-request", session.user.id))
     if (limited) return limited

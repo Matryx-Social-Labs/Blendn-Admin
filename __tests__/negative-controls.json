@@ -2512,6 +2512,12 @@
       "observed": "M976a: 1 of 1 failing (Unique constraint failed on event_occurrences_event_id_occurs_on_key). Removed; 1/1.",
       "date": "2026-11-01"
     },
+    "invite-accept-attendee.itest.ts": {
+      "guards": "SCRUM-984: an attendee accepting an invite becomes the inviter's role, never organizer by default, and a session held only for the invite reaches no join-request route.",
+      "mutation": "M984a accept-invite always promotes to organizer.",
+      "observed": "M984a: 2 failing of 4 (comes out venue_owner, comes out sponsor).",
+      "date": "2026-11-01"
+    },
     "deletion-reauth.itest.ts": {
       "guards": "SCRUM-944 (3) / owner ruling A-18: account deletion needs the password (wrong → 403 PASSWORD_INCORRECT) or a linked Google/Apple token issued within 15 minutes (else 403 REAUTH_REQUIRED); no proof deletes as before until MOBILE_MIN_APP_VERSION ≥ 1.0.1, then REAUTH_REQUIRED.",
       "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",

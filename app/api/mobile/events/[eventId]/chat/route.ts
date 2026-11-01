@@ -40,7 +40,8 @@ import { deliverToRoom, previewFor } from "@/lib/room-delivery"
 import { idForViewer } from "@/lib/room-handle"
 import { roomMuteState } from "@/lib/room-mute"
 import { bannedRefusal, checkAndAutoUnmute, hideMessage, flagForReview, checkAndAutoMute, mutedRefusal } from "@/lib/moderation/actions"
-import { checkTextContent, notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
+import { notChecked, type ModerationCheck } from "@/lib/moderation/openai-moderation"
+import { textCheckFor } from "@/lib/moderation/staging-override"
 import { discardAndRefuse, refuseBigRoomWhileDown, verdictForBigRoom } from "@/lib/moderation/degraded-room"
 import { readJson, isUuid } from "@/lib/api-input"
 import { createRoom } from "@/lib/check-in-core"
@@ -842,7 +843,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const refusedWhileDown = await refuseBigRoomWhileDown(roomEventId)
     if (refusedWhileDown) return refusedWhileDown
 
-    const pendingText = checkTextContent(content)
+    const pendingText = textCheckFor(authUser.userId, content)
     const blocked = keptApartIn(authUser.userId, "event")
     const senderMembershipPending = db.chat_group_members.findUnique({
       where: {
