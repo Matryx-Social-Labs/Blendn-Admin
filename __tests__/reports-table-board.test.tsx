@@ -24,6 +24,7 @@ const row = (id: string, over: Partial<ReportRow>): ReportRow => ({
   subjectName: "Author",
   subjectSuspended: false,
   excerpt: "two seats, insta first",
+  image: null,
   messageType: "board_post",
   boardKind: "offer",
   messageDeleted: false,

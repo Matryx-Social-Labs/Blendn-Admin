@@ -60,6 +60,27 @@ function chatKeyOf(url: string | null, userId: string): string | null {
   return sealedChatKey(url) ?? ownedObjectKey(url, userId, "chat")
 }
 
+/**
+ * Images a report nobody has resolved still needs (owner row A-24, SCRUM-955): the 180-day purge leaves these, and
+ * keeps the record, until somebody decides the report. Filed by somebody else, as `retainedChatMediaKeys` asks.
+ */
+export async function heldChatMediaKeys(userId: string): Promise<Set<string>> {
+  const rows = await db.$queryRaw<{ url: string | null }[]>`
+    SELECT m.metadata->>'mediaUrl' AS url
+      FROM chat_messages m
+      JOIN message_reports r ON r.message_id = m.id AND r.message_type = 'group'
+     WHERE m.user_id = ${userId} AND r.status = 'pending' AND r.reporter_id <> m.user_id
+       AND m.metadata->>'mediaUrl' IS NOT NULL
+    UNION ALL
+    SELECT p.media_url AS url
+      FROM private_messages p
+      JOIN message_reports r ON r.message_id = p.id AND r.message_type = 'private'
+     WHERE p.sender_id = ${userId} AND r.status = 'pending' AND r.reporter_id <> p.sender_id
+       AND p.media_url IS NOT NULL
+  `
+  return new Set(rows.map((r) => chatKeyOf(r.url, userId)).filter((k): k is string => k !== null))
+}
+
 /** Every sealed chat copy the person's own messages point at, in rooms and DMs. */
 export async function sentChatMediaKeys(userId: string): Promise<Set<string>> {
   const rows = await db.$queryRaw<{ url: string | null }[]>`

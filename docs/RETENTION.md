@@ -76,12 +76,12 @@ deletes their account:
   sweep erases everything left under `chat/<id>/`, and every sealed copy the
   person's messages still point at, before it purges the record,
   and keeps a record whose images it could not erase for the next pass
-  (SCRUM-429). At 180 days they go whatever is still open on them: a report
-  nobody has reviewed, or a flag nobody cleared, loses its image then. Nothing
-  in the product records a legal hold that would stop it. Images sent since SCRUM-427 are in the private bucket and served
+  (SCRUM-429). At 180 days they go, except an image whose report is still pending: it stays
+  until the report is decided (SCRUM-955, owner row A-24), and its record with it. A flag nobody cleared
+  loses its image then. Nothing in the product records a legal hold. Images sent since SCRUM-427 are in the private bucket and served
   only through signed URLs. Known gaps: images from before SCRUM-427 that are
-  kept stay in the public bucket until then, and a report filed after the
-  deletion finds the image already gone.
+  kept stay in the public bucket until then. A report filed after the deletion
+  finds the image already gone, and the reports screen says so with the date.
 - **Profile photos** (SCRUM-479): a photo moderation pulls, and the blur of a
   pulled primary, are recorded `photo_checks.hidden` and moved from the public
   bucket to the private one under the same key, so the URL answers 404. Account

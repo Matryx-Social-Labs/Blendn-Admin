@@ -201,16 +201,46 @@ function ReportCard({
   )
 }
 
-function Excerpt({ row }: { row: ReportRow }) {
-  if (row.excerpt) {
+/** The image a report is about, or why it isn't here (SCRUM-955). */
+function ReportedImage({ image }: { image: NonNullable<ReportRow["image"]> }) {
+  if ("erasedOn" in image) {
     return (
-      <blockquote className="whitespace-pre-wrap break-words rounded-lg bg-surface-raised px-3 py-2.5 text-[0.84375rem]">
-        &ldquo;{row.excerpt}&rdquo;
-        {/* Muted, not faint: faint measured 4.1:1 on this card (SCRUM-613); the floor is 4.5:1. */}
-        {row.messageDeleted ? <span className="ml-1 text-muted-foreground">(removed)</span> : null}
-      </blockquote>
+      <p className="text-[0.8125rem] text-faint-foreground">
+        The sender deleted their account; this image was erased on {new Date(image.erasedOn).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}.
+      </p>
     )
   }
+  return (
+    // A signed URL for this page; next/image would cache it past its expiry.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={image.url} alt="The reported image" loading="lazy" className="max-h-60 max-w-xs rounded-lg border border-border object-contain" />
+  )
+}
+
+function Excerpt({ row }: { row: ReportRow }) {
+  if (row.image) {
+    return (
+      <div className="flex flex-col gap-2">
+        {row.excerpt ? <Quote row={row} /> : null}
+        <ReportedImage image={row.image} />
+      </div>
+    )
+  }
+  if (row.excerpt) return <Quote row={row} />
+  return <NoQuote row={row} />
+}
+
+function Quote({ row }: { row: ReportRow }) {
+  return (
+    <blockquote className="whitespace-pre-wrap break-words rounded-lg bg-surface-raised px-3 py-2.5 text-[0.84375rem] leading-relaxed">
+      &ldquo;{row.excerpt}&rdquo;
+      {/* Muted, not faint: faint measured 4.1:1 on this card (SCRUM-613); the floor is 4.5:1. */}
+      {row.messageDeleted ? <span className="ml-1 text-muted-foreground">(removed)</span> : null}
+    </blockquote>
+  )
+}
+
+function NoQuote({ row }: { row: ReportRow }) {
   // The reported post or ask is gone with its author's account, or the message
   // was hard-deleted between the report and the review: an empty quote would
   // read as an empty message.

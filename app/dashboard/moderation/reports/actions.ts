@@ -7,6 +7,7 @@ import type { report_status } from "@prisma/client"
 import { auditInTx } from "@/lib/audit-log"
 import { ALREADY_DECIDED, decisionFrom, refuseUnlessDecided } from "@/lib/decision"
 import { requireAdmin } from "@/lib/current-user"
+import { readableUrl } from "@/lib/tigris"
 import { db } from "@/lib/db"
 import { emitChatMessageHidden, evictUserSockets } from "@/lib/socket-server"
 import { tellAuthorPostTakenDown } from "@/lib/board-takedown"
@@ -50,6 +51,11 @@ export interface ReportRow {
   subjectSuspended: boolean
   /** Message reports only — a board post's body and a board ask's message included. */
   excerpt: string | null
+  /**
+   * The reported image, signed for this screen, or the date it was erased: a report filed after the sender deleted
+   * their account finds it gone (SCRUM-955). Null when the message has no image.
+   */
+  image: { url: string } | { erasedOn: string } | null
   messageType: "group" | "private" | "board_post" | "board_request" | "crew" | "venue_offer" | null
   /**
    * Crew reports only (C12): the crew's state now. The subject is the crew's
@@ -206,6 +212,7 @@ export async function getReportQueue(status: report_status = "pending") {
           select: {
             id: true,
             content: true,
+            metadata: true,
             deleted_at: true,
             user: person,
             chat_group: { select: { event_id: true, event: { select: { title: true } } } },
@@ -215,7 +222,7 @@ export async function getReportQueue(status: report_status = "pending") {
     privateIds.length
       ? db.private_messages.findMany({
           where: { id: { in: privateIds } },
-          select: { id: true, message_text: true, sender: person },
+          select: { id: true, message_text: true, media_url: true, sender: person },
         })
       : [],
     /*
@@ -274,6 +281,7 @@ export async function getReportQueue(status: report_status = "pending") {
   const boardRequestById = new Map(boardRequests.map((r) => [r.id, r]))
   const crewById = new Map(crews.map((c) => [c.id, c]))
   const offerById = new Map(offers.map((o) => [o.id, o]))
+  const imageByReport = await reportedImages(messageReports, groupById, privateById)
 
   /*
    * How many reports in this tab name the same thing. Grouped by subject so a
@@ -314,6 +322,7 @@ export async function getReportQueue(status: report_status = "pending") {
         subjectName: displayName(r.reported),
         subjectSuspended: r.reported.suspended_at !== null,
         excerpt: null,
+        image: null,
         messageType: null,
         boardKind: null,
         messageDeleted: false,
@@ -349,6 +358,7 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectSuspended: false,
           // The name and bio as they read when it was reported.
           excerpt: (r.excerpt ?? "").slice(0, 200) || null,
+          image: null,
           messageType: "crew",
           boardKind: null,
           messageDeleted: false,
@@ -368,6 +378,7 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectName: `Offer · ${offer?.venue.name ?? "gone"}${offer && offer.ends_at.getTime() <= now ? " (ended)" : ""}`,
           subjectSuspended: false,
           excerpt: (r.excerpt ?? "").slice(0, 200) || null,
+          image: null,
           messageType: "venue_offer",
           boardKind: null,
           messageDeleted: false,
@@ -387,6 +398,7 @@ export async function getReportQueue(status: report_status = "pending") {
           // What was reported, as it was then; the live body if it predates
           // the snapshot.
           excerpt: (r.excerpt ?? post?.body ?? "").slice(0, 200) || null,
+          image: null,
           messageType: "board_post",
           boardKind: post?.kind ?? null,
           messageDeleted: post?.deleted_at != null,
@@ -406,6 +418,7 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectName: displayName(about),
           subjectSuspended: about?.suspended_at != null,
           excerpt: (r.excerpt ?? ask?.message ?? "").slice(0, 200) || null,
+          image: null,
           messageType: "board_request",
           boardKind: null,
           messageDeleted: false,
@@ -426,6 +439,7 @@ export async function getReportQueue(status: report_status = "pending") {
         // A message deleted between the report and the review leaves the row
         // saying so rather than showing an empty quote.
         excerpt: (group?.content ?? priv?.message_text ?? "").slice(0, 200) || null,
+        image: imageByReport.get(r.id) ?? null,
         messageType: r.message_type === "private" ? "private" : "group",
         boardKind: null,
         messageDeleted: group?.deleted_at != null,
@@ -459,6 +473,7 @@ export async function getReportQueue(status: report_status = "pending") {
           : (r.event?.title ?? "Deleted event"),
         subjectSuspended: false,
         excerpt: null,
+        image: null,
         messageType: null,
         boardKind: null,
         messageDeleted: false,
@@ -803,4 +818,36 @@ async function messageSubject(report: {
     select: { user_id: true, chat_group_id: true },
   })
   return { userId: m?.user_id ?? null, chatGroupId: m?.chat_group_id ?? null }
+}
+
+/** Each message report's image, as `ReportRow.image`. An admin-only read: the URL is signed for this page. */
+async function reportedImages(
+  reports: { id: string; message_id: string; created_at: Date }[],
+  groupById: Map<string, { metadata: unknown; user: { id: string } | null }>,
+  privateById: Map<string, { media_url: string | null; sender: { id: string } | null }>
+): Promise<Map<string, ReportRow["image"]>> {
+  const found = reports.flatMap((r) => {
+    const group = groupById.get(r.message_id)
+    const priv = privateById.get(r.message_id)
+    const url = (group?.metadata as { mediaUrl?: unknown } | null)?.mediaUrl ?? priv?.media_url
+    const author = group?.user?.id ?? priv?.sender?.id
+    return typeof url === "string" && author ? [{ report: r, url, author }] : []
+  })
+  if (found.length === 0) return new Map()
+  const records = await db.deleted_account_records.findMany({
+    where: { user_id: { in: found.map((f) => f.author) } },
+    select: { user_id: true, deleted_at: true },
+  })
+  const deletedAt = new Map(records.map((r) => [r.user_id, r.deleted_at]))
+  return new Map(
+    await Promise.all(
+      found.map(async ({ report, url, author }) => {
+        // Kept when reported before the deletion (`retainedChatMediaKeys`); erased with the account when after.
+        const gone = deletedAt.get(author)
+        const image: ReportRow["image"] =
+          gone && report.created_at > gone ? { erasedOn: gone.toISOString() } : { url: await readableUrl(url) }
+        return [report.id, image] as const
+      })
+    )
+  )
 }

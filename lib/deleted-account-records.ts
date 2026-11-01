@@ -2,7 +2,7 @@
 // and `build:server` cannot resolve the alias (server-import-boundary.test.ts).
 import { db } from "./db"
 import { logger } from "./logger"
-import { eraseChatMedia } from "./retained-media"
+import { eraseChatMedia, heldChatMediaKeys } from "./retained-media"
 import { deletePrefix, isConfigured } from "./tigris"
 
 /**
@@ -99,7 +99,10 @@ export async function purgeDeletedAccountRecords(now: Date = new Date()): Promis
        * empty id would make the prefix every person's.
        */
       if (record.user_id) {
-        await eraseChatMedia(record.user_id, new Set())
+        // A reported image waits for its report (A-24): erase the rest, and hold the record for the next pass.
+        const held = await heldChatMediaKeys(record.user_id)
+        await eraseChatMedia(record.user_id, held)
+        if (held.size > 0) continue
         // Both buckets: a photo moderation pulled was kept in the private one (SCRUM-479).
         await deletePrefix(`profile/${record.user_id}/`)
         await db.photo_checks.deleteMany({ where: { user_id: record.user_id } })
