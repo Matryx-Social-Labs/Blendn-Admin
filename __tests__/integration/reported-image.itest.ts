@@ -65,7 +65,7 @@ describe("the reports screen", () => {
     const kept = await imageIn(stays, "kept")
     const erased = await imageIn(gone, "erased")
     const goneOn = new Date(Date.now() - 2 * DAY)
-    await left(gone, goneOn, new Date(Date.now() + 100 * DAY))
+    await db.user.update({ where: { id: gone }, data: { deletedAt: goneOn } })
     await report(kept.id, reporter)
     await report(erased.id, reporter)
 

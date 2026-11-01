@@ -204,7 +204,7 @@ export async function getReportQueue(status: report_status = "pending") {
     idsOf("venue_offer"),
   ]
 
-  const person = { select: { id: true, name: true, email: true, suspended_at: true } } as const
+  const person = { select: { id: true, name: true, email: true, suspended_at: true, deletedAt: true } } as const
   const [groupMessages, privateMessages, boardPosts, boardRequests, crews, offers] = await Promise.all([
     groupIds.length
       ? db.chat_messages.findMany({
@@ -823,27 +823,19 @@ async function messageSubject(report: {
 /** Each message report's image, as `ReportRow.image`. An admin-only read: the URL is signed for this page. */
 async function reportedImages(
   reports: { id: string; message_id: string; created_at: Date }[],
-  groupById: Map<string, { metadata: unknown; user: { id: string } | null }>,
-  privateById: Map<string, { media_url: string | null; sender: { id: string } | null }>
+  groupById: Map<string, { metadata: unknown; user: { deletedAt: Date | null } | null }>,
+  privateById: Map<string, { media_url: string | null; sender: { deletedAt: Date | null } | null }>
 ): Promise<Map<string, ReportRow["image"]>> {
-  const found = reports.flatMap((r) => {
-    const group = groupById.get(r.message_id)
-    const priv = privateById.get(r.message_id)
+  const found = reports.flatMap((report) => {
+    const group = groupById.get(report.message_id)
+    const priv = privateById.get(report.message_id)
     const url = (group?.metadata as { mediaUrl?: unknown } | null)?.mediaUrl ?? priv?.media_url
-    const author = group?.user?.id ?? priv?.sender?.id
-    return typeof url === "string" && author ? [{ report: r, url, author }] : []
+    return typeof url === "string" ? [{ report, url, gone: group?.user?.deletedAt ?? priv?.sender?.deletedAt ?? null }] : []
   })
-  if (found.length === 0) return new Map()
-  const records = await db.deleted_account_records.findMany({
-    where: { user_id: { in: found.map((f) => f.author) } },
-    select: { user_id: true, deleted_at: true },
-  })
-  const deletedAt = new Map(records.map((r) => [r.user_id, r.deleted_at]))
   return new Map(
     await Promise.all(
-      found.map(async ({ report, url, author }) => {
+      found.map(async ({ report, url, gone }) => {
         // Kept when reported before the deletion (`retainedChatMediaKeys`); erased with the account when after.
-        const gone = deletedAt.get(author)
         const image: ReportRow["image"] =
           gone && report.created_at > gone ? { erasedOn: gone.toISOString() } : { url: await readableUrl(url) }
         return [report.id, image] as const
