@@ -1,7 +1,11 @@
 -- Venue candidates for the five launch cities, from Overture Maps places.
 -- See README.md beside this file for why these sources, these filters, and what happens next.
 --
---   duckdb < scripts/places/candidates.sql        (run from the repo root; ~1 min, reads S3 anonymously)
+--   duckdb < scripts/places/candidates.sql                       (India, the default)
+--   PLACES_COUNTRY=CA duckdb < scripts/places/candidates.sql     (Canada)
+--
+-- Run from the repo root; ~1 min a country, reads S3 anonymously. One country a run, so the
+-- prefilter box stays one country's, not half the planet.
 --
 -- Writes scripts/places/out/review/city=<city>/data_0.csv for the review pass.
 
@@ -11,13 +15,25 @@ SET s3_region = 'us-west-2';
 -- The release is pinned: a run must be reproducible, and Overture ids churn between releases.
 SET VARIABLE release = '2026-09-23.1';
 
--- Same boxes as scripts/map-buildings/cities.json.
-CREATE TABLE cities AS SELECT * FROM (VALUES
-  ('bengaluru', 'Bengaluru', 77.45, 12.83, 77.78, 13.14),
-  ('mumbai',    'Mumbai',    72.77, 18.89, 73.03, 19.28),
-  ('delhi-ncr', 'Delhi',     76.84, 28.40, 77.35, 28.88),
-  ('hyderabad', 'Hyderabad', 78.30, 17.30, 78.60, 17.56),
-  ('pune',      'Pune',      73.74, 18.43, 73.98, 18.64)) t(slug, city, xmin, ymin, xmax, ymax);
+-- India's are scripts/map-buildings/cities.json's boxes; Canada's are the `cities` rows the
+-- markets_and_cities migration seeded. A venue's city must be a catalogue name: import-venues.ts
+-- refuses any other, and takes the venue's time zone from it.
+CREATE TABLE all_cities AS SELECT * FROM (VALUES
+  ('IN', 'bengaluru', 'Bengaluru', 77.45, 12.83, 77.78, 13.14),
+  ('IN', 'mumbai',    'Mumbai',    72.77, 18.89, 73.03, 19.28),
+  ('IN', 'delhi-ncr', 'Delhi',     76.84, 28.40, 77.35, 28.88),
+  ('IN', 'hyderabad', 'Hyderabad', 78.30, 17.30, 78.60, 17.56),
+  ('IN', 'pune',      'Pune',      73.74, 18.43, 73.98, 18.64),
+  ('CA', 'toronto',   'Toronto',   -79.64, 43.58, -79.11, 43.86),
+  ('CA', 'vancouver', 'Vancouver', -123.27, 49.20, -123.02, 49.32)) t(country, slug, city, xmin, ymin, xmax, ymax);
+
+SET VARIABLE country = coalesce(nullif(getenv('PLACES_COUNTRY'), ''), 'IN');
+CREATE TABLE cities AS SELECT * EXCLUDE (country) FROM all_cities WHERE country = getvariable('country');
+SET VARIABLE xmin = (SELECT min(xmin) FROM cities);
+SET VARIABLE xmax = (SELECT max(xmax) FROM cities);
+SET VARIABLE ymin = (SELECT min(ymin) FROM cities);
+SET VARIABLE ymax = (SELECT max(ymax) FROM cities);
+SELECT getvariable('country') AS country, count(*) AS cities FROM cities;
 
 CREATE TABLE raw AS
 SELECT c.slug, c.city AS box_city, p.id, p.names.primary AS name, p.basic_category, p.taxonomy.primary AS cat,
@@ -27,7 +43,7 @@ SELECT c.slug, c.city AS box_city, p.id, p.names.primary AS name, p.basic_catego
        ST_X(p.geometry) AS lng, ST_Y(p.geometry) AS lat
 FROM read_parquet('s3://overturemaps-us-west-2/release/' || getvariable('release') || '/theme=places/type=place/*') p
 JOIN cities c ON p.bbox.xmin BETWEEN c.xmin AND c.xmax AND p.bbox.ymin BETWEEN c.ymin AND c.ymax
-WHERE p.bbox.xmin BETWEEN 72.77 AND 78.60 AND p.bbox.ymin BETWEEN 12.83 AND 28.88
+WHERE p.bbox.xmin BETWEEN getvariable('xmin') AND getvariable('xmax') AND p.bbox.ymin BETWEEN getvariable('ymin') AND getvariable('ymax')
   -- Almost every place has no status; only an explicit closure is a reason to drop one.
   AND coalesce(p.operating_status, 'open') = 'open'
   AND p.names.primary IS NOT NULL;
@@ -54,7 +70,7 @@ SELECT * FROM grouped WHERE grp IS NOT NULL AND (
         list_has_any(alts, ['bar', 'pub', 'lounge', 'cocktail_bar', 'brewery', 'wine_bar', 'beer_bar', 'sports_bar', 'gastropub'])
         OR regexp_matches(lower(name), '(^|\s)(bar|pub|brew\w*|lounge|bistro|taproom|social|tavern)(\s|$)'))))
   -- A place named after another city is a mis-pin ("Tantra Nightclub Kolkata" sat in Bengaluru).
-  AND NOT regexp_matches(lower(name), 'kolkata|chennai|goa\b|jaipur|chandigarh|ahmedabad');
+  AND NOT regexp_matches(lower(name), 'kolkata|chennai|goa\b|jaipur|chandigarh|ahmedabad|montreal|calgary|ottawa|edmonton|winnipeg');
 
 -- One row per place: Overture can still hold the same name twice a few metres apart.
 CREATE TABLE deduped AS
