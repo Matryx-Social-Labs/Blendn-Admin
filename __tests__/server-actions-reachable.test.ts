@@ -99,8 +99,9 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   // cron and the dashboard Tickets tab (phase 4) are their callers; delete
   // each line as that phase wires it.
   ["reserveTickets", "ticketing phase 2's create-order route calls it (SCRUM-1007)"],
-  ["releaseExpiredHolds", "ticketing phase 2's hold sweeper cron calls it (SCRUM-1007)"],
-  ["feeScheduleFromMarket", "ticketing phase 4's turn-on action snapshots the market with it (SCRUM-1007)"],
+  ["enableTicketing", "ticketing phase 4's turn-on action is its caller; it snapshots the market and fixes the price rule (SCRUM-1010)"],
+  ["issueTickets", "ticketing phase 2's payment webhook issues tickets with it in the transaction that marks the order paid (SCRUM-1010)"],
+  ["redeemTicket", "ticketing phase 4's door page (\"Check tickets\") calls it behind a rate limit (SCRUM-1010)"],
   ["recordLegalAcceptance", "ticketing phase 4's turn-on dialog records the terms with it (SCRUM-1007)"],
   ["latestLegalAcceptance", "ticketing phase 4's Tickets tab shows who accepted with it (SCRUM-1007)"],
 

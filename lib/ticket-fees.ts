@@ -4,9 +4,10 @@ import { z } from "zod"
  * The booking fee on a ticket order (ticketing-business-model.md §2).
  *
  * Pure and client-safe: no database, no secrets, no clock. The caller hands
- * over the event's fee snapshot, how many paid tickets the event has already
- * counted, the order's lines, the organisation's plan and its founding-offer
- * state, and gets every amount back in integer minor units (paise, cents).
+ * over the event's fee snapshot and price rule (both read from the event row,
+ * never from the buyer's request), how many paid tickets the event has sold,
+ * and the order's lines, and gets every amount back in integer minor units
+ * (paise, cents).
  *
  * ## The one rounding rule
  *
@@ -25,11 +26,23 @@ import { z } from "zod"
  * ## Slabs
  *
  * Marginal per event, like tax slabs: ticket N of the event pays the rate of
- * the slab N falls in. Only paid tickets are numbered (a free ticket carries
- * no fee and does not move the event up a slab). Within an order, tickets are
- * numbered line by line in the order given. Pro starts one slab lower. The
- * founding offer is a flat rate, or the slab's rate where that is lower; the
- * per-ticket minimum applies under every rule.
+ * the slab N falls in. Pro starts one slab lower. The founding offer is a flat
+ * rate, or the slab's rate where that is lower; the per-ticket minimum applies
+ * under every rule.
+ *
+ * Who decides a ticket's N, because N is money (security H3, database M4):
+ *
+ * - **Sold tickets only.** `paidTicketsBefore` counts the event's paid tickets
+ *   that are `sold`, never `held`. Held seats are a buyer's say-so: counting
+ *   them let anyone push the event into a cheaper slab by holding seats they
+ *   never meant to pay for, and every hold that expired left the count wrong.
+ * - **Only paid tickets are numbered.** A free ticket carries no fee and does
+ *   not move the event up a slab.
+ * - **Dearest first, then by type id.** Within an order, tickets are numbered
+ *   by unit price descending, ties broken by ticket type id, and `lines` in
+ *   the breakdown come back in that order. Never the caller's order: sent
+ *   cheap-first, an order straddling a slab would put its dearest tickets on
+ *   the lower rate. Deterministic, so the same order always prices the same.
  */
 
 export const FEE_SCHEDULE_VERSION = 1
@@ -42,6 +55,13 @@ export const FOUNDING_OFFER_ENDS_AT = new Date("2027-04-01T00:00:00+05:30")
 const BPS_SCALE = 10_000
 
 export class TicketFeeError extends Error {}
+
+/**
+ * The organiser absorbs the fees, and on this price they exceed it: the payout
+ * would be negative. The organiser's setting, not our bug, so a reserve
+ * answers it as a refusal (security M6).
+ */
+export class FeesExceedPriceError extends TicketFeeError {}
 
 const bps = z.number().int().min(0).max(BPS_SCALE)
 const minor = z.number().int().min(0)
@@ -111,6 +131,14 @@ export function foundingOfferApplies(state: FoundingOfferState): boolean {
   return state.ticketedEventsBefore < FOUNDING_OFFER_EVENTS && state.enabledAt.getTime() < FOUNDING_OFFER_ENDS_AT.getTime()
 }
 
+/** How an event's fee is priced: `events.ticket_fee_rule`, decided once by `enableTicketing`. */
+export type FeeRule = "standard" | "pro" | "founding"
+
+/** The founding offer beats Pro, and Pro beats standard. */
+export function feeRuleFor(input: { pro: boolean; founding: FoundingOfferState }): FeeRule {
+  return foundingOfferApplies(input.founding) ? "founding" : input.pro ? "pro" : "standard"
+}
+
 export interface FeeLineInput {
   ticketTypeId: string
   unitPriceMinor: number
@@ -119,12 +147,11 @@ export interface FeeLineInput {
 
 export interface FeeInput {
   schedule: FeeSchedule
-  /** Paid tickets the event has already numbered (sold, and held under the lock). */
+  /** Paid tickets the event has sold. Never held ones: see "Slabs" above. */
   paidTicketsBefore: number
+  /** In any order: they are numbered dearest first (see "Slabs"). */
   lines: FeeLineInput[]
-  /** An organisation on a paid Analytics or Venue Pro plan. */
-  pro: boolean
-  founding: FoundingOfferState
+  rule: FeeRule
   feesAbsorbed: boolean
 }
 
@@ -170,10 +197,11 @@ export interface FeeTotals {
 export interface FeeBreakdown {
   version: typeof FEE_SCHEDULE_VERSION
   currency: string
-  rule: "standard" | "pro" | "founding"
+  rule: FeeRule
   feesAbsorbed: boolean
   paidTicketsBefore: number
   paidTicketsAfter: number
+  /** Dearest first, then by type id: the order the tickets were numbered in. */
   lines: FeeLine[]
   totals: FeeTotals
 }
@@ -193,7 +221,7 @@ function slabIndex(schedule: FeeSchedule, ticketNumber: number): number {
   return index
 }
 
-function rateFor(input: FeeInput, rule: FeeBreakdown["rule"], ticketNumber: number): number {
+function rateFor(input: FeeInput, rule: FeeRule, ticketNumber: number): number {
   const { slabs } = input.schedule
   const index = slabIndex(input.schedule, ticketNumber)
   if (rule === "founding") return Math.min(FOUNDING_OFFER_BPS, slabs[index].bps)
@@ -209,7 +237,7 @@ function perTicket(input: FeeInput, priceMinor: number, rate: number): PerTicket
   const charged = feesAbsorbed ? priceMinor : priceMinor + serviceFeeMinor + serviceFeeTaxMinor
   const processingFeeMinor = ofBps(charged, schedule.processingBps)
   if (feesAbsorbed && serviceFeeMinor + serviceFeeTaxMinor + processingFeeMinor > priceMinor) {
-    throw new TicketFeeError("the fees on this price exceed it, so they cannot be absorbed")
+    throw new FeesExceedPriceError("the fees on this price exceed it, so they cannot be absorbed")
   }
   return { serviceFeeMinor, serviceFeeTaxMinor, processingFeeMinor }
 }
@@ -228,7 +256,7 @@ function segment(quantity: number, rate: number, fees: PerTicketFees): FeeSegmen
 }
 
 /** Split a paid line into runs at one rate each: the tickets numbered `first`..`first + quantity - 1`. */
-function segmentsFor(input: FeeInput, rule: FeeBreakdown["rule"], line: FeeLineInput, first: number): FeeSegment[] {
+function segmentsFor(input: FeeInput, rule: FeeRule, line: FeeLineInput, first: number): FeeSegment[] {
   if (line.unitPriceMinor === 0) return [segment(line.quantity, 0, ZERO)]
   const runs: FeeSegment[] = []
   let ticket = first
@@ -280,11 +308,18 @@ function validate(input: FeeInput): void {
   }
 }
 
+/** Dearest first, then by type id: never the caller's order (see "Slabs"). */
+function numberingOrder(lines: readonly FeeLineInput[]): FeeLineInput[] {
+  return [...lines].sort(
+    (a, b) => b.unitPriceMinor - a.unitPriceMinor || (a.ticketTypeId < b.ticketTypeId ? -1 : a.ticketTypeId > b.ticketTypeId ? 1 : 0)
+  )
+}
+
 export function ticketFees(input: FeeInput): FeeBreakdown {
   validate(input)
-  const rule: FeeBreakdown["rule"] = foundingOfferApplies(input.founding) ? "founding" : input.pro ? "pro" : "standard"
+  const { rule } = input
   let numbered = input.paidTicketsBefore
-  const lines = input.lines.map((line) => {
+  const lines = numberingOrder(input.lines).map((line) => {
     const segments = segmentsFor(input, rule, line, numbered + 1)
     if (line.unitPriceMinor > 0) numbered += line.quantity
     return lineFrom(input, line, segments)

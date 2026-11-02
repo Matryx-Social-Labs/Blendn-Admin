@@ -1,5 +1,5 @@
-import { feeScheduleFromMarket, ticketFees, type MarketFeeRow } from "@/lib/ticket-fees"
-import { HOLD_MINUTES, MAX_PENDING_PER_BUYER, releaseExpiredHolds, reserveTickets, type ReserveInput } from "@/lib/ticket-holds"
+import { feeScheduleFromMarket, ticketFees, type FeeRule, type MarketFeeRow } from "@/lib/ticket-fees"
+import { HOLD_MINUTES, MAX_PENDING_PER_BUYER, MAX_SEATS_PER_BUYER, releaseExpiredHolds, reserveTickets, type ReserveInput } from "@/lib/ticket-holds"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
@@ -15,8 +15,6 @@ import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 const users: string[] = []
 const events: string[] = []
-
-const NOT_FOUNDING = { pro: false, founding: { ticketedEventsBefore: 3, enabledAt: new Date("2026-11-01T00:00:00Z") } }
 
 let previousFlag: string | undefined
 beforeAll(() => {
@@ -40,15 +38,27 @@ async function india() {
   return feeScheduleFromMarket(row as MarketFeeRow, new Date())
 }
 
-/** A published native-ticketed event with ticket types (quantity, price in paise). */
-async function ticketedEvent(...types: Array<{ quantity: number; price?: number; sold?: number; max?: number; startsAt?: Date }>) {
+type TypeSpec = { quantity: number; price?: number; sold?: number; max?: number; startsAt?: Date; hidden?: boolean }
+
+/** A published native-ticketed event with ticket types (quantity, price in paise), priced by `rule`. */
+async function ticketedEvent(...types: TypeSpec[]) {
+  return ticketedEventWith("standard", ...types)
+}
+
+async function ticketedEventWith(rule: FeeRule, ...types: TypeSpec[]) {
   const host = await makeUser(testId("th-host"), "organizer")
   users.push(host)
   const eventId = await makeEvent(host)
   events.push(eventId)
   await db.events.update({
     where: { id: eventId },
-    data: { ticketing_mode: "native", ticket_fee_schedule: await india(), end_time: new Date(Date.now() + 86_400_000) },
+    data: {
+      ticketing_mode: "native",
+      ticket_fee_schedule: await india(),
+      ticketing_enabled_at: new Date(),
+      ticket_fee_rule: rule,
+      end_time: new Date(Date.now() + 86_400_000),
+    },
   })
   const ids: string[] = []
   for (const [i, t] of types.entries()) {
@@ -61,6 +71,7 @@ async function ticketedEvent(...types: Array<{ quantity: number; price?: number;
         sold: t.sold ?? 0,
         max_per_order: t.max ?? 10,
         sale_starts_at: t.startsAt ?? null,
+        hidden: t.hidden ?? false,
         sort: i,
       },
       select: { id: true },
@@ -77,8 +88,16 @@ async function buyers(n: number) {
   return ids
 }
 
-const reserve = (eventId: string, buyerId: string, lines: ReserveInput["lines"], now?: Date) =>
-  reserveTickets({ eventId, buyerId, lines, pricing: NOT_FOUNDING, ...(now && { now }) })
+const reserve = (eventId: string, buyerId: string, lines: ReserveInput["lines"]) => reserveTickets({ eventId, buyerId, lines })
+
+/** The hold ran out twenty minutes ago. The clock is the server's, so the row is moved, not the clock. */
+async function lapse(result: Awaited<ReturnType<typeof reserve>>) {
+  if (!result.ok) throw new Error(`setup refused: ${result.reason}`)
+  await db.ticket_orders.update({ where: { id: result.orderId }, data: { hold_expires_at: new Date(Date.now() - 20 * 60_000) } })
+  return result.orderId
+}
+
+const one = (ticketTypeId: string, quantity = 1) => [{ ticketTypeId, quantity }]
 
 const typeRow = (id: string) => db.ticket_types.findUniqueOrThrow({ where: { id }, select: { sold: true, held: true, quantity: true } })
 
@@ -141,9 +160,9 @@ describe("what a hold writes", () => {
   it("a pending order expiring in ten minutes, its lines, and the fee breakdown as charged", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 10, price: 49_900 })
     const [buyer] = await buyers(1)
-    const now = new Date()
+    const before = Date.now()
 
-    const result = await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 2 }], now)
+    const result = await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 2 }])
 
     if (!result.ok) throw new Error(`refused: ${result.reason}`)
     const order = await db.ticket_orders.findUniqueOrThrow({ where: { id: result.orderId }, include: { lines: true } })
@@ -151,8 +170,7 @@ describe("what a hold writes", () => {
       schedule: await india(),
       paidTicketsBefore: 0,
       lines: [{ ticketTypeId: ids[0], unitPriceMinor: 49_900, quantity: 2 }],
-      pro: false,
-      founding: NOT_FOUNDING.founding,
+      rule: "standard",
       feesAbsorbed: false,
     })
     expect(order).toMatchObject({
@@ -167,12 +185,13 @@ describe("what a hold writes", () => {
       fees_absorbed: false,
       provider_payment_ref: null,
     })
-    expect(order.hold_expires_at.getTime()).toBe(now.getTime() + HOLD_MINUTES * 60_000)
+    expect(order.hold_expires_at.getTime()).toBeGreaterThanOrEqual(before + HOLD_MINUTES * 60_000)
+    expect(order.hold_expires_at.getTime()).toBeLessThanOrEqual(Date.now() + HOLD_MINUTES * 60_000)
     expect(order.lines).toEqual([expect.objectContaining({ ticket_type_id: ids[0], quantity: 2, unit_price_minor: 49_900 })])
     expect(order.fee_breakdown).toEqual(JSON.parse(JSON.stringify(expected)))
   })
 
-  it("numbers tickets after those sold and held, so an order at 99 sold straddles into 3.5%", async () => {
+  it("numbers tickets after those sold, so an order at 99 sold straddles into 3.5%", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 200, price: 100_000, sold: 99 })
     const [buyer] = await buyers(1)
 
@@ -182,15 +201,52 @@ describe("what a hold writes", () => {
     expect(result.breakdown.lines[0].segments.map((s) => [s.quantity, s.bps])).toEqual([[1, 500], [1, 350]])
   })
 
-  it("prices with the caller's plan: Pro starts one slab lower", async () => {
-    const { eventId, ids } = await ticketedEvent({ quantity: 10, price: 100_000 })
+  it("never counts held seats toward the slab: holding seats cannot cheapen anybody's fee (security H3)", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 200, price: 100_000, sold: 95 })
+    const [squatter, buyer] = await buyers(2)
+    expect((await reserve(eventId, squatter, one(ids[0], 10))).ok).toBe(true)
+
+    const result = await reserve(eventId, buyer, one(ids[0], 2))
+
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    expect(result.breakdown.paidTicketsBefore).toBe(95)
+    expect(result.breakdown.lines[0].segments.map((s) => [s.quantity, s.bps])).toEqual([[2, 500]])
+  })
+
+  it("numbers an order's tickets dearest first, whatever order the request listed them in", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 200, price: 100_000, sold: 99 }, { quantity: 50, price: 300_000 })
+    const [cheap, dear] = ids
     const [buyer] = await buyers(1)
 
-    const result = await reserveTickets({ eventId, buyerId: buyer, lines: [{ ticketTypeId: ids[0], quantity: 1 }], pricing: { ...NOT_FOUNDING, pro: true } })
+    const result = await reserve(eventId, buyer, [{ ticketTypeId: cheap, quantity: 1 }, { ticketTypeId: dear, quantity: 1 }])
+
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    expect(result.breakdown.lines.map((l) => [l.ticketTypeId, l.segments[0].bps])).toEqual([[dear, 500], [cheap, 350]])
+  })
+
+  it("prices with the rule stored on the event, not anything the request says (security H4)", async () => {
+    const { eventId, ids } = await ticketedEventWith("pro", { quantity: 10, price: 100_000 })
+    const [buyer] = await buyers(1)
+    // A request carrying its own pricing is ignored: the type has no such field, the row decides.
+    const request = { eventId, buyerId: buyer, lines: one(ids[0]), pricing: { pro: false, founding: { ticketedEventsBefore: 0, enabledAt: new Date() } } }
+
+    const result = await reserveTickets(request as ReserveInput)
 
     if (!result.ok) throw new Error(`refused: ${result.reason}`)
     expect(result.breakdown.rule).toBe("pro")
     expect(result.breakdown.lines[0].segments[0].bps).toBe(350)
+  })
+
+  it("writes a subtotal that is the sum of its lines", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 10, price: 49_900 }, { quantity: 10, price: 129_900 })
+    const [buyer] = await buyers(1)
+
+    const result = await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 3 }, { ticketTypeId: ids[1], quantity: 2 }])
+
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    const order = await db.ticket_orders.findUniqueOrThrow({ where: { id: result.orderId }, include: { lines: true } })
+    expect(order.subtotal_minor).toBe(order.lines.reduce((s, l) => s + l.quantity * l.unit_price_minor, 0))
+    expect(order.subtotal_minor).toBe(3 * 49_900 + 2 * 129_900)
   })
 
   it("takes the organiser's choice to absorb fees from the event", async () => {
@@ -265,9 +321,8 @@ describe("refusals", () => {
   it("the cap counts only live holds: an expired one does not hold the buyer back", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 50 })
     const [buyer] = await buyers(1)
-    const past = new Date(Date.now() - 30 * 60_000)
-    for (let i = 0; i < MAX_PENDING_PER_BUYER; i++) await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 1 }], past)
-    expect((await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 1 }])).ok).toBe(true)
+    for (let i = 0; i < MAX_PENDING_PER_BUYER; i++) await lapse(await reserve(eventId, buyer, one(ids[0])))
+    expect((await reserve(eventId, buyer, one(ids[0]))).ok).toBe(true)
   })
 
   it("an order whose total would not fit the column", async () => {
@@ -277,10 +332,71 @@ describe("refusals", () => {
     expect((await typeRow(ids[0])).held).toBe(0)
   })
 
+  it(`more than ${MAX_SEATS_PER_BUYER} seats in one order, across its lines, before any lock is taken`, async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 50, max: 100 }, { quantity: 50, max: 100 })
+    const [buyer] = await buyers(1)
+    expect(await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 6 }, { ticketTypeId: ids[1], quantity: 5 }])).toEqual({ ok: false, reason: "over_order_limit" })
+    expect(await reserve(eventId, buyer, one(ids[0], MAX_SEATS_PER_BUYER + 1))).toEqual({ ok: false, reason: "over_order_limit" })
+    expect((await typeRow(ids[0])).held).toBe(0)
+  })
+
   it("more than the per-order limit", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 50, max: 4 })
     const [buyer] = await buyers(1)
     expect(await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 5 }])).toEqual({ ok: false, reason: "over_order_limit" })
+  })
+
+  it("a hidden ticket type, even to a request that knows its id (security H2)", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 5, hidden: true })
+    const [buyer] = await buyers(1)
+    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "unknown_ticket_type" })
+    expect((await typeRow(ids[0])).held).toBe(0)
+  })
+
+  it("a private event (security M5)", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 5 })
+    await db.events.update({ where: { id: eventId }, data: { visibility: "private" } })
+    const [buyer] = await buyers(1)
+    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "not_on_sale" })
+  })
+
+  it("a buyer under the event's minimum age, by birth date, and one whose age is unknown (security M5)", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 5 })
+    await db.events.update({ where: { id: eventId }, data: { min_age: 21 } })
+    const [young, unknown, adult] = await buyers(3)
+    const yearsAgo = (n: number) => new Date(Date.UTC(new Date().getUTCFullYear() - n, 0, 1))
+    // A stored age says 30; the birth date says 19, and wins (lib/age.ts ageFrom).
+    await db.profiles.create({ data: { id: young, age: 30, date_of_birth: yearsAgo(19) } })
+    await db.profiles.create({ data: { id: adult, date_of_birth: yearsAgo(30) } })
+
+    expect(await reserve(eventId, young, one(ids[0]))).toEqual({ ok: false, reason: "under_age" })
+    expect(await reserve(eventId, unknown, one(ids[0]))).toEqual({ ok: false, reason: "under_age" })
+    expect((await reserve(eventId, adult, one(ids[0]))).ok).toBe(true)
+  })
+
+  it("a suspended or deleted buyer", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 5 })
+    const [suspended, deleted] = await buyers(2)
+    await db.user.update({ where: { id: suspended }, data: { suspended_at: new Date() } })
+    await db.user.update({ where: { id: deleted }, data: { deletedAt: new Date() } })
+    expect(await reserve(eventId, suspended, one(ids[0]))).toEqual({ ok: false, reason: "buyer_not_allowed" })
+    expect(await reserve(eventId, deleted, one(ids[0]))).toEqual({ ok: false, reason: "buyer_not_allowed" })
+  })
+
+  it("an order of free tickets only: free stays RSVP and capacity, never an order (§4.4)", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 5, price: 0 })
+    const [buyer] = await buyers(1)
+    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "free_order" })
+    expect((await typeRow(ids[0])).held).toBe(0)
+    expect(await db.ticket_orders.count({ where: { event_id: eventId } })).toBe(0)
+  })
+
+  it("absorbed fees that would exceed the price: an answer, not a 500 (security M6)", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 5, price: 500 })
+    await db.events.update({ where: { id: eventId }, data: { fees_absorbed: true } })
+    const [buyer] = await buyers(1)
+    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "fees_exceed_price" })
+    expect((await typeRow(ids[0])).held).toBe(0)
   })
 
   it("another event's ticket type", async () => {
@@ -304,29 +420,116 @@ describe("refusals", () => {
   })
 })
 
+describe("one buyer cannot hold the room (security H1)", () => {
+  it(`stops a buyer at ${MAX_SEATS_PER_BUYER} seats across their holds, and a second account is its own buyer`, async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 100 })
+    const [hoarder, other] = await buyers(2)
+    expect((await reserve(eventId, hoarder, one(ids[0], 6))).ok).toBe(true)
+
+    expect(await reserve(eventId, hoarder, one(ids[0], 5))).toEqual({ ok: false, reason: "too_many_seats" })
+    expect((await reserve(eventId, hoarder, one(ids[0], 4))).ok).toBe(true)
+    expect((await typeRow(ids[0])).held).toBe(10)
+    expect((await reserve(eventId, other, one(ids[0], 2))).ok).toBe(true)
+  })
+
+  it("counts paid seats too: a buyer who paid for ten holds no more", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 100 })
+    const [buyer] = await buyers(1)
+    const paid = await reserve(eventId, buyer, one(ids[0], MAX_SEATS_PER_BUYER))
+    if (!paid.ok) throw new Error(`setup refused: ${paid.reason}`)
+    await db.ticket_orders.update({ where: { id: paid.orderId }, data: { status: "paid", provider_payment_ref: `pay_${testId("cap")}`, paid_at: new Date() } })
+
+    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "too_many_seats" })
+  })
+
+  it("does not count a hold that ran out", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 100 })
+    const [buyer] = await buyers(1)
+    await lapse(await reserve(eventId, buyer, one(ids[0], MAX_SEATS_PER_BUYER)))
+    expect((await reserve(eventId, buyer, one(ids[0], MAX_SEATS_PER_BUYER))).ok).toBe(true)
+  })
+
+  it("twenty concurrent orders from one buyer: never past the cap", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 100 })
+    const [buyer] = await buyers(1)
+
+    await Promise.all(Array.from({ length: 20 }, () => reserve(eventId, buyer, one(ids[0], 3))))
+
+    const seats = await db.ticket_order_lines.aggregate({ where: { event_id: eventId }, _sum: { quantity: true } })
+    expect(seats._sum.quantity).toBeLessThanOrEqual(MAX_SEATS_PER_BUYER)
+    expect((await typeRow(ids[0])).held).toBe(seats._sum.quantity)
+  })
+})
+
+describe("an expired hold is given back by the next reserve, without the sweeper (database HIGH 2)", () => {
+  it("the last seat, held and lapsed, goes to the next buyer at once", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 1 })
+    const [first, second] = await buyers(2)
+    const lapsed = await lapse(await reserve(eventId, first, one(ids[0])))
+
+    const result = await reserve(eventId, second, one(ids[0]))
+
+    expect(result.ok).toBe(true)
+    expect((await db.ticket_orders.findUniqueOrThrow({ where: { id: lapsed } })).status).toBe("expired")
+    expect(await typeRow(ids[0])).toEqual({ sold: 0, held: 1, quantity: 1 })
+  })
+})
+
+describe("a lock held too long is busy, not a stuck connection (database HIGH 1)", () => {
+  it("answers busy after the lock timeout and holds nothing", async () => {
+    const { eventId, ids } = await ticketedEvent({ quantity: 5 })
+    const [buyer] = await buyers(1)
+    let release!: () => void
+    const released = new Promise<void>((resolve) => (release = resolve))
+    let locked!: () => void
+    const isLocked = new Promise<void>((resolve) => (locked = resolve))
+    const holder = db.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM ticket_types WHERE id = ${ids[0]}::uuid FOR UPDATE`
+        locked()
+        await released
+      },
+      { timeout: 20_000 }
+    )
+    await isLocked
+    const started = Date.now()
+
+    const result = await reserve(eventId, buyer, one(ids[0]))
+
+    const waited = Date.now() - started
+    release()
+    await holder
+    expect(result).toEqual({ ok: false, reason: "busy" })
+    expect(waited).toBeGreaterThanOrEqual(1_900)
+    expect(waited).toBeLessThan(8_000)
+    expect((await typeRow(ids[0])).held).toBe(0)
+  })
+})
+
 describe("releasing expired holds", () => {
   it("expires a hold past its time, gives its quantity back, and leaves a live one alone", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 5 })
     const [early, late] = await buyers(2)
-    const t0 = new Date(Date.now() - 30 * 60_000)
-    const stale = await reserve(eventId, early, [{ ticketTypeId: ids[0], quantity: 2 }], t0)
-    const live = await reserve(eventId, late, [{ ticketTypeId: ids[0], quantity: 1 }])
-    if (!stale.ok || !live.ok) throw new Error("setup refused")
+    const held = await reserve(eventId, early, one(ids[0], 2))
+    const live = await reserve(eventId, late, one(ids[0]))
+    if (!live.ok) throw new Error("setup refused")
+    const stale = await lapse(held)
     expect((await typeRow(ids[0])).held).toBe(3)
 
     const first = await releaseExpiredHolds()
 
     expect(first.released).toBeGreaterThanOrEqual(1)
     expect((await typeRow(ids[0])).held).toBe(1)
-    expect((await db.ticket_orders.findUniqueOrThrow({ where: { id: stale.orderId } })).status).toBe("expired")
+    expect((await db.ticket_orders.findUniqueOrThrow({ where: { id: stale } })).status).toBe("expired")
     expect((await db.ticket_orders.findUniqueOrThrow({ where: { id: live.orderId } })).status).toBe("pending")
   })
 
   it("is idempotent: a second sweep, or two at once, releases nothing twice", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 5 })
     const people = await buyers(3)
-    const past = new Date(Date.now() - 30 * 60_000)
-    for (const p of people) await reserve(eventId, p, [{ ticketTypeId: ids[0], quantity: 1 }], past)
+    const holds = []
+    for (const p of people) holds.push(await reserve(eventId, p, one(ids[0])))
+    for (const h of holds) await lapse(h)
 
     await Promise.all([releaseExpiredHolds(), releaseExpiredHolds(), releaseExpiredHolds()])
     await releaseExpiredHolds()
@@ -337,20 +540,23 @@ describe("releasing expired holds", () => {
 
   it("puts the released seats back on sale", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 1 })
-    const [a, b] = await buyers(2)
-    await reserve(eventId, a, [{ ticketTypeId: ids[0], quantity: 1 }], new Date(Date.now() - 30 * 60_000))
-    expect(await reserve(eventId, b, [{ ticketTypeId: ids[0], quantity: 1 }])).toEqual({ ok: false, reason: "sold_out" })
+    const [a, b, c] = await buyers(3)
+    const held = await reserve(eventId, a, one(ids[0]))
+    expect(await reserve(eventId, b, one(ids[0]))).toEqual({ ok: false, reason: "sold_out" })
+    await lapse(held)
 
     await releaseExpiredHolds()
 
-    expect((await reserve(eventId, b, [{ ticketTypeId: ids[0], quantity: 1 }])).ok).toBe(true)
+    expect((await typeRow(ids[0])).held).toBe(0)
+    expect((await reserve(eventId, c, one(ids[0]))).ok).toBe(true)
   })
 
   it("works in batches", async () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 5 })
     const people = await buyers(3)
-    const past = new Date(Date.now() - 30 * 60_000)
-    for (const p of people) await reserve(eventId, p, [{ ticketTypeId: ids[0], quantity: 1 }], past)
+    const holds = []
+    for (const p of people) holds.push(await reserve(eventId, p, one(ids[0])))
+    for (const h of holds) await lapse(h)
 
     let released = 0
     for (let pass = 0; pass < 10 && (await typeRow(ids[0])).held > 0; pass++) released += (await releaseExpiredHolds({ limit: 1 })).released

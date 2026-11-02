@@ -190,21 +190,27 @@ and therefore in every deployed environment:
 | `cities_centre_in_bounds` | a city's centre is inside its box |
 | `cities_licensed_min_age_floor` | a city's licensed-venue age default is never under the 18+ floor |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
-| `markets_ticket_fee_slabs_shape` | a market's service-fee slabs: thresholds and rates the same length, at least one, the first from ticket 1, no NULLs (ascending order is `parseFeeSchedule`'s, `lib/ticket-fees.ts`) |
+| `markets_ticket_fee_slabs_shape` | a market's service-fee slabs: thresholds and rates the same length, at least one, the first from ticket 1, no NULLs |
+| `markets_ticket_fee_slabs_ascending` | slab thresholds strictly ascending, through the IMMUTABLE SQL function `ticket_fee_slabs_ascending` (also `parseFeeSchedule`'s, `lib/ticket-fees.ts`) |
 | `markets_ticket_fee_rates_range` | slab rates, tax on the fee and processing are 0–10000 bps; the minimum fee is never negative |
+| `markets_ticket_fee_min_when_selling` | a market that is not `off` charges a minimum fee of at least 1 minor unit per paid ticket |
 | `events_ticketing_external_needs_url` | an event linking out to tickets has the link |
 | `events_external_ticket_url_https` | that link is https with a host and no user name, and at most 2048 characters — the floor under `httpsUrl()` |
 | `events_ticketing_native_needs_schedule` | an event selling tickets here has its fee snapshot (`IS NOT NULL` spelled out: `jsonb_typeof(NULL)` would pass) |
 | `events_venue_day_not_ticketed` | a venue day is never ticketed |
+| `events_ticketing_native_needs_enablement` | a native event was turned on by `enableTicketing` (`lib/ticketing-enable.ts`): it has `ticketing_enabled_at` |
+| `events_ticket_fee_rule_with_enabled_at` | `ticket_fee_rule` and `ticketing_enabled_at` are set together: the price rule is decided once, in the database, never by a request |
 | `ticket_types_not_oversold` | `sold + held <= quantity` — the last word under `reserveTickets`'s row lock (`lib/ticket-holds.ts`), read there as sold out |
 | `ticket_types_price_non_negative` / `ticket_types_counts_non_negative` | a price is ≥ 0 (free is 0); quantity, sold and held are ≥ 0 |
 | `ticket_types_max_per_order_range` / `ticket_types_name_length` / `ticket_types_sale_window_order` | 1–100 per order; a name of 1–80 characters after trimming; a sale ends after it starts |
 | `ticket_orders_total_is_its_parts` | an order's total is its subtotal plus service fee, tax and processing — or the subtotal alone when the organiser absorbs the fees |
 | `ticket_orders_paid_has_payment_ref` | a paid or refunded order has a provider payment ref and a paid time: paid only on the provider's word |
 | `ticket_orders_amounts_non_negative` / `ticket_orders_currency_shape` / `ticket_orders_fee_breakdown_object` | no negative amount; an ISO-shaped currency; the breakdown is a JSON object |
+| `ticket_orders_total_positive` | `total_minor > 0`: free tickets are RSVP plus capacity and never an order (ticketing decision §4.4) |
 | `ticket_order_lines_quantity_positive` / `ticket_order_lines_price_non_negative` | a line holds at least one ticket, at a price ≥ 0 |
-| `tickets_door_code_shape` / `tickets_qr_secret_length` / `tickets_redeemer_needs_time` | a six-character upper-case door code (unique per event); a QR secret of 32–128 characters; who redeemed only with when |
-| `legal_acceptances_document_key_shape` / `legal_acceptances_version_shape` / `…_ip_length` / `…_user_agent_length` | a slug document key, a numeric version (`0.1`), bounded IP and user agent |
+| `tickets_door_code_shape` / `tickets_qr_secret_hash_shape` / `tickets_redeemer_needs_time` | a door code is six of `23456789ABCDEFGHJKMNPQRSTVWXYZ` (Crockford base32 less 0 O 1 I L U, `DOOR_CODE_ALPHABET` in `lib/tickets.ts`; unique per event; NOT VALID, so new rows only); only `sha256(qr secret)` is stored, as 64 lower-case hex; who redeemed only with when |
+| `legal_acceptances_document_key_shape` / `legal_acceptances_version_shape` / `…_ip_length` | a slug document key, a numeric version (`0.1`), a bounded IP |
+| `legal_acceptances_ip_truncated` / `legal_acceptances_document_sha256_shape` / `legal_acceptances_user_agent_length` | NOT VALID (the table is append-only, so rows from before stay as written): the IP is a network, `a.b.c.0/24` or `x:y:z::/48` (`truncatedIp`); the sha256 of the exact text shown is present; a user agent is at most 200 code points |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
@@ -222,7 +228,8 @@ so nothing is hidden or in preview), the
 Canada `external`: on a `db push` database every market is `off` with no
 minimum and no GST), the `legal_acceptances_append_only` and
 `legal_acceptances_no_truncate` triggers (an acceptance is evidence: a new
-version is a new row, never an edit), the
+version is a new row, never an edit), the `tickets_order_must_be_paid` trigger
+(a ticket exists only for a paid order), the
 `events_city_clean` and `venues_city_clean` triggers (`clean_city_text`, the database's half of `cityKey`, so a padded or "Toronto, ON" city cannot pass the city rule), the
 system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its
