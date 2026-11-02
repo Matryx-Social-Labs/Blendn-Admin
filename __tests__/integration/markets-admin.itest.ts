@@ -254,10 +254,32 @@ describe("what an admin types is checked before anything is written", () => {
     expect(await db.markets.count({ where: { code: { in: ["XS", "xr1"] } } })).toBe(0)
   })
 
+  it("matches the typed address exactly: a % or _ in it is a character, never a wildcard that finds somebody else", async () => {
+    // The attendee's address with one letter turned into _, and a bare %: both would match them under ILIKE.
+    const real = `${attendee}@itest.invalid`
+    const underscored = real.replace(/[a-z0-9](?=@)/, "_")
+    for (const typed of [underscored, "%@itest.invalid", `${attendee.slice(0, 8)}%`]) {
+      await expect(addPreviewer(CODE, typed)).rejects.toThrow("No Blendn account uses that email.")
+    }
+    expect(await db.market_previewers.count({ where: { market_code: CODE } })).toBe(0)
+    // Control: the exact address, typed in another case, still finds them, and the answer names the stored address.
+    await expect(addPreviewer(CODE, real.toUpperCase())).resolves.toEqual({ email: real })
+    await removePreviewer(CODE, attendee)
+  })
+
   it("refuses a previewer email with no account, and a second add of the same person", async () => {
     await expect(addPreviewer(CODE, "nobody-here@itest.invalid")).rejects.toThrow("No Blendn account uses that email.")
     await addPreviewer(CODE, `${organiser}@itest.invalid`)
     await expect(addPreviewer(CODE, `${organiser}@itest.invalid`)).rejects.toThrow(`${organiser}@itest.invalid already previews Testland.`)
+    await removePreviewer(CODE, organiser)
+  })
+
+  it("refuses a Prisma operator where a string belongs, so a remove can never match everyone", async () => {
+    await addPreviewer(CODE, `${organiser}@itest.invalid`)
+    await expect(removePreviewer({ not: "" } as never, { not: "" } as never)).rejects.toThrow("That is not a valid value.")
+    await expect(setCityState({ startsWith: "" } as never, "hidden")).rejects.toThrow("That is not a valid value.")
+    await expect(createCity({ ...cityInput(slugOf("obj")), name: { toString: () => "x" } as never })).rejects.toThrow("That is not a valid value.")
+    expect(await db.market_previewers.count({ where: { market_code: CODE } })).toBe(1)
     await removePreviewer(CODE, organiser)
   })
 

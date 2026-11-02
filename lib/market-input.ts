@@ -12,6 +12,12 @@ export const LAUNCH_STATES: readonly LaunchState[] = ["live", "preview", "hidden
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const LICENSED_AGE = { min: 18, max: 21 }
 
+/** A server action's argument as the plain string it must be: an object such as `{ not: "" }` would be a Prisma operator. */
+export function textFrom(value: unknown, max = 200): string {
+  if (typeof value !== "string" || value.length > max) throw new Refusal("That is not a valid value.")
+  return value
+}
+
 export function launchStateFrom(value: unknown): LaunchState {
   if (!LAUNCH_STATES.includes(value as LaunchState)) throw new Refusal("Choose Live, Preview or Hidden.")
   return value as LaunchState
@@ -68,7 +74,13 @@ const coordinate = (value: number | string, limit: number, axis: "Latitude" | "L
   return n
 }
 
-export function cityRowFrom(input: CityInput): CityRowInput {
+const text = (v: unknown) => (typeof v === "number" ? String(v) : v == null ? "" : textFrom(v))
+
+export function cityRowFrom(raw: CityInput): CityRowInput {
+  const input = {
+    ...Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, text(v)])),
+    matchNames: textFrom(raw.matchNames, 2000),
+  } as Record<keyof CityInput, string>
   const name = input.name.trim()
   if (!name) throw new Refusal("Name the city.")
   const slug = input.slug.trim()
@@ -98,7 +110,7 @@ export function cityRowFrom(input: CityInput): CityRowInput {
     slug,
     name,
     match_names: matchNames,
-    region: input.region?.trim() || null,
+    region: input.region.trim() || null,
     timezone,
     centre_lat: centreLat,
     centre_lon: centreLon,
@@ -117,7 +129,8 @@ export interface MarketInput {
   locale: string
 }
 
-export function marketRowFrom(input: MarketInput): MarketInput {
+export function marketRowFrom(raw: MarketInput): MarketInput {
+  const input = { code: textFrom(raw.code), name: textFrom(raw.name), currency: textFrom(raw.currency), locale: textFrom(raw.locale) }
   const code = input.code.trim()
   if (!/^[A-Z]{2}$/.test(code)) throw new Refusal("Two capital letters, like DE.")
   const name = input.name.trim()

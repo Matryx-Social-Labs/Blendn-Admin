@@ -119,11 +119,11 @@ export function MarketsManager({ markets }: { markets: MarketView[] }) {
   const [busy, startTransition] = useTransition()
   const [pending, setPending] = useState<Pending | null>(null)
 
-  const run = (fn: () => Promise<void>, ok: string, after?: () => void) =>
+  const run = (fn: () => Promise<void>, ok: string | (() => string), after?: () => void) =>
     startTransition(async () => {
       try {
         await fn()
-        toast.success(ok)
+        toast.success(typeof ok === "string" ? ok : ok())
         setPending(null)
         after?.()
       } catch (err) {
@@ -161,7 +161,7 @@ export function MarketsManager({ markets }: { markets: MarketView[] }) {
   )
 }
 
-type Run = (fn: () => Promise<void>, ok: string, after?: () => void) => void
+type Run = (fn: () => Promise<void>, ok: string | (() => string), after?: () => void) => void
 
 function MarketPanel({ market, pending, busy, onPending, run }: { market: MarketView; pending: Pending | null; busy: boolean; onPending: (p: Pending | null) => void; run: Run }) {
   const [filter, setFilter] = useState("")
@@ -290,7 +290,15 @@ function PreviewersPanel({ market, busy, run }: { market: MarketView; busy: bool
         onSubmit={(e) => {
           e.preventDefault()
           const address = email.trim()
-          if (address) run(() => addPreviewer(market.code, address), `${address} can now see ${market.name} in preview.`, () => setEmail(""))
+          if (!address) return
+          let added = address
+          run(
+            async () => {
+              added = (await addPreviewer(market.code, address)).email
+            },
+            () => `${added} can now see ${market.name} in preview.`,
+            () => setEmail("")
+          )
         }}
       >
         <Input type="email" required aria-label={`Email of a new ${market.name} previewer`} placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className="max-w-xs" />

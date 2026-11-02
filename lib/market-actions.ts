@@ -8,7 +8,7 @@ import { buildCatalogue, cityFor, forgetCityCatalogue, type Catalogue, type Laun
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { realEventsWhere } from "@/lib/event-kind"
-import { cityRowFrom, launchStateFrom, marketRowFrom, type CityInput, type MarketInput } from "@/lib/market-input"
+import { cityRowFrom, launchStateFrom, marketRowFrom, textFrom, type CityInput, type MarketInput } from "@/lib/market-input"
 import { Refusal } from "@/lib/refusal"
 import { openOnBlendnWhere } from "@/lib/venue-visibility"
 
@@ -150,8 +150,9 @@ export async function getMarkets(): Promise<{ markets: MarketView[] }> {
   }
 }
 
-export async function setCityState(slug: string, state: LaunchState): Promise<void> {
+export async function setCityState(slugArg: string, state: LaunchState): Promise<void> {
   const user = await requireAdmin()
+  const slug = textFrom(slugArg)
   const to = launchStateFrom(state)
   const changed = await db.$transaction(async (tx) => {
     const city = await tx.cities.findUnique({ where: { slug }, select: { id: true, name: true, launch_state: true } })
@@ -167,8 +168,9 @@ export async function setCityState(slug: string, state: LaunchState): Promise<vo
   if (changed) saved()
 }
 
-export async function setMarketState(code: string, state: LaunchState): Promise<void> {
+export async function setMarketState(codeArg: string, state: LaunchState): Promise<void> {
   const user = await requireAdmin()
+  const code = textFrom(codeArg)
   const to = launchStateFrom(state)
   const changed = await db.$transaction(async (tx) => {
     const market = await tx.markets.findUnique({ where: { code }, select: { name: true, launch_state: true } })
@@ -220,13 +222,16 @@ export async function createMarket(input: MarketInput): Promise<void> {
   saved()
 }
 
-export async function addPreviewer(code: string, email: string): Promise<void> {
+/** Returns the address the account holds, for the confirmation: never the typed text. */
+export async function addPreviewer(codeArg: string, email: string): Promise<{ email: string }> {
   const user = await requireAdmin()
-  const address = email.trim().toLowerCase()
-  await db.$transaction(async (tx) => {
+  const code = textFrom(codeArg)
+  const address = textFrom(email, 320).trim().toLowerCase()
+  const added = await db.$transaction(async (tx) => {
     const market = await tx.markets.findUnique({ where: { code }, select: { name: true } })
     if (!market) throw new Refusal("No such country.")
-    const person = await tx.user.findFirst({ where: { email: { equals: address, mode: "insensitive" } }, select: { id: true, email: true } })
+    // Exact, as sign-in matches (lib/auth.ts): `mode: "insensitive"` is ILIKE, where a typed % or _ finds somebody else.
+    const person = await tx.user.findUnique({ where: { email: address }, select: { id: true, email: true } })
     if (!person) throw new Refusal("No Blendn account uses that email.")
     const key = { user_id_market_code: { user_id: person.id, market_code: code } }
     if (await tx.market_previewers.findUnique({ where: key, select: { user_id: true } })) {
@@ -234,12 +239,16 @@ export async function addPreviewer(code: string, email: string): Promise<void> {
     }
     await tx.market_previewers.create({ data: { user_id: person.id, market_code: code } })
     await auditInTx(tx, { userId: user.id, action: "market.previewer_added", resource: "market", resourceId: code, details: { previewerId: person.id } })
+    return { email: person.email }
   })
   saved()
+  return added
 }
 
-export async function removePreviewer(code: string, userId: string): Promise<void> {
+export async function removePreviewer(codeArg: string, userIdArg: string): Promise<void> {
   const user = await requireAdmin()
+  const code = textFrom(codeArg)
+  const userId = textFrom(userIdArg)
   await db.$transaction(async (tx) => {
     const { count } = await tx.market_previewers.deleteMany({ where: { market_code: code, user_id: userId } })
     if (count === 0) throw new Refusal("They don’t preview this country.")
