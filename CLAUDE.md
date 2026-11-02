@@ -211,6 +211,12 @@ and therefore in every deployed environment:
 | `tickets_door_code_shape` / `tickets_redeemer_needs_time` | a door code is six of `23456789ABCDEFGHJKMNPQRSTVWXYZ` (Crockford base32 less 0 O 1 I L U, `DOOR_CODE_ALPHABET` in `lib/tickets.ts`; unique per event; NOT VALID, so new rows only); who redeemed only with when. No QR column: a QR is `<id>.<HMAC-SHA256(TICKET_QR_KEY, id)>`, derived on demand (`ticketQrPayload`, `verifyTicketQr`) |
 | `legal_acceptances_document_key_shape` / `legal_acceptances_version_shape` / `…_ip_length` | a slug document key, a numeric version (`0.1`), a bounded IP |
 | `legal_acceptances_ip_truncated` / `legal_acceptances_document_sha256_shape` / `legal_acceptances_user_agent_length` | NOT VALID (the table is append-only, so rows from before stay as written): the IP is a network, `a.b.c.0/24` or `x:y:z::/48` (`truncatedIp`); the sha256 of the exact text shown is present; a user agent is at most 200 code points |
+| `organisations_razorpay_account_id_shape` / `organisations_razorpay_active_has_account` | an organisation's Razorpay Route linked account is `acc_` and 14 characters, and an `active` one has its id; `enableTicketing` refuses `payouts_not_connected` unless it is active (`payoutStatus`, SCRUM-1011) |
+| `markets_ticket_tax_label_length` | what the buyer quote calls the tax on our fee (`GST` in India) is 1–24 characters |
+| `ticket_orders_refund_request_shape` | a refund claim (`refund_requested_at`) and its amount come together, the amount 1 to `total_minor`, only on an order with a payment; a reason ≤ 200 |
+| `ticket_orders_refunded_range` / `ticket_orders_refunded_has_refund` | the refunded amount is 0 to `total_minor`; a `refunded` order has Razorpay's refund id, time and an amount ≥ 1 — refunded only on Razorpay's word |
+| `ticket_payouts_status_shape` | a payout `pending` or `on_hold` has a linked account, and `on_hold` has Razorpay's transfer id; `no_account` has neither |
+| `ticket_payouts_amount_positive` / `…_reversed_range` / `…_currency_shape` / `…_linked_account_shape` | a payout is ≥ 1 minor unit; reversed 0 to its amount; an org debit ≥ 0; ISO currency; `acc_` account |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
@@ -224,7 +230,9 @@ crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
 `db push` database the catalogue is empty and every city reads as uncatalogued,
 so nothing is hidden or in preview), the
 `ticket_orders_pending_expiry` partial index (what the hold sweeper,
-`releaseExpiredHolds`, reads), the `markets` ticketing rows (India `native`,
+`releaseExpiredHolds`, reads), the reconcile job's partial indexes
+`ticket_orders_unconfirmed_payment`, `ticket_orders_unconfirmed_refund` and
+`ticket_payouts_pending` (`lib/ticket-reconcile.ts`), India's `GST` tax label, the `markets` ticketing rows (India `native`,
 Canada `external`: on a `db push` database every market is `off` with no
 minimum and no GST), the `legal_acceptances_append_only` and
 `legal_acceptances_no_truncate` triggers (an acceptance is evidence: a new

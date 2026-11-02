@@ -79,7 +79,8 @@ describe("TICKET_QR_KEY at boot", () => {
 
   it("is required once TICKETING is on", () => {
     expect(boot({ TICKETING: "true" })).toThrow(/Invalid environment variables/)
-    expect(() => boot({ TICKETING: "true", TICKET_QR_KEY: KEY })()).not.toThrow()
+    // TICKET_PAY_KEY is required with it since Phase 2 (ticket-pay-token.test.ts holds that rule).
+    expect(() => boot({ TICKETING: "true", TICKET_QR_KEY: KEY, TICKET_PAY_KEY: `${KEY}-pay` })()).not.toThrow()
   })
 
   it("is not asked for while TICKETING is off", () => {

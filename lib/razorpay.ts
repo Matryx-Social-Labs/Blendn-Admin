@@ -7,9 +7,9 @@ import { razorpayKeys } from "./env"
 /**
  * Razorpay, over its REST API (plan v2 §9.2).
  *
- * Plain `fetch`, not the `razorpay` npm SDK: the dashboard makes five calls
- * (create a plan, list plans, create a subscription, cancel it, create an
- * order) and verifies one signature. The SDK would add a dependency and its
+ * Plain `fetch`, not the `razorpay` npm SDK: billing makes a handful of calls
+ * (plans, subscriptions, orders, payment links) and ticketing a few more
+ * (orders, refunds, Route transfers and reversals), and one signature is verified. The SDK would add a dependency and its
  * transitive tree to the server bundle for that, and hide the request shape a
  * reviewer needs to see. The webhook signature is ten lines of `crypto`.
  *
@@ -327,3 +327,119 @@ export const PAYMENT_LINK_LIFETIME_MS = PAYMENT_LINK_DAYS * 24 * 60 * 60 * 1000
 
 /** How long Razorpay lets a created subscription wait, for our own "still open" rule. */
 export const CREATED_CHECKOUT_LIFETIME_MS = SUBSCRIPTION_EXPIRES_AFTER_S * 1000
+
+/* -------------------------------------------------------------------------- */
+/* Tickets: orders, refunds, Route transfers (SCRUM-1011)                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A Razorpay order for one ticket order, for the amount read from
+ * `ticket_orders.total_minor` by the caller. The receipt is our order id, so a
+ * person in the Razorpay dashboard can find it; `notes` are for them only, the
+ * webhook resolves the order from `provider_order_ref`. An answer for any other
+ * amount or currency is refused, not stored.
+ */
+export async function createTicketOrder(input: { orderId: string; amountMinor: number; currency: string }): Promise<RazorpayOrder> {
+  const order = await call(orderSchema, "POST", "/orders", {
+    amount: input.amountMinor,
+    currency: input.currency,
+    receipt: input.orderId,
+    notes: { ticket_order_id: input.orderId },
+  })
+  if (order.amount !== input.amountMinor || order.currency !== input.currency) {
+    throw new RazorpayError(502, "Razorpay created the order for another amount")
+  }
+  return order
+}
+
+const ticketPaymentSchema = z.object({
+  id: z.string().min(1),
+  order_id: z.string().nullable().optional(),
+  amount: z.number().int(),
+  currency: z.string(),
+  status: z.string(),
+  created_at: z.number().int(),
+})
+export type RazorpayPayment = z.infer<typeof ticketPaymentSchema>
+
+/** An order's payments, for the reconcile job: a webhook lost is a payment found here. */
+export async function orderPayments(orderRef: string): Promise<RazorpayPayment[]> {
+  return (await call(z.object({ items: z.array(ticketPaymentSchema) }), "GET", `/orders/${encodeURIComponent(orderRef)}/payments`)).items
+}
+
+const refundSchema = z.object({
+  id: z.string().min(1),
+  payment_id: z.string(),
+  amount: z.number().int(),
+  currency: z.string(),
+  status: z.string(),
+})
+export type RazorpayRefund = z.infer<typeof refundSchema>
+
+/** Refund part or all of a payment. Normal speed: instant refunds cost extra and are Razorpay's to offer. */
+export async function refundPayment(input: { paymentId: string; amountMinor: number; orderId: string }): Promise<RazorpayRefund> {
+  return call(refundSchema, "POST", `/payments/${encodeURIComponent(input.paymentId)}/refund`, {
+    amount: input.amountMinor,
+    speed: "normal",
+    receipt: input.orderId,
+    notes: { ticket_order_id: input.orderId },
+  })
+}
+
+/** A payment's refunds: asked before refunding again, so a retry never refunds twice. */
+export async function paymentRefunds(paymentId: string): Promise<RazorpayRefund[]> {
+  return (await call(z.object({ items: z.array(refundSchema) }), "GET", `/payments/${encodeURIComponent(paymentId)}/refunds`)).items
+}
+
+const transferSchema = z.object({
+  id: z.string().min(1),
+  recipient: z.string(),
+  amount: z.number().int(),
+  currency: z.string(),
+})
+export type RazorpayTransfer = z.infer<typeof transferSchema>
+
+/** A payment's Route transfers: asked before transferring again, so a retry never pays an organizer twice. */
+export async function paymentTransfers(paymentId: string): Promise<RazorpayTransfer[]> {
+  return (await call(z.object({ items: z.array(transferSchema) }), "GET", `/payments/${encodeURIComponent(paymentId)}/transfers`)).items
+}
+
+/**
+ * Transfer the organizer's share of a captured payment to their linked
+ * account, held until `onHoldUntil` (three days after the event ends), when
+ * Razorpay releases it to their bank. An answer for another account or amount
+ * is refused.
+ */
+export async function createTransfer(input: {
+  paymentId: string
+  account: string
+  amountMinor: number
+  currency: string
+  onHoldUntil: Date
+  orderId: string
+}): Promise<RazorpayTransfer> {
+  const { items } = await call(z.object({ items: z.array(transferSchema).length(1) }), "POST", `/payments/${encodeURIComponent(input.paymentId)}/transfers`, {
+    transfers: [
+      {
+        account: input.account,
+        amount: input.amountMinor,
+        currency: input.currency,
+        on_hold: 1,
+        on_hold_until: Math.floor(input.onHoldUntil.getTime() / 1000),
+        notes: { ticket_order_id: input.orderId },
+      },
+    ],
+  })
+  const transfer = items[0]
+  if (transfer.recipient !== input.account || transfer.amount !== input.amountMinor || transfer.currency !== input.currency) {
+    throw new RazorpayError(502, "Razorpay made the transfer to another account or amount")
+  }
+  return transfer
+}
+
+const reversalSchema = z.object({ id: z.string().min(1), transfer_id: z.string(), amount: z.number().int() })
+
+/** Take back part or all of a transfer: a refund's share, out of the organizer's held payout. */
+export async function reverseTransfer(transferId: string, amountMinor: number): Promise<z.infer<typeof reversalSchema>> {
+  return call(reversalSchema, "POST", `/transfers/${encodeURIComponent(transferId)}/reversals`, { amount: amountMinor })
+}

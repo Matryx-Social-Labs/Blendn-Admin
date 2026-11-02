@@ -10,6 +10,8 @@ import { endPaidEntitlement, passHeldElsewhere, recordPaidEntitlement, type Subj
 import { logger } from "./logger"
 import { OPEN_SUBSCRIPTION_STATUSES } from "./billing"
 import { cancelSubscription } from "./razorpay"
+import { settleTicketPayment } from "./ticket-payments"
+import { afterRefund, afterSettle, finishRefund } from "./ticket-settle"
 
 /**
  * What a verified Razorpay delivery does (plan v2 §9.2).
@@ -60,7 +62,7 @@ const PROVIDER = "razorpay"
 const TERMINAL = ["cancelled", "completed"]
 
 /** Why a delivery changed nothing. Stored in `payment_events.error`. */
-export type Refused = "unknown_ref" | "plan_mismatch" | "amount_mismatch" | "malformed"
+export type Refused = "unknown_ref" | "plan_mismatch" | "amount_mismatch" | "malformed" | "second_payment" | "unrequested_refund"
 
 export interface DeliveryResult {
   duplicate: boolean
@@ -184,7 +186,7 @@ export async function recordRazorpayDelivery(
     // An unknown order.paid is, in practice, the order Razorpay makes behind
     // every payment link: the link's own payment_link.paid is what settles it.
     const linkOrder = delivery.event === "order.paid" && outcome.refused === "unknown_ref"
-    const money = /^(subscription\.charged|order\.paid|payment_link\.paid)$/.test(delivery.event)
+    const money = /^(subscription\.charged|order\.paid|payment_link\.paid|payment\.captured|refund\.processed)$/.test(delivery.event)
     ;(linkOrder ? logger.info : money || outcome.refused !== "unknown_ref" ? logger.error : logger.warn)("Razorpay delivery refused", {
       eventId,
       type: delivery.event,
@@ -322,6 +324,19 @@ const auditResource = (c: Checkout) => (c.venue_id ? { resource: { kind: "venue"
 
 async function apply(tx: Tx, d: Delivery): Promise<Outcome> {
   if (PAYMENT_DELIVERIES.has(d.event)) await lockPayment(tx, str(entityOf(d, "payment")?.id))
+  // Ticket orders first (SCRUM-1011): each answers null for a reference that is not one, and billing reads on.
+  if (d.event === "payment.captured" || d.event === "order.paid") {
+    const ticket = await applyTicketPayment(tx, d)
+    if (ticket) return ticket
+  }
+  if (d.event === "refund.processed") {
+    const ticket = await applyTicketRefund(tx, d)
+    if (ticket) return ticket
+  }
+  if (d.event === "payment.failed") {
+    const ticket = await applyTicketPaymentFailed(tx, d)
+    if (ticket) return ticket
+  }
   if (d.event.startsWith("subscription.")) return applySubscription(tx, d)
   if (d.event === "order.paid") return applyOrderPaid(tx, d)
   if (d.event === "payment_link.paid") return applyPaymentLinkPaid(tx, d)
@@ -912,4 +927,82 @@ async function voidRefundedCharge(tx: Tx, out: Outcome, c: Checkout, refundId: s
     resource: { kind: "placement_charges", id: charge.id },
     details: { from: charge.status, source: "razorpay", reason: "refund.processed", refundId, amountMinor: charge.amount_minor },
   })
+}
+
+/* -------------------------------------------------------------------------- */
+/* Ticket orders (SCRUM-1011)                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A captured payment for a ticket order: `payment.captured` or `order.paid`,
+ * whichever arrives first settles it and the other is a no-op (the order
+ * carries the payment id). The order is found by its Razorpay order id on our
+ * own row, never by notes; lib/ticket-payments.ts holds it to `total_minor`.
+ * Null when the reference is not a ticket order.
+ */
+async function applyTicketPayment(tx: Tx, d: Delivery): Promise<Outcome | null> {
+  const payment = entityOf(d, "payment")
+  const orderRef = str(payment?.order_id) ?? str(entityOf(d, "order")?.id)
+  const eventAt = at(d.created_at)
+  if (!orderRef) return null
+  const paymentId = str(payment?.id)
+  const amount = num(payment?.amount)
+  const currency = str(payment?.currency)
+  const captured = payment && paymentId && amount !== null && currency && eventAt && str(payment.status) === "captured"
+  if (!captured) {
+    // A ticket order's delivery with no captured payment in it changes nothing; anyone else's is billing's.
+    const ours = await tx.ticket_orders.count({ where: { provider: PROVIDER, provider_order_ref: orderRef } })
+    return ours > 0 ? refuse("malformed") : null
+  }
+  const outcome = await settleTicketPayment(tx, { paymentId, orderRef, amountMinor: amount, currency, capturedAt: paidAt(payment, eventAt) })
+  if (outcome.kind === "not_ticket") return null
+
+  const audit: Audit[] = []
+  if (outcome.orgId && (outcome.kind === "paid" || outcome.kind === "refund_due" || outcome.kind === "refused")) {
+    audit.push({
+      action: `ticket_order.${outcome.kind}`,
+      orgId: outcome.orgId,
+      resource: { kind: "ticket_order", id: outcome.orderId },
+      details: { paymentId, orderRef, ...("reason" in outcome ? { reason: outcome.reason } : {}), ...("late" in outcome ? { late: outcome.late } : {}) },
+    })
+  }
+  if (outcome.kind === "refused") return { ...refuse(outcome.reason), audit }
+  return { applied: outcome.kind !== "duplicate", audit, after: afterSettle(outcome) }
+}
+
+/**
+ * Razorpay confirming a refund of a ticket payment. Applied only to a refund
+ * this server asked for (`refund_requested_at`): one made by hand in the
+ * Razorpay dashboard is refused and logged, for a person to reconcile, rather
+ * than read as the whole order. Null when the payment is not a ticket order's.
+ */
+async function applyTicketRefund(tx: Tx, d: Delivery): Promise<Outcome | null> {
+  const refund = entityOf(d, "refund")
+  const paymentId = str(refund?.payment_id)
+  const refundId = str(refund?.id)
+  if (!paymentId) return null
+  const [order] = await tx.$queryRaw<{ id: string; refund_requested_minor: number | null }[]>`
+    SELECT id::text, refund_requested_minor FROM ticket_orders
+     WHERE provider = ${PROVIDER} AND provider_payment_ref = ${paymentId}
+       FOR UPDATE`
+  if (!order) return null
+  if (!refundId || str(refund?.status) !== "processed") return refuse("malformed")
+  if (order.refund_requested_minor === null) return refuse("unrequested_refund")
+  const recorded = await finishRefund(tx, order.id, { refundRef: refundId, amountMinor: order.refund_requested_minor })
+  return { applied: recorded, audit: [], after: [() => afterRefund(order.id, recorded)] }
+}
+
+/**
+ * A checkout attempt on a ticket order failed: the order says so while it is
+ * still pending (`paymentFailed`, contract §8.2) until the pay page starts
+ * another. Never ahead of a later success: only a pending order is marked.
+ */
+async function applyTicketPaymentFailed(tx: Tx, d: Delivery): Promise<Outcome | null> {
+  const orderRef = str(entityOf(d, "payment")?.order_id)
+  const eventAt = at(d.created_at)
+  if (!orderRef || !eventAt) return null
+  const ours = await tx.ticket_orders.findFirst({ where: { provider: PROVIDER, provider_order_ref: orderRef }, select: { id: true } })
+  if (!ours) return null
+  const { count } = await tx.ticket_orders.updateMany({ where: { id: ours.id, status: "pending" }, data: { payment_failed_at: eventAt } })
+  return { applied: count > 0, audit: [], after: [] }
 }

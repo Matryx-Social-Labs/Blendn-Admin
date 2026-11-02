@@ -186,7 +186,8 @@ describe("redeeming", () => {
     const elsewhere = await issuedTicket()
     expect(await redeemTicket({ eventId: t.eventId, user: door(t.host), credential: { qr: elsewhere.qrPayload } })).toEqual({ ok: false, reason: "invalid" })
 
-    await db.ticket_orders.update({ where: { id: t.orderId }, data: { status: "refunded" } })
+    // Refunded on Razorpay's word: its refund id, amount and time (CHECK ticket_orders_refunded_has_refund, SCRUM-1011).
+    await db.ticket_orders.update({ where: { id: t.orderId }, data: { status: "refunded", provider_refund_ref: `rfnd_${t.orderId.slice(0, 8)}`, refunded_minor: 1, refunded_at: new Date() } })
     expect(await redeemTicket({ eventId: t.eventId, user: door(t.host), credential: { doorCode: t.doorCode } })).toEqual({ ok: false, reason: "invalid" })
   })
 

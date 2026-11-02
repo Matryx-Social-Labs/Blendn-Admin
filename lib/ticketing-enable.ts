@@ -8,6 +8,7 @@ import { hasEntitlement } from "./entitlements"
 import { realEventsWhere } from "./event-kind"
 import { ticketingOn } from "./env"
 import { ORGANIZER_TICKETING_TERMS } from "./legal-acceptance"
+import { payoutsConnected } from "./payout-status"
 import { actorFor } from "./org-membership"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { feeRuleFor, feeScheduleFromMarket, type FeeRule, type FeeSchedule, type MarketFeeRow } from "./ticket-fees"
@@ -23,7 +24,7 @@ import { feeRuleFor, feeScheduleFromMarket, type FeeRule, type FeeSchedule, type
  *
  * 1. The actor may edit the event (`eventPermissions` on `actorFor`, so the
  *    role and memberships are the database's, organisation-shaped).
- * 2. The organisation's acceptance of the organizer ticketing terms in force
+ * 2. The organisation's Razorpay Route linked account is active (SCRUM-1011), and its acceptance of the organizer ticketing terms in force
  *    is the version current now (database 13).
  * 3. The market is the event's city's (`cities.market_code`, decision §4.2),
  *    and must sell natively; its rates are snapshotted.
@@ -42,6 +43,7 @@ export type EnableRefusal =
   | "not_found"
   | "not_authorized"
   | "no_organization"
+  | "payouts_not_connected"
   | "terms_not_accepted"
   | "market_not_native"
   | "already_enabled"
@@ -91,7 +93,10 @@ async function enable(tx: Prisma.TransactionClient, eventId: string, actor: Perm
   if (!orgId) throw new Refused("no_organization")
 
   // Serialises this organisation's turn-ons, so the founding count below is exact.
-  await tx.$queryRaw`SELECT id FROM organisations WHERE id = ${orgId}::uuid FOR UPDATE`
+  const [org] = await tx.$queryRaw<{ razorpay_account_id: string | null; razorpay_account_status: string }[]>`
+    SELECT razorpay_account_id, razorpay_account_status::text AS razorpay_account_status FROM organisations WHERE id = ${orgId}::uuid FOR UPDATE`
+  // Nobody to pay the organizer's share to (SCRUM-1011): Route needs an active linked account first.
+  if (!org || !payoutsConnected(org)) throw new Refused("payouts_not_connected")
   if (!(await termsAccepted(tx, orgId))) throw new Refused("terms_not_accepted")
 
   const marketCode = marketOf(event.city)

@@ -60,7 +60,7 @@ describe("the launch gate on routes by id", () => {
   })
 
   it("the two gates themselves still hold it", () => {
-    const access = readFileSync(join(__dirname, "../lib/event-access.ts"), "utf8")
+    const access = readFileSync(join(__dirname, "../lib/event-door.ts"), "utf8") // the rules; lib/event-access.ts re-exports them
     expect(access).toMatch(/await mayOpenEvent\(userId, eventId, event\.city\)/)
     expect(read("events/[eventId]/checkin")).toMatch(/await mayOpenEvent\(authUser\.userId, eventId, event\.city\)/)
   })

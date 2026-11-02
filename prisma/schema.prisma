@@ -1871,10 +1871,18 @@ model organisations {
   first_free_event_id  String?   @db.Uuid
   verified_at  DateTime?           @db.Timestamptz(6)
   verified_by  String?
+  /// The Razorpay Route linked account (`acc_` + 14) the organizer's share of a ticket sale is
+  /// transferred to (SCRUM-1011). KYC is Razorpay's. `enableTicketing` refuses unless it is active;
+  /// shape CHECK `organisations_razorpay_account_id_shape` in migration SQL.
+  razorpay_account_id String?
+  /// Its onboarding state at Razorpay. Only `active` (with an account id, CHECK
+  /// `organisations_razorpay_active_has_account`) may sell (`payoutStatus`, lib/payout-status.ts).
+  razorpay_account_status razorpay_account_status @default(not_started)
   created_at   DateTime            @default(now()) @db.Timestamptz(6)
   updated_at   DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
 
   members        organisation_members[]
+  ticket_payouts ticket_payouts[]
   events         events[]
   venues         venues[]       @relation("VenueOwnerOrg")
   venues_created venues[]       @relation("VenueCreatedByOrg")
@@ -4569,6 +4577,8 @@ model markets {
   ticket_fee_tax_bps    Int            @default(0)
   /// Payment processing passed on at cost, as an estimate in basis points.
   ticket_processing_bps Int            @default(0)
+  /// What the buyer quote calls the tax on the service fee (`GST` in India). 1–24 characters (CHECK in SQL).
+  ticket_tax_label      String         @default("Tax")
 
   cities     cities[]
   previewers market_previewers[]
@@ -4666,6 +4676,19 @@ model ticket_orders {
   provider_payment_ref  String?
   hold_expires_at       DateTime            @db.Timestamptz(6)
   paid_at               DateTime?           @db.Timestamptz(6)
+  /// The latest checkout attempt failed (Razorpay `payment.failed`); cleared when the pay page
+  /// starts another. Read only while `pending` (`paymentFailed`, contract §8.2).
+  payment_failed_at      DateTime? @db.Timestamptz(6)
+  /// The refund claim (SCRUM-1011): set once, under the order's row lock, before Razorpay is
+  /// asked, so two refunds of one order never both reach it. With the amount asked for and why.
+  refund_requested_at    DateTime? @db.Timestamptz(6)
+  refund_requested_minor Int?
+  /// `late_payment`, `event_cancelled`, `buyer_deleted`, or the organizer's words (200 at most).
+  refund_reason          String?
+  /// Set on Razorpay's word only (`rfnd_…`). CHECKs in migration SQL tie them to `refunded`.
+  refunded_minor         Int       @default(0)
+  provider_refund_ref    String?
+  refunded_at            DateTime? @db.Timestamptz(6)
   created_at            DateTime            @default(now()) @db.Timestamptz(6)
   updated_at            DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
 
@@ -4675,10 +4698,13 @@ model ticket_orders {
   buyer   User                 @relation("TicketOrderBuyer", fields: [buyer_id], references: [id], onDelete: Restrict)
   lines   ticket_order_lines[]
   tickets tickets[]
-  /// Also `ticket_orders_pending_expiry` (partial index for the hold sweeper, migration SQL).
+  payout  ticket_payouts?
+  /// Also `ticket_orders_pending_expiry` (partial index for the hold sweeper), and
+  /// `ticket_orders_unconfirmed_payment` / `_refund` (the reconcile job's), migration SQL.
 
   @@unique([provider, provider_order_ref])
   @@unique([provider, provider_payment_ref])
+  @@unique([provider, provider_refund_ref])
   @@unique([id, event_id])
   @@index([event_id, status])
   @@index([buyer_id, created_at])
@@ -4726,6 +4752,53 @@ model tickets {
   @@index([ticket_type_id])
   @@index([holder_id])
   @@index([redeemed_by])
+}
+
+/// A Razorpay Route linked account's onboarding, as Razorpay reports it (SCRUM-1011).
+enum razorpay_account_status {
+  not_started
+  /// KYC under review at Razorpay.
+  pending
+  active
+  rejected
+}
+
+/// Where a ticket payout is (SCRUM-1011). See `ticket_payouts`.
+enum ticket_payout_status {
+  /// Owed, the transfer not made yet: the reconcile job retries.
+  pending
+  /// Transferred, held at Razorpay until `on_hold_until`; Razorpay releases it then.
+  on_hold
+  /// Taken back by a refund. `org_debit_minor` is what the organisation still owes.
+  reversed
+  /// The organisation had no linked account when the order was paid.
+  no_account
+}
+
+/// The organizer's share of one paid order: a Razorpay Route transfer to the organisation's
+/// linked account, on hold until three days after the event ends (chargebacks come out of it).
+/// Shape CHECKs (status vs refs, amounts) in migration SQL. Restrict: a money record.
+model ticket_payouts {
+  order_id              String               @id @db.Uuid
+  org_id                String               @db.Uuid
+  linked_account_ref    String?
+  amount_minor          Int
+  currency              String
+  status                ticket_payout_status @default(pending)
+  /// `trf_…`, once Razorpay made the transfer.
+  provider_transfer_ref String?              @unique
+  on_hold_until         DateTime             @db.Timestamptz(6)
+  reversed_minor        Int                  @default(0)
+  /// Owed by the organisation after a reversal: the processing Razorpay keeps on a cancellation.
+  org_debit_minor       Int                  @default(0)
+  created_at            DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime             @default(now()) @updatedAt @db.Timestamptz(6)
+
+  order ticket_orders @relation(fields: [order_id], references: [id], onDelete: Restrict)
+  org   organisations @relation(fields: [org_id], references: [id], onDelete: Restrict)
+  /// Also `ticket_payouts_pending` (partial, the reconcile job's), migration SQL.
+
+  @@index([org_id, status])
 }
 
 /// A clickwrap acceptance of a legal document for an organisation (the organizer ticketing

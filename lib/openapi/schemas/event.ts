@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
 import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema } from "./common"
+import { EventTicketingSchema } from "./tickets"
 
 /** Likes and waves name somebody only by this event's handle (SCRUM-371). */
 const ThisRoomRefSchema = z.string().min(1).openapi({
@@ -438,6 +439,7 @@ export const EventDetailSchema = z
     distance: z.number().nullable().openapi({
       description: "Kilometres from `lat`/`lon`. Null unless both are sent and the event has a pin.",
     }),
+    ticketing: EventTicketingSchema,
     interestedUsers: z.array(z.unknown()).max(0).optional().openapi({
       description: "Only with `include=interestedUsers`, and always empty: who favourited an event is not disclosed.",
     }),

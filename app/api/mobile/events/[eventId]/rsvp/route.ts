@@ -13,6 +13,10 @@ import {
   serverErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { ticketsRequired } from "@/lib/ticket-views"
+
+/** A native ticketed event: going is having a ticket. */
+const TICKETS_REQUIRED_SENTENCE = "This event is ticketed: get a ticket to go."
 
 /** What the person is told when they try to join a night that was called off. */
 const EVENT_CANCELLED_SENTENCE = "This event has been cancelled, so it isn’t taking RSVPs any more."
@@ -33,6 +37,8 @@ export async function POST(
 
     const denied = await attendeeEventAccess(user.userId, eventId, "participate")
     if (denied) return eventAccessResponse(denied)
+    // A native ticketed event's RSVP is its ticket's (contract §8.6): "Get tickets", never a bare "I'm going".
+    if (await ticketsRequired(eventId)) return errorResponse(TICKETS_REQUIRED_SENTENCE, 409, "tickets_required")
 
     // An empty object means "going", so a body that isn't an object must not read as one.
     const body = await readJson(request)
@@ -87,6 +93,8 @@ export async function DELETE(
     // on age: somebody who got in before the rule must be able to get out.
     const denied = await attendeeEventAccess(user.userId, eventId, "view")
     if (denied?.kind === "not_found") return eventAccessResponse(denied)
+    // The ticket wrote it and a refund removes it; withdrawing it by hand would cut a ticket holder out of the room.
+    if (await ticketsRequired(eventId)) return errorResponse(TICKETS_REQUIRED_SENTENCE, 409, "tickets_required")
 
     await db.event_rsvps.deleteMany({
       where: { event_id: eventId, user_id: user.userId },

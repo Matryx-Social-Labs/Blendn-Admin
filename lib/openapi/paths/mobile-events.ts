@@ -564,7 +564,8 @@ registry.registerPath({
     PARTICIPATION_GATE +
     "403 `AGE_RESTRICTED` on an age-restricted event for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter); 404 for a draft " +
     "or a private event you are not on the list for (lib/event-access.ts); 409 `CONFLICT` + `reasonCode` `EVENT_CANCELLED` for a new `going` or " +
-    "`maybe` on a cancelled event (`not_going` and DELETE stay open, so somebody who was in can get out).",
+    "`maybe` on a cancelled event (`not_going` and DELETE stay open, so somebody who was in can get out). " +
+    "409 `errorCode` `tickets_required` on a native ticketed event while TICKETING is on: the paid ticket writes the RSVP, a full refund removes it.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -582,6 +583,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/rsvp",
   tags: ["Mobile Events"],
   summary: "Cancel RSVP",
+  description: "409 `errorCode` `tickets_required` on a native ticketed event while TICKETING is on: the RSVP is the ticket's.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {

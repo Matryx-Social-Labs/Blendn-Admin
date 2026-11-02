@@ -37,6 +37,7 @@ import {
   validationErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { eventTicketing } from "@/lib/ticket-views"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -160,7 +161,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
+    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp, ticketing] =
       await Promise.all([
         eventRead,
         // Counted from check-in rows rather than a stored column. Just the
@@ -209,6 +210,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         }),
+        // Null while TICKETING is off or the event sells nothing (contract §1).
+        eventTicketing(eventId, authUser.userId),
       ])
 
     if (!found) {
@@ -379,6 +382,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         rsvpStatus: userRsvp?.status || null,
       },
       distance,
+      ticketing,
       /*
        * The same disclosure the dedicated route already closed, reachable
        * through a different door.
