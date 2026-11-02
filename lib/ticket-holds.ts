@@ -6,7 +6,7 @@ import { ageFrom, minAgeRefusal } from "./age"
 import { isUuid } from "./api-input"
 import { db } from "./db"
 import { ticketingOn } from "./env"
-import { attendeeEventAccess } from "./event-access"
+import { attendeeEventAccess } from "./event-door"
 import { violatedConstraint } from "./prisma-errors"
 import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown } from "./ticket-fees"
 

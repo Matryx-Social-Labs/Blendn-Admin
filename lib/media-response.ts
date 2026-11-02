@@ -1,4 +1,4 @@
-import { getAccessibleMediaUrl, readableUrl } from "./tigris"
+import { getAccessibleMediaUrl, readableUrl } from "@/lib/tigris"
 
 const IMAGE_FIELD_KEYS = new Set(["image", "avatar"])
 const IMAGE_ARRAY_FIELD_KEYS = new Set(["photos"])

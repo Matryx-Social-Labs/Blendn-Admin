@@ -48,7 +48,7 @@ function importsOf(file: string): string[] {
 }
 
 describe("the custom server's import graph", () => {
-  it("never reaches an @/ alias", () => {
+  it("never reaches an @/ alias, nor next/server", () => {
     const entry = join(ROOT, "server.ts")
     const seen = new Set<string>()
     // How each file became reachable, so a failure names the chain rather than
@@ -63,6 +63,19 @@ describe("the custom server's import graph", () => {
       seen.add(file)
 
       for (const specifier of importsOf(file)) {
+        /*
+         * `next/server` at module load, before `server.ts` has prepared Next,
+         * kills the boot: "AsyncLocalStorage accessed in runtime where it is
+         * not available" (e2e, PR #907, when lib/ticket-holds.ts reached
+         * lib/event-access.ts → lib/api-response.ts). Route helpers stay out of
+         * the server's graph; database-only rules live beside them (lib/event-door.ts).
+         */
+        if (specifier === "next/server") {
+          const chain: string[] = [relative(ROOT, file)]
+          for (let at = via.get(file); at; at = via.get(at)) chain.push(relative(ROOT, at))
+          violations.push(`next/server imported by ${chain.reverse().join(" → ")}`)
+          continue
+        }
         if (specifier.startsWith("@/")) {
           const chain: string[] = [relative(ROOT, file)]
           for (let at = via.get(file); at; at = via.get(at)) chain.push(relative(ROOT, at))
