@@ -303,6 +303,29 @@ describe("the /events/cities answer", () => {
     const body = citiesResponse({ catalogue: mixed, events: [], places: [], previewMarkets: NONE, wantsPreview: true, deviceCountry: null })
     expect(body.defaultCitySlug).toBe("l")
     expect(body.cities.map((c) => c.slug)).toContain("l")
+    // An old client cannot say "coming soon", so with nothing anywhere it is sent no city at all.
+    const old = citiesResponse({ catalogue: mixed, events: [], places: [], previewMarkets: NONE, wantsPreview: false, deviceCountry: null })
+    expect(old.defaultCitySlug).toBe("l")
+    expect(old.cities).toEqual([])
+  })
+
+  describe("two live countries, one with rows", () => {
+    const pair = buildCatalogue(
+      [market({}), market({ code: "BB", name: "Bland", sort: 1 })],
+      [city({ slug: "alpha", is_default: true }), city({ slug: "beta", name: "Beta", market_code: "BB", is_default: true })]
+    )
+    const body = citiesResponse({
+      catalogue: pair,
+      events: [{ city: "Beta", latitude: 1, longitude: 2 }],
+      places: [],
+      previewMarkets: NONE,
+      wantsPreview: true,
+      deviceCountry: "AA",
+    })
+
+    it("the default moves to the other country's city that opens with something", () => expect(body.defaultCitySlug).toBe("beta"))
+    it("the device still names only its own country's city, as coming soon", () =>
+      expect(body.device).toEqual({ country: "AA", access: "comingSoon", citySlug: "alpha" }))
   })
 
   it("does not list any other live city with no rows", () => {
