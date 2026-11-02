@@ -2560,6 +2560,12 @@
       "observed": "M979a: 1 of 4 failing (the adding org wrote an unclaimed venue's list). M979b: 1 of 4 failing (a retired amenity was written). Restored; 4/4.",
       "date": "2026-11-01"
     },
+    "import-venues.test.ts": {
+      "guards": "SCRUM-709 P6: the venue import names each venue's catalogue time zone on insert (source check over scripts/import-venues.ts createManyAndReturn), so no imported row lands on the column's Asia/Kolkata default; plus the import's pure rules (venue type, maps-URL coordinates, catalogue placement, OSM fences).",
+      "mutation": "M709a scripts/import-venues.ts `timezone: row.timezone!,` changed to `timezone: row.timezone ?? undefined,` in the insert.",
+      "observed": "M709a: 1 of 26 failing ('writes the zone it found'). Restored from a saved copy; 26/26.",
+      "date": "2026-11-02"
+    },
     "deletion-reauth.itest.ts": {
       "guards": "SCRUM-944 (3) / owner ruling A-18: account deletion needs the password (wrong → 403 PASSWORD_INCORRECT) or a linked Google/Apple token issued within 15 minutes (else 403 REAUTH_REQUIRED); no proof deletes as before until MOBILE_MIN_APP_VERSION ≥ 1.0.1, then REAUTH_REQUIRED.",
       "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",

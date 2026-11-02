@@ -169,6 +169,25 @@ names the events that are live. Nothing else changes: RSVPs, check-ins,
 memberships, bans, profiles and claims stay as they are. Post one line on
 SCRUM-208.
 
+**Another city or country** gets the same scenarios with `--city <slug>`
+(default `bengaluru`): slugs `<slug>-*`, venues inside the city's box as
+"(test)" names, times in its own zone, its own crowd. Its `--apply` removes
+that city's other events only and never checks anyone out of Bengaluru's
+rooms. A new one is a catalogue row first (`/dashboard/markets`, or a
+migration), then:
+
+```bash
+DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto                       # dry run
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto --apply
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto --refresh-times
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto --clean --apply  # its toronto-* events and (test) venues, nothing else
+```
+
+The run refuses if this Node's tzdata and the database disagree about the
+city's offset (`zoneDisagreement`). Homebrew's Node uses the system ICU and
+lagged: on 2026-11-01 it still put Vancouver at UTC-8 after British Columbia
+stayed on UTC-7. Run it with an official build then: `npx -y node@22 node_modules/.bin/tsx scripts/seed-blr-scenarios.ts …`.
+
 seed-qa's own events outside Bengaluru refresh the same way, with covers and
 clips put back on the seed's current source:
 

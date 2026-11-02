@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import type { venue_type } from "@prisma/client"
 
 import { auditManyInTx } from "../lib/audit-log"
+import { cityCatalogue, cityFor, type Catalogue } from "../lib/cities"
 import { parseCsvRows } from "../lib/csv"
 import { closeDb, db } from "../lib/db"
 import { haversineDistanceMeters } from "../lib/geo"
@@ -88,6 +89,8 @@ export interface VenueRow {
   source: CoordinateSource
   /** The open dataset the row came from (scripts/places); null for a founder's own list. */
   origin: { source: string; recordId: string } | null
+  /** Its catalogue city's IANA zone (`placedInCatalogue`); null until the row is placed. */
+  timezone: string | null
 }
 
 export type RowResult =
@@ -224,7 +227,21 @@ export async function readRow(
 
   const address = (cells.address ?? "").trim() || null
   const origin = dataset ? { source: dataset, recordId } : null
-  return { ok: true, row: { line, name, address, city, venueType, lat, lng, source, origin } }
+  return { ok: true, row: { line, name, address, city, venueType, lat, lng, source, origin, timezone: null } }
+}
+
+/**
+ * The row's city, as the catalogue (`cities`) names it, and that city's time zone.
+ * `venues.timezone` defaults to Asia/Kolkata, so a Toronto venue written without
+ * one would compute "open tonight" in IST. A city the catalogue does not hold is
+ * refused: add it as a row first, and the import then knows its zone.
+ */
+export function placedInCatalogue(catalogue: Catalogue, row: VenueRow): RowResult {
+  const city = cityFor(catalogue, row.city)
+  if (!city) {
+    return { ok: false, line: row.line, name: row.name, reason: `city "${row.city}" is not in the catalogue: add it at /dashboard/markets first` }
+  }
+  return { ok: true, row: { ...row, timezone: city.timezone } }
 }
 
 /** The header row, mapped to column names. Refuses a file missing `name`. */
@@ -303,6 +320,7 @@ async function plan(text: string): Promise<{ accepted: VenueRow[]; refused: numb
   const accepted: VenueRow[] = []
   let refused = 0
   let duplicates = 0
+  const catalogue = await cityCatalogue()
   // Record ids already imported, in one query rather than one per row.
   const recordIdAt = [...columns].find(([, key]) => key === "source_id")?.[0]
   const fileIds = recordIdAt === undefined ? [] : body.map(({ cells }) => (cells[recordIdAt] ?? "").trim()).filter(Boolean)
@@ -320,7 +338,8 @@ async function plan(text: string): Promise<{ accepted: VenueRow[]; refused: numb
       continue
     }
     const named = Object.fromEntries([...columns].map(([at, key]) => [key, cells[at] ?? ""]))
-    const result = await readRow(named, line)
+    const read = await readRow(named, line)
+    const result = read.ok ? placedInCatalogue(catalogue, read.row) : read
     if (!result.ok) {
       console.log(`  SKIP  line ${result.line} ${result.name}: ${result.reason}`)
       refused++
@@ -383,6 +402,10 @@ async function main() {
     return
   }
 
+  // Every accepted row went through placedInCatalogue; a row without a zone would take the IST default.
+  const unplaced = accepted.find((row) => !row.timezone)
+  if (unplaced) throw new Error(`line ${unplaced.line} ${unplaced.name} has no time zone: nothing was written`)
+
   // Footprints first (the slow, fallible part), so the write is one transaction.
   const writes: { row: VenueRow; fence: Geofence; source: string }[] = []
   for (const row of accepted) writes.push({ row, ...(await footprint(row, osm)) })
@@ -398,6 +421,7 @@ async function main() {
           venue_type: row.venueType,
           address: row.address,
           city: row.city,
+          timezone: row.timezone!,
           latitude: row.lat,
           longitude: row.lng,
           geofence: fence as object,

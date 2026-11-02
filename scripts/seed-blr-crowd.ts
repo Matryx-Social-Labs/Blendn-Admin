@@ -130,10 +130,28 @@ type Portrait = { id: string; alt: string }
 const apparentAge = (p: Portrait) => Number(/~(\d+)/.exec(p.alt)?.[1] ?? 28)
 
 /**
- * Create or refresh every crowd account and profile. Returns their ids in a
- * stable order, women and men interleaved so any slice is mixed.
+ * Another city's own crowd (`seed-city.ts`): the same faces under their own
+ * accounts, so seating them in that city's rooms never checks Bengaluru's crowd
+ * out of Bengaluru's (one open check-in per person, SCRUM-705). Their emails are
+ * on `<city>.crowd.blendn.invalid`, outside the `@crowd.blendn.invalid` that
+ * `seed-blr-my-banter.ts` reads as Bengaluru's crowd. The profile drops what
+ * only reads in Bengaluru: the neighbourhood, the employer, the college, the bio.
  */
-export async function ensureCrowd(db: PrismaClient): Promise<string[]> {
+export interface LocalCrowd {
+  /** The city slug, in the email domain. */
+  key: string
+  /** The city's name, for `profiles.location`. */
+  place: string
+  /** The city's copy table (`localiseText`). */
+  neutral: (text: string) => string
+}
+
+/**
+ * Create or refresh every crowd account and profile. Returns their ids in a
+ * stable order, women and men interleaved so any slice is mixed. Bengaluru's
+ * crowd without `local`; another city's with it.
+ */
+export async function ensureCrowd(db: PrismaClient, local?: LocalCrowd): Promise<string[]> {
   const portraits = PORTRAITS as unknown as Record<"women" | "men" | "extra_women" | "extra_men", Portrait[]>
   const leafCats = await db.categories.findMany({ where: { parent_id: { not: null } }, orderBy: { slug: "asc" }, select: { id: true } })
 
@@ -159,12 +177,13 @@ export async function ensureCrowd(db: PrismaClient): Promise<string[]> {
     const { main, extra } = photoOf.get(p)!
     const photos = [photoUrl(main), ...(extra ? [photoUrl(extra)] : [])]
     const name = `${p.first} ${p.last}`
+    const email = local ? `${slugOf(p)}@${local.key}.${CROWD_DOMAIN}` : crowdEmail(p)
     const joined = new Date(Date.now() - (30 + i * 3) * 24 * 3_600_000)
 
     const user = await db.user.upsert({
-      where: { email: crowdEmail(p) },
+      where: { email },
       update: { name, image: photos[0], role: "attendee", deletedAt: null, suspended_at: null },
-      create: { email: crowdEmail(p), name, image: photos[0], role: "attendee", emailVerified: joined, password: null, createdAt: joined },
+      create: { email, name, image: photos[0], role: "attendee", emailVerified: joined, password: null, createdAt: joined },
     })
 
     const expertise = expertiseFor(p.field).slice(i % 2, (i % 2) + 2).map((e) => e.slug)
@@ -173,16 +192,16 @@ export async function ensureCrowd(db: PrismaClient): Promise<string[]> {
       phone: null,
       age: p.age,
       date_of_birth: dobFor(p, i),
-      location: `${p.area}, Bengaluru`,
-      bio: p.bio,
-      occupation: p.occupation,
+      location: local ? local.place : `${p.area}, Bengaluru`,
+      bio: local ? `Into ${p.interests.join(", ").toLowerCase()}. Say hi.` : p.bio,
+      occupation: local ? p.occupation.replace(/ at .*$/, "") : p.occupation,
       work_field: p.field,
       expertise,
-      education: p.education,
+      education: local ? null : p.education,
       interests: p.interests,
       photos,
       blur_photo: blurUrl(main),
-      goals: p.goals,
+      goals: local ? p.goals.map(local.neutral) : p.goals,
       looking_for: p.lookingFor,
       onboarded: true,
       intent_default: p.intents,
