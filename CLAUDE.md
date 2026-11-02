@@ -158,8 +158,9 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while twenty-seven exist in
-migration SQL and therefore in every deployed environment:
+express a CHECK constraint, so `db push` creates none — while every one below (and
+more: `grep -h 'CHECK (' prisma/migrations/*/migration.sql`) exists in migration SQL
+and therefore in every deployed environment:
 
 | Constraint | What it enforces |
 |---|---|
@@ -189,6 +190,21 @@ migration SQL and therefore in every deployed environment:
 | `cities_centre_in_bounds` | a city's centre is inside its box |
 | `cities_licensed_min_age_floor` | a city's licensed-venue age default is never under the 18+ floor |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
+| `markets_ticket_fee_slabs_shape` | a market's service-fee slabs: thresholds and rates the same length, at least one, the first from ticket 1, no NULLs (ascending order is `parseFeeSchedule`'s, `lib/ticket-fees.ts`) |
+| `markets_ticket_fee_rates_range` | slab rates, tax on the fee and processing are 0–10000 bps; the minimum fee is never negative |
+| `events_ticketing_external_needs_url` | an event linking out to tickets has the link |
+| `events_external_ticket_url_https` | that link is https with a host and no user name, and at most 2048 characters — the floor under `httpsUrl()` |
+| `events_ticketing_native_needs_schedule` | an event selling tickets here has its fee snapshot (`IS NOT NULL` spelled out: `jsonb_typeof(NULL)` would pass) |
+| `events_venue_day_not_ticketed` | a venue day is never ticketed |
+| `ticket_types_not_oversold` | `sold + held <= quantity` — the last word under `reserveTickets`'s row lock (`lib/ticket-holds.ts`), read there as sold out |
+| `ticket_types_price_non_negative` / `ticket_types_counts_non_negative` | a price is ≥ 0 (free is 0); quantity, sold and held are ≥ 0 |
+| `ticket_types_max_per_order_range` / `ticket_types_name_length` / `ticket_types_sale_window_order` | 1–100 per order; a name of 1–80 characters after trimming; a sale ends after it starts |
+| `ticket_orders_total_is_its_parts` | an order's total is its subtotal plus service fee, tax and processing — or the subtotal alone when the organiser absorbs the fees |
+| `ticket_orders_paid_has_payment_ref` | a paid or refunded order has a provider payment ref and a paid time: paid only on the provider's word |
+| `ticket_orders_amounts_non_negative` / `ticket_orders_currency_shape` / `ticket_orders_fee_breakdown_object` | no negative amount; an ISO-shaped currency; the breakdown is a JSON object |
+| `ticket_order_lines_quantity_positive` / `ticket_order_lines_price_non_negative` | a line holds at least one ticket, at a price ≥ 0 |
+| `tickets_door_code_shape` / `tickets_qr_secret_length` / `tickets_redeemer_needs_time` | a six-character upper-case door code (unique per event); a QR secret of 32–128 characters; who redeemed only with when |
+| `legal_acceptances_document_key_shape` / `legal_acceptances_version_shape` / `…_ip_length` / `…_user_agent_length` | a slug document key, a numeric version (`0.1`), bounded IP and user agent |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
@@ -201,6 +217,12 @@ crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
 `cities_one_default_per_market`, the seeded `markets` and `cities` rows (on a
 `db push` database the catalogue is empty and every city reads as uncatalogued,
 so nothing is hidden or in preview), the
+`ticket_orders_pending_expiry` partial index (what the hold sweeper,
+`releaseExpiredHolds`, reads), the `markets` ticketing rows (India `native`,
+Canada `external`: on a `db push` database every market is `off` with no
+minimum and no GST), the `legal_acceptances_append_only` and
+`legal_acceptances_no_truncate` triggers (an acceptance is evidence: a new
+version is a new row, never an edit), the
 `events_city_clean` and `venues_city_clean` triggers (`clean_city_text`, the database's half of `cityKey`, so a padded or "Toronto, ON" city cannot pass the city rule), the
 system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its

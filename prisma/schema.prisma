@@ -169,6 +169,10 @@ model User {
   photo_checks          photo_checks[]
   city_demand           city_demand[]
   market_previewers     market_previewers[]
+  ticket_orders         ticket_orders[]     @relation("TicketOrderBuyer")
+  tickets_held          tickets[]           @relation("TicketHolder")
+  tickets_redeemed      tickets[]           @relation("TicketRedeemer")
+  legal_acceptances     legal_acceptances[] @relation("LegalAcceptanceUser")
   leads_assigned        leads[]
   lead_notes            lead_notes[]
   checkInRefusals       check_in_refusals[]
@@ -606,6 +610,19 @@ model events {
   /// partial unique index that lives only in migration SQL
   /// (`events_one_venue_day_per_day`).
   kind              event_kind         @default(event)
+  /// Ticketing (SCRUM-1008). `off`: free with "I'm going", as every event was. `native`:
+  /// sold here, priced from `ticket_fee_schedule`. `external`: a button to
+  /// `external_ticket_url`, written through `httpsUrl()`. CHECKs: external needs the
+  /// URL, the URL is https, native needs the schedule, a venue day is never ticketed
+  /// (migration SQL).
+  ticketing_mode        ticketing_mode       @default(off)
+  external_ticket_url   String?
+  refund_policy         ticket_refund_policy @default(none)
+  /// The organiser takes the booking fee out of their payout; the buyer pays the price.
+  fees_absorbed         Boolean              @default(false)
+  /// The market's rates when ticketing went on (`feeScheduleFromMarket`), so a later
+  /// rate change never reprices an event already selling. `parseFeeSchedule` reads it.
+  ticket_fee_schedule   Json?
 
   // Relations
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
@@ -650,6 +667,8 @@ model events {
   feedback           event_feedback[]
   entitlements       entitlements[]
   billing_checkouts  billing_checkouts[]
+  ticket_types       ticket_types[]
+  ticket_orders      ticket_orders[]
   venue              venues?                    @relation(fields: [venue_id], references: [id], onDelete: SetNull)
   organizer_org      organisations?             @relation(fields: [organizer_org_id], references: [id], onDelete: SetNull)
   eventClaims        event_claims[]
@@ -1865,6 +1884,7 @@ model organisations {
   billing_checkouts billing_checkouts[]
   venue_offers   venue_offers[]
   regular_optins venue_regular_optins[]
+  legal_acceptances legal_acceptances[]
 
   @@index([status])
 }
@@ -4526,8 +4546,187 @@ model markets {
   sort         Int          @default(0)
   updated_at   DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
 
+  /// Ticketing (SCRUM-1008): `native` sells through Blendn, `external` links to another
+  /// site, `off` neither. India native, Canada external at launch. A new market is off.
+  ticketing_mode        ticketing_mode @default(off)
+  /// The service-fee slabs, marginal per event: slab i starts at ticket
+  /// `ticket_fee_slab_from[i]` and charges `ticket_fee_slab_bps[i]`. Same length,
+  /// first is 1, ascending, rates 0–10000: CHECKs `markets_ticket_fee_slabs_*`.
+  ticket_fee_slab_from  Int[]          @default([1, 101, 501])
+  ticket_fee_slab_bps   Int[]          @default([500, 350, 200])
+  /// The per-paid-ticket minimum service fee, in the market's minor unit.
+  ticket_fee_min_minor  Int            @default(0)
+  /// Tax on the service fee (GST 18% = 1800 in India), in basis points.
+  ticket_fee_tax_bps    Int            @default(0)
+  /// Payment processing passed on at cost, as an estimate in basis points.
+  ticket_processing_bps Int            @default(0)
+
   cities     cities[]
   previewers market_previewers[]
+}
+
+/// Whether tickets are sold here, linked to elsewhere, or neither. On `markets` and `events`.
+enum ticketing_mode {
+  off
+  native
+  external
+}
+
+/// The buyer refunds an organiser offers (organizer ticketing terms §5.1).
+enum ticket_refund_policy {
+  none
+  until_7d
+  until_24h
+}
+
+enum ticket_order_status {
+  /// Holding its quantities until `hold_expires_at`.
+  pending
+  paid
+  refunded
+  /// The hold ran out unpaid; its quantities went back (`releaseExpiredHolds`).
+  expired
+  cancelled
+}
+
+/// A kind of ticket for one event: price, how many, when on sale. Every amount is in the
+/// currency of the event's fee snapshot, so one event has one currency by construction.
+/// `sold + held <= quantity` is CHECK `ticket_types_not_oversold`, the last word under the
+/// row lock in `lib/ticket-holds.ts`; the other shape CHECKs are in migration SQL too.
+model ticket_types {
+  id             String    @id @default(uuid()) @db.Uuid
+  event_id       String    @db.Uuid
+  name           String
+  price_minor    Int
+  quantity       Int
+  sold           Int       @default(0)
+  /// Reserved by pending orders, released when they expire.
+  held           Int       @default(0)
+  max_per_order  Int       @default(10)
+  sale_starts_at DateTime? @db.Timestamptz(6)
+  sale_ends_at   DateTime? @db.Timestamptz(6)
+  /// Not listed; still sold through a direct link.
+  hidden         Boolean   @default(false)
+  sort           Int       @default(0)
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Cascade: a type nobody bought goes with its event. One that was bought is held by
+  /// its order lines and tickets (Restrict), and so is its event.
+  event       events               @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  order_lines ticket_order_lines[]
+  tickets     tickets[]
+
+  /// For the composite foreign keys that keep a line's and a ticket's type on their order's event.
+  @@unique([id, event_id])
+  @@index([event_id, sort])
+}
+
+/// One buyer's order: a hold while `pending`, then paid, refunded, expired or cancelled.
+/// Amounts are minor units; `fee_breakdown` is `lib/ticket-fees.ts`'s output as charged,
+/// so a later rate change never reprices it. CHECKs in migration SQL: the parts sum to the
+/// total, a paid or refunded order has a provider payment ref.
+model ticket_orders {
+  id                    String              @id @default(uuid()) @db.Uuid
+  event_id              String              @db.Uuid
+  buyer_id              String
+  status                ticket_order_status @default(pending)
+  currency              String
+  subtotal_minor        Int
+  service_fee_minor     Int
+  service_fee_tax_minor Int
+  processing_fee_minor  Int
+  /// What the buyer is charged: the subtotal, plus the fees unless the organiser absorbs them.
+  total_minor           Int
+  fees_absorbed         Boolean
+  fee_breakdown         Json
+  provider              String              @default("razorpay")
+  /// `order_…`, set when the provider order is created.
+  provider_order_ref    String?
+  /// `pay_…`, set by the signed webhook, the only writer of `paid`.
+  provider_payment_ref  String?
+  hold_expires_at       DateTime            @db.Timestamptz(6)
+  paid_at               DateTime?           @db.Timestamptz(6)
+  created_at            DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime            @default(now()) @updatedAt @db.Timestamptz(6)
+
+  /// Restrict, both: an order is a money record. Accounts are scrubbed, never deleted, and
+  /// an event with orders is not deleted either.
+  event   events               @relation(fields: [event_id], references: [id], onDelete: Restrict)
+  buyer   User                 @relation("TicketOrderBuyer", fields: [buyer_id], references: [id], onDelete: Restrict)
+  lines   ticket_order_lines[]
+  tickets tickets[]
+  /// Also `ticket_orders_pending_expiry` (partial index for the hold sweeper, migration SQL).
+
+  @@unique([provider, provider_order_ref])
+  @@unique([provider, provider_payment_ref])
+  @@unique([id, event_id])
+  @@index([event_id, status])
+  @@index([buyer_id, created_at])
+}
+
+/// How many of one ticket type an order holds. Its type and its order are on one event:
+/// both foreign keys carry `event_id`.
+model ticket_order_lines {
+  order_id         String @db.Uuid
+  ticket_type_id   String @db.Uuid
+  event_id         String @db.Uuid
+  quantity         Int
+  unit_price_minor Int
+
+  order       ticket_orders @relation(fields: [order_id, event_id], references: [id, event_id], onDelete: Cascade)
+  ticket_type ticket_types  @relation(fields: [ticket_type_id, event_id], references: [id, event_id], onDelete: Restrict)
+
+  @@id([order_id, ticket_type_id])
+  @@index([ticket_type_id])
+}
+
+/// One admission. The door code is unique per event (`tickets_event_id_door_code_key`);
+/// the QR carries `qr_secret`. Type and order are on the ticket's event (composite keys).
+model tickets {
+  id             String    @id @default(uuid()) @db.Uuid
+  order_id       String    @db.Uuid
+  ticket_type_id String    @db.Uuid
+  event_id       String    @db.Uuid
+  holder_id      String
+  door_code      String
+  qr_secret      String    @unique
+  redeemed_at    DateTime? @db.Timestamptz(6)
+  redeemed_by    String?
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+
+  order       ticket_orders @relation(fields: [order_id, event_id], references: [id, event_id], onDelete: Restrict)
+  ticket_type ticket_types  @relation(fields: [ticket_type_id, event_id], references: [id, event_id], onDelete: Restrict)
+  holder      User          @relation("TicketHolder", fields: [holder_id], references: [id], onDelete: Restrict)
+  redeemer    User?         @relation("TicketRedeemer", fields: [redeemed_by], references: [id], onDelete: SetNull)
+
+  @@unique([event_id, door_code])
+  @@index([order_id])
+  @@index([ticket_type_id])
+  @@index([holder_id])
+  @@index([redeemed_by])
+}
+
+/// A clickwrap acceptance of a legal document for an organisation (the organizer ticketing
+/// terms). Append-only: trigger `legal_acceptances_append_only` refuses UPDATE, DELETE and
+/// TRUNCATE (migration SQL). A new version is a new row; the latest per org and document
+/// is the one in force (`lib/legal-acceptance.ts`).
+model legal_acceptances {
+  id           String   @id @default(uuid()) @db.Uuid
+  org_id       String   @db.Uuid
+  user_id      String
+  document_key String
+  version      String
+  accepted_at  DateTime @default(now()) @db.Timestamptz(6)
+  ip           String?
+  user_agent   String?
+
+  /// Restrict, both: the evidence outlives nothing it is about.
+  org  organisations @relation(fields: [org_id], references: [id], onDelete: Restrict)
+  user User          @relation("LegalAcceptanceUser", fields: [user_id], references: [id], onDelete: Restrict)
+
+  @@index([org_id, document_key, accepted_at(sort: Desc)])
+  @@index([user_id])
 }
 
 /// A city in a market. `events.city` and `venues.city` stay free text: `match_names` says which

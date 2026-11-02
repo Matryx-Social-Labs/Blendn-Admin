@@ -110,6 +110,13 @@ const envSchema = z.object({
     .optional(),
 
   /**
+   * Ticketing (SCRUM-1007): `true` turns on selling tickets and recording the
+   * organizer ticketing terms (`ticketingOn`). Unset or anything else: off,
+   * which is every environment until the owner says otherwise.
+   */
+  TICKETING: z.enum(["true", "false"]).optional(),
+
+  /**
    * RevenueCat (plan v2 §5). The value the RevenueCat dashboard sends as the
    * webhook's `Authorization` header is `Bearer <this>`. We choose it, so 32
    * or more. Unset: the webhook refuses everything and nothing grants Blendn+
@@ -460,6 +467,11 @@ export function dashboardHost(): string | null {
   // so a link built from it is never "https://https://…" (step 5 review).
   const host = process.env.DASHBOARD_HOST?.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
   return host ? host : null
+}
+
+/** Whether ticketing is on here (`TICKETING=true`). Off by default; the one reader of the variable. */
+export function ticketingOn(): boolean {
+  return process.env.TICKETING?.trim() === "true"
 }
 
 /**
