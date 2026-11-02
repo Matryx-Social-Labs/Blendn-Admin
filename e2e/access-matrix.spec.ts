@@ -101,6 +101,8 @@ const ROW_MARKER: Record<string, { markers: string[]; path?: string }> = {
    * seed-qa, so it is present in any migrated database — including CI's.
    */
   "/dashboard/amenities": { markers: ["Premium spirits"] },
+  // Vancouver's zone: the catalogue is seeded by its migration, so it is in any migrated database.
+  "/dashboard/markets": { markers: ["America/Vancouver"] },
   /*
    * Step 18: the pages that sat in `STREAMED_OR_UNSEEDED` because the seeded
    * world left them empty. `scripts/seed-admin-world.ts` gives each one row.

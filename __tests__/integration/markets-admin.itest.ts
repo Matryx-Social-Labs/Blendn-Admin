@@ -84,13 +84,22 @@ beforeAll(async () => {
   await db.events.update({ where: { id: eventId }, data: { city: `Fullton ${suppliedSlug}` } })
 })
 
-afterEach(() => {
+const venues: string[] = []
+
+// Runs whether or not the test passed, so a failure never leaks a previewer or a state into the next test.
+afterEach(async () => {
   actingUser = null
+  await db.market_previewers.deleteMany({ where: { market_code: CODE } })
+  await db.cities.updateMany({ where: { slug: { in: [emptySlug, suppliedSlug] } }, data: { launch_state: "preview" } })
+  await db.markets.update({ where: { code: CODE }, data: { launch_state: "live" } })
+  await db.events.updateMany({ where: { id: { in: events.slice(1) } }, data: { deleted_at: new Date() } })
+  await db.venues.updateMany({ where: { id: { in: venues } }, data: { deleted_at: new Date() } })
 })
 
 afterAll(async () => {
   await db.audit_logs.deleteMany({ where: { user_id: { in: users } } })
   await db.market_previewers.deleteMany({ where: { market_code: { in: [CODE, NEW_CODE] } } })
+  await db.venues.deleteMany({ where: { id: { in: venues } } })
   await db.event_occurrences.deleteMany({ where: { event_id: { in: events } } })
   await db.events.deleteMany({ where: { id: { in: events } } })
   await db.cities.deleteMany({ where: { market_code: { in: [CODE, NEW_CODE] } } })
@@ -142,13 +151,25 @@ describe("a city never goes live empty", () => {
     await setCityState(suppliedSlug, "preview")
   })
 
-  it("does not count an event above the age floor: a 19+ night is not something every viewer can open", async () => {
+  it("counts an event at the age floor and not one above it: a 19+ night is not something every viewer can open", async () => {
     actingUser = { id: admin, role: "app_admin" }
     const eventId = await makeEvent(organiser)
     events.push(eventId)
     await db.events.update({ where: { id: eventId }, data: { city: `Emptyville ${emptySlug}`, min_age: 19 } })
     await expect(setCityState(emptySlug, "live")).rejects.toThrow("can’t go live")
-    await db.events.update({ where: { id: eventId }, data: { deleted_at: new Date() } })
+    await db.events.update({ where: { id: eventId }, data: { min_age: 18 } })
+    await setCityState(emptySlug, "live")
+    expect((await db.cities.findUnique({ where: { slug: emptySlug } }))?.launch_state).toBe("live")
+  })
+
+  it("counts a listed venue as supply, with no event at all", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    const venue = await db.venues.create({ data: { name: testId("venue"), city: `Emptyville ${emptySlug}`, status: "active" }, select: { id: true } })
+    venues.push(venue.id)
+    const view = async () => (await getMarkets()).markets.find((m) => m.code === CODE)!.cities.find((c) => c.slug === emptySlug)!
+    expect(await view()).toMatchObject({ upcomingEvents: 0, venues: 1 })
+    await setCityState(emptySlug, "live")
+    expect((await db.cities.findUnique({ where: { slug: emptySlug } }))?.launch_state).toBe("live")
   })
 
   it("refuses a market going live while one of its live cities has no supply", async () => {
@@ -171,7 +192,8 @@ describe("each action writes exactly one audit row, and the app sees it at once"
     await setCityState(suppliedSlug, "hidden")
     expect(await auditRows(id)).toBe(before + 1)
     const row = await db.audit_logs.findFirstOrThrow({ where: { resource_id: id }, orderBy: { created_at: "desc" } })
-    expect(row).toMatchObject({ user_id: admin, action: "city.state_changed", resource: "city", details: { from: "preview", to: "hidden", slug: suppliedSlug } })
+    expect(row).toMatchObject({ user_id: admin, action: "city.state_changed", resource: "city" })
+    expect(row.details).toEqual({ slug: suppliedSlug, from: "preview", to: "hidden" })
     // No clearCityCatalogue() here: the save did it.
     expect((await cityCatalogue()).cities.find((c) => c.slug === suppliedSlug)?.launchState).toBe("hidden")
     await setCityState(suppliedSlug, "preview")
@@ -180,26 +202,48 @@ describe("each action writes exactly one audit row, and the app sees it at once"
   it("a market's state: one row", async () => {
     actingUser = { id: admin, role: "app_admin" }
     const before = await auditRows(CODE)
+    // Warm: the read after the save must come from a cache the save cleared, not from a cold one.
+    expect((await cityCatalogue()).markets.find((m) => m.code === CODE)?.launchState).toBe("live")
     await setMarketState(CODE, "preview")
     expect(await auditRows(CODE)).toBe(before + 1)
     expect((await cityCatalogue()).markets.find((m) => m.code === CODE)?.launchState).toBe("preview")
-    await setMarketState(CODE, "live")
+    const row = await db.audit_logs.findFirstOrThrow({ where: { resource_id: CODE, action: "market.state_changed" }, orderBy: { created_at: "desc" } })
+    expect(row.details).toEqual({ from: "live", to: "preview" })
   })
 
-  it("setting the state it already has writes nothing", async () => {
+  it("setting the state it already has writes nothing, for a market and for a city", async () => {
     actingUser = { id: admin, role: "app_admin" }
-    const before = await auditRows(CODE)
+    const cityId = (await db.cities.findUniqueOrThrow({ where: { slug: suppliedSlug } })).id
+    const [market, city] = [await auditRows(CODE), await auditRows(cityId)]
     await setMarketState(CODE, "live")
-    expect(await auditRows(CODE)).toBe(before)
+    await setCityState(suppliedSlug, "preview")
+    expect([await auditRows(CODE), await auditRows(cityId)]).toEqual([market, city])
+  })
+
+  it("refuses what does not exist, and writes nothing", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    const before = await snapshot()
+    await expect(setCityState("no-such-city-here", "live")).rejects.toThrow("No such city.")
+    await expect(setMarketState("XZ", "live")).rejects.toThrow("No such country.")
+    await expect(addPreviewer("XZ", `${attendee}@itest.invalid`)).rejects.toThrow("No such country.")
+    await expect(removePreviewer(CODE, attendee)).rejects.toThrow("They don’t preview this country.")
+    expect(await snapshot()).toEqual(before)
   })
 
   it("a new city: one row, hidden, its zone and age kept", async () => {
     actingUser = { id: admin, role: "app_admin" }
     const slug = slugOf("new")
+    expect((await cityCatalogue()).cities.some((c) => c.slug === slug)).toBe(false)
     await createCity(cityInput(slug, "Newton"))
     const city = await db.cities.findUniqueOrThrow({ where: { slug } })
     expect(city).toMatchObject({ launch_state: "hidden", timezone: "America/Toronto", default_licensed_min_age: 19, match_names: ["newton"], is_default: false })
     expect(await auditRows(city.id)).toBe(1)
+    expect((await db.audit_logs.findFirstOrThrow({ where: { resource_id: city.id } })).details).toEqual({
+      slug,
+      market: CODE,
+      timezone: "America/Toronto",
+      tookOffline: { events: 0, venues: 0 },
+    })
     expect((await cityCatalogue()).cities.some((c) => c.slug === slug)).toBe(true)
   })
 
@@ -228,9 +272,12 @@ describe("each action writes exactly one audit row, and the app sees it at once"
 
   it("a new country: one row, hidden", async () => {
     actingUser = { id: admin, role: "app_admin" }
+    expect((await cityCatalogue()).markets.some((m) => m.code === NEW_CODE)).toBe(false)
     await createMarket({ code: NEW_CODE, name: "Newland", currency: "EUR", locale: "de-DE" })
     expect(await db.markets.findUnique({ where: { code: NEW_CODE } })).toMatchObject({ launch_state: "hidden", currency: "EUR", locale: "de-DE" })
     expect(await auditRows(NEW_CODE)).toBe(1)
+    expect((await db.audit_logs.findFirstOrThrow({ where: { resource_id: NEW_CODE } })).details).toEqual({ code: NEW_CODE, name: "Newland", currency: "EUR", locale: "de-DE" })
+    expect((await cityCatalogue()).markets.some((m) => m.code === NEW_CODE)).toBe(true)
   })
 
   it("a previewer added and removed: one row each, and their preview access follows at once", async () => {
@@ -241,12 +288,14 @@ describe("each action writes exactly one audit row, and the app sees it at once"
 
     await addPreviewer(CODE, `  ${attendee.toUpperCase()}@ITEST.INVALID `)
     expect(await db.market_previewers.count({ where: { market_code: CODE, user_id: attendee } })).toBe(1)
-    expect(await db.audit_logs.count({ where: { action: "market.previewer_added", resource_id: CODE } })).toBe(1)
+    const added = await db.audit_logs.findMany({ where: { action: "market.previewer_added", resource_id: CODE } })
+    expect(added.map((r) => r.details)).toEqual([{ previewerId: attendee }])
     expect((await previewMarketsFor(attendee, await cityCatalogue())).has(CODE)).toBe(true)
 
     await removePreviewer(CODE, attendee)
     expect(await db.market_previewers.count({ where: { market_code: CODE } })).toBe(0)
-    expect(await db.audit_logs.count({ where: { action: "market.previewer_removed", resource_id: CODE } })).toBe(1)
+    const removed = await db.audit_logs.findMany({ where: { action: "market.previewer_removed", resource_id: CODE } })
+    expect(removed.map((r) => r.details)).toEqual([{ previewerId: attendee }])
     expect((await previewMarketsFor(attendee, await cityCatalogue())).has(CODE)).toBe(false)
     await setMarketState(CODE, "live")
   })
@@ -265,6 +314,11 @@ describe("what an admin types is checked before anything is written", () => {
     [{ minLat: 12 }, "Min must be less than max."],
     [{ centreLat: 30 }, "The centre must sit inside the bounds."],
     [{ licensedMinAge: "17" }, "A whole number from 18 to 21, or leave it empty."],
+    [{ licensedMinAge: "22" }, "A whole number from 18 to 21, or leave it empty."],
+    [{ centreLat: 91, minLat: 10, maxLat: 11 }, "Latitude is between -90 and 90."],
+    [{ minLon: -181 }, "Longitude is between -180 and 180."],
+    [{ maxLon: "east" }, "Longitude is between -180 and 180."],
+    [{ minLat: "" }, "Latitude is between -90 and 90."],
   ])("refuses a city with %j", async (patch, message) => {
     const before = await snapshot()
     await expect(createCity({ ...cityInput(slugOf("bad")), ...patch })).rejects.toThrow(message)

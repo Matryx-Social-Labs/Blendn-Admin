@@ -4,8 +4,11 @@ import { Refusal } from "./refusal"
 
 /*
  * What an admin types on /dashboard/markets, checked before anything is written.
- * Pure, so `market-actions.ts` stays the database half. The CHECKs in the
- * markets_and_cities migration hold the same shapes; these say why in words.
+ * Pure, so `market-actions.ts` stays the database half. The markets_and_cities
+ * migration's CHECKs back only some of these: code, currency and slug shape, the
+ * timezone shape, bounds order, centre inside bounds, and a licensed age of at
+ * least 18. The coordinate ranges, the age ceiling of 21, the locale shape and a
+ * timezone Intl actually knows are checked here alone.
  */
 
 export const LAUNCH_STATES: readonly LaunchState[] = ["live", "preview", "hidden"]
