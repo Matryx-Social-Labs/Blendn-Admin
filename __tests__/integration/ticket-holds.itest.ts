@@ -357,7 +357,9 @@ describe("refusals", () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 5 })
     await db.events.update({ where: { id: eventId }, data: { visibility: "private" } })
     const [buyer] = await buyers(1)
-    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "not_on_sale" })
+    // Its own answer since Phase 2 (contract §2 `private`), still never a hold.
+    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "private" })
+    expect((await typeRow(ids[0])).held).toBe(0)
   })
 
   it("a buyer under the event's minimum age, by birth date, and one whose age is unknown (security M5)", async () => {

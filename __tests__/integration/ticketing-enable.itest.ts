@@ -36,8 +36,12 @@ afterAll(async () => {
 const orgs: string[] = []
 const venues: string[] = []
 
-async function org(opts: { accepted?: string | null } = {}) {
-  const row = await db.organisations.create({ data: { display_name: testId("te-org"), kind: "company", status: "verified" }, select: { id: true } })
+async function org(opts: { accepted?: string | null; account?: string | null } = {}) {
+  const row = await db.organisations.create({
+    // A Route linked account unless told otherwise (SCRUM-1011): without one there is nobody to pay.
+    data: { display_name: testId("te-org"), kind: "company", status: "verified", razorpay_account_id: opts.account === undefined ? "acc_ITESTENABLE001" : opts.account },
+    select: { id: true },
+  })
   orgs.push(row.id)
   const owner = await member(row.id, "owner")
   const accepted = opts.accepted === undefined ? ORGANIZER_TICKETING_TERMS.version : opts.accepted
@@ -190,6 +194,13 @@ describe("who may not", () => {
 })
 
 describe("what must be true first", () => {
+  it("the organisation has a Razorpay linked account to be paid into (SCRUM-1011)", async () => {
+    const { orgId, owner } = await org({ account: null })
+    const eventId = await eventOf(orgId, owner)
+    expect(await enableTicketing(eventId, asOrganizer(owner))).toEqual({ ok: false, reason: "no_payout_account" })
+    expect((await db.events.findUniqueOrThrow({ where: { id: eventId } })).ticketing_mode).toBe("off")
+  })
+
   it("the organisation accepted the terms (database 13)", async () => {
     const { orgId, owner } = await org({ accepted: null })
     expect(await enableTicketing(await eventOf(orgId, owner), asOrganizer(owner))).toEqual({ ok: false, reason: "terms_not_accepted" })

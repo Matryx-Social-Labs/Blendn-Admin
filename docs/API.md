@@ -1417,6 +1417,83 @@ room's own routes — `GET /events/:venueDayId/checkins`, `/matches`,
 
 ---
 
+## Tickets (SCRUM-1011)
+
+Behind the server's `TICKETING` flag, off by default: with it off every route
+below is a 404 and `GET /events/:eventId` has `ticketing: null`. The shared
+contract is `.context/plans/ticketing-api-contract.md` (v1 + §8 v1.1). Money is
+integer minor units plus an ISO currency. Payment happens on the hosted pay
+page, never in the app, and only Razorpay's signed webhook marks an order paid.
+
+### GET /events/:eventId — `ticketing`
+
+`null`, or:
+
+- `{ mode: "external", externalUrl, externalSite }` — `externalSite` is the
+  link's own hostname with `www.` stripped, derived on the server from
+  `externalUrl`, never stored or sent separately.
+- `{ mode: "native", currency, fromMinor, feesAbsorbed, refundPolicy, types, mine }` —
+  `types` sorted by position, never a hidden or a free (`priceMinor: 0`) type;
+  each has `status` (`on_sale` · `sold_out` · `not_started` · `ended`) and
+  `remaining` only while on sale with 20 or fewer left. `mine` is
+  `{ ticketCount, orderIds }` for the viewer's paid orders, else `null`.
+
+### POST /events/:eventId/ticket-quote · POST /events/:eventId/ticket-orders
+
+Body `{ lines: [{ typeId, quantity }] }` (1–20 lines). The quote holds nothing:
+
+```json
+{ "currency": "INR", "subtotalMinor": 99800, "bookingFeeMinor": 8382, "totalMinor": 108182, "taxLabel": "GST",
+  "feeParts": { "serviceMinor": 4990, "taxMinor": 898, "processingMinor": 2494 },
+  "lines": [{ "typeId": "…", "quantity": 2, "unitMinor": 49900 }] }
+```
+
+With fees absorbed, `bookingFeeMinor` is 0 and `feeParts` is absent. An order
+holds the seats for 10 minutes and answers 201
+`{ orderId, status: "pending", totalMinor, currency, holdExpiresAt, payUrl }`;
+`payUrl` is `<PAY_BASE_URL>/pay/o/<orderId>?t=<token>`, the token signed,
+15 minutes, bound to the order and its buyer. Treat it as opaque.
+
+Refusals are 409 with the code in `errorCode`: `sold_out`, `not_on_sale`,
+`over_order_limit`, `over_buyer_limit` (10 seats a buyer an event, held and
+paid together), `unknown_ticket_type`, `age`, `private`; orders also
+`too_many_holds` and `busy` (`retryAfter: 1`, retry at most twice). A draft or a
+stranger's private event is 404. 503: Razorpay cannot take the payment (the
+hold is given back). Limits: quote 60/min a user and 240/min a network; order
+10/min a user and 30/min a network.
+
+### GET /ticket-orders/:orderId · DELETE /ticket-orders/:orderId
+
+Buyer only; anyone else's is the same 404.
+`{ orderId, eventId, status, holdExpiresAt, totalMinor, currency, paymentFailed, tickets }` —
+`tickets` empty unless `paid`; `paymentFailed` is the latest checkout
+attempt's failure (Razorpay `payment.failed`), cleared when the pay page starts
+another. DELETE lets a pending hold go (204, `cancelled`); 409 `not_pending`
+otherwise.
+
+### GET /me/tickets?eventId=
+
+Tickets of my paid orders, newest event first, not paginated:
+`{ ticketId, orderId, eventId, typeName, doorCode, qrPayload, redeemedAt, event: { id, title, startsAt, endsAt, timezone, venueName, coverUrl } }`.
+`qrPayload` is `<ticketId>.<mac>`, derived on the server, never stored.
+
+### RSVP on a ticketed event
+
+`POST` and `DELETE /events/:eventId/rsvp` answer 409 `tickets_required` on a
+native ticketed event while `TICKETING` is on: the paid order writes the RSVP
+`going`, a full refund removes it.
+
+### The pay page and the webhook
+
+`/pay/o/:orderId?t=` (the admin app; `pay.blendn.app` once its DNS exists)
+draws the order and the hold's clock and opens Razorpay Standard Checkout; it
+polls `/pay/o/:orderId/status?t=` until the webhook has marked the order paid,
+then offers `blendn://ticket/<orderId>`. No indexing, no referrer, no caching.
+`POST /api/webhooks/razorpay` settles `payment.captured` / `order.paid` for a
+ticket order (amount and currency must equal `total_minor`), refunds a late
+payment it cannot seat, records `refund.processed` for a refund it asked for,
+and marks `payment.failed`. Buyer terms of sale: `/terms/tickets` (draft).
+
 ## Venues — the Hotspots feed
 
 ### GET /venues

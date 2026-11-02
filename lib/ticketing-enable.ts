@@ -23,7 +23,7 @@ import { feeRuleFor, feeScheduleFromMarket, type FeeRule, type FeeSchedule, type
  *
  * 1. The actor may edit the event (`eventPermissions` on `actorFor`, so the
  *    role and memberships are the database's, organisation-shaped).
- * 2. The organisation's acceptance of the organizer ticketing terms in force
+ * 2. The organisation has a Razorpay Route linked account (SCRUM-1011), and its acceptance of the organizer ticketing terms in force
  *    is the version current now (database 13).
  * 3. The market is the event's city's (`cities.market_code`, decision §4.2),
  *    and must sell natively; its rates are snapshotted.
@@ -42,6 +42,7 @@ export type EnableRefusal =
   | "not_found"
   | "not_authorized"
   | "no_organization"
+  | "no_payout_account"
   | "terms_not_accepted"
   | "market_not_native"
   | "already_enabled"
@@ -91,7 +92,10 @@ async function enable(tx: Prisma.TransactionClient, eventId: string, actor: Perm
   if (!orgId) throw new Refused("no_organization")
 
   // Serialises this organisation's turn-ons, so the founding count below is exact.
-  await tx.$queryRaw`SELECT id FROM organisations WHERE id = ${orgId}::uuid FOR UPDATE`
+  const [org] = await tx.$queryRaw<{ razorpay_account_id: string | null }[]>`
+    SELECT razorpay_account_id FROM organisations WHERE id = ${orgId}::uuid FOR UPDATE`
+  // Nobody to pay the organizer's share to (SCRUM-1011): Route needs the linked account first.
+  if (!org?.razorpay_account_id) throw new Refused("no_payout_account")
   if (!(await termsAccepted(tx, orgId))) throw new Refused("terms_not_accepted")
 
   const marketCode = marketOf(event.city)

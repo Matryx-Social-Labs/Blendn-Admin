@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 
 // Relative imports: lib/ticket-hold-sweeper.ts reaches this from server.ts, and `build:server`
 // compiles with plain tsc, which emits the @/ alias verbatim into the require().
@@ -38,7 +38,9 @@ import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown }
  * |------------------------------|-------------------------------------------------------------------------|
  * | `reserveTickets`             | the event's types (id order), then expired orders `SKIP LOCKED`, then inserts its own |
  * | `releaseExpiredHolds`        | expired orders `SKIP LOCKED`, then their types (id order)               |
- * | the payment webhook, Phase 2 | its order, then the order's types (id order)                           |
+ * | the payment webhook (lib/ticket-payments.ts) | its order, then the order's types (id order)           |
+ * | a refund (`finishRefund`)    | its order, then the order's types (id order)                           |
+ * | `cancelBuyerHolds` / `cancelHold` / `cancelEventHolds` | pending orders (id order, waiting), then their types (id order) |
  *
  * Reserving never waits on an order lock (`SKIP LOCKED`), and everyone takes
  * types in id order, so there is no cycle. Each transaction sets
@@ -47,7 +49,7 @@ import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown }
  *
  * ## Late payment: the Phase 2 contract (security M4, database 7)
  *
- * Not built here; whoever builds the webhook builds exactly this.
+ * Built in lib/ticket-payments.ts (SCRUM-1011), exactly this.
  *
  * 1. The webhook locks the order (`FOR UPDATE`), then the order's types in id
  *    order — the order above, so it cannot deadlock a reserve or the sweeper.
@@ -63,9 +65,11 @@ import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown }
  *    issued tickets that oversell the room.
  * 5. Replays are no-ops: `provider_payment_ref` is unique per provider.
  *
- * Account deletion cancels the person's pending holds (status `cancelled`,
- * seats back as the sweeper gives them) in the deletion's transaction; their
- * paid orders stay, because an order is a money record (FK RESTRICT).
+ * Account deletion cancels the person's pending holds (`cancelBuyerHolds`:
+ * status `cancelled`, seats back as the sweeper gives them), right after the
+ * erasure commits, so no hold outlives the account by its ten minutes; a
+ * payment that lands on one is refunded (lib/ticket-payments.ts). Their paid
+ * orders stay, because an order is a money record (FK RESTRICT).
  */
 
 export const HOLD_MINUTES = 10
@@ -89,6 +93,7 @@ export type ReserveRefusal =
   | "bad_lines"
   | "buyer_not_allowed"
   | "not_on_sale"
+  | "private"
   | "under_age"
   | "unknown_ticket_type"
   | "over_order_limit"
@@ -165,6 +170,21 @@ function lockTypes(tx: Prisma.TransactionClient, eventId: string): Promise<Locke
        FOR UPDATE`
 }
 
+/**
+ * Every type of the event, unlocked, for a quote: `held` less what lapsed
+ * holds still count, so the quote says what an order placed now would find
+ * (an order gives lapsed holds back before it counts).
+ */
+function readTypes(eventId: string, now: Date): Promise<LockedType[]> {
+  return db.$queryRaw<LockedType[]>`
+    SELECT t.id::text, t.price_minor, t.quantity, t.sold,
+           t.held - coalesce((SELECT sum(l.quantity) FROM ticket_order_lines l JOIN ticket_orders o ON o.id = l.order_id
+                               WHERE l.ticket_type_id = t.id AND o.status = 'pending' AND o.hold_expires_at <= ${now}), 0)::int AS held,
+           t.max_per_order, t.hidden, t.sale_starts_at, t.sale_ends_at
+      FROM ticket_types t
+     WHERE t.event_id = ${eventId}::uuid`
+}
+
 /** Read after the type locks, so nothing it says can change under the order (database HIGH 1). */
 async function sellingEvent(tx: Prisma.TransactionClient, eventId: string, age: number | null, now: Date) {
   const event = await tx.events.findUnique({
@@ -186,13 +206,13 @@ async function sellingEvent(tx: Prisma.TransactionClient, eventId: string, age: 
     event &&
     event.kind === "event" &&
     event.status === "published" &&
-    // A private event's guest list is its own door (security M5); nobody buys their way past it.
-    event.visibility !== "private" &&
     event.deleted_at === null &&
     event.ticketing_mode === "native" &&
     event.ticket_fee_rule !== null &&
     event.end_time > now
   if (!selling) throw new Refused("not_on_sale")
+  // A private event's guest list is its own door (security M5); nobody buys their way past it.
+  if (event.visibility === "private") throw new Refused("private")
   // Unknown age is a no, as at the door (minAgeRefusal).
   if (minAgeRefusal(age, event.min_age)) throw new Refused("under_age")
   return { ...event, ticket_fee_rule: event.ticket_fee_rule! }
@@ -203,7 +223,7 @@ async function sellingEvent(tx: Prisma.TransactionClient, eventId: string, age: 
  * table. The caller holds the orders' row locks; their types are locked here
  * in id order, which is a no-op for a reserve that already holds them.
  */
-async function expireOrders(tx: Prisma.TransactionClient, ids: string[]): Promise<void> {
+async function expireOrders(tx: Prisma.TransactionClient, ids: string[], to: "expired" | "cancelled" = "expired"): Promise<void> {
   const back = await tx.ticket_order_lines.groupBy({ by: ["ticket_type_id"], where: { order_id: { in: ids } }, _sum: { quantity: true } })
   const typeIds = back.map((b) => b.ticket_type_id)
   const quantities = back.map((b) => b._sum.quantity ?? 0)
@@ -212,7 +232,7 @@ async function expireOrders(tx: Prisma.TransactionClient, ids: string[]): Promis
     UPDATE ticket_types AS t SET held = t.held - v.quantity, updated_at = now()
       FROM unnest(${typeIds}::uuid[], ${quantities}::int[]) AS v(id, quantity)
      WHERE t.id = v.id`
-  await tx.ticket_orders.updateMany({ where: { id: { in: ids }, status: "pending" }, data: { status: "expired" } })
+  await tx.ticket_orders.updateMany({ where: { id: { in: ids }, status: "pending" }, data: { status: to } })
 }
 
 /** The event's holds that have run out, given back now. `SKIP LOCKED`: one the sweeper holds is its to finish. */
@@ -271,6 +291,15 @@ async function hold(tx: Prisma.TransactionClient, input: ReserveInput, age: numb
   if (stake.pending >= MAX_PENDING_PER_BUYER) throw new Refused("too_many_holds")
   if (stake.seats + ordered > MAX_SEATS_PER_BUYER) throw new Refused("too_many_seats")
 
+  return writeHold(tx, input, lines, priceOf(event, types, lines), now)
+}
+
+/** The order's price, from the event's snapshot and the types' prices: the one pricing for a hold and a quote. */
+function priceOf(
+  event: { ticket_fee_schedule: Prisma.JsonValue; ticket_fee_rule: NonNullable<Awaited<ReturnType<typeof sellingEvent>>["ticket_fee_rule"]>; fees_absorbed: boolean },
+  types: LockedType[],
+  lines: PricedLine[]
+): FeeBreakdown {
   const breakdown = priced({
     schedule: parseFeeSchedule(event.ticket_fee_schedule),
     // Sold only, never held: a hold is a buyer's say-so (lib/ticket-fees.ts, "Slabs").
@@ -283,8 +312,7 @@ async function hold(tx: Prisma.TransactionClient, input: ReserveInput, age: numb
   // Free tickets are RSVP plus capacity and never an order (ticketing-business-model.md §4.4).
   if (totals.totalMinor === 0) throw new Refused("free_order")
   if (totals.totalMinor > MAX_ORDER_TOTAL_MINOR) throw new Refused("bad_lines")
-
-  return writeHold(tx, input, lines, breakdown, now)
+  return breakdown
 }
 
 type PricedLine = ReserveInput["lines"][number] & { type: LockedType }
@@ -387,3 +415,52 @@ export async function releaseExpiredHolds(opts: { limit?: number } = {}): Promis
     return { released: orders.length }
   }, TX)
 }
+
+export type QuoteResult = { ok: true; breakdown: FeeBreakdown; market: string } | { ok: false; reason: ReserveRefusal }
+
+/**
+ * What an order for these lines would cost now, with the same refusals as
+ * `reserveTickets` less the hold count (nothing is held), and no lock and no
+ * write: the app asks on every stepper change (contract §2). An order placed
+ * after it is priced again, under the locks, and that price is the charge.
+ */
+export async function quoteTickets(input: ReserveInput): Promise<QuoteResult> {
+  if (!ticketingOn()) return { ok: false, reason: "ticketing_off" }
+  if (!wellFormed(input)) return { ok: false, reason: "bad_lines" }
+  if (input.lines.reduce((n, l) => n + l.quantity, 0) > MAX_SEATS_PER_BUYER) return { ok: false, reason: "over_order_limit" }
+  const buyer = await buyerAge(input.buyerId)
+  if (!buyer) return { ok: false, reason: "buyer_not_allowed" }
+  const now = new Date()
+  try {
+    const [types, event] = await Promise.all([readTypes(input.eventId, now), sellingEvent(db, input.eventId, buyer.age, now)])
+    const byId = new Map(types.map((t) => [t.id, t]))
+    const lines = input.lines.map((l) => ({ ...l, type: checkLine(byId.get(l.ticketTypeId), l.quantity, now) }))
+    const stake = await buyerStake(db, input.eventId, input.buyerId, now)
+    if (stake.seats + lines.reduce((n, l) => n + l.quantity, 0) > MAX_SEATS_PER_BUYER) throw new Refused("too_many_seats")
+    return { ok: true, breakdown: priceOf(event, types, lines), market: parseFeeSchedule(event.ticket_fee_schedule).market }
+  } catch (error) {
+    if (error instanceof Refused) return { ok: false, reason: error.reason }
+    throw error
+  }
+}
+
+/** Lock these pending orders (id order, waiting: the payment webhook takes an order the same way) and give them back as `cancelled`. */
+async function cancelPending(where: Prisma.Sql): Promise<number> {
+  return db.$transaction(async (tx) => {
+    await setLockTimeout(tx)
+    const orders = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id::text FROM ticket_orders WHERE status = 'pending' AND ${where} ORDER BY id FOR UPDATE`
+    if (orders.length === 0) return 0
+    await expireOrders(tx, orders.map((o) => o.id), "cancelled")
+    return orders.length
+  }, TX)
+}
+
+/** Account deletion (security L3): the person's pending holds go back now, not in ten minutes. */
+export const cancelBuyerHolds = (buyerId: string): Promise<number> => cancelPending(Prisma.sql`buyer_id = ${buyerId}`)
+
+/** One order's hold, given back: its Razorpay order could not be created, so nobody can pay it. */
+export const cancelHold = (orderId: string): Promise<number> => cancelPending(Prisma.sql`id = ${orderId}::uuid`)
+
+/** A cancelled event's open holds, given back: nobody may pay for one now. */
+export const cancelEventHolds = (eventId: string): Promise<number> => cancelPending(Prisma.sql`event_id = ${eventId}::uuid`)

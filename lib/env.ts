@@ -123,6 +123,19 @@ const envSchema = z.object({
    * rotating it invalidates every QR issued, never a door code.
    */
   TICKET_QR_KEY: z.string().min(32, "TICKET_QR_KEY must be at least 32 characters").optional(),
+  /**
+   * The key a pay link's token is signed with (lib/ticket-pay-token.ts): the
+   * browser that opens the pay page has no JWT, so the link carries a 15-minute
+   * HMAC bound to the order and its buyer. 32 or more, required once TICKETING
+   * is on. Its own key, not the QR one: rotating it costs open pay links only.
+   */
+  TICKET_PAY_KEY: z.string().min(32, "TICKET_PAY_KEY must be at least 32 characters").optional(),
+  /**
+   * Where pay links point (`<PAY_BASE_URL>/pay/o/<orderId>?t=…`): https://pay.blendn.app
+   * once its DNS exists (owner action), the service's own host before that.
+   * Unset: NEXTAUTH_URL.
+   */
+  PAY_BASE_URL: z.string().url("PAY_BASE_URL must be an absolute URL").optional(),
 
   /**
    * RevenueCat (plan v2 §5). The value the RevenueCat dashboard sends as the
@@ -224,6 +237,10 @@ const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
   // Selling with no QR key issues tickets that cannot be checked at the door.
   if (env.TICKETING === "true" && !env.TICKET_QR_KEY) {
     ctx.addIssue({ code: "custom", path: ["TICKET_QR_KEY"], message: "TICKET_QR_KEY is required once TICKETING is on" })
+  }
+  // Selling with no pay key creates orders nobody can open the pay page for.
+  if (env.TICKETING === "true" && !env.TICKET_PAY_KEY) {
+    ctx.addIssue({ code: "custom", path: ["TICKET_PAY_KEY"], message: "TICKET_PAY_KEY is required once TICKETING is on" })
   }
   const mode = razorpayKeyModeProblem(env.RAZORPAY_KEY_ID, env.RAILWAY_ENVIRONMENT_NAME)
   if (mode) ctx.addIssue({ code: "custom", path: ["RAZORPAY_KEY_ID"], message: mode })
@@ -495,6 +512,20 @@ export function ticketQrKey(): string {
   const key = process.env.TICKET_QR_KEY?.trim()
   if (!key || key.length < 32) throw new Error("TICKET_QR_KEY is not set (32+ characters): required while TICKETING is on")
   return key
+}
+
+/** The pay link signing key (lib/ticket-pay-token.ts). Throws when unset or short, as `ticketQrKey` does. */
+export function ticketPayKey(): string {
+  const key = process.env.TICKET_PAY_KEY?.trim()
+  if (!key || key.length < 32) throw new Error("TICKET_PAY_KEY is not set (32+ characters): required while TICKETING is on")
+  return key
+}
+
+/** The origin pay links are built on: `PAY_BASE_URL`, else `NEXTAUTH_URL`, without a trailing slash. */
+export function payBaseUrl(): string {
+  const base = (process.env.PAY_BASE_URL?.trim() || process.env.NEXTAUTH_URL?.trim() || "").replace(/\/+$/, "")
+  if (!base) throw new Error("PAY_BASE_URL (or NEXTAUTH_URL) is not set: pay links need a host")
+  return base
 }
 
 /**

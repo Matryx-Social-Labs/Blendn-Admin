@@ -1,5 +1,5 @@
 import { logger } from "./logger"
-import { dashboardHost } from "@/lib/env"
+import { dashboardHost } from "./env"
 import {
   approvedHtml,
   claimDecisionHtml,
@@ -9,6 +9,7 @@ import {
   applyAgainHtml,
   inviteHtml,
   onboardingVerifyHtml,
+  ticketOrderHtml,
 } from "./email-html"
 
 /**
@@ -369,5 +370,20 @@ export function domainVerifyEmail(domain: string, link: string) {
       "",
       "If this wasn’t expected, ignore it — the domain will not be verified.",
     ].join("\n"),
+  }
+}
+
+/**
+ * A ticket order's news for its buyer (SCRUM-1011). The order reference is the
+ * first eight characters of its id, what the buyer quotes; the pass itself is
+ * in the app, never in an email.
+ */
+export function ticketOrderEmail(opts: { subject: string; heading: string; paragraphs: string[]; orderId: string }) {
+  const link = "https://www.blendn.app"
+  const paragraphs = [...opts.paragraphs, `Order reference: ${opts.orderId.slice(0, 8).toUpperCase()}`]
+  return {
+    subject: opts.subject,
+    text: [opts.heading, "", ...paragraphs.flatMap((p) => [p, ""]), link].join("\n"),
+    html: ticketOrderHtml({ heading: opts.heading, paragraphs, link }),
   }
 }

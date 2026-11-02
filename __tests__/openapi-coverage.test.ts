@@ -21,6 +21,7 @@ import "@/lib/openapi/paths/mobile-misc"
 import "@/lib/openapi/paths/mobile-friends"
 import "@/lib/openapi/paths/mobile-crews"
 import "@/lib/openapi/paths/mobile-offers"
+import "@/lib/openapi/paths/mobile-tickets"
 import "@/lib/openapi/paths/dashboard"
 import "@/lib/openapi/paths/system"
 

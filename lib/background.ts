@@ -17,6 +17,7 @@ import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
 import { startReminderSweeper, stopReminderSweeper } from "./reminder-sweeper"
 import { startSentimentSweeper, stopSentimentSweeper } from "./sentiment-sweeper"
 import { startTicketHoldSweeper, stopTicketHoldSweeper } from "./ticket-hold-sweeper"
+import { startTicketReconciler, stopTicketReconciler } from "./ticket-reconcile"
 
 /**
  * Every recurring job this process owns, in one place.
@@ -78,6 +79,8 @@ export function startBackgroundWork(): void {
   startModerationRecheckSweeper()
   // Ticket holds nobody paid for, given back each minute (SCRUM-1010). Starts nothing while TICKETING is off.
   startTicketHoldSweeper()
+  // Ticket payments, refunds and payouts nobody confirmed, every five minutes (SCRUM-1011). Same flag.
+  startTicketReconciler()
 
   logger.info("Background work started", {
     // Listed exhaustively: this said three while starting four, so the log
@@ -94,6 +97,7 @@ export function startBackgroundWork(): void {
       "moderation-recheck",
       // Only when TICKETING is on; listed so the log still says what was asked for.
       "ticket-holds",
+      "ticket-reconcile",
     ],
   })
 }
@@ -116,4 +120,5 @@ export function stopBackgroundWork(): void {
   stopOrphanPhotoSweeper()
   stopModerationRecheckSweeper()
   stopTicketHoldSweeper()
+  stopTicketReconciler()
 }
