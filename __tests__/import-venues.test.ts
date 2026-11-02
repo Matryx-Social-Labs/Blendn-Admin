@@ -1,5 +1,8 @@
 jest.mock("@/lib/db", () => ({ db: {}, closeDb: jest.fn() }))
 
+import { readFileSync } from "fs"
+import { join } from "path"
+
 import {
   columnsOf,
   coordinatesFromMapsUrl,
@@ -246,7 +249,7 @@ describe("placedInCatalogue — a venue's day runs in its own city's time zone (
   })
 
   it("writes the zone it found: the insert names `timezone`, so no row lands on the default", () => {
-    const source = require("fs").readFileSync(require("path").join(__dirname, "../scripts/import-venues.ts"), "utf8") as string
+    const source = readFileSync(join(__dirname, "../scripts/import-venues.ts"), "utf8")
     expect(source).toMatch(/createManyAndReturn\(\{[\s\S]*?timezone: row\.timezone!,/)
   })
 })
