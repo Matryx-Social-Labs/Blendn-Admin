@@ -16,6 +16,7 @@ import { startPhotoModerationSweeper, stopPhotoModerationSweeper } from "./photo
 import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
 import { startReminderSweeper, stopReminderSweeper } from "./reminder-sweeper"
 import { startSentimentSweeper, stopSentimentSweeper } from "./sentiment-sweeper"
+import { startTicketHoldSweeper, stopTicketHoldSweeper } from "./ticket-hold-sweeper"
 
 /**
  * Every recurring job this process owns, in one place.
@@ -75,6 +76,8 @@ export function startBackgroundWork(): void {
   startOrphanPhotoSweeper()
   // Room lines OpenAI could not check when they were sent (moderation-degraded policy).
   startModerationRecheckSweeper()
+  // Ticket holds nobody paid for, given back each minute (SCRUM-1010). Starts nothing while TICKETING is off.
+  startTicketHoldSweeper()
 
   logger.info("Background work started", {
     // Listed exhaustively: this said three while starting four, so the log
@@ -89,6 +92,8 @@ export function startBackgroundWork(): void {
       "photo-moderation",
       "photo-orphans",
       "moderation-recheck",
+      // Only when TICKETING is on; listed so the log still says what was asked for.
+      "ticket-holds",
     ],
   })
 }
@@ -110,4 +115,5 @@ export function stopBackgroundWork(): void {
   stopPhotoModerationSweeper()
   stopOrphanPhotoSweeper()
   stopModerationRecheckSweeper()
+  stopTicketHoldSweeper()
 }

@@ -16,6 +16,16 @@ import { activeMembership } from "./org-membership"
  * may (the same line as billing and venue listing), and only the version in
  * force can be accepted: a stale tab is refused rather than recorded as
  * agreeing to text nobody is showing any more.
+ *
+ * What is kept is what proves the click and no more (security M1, M2, L1, L2;
+ * database 11, 12): the network the click came from, never the address (/24
+ * for IPv4, /48 for IPv6, in this row and its audit row alike), a user agent
+ * of at most 200 characters, and `document_sha256`, the hash of the exact text
+ * shown, so "version 0.1" can be proved to mean those words. A suspended
+ * person or a suspended organisation binds nobody.
+ *
+ * Revoking UPDATE and DELETE on this table from the app's database role is
+ * infrastructure (the triggers are the floor until then), noted on SCRUM-1010.
  */
 
 export const ORGANIZER_TICKETING_TERMS = { key: "organizer-ticketing-terms", version: "0.1" } as const
@@ -25,19 +35,25 @@ const CURRENT_VERSION: Readonly<Record<string, string>> = {
   [ORGANIZER_TICKETING_TERMS.key]: ORGANIZER_TICKETING_TERMS.version,
 }
 
-const USER_AGENT_MAX = 512
+/** Code points, as `char_length` counts them (CHECK `legal_acceptances_user_agent_length`). */
+const USER_AGENT_MAX = 200
+const SHA256_HEX = /^[0-9a-f]{64}$/
 
-export type AcceptanceRefusal = "ticketing_off" | "unknown_document" | "stale_version" | "not_authorized"
+export type AcceptanceRefusal = "ticketing_off" | "unknown_document" | "stale_version" | "bad_document_hash" | "not_authorized"
 
 export interface AcceptanceInput {
   orgId: string
   userId: string
   documentKey: string
   version: string
-  /** The client's address (`getRequestIp`). Anything that is not an IP is stored as nothing. */
+  /**
+   * sha256, hex, of the exact text the server rendered for this version. The
+   * server computes it from what it served, never the browser's word.
+   */
+  documentSha256: string
+  /** The client's address (`getRequestIp`). Stored as its network (`truncatedIp`); anything that is not an IP, as nothing. */
   ip?: string | null
   userAgent?: string | null
-  now?: Date
 }
 
 export interface LegalAcceptance {
@@ -49,29 +65,61 @@ export interface LegalAcceptance {
 
 export type AcceptanceResult = { ok: true; acceptance: LegalAcceptance } | { ok: false; reason: AcceptanceRefusal }
 
-const cleanIp = (ip: string | null | undefined): string | null => (ip && isIP(ip.trim()) ? ip.trim() : null)
-const cleanUserAgent = (ua: string | null | undefined): string | null => (ua ? ua.slice(0, USER_AGENT_MAX) : null)
+/** An IPv6 address as its eight groups, `::` and a dotted IPv4 tail expanded. */
+function ipv6Groups(ip: string): number[] {
+  const dotted = ip.match(/(\d+)\.(\d+)\.(\d+)\.(\d+)$/)
+  const hex = dotted ? `${ip.slice(0, dotted.index)}${((+dotted[1] << 8) | +dotted[2]).toString(16)}:${((+dotted[3] << 8) | +dotted[4]).toString(16)}` : ip
+  const [head, tail] = hex.split("::")
+  const left = head ? head.split(":") : []
+  const right = tail === undefined ? [] : tail ? tail.split(":") : []
+  const middle = tail === undefined ? [] : Array(8 - left.length - right.length).fill("0")
+  return [...left, ...middle, ...right].map((g) => parseInt(g, 16))
+}
+
+/**
+ * The network an address is in, never the address: `203.0.113.0/24`,
+ * `2001:db8:85a3::/48`. An IPv4-mapped IPv6 address is the IPv4 it maps.
+ * Anything that is not an IP is null. CHECK `legal_acceptances_ip_truncated`.
+ */
+export function truncatedIp(raw: string | null | undefined): string | null {
+  const ip = raw?.trim().replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, "") ?? ""
+  const family = isIP(ip)
+  if (family === 4) return `${ip.split(".").slice(0, 3).join(".")}.0/24`
+  if (family !== 6) return null
+  return `${ipv6Groups(ip.replace(/%.*$/, "")).slice(0, 3).map((g) => g.toString(16)).join(":")}::/48`
+}
+
+/** By code points, so an emoji is never cut in half into a lone surrogate. */
+const cleanUserAgent = (ua: string | null | undefined): string | null => (ua ? Array.from(ua).slice(0, USER_AGENT_MAX).join("") : null)
 
 /**
  * Record that `userId` accepted a document for `orgId`, with an audit row in
  * the same transaction. The only document today is the ticketing terms, so
- * nothing is recorded while `TICKETING` is off.
+ * nothing is recorded while `TICKETING` is off. The time is the database's.
  */
 export async function recordLegalAcceptance(input: AcceptanceInput): Promise<AcceptanceResult> {
   if (!ticketingOn()) return { ok: false, reason: "ticketing_off" }
   const current = Object.hasOwn(CURRENT_VERSION, input.documentKey) ? CURRENT_VERSION[input.documentKey] : undefined
   if (!current) return { ok: false, reason: "unknown_document" }
   if (input.version !== current) return { ok: false, reason: "stale_version" }
+  if (typeof input.documentSha256 !== "string" || !SHA256_HEX.test(input.documentSha256)) return { ok: false, reason: "bad_document_hash" }
   if (!isUuid(input.orgId)) return { ok: false, reason: "not_authorized" }
 
   return db.$transaction(async (tx) => {
+    // A suspended organisation (activeMembership) or a suspended or deleted person binds nobody.
     const binding = await tx.organisation_members.findFirst({
-      where: { org_id: input.orgId, user_id: input.userId, role: { in: ["owner", "admin"] }, ...activeMembership },
+      where: {
+        org_id: input.orgId,
+        user_id: input.userId,
+        role: { in: ["owner", "admin"] },
+        ...activeMembership,
+        user: { suspended_at: null, deletedAt: null },
+      },
       select: { id: true },
     })
     if (!binding) return { ok: false as const, reason: "not_authorized" as const }
 
-    const ip = cleanIp(input.ip)
+    const ip = truncatedIp(input.ip)
     const row = await tx.legal_acceptances.create({
       data: {
         org_id: input.orgId,
@@ -80,7 +128,7 @@ export async function recordLegalAcceptance(input: AcceptanceInput): Promise<Acc
         version: current,
         ip: ip,
         user_agent: cleanUserAgent(input.userAgent),
-        ...(input.now && { accepted_at: input.now }),
+        document_sha256: input.documentSha256,
       },
       select: { id: true, user_id: true, version: true, accepted_at: true },
     })
@@ -90,7 +138,7 @@ export async function recordLegalAcceptance(input: AcceptanceInput): Promise<Acc
       resource: "organisation",
       resourceId: input.orgId,
       orgId: input.orgId,
-      details: { documentKey: input.documentKey, version: current, acceptanceId: row.id },
+      details: { documentKey: input.documentKey, version: current, documentSha256: input.documentSha256, acceptanceId: row.id },
       ...(ip && { ipAddress: ip }),
     })
     return { ok: true as const, acceptance: { id: row.id, userId: row.user_id, version: row.version, acceptedAt: row.accepted_at } }

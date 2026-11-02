@@ -623,6 +623,12 @@ model events {
   /// The market's rates when ticketing went on (`feeScheduleFromMarket`), so a later
   /// rate change never reprices an event already selling. `parseFeeSchedule` reads it.
   ticket_fee_schedule   Json?
+  /// When `enableTicketing` (lib/ticketing-enable.ts) turned native selling on, and the
+  /// price rule it derived from the organisation's plan and founding offer then. Set
+  /// together (CHECK `events_ticket_fee_rule_with_enabled_at`); native needs them
+  /// (`events_ticketing_native_needs_enablement`). The buyer's request never chooses a rule.
+  ticketing_enabled_at  DateTime?            @db.Timestamptz(6)
+  ticket_fee_rule       ticket_fee_rule?
 
   // Relations
   organizer          User                       @relation(fields: [organizer_id], references: [id], onDelete: Cascade)
@@ -4551,10 +4557,13 @@ model markets {
   ticketing_mode        ticketing_mode @default(off)
   /// The service-fee slabs, marginal per event: slab i starts at ticket
   /// `ticket_fee_slab_from[i]` and charges `ticket_fee_slab_bps[i]`. Same length,
-  /// first is 1, ascending, rates 0–10000: CHECKs `markets_ticket_fee_slabs_*`.
+  /// first is 1, strictly ascending, rates 0–10000: CHECKs `markets_ticket_fee_slabs_shape`,
+  /// `markets_ticket_fee_slabs_ascending` (the SQL function `ticket_fee_slabs_ascending`) and
+  /// `markets_ticket_fee_rates_range`.
   ticket_fee_slab_from  Int[]          @default([1, 101, 501])
   ticket_fee_slab_bps   Int[]          @default([500, 350, 200])
-  /// The per-paid-ticket minimum service fee, in the market's minor unit.
+  /// The per-paid-ticket minimum service fee, in the market's minor unit. At least 1 unless
+  /// the market is `off` (`markets_ticket_fee_min_when_selling`).
   ticket_fee_min_minor  Int            @default(0)
   /// Tax on the service fee (GST 18% = 1800 in India), in basis points.
   ticket_fee_tax_bps    Int            @default(0)
@@ -4577,6 +4586,15 @@ enum ticket_refund_policy {
   none
   until_7d
   until_24h
+}
+
+/// How an event's service fee is priced, fixed when ticketing went on (`feeRuleFor`).
+enum ticket_fee_rule {
+  standard
+  /// One slab lower: the organisation had paid Analytics, or its venue Venue Pro.
+  pro
+  /// 2% flat (never under the minimum): the organisation's first three ticketed events.
+  founding
 }
 
 enum ticket_order_status {
@@ -4605,7 +4623,8 @@ model ticket_types {
   max_per_order  Int       @default(10)
   sale_starts_at DateTime? @db.Timestamptz(6)
   sale_ends_at   DateTime? @db.Timestamptz(6)
-  /// Not listed; still sold through a direct link.
+  /// Not listed and not sold: `reserveTickets` refuses it as an unknown type. Access
+  /// codes for a hidden tier are later work, not a link that happens to know the id.
   hidden         Boolean   @default(false)
   sort           Int       @default(0)
   created_at     DateTime  @default(now()) @db.Timestamptz(6)
@@ -4674,7 +4693,8 @@ model ticket_order_lines {
   quantity         Int
   unit_price_minor Int
 
-  order       ticket_orders @relation(fields: [order_id, event_id], references: [id, event_id], onDelete: Cascade)
+  /// Restrict: a line is part of a money record, and goes only if its order is deliberately unwound.
+  order       ticket_orders @relation(fields: [order_id, event_id], references: [id, event_id], onDelete: Restrict)
   ticket_type ticket_types  @relation(fields: [ticket_type_id, event_id], references: [id, event_id], onDelete: Restrict)
 
   @@id([order_id, ticket_type_id])
@@ -4682,15 +4702,16 @@ model ticket_order_lines {
 }
 
 /// One admission. The door code is unique per event (`tickets_event_id_door_code_key`);
-/// the QR carries `qr_secret`. Type and order are on the ticket's event (composite keys).
+/// the QR is signed, not stored (`ticketQrPayload`). Type and order are on the ticket's event (composite keys).
 model tickets {
   id             String    @id @default(uuid()) @db.Uuid
   order_id       String    @db.Uuid
   ticket_type_id String    @db.Uuid
   event_id       String    @db.Uuid
   holder_id      String
+  /// Six of `DOOR_CODE_ALPHABET` (lib/tickets.ts), unique per event. The QR is not stored:
+  /// it is `<id>.<HMAC-SHA256(TICKET_QR_KEY, id)>`, derived on demand (`ticketQrPayload`).
   door_code      String
-  qr_secret      String    @unique
   redeemed_at    DateTime? @db.Timestamptz(6)
   redeemed_by    String?
   created_at     DateTime  @default(now()) @db.Timestamptz(6)
@@ -4718,8 +4739,12 @@ model legal_acceptances {
   document_key String
   version      String
   accepted_at  DateTime @default(now()) @db.Timestamptz(6)
+  /// The network, not the address: /24 or /48 (`truncatedIp`).
   ip           String?
+  /// At most 200 code points.
   user_agent   String?
+  /// sha256 of the exact text shown, hex. Null only on rows from before it was recorded.
+  document_sha256 String?
 
   /// Restrict, both: the evidence outlives nothing it is about.
   org  organisations @relation(fields: [org_id], references: [id], onDelete: Restrict)

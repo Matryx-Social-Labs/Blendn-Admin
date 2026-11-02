@@ -1,6 +1,8 @@
 import {
   FOUNDING_OFFER_ENDS_AT,
+  FeesExceedPriceError,
   TicketFeeError,
+  feeRuleFor,
   feeScheduleFromMarket,
   foundingOfferApplies,
   parseFeeSchedule,
@@ -34,8 +36,7 @@ function fees(over: Partial<FeeInput> & Pick<FeeInput, "lines">) {
   return ticketFees({
     schedule: IN,
     paidTicketsBefore: 0,
-    pro: false,
-    founding: NOT_FOUNDING,
+    rule: "standard",
     feesAbsorbed: false,
     ...over,
   })
@@ -94,16 +95,26 @@ describe("slabs are marginal per event", () => {
     expect(b.lines[0].segments[0]).toMatchObject({ bps: 200, serviceFeeMinor: 2_000 })
   })
 
-  it("numbers tickets across lines in the order given", () => {
-    const b = fees({ paidTicketsBefore: 99, lines: [line(100_000, 1, "a"), line(200_000, 1, "b")] })
-    expect(b.lines[0].segments[0]).toMatchObject({ bps: 500 })
-    expect(b.lines[1].segments[0]).toMatchObject({ bps: 350 })
+  it("numbers tickets across lines dearest first, whatever order the caller sent them in (security H3)", () => {
+    // Ticket 100 is the last at 5%. Sent cheap-first, a buyer would put the ₹2,000 ticket on 3.5%.
+    for (const lines of [[line(100_000, 1, "a"), line(200_000, 1, "b")], [line(200_000, 1, "b"), line(100_000, 1, "a")]]) {
+      const b = fees({ paidTicketsBefore: 99, lines })
+      expect(b.lines.map((l) => [l.ticketTypeId, l.segments[0].bps])).toEqual([["b", 500], ["a", 350]])
+    }
+  })
+
+  it("breaks a price tie on the type id, so the same order always prices the same", () => {
+    const sent = [line(100_000, 1, "z"), line(100_000, 1, "a")]
+    expect(fees({ paidTicketsBefore: 99, lines: sent }).lines.map((l) => l.ticketTypeId)).toEqual(["a", "z"])
+    expect(fees({ paidTicketsBefore: 99, lines: [...sent].reverse() }).lines.map((l) => l.ticketTypeId)).toEqual(["a", "z"])
   })
 
   it("free tickets carry no fee and do not advance the slab", () => {
     const b = fees({ paidTicketsBefore: 99, lines: [line(0, 5, "free"), line(100_000, 1, "paid")] })
-    expect(b.lines[0]).toMatchObject({ subtotalMinor: 0, serviceFeeMinor: 0, processingFeeMinor: 0, totalMinor: 0 })
-    expect(b.lines[1].segments[0]).toMatchObject({ bps: 500 })
+    const free = b.lines.find((l) => l.ticketTypeId === "free")!
+    const paid = b.lines.find((l) => l.ticketTypeId === "paid")!
+    expect(free).toMatchObject({ subtotalMinor: 0, serviceFeeMinor: 0, processingFeeMinor: 0, totalMinor: 0 })
+    expect(paid.segments[0]).toMatchObject({ bps: 500 })
     expect(b.paidTicketsAfter).toBe(100)
   })
 })
@@ -120,13 +131,13 @@ describe("the per-ticket minimum", () => {
 
 describe("Pro starts one slab lower", () => {
   it("is 3.5% for tickets 1–100 and 2% from 101", () => {
-    const b = fees({ pro: true, paidTicketsBefore: 99, lines: [line(100_000, 2)] })
+    const b = fees({ rule: "pro", paidTicketsBefore: 99, lines: [line(100_000, 2)] })
     expect(b.rule).toBe("pro")
     expect(b.lines[0].segments.map((s) => s.bps)).toEqual([350, 200])
   })
 
   it("stays at the last slab past 500", () => {
-    expect(fees({ pro: true, paidTicketsBefore: 600, lines: [line(100_000, 1)] }).lines[0].segments[0].bps).toBe(200)
+    expect(fees({ rule: "pro", paidTicketsBefore: 600, lines: [line(100_000, 1)] }).lines[0].segments[0].bps).toBe(200)
   })
 })
 
@@ -134,17 +145,19 @@ describe("the founding offer", () => {
   const founding = { ticketedEventsBefore: 0, enabledAt: new Date("2027-01-15T00:00:00Z") }
 
   it("is 2% flat on an organisation's first three ticketed events", () => {
-    const b = fees({ founding, paidTicketsBefore: 0, lines: [line(100_000, 3)] })
+    const b = fees({ rule: "founding", paidTicketsBefore: 0, lines: [line(100_000, 3)] })
     expect(b.rule).toBe("founding")
     expect(b.lines[0].segments).toEqual([expect.objectContaining({ quantity: 3, bps: 200, serviceFeeMinor: 6_000 })])
   })
 
   it("beats Pro", () => {
-    expect(fees({ founding, pro: true, lines: [line(100_000, 1)] }).lines[0].segments[0].bps).toBe(200)
+    expect(feeRuleFor({ pro: true, founding })).toBe("founding")
+    expect(feeRuleFor({ pro: true, founding: NOT_FOUNDING })).toBe("pro")
+    expect(feeRuleFor({ pro: false, founding: NOT_FOUNDING })).toBe("standard")
   })
 
   it("keeps the per-ticket minimum", () => {
-    expect(fees({ founding, lines: [line(14_900, 1)] }).totals.serviceFeeMinor).toBe(1_000)
+    expect(fees({ rule: "founding", lines: [line(14_900, 1)] }).totals.serviceFeeMinor).toBe(1_000)
   })
 
   it("is not the fourth event's", () => {
@@ -196,8 +209,10 @@ describe("who pays the fees", () => {
     })
   })
 
-  it("absorbed: refuses a price the fees would exceed, rather than a negative payout", () => {
-    expect(() => fees({ feesAbsorbed: true, lines: [line(500, 1)] })).toThrow(TicketFeeError)
+  it("absorbed: refuses a price the fees would exceed, rather than a negative payout, as its own error", () => {
+    // Its own class, so a reserve can answer it as a refusal rather than a 500 (security M6).
+    expect(() => fees({ feesAbsorbed: true, lines: [line(500, 1)] })).toThrow(FeesExceedPriceError)
+    expect(new FeesExceedPriceError("x")).toBeInstanceOf(TicketFeeError)
   })
 })
 
@@ -205,7 +220,7 @@ describe("integer money: the parts always add up", () => {
   const cases: Array<[string, Partial<FeeInput> & Pick<FeeInput, "lines">]> = [
     ["straddle, buyer pays", { paidTicketsBefore: 97, lines: [line(79_900, 7, "a"), line(14_900, 3, "b"), line(0, 2, "c")] }],
     ["straddle, absorbed", { feesAbsorbed: true, paidTicketsBefore: 497, lines: [line(149_900, 9, "a"), line(52_300, 4, "b")] }],
-    ["pro across both slabs", { pro: true, paidTicketsBefore: 95, lines: [line(33_333, 11)] }],
+    ["pro across both slabs", { rule: "pro", paidTicketsBefore: 95, lines: [line(33_333, 11)] }],
   ]
 
   it.each(cases)("%s", (_name, input) => {
