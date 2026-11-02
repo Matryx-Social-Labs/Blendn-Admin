@@ -169,6 +169,20 @@ names the events that are live. Nothing else changes: RSVPs, check-ins,
 memberships, bans, profiles and claims stay as they are. Post one line on
 SCRUM-208.
 
+**Another city or country** gets the same scenarios with `--city <slug>`
+(default `bengaluru`): slugs `<slug>-*`, venues inside the city's box as
+"(test)" names, times in its own zone, its own crowd. Its `--apply` removes
+that city's other events only and never checks anyone out of Bengaluru's
+rooms. A new one is a catalogue row first (`/dashboard/markets`, or a
+migration), then:
+
+```bash
+DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto                       # dry run
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto --apply
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto --refresh-times
+RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto --clean --apply  # its toronto-* events and (test) venues, nothing else
+```
+
 seed-qa's own events outside Bengaluru refresh the same way, with covers and
 clips put back on the seed's current source:
 

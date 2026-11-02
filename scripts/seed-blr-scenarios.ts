@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient, type connection_intent, type door_policy, type event_status, type venue_type, type visibility_type } from "@prisma/client"
+import { Prisma, PrismaClient, type connection_intent, type door_policy, type event_status, type visibility_type } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { syncOccurrences } from "../lib/occurrences"
 import { openSession } from "../lib/presence-sessions"
@@ -10,6 +10,23 @@ import { CROWD_CHAT, CROWD_REVIEWS, CROWD_SIZE, ensureCrowd } from "./seed-blr-c
 import PHOTOS from "./seed-blr-photos.json"
 import { realEventsWhere } from "../lib/event-kind"
 import { leaveOtherRooms } from "./seed-one-room"
+import {
+  HOME_SLUG,
+  cityMatchFor,
+  clockFor,
+  isHome,
+  loadSeedCity,
+  localSlug,
+  localiseText,
+  neutralLink,
+  placeVenues,
+  seededEventsWhere,
+  slugPrefix,
+  type Clock,
+  type Fence,
+  type SeedCity,
+  type VenueSpec,
+} from "./seed-city"
 
 /**
  * Bengaluru, rebuilt so every state an event can be in is on the phone at once.
@@ -58,6 +75,24 @@ import { leaveOtherRooms } from "./seed-one-room"
  *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --hours --apply  # opening hours on the test venues below, nothing else (without --apply: lists them)
  *   DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --hours --clear --apply  # and back to none (SCRUM-897)
  *
+ * ## Any other city (`--city <slug>`, default `bengaluru`)
+ *
+ * The same scenarios for any city in the catalogue (`cities`/`markets`), in
+ * that city's own zone: slugs `<slug>-…` instead of `blr-…`, the venues moved
+ * into the city's box under neutral "(test)" names, the copy's Indian places
+ * and rupee amounts swapped out (`scripts/seed-city.ts`). Its remove step
+ * soft-deletes that city's other events only — never Bengaluru's, never
+ * another city's. It seats its own crowd (`<slug>.crowd.blendn.invalid`) and
+ * never the named QA people, whose one open check-in stays in Bengaluru.
+ *
+ * A new country or city:
+ *   1. add it as a row at /dashboard/markets (or in a migration): slug, name,
+ *      match names, region, zone, centre and box, under its market
+ *   2. DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city <slug>              # dry run
+ *   3. DATABASE_URL=... RAILWAY_ENVIRONMENT_NAME=staging npx tsx scripts/seed-blr-scenarios.ts --city <slug> --apply
+ *   4. ... --city <slug> --refresh-times       # put the clock back, as above
+ *   5. ... --city <slug> --clean [--apply]     # remove it: soft-deletes its `<slug>-` events and its "(test)" venues, nothing else
+ *
  * Staging or localhost only (`environmentRefusal`).
  */
 
@@ -69,12 +104,9 @@ const APPLY = process.argv.includes("--apply")
 const REFRESH_TIMES = process.argv.includes("--refresh-times")
 const HOURS = process.argv.includes("--hours")
 const CLEAR = process.argv.includes("--clear")
-
-const CITY = "Bengaluru"
-const STATE = "Karnataka"
-const COUNTRY = "India"
-const TZ = "Asia/Kolkata"
-const SLUG_PREFIX = "blr-"
+const CLEAN = process.argv.includes("--clean")
+const CITY_FLAG = process.argv.indexOf("--city")
+const CITY_SLUG: string | undefined = CITY_FLAG === -1 ? HOME_SLUG : process.argv[CITY_FLAG + 1]
 
 /* -------------------------------------------------------------------------- */
 /* Time                                                                        */
@@ -88,27 +120,18 @@ const NOW = new Date()
 const round = (d: Date, step = 5 * MIN) => new Date(Math.round(d.getTime() / step) * step)
 const fromNow = (minutes: number, step = 5 * MIN) => round(new Date(NOW.getTime() + minutes * MIN), step)
 
-/** Today's date in Bengaluru, as YYYY-MM-DD. */
-const istToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(NOW)
-
-/** A wall-clock time in Bengaluru, `dayOffset` days from today. IST has no DST. */
-function ist(dayOffset: number, hhmm: string): Date {
-  const base = new Date(`${istToday()}T${hhmm}:00+05:30`)
-  return new Date(base.getTime() + dayOffset * 24 * HOUR)
-}
-
 /**
- * "Tonight": this evening in Bengaluru if there is still one to have, so the
+ * "Tonight": this evening in the city if there is still one to have, so the
  * card reads "Tonight · 8:30 PM". Kept clear of the check-in window, which is
  * a different scenario. Past 22:00 there is no tonight left and it becomes
  * tomorrow night — the run says so.
  */
-function tonight(): { start: Date; end: Date } {
-  const preferred = ist(0, "20:30")
+function tonight(c: Clock): { start: Date; end: Date } {
+  const preferred = c.wall(0, "20:30")
   if (preferred.getTime() - NOW.getTime() >= 2 * HOUR) return { start: preferred, end: new Date(preferred.getTime() + 2.5 * HOUR) }
   const soon = fromNow(150, 15 * MIN)
-  const sameDay = new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(soon) === istToday()
-  const start = sameDay ? soon : ist(1, "20:30")
+  const sameDay = c.day(soon) === c.day(NOW)
+  const start = sameDay ? soon : c.wall(1, "20:30")
   return { start, end: new Date(start.getTime() + 2.5 * HOUR) }
 }
 
@@ -147,26 +170,9 @@ const INTENTS: connection_intent[][] = [["networking", "friendship"], ["dating",
 /* Venues                                                                      */
 /* -------------------------------------------------------------------------- */
 
-type Fence =
-  | { type: "circle"; lat: number; lng: number; radius: number; buffer: number }
-  | { type: "polygon"; ring: [number, number][]; buffer: number }
-
-interface VenueSpec {
-  name: string
-  address: string
-  postal: string
-  lat: number
-  lng: number
-  type: venue_type
-  capacity: number
-  /** Owned by the venue test organisation, so "venue owner operates, may not edit" is testable. */
-  ownedByVenueOrg?: boolean
-  fence: Fence
-}
-
 /**
  * Opening hours for a few of the scenario venues (SCRUM-897): `venues.hours` has no product writer, so the venue page's OPEN
- * tile ("Till 4 AM / Opens 6 PM / Closed", OUT-03) could not be driven. Wall clock in the venue's own zone (`TZ`); a close at or
+ * tile ("Till 4 AM / Opens 6 PM / Closed", OUT-03) could not be driven. Wall clock in the venue's own zone (the city's); a close at or
  * before the open runs past midnight (`lib/venue-hours.ts`). Only these test venues: never the Overture venues.
  */
 const everyDay = (open: string, close: string, days = [0, 1, 2, 3, 4, 5, 6]) => days.map((day) => ({ day, open, close }))
@@ -181,7 +187,7 @@ const HOURS_BY_VENUE: Partial<Record<keyof typeof VENUES, { day: number; open: s
 
 const circle = (lat: number, lng: number, radius: number, buffer = 30): Fence => ({ type: "circle", lat, lng, radius, buffer })
 
-const VENUES = {
+export const VENUES = {
   oliveBeach: { name: "Olive Beach", address: "16, Wood Street, Ashok Nagar, Bengaluru", postal: "560025", lat: 12.9719, lng: 77.611, type: "restaurant", capacity: 120, fence: circle(12.9719, 77.611, 40) },
   thirdWave: { name: "Third Wave Coffee, Koramangala", address: "80 Feet Road, 4th Block, Koramangala, Bengaluru", postal: "560034", lat: 12.9346, lng: 77.6269, type: "cafe", capacity: 45, fence: circle(12.9346, 77.6269, 25) },
   bflat: { name: "BFlat Bar", address: "776, 100 Feet Road, Indiranagar, Bengaluru", postal: "560038", lat: 12.9784, lng: 77.6408, type: "live_music_venue", capacity: 150, ownedByVenueOrg: true, fence: circle(12.9784, 77.6408, 35) },
@@ -272,7 +278,7 @@ interface EventSpec {
   venue: VenueKey
   /** How the venue got attached, when it did. Free text only when absent. */
   venueLink?: "confirmed" | "auto_linked" | null
-  when: () => { start: Date; end: Date }
+  when: (c: Clock) => { start: Date; end: Date }
   status?: event_status
   visibility?: visibility_type
   capacity: number | null
@@ -301,7 +307,7 @@ interface EventSpec {
   social?: Social
 }
 
-const EVENTS: EventSpec[] = [
+export const EVENTS: EventSpec[] = [
   /* ── before it starts ──────────────────────────────────────────────────── */
   {
     slug: "blr-sunday-jazz-brunch",
@@ -315,7 +321,7 @@ const EVENTS: EventSpec[] = [
     photos: "jazz-brunch",
     venue: "oliveBeach",
     venueLink: "confirmed",
-    when: () => ({ start: ist(6, "12:00"), end: ist(6, "16:00") }),
+    when: (c) => ({ start: c.wall(6, "12:00"), end: c.wall(6, "16:00") }),
     capacity: 90,
     featured: true,
     link: "https://www.olivebeach.in",
@@ -346,7 +352,7 @@ const EVENTS: EventSpec[] = [
     photos: "founders-breakfast",
     venue: "thirdWave",
     venueLink: "auto_linked",
-    when: () => ({ start: ist(1, "08:30"), end: ist(1, "10:30") }),
+    when: (c) => ({ start: c.wall(1, "08:30"), end: c.wall(1, "10:30") }),
     capacity: 24,
     recurring: true,
     categories: ["networking-founders", "food-drink-coffee"],
@@ -747,7 +753,7 @@ const EVENTS: EventSpec[] = [
     photos: "cycling-sunrise",
     venue: "decathlonHebbal",
     venueLink: null,
-    when: () => ({ start: ist(-3, "04:30"), end: ist(-3, "10:00") }),
+    when: (c) => ({ start: c.wall(-3, "04:30"), end: c.wall(-3, "10:00") }),
     capacity: 40,
     recurring: true,
     categories: ["outdoor-cycling", "sports-running"],
@@ -790,7 +796,7 @@ const EVENTS: EventSpec[] = [
     photos: "flea-market",
     venue: "jayamahal",
     venueLink: "auto_linked",
-    when: () => ({ start: ist(-7, "11:00"), end: ist(-7, "21:00") }),
+    when: (c) => ({ start: c.wall(-7, "11:00"), end: c.wall(-7, "21:00") }),
     capacity: 5000,
     categories: ["markets-fairs-flea-markets", "food-drink-food-festivals"],
     amenities: ["live-music", "outdoor-space", "parking", "accessible-toilets"],
@@ -821,7 +827,7 @@ const EVENTS: EventSpec[] = [
     photos: "open-air-film",
     venue: "bic",
     venueLink: "confirmed",
-    when: () => ({ start: ist(2, "19:00"), end: ist(2, "22:00") }),
+    when: (c) => ({ start: c.wall(2, "19:00"), end: c.wall(2, "22:00") }),
     status: "cancelled",
     capacity: 150,
     categories: ["arts-culture-film-screenings"],
@@ -847,7 +853,7 @@ const EVENTS: EventSpec[] = [
     photos: "pottery",
     venue: "clayStation",
     venueLink: "confirmed",
-    when: () => ({ start: ist(3, "11:00"), end: ist(3, "14:00") }),
+    when: (c) => ({ start: c.wall(3, "11:00"), end: c.wall(3, "14:00") }),
     capacity: 12,
     categories: ["arts-culture-workshops", "learning-classes-and-courses"],
     amenities: ["food-included", "quiet-area"],
@@ -875,7 +881,7 @@ const EVENTS: EventSpec[] = [
     photos: "supper-club",
     venue: "lupa",
     venueLink: "confirmed",
-    when: () => ({ start: ist(4, "20:00"), end: ist(4, "22:30") }),
+    when: (c) => ({ start: c.wall(4, "20:00"), end: c.wall(4, "22:30") }),
     capacity: 6,
     categories: ["food-drink-supper-clubs"],
     amenities: ["food-included", "welcome-drink", "step-free-access", "accessible-toilets"],
@@ -903,7 +909,7 @@ const EVENTS: EventSpec[] = [
     photos: "techno-party",
     venue: "kittyKo",
     venueLink: "confirmed",
-    when: () => ({ start: ist(4, "22:00"), end: ist(5, "03:00") }),
+    when: (c) => ({ start: c.wall(4, "22:00"), end: c.wall(5, "03:00") }),
     capacity: 400,
     minAge: 21,
     door: "guest_list",
@@ -933,7 +939,7 @@ const EVENTS: EventSpec[] = [
     photos: "speed-dating",
     venue: "bygHennur",
     venueLink: "confirmed",
-    when: () => ({ start: ist(5, "19:30"), end: ist(5, "23:00") }),
+    when: (c) => ({ start: c.wall(5, "19:30"), end: c.wall(5, "23:00") }),
     capacity: 120,
     minAge: 18,
     door: "members_only",
@@ -965,7 +971,7 @@ const EVENTS: EventSpec[] = [
     photos: "literature-talk",
     venue: "attaGalatta",
     venueLink: "auto_linked",
-    when: () => ({ start: ist(6, "17:00"), end: ist(6, "19:00") }),
+    when: (c) => ({ start: c.wall(6, "17:00"), end: c.wall(6, "19:00") }),
     capacity: 60,
     curated: { source: "https://attagalatta.com/events/writing-bengaluru", claimed: false },
     categories: ["arts-culture-literature"],
@@ -991,7 +997,7 @@ const EVENTS: EventSpec[] = [
     photos: "hackathon",
     venue: "nimhans",
     venueLink: "confirmed",
-    when: () => ({ start: ist(12, "09:00"), end: ist(13, "21:00") }),
+    when: (c) => ({ start: c.wall(12, "09:00"), end: c.wall(13, "21:00") }),
     capacity: 300,
     link: "https://buildbengaluru.devfolio.co",
     curated: { source: "https://buildbengaluru.devfolio.co", claimed: true },
@@ -1023,7 +1029,7 @@ const EVENTS: EventSpec[] = [
     video: true,
     venue: "highUltra",
     venueLink: "confirmed",
-    when: () => ({ start: ist(1, "18:00"), end: ist(2, "00:00") }),
+    when: (c) => ({ start: c.wall(1, "18:00"), end: c.wall(2, "00:00") }),
     capacity: 250,
     featured: true,
     minAge: 21,
@@ -1054,7 +1060,7 @@ const EVENTS: EventSpec[] = [
     photos: "run-club",
     venue: "cubbon",
     venueLink: "confirmed",
-    when: () => ({ start: ist(2, "06:00"), end: ist(2, "07:30") }),
+    when: (c) => ({ start: c.wall(2, "06:00"), end: c.wall(2, "07:30") }),
     capacity: null,
     recurring: true,
     categories: ["sports-running", "wellness-fitness"],
@@ -1086,7 +1092,7 @@ const EVENTS: EventSpec[] = [
     photos: "art-workshop",
     venue: "artRoom",
     venueLink: "confirmed",
-    when: () => ({ start: ist(8, "18:30"), end: ist(8, "20:30") }),
+    when: (c) => ({ start: c.wall(8, "18:30"), end: c.wall(8, "20:30") }),
     status: "draft",
     capacity: 20,
     categories: ["arts-culture-workshops"],
@@ -1111,7 +1117,7 @@ const EVENTS: EventSpec[] = [
     photos: "wine-tasting",
     venue: "toastTonic",
     venueLink: "confirmed",
-    when: () => ({ start: ist(3, "19:30"), end: ist(3, "22:00") }),
+    when: (c) => ({ start: c.wall(3, "19:30"), end: c.wall(3, "22:00") }),
     visibility: "private",
     capacity: 30,
     minAge: 21,
@@ -1138,7 +1144,7 @@ const EVENTS: EventSpec[] = [
     photos: "tech-meetup",
     venue: "churchStSocial",
     venueLink: "auto_linked",
-    when: () => ({ start: ist(7, "19:00"), end: ist(7, "22:00") }),
+    when: (c) => ({ start: c.wall(7, "19:00"), end: c.wall(7, "22:00") }),
     visibility: "unlisted",
     capacity: 60,
     categories: ["tech-meetups", "networking-industry-mixers"],
@@ -1162,7 +1168,7 @@ const EVENTS: EventSpec[] = [
     photos: "flea-market",
     venue: "churchStSocial",
     venueLink: null,
-    when: () => ({ start: ist(9, "11:00"), end: ist(9, "19:00") }),
+    when: (c) => ({ start: c.wall(9, "11:00"), end: c.wall(9, "19:00") }),
     deleted: true,
     capacity: 500,
     categories: ["markets-fairs-flea-markets"],
@@ -1267,29 +1273,23 @@ async function mediaFor(spec: EventSpec) {
 /* Run                                                                         */
 /* -------------------------------------------------------------------------- */
 
-const cityMatch = {
-  OR: [
-    { city: { equals: "Bengaluru", mode: "insensitive" as const } },
-    { city: { equals: "Bangalore", mode: "insensitive" as const } },
-    { AND: [{ city: null }, { OR: [{ address: { contains: "Bengaluru", mode: "insensitive" as const } }, { address: { contains: "Bangalore", mode: "insensitive" as const } }] }] },
-  ],
-}
-
 /**
- * Rows other seed scripts own and that are not Bengaluru *listings*:
+ * Rows other seed scripts own and that are not the city's *listings*:
  * `seed-me-demo.ts` gives one account an unlisted, already-ended history for
  * the Me tab. Hiding those empties somebody's profile, not the city's feed.
  */
 const KEEP_SLUG_PREFIXES = ["me-demo-"]
-const notOurs = { AND: [{ slug: { not: { startsWith: SLUG_PREFIX } } }, ...KEEP_SLUG_PREFIXES.map((p) => ({ NOT: { slug: { startsWith: p } } }))] }
+const notOurs = (city: SeedCity) => ({
+  AND: [{ slug: { not: { startsWith: slugPrefix(city) } } }, ...KEEP_SLUG_PREFIXES.map((p) => ({ NOT: { slug: { startsWith: p } } }))],
+})
 
 /** As if the reminder sweep already ran, except on the event that is waiting for it. */
 const remindedAt = (spec: EventSpec, start: Date): Date | null =>
   !spec.reminderPending && start.getTime() - NOW.getTime() < 60 * MIN ? new Date(start.getTime() - 60 * MIN) : null
 
 /** Every day of the span at the spec's capacity, and the last one cancelled when the spec says so. */
-async function placeDays(spec: EventSpec, eventId: string, start: Date, end: Date) {
-  await holdSeedOccurrences(db, eventId, spec.capacity, () => syncOccurrences(eventId, start, end, TZ))
+async function placeDays(spec: EventSpec, eventId: string, start: Date, end: Date, zone: string) {
+  await holdSeedOccurrences(db, eventId, spec.capacity, () => syncOccurrences(eventId, start, end, zone))
   if (!spec.cancelLastDay) return
   const last = await db.event_occurrences.findFirst({ where: { event_id: eventId, cancelled_at: null }, orderBy: { start_time: "desc" } })
   if (last) await db.event_occurrences.update({ where: { id: last.id }, data: { cancelled_at: new Date(NOW.getTime() - 6 * HOUR) } })
@@ -1299,21 +1299,23 @@ async function placeDays(spec: EventSpec, eventId: string, start: Date, end: Dat
  * `--refresh-times`: every scenario event back at its offset from now, its days
  * re-synced, and a room the archive sweep closed reopened — nothing else
  * (SCRUM-482). `--apply` resets these events' RSVPs, check-ins and rooms under
- * whoever is testing, and soft-deletes every other Bengaluru event, seed-qa's
+ * whoever is testing, and soft-deletes every other event in the city, seed-qa's
  * live one included; this is the only way back to a live event that does
  * neither. The seeded check-ins and RSVPs stay where they were, as with
  * `seed-qa.ts --refresh-times`.
  */
 async function refreshTimes() {
+  // No parameters: seed-refresh-callers.test.ts finds this body by its signature.
+  const { city, clock, events } = (await cityRun())!
   const live: string[] = []
-  for (const spec of EVENTS) {
+  for (const spec of events) {
     if (spec.deleted) continue
-    const { start, end } = spec.when()
+    const { start, end } = spec.when(clock)
     const result = await refreshSeededEvent(
       db,
       spec.slug,
       { start, end, data: { reminded_at: remindedAt(spec, start) } },
-      (event) => placeDays(spec, event.id, start, end)
+      (event) => placeDays(spec, event.id, start, end, city.timezone)
     )
     console.log(describeRefresh(spec.slug, result, start))
     if (result.status === "moved" && start <= NOW && end > NOW) live.push(spec.slug)
@@ -1322,17 +1324,37 @@ async function refreshTimes() {
 }
 
 /** `--hours`: write (or with `--clear`, remove) `venues.hours` and the zone on the scenario venues above, and print the ids. */
-async function seedHours() {
+async function seedHours(venues: Record<VenueKey, VenueSpec>, city: SeedCity) {
   for (const [key, hours] of Object.entries(HOURS_BY_VENUE)) {
-    const spec = VENUES[key as keyof typeof VENUES]
-    const venue = await db.venues.findFirst({ where: { name: spec.name, city: CITY, deleted_at: null }, select: { id: true } })
+    const spec = venues[key as VenueKey]
+    const venue = await db.venues.findFirst({ where: { name: spec.name, city: city.name, deleted_at: null }, select: { id: true } })
     if (!venue) {
       console.log(`! ${spec.name} is not on this database — skipped (run --apply first)`)
       continue
     }
-    if (APPLY) await db.venues.update({ where: { id: venue.id }, data: { hours: CLEAR ? Prisma.DbNull : hours, ...(CLEAR ? {} : { timezone: TZ }) } })
+    if (APPLY) await db.venues.update({ where: { id: venue.id }, data: { hours: CLEAR ? Prisma.DbNull : hours, ...(CLEAR ? {} : { timezone: city.timezone }) } })
     console.log(`${APPLY ? "" : "(dry run) "}${CLEAR ? "cleared" : "hours  "} ${venue.id}  ${spec.name}${CLEAR ? "" : `  ${hours!.length} rows, e.g. ${hours![0].open}-${hours![0].close}`}`)
   }
+}
+
+/**
+ * `--clean`: the city's seeded rows, soft-deleted — its `<prefix>` events and
+ * the scenario venues under their names in that city. Nothing else: not another
+ * city's rows, not the crowd's accounts, never a venue day.
+ */
+async function clean(city: SeedCity, venues: Record<VenueKey, VenueSpec>) {
+  const seeded = { ...seededEventsWhere(city), ...realEventsWhere }
+  const seededVenues = { name: { in: Object.values<VenueSpec>(venues).map((v) => v.name) }, city: city.name, deleted_at: null }
+  const [eventCount, venueCount] = await Promise.all([db.events.count({ where: seeded }), db.venues.count({ where: seededVenues })])
+  console.log(`${APPLY ? "Soft-delete" : "Would soft-delete"} ${eventCount} ${slugPrefix(city)}* event(s) and ${venueCount} seeded venue(s) in ${city.name}. Nothing else.`)
+  if (!APPLY) {
+    console.log("\nDry run. Re-run with --apply to write.\n")
+    return
+  }
+  const at = new Date()
+  const events = await db.events.updateMany({ where: seeded, data: { deleted_at: at, updated_at: at } })
+  const removed = await db.venues.updateMany({ where: seededVenues, data: { deleted_at: at } })
+  console.log(`soft-deleted ${events.count} event(s) and ${removed.count} venue(s)\n`)
 }
 
 async function main() {
@@ -1345,11 +1367,13 @@ async function main() {
   })()
   console.log(`\ndatabase: ${host}`)
   console.log(
-    REFRESH_TIMES
-      ? "mode:     REFRESH TIMES — event times, days and closed rooms only\n"
-      : APPLY
-        ? "mode:     APPLY — this will write\n"
-        : "mode:     dry run\n"
+    CLEAN
+      ? "mode:     CLEAN — this city's seeded events and venues only"
+      : REFRESH_TIMES
+        ? "mode:     REFRESH TIMES — event times, days and closed rooms only"
+        : APPLY
+          ? "mode:     APPLY — this will write"
+          : "mode:     dry run"
   )
 
   const refusal = environmentRefusal(process.env)
@@ -1358,32 +1382,51 @@ async function main() {
     process.exitCode = 1
     return
   }
-  if (HOURS) {
-    await seedHours()
+  const run = await cityRun()
+  if (!run) {
+    console.error(`REFUSING: no city "${CITY_SLUG ?? ""}" in the catalogue — add it at /dashboard/markets (or in a migration) first; --city takes its slug.`)
+    process.exitCode = 1
     return
   }
-  if (REFRESH_TIMES) {
-    await refreshTimes()
-    return
-  }
+  const { city, clock, events, venues } = run
+  console.log(`city:     ${city.name} (${city.slug}, ${city.timezone}) — scenario slugs ${slugPrefix(city)}*\n`)
+  if (CLEAN) return clean(city, venues)
+  if (HOURS) return seedHours(venues, city)
+  if (REFRESH_TIMES) return refreshTimes()
+  await seedCity(city, clock, events, venues)
+}
 
+/** This run's city from the catalogue (`--city`), with its clock, scenarios and venues. Read once. */
+let run: Promise<{ city: SeedCity; clock: Clock; events: EventSpec[]; venues: Record<VenueKey, VenueSpec> } | null> | undefined
+function cityRun() {
+  run ??= (CITY_SLUG ? loadSeedCity(db, CITY_SLUG) : Promise.resolve(null)).then(
+    (city) => city && { city, clock: clockFor(city.timezone, NOW), events: EVENTS.map((e) => forCity(e, city)), venues: placeVenues(VENUES, city) }
+  )
+  return run
+}
+
+/** `--apply` (and its dry run): the city's other events out, its scenarios in. */
+async function seedCity(city: SeedCity, clock: Clock, events: EventSpec[], venues: Record<VenueKey, VenueSpec>) {
   /*
    * Never a venue day (F10). They are made by people going live, not by this
    * seed, and soft-deleting one takes a room and everybody's check-ins in it
-   * out from under them on staging.
+   * out from under them on staging. Never another city's events either: the
+   * match is this city's catalogue names (`cityMatchFor`).
    */
+  const cityMatch = cityMatchFor(city)
   const doomed = await db.events.findMany({
-    where: { ...cityMatch, deleted_at: null, ...notOurs, ...realEventsWhere },
+    where: { ...cityMatch, deleted_at: null, ...notOurs(city), ...realEventsWhere },
     select: { slug: true, title: true, status: true },
     orderBy: { start_time: "asc" },
   })
-  console.log(`Soft-delete ${doomed.length} existing Bengaluru event(s):`)
+  const names = isHome(city) ? "Bengaluru / Bangalore" : city.matchKeys.join(" / ")
+  console.log(`Soft-delete ${doomed.length} existing ${city.name} event(s) — city ${names} only, no other city's:`)
   for (const e of doomed) console.log(`    - ${e.slug.padEnd(40)} ${e.status.padEnd(10)} ${e.title}`)
 
-  console.log(`\nSeed ${EVENTS.length} scenario events:`)
-  for (const e of EVENTS) {
-    const { start, end } = e.when()
-    console.log(`    ${e.slug.padEnd(38)} ${fmt(start)} → ${fmt(end)}\n      ${e.scenario}`)
+  console.log(`\nSeed ${events.length} scenario events:`)
+  for (const e of events) {
+    const { start, end } = e.when(clock)
+    console.log(`    ${e.slug.padEnd(38)} ${fmt(start, city.timezone)} → ${fmt(end, city.timezone)}\n      ${e.scenario}`)
   }
 
   if (!APPLY) {
@@ -1409,7 +1452,7 @@ async function main() {
     if (u) people[key] = u.id
     else console.log(`  !  ${email} not found — run seed:qa --apply to create the attendees; skipped`)
   }
-  const crowdIds = await ensureCrowd(db)
+  const crowdIds = await ensureCrowd(db, isHome(city) ? undefined : { key: city.slug, place: city.name, neutral: (text) => localiseText(text, city) })
   console.log(`crowd: ${crowdIds.length} profiles ready`)
   const ids = (list: Person[] | undefined) => (list ?? []).map((p) => people[p]).filter((id): id is string => !!id)
 
@@ -1426,19 +1469,19 @@ async function main() {
 
   /* ── remove ───────────────────────────────────────────────────────────── */
   const removed = await db.events.updateMany({
-    where: { ...cityMatch, deleted_at: null, ...notOurs, ...realEventsWhere },
+    where: { ...cityMatch, deleted_at: null, ...notOurs(city), ...realEventsWhere },
     data: { deleted_at: new Date(), updated_at: new Date() },
   })
   console.log(`\nsoft-deleted ${removed.count} event(s)`)
 
   /* ── venues ───────────────────────────────────────────────────────────── */
   const venueIds: Partial<Record<VenueKey, string>> = {}
-  for (const [key, v] of Object.entries(VENUES) as [VenueKey, VenueSpec][]) {
+  for (const [key, v] of Object.entries(venues) as [VenueKey, VenueSpec][]) {
     const owned = v.ownedByVenueOrg && venuesOrg
     const data = {
       name: v.name,
-      address: `${v.address} ${v.postal}`,
-      city: CITY,
+      address: [v.address, v.postal].filter(Boolean).join(" "),
+      city: city.name,
       latitude: v.lat,
       longitude: v.lng,
       capacity: v.capacity,
@@ -1449,10 +1492,10 @@ async function main() {
       claimed_at: owned ? new Date(NOW.getTime() - 60 * 24 * HOUR) : null,
       status: "active" as const,
       deleted_at: null,
-      timezone: TZ,
+      timezone: city.timezone,
       ...(HOURS_BY_VENUE[key] && { hours: HOURS_BY_VENUE[key] }),
     }
-    const existing = await db.venues.findFirst({ where: { name: v.name, city: CITY }, select: { id: true } })
+    const existing = await db.venues.findFirst({ where: { name: v.name, city: city.name }, select: { id: true } })
     const row = existing
       ? await db.venues.update({ where: { id: existing.id }, data })
       : await db.venues.create({ data: { ...data, created_by: admin.id } })
@@ -1469,10 +1512,11 @@ async function main() {
 
   /* ── events ───────────────────────────────────────────────────────────── */
   const hotlinked: string[] = []
-  for (const spec of EVENTS) {
-    const { start, end } = spec.when()
-    const venue = VENUES[spec.venue] as VenueSpec
-    const media = await mediaFor(spec)
+  for (const [i, spec] of events.entries()) {
+    const { start, end } = spec.when(clock)
+    const venue = venues[spec.venue]
+    // Bengaluru's spec: one set of objects in the bucket, whichever city shows them.
+    const media = await mediaFor(EVENTS[i])
     hotlinked.push(...media.hotlinked)
 
     const linked = spec.venueLink ? (venueIds[spec.venue] ?? null) : null
@@ -1490,13 +1534,13 @@ async function main() {
       venue_name: venue.name,
       venue_id: linked,
       venue_link_status: linked ? (spec.venueLink ?? null) : null,
-      city: CITY,
-      state: STATE,
-      country: COUNTRY,
-      postal_code: venue.postal,
+      city: city.name,
+      state: city.state,
+      country: city.country,
+      postal_code: venue.postal || null,
       start_time: start,
       end_time: end,
-      timezone: TZ,
+      timezone: city.timezone,
       status: spec.status ?? "published",
       visibility: spec.visibility ?? "public",
       max_capacity: spec.capacity,
@@ -1524,7 +1568,7 @@ async function main() {
       create: { slug: spec.slug, ...fields, created_at: createdAt },
     })
 
-    await placeDays(spec, event.id, start, end)
+    await placeDays(spec, event.id, start, end, city.timezone)
 
     await db.event_details.upsert({
       where: { event_id: event.id },
@@ -1565,7 +1609,7 @@ async function main() {
     const amenities = spec.amenities.map((s) => amenityIds.get(s)).filter((id): id is string => !!id)
     if (amenities.length) await db.event_amenities.createMany({ data: amenities.map((amenity_id) => ({ event_id: event.id, amenity_id })) })
 
-    await seedSocial(event.id, spec, start, end, { ids, crowdIds, organiserId: organiser.id, orgName: eventsOrg?.display_name ?? "Organiser", sponsorId: sponsor?.id ?? null, adminId: admin.id })
+    await seedSocial(event.id, spec, start, end, { venue, ids, crowdIds, organiserId: organiser.id, orgName: eventsOrg?.display_name ?? "Organiser", sponsorId: sponsor?.id ?? null, adminId: admin.id })
 
     console.log(`  ✓ ${spec.slug}`)
   }
@@ -1578,11 +1622,54 @@ async function main() {
   }
 
   console.log("\nCheck-in pins (set the simulator location to these):")
-  for (const spec of EVENTS.filter((e) => !e.status && !e.visibility && !e.deleted)) {
-    const v = VENUES[spec.venue] as VenueSpec
+  for (const spec of events.filter((e) => !e.status && !e.visibility && !e.deleted)) {
+    const v = venues[spec.venue]
     console.log(`    ${spec.slug.padEnd(38)} ${v.lat.toFixed(4)}, ${v.lng.toFixed(4)}`)
   }
   console.log("\nThe feed caches for 30 s — pull to refresh after that.\n")
+}
+
+/**
+ * A scenario as it runs in `city`; Bengaluru's exactly as written. Its own slug
+ * and links, its copy through the city's table (`localiseText`), the city's
+ * licensed age on a 21+ door — and no named QA person seated inside. Each person
+ * has one open check-in (SCRUM-705): seating them here would check them out of
+ * Bengaluru's rooms. They still RSVP, favourite, rate and talk; the city's own
+ * crowd fills its rooms.
+ */
+export function forCity(spec: EventSpec, city: SeedCity): EventSpec {
+  if (isHome(city)) return spec
+  const t = (text: string) => localiseText(text, city)
+  const tr = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [t(k), t(v)]))
+  const s = spec.social
+  return {
+    ...spec,
+    slug: localSlug(city, spec.slug),
+    scenario: t(spec.scenario),
+    title: t(spec.title),
+    short: t(spec.short),
+    description: t(spec.description),
+    full: t(spec.full),
+    link: spec.link && neutralLink(city, spec.slug),
+    curated: spec.curated && { ...spec.curated, source: neutralLink(city, spec.slug) },
+    // The scenarios' licensed-venue age; the city's own where it has one (19 in Toronto and Vancouver).
+    minAge: spec.minAge === 21 && city.licensedMinAge ? city.licensedMinAge : spec.minAge,
+    details: {
+      houseRules: t(spec.details.houseRules),
+      cancellation: t(spec.details.cancellation),
+      health: spec.details.health && t(spec.details.health),
+      faq: spec.details.faq.map((f) => ({ question: t(f.question), answer: t(f.answer) })),
+      access: tr(spec.details.access),
+      extra: tr(spec.details.extra),
+    },
+    social: s && {
+      ...s,
+      checkedIn: undefined,
+      chat: s.chat?.map(([p, line]): [Person, string] => [p, t(line)]),
+      ratings: s.ratings?.map(([p, stars, text]): [Person, number, string] => [p, stars, t(text)]),
+      announcement: s.announcement && t(s.announcement),
+    },
+  }
 }
 
 function detailsOf(spec: EventSpec) {
@@ -1611,7 +1698,7 @@ async function seedSocial(
   spec: EventSpec,
   start: Date,
   end: Date,
-  ctx: { ids: (l: Person[] | undefined) => string[]; crowdIds: string[]; organiserId: string; orgName: string; sponsorId: string | null; adminId: string }
+  ctx: { venue: VenueSpec; ids: (l: Person[] | undefined) => string[]; crowdIds: string[]; organiserId: string; orgName: string; sponsorId: string | null; adminId: string }
 ) {
   const s = spec.social ?? {}
   const everyone = [...ctx.ids(Object.keys(PEOPLE) as Person[]), ...ctx.crowdIds]
@@ -1690,8 +1777,8 @@ async function seedSocial(
         kind: "attendee",
         status: "checked_in",
         check_in_time: checkInAt,
-        latitude: VENUES[spec.venue].lat,
-        longitude: VENUES[spec.venue].lng,
+        latitude: ctx.venue.lat,
+        longitude: ctx.venue.lng,
         device_info: { platform: i % 2 ? "android" : "ios", source: "seed-blr-scenarios" },
         last_seen_at: new Date(),
       },
@@ -1718,8 +1805,8 @@ async function seedSocial(
         status: "checked_out",
         check_in_time: inAt,
         check_out_time: outAt,
-        latitude: VENUES[spec.venue].lat,
-        longitude: VENUES[spec.venue].lng,
+        latitude: ctx.venue.lat,
+        longitude: ctx.venue.lng,
         device_info: { platform: i % 2 ? "android" : "ios", source: "seed-blr-scenarios" },
         last_seen_at: outAt,
       },
@@ -1830,13 +1917,15 @@ async function seedSocial(
   }
 }
 
-function fmt(d: Date): string {
-  return new Intl.DateTimeFormat("en-IN", { timeZone: TZ, weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(d)
+function fmt(d: Date, zone: string): string {
+  return new Intl.DateTimeFormat("en-IN", { timeZone: zone, weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }).format(d)
 }
 
-main()
-  .catch((e) => {
-    console.error(e)
-    process.exitCode = 1
-  })
-  .finally(() => db.$disconnect())
+if (require.main === module) {
+  main()
+    .catch((e) => {
+      console.error(e)
+      process.exitCode = 1
+    })
+    .finally(() => db.$disconnect())
+}
