@@ -1315,7 +1315,7 @@ country needs no code. A city's state is the lower of its own and its country's.
 
 | State | `/events/cities` | Its events and places |
 |---|---|---|
-| `live` | Listed once it has rows (a country's default always) | Everyone |
+| `live` | Listed once it has rows. With none it would open empty, so a country's default is `access: comingSoon` (only with `travel1`; `full` for a previewer of its country) and any other is not listed | Everyone |
 | `preview` | `access: comingSoon`, counts 0, only with `X-Client-Features: travel1`; `access: full`, real counts, for a previewer on any client | Empty for everyone but `market_previewers` |
 | `hidden` | Never | Never |
 
@@ -1333,7 +1333,7 @@ geocoding; the server does not store it.
 | `device.access` | Means | What to do |
 |---|---|---|
 | `full` | We are open in that country | Browse the city whose `bounds` hold the device's point (boxes overlap: the smallest box holding it), else `citySlug` |
-| `comingSoon` | That country is in preview | The coming-soon screen for `citySlug` (the bounds' city first), and record demand |
+| `comingSoon` | That country is in preview, or nothing in it has rows right now | The coming-soon screen for `citySlug` (the bounds' city first), and record demand |
 | `none` | We are not there, or that country is hidden | Say so and record demand. `citySlug` is null. May browse the top-level `defaultCitySlug`, **never described as near them** |
 
 **The gate holds by id too.** Everything under `/events/:id` that goes through
@@ -1352,9 +1352,11 @@ signal: it opens and lists under Elsewhere. The gate is launch visibility, and a
 unknown city in a served country must not vanish.
 
 `citySlug` is only ever a city in `device.country`. The top-level
-`defaultCitySlug` (a live country's default) is for no device country, or for
-`none`; it is null only when no live country has a city, and always in `cities`
-otherwise. Do not fall back to the first row of `cities`: that is the busiest
+`defaultCitySlug` (a live city with rows: a live country's default, else the
+busiest; a live default with none only when no live city has rows) is for no
+device country, or for `none`; it is null only when no live country has a city,
+and otherwise always in `cities` for a `travel1` client (as `comingSoon` when it
+has no rows). `device.citySlug` prefers the same way within its country. Do not fall back to the first row of `cities`: that is the busiest
 city in the world.
 
 Pass `city` straight back to `GET /events`, `GET /events/search` or

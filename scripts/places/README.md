@@ -33,6 +33,19 @@ From the repo root, with the DuckDB CLI (`brew install duckdb`):
    Leave out `--osm` for these files: it pauses 5 s per row for Overpass, hours for a city.
    Staging first, driven in the app, then production with the same files.
 
+### Another country
+
+`candidates.sql` runs one country at a time: `PLACES_COUNTRY=CA duckdb < scripts/places/candidates.sql`.
+Add the country's city boxes to `all_cities` there, matching the `cities` rows (`/dashboard/markets`).
+A city must be in the catalogue before its venues import: `import-venues.ts` refuses any other
+city, and writes each venue's `timezone` from its catalogue city (the column's default is
+Asia/Kolkata, so a Toronto bar would otherwise open "tonight" in IST).
+
+Canada on staging (2026-11-01) skipped the agent review: the decisions are REVIEW.md's
+mechanical rules only (confidence 0.8 or more; no wine or liquor stores, McCafé counters or
+airport lounges), with reason `canada staging pass: rule not read`. Production needs the full
+review pass and a person's sample read first, and waits on SCRUM-702 like India's import.
+
 `out/` is gitignored: everything in it is regenerated from the pinned release.
 
 ## Refreshing

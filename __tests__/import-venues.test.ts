@@ -1,11 +1,15 @@
 jest.mock("@/lib/db", () => ({ db: {}, closeDb: jest.fn() }))
 
+import { readFileSync } from "fs"
+import { join } from "path"
+
 import {
   columnsOf,
   coordinatesFromMapsUrl,
   duplicateInFile,
   listedDuplicate,
   nameKey,
+  placedInCatalogue,
   followShortLink,
   readRow,
   venueTypeFrom,
@@ -69,7 +73,7 @@ describe("readRow", () => {
   it("accepts a complete row", async () => {
     await expect(readRow(base, 2, offline)).resolves.toEqual({
       ok: true,
-      row: { line: 2, name: "Toit Brewpub", address: null, city: "Bengaluru", venueType: "brewery", lat: 12.9792, lng: 77.6407, source: "lat/lng", origin: null },
+      row: { line: 2, name: "Toit Brewpub", address: null, city: "Bengaluru", venueType: "brewery", lat: 12.9792, lng: 77.6407, source: "lat/lng", origin: null, timezone: null },
     })
   })
 
@@ -115,7 +119,7 @@ describe("readRow", () => {
 
 describe("duplicateInFile", () => {
   const row = (line: number, lat: number, lng: number): VenueRow =>
-    ({ line, name: `r${line}`, address: null, city: "Bengaluru", venueType: null, lat, lng, source: "lat/lng", origin: null })
+    ({ line, name: `r${line}`, address: null, city: "Bengaluru", venueType: null, lat, lng, source: "lat/lng", origin: null, timezone: null })
 
   it("catches a second row within 100 m of an earlier one, and lets one 150 m away through", () => {
     const first = row(2, 12.9792, 77.6407)
@@ -139,7 +143,7 @@ describe("duplicateInFile", () => {
 describe("listedDuplicate", () => {
   const fromDataset: VenueRow = {
     line: 2, name: "Phoenix Mall", address: null, city: "Bengaluru", venueType: null,
-    lat: 12.9972, lng: 77.6963, source: "lat/lng", origin: { source: "overture:2026-09-23.1", recordId: "id2" },
+    lat: 12.9972, lng: 77.6963, source: "lat/lng", origin: { source: "overture:2026-09-23.1", recordId: "id2" }, timezone: null,
   }
 
   it("matches a same-named venue whose outline holds the pin, though its own pin is 167 m off", () => {
@@ -203,5 +207,49 @@ describe("followShortLink — one hop, by HEAD, to Google Maps only", () => {
     global.fetch = untouched as unknown as typeof fetch
     await expect(followShortLink("https://evil.example/x")).resolves.toBe("https://evil.example/x")
     expect(untouched).not.toHaveBeenCalled()
+  })
+})
+
+describe("placedInCatalogue — a venue's day runs in its own city's time zone (travel P6)", () => {
+  // The column defaults to Asia/Kolkata. A Toronto bar imported on the default
+  // would open and close "tonight" in IST, nine and a half hours off.
+  const { buildCatalogue } = jest.requireActual("@/lib/cities") as typeof import("@/lib/cities")
+  const city = (slug: string, name: string, market: string, timezone: string, match: string[] = []) => ({
+    id: `id-${slug}`, market_code: market, slug, name, match_names: match, timezone, launch_state: "preview" as const,
+    is_default: false, centre_lat: 0, centre_lon: 0, min_lat: -1, min_lon: -1, max_lat: 1, max_lon: 1, sort: 0,
+  })
+  const catalogue = buildCatalogue(
+    [
+      { code: "IN", name: "India", launch_state: "live", sort: 0 },
+      { code: "CA", name: "Canada", launch_state: "preview", sort: 1 },
+    ],
+    [
+      city("bengaluru", "Bengaluru", "IN", "Asia/Kolkata", ["bangalore"]),
+      city("toronto", "Toronto", "CA", "America/Toronto", ["north york"]),
+      city("vancouver", "Vancouver", "CA", "America/Vancouver", ["burnaby"]),
+    ]
+  )
+  const row = (cityName: string): VenueRow =>
+    ({ line: 2, name: "Bar", address: null, city: cityName, venueType: null, lat: 0, lng: 0, source: "lat/lng", origin: null, timezone: null })
+
+  it("takes the zone of the catalogue city the row's spelling names", () => {
+    expect(placedInCatalogue(catalogue, row("Toronto"))).toMatchObject({ ok: true, row: { timezone: "America/Toronto" } })
+    expect(placedInCatalogue(catalogue, row("North York"))).toMatchObject({ ok: true, row: { timezone: "America/Toronto" } })
+    expect(placedInCatalogue(catalogue, row("Burnaby"))).toMatchObject({ ok: true, row: { timezone: "America/Vancouver" } })
+    expect(placedInCatalogue(catalogue, row("Bangalore"))).toMatchObject({ ok: true, row: { timezone: "Asia/Kolkata" } })
+  })
+
+  it("refuses a city the catalogue does not hold, rather than letting it take the column's IST default", () => {
+    expect(placedInCatalogue(catalogue, row("Montreal"))).toEqual({
+      ok: false,
+      line: 2,
+      name: "Bar",
+      reason: 'city "Montreal" is not in the catalogue: add it at /dashboard/markets first',
+    })
+  })
+
+  it("writes the zone it found: the insert names `timezone`, so no row lands on the default", () => {
+    const source = readFileSync(join(__dirname, "../scripts/import-venues.ts"), "utf8")
+    expect(source).toMatch(/createManyAndReturn\(\{[\s\S]*?timezone: row\.timezone!,/)
   })
 })

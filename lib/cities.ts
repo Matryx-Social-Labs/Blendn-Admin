@@ -162,6 +162,16 @@ export function cityCatalogue(): Promise<Catalogue> {
   return catalogue
 }
 
+/**
+ * Forget the cached catalogue and every cached previewer set, after an admin's
+ * save (`lib/market-actions.ts`). This instance reads fresh on its next request;
+ * another instance, within its minute.
+ */
+export function forgetCityCatalogue(): void {
+  shared.__blendnCityCatalogue = null
+  shared.__blendnMarketPreviewers?.clear()
+}
+
 const NO_MARKETS: ReadonlySet<string> = new Set()
 
 /**
