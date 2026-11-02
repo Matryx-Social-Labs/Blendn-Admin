@@ -240,7 +240,6 @@ describe("tickets", () => {
       event_id: w.eventId,
       holder_id: w.buyer,
       door_code: "AB23CD",
-      qr_secret_hash: secretHash(),
       ...over,
     })
     return { ...w, orderId: o.id, ticket }
@@ -263,8 +262,6 @@ describe("tickets", () => {
     ["a lower-case door code", { door_code: "ab23cd" }, "tickets_door_code_shape"],
     ["a five-character door code", { door_code: "AB23C" }, "tickets_door_code_shape"],
     ...["0", "O", "1", "I", "L", "U"].map((c): [string, Record<string, unknown>, string] => [`a door code with ${c} in it`, { door_code: `AB23C${c}` }, "tickets_door_code_shape"]),
-    ["a QR secret stored as itself", { qr_secret_hash: randomBytes(32).toString("base64url") }, "tickets_qr_secret_hash_shape"],
-    ["an upper-case hash", { qr_secret_hash: secretHash().toUpperCase() }, "tickets_qr_secret_hash_shape"],
   ])("refuses %s", async (_name, over, constraint) => {
     const p = await paidOrder()
     await expect(db.tickets.create({ data: p.ticket(over) })).rejects.toThrow(new RegExp(constraint))

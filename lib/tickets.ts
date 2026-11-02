@@ -1,10 +1,10 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto"
+import { createHmac, randomInt, timingSafeEqual } from "node:crypto"
 
 import type { Prisma, user_role } from "@prisma/client"
 
 import { isUuid } from "./api-input"
 import { db } from "./db"
-import { ticketingOn } from "./env"
+import { ticketQrKey, ticketingOn } from "./env"
 import { actorFor } from "./org-membership"
 import { violatedConstraint } from "./prisma-errors"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
@@ -14,9 +14,10 @@ import { eventPermissionSelect, eventPermissions } from "./rbac"
  * (SCRUM-1010, security H5, database 6).
  *
  * A ticket carries two credentials. The **door code** is six characters a
- * person reads aloud or types; the **QR** is `<ticket id>.<secret>`, scanned.
- * Only `sha256(secret)` is stored (`qr_secret_hash`): the secret goes to the
- * buyer once, at issue, and a copy of the table is not a copy of every pass.
+ * person reads aloud or types, random and unique per event. The **QR** is
+ * `<ticket id>.<base64url HMAC-SHA256(TICKET_QR_KEY, ticket id)>`, derived on
+ * demand and stored nowhere: the server can show it again after a reinstall
+ * or on a new phone, and a copy of the table is not a copy of every pass.
  *
  * Issuing is Phase 2's (the webhook marks an order paid and issues its tickets
  * in that transaction; `tickets_order_must_be_paid` refuses one for any order
@@ -27,8 +28,6 @@ import { eventPermissionSelect, eventPermissions } from "./rbac"
 /** Crockford base32 less 0 O 1 I L U: nothing a tired door can misread. CHECK `tickets_door_code_shape` matches. */
 export const DOOR_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
 export const DOOR_CODE_LENGTH = 6
-/** 32 random bytes: past guessing, whatever the door's rate limit. */
-const QR_SECRET_BYTES = 32
 /** Collisions in 30^6 codes per event are rare; this many in a row is a broken generator, not bad luck. */
 const DOOR_CODE_ATTEMPTS = 8
 const DOOR_CODE_INDEX = "tickets_event_id_door_code_key"
@@ -40,12 +39,31 @@ export function newDoorCode(): string {
   return code
 }
 
-export const qrSecretHash = (secret: string): string => createHash("sha256").update(secret, "utf8").digest("hex")
+const qrMac = (ticketId: string): Buffer => createHmac("sha256", ticketQrKey()).update(ticketId, "utf8").digest()
+
+/** What a ticket's QR encodes. Derived, so the wallet, a reinstall and the email all get the same one. */
+export function ticketQrPayload(ticketId: string): string {
+  if (!isUuid(ticketId)) throw new TypeError("a ticket id is a uuid")
+  return `${ticketId}.${qrMac(ticketId).toString("base64url")}`
+}
+
+/**
+ * The ticket a scanned QR names, or null if it is not one we signed. The MAC
+ * is recomputed and compared in constant time, so how much of a forgery
+ * matched never shows in the response time.
+ */
+export function verifyTicketQr(payload: string): string | null {
+  const [ticketId, mac, extra] = typeof payload === "string" ? payload.split(".") : []
+  if (!isUuid(ticketId) || !mac || extra !== undefined) return null
+  const presented = Buffer.from(mac, "base64url")
+  const expected = qrMac(ticketId)
+  return presented.length === expected.length && timingSafeEqual(presented, expected) ? ticketId : null
+}
 
 export interface IssuedTicket {
   ticketId: string
   doorCode: string
-  /** `<ticket id>.<secret>`: shown once, to the holder, and never stored. */
+  /** `ticketQrPayload(ticketId)`: the same every time it is asked for. */
   qrPayload: string
 }
 
@@ -77,7 +95,6 @@ async function issueOne(
   tx: Prisma.TransactionClient,
   seat: { orderId: string; eventId: string; holderId: string; ticketTypeId: string }
 ): Promise<IssuedTicket> {
-  const secret = randomBytes(QR_SECRET_BYTES).toString("base64url")
   for (let attempt = 1; ; attempt++) {
     const doorCode = newDoorCode()
     await tx.$executeRaw`SAVEPOINT door_code`
@@ -89,12 +106,11 @@ async function issueOne(
           ticket_type_id: seat.ticketTypeId,
           holder_id: seat.holderId,
           door_code: doorCode,
-          qr_secret_hash: qrSecretHash(secret),
         },
         select: { id: true },
       })
       await tx.$executeRaw`RELEASE SAVEPOINT door_code`
-      return { ticketId: row.id, doorCode, qrPayload: `${row.id}.${secret}` }
+      return { ticketId: row.id, doorCode, qrPayload: ticketQrPayload(row.id) }
     } catch (error) {
       if (!violatedConstraint(error, DOOR_CODE_INDEX) || attempt >= DOOR_CODE_ATTEMPTS) throw error
       await tx.$executeRaw`ROLLBACK TO SAVEPOINT door_code`
@@ -108,13 +124,6 @@ export type RedeemResult =
   | { ok: true; ticketId: string; redeemedAt: Date }
   | { ok: false; reason: "ticketing_off" | "not_authorized" | "invalid" | "already_redeemed"; redeemedAt?: Date }
 
-/** Constant time over the hashes, so how much of a forged secret matched never shows in the response time. */
-function secretMatches(presented: string, storedHash: string): boolean {
-  const a = Buffer.from(qrSecretHash(presented), "hex")
-  const b = Buffer.from(storedHash, "hex")
-  return a.length === b.length && timingSafeEqual(a, b)
-}
-
 async function ticketFor(eventId: string, credential: RedeemCredential): Promise<string | null> {
   if ("doorCode" in credential) {
     const code = typeof credential.doorCode === "string" ? credential.doorCode.trim().toUpperCase() : ""
@@ -122,10 +131,10 @@ async function ticketFor(eventId: string, credential: RedeemCredential): Promise
     const row = await db.tickets.findUnique({ where: { event_id_door_code: { event_id: eventId, door_code: code } }, select: { id: true } })
     return row?.id ?? null
   }
-  const [ticketId, secret, extra] = typeof credential.qr === "string" ? credential.qr.split(".") : []
-  if (!isUuid(ticketId) || !secret || extra !== undefined) return null
-  const row = await db.tickets.findUnique({ where: { id: ticketId }, select: { event_id: true, qr_secret_hash: true } })
-  return row && row.event_id === eventId && secretMatches(secret, row.qr_secret_hash) ? ticketId : null
+  const ticketId = verifyTicketQr(credential.qr)
+  if (!ticketId) return null
+  const row = await db.tickets.findUnique({ where: { id: ticketId }, select: { event_id: true } })
+  return row?.event_id === eventId ? ticketId : null
 }
 
 /**

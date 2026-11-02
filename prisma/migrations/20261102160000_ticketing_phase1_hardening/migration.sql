@@ -52,12 +52,11 @@ ALTER TABLE "ticket_order_lines" ADD CONSTRAINT "ticket_order_lines_order_id_eve
 
 -- Tickets ----------------------------------------------------------------------------------------
 
--- Only the hash of the QR secret is stored: a copy of this table must not be a copy of every pass.
-ALTER TABLE "tickets" DROP CONSTRAINT "tickets_qr_secret_length";
-ALTER TABLE "tickets" RENAME COLUMN "qr_secret" TO "qr_secret_hash";
-ALTER INDEX "tickets_qr_secret_key" RENAME TO "tickets_qr_secret_hash_key";
-UPDATE "tickets" SET "qr_secret_hash" = encode(sha256(convert_to("qr_secret_hash", 'UTF8')), 'hex');
-ALTER TABLE "tickets" ADD CONSTRAINT "tickets_qr_secret_hash_shape" CHECK ("qr_secret_hash" ~ '^[0-9a-f]{64}$');
+-- No QR secret is stored at all. A ticket's QR is `<id>.<HMAC-SHA256(TICKET_QR_KEY, id)>`, derived on
+-- demand (lib/tickets.ts ticketQrPayload), so a reinstalled phone gets it back and a copy of this table
+-- is not a copy of every pass. Dropping the column drops `tickets_qr_secret_length` and
+-- `tickets_qr_secret_key` with it.
+ALTER TABLE "tickets" DROP COLUMN "qr_secret";
 
 -- Door codes from Crockford base32 less 0 O 1 I L U: 30 symbols nobody misreads at a door. Spelled
 -- out, not as ranges, so the collation cannot widen it. NOT VALID: a code already issued stays

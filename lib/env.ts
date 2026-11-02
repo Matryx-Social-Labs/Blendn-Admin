@@ -117,6 +117,14 @@ const envSchema = z.object({
   TICKETING: z.enum(["true", "false"]).optional(),
 
   /**
+   * The key a ticket's QR is signed with (`ticketQrPayload`, lib/tickets.ts):
+   * `<ticket id>.<HMAC-SHA256(this, ticket id)>`, derived on demand, stored
+   * nowhere. 32 or more. Required once TICKETING is on (the refinement below);
+   * rotating it invalidates every QR issued, never a door code.
+   */
+  TICKET_QR_KEY: z.string().min(32, "TICKET_QR_KEY must be at least 32 characters").optional(),
+
+  /**
    * RevenueCat (plan v2 §5). The value the RevenueCat dashboard sends as the
    * webhook's `Authorization` header is `Bearer <this>`. We choose it, so 32
    * or more. Unset: the webhook refuses everything and nothing grants Blendn+
@@ -213,6 +221,10 @@ export function razorpayKeyModeProblem(
 }
 
 const refinedEnvSchema = envSchema.superRefine((env, ctx) => {
+  // Selling with no QR key issues tickets that cannot be checked at the door.
+  if (env.TICKETING === "true" && !env.TICKET_QR_KEY) {
+    ctx.addIssue({ code: "custom", path: ["TICKET_QR_KEY"], message: "TICKET_QR_KEY is required once TICKETING is on" })
+  }
   const mode = razorpayKeyModeProblem(env.RAZORPAY_KEY_ID, env.RAILWAY_ENVIRONMENT_NAME)
   if (mode) ctx.addIssue({ code: "custom", path: ["RAZORPAY_KEY_ID"], message: mode })
   // Half a key pair is a mistake, not a policy: checkout would fail on the
@@ -472,6 +484,17 @@ export function dashboardHost(): string | null {
 /** Whether ticketing is on here (`TICKETING=true`). Off by default; the one reader of the variable. */
 export function ticketingOn(): boolean {
   return process.env.TICKETING?.trim() === "true"
+}
+
+/**
+ * The ticket QR signing key. Throws when unset or shorter than 32: a ticket
+ * whose QR cannot be signed or checked is a bug to surface, not a fallback to
+ * take. The one reader of the variable.
+ */
+export function ticketQrKey(): string {
+  const key = process.env.TICKET_QR_KEY?.trim()
+  if (!key || key.length < 32) throw new Error("TICKET_QR_KEY is not set (32+ characters): required while TICKETING is on")
+  return key
 }
 
 /**

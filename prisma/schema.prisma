@@ -4702,17 +4702,16 @@ model ticket_order_lines {
 }
 
 /// One admission. The door code is unique per event (`tickets_event_id_door_code_key`);
-/// the QR carries `qr_secret`. Type and order are on the ticket's event (composite keys).
+/// the QR is signed, not stored (`ticketQrPayload`). Type and order are on the ticket's event (composite keys).
 model tickets {
   id             String    @id @default(uuid()) @db.Uuid
   order_id       String    @db.Uuid
   ticket_type_id String    @db.Uuid
   event_id       String    @db.Uuid
   holder_id      String
-  /// Six of `DOOR_CODE_ALPHABET` (lib/tickets.ts), unique per event.
+  /// Six of `DOOR_CODE_ALPHABET` (lib/tickets.ts), unique per event. The QR is not stored:
+  /// it is `<id>.<HMAC-SHA256(TICKET_QR_KEY, id)>`, derived on demand (`ticketQrPayload`).
   door_code      String
-  /// sha256 of the QR secret, hex. The secret itself is handed to the buyer once and never stored.
-  qr_secret_hash String    @unique
   redeemed_at    DateTime? @db.Timestamptz(6)
   redeemed_by    String?
   created_at     DateTime  @default(now()) @db.Timestamptz(6)
