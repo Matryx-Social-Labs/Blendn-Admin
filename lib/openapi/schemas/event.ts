@@ -155,7 +155,7 @@ export const EventCitiesResponseSchema = z
         slug: z.string().nullable().openapi({ description: "The catalogue's id for this city; what `homeCitySlug` takes. Null when uncatalogued (file it under Elsewhere)." }),
         country: z.string().nullable().openapi({ description: "ISO 3166-1 alpha-2. Null when uncatalogued." }),
         launchState: z.enum(["live", "preview"]).nullable().openapi({ description: "The lower of the city's own state and its country's. A hidden city is never listed. Null when uncatalogued." }),
-        access: z.enum(["full", "comingSoon"]).openapi({ description: "`comingSoon`: a preview city this viewer cannot open; its counts are 0 and its lists empty. Show the coming-soon screen and record demand. Only sent to a client declaring `X-Client-Features: travel1`." }),
+        access: z.enum(["full", "comingSoon"]).openapi({ description: "`comingSoon`: a city this viewer cannot open, or would open empty: a preview city (unless a previewer), or a city with no rows right now (live included; a previewer of its country still gets `full`). Its counts are 0 and its lists empty. Show the coming-soon screen and record demand. Only sent to a client declaring `X-Client-Features: travel1`." }),
         timezone: z.string().nullable().openapi({ description: "IANA zone to show this city's times in. Null when uncatalogued." }),
         bounds: z
           .object({ minLat: z.number(), minLon: z.number(), maxLat: z.number(), maxLon: z.number() })
@@ -184,15 +184,15 @@ export const EventCitiesResponseSchema = z
       )
       .openapi({ description: "The countries served, in picker order. A hidden country is never listed." }),
     defaultCitySlug: z.string().nullable().openapi({
-      description: "A live country's default city: where to browse with no device country, or from a country we do not serve. Never call it near the person. Listed in `cities` whenever it is not null.",
+      description: "Where to browse with no device country, or from a country we do not serve: a live city with rows (a live country's default, else the busiest), or a live default with none only when no live city has rows. Never call it near the person. Listed in `cities` for a `travel1` client whenever it is not null (as `comingSoon` when it has no rows).",
     }),
     device: z
       .object({
         country: z.string().openapi({ description: "`X-Country`, upper-cased." }),
         access: z.enum(["full", "comingSoon", "none"]).openapi({
-          description: "`full`: open `citySlug`. `comingSoon`: a preview country; open that city's coming-soon screen. `none`: we are not there; say so, and name no city as near.",
+          description: "`full`: open `citySlug`. `comingSoon`: a preview country, or one with no rows right now; open that city's coming-soon screen. `none`: we are not there; say so, and name no city as near.",
         }),
-        citySlug: z.string().nullable().openapi({ description: "Only ever a city in `country`; null for `none`. Prefer the smallest box in `cities` holding the device's point." }),
+        citySlug: z.string().nullable().openapi({ description: "Only ever a city in `country`: its default when that has rows, else its busiest; null for `none`. Prefer the smallest box in `cities` holding the device's point." }),
       })
       .nullable()
       .openapi({ description: "Null when the client sent no valid `X-Country`." }),

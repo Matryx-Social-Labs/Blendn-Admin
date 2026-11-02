@@ -255,10 +255,39 @@ describe("the /events/cities answer", () => {
     }
   })
 
-  it("lists a live market's default city with no rows, so the default always resolves", () => {
+  it("a live default city with no rows still resolves, but as coming soon: it would open empty", () => {
     const body = answer({ events: [] })
-    expect(row(body, "Alpha")).toMatchObject({ eventCount: 0, placeCount: 0, centre: { latitude: 1, longitude: 2 } })
+    expect(row(body, "Alpha")).toMatchObject({ eventCount: 0, placeCount: 0, access: "comingSoon", centre: { latitude: 1, longitude: 2 } })
     expect(body.defaultCitySlug).toBe("alpha")
+  })
+
+  it("an old client is never sent an empty live city: it cannot say coming soon", () => {
+    expect(row(answer({ events: [], wantsPreview: false }), "Alpha")).toBeUndefined()
+  })
+
+  it("an empty live city stays open for its market's previewer", () => {
+    expect(row(answer({ events: [], previewMarkets: new Set(["AA"]) }), "Alpha")).toMatchObject({ access: "full" })
+  })
+
+  describe("a live city that emptied while another has events", () => {
+    const two = buildCatalogue([market({})], [city({ slug: "alpha", is_default: true }), city({ slug: "busy", name: "Busy", sort: 1 })])
+    const body = citiesResponse({
+      catalogue: two,
+      events: [{ city: "Busy", latitude: 1, longitude: 2 }],
+      places: [],
+      previewMarkets: NONE,
+      wantsPreview: true,
+      deviceCountry: "AA",
+    })
+
+    it("the default moves to the city that opens with something", () => expect(body.defaultCitySlug).toBe("busy"))
+    it("the device's country names that city, open", () => expect(body.device).toEqual({ country: "AA", access: "full", citySlug: "busy" }))
+    it("the emptied default is coming soon, not open", () => expect(row(body, "Alpha")).toMatchObject({ access: "comingSoon", eventCount: 0 }))
+    it("the country keeps its configured default", () => expect(body.countries[0].defaultCitySlug).toBe("alpha"))
+  })
+
+  it("in a live country with no supply anywhere, the device's city is coming soon", () => {
+    expect(answer({ events: [], deviceCountry: "AA" }).device).toEqual({ country: "AA", access: "comingSoon", citySlug: "alpha" })
   })
 
   it("a market with no default row still resolves: its first open city is named, so it is listed", () => {
@@ -271,9 +300,32 @@ describe("the /events/cities answer", () => {
 
   it("a live market whose default is only in preview falls back to a live city, and lists it", () => {
     const mixed = buildCatalogue([market({})], [city({ slug: "p", name: "P", launch_state: "preview", is_default: true }), city({ slug: "l", name: "L", sort: 1 })])
-    const body = citiesResponse({ catalogue: mixed, events: [], places: [], previewMarkets: NONE, wantsPreview: false, deviceCountry: null })
+    const body = citiesResponse({ catalogue: mixed, events: [], places: [], previewMarkets: NONE, wantsPreview: true, deviceCountry: null })
     expect(body.defaultCitySlug).toBe("l")
     expect(body.cities.map((c) => c.slug)).toContain("l")
+    // An old client cannot say "coming soon", so with nothing anywhere it is sent no city at all.
+    const old = citiesResponse({ catalogue: mixed, events: [], places: [], previewMarkets: NONE, wantsPreview: false, deviceCountry: null })
+    expect(old.defaultCitySlug).toBe("l")
+    expect(old.cities).toEqual([])
+  })
+
+  describe("two live countries, one with rows", () => {
+    const pair = buildCatalogue(
+      [market({}), market({ code: "BB", name: "Bland", sort: 1 })],
+      [city({ slug: "alpha", is_default: true }), city({ slug: "beta", name: "Beta", market_code: "BB", is_default: true })]
+    )
+    const body = citiesResponse({
+      catalogue: pair,
+      events: [{ city: "Beta", latitude: 1, longitude: 2 }],
+      places: [],
+      previewMarkets: NONE,
+      wantsPreview: true,
+      deviceCountry: "AA",
+    })
+
+    it("the default moves to the other country's city that opens with something", () => expect(body.defaultCitySlug).toBe("beta"))
+    it("the device still names only its own country's city, as coming soon", () =>
+      expect(body.device).toEqual({ country: "AA", access: "comingSoon", citySlug: "alpha" }))
   })
 
   it("does not list any other live city with no rows", () => {
