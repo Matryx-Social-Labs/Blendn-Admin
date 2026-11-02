@@ -136,6 +136,12 @@ function pickerRow(row: BrowseCity, city: CatalogueCity | null, access: CityAcce
  * `defaultCitySlug` always resolves. Any other city with no rows stays off the
  * list, so a catalogue row alone never opens an empty city.
  *
+ * A city with no rows is open only to its market's previewer; to anyone else it
+ * is coming soon (and so absent for an old client), even when it is live: a
+ * live city empties as its events end. `defaultCitySlug` and `device.citySlug`
+ * prefer a city that opens with something, and name an empty one only when
+ * nothing in scope has rows.
+ *
  * `device` is what stops a person being told another country's city is near
  * them: `citySlug` is only ever a city in `country`, and null where we are not.
  */
@@ -151,22 +157,39 @@ export function citiesResponse(input: CitiesResponseInput) {
   const withRows = browseCities(foldable(input.events), foldable(input.places)).map((row) => {
     return pickerRow(row, cityFor(catalogue, row.city), "full")
   })
-  const liveCities = catalogue.cities.filter((c) => c.launchState === "live")
-  const fallback = liveCities.find((c) => c.isDefault) ?? liveCities[0]
   const listed = new Set(withRows.map((c) => c.slug))
+  /*
+   * A city with no rows opens empty, so only its market's previewer is offered
+   * it open; to anyone else it is coming soon. A live city empties as its
+   * events end, and a market's default is listed even at zero.
+   */
+  const accessOf = (c: CatalogueCity): CityAccess => {
+    const access = cityAccess(c, previewMarkets)
+    return access === "full" && !listed.has(c.slug) && !previewMarkets.has(c.country) ? "comingSoon" : access
+  }
+  /** Of these cities, one that opens with something: the default, else the busiest (`withRows` is busiest-first); else as configured. */
+  const openFirst = (cities: CatalogueCity[]) => {
+    const busiest = withRows.find((r) => cities.some((c) => c.slug === r.slug))
+    return (
+      cities.find((c) => c.isDefault && listed.has(c.slug)) ??
+      cities.find((c) => c.slug === busiest?.slug) ??
+      cities.find((c) => c.isDefault) ??
+      cities[0]
+    )
+  }
+  const fallback = openFirst(catalogue.cities.filter((c) => c.launchState === "live"))
   const withoutRows = catalogue.cities
     .filter((c) => !listed.has(c.slug))
     .flatMap((c) => {
-      const access = cityAccess(c, previewMarkets)
+      const access = accessOf(c)
       const named = c.slug === fallback?.slug || catalogue.markets.some((m) => m.defaultCitySlug === c.slug)
-      const lists = access === "comingSoon" ? wantsPreview : access === "full" && (named || c.launchState === "preview")
+      const lists = (named || c.launchState === "preview") && (access === "full" || (access === "comingSoon" && wantsPreview))
       return lists ? [pickerRow({ city: c.name, eventCount: 0, placeCount: 0, centre: null }, c, access)] : []
     })
 
   const served = catalogue.markets.filter((m) => m.launchState !== "hidden" && m.defaultCitySlug !== null)
-  const bySlug = (slug: string | null) => catalogue.cities.find((c) => c.slug === slug)
   const here = deviceCountry === null ? undefined : served.find((m) => m.code === deviceCountry)
-  const hereCity = bySlug(here?.defaultCitySlug ?? null)
+  const hereCity = here && openFirst(catalogue.cities.filter((c) => c.country === here.code && cityAccess(c, previewMarkets) !== "hidden"))
 
   return {
     cities: [...withRows, ...withoutRows],
@@ -178,7 +201,7 @@ export function citiesResponse(input: CitiesResponseInput) {
         ? null
         : {
             country: deviceCountry,
-            access: hereCity ? cityAccess(hereCity, previewMarkets) : ("none" as const),
+            access: hereCity ? accessOf(hereCity) : ("none" as const),
             citySlug: hereCity?.slug ?? null,
           },
   }
