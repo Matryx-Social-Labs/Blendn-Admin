@@ -1454,11 +1454,15 @@ holds the seats for 10 minutes and answers 201
 `payUrl` is `<PAY_BASE_URL>/pay/o/<orderId>?t=<token>`, the token signed,
 15 minutes, bound to the order and its buyer. Treat it as opaque.
 
-Refusals are 409 with the code in `errorCode`: `sold_out`, `not_on_sale`,
-`over_order_limit`, `over_buyer_limit` (10 seats a buyer an event, held and
-paid together), `unknown_ticket_type`, `age`, `private`; orders also
-`too_many_holds` and `busy` (`retryAfter: 1`, retry at most twice). A draft or a
-stranger's private event is 404. 503: Razorpay cannot take the payment (the
+First the RSVP's door, with exactly the answers `POST /events/:eventId/rsvp`
+gives: 404 for a draft or a stranger's private event, 403 `AGE_RESTRICTED`
+(`reasonCode` `AGE_RESTRICTED` / `AGE_UNKNOWN`) under the event's minimum age,
+403 `FORBIDDEN` + `PROFILE_INCOMPLETE` for an account not set up: whoever may
+not say "going" may not buy their way in. Then refusals are 409 with the code in
+`errorCode`: `sold_out`, `not_on_sale`, `over_order_limit`, `over_buyer_limit`
+(10 seats a buyer an event, held and paid together), `unknown_ticket_type`,
+`private` (someone the door lets in, such as its organizer), `age` (backstop);
+orders also `too_many_holds` and `busy` (`retryAfter: 1`, retry at most twice). 503: Razorpay cannot take the payment (the
 hold is given back). Limits: quote 60/min a user and 240/min a network; order
 10/min a user and 30/min a network.
 
@@ -1490,8 +1494,10 @@ draws the order and the hold's clock and opens Razorpay Standard Checkout; it
 polls `/pay/o/:orderId/status?t=` until the webhook has marked the order paid,
 then offers `blendn://ticket/<orderId>`. No indexing, no referrer, no caching.
 `POST /api/webhooks/razorpay` settles `payment.captured` / `order.paid` for a
-ticket order (amount and currency must equal `total_minor`), refunds a late
-payment it cannot seat, records `refund.processed` for a refund it asked for,
+ticket order (amount and currency must equal `total_minor`), re-seats a late
+payment only if a hold for it would be granted now (every gate: the RSVP's
+door, buyer standing, event still selling, sale window, minimum age, capacity,
+the seat cap) and otherwise refunds it in full, records `refund.processed` for a refund it asked for,
 and marks `payment.failed`. Buyer terms of sale: `/terms/tickets` (draft).
 
 ## Venues — the Hotspots feed

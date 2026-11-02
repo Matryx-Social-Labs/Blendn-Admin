@@ -25,7 +25,7 @@ registry.registerPath({
   description:
     "What these lines would cost now. Nothing is held; the order is priced again under its locks and that price is the charge. " +
     TICKET_REFUSALS +
-    "A draft or a stranger's private event is 404. Limited per user (60/min) and per network (240/min).",
+    "Limited per user (60/min) and per network (240/min).",
   security: bearerAuth,
   request: { params: eventParams, body: json(TicketLinesSchema) },
   responses: { 200: { description: "The quote", ...json(wrap(TicketQuoteSchema)) }, ...conflict("Refused: see the codes above"), ...standardErrors },

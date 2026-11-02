@@ -8,9 +8,14 @@ SET LOCAL lock_timeout = '5s';
 
 -- Organisations: the Razorpay Route linked account an organizer's share is transferred to. KYC is
 -- Razorpay's (linked-account onboarding); we keep the id. `enableTicketing` refuses without one.
+-- Its onboarding state is Razorpay's word, mirrored: not_started, pending (KYC under review), active, rejected.
+-- Only `active` sells, and only with an account id.
+CREATE TYPE "razorpay_account_status" AS ENUM ('not_started', 'pending', 'active', 'rejected');
 ALTER TABLE "organisations"
   ADD COLUMN "razorpay_account_id" TEXT,
-  ADD CONSTRAINT "organisations_razorpay_account_id_shape" CHECK ("razorpay_account_id" IS NULL OR "razorpay_account_id" ~ '^acc_[A-Za-z0-9]{14}$');
+  ADD COLUMN "razorpay_account_status" "razorpay_account_status" NOT NULL DEFAULT 'not_started',
+  ADD CONSTRAINT "organisations_razorpay_account_id_shape" CHECK ("razorpay_account_id" IS NULL OR "razorpay_account_id" ~ '^acc_[A-Za-z0-9]{14}$'),
+  ADD CONSTRAINT "organisations_razorpay_active_has_account" CHECK ("razorpay_account_status" <> 'active' OR "razorpay_account_id" IS NOT NULL);
 
 -- Markets: what the buyer quote calls the tax on our fee (contract §8.8). Data, like the rates.
 ALTER TABLE "markets"

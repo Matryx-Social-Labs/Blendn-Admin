@@ -1,6 +1,6 @@
 // Relative imports — see lib/conversations.ts. Enforced by
 // __tests__/server-import-boundary.test.ts.
-import { mayOpenCity } from "@/lib/browse-scope"
+import { mayOpenCity } from "./browse-scope"
 import { ageFrom, FINISH_ONBOARDING, mayParticipate, minAgeRefusal } from "./age"
 import { ErrorCode, errorResponse, notFoundResponse } from "./api-response"
 import { db } from "./db"

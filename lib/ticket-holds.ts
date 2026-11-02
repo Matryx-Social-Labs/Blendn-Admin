@@ -6,6 +6,7 @@ import { ageFrom, minAgeRefusal } from "./age"
 import { isUuid } from "./api-input"
 import { db } from "./db"
 import { ticketingOn } from "./env"
+import { attendeeEventAccess } from "./event-access"
 import { violatedConstraint } from "./prisma-errors"
 import { FeesExceedPriceError, parseFeeSchedule, ticketFees, type FeeBreakdown } from "./ticket-fees"
 
@@ -92,6 +93,8 @@ export type ReserveRefusal =
   | "ticketing_off"
   | "bad_lines"
   | "buyer_not_allowed"
+  /** The RSVP's door refuses them (`attendeeEventAccess`, participate): not found to them, or not set up. */
+  | "no_access"
   | "not_on_sale"
   | "private"
   | "under_age"
@@ -155,6 +158,19 @@ async function buyerAge(buyerId: string): Promise<{ age: number | null } | null>
   if (!buyer || buyer.suspended_at || buyer.deletedAt) return null
   // Derived from the birth date, never the stored column (lib/age.ts).
   return { age: ageFrom(buyer.profile) }
+}
+
+/**
+ * The RSVP's door (security review, gate parity): whoever `POST /rsvp` would
+ * refuse — not found to them (a draft, a stranger's private event, a closed
+ * city), too young or of unknown age for it, not set up — buys nothing. The
+ * routes answer with the RSVP's own response first; this is the backstop for
+ * every other caller, the late payment included.
+ */
+async function doorRefusal(input: Pick<ReserveInput, "eventId" | "buyerId">): Promise<ReserveRefusal | null> {
+  const denied = await attendeeEventAccess(input.buyerId, input.eventId, "participate")
+  if (!denied) return null
+  return denied.kind === "age" ? "under_age" : "no_access"
 }
 
 /** First in every transaction here: a row lock waited on past 2 s is `busy`. A literal, because SET takes no parameter. */
@@ -379,6 +395,8 @@ export async function reserveTickets(input: ReserveInput): Promise<ReserveResult
   if (input.lines.reduce((n, l) => n + l.quantity, 0) > MAX_SEATS_PER_BUYER) return { ok: false, reason: "over_order_limit" }
   const buyer = await buyerAge(input.buyerId)
   if (!buyer) return { ok: false, reason: "buyer_not_allowed" }
+  const door = await doorRefusal(input)
+  if (door) return { ok: false, reason: door }
 
   const now = new Date()
   try {
@@ -430,6 +448,8 @@ export async function quoteTickets(input: ReserveInput): Promise<QuoteResult> {
   if (input.lines.reduce((n, l) => n + l.quantity, 0) > MAX_SEATS_PER_BUYER) return { ok: false, reason: "over_order_limit" }
   const buyer = await buyerAge(input.buyerId)
   if (!buyer) return { ok: false, reason: "buyer_not_allowed" }
+  const door = await doorRefusal(input)
+  if (door) return { ok: false, reason: door }
   const now = new Date()
   try {
     const [types, event] = await Promise.all([readTypes(input.eventId, now), sellingEvent(db, input.eventId, buyer.age, now)])
@@ -464,3 +484,31 @@ export const cancelHold = (orderId: string): Promise<number> => cancelPending(Pr
 
 /** A cancelled event's open holds, given back: nobody may pay for one now. */
 export const cancelEventHolds = (eventId: string): Promise<number> => cancelPending(Prisma.sql`event_id = ${eventId}::uuid`)
+
+/**
+ * Would a hold for this order be granted now? For a payment that arrived after
+ * its hold ran out (lib/ticket-payments.ts), under the caller's locks: the
+ * order's row, then every type of the event in id order (the order a reserve
+ * takes them in, so this cannot deadlock it). Every gate `hold` runs, against
+ * now: the buyer's standing and the RSVP's door, the event still selling (and
+ * not ended, not private, not under its minimum age), each line's type on sale
+ * with room, and the buyer's seat cap. Null when it would be; the refusal when not.
+ */
+export async function lateSeatRefusal(tx: Prisma.TransactionClient, input: ReserveInput, now: Date): Promise<ReserveRefusal | null> {
+  const buyer = await buyerAge(input.buyerId)
+  if (!buyer) return "buyer_not_allowed"
+  const door = await doorRefusal(input)
+  if (door) return door
+  try {
+    const types = await lockTypes(tx, input.eventId)
+    await sellingEvent(tx, input.eventId, buyer.age, now)
+    const byId = new Map(types.map((t) => [t.id, t]))
+    for (const l of input.lines) checkLine(byId.get(l.ticketTypeId), l.quantity, now)
+    const stake = await buyerStake(tx, input.eventId, input.buyerId, now)
+    if (stake.seats + input.lines.reduce((n, l) => n + l.quantity, 0) > MAX_SEATS_PER_BUYER) throw new Refused("too_many_seats")
+    return null
+  } catch (error) {
+    if (error instanceof Refused) return error.reason
+    throw error
+  }
+}

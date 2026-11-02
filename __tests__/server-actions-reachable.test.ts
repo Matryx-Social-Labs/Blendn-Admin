@@ -101,6 +101,7 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["enableTicketing", "ticketing phase 4's turn-on action is its caller; it snapshots the market and fixes the price rule (SCRUM-1010)"],
   ["refundOrder", "ticketing phase 4's order row Refund button calls it; phase 2 built and tested it (SCRUM-1011)"],
   ["cancelEventRefundAll", "ticketing phase 4's cancel-event flow calls it once the event is cancelled (SCRUM-1011)"],
+  ["payoutStatus", "ticketing phase 4's Payouts settings and the Tickets tab's turn-on gate read it (SCRUM-1011)"],
   ["redeemTicket", "ticketing phase 4's door page (\"Check tickets\") calls it behind a rate limit (SCRUM-1010)"],
   ["recordLegalAcceptance", "ticketing phase 4's turn-on dialog records the terms with it (SCRUM-1007)"],
   ["latestLegalAcceptance", "ticketing phase 4's Tickets tab shows who accepted with it (SCRUM-1007)"],

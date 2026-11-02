@@ -154,6 +154,8 @@ export function PayCheckout({ order }: { order: PayOrder }) {
       name: "Blend’n",
       description: `${order.seats} ticket${order.seats === 1 ? "" : "s"} · ${order.eventTitle}`.slice(0, 255),
       theme: { color: EMBER },
+      // Razorpay orders cannot be expired or closed through its API, so Checkout itself is closed when the hold ends.
+      timeout: Math.max(1, Math.floor(left / 1000)),
       handler: confirm,
       modal: { confirm_close: true },
     })
@@ -162,7 +164,7 @@ export function PayCheckout({ order }: { order: PayOrder }) {
       setPhase("failed")
     })
     checkout.open()
-  }, [order, confirm])
+  }, [order, confirm, left])
 
   if (phase === "paid") return <Done title="You’re in" body={`Your ${order.seats === 1 ? "ticket is" : `${order.seats} tickets are`} in Blend’n, ready for the door.`} orderId={order.orderId} />
   if (phase === "still")

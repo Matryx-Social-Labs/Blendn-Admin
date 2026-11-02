@@ -191,13 +191,7 @@ describe("POST /events/:id/ticket-quote", () => {
     expect(res).toMatchObject({ status: 409, body: { success: false, errorCode: code } })
   })
 
-  it("refuses an under-age buyer as `age`, and more than ten seats for one buyer as over_buyer_limit", async () => {
-    const ev = await ticketedEvent(w, [{ quantity: 50, max: 10 }])
-    await db.events.update({ where: { id: ev.eventId }, data: { min_age: 21 } })
-    const young = await buyer(w)
-    await db.profiles.update({ where: { id: young }, data: { date_of_birth: new Date(Date.UTC(new Date().getUTCFullYear() - 19, 0, 1)) } })
-    expect((await quote(ev.eventId, young, [{ typeId: ev.typeIds[0], quantity: 1 }])).body.errorCode).toBe("age")
-
+  it("refuses more than ten seats for one buyer as over_buyer_limit", async () => {
     const ev2 = await ticketedEvent(w, [{ quantity: 50, max: 10 }])
     const b = await buyer(w)
     await order(ev2.eventId, b, [{ typeId: ev2.typeIds[0], quantity: 8 }])
@@ -225,6 +219,46 @@ describe("POST /events/:id/ticket-quote", () => {
     for (let i = 0; i < 62; i++) statuses.push((await quote(ev.eventId, b, [{ typeId: ev.typeIds[0], quantity: 1 }])).status)
     expect(statuses.slice(0, 60).every((s) => s === 200)).toBe(true)
     expect(statuses.at(-1)).toBe(429)
+  })
+})
+
+describe("the door is the RSVP's (security review, gate parity)", () => {
+  const yearsAgo = (n: number) => new Date(Date.UTC(new Date().getUTCFullYear() - n, 0, 1))
+  const rsvp = (eventId: string, userId: string) =>
+    rsvpRoute.POST(req(`/api/mobile/events/${eventId}/rsvp`, userId, { method: "POST", body: { status: "going" } }), params("eventId", eventId)).then(json)
+  const shape = (r: { status: number; body: { errorCode?: string; reasonCode?: string } }) => ({ status: r.status, errorCode: r.body.errorCode, reasonCode: r.body.reasonCode })
+
+  // Each: a buyer and an event the RSVP route refuses before anything ticket-shaped, and its answer.
+  const cases: Array<[string, (eventId: string, userId: string) => Promise<void>, { status: number; errorCode: string; reasonCode?: string }]> = [
+    ["under the event's minimum age", async (e, u) => {
+      await db.events.update({ where: { id: e }, data: { min_age: 21 } })
+      await db.profiles.update({ where: { id: u }, data: { date_of_birth: yearsAgo(19) } })
+    }, { status: 403, errorCode: "AGE_RESTRICTED", reasonCode: "AGE_RESTRICTED" }],
+    ["of unknown age on an age-restricted event", async (e) => {
+      await db.events.update({ where: { id: e }, data: { min_age: 21 } })
+    }, { status: 403, errorCode: "AGE_RESTRICTED", reasonCode: "AGE_UNKNOWN" }],
+    ["who has not finished setting up", async (_e, u) => {
+      await db.profiles.update({ where: { id: u }, data: { onboarded: false, date_of_birth: null, age: null } })
+    }, { status: 403, errorCode: "FORBIDDEN", reasonCode: "PROFILE_INCOMPLETE" }],
+    ["at a stranger's private event", async (e) => {
+      await db.events.update({ where: { id: e }, data: { visibility: "private" } })
+    }, { status: 404, errorCode: "NOT_FOUND" }],
+    ["at a draft", async (e) => {
+      await db.events.update({ where: { id: e }, data: { status: "draft" } })
+    }, { status: 404, errorCode: "NOT_FOUND" }],
+  ]
+
+  it.each(cases)("a buyer %s gets the RSVP's answer from the quote and the order, and no hold", async (_label, setup, expected) => {
+    const ev = await ticketedEvent(w, [{ quantity: 10 }])
+    const b = await buyer(w)
+    await setup(ev.eventId, b)
+    const lines = [{ typeId: ev.typeIds[0], quantity: 1 }]
+
+    const fromRsvp = shape(await rsvp(ev.eventId, b))
+    expect(fromRsvp).toEqual({ ...expected, reasonCode: expected.reasonCode })
+    expect(shape(await quote(ev.eventId, b, lines))).toEqual(fromRsvp)
+    expect(shape(await order(ev.eventId, b, lines))).toEqual(fromRsvp)
+    expect((await typeRow(ev.typeIds[0])).held).toBe(0)
   })
 })
 

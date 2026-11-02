@@ -39,6 +39,8 @@ const REFUSALS: Record<ReserveRefusal, [number, string, string]> = {
   ticketing_off: [404, ErrorCode.NOT_FOUND, "Not found"],
   bad_lines: [400, ErrorCode.VALIDATION_FAILED, "Those tickets can’t be ordered"],
   buyer_not_allowed: [403, ErrorCode.FORBIDDEN, "This account can’t buy tickets"],
+  // The routes answer the RSVP's own response before reserving (`eventAccessResponse`); this is the backstop.
+  no_access: [404, ErrorCode.NOT_FOUND, "Event not found"],
   not_on_sale: [409, "not_on_sale", "Those tickets aren’t on sale"],
   private: [409, "private", "This event is invite-only"],
   under_age: [409, "age", "This event has a minimum age"],

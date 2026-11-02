@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 
 import { ORGANIZER_TICKETING_TERMS } from "@/lib/legal-acceptance"
 import { enableTicketing } from "@/lib/ticketing-enable"
+import { payoutStatus } from "@/lib/payout-status"
 import { FOUNDING_OFFER_EVENTS, parseFeeSchedule } from "@/lib/ticket-fees"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
@@ -36,10 +37,19 @@ afterAll(async () => {
 const orgs: string[] = []
 const venues: string[] = []
 
-async function org(opts: { accepted?: string | null; account?: string | null } = {}) {
+type AccountStatus = "not_started" | "pending" | "active" | "rejected"
+
+async function org(opts: { accepted?: string | null; account?: string | null; accountStatus?: AccountStatus } = {}) {
+  const account = opts.account === undefined ? "acc_ITESTENABLE001" : opts.account
   const row = await db.organisations.create({
-    // A Route linked account unless told otherwise (SCRUM-1011): without one there is nobody to pay.
-    data: { display_name: testId("te-org"), kind: "company", status: "verified", razorpay_account_id: opts.account === undefined ? "acc_ITESTENABLE001" : opts.account },
+    // An active Route linked account unless told otherwise (SCRUM-1011): without one there is nobody to pay.
+    data: {
+      display_name: testId("te-org"),
+      kind: "company",
+      status: "verified",
+      razorpay_account_id: account,
+      razorpay_account_status: opts.accountStatus ?? (account ? "active" : "not_started"),
+    },
     select: { id: true },
   })
   orgs.push(row.id)
@@ -194,11 +204,30 @@ describe("who may not", () => {
 })
 
 describe("what must be true first", () => {
-  it("the organisation has a Razorpay linked account to be paid into (SCRUM-1011)", async () => {
-    const { orgId, owner } = await org({ account: null })
+  it.each([
+    ["no linked account at all", { account: null }],
+    ["an account still under KYC review", { accountStatus: "pending" as const }],
+    ["an account Razorpay rejected", { accountStatus: "rejected" as const }],
+    ["an account id with onboarding not started", { accountStatus: "not_started" as const }],
+  ])("payouts connected, i.e. an active Razorpay linked account to be paid into, not %s (SCRUM-1011)", async (_label, opts) => {
+    const { orgId, owner } = await org(opts)
     const eventId = await eventOf(orgId, owner)
-    expect(await enableTicketing(eventId, asOrganizer(owner))).toEqual({ ok: false, reason: "no_payout_account" })
+    expect(await enableTicketing(eventId, asOrganizer(owner))).toEqual({ ok: false, reason: "payouts_not_connected" })
     expect((await db.events.findUniqueOrThrow({ where: { id: eventId } })).ticketing_mode).toBe("off")
+  })
+
+  it("payoutStatus says what the dashboard shows, and whether it can sell", async () => {
+    const active = await org()
+    const pending = await org({ accountStatus: "pending" })
+    const none = await org({ account: null })
+    expect(await payoutStatus(active.orgId)).toEqual({ status: "active", linkedAccountId: "acc_ITESTENABLE001", connected: true })
+    expect(await payoutStatus(pending.orgId)).toEqual({ status: "pending", linkedAccountId: "acc_ITESTENABLE001", connected: false })
+    expect(await payoutStatus(none.orgId)).toEqual({ status: "not_started", linkedAccountId: null, connected: false })
+    expect(await payoutStatus("6f1c2b8e-4c1a-4f7e-9a3b-2d5e8f0a1b2c")).toBeNull()
+  })
+
+  it("an active account needs its id: the database refuses one without", async () => {
+    await expect(db.organisations.create({ data: { display_name: testId("te-org"), kind: "company", razorpay_account_status: "active" } })).rejects.toThrow(/organisations_razorpay_active_has_account/)
   })
 
   it("the organisation accepted the terms (database 13)", async () => {

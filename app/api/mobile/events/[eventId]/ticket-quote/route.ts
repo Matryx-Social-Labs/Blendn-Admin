@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { isUuid, readJson } from "@/lib/api-input"
 import { errorResponse, notFoundResponse, serverErrorResponse, successResponse, unauthorizedResponse, validationErrorResponse } from "@/lib/api-response"
 import { ticketingOn } from "@/lib/env"
-import { attendeeEventAccess } from "@/lib/event-access"
+import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { networkLimit, rateLimit, userLimit } from "@/lib/rate-limit"
@@ -28,8 +28,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { eventId } = await params
     if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
-    // A draft, or a stranger's private event, is not found: the same door as the event page.
-    if ((await attendeeEventAccess(user.userId, eventId, "view"))?.kind === "not_found") return notFoundResponse("Event not found")
+    // The RSVP's door, and its answer, for every refusal (security review, gate parity): whoever may not say
+    // "going" may not buy their way in. `reserveTickets` asks the same again, as the backstop.
+    const denied = await attendeeEventAccess(user.userId, eventId, "participate")
+    if (denied) return eventAccessResponse(denied)
 
     const parsed = linesSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)

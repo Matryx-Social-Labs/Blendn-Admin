@@ -1,7 +1,7 @@
 import { feeScheduleFromMarket, ticketFees, type FeeRule, type MarketFeeRow } from "@/lib/ticket-fees"
 import { HOLD_MINUTES, MAX_PENDING_PER_BUYER, MAX_SEATS_PER_BUYER, releaseExpiredHolds, reserveTickets, type ReserveInput } from "@/lib/ticket-holds"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, onboard, testId } from "./helpers"
 
 /**
  * Ticket holds against the real database (SCRUM-1008).
@@ -81,10 +81,12 @@ async function ticketedEventWith(rule: FeeRule, ...types: TypeSpec[]) {
   return { eventId, ids }
 }
 
+/** Set up, as every app user who buys is: since Phase 2 a hold asks the RSVP's door first (`attendeeEventAccess`, participate). */
 async function buyers(n: number) {
   const ids: string[] = []
   for (let i = 0; i < n; i++) ids.push(await makeUser(testId("th-buyer")))
   users.push(...ids)
+  await onboard(...ids)
   return ids
 }
 
@@ -286,7 +288,8 @@ describe("refusals", () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 5 })
     await db.events.update({ where: { id: eventId }, data: { status: "draft" } })
     const [buyer] = await buyers(1)
-    expect(await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 1 }])).toEqual({ ok: false, reason: "not_on_sale" })
+    // Not there at all to a buyer, as at the RSVP's door (Phase 2); `sellingEvent` would say not_on_sale behind it.
+    expect(await reserve(eventId, buyer, [{ ticketTypeId: ids[0], quantity: 1 }])).toEqual({ ok: false, reason: "no_access" })
   })
 
   it("a type whose sale has not started", async () => {
@@ -357,8 +360,12 @@ describe("refusals", () => {
     const { eventId, ids } = await ticketedEvent({ quantity: 5 })
     await db.events.update({ where: { id: eventId }, data: { visibility: "private" } })
     const [buyer] = await buyers(1)
-    // Its own answer since Phase 2 (contract §2 `private`), still never a hold.
-    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "private" })
+    // Since Phase 2: to a stranger it is not there at all (the RSVP's door); to someone the door lets in,
+    // its own answer (contract §2 `private`). Never a hold either way.
+    expect(await reserve(eventId, buyer, one(ids[0]))).toEqual({ ok: false, reason: "no_access" })
+    const { organizer_id: host } = await db.events.findUniqueOrThrow({ where: { id: eventId }, select: { organizer_id: true } })
+    await onboard(host)
+    expect(await reserve(eventId, host, one(ids[0]))).toEqual({ ok: false, reason: "private" })
     expect((await typeRow(ids[0])).held).toBe(0)
   })
 
@@ -368,8 +375,8 @@ describe("refusals", () => {
     const [young, unknown, adult] = await buyers(3)
     const yearsAgo = (n: number) => new Date(Date.UTC(new Date().getUTCFullYear() - n, 0, 1))
     // A stored age says 30; the birth date says 19, and wins (lib/age.ts ageFrom).
-    await db.profiles.create({ data: { id: young, age: 30, date_of_birth: yearsAgo(19) } })
-    await db.profiles.create({ data: { id: adult, date_of_birth: yearsAgo(30) } })
+    await db.profiles.update({ where: { id: young }, data: { age: 30, date_of_birth: yearsAgo(19) } })
+    await db.profiles.update({ where: { id: adult }, data: { date_of_birth: yearsAgo(30) } })
 
     expect(await reserve(eventId, young, one(ids[0]))).toEqual({ ok: false, reason: "under_age" })
     expect(await reserve(eventId, unknown, one(ids[0]))).toEqual({ ok: false, reason: "under_age" })

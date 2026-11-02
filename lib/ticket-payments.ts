@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client"
 
 // Relative imports: lib/ticket-reconcile.ts reaches this from server.ts (`build:server`, plain tsc).
+import { payoutsConnected } from "./payout-status"
+import { lateSeatRefusal } from "./ticket-holds"
 import { issueTickets } from "./tickets"
 
 /**
@@ -15,7 +17,10 @@ import { issueTickets } from "./tickets"
  * 3. A `pending` order: `held -= q`, `sold += q`, `paid`, tickets issued, the
  *    RSVP written, the payout owed, all in this transaction.
  * 4. An `expired` order (paid after its seats went back): re-seated straight
- *    to `sold` if every line still fits, then as 3. If not, or the order was
+ *    to `sold` only if a hold for it would be granted now — every gate a hold
+ *    runs (`lateSeatRefusal`: the buyer's standing and the RSVP's door, the
+ *    event still selling, the sale window, minimum age, capacity, the seat
+ *    cap) — then as 3. If not, or the order was
  *    `cancelled` (its buyer deleted the account), or the event is no longer on,
  *    the payment is recorded on the order and a full refund is asked for
  *    (`refund_requested_*`): `executeRefund` makes it after the commit, and the
@@ -84,11 +89,15 @@ export async function lockOrderByRef(tx: Prisma.TransactionClient, orderRef: str
   return order ?? null
 }
 
-/** The order's lines, and its types locked in id order (the order everyone locks them in). */
+/**
+ * The order's lines, and every type of its event locked in id order: the
+ * order a reserve takes them in, so a late payment's gates (which read the
+ * whole event, `lateSeatRefusal`) never take a lower id after a higher one.
+ */
 export async function lockLines(tx: Prisma.TransactionClient, orderId: string) {
-  const lines = await tx.ticket_order_lines.findMany({ where: { order_id: orderId }, select: { ticket_type_id: true, quantity: true }, orderBy: { ticket_type_id: "asc" } })
+  const lines = await tx.ticket_order_lines.findMany({ where: { order_id: orderId }, select: { ticket_type_id: true, quantity: true, event_id: true }, orderBy: { ticket_type_id: "asc" } })
   const types = await tx.$queryRaw<{ id: string; quantity: number; sold: number; held: number }[]>`
-    SELECT id::text, quantity, sold, held FROM ticket_types WHERE id = ANY(${lines.map((l) => l.ticket_type_id)}::uuid[]) ORDER BY id FOR UPDATE`
+    SELECT id::text, quantity, sold, held FROM ticket_types WHERE event_id = ${lines[0]?.event_id ?? null}::uuid ORDER BY id FOR UPDATE`
   return { lines, types: new Map(types.map((t) => [t.id, t])) }
 }
 
@@ -105,7 +114,13 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
   const [event, buyer] = await Promise.all([
     tx.events.findUnique({
       where: { id: order.event_id },
-      select: { status: true, deleted_at: true, end_time: true, organizer_org_id: true, organizer_org: { select: { razorpay_account_id: true } } },
+      select: {
+        status: true,
+        deleted_at: true,
+        end_time: true,
+        organizer_org_id: true,
+        organizer_org: { select: { razorpay_account_id: true, razorpay_account_status: true } },
+      },
     }),
     tx.user.findUnique({ where: { id: order.buyer_id }, select: { deletedAt: true } }),
   ])
@@ -113,7 +128,8 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
     on: event !== null && event.status === "published" && event.deleted_at === null,
     buyerGone: !buyer || buyer.deletedAt !== null,
     orgId: event?.organizer_org_id ?? null,
-    account: event?.organizer_org?.razorpay_account_id ?? null,
+    // Only an active linked account is paid; otherwise the payout is recorded as owed to nobody (`no_account`).
+    account: event?.organizer_org && payoutsConnected(event.organizer_org) ? event.organizer_org.razorpay_account_id : null,
     endTime: event?.end_time ?? new Date(),
   }
 }
@@ -129,8 +145,8 @@ export async function settleTicketPayment(tx: Prisma.TransactionClient, p: Captu
   if (order.provider_payment_ref) return { kind: "refused", reason: "second_payment", ...settled }
   if (p.amountMinor !== order.total_minor || p.currency !== order.currency) return { kind: "refused", reason: "amount_mismatch", ...settled }
 
-  const { lines, types } = await lockLines(tx, order.id)
-  const refuseReason = whyNotSeated(order, lines, types, ctx)
+  const { lines } = await lockLines(tx, order.id)
+  const refuseReason = await whyNotSeated(tx, order, lines, ctx, now)
   if (refuseReason) {
     if (order.status === "pending") await moveSeats(tx, lines, { held: -1, sold: 0 })
     await tx.ticket_orders.update({
@@ -160,21 +176,18 @@ export async function settleTicketPayment(tx: Prisma.TransactionClient, p: Captu
   return { kind: "paid", late: order.status !== "pending", tickets: tickets.length, ...settled }
 }
 
-function whyNotSeated(
+async function whyNotSeated(
+  tx: Prisma.TransactionClient,
   order: LockedOrder,
   lines: Line[],
-  types: Map<string, { quantity: number; sold: number; held: number }>,
-  ctx: { on: boolean; buyerGone: boolean }
-): RefundReason | null {
+  ctx: { on: boolean; buyerGone: boolean },
+  now: Date
+): Promise<RefundReason | null> {
   if (order.status === "cancelled" || ctx.buyerGone) return "order_cancelled"
-  if (!ctx.on) return "event_not_on"
-  if (order.status === "pending") return null
-  // Expired: its seats went back. Only if every line still fits, under the type locks.
-  const fits = lines.every((l) => {
-    const t = types.get(l.ticket_type_id)
-    return t !== undefined && t.sold + t.held + l.quantity <= t.quantity
-  })
-  return fits ? null : "late_payment"
+  if (order.status === "pending") return ctx.on ? null : "event_not_on"
+  // Expired: its seats went back. Seated again only as a new hold would be, under the type locks.
+  const refused = await lateSeatRefusal(tx, { eventId: order.event_id, buyerId: order.buyer_id, lines: lines.map((l) => ({ ticketTypeId: l.ticket_type_id, quantity: l.quantity })) }, now)
+  return refused ? "late_payment" : null
 }
 
 /** The organizer's share, owed to the organisation's linked account; the transfer is made after the commit. */

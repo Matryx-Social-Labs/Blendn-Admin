@@ -137,8 +137,11 @@ describe("a captured payment", () => {
     expect(rzp.transfers.get(payment.id)![0].amount).toBe(49_900 - order.service_fee_minor - order.service_fee_tax_minor - order.processing_fee_minor)
   })
 
-  it("records the payout as owed to nobody when the organisation has no linked account, and transfers nothing", async () => {
-    const ev = await ticketedEvent(w, [{ quantity: 10 }], { account: null })
+  it.each([
+    ["has no linked account", { account: null }],
+    ["has an account no longer active at Razorpay", { accountStatus: "pending" as const }],
+  ])("records the payout as owed to nobody when the organisation %s, and transfers nothing", async (_label, opts) => {
+    const ev = await ticketedEvent(w, [{ quantity: 10 }], opts)
     const held = await heldOrder(rzp, ev.eventId, await buyer(w), [{ ticketTypeId: ev.typeIds[0], quantity: 1 }])
     const payment = rzp.capture(held.orderRef)
     await deliver(capturedDelivery("payment.captured", payment))
@@ -240,6 +243,42 @@ describe("paid for an event that is no longer on", () => {
 
     expect(await orderRow(o.orderId)).toMatchObject({ status: "refunded", refund_reason: "event_not_on", refunded_minor: o.totalMinor, _count: { tickets: 0 } })
     expect(await typeRow(o.typeIds[0])).toMatchObject({ sold: 0, held: 0 })
+  })
+})
+
+describe("a late payment is held to every gate a hold is (security review)", () => {
+  const yearsAgo = (n: number) => new Date(Date.UTC(new Date().getUTCFullYear() - n, 0, 1))
+  type O = Awaited<ReturnType<typeof boughtOrder>>
+  const gates: Array<[string, (o: O) => Promise<unknown>]> = [
+    ["the buyer's seat cap: paid since, it would pass ten", async (o) => {
+      const more = await heldOrder(rzp, o.eventId, o.buyerId, [{ ticketTypeId: o.typeIds[0], quantity: 9 }])
+      await deliver(capturedDelivery("payment.captured", rzp.capture(more.orderRef)))
+    }],
+    ["the type's sale window has closed", (o) => db.ticket_types.update({ where: { id: o.typeIds[0] }, data: { sale_ends_at: new Date(Date.now() - 60_000) } })],
+    ["the event has ended", (o) => db.events.update({ where: { id: o.eventId }, data: { end_time: new Date(Date.now() - 60_000) } })],
+    ["the event stopped selling here", (o) => db.events.update({ where: { id: o.eventId }, data: { ticketing_mode: "external", external_ticket_url: "https://example.com/t" } })],
+    ["the event went private", (o) => db.events.update({ where: { id: o.eventId }, data: { visibility: "private" } })],
+    ["the event's minimum age is now above the buyer's", async (o) => {
+      await db.events.update({ where: { id: o.eventId }, data: { min_age: 21 } })
+      await db.profiles.update({ where: { id: o.buyerId }, data: { date_of_birth: yearsAgo(19) } })
+    }],
+    ["the buyer was suspended", (o) => db.user.update({ where: { id: o.buyerId }, data: { suspended_at: new Date() } })],
+    ["the buyer may no longer take part (setup unfinished)", (o) => db.profiles.update({ where: { id: o.buyerId }, data: { onboarded: false, date_of_birth: null, age: null } })],
+  ]
+
+  it.each(gates)("refunded in full when %s, no tickets", async (_label, change) => {
+    // Room to spare: every refusal here is the gate's, never capacity's.
+    const o = await boughtOrder(2, { quantity: 50 })
+    await lapse(o.orderId)
+    await releaseExpiredHolds()
+    await change(o)
+    const payment = rzp.capture(o.orderRef)
+
+    await deliver(capturedDelivery("payment.captured", payment))
+    await settled()
+
+    expect(await orderRow(o.orderId)).toMatchObject({ status: "refunded", refund_reason: "late_payment", refunded_minor: o.totalMinor, _count: { tickets: 0 } })
+    expect(rzp.refunds.get(payment.id)).toEqual([expect.objectContaining({ amount: o.totalMinor })])
   })
 })
 

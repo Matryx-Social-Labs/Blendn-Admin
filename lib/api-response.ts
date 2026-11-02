@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { ZodError } from "zod"
-import { resolveMediaFields } from "@/lib/media-response"
+import { resolveMediaFields } from "./media-response"
 
 export interface ApiResponse<T = unknown> {
   success: boolean

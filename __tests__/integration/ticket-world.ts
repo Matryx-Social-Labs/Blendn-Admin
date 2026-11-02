@@ -155,11 +155,22 @@ export async function india() {
 type TypeSpec = { quantity: number; price?: number; hidden?: boolean; sold?: number; startsAt?: Date | null; endsAt?: Date | null; max?: number }
 
 /** An org (owner = host, with a linked account unless told otherwise) and its published native-ticketed event. */
-export async function ticketedEvent(w: World, types: TypeSpec[], opts: { account?: string | null; absorbed?: boolean } = {}) {
+export async function ticketedEvent(
+  w: World,
+  types: TypeSpec[],
+  opts: { account?: string | null; accountStatus?: "not_started" | "pending" | "active" | "rejected"; absorbed?: boolean } = {}
+) {
   const host = await makeUser(testId("tix-host"), "organizer")
   w.users.push(host)
+  const account = opts.account === undefined ? LINKED_ACCOUNT : opts.account
   const org = await db.organisations.create({
-    data: { kind: "company", display_name: testId("tix-org"), status: "verified", razorpay_account_id: opts.account === undefined ? LINKED_ACCOUNT : opts.account },
+    data: {
+      kind: "company",
+      display_name: testId("tix-org"),
+      status: "verified",
+      razorpay_account_id: account,
+      razorpay_account_status: opts.accountStatus ?? (account ? "active" : "not_started"),
+    },
   })
   w.orgs.push(org.id)
   await db.organisation_members.create({ data: { org_id: org.id, user_id: host, role: "owner" } })
