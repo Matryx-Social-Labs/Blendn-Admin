@@ -50,6 +50,8 @@ export interface CityInput {
   maxLon: number | string
   /** Empty for none. */
   licensedMinAge?: number | string | null
+  /** The admin confirmed that listed rows already naming this city leave the app until it is live. */
+  takeOffline?: boolean
 }
 
 export interface CityRowInput {
@@ -75,10 +77,15 @@ const coordinate = (value: number | string, limit: number, axis: "Latitude" | "L
 }
 
 const text = (v: unknown) => (typeof v === "number" ? String(v) : v == null ? "" : textFrom(v))
+const CITY_FIELDS = ["marketCode", "slug", "name", "region", "timezone", "centreLat", "centreLon", "minLat", "minLon", "maxLat", "maxLon", "licensedMinAge"] as const
+
+/** Shared with the form: a refusal that a confirm can lift (`createCity`'s `takeOffline`). */
+export const TAKES_OFFLINE = "already list"
 
 export function cityRowFrom(raw: CityInput): CityRowInput {
+  // The known fields only, each a string: a missing optional one is "", an unknown or __proto__ key never read.
   const input = {
-    ...Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, text(v)])),
+    ...Object.fromEntries(CITY_FIELDS.map((k) => [k, text(raw[k])])),
     matchNames: textFrom(raw.matchNames, 2000),
   } as Record<keyof CityInput, string>
   const name = input.name.trim()
@@ -89,6 +96,8 @@ export function cityRowFrom(raw: CityInput): CityRowInput {
   if (matchNames.length === 0) throw new Refusal("At least one spelling, comma-separated.")
   const timezone = input.timezone.trim()
   if (!isKnownTimezone(timezone)) throw new Refusal("Not a timezone we know. Use the IANA name, like America/Toronto.")
+  // Stored as Intl names it: "america/toronto" is accepted and kept as "America/Toronto".
+  const zone = new Intl.DateTimeFormat("en", { timeZone: timezone }).resolvedOptions().timeZone
 
   const lat = (v: number | string) => coordinate(v, 90, "Latitude")
   const lon = (v: number | string) => coordinate(v, 180, "Longitude")
@@ -111,7 +120,7 @@ export function cityRowFrom(raw: CityInput): CityRowInput {
     name,
     match_names: matchNames,
     region: input.region.trim() || null,
-    timezone,
+    timezone: zone,
     centre_lat: centreLat,
     centre_lon: centreLon,
     min_lat: minLat,

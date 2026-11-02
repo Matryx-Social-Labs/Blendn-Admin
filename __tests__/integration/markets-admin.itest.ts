@@ -142,6 +142,15 @@ describe("a city never goes live empty", () => {
     await setCityState(suppliedSlug, "preview")
   })
 
+  it("does not count an event above the age floor: a 19+ night is not something every viewer can open", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    const eventId = await makeEvent(organiser)
+    events.push(eventId)
+    await db.events.update({ where: { id: eventId }, data: { city: `Emptyville ${emptySlug}`, min_age: 19 } })
+    await expect(setCityState(emptySlug, "live")).rejects.toThrow("can’t go live")
+    await db.events.update({ where: { id: eventId }, data: { deleted_at: new Date() } })
+  })
+
   it("refuses a market going live while one of its live cities has no supply", async () => {
     actingUser = { id: admin, role: "app_admin" }
     await setMarketState(CODE, "hidden")
@@ -192,6 +201,29 @@ describe("each action writes exactly one audit row, and the app sees it at once"
     expect(city).toMatchObject({ launch_state: "hidden", timezone: "America/Toronto", default_licensed_min_age: 19, match_names: ["newton"], is_default: false })
     expect(await auditRows(city.id)).toBe(1)
     expect((await cityCatalogue()).cities.some((c) => c.slug === slug)).toBe(true)
+  })
+
+  it("a new city that listed rows already name: refused until the admin agrees to take them offline", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    const slug = slugOf("named")
+    const name = `Offlineton ${slug}`
+    const eventId = await makeEvent(organiser)
+    events.push(eventId)
+    await db.events.update({ where: { id: eventId }, data: { city: name } })
+    const input = { ...cityInput(slug, name), matchNames: name }
+    await expect(createCity(input)).rejects.toThrow(`1 listed events and 0 venues already list ${name}.`)
+    expect(await db.cities.count({ where: { slug } })).toBe(0)
+    await createCity({ ...input, takeOffline: true })
+    const city = await db.cities.findUniqueOrThrow({ where: { slug } })
+    expect(await db.audit_logs.findFirst({ where: { resource_id: city.id } })).toMatchObject({ details: { tookOffline: { events: 1, venues: 0 } } })
+  })
+
+  it("a new city with no region, and a zone typed in lower case: kept as null and as Intl names it", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    const slug = slugOf("plain")
+    const { region: _region, ...noRegion } = cityInput(slug, `Plainfield ${slug}`)
+    await createCity({ ...noRegion, matchNames: `plainfield ${slug}`, timezone: "america/toronto" })
+    expect(await db.cities.findUnique({ where: { slug } })).toMatchObject({ region: null, timezone: "America/Toronto" })
   })
 
   it("a new country: one row, hidden", async () => {

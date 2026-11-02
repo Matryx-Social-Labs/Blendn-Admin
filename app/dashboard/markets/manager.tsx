@@ -71,7 +71,20 @@ function Ladder({
   onPick: (to: LaunchState) => void
 }) {
   return (
-    <div role="radiogroup" aria-label={label} aria-describedby={describedBy} className="inline-flex flex-none gap-0.5 rounded-md border border-input p-0.5">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      aria-describedby={describedBy}
+      className="inline-flex flex-none gap-0.5 rounded-md border border-input p-0.5"
+      // One tab stop; arrows move between the three, as a radio group does. Enter or Space picks.
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+        const radios = [...e.currentTarget.querySelectorAll<HTMLButtonElement>("[role=radio]")]
+        const at = radios.indexOf(document.activeElement as HTMLButtonElement)
+        radios[(at + (e.key === "ArrowRight" ? 1 : radios.length - 1)) % radios.length]?.focus()
+        e.preventDefault()
+      }}
+    >
       {(["hidden", "preview", "live"] as const).map((state) => {
         const refused = state === "live" && refusedLive && value !== "live"
         return (
@@ -80,6 +93,7 @@ function Ladder({
             type="button"
             role="radio"
             aria-checked={value === state}
+            tabIndex={value === state ? 0 : -1}
             aria-disabled={refused || undefined}
             disabled={disabled}
             onClick={() => (refused || value === state ? undefined : onPick(state))}

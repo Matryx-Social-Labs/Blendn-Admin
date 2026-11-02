@@ -5,10 +5,12 @@ import { toast } from "sonner"
 
 import { Panel } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { createCity, createMarket, type MarketView } from "@/lib/market-actions"
+import { TAKES_OFFLINE } from "@/lib/market-input"
 import { refusalMessage } from "@/lib/refusal"
 
 /*
@@ -36,8 +38,11 @@ export function AddForms({ markets }: { markets: MarketView[] }) {
   const [marketCode, setMarketCode] = useState(markets[0]?.code ?? "")
   const [city, setCity] = useState(blankCity)
   const [market, setMarket] = useState({ code: "", name: "", currency: "", locale: "" })
+  // Shown only once the server says listed rows already name the city (`createCity`).
+  const [offlineAsked, setOfflineAsked] = useState(false)
+  const [takeOffline, setTakeOffline] = useState(false)
 
-  const submit = (e: FormEvent, fn: () => Promise<void>, ok: string, reset: () => void) => {
+  const submit = (e: FormEvent, fn: () => Promise<void>, ok: string, reset: () => void, onRefusal?: (message: string) => void) => {
     e.preventDefault()
     startTransition(async () => {
       try {
@@ -45,9 +50,16 @@ export function AddForms({ markets }: { markets: MarketView[] }) {
         toast.success(ok)
         reset()
       } catch (err) {
-        toast.error(refusalMessage(err, "That did not work"))
+        const message = refusalMessage(err, "That did not work")
+        onRefusal?.(message)
+        toast.error(message)
       }
     })
+  }
+  const resetCity = () => {
+    setCity(blankCity())
+    setOfflineAsked(false)
+    setTakeOffline(false)
   }
 
   const cityInput = (field: CityField, label: string, extra: { help?: string; inputMode?: "decimal" | "numeric"; placeholder?: string } = {}) => (
@@ -72,7 +84,11 @@ export function AddForms({ markets }: { markets: MarketView[] }) {
       <Panel title="Add a city" hint="starts hidden">
         <form
           className="flex flex-col gap-3"
-          onSubmit={(e) => submit(e, () => createCity({ marketCode, ...city }), `${city.name.trim()} added, hidden.`, () => setCity(blankCity()))}
+          onSubmit={(e) =>
+            submit(e, () => createCity({ marketCode, ...city, takeOffline }), `${city.name.trim()} added, hidden.`, resetCity, (message) => {
+              if (message.includes(TAKES_OFFLINE)) setOfflineAsked(true)
+            })
+          }
         >
           <div className="grid grid-cols-2 gap-3">
             <Field id="city-market" label="Country">
@@ -106,6 +122,12 @@ export function AddForms({ markets }: { markets: MarketView[] }) {
             {cityInput("maxLat", "Max latitude", { inputMode: "decimal" })}
             {cityInput("maxLon", "Max longitude", { inputMode: "decimal" })}
           </div>
+          {offlineAsked ? (
+            <div className="flex items-center gap-2">
+              <Checkbox id="city-take-offline" checked={takeOffline} onCheckedChange={(v) => setTakeOffline(v === true)} />
+              <Label htmlFor="city-take-offline">Take them offline until it is live</Label>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-3">
             <Button type="submit" disabled={busy || !marketCode}>
               Add city
