@@ -213,7 +213,7 @@ function MarketPanel({ market, pending, busy, onPending, run }: { market: Market
             verb={marketPending.to === "live" ? `Make ${market.name} live` : marketPending.to === "preview" ? "Set to preview" : `Hide ${market.name}`}
             destructive={marketPending.to === "hidden"}
             pending={busy}
-            onYes={() => run(() => setMarketState(market.code, marketPending.to), `${market.name}: ${LABEL[marketPending.to]}`)}
+            onYes={() => run(() => setMarketState(market.code, marketPending.to, market.launchState), `${market.name}: ${LABEL[marketPending.to]}`)}
             onNo={() => onPending(null)}
           />
         </div>
@@ -280,7 +280,7 @@ function CityRow({ city, market, pending, busy, onPending, run }: { city: CityVi
           verb={verbFor(city.name, mine.to)}
           destructive={mine.to === "hidden"}
           pending={busy}
-          onYes={() => run(() => setCityState(city.slug, mine.to), `${city.name}: ${LABEL[mine.to]}`)}
+          onYes={() => run(() => setCityState(city.slug, mine.to, city.launchState), `${city.name}: ${LABEL[mine.to]}`)}
           onNo={() => onPending(null)}
         />
       ) : null}

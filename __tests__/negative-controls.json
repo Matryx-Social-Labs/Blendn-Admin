@@ -42,9 +42,9 @@
       "date": "2026-11-01"
     },
     "markets-admin.itest.ts": {
-      "guards": "SCRUM-709 P5 lost update: setCityState / setMarketState write only from the launch_state they read (updateMany on the expected `from`); a save from a stale read is refused, the other admin's state stands, and no audit row records a `from` the row was no longer in. The race is made deterministic by committing another connection's write between the action's read and its write.",
-      "mutation": "LU1 the city's updateMany where drops launch_state. LU2 the market's drops it.",
-      "observed": "LU1: 1 of 41 failing (the city race). LU2: 1 of 41 failing (the country race). The no-race control stays green under both. Restored; 41 green.",
+      "guards": "SCRUM-709 P5 lost update: setCityState / setMarketState take `from`, the state the screen showed, refuse when the row is no longer in it (checked at once, and again by updateMany on `from`), so an admin whose page loaded before another admin's save never writes over it, and no audit row records a `from` the row was not in. Both windows are tested: the page loaded before the other save, and the other save committing between the action's read and its write (made deterministic by another connection's write after the read).",
+      "mutation": "C1 (the review's HIGH): the at-once check removed and updateMany filtered on the state re-read at click time. C2: both removed, the write by key only.",
+      "observed": "C1: 2 of 42 failing (the city and the country stale screen; the in-transaction race still refused). C2: 3 of 42 failing (both city cases and the country). The no-race control stays green under both. Restored; 42 green.",
       "date": "2026-11-02"
     },
     "city-catalogue.test.ts": {
