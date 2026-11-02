@@ -1,6 +1,6 @@
 jest.mock("@/lib/db", () => ({ db: {}, closeDb: jest.fn() }))
 
-import { cityMatchFor, localSlug, localiseText, placeVenues, seededEventsWhere, slugPrefix, wallClock, type SeedCity } from "../scripts/seed-city"
+import { cityMatchFor, localSlug, localiseText, placeVenues, seededEventsWhere, slugPrefix, wallClock, zoneDisagreement, type SeedCity } from "../scripts/seed-city"
 import { EVENTS, VENUES, forCity } from "../scripts/seed-blr-scenarios"
 
 /*
@@ -154,5 +154,20 @@ describe("forCity", () => {
     expect(forCity(techno, TORONTO).minAge).toBe(19)
     expect(forCity(techno, city({ slug: "mumbai", name: "Mumbai" })).minAge).toBe(21)
     expect(localiseText("21+ with ID", TORONTO)).toBe("19+ with ID")
+  })
+})
+
+describe("zoneDisagreement: the seed's clock and the database's must agree before anything is written", () => {
+  const at = new Date("2026-11-15T12:00:00Z")
+  const dbSaying = (minutes: number) => ({ $queryRaw: (async () => [{ minutes }]) as never })
+
+  it("passes when the database gives the offset this process gives", async () => {
+    const mine = -Number(/GMT-(\d{2})/.exec(new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", timeZoneName: "longOffset" }).format(at))![1]) * 60
+    expect(await zoneDisagreement(dbSaying(mine), "America/Toronto", [at])).toBeNull()
+  })
+
+  it("refuses, naming both offsets, when they differ (Vancouver on 2026-11-01: UTC-7 against a stale UTC-8)", async () => {
+    const message = await zoneDisagreement(dbSaying(-11 * 60), "America/Toronto", [at])
+    expect(message).toMatch(/^America\/Toronto on 2026-11-15: this Node \(tzdata .+\) says UTC-5, the database says UTC-11\./)
   })
 })

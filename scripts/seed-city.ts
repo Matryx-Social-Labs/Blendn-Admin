@@ -86,6 +86,37 @@ export function wallClock(zone: string, now: Date, dayOffset: number, hhmm: stri
   return new Date(asUtc - offsetMinutes(zone, new Date(guess)) * MIN)
 }
 
+const utcLabel = (minutes: number) => `UTC${minutes < 0 ? "-" : "+"}${Math.floor(Math.abs(minutes) / 60)}${Math.abs(minutes) % 60 ? `:${String(Math.abs(minutes) % 60).padStart(2, "0")}` : ""}`
+
+/**
+ * Why this run's clock cannot be trusted, or null. Event times are made here
+ * with this process's Intl, and every reader on the server and in SQL reads
+ * them with its own tzdata: both must say the same offset. On 2026-11-01 they
+ * did not: British Columbia stayed on UTC-7 (tzdata 2026b), while a Homebrew
+ * Node on system ICU (tzdata 2026a) still fell back to UTC-8, so every
+ * Vancouver time would have been written an hour off. Checked now and at the
+ * far end of the scenarios (two weeks), across any change in between.
+ */
+export async function zoneDisagreement(
+  db: { $queryRaw: <T>(query: TemplateStringsArray, ...values: unknown[]) => Promise<T> },
+  zone: string,
+  instants: Date[]
+): Promise<string | null> {
+  for (const at of instants) {
+    const [row] = await db.$queryRaw<{ minutes: number }[]>`
+      SELECT (EXTRACT(EPOCH FROM ((${at}::timestamptz AT TIME ZONE ${zone}) - (${at}::timestamptz AT TIME ZONE 'UTC'))) / 60)::int AS minutes`
+    const mine = offsetMinutes(zone, at)
+    if (Number(row.minutes) !== mine) {
+      return (
+        `${zone} on ${at.toISOString().slice(0, 10)}: this Node (tzdata ${process.versions.tz ?? "unknown"}) says ${utcLabel(mine)}, ` +
+        `the database says ${utcLabel(Number(row.minutes))}. Run the seed with an official Node build whose tzdata matches ` +
+        `(e.g. \`npx -y node@22 node_modules/.bin/tsx …\`), not one on an older system ICU.`
+      )
+    }
+  }
+  return null
+}
+
 /** A city's clock for one run: what an event's `when` is given. */
 export interface Clock {
   now: Date

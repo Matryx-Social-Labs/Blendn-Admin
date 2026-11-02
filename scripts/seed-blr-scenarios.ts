@@ -16,6 +16,7 @@ import {
   clockFor,
   isHome,
   loadSeedCity,
+  zoneDisagreement,
   localSlug,
   localiseText,
   neutralLink,
@@ -1399,9 +1400,13 @@ async function main() {
 /** This run's city from the catalogue (`--city`), with its clock, scenarios and venues. Read once. */
 let run: Promise<{ city: SeedCity; clock: Clock; events: EventSpec[]; venues: Record<VenueKey, VenueSpec> } | null> | undefined
 function cityRun() {
-  run ??= (CITY_SLUG ? loadSeedCity(db, CITY_SLUG) : Promise.resolve(null)).then(
-    (city) => city && { city, clock: clockFor(city.timezone, NOW), events: EVENTS.map((e) => forCity(e, city)), venues: placeVenues(VENUES, city) }
-  )
+  run ??= (CITY_SLUG ? loadSeedCity(db, CITY_SLUG) : Promise.resolve(null)).then(async (city) => {
+    if (!city) return null
+    // Refuse rather than write every time an hour off (seed-city.ts zoneDisagreement).
+    const disagreement = await zoneDisagreement(db, city.timezone, [NOW, new Date(NOW.getTime() + 15 * 24 * HOUR)])
+    if (disagreement) throw new Error(`REFUSING: ${disagreement}`)
+    return { city, clock: clockFor(city.timezone, NOW), events: EVENTS.map((e) => forCity(e, city)), venues: placeVenues(VENUES, city) }
+  })
   return run
 }
 

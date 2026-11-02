@@ -183,6 +183,11 @@ RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scena
 RAILWAY_ENVIRONMENT_NAME=staging DATABASE_URL=... npx tsx scripts/seed-blr-scenarios.ts --city toronto --clean --apply  # its toronto-* events and (test) venues, nothing else
 ```
 
+The run refuses if this Node's tzdata and the database disagree about the
+city's offset (`zoneDisagreement`). Homebrew's Node uses the system ICU and
+lagged: on 2026-11-01 it still put Vancouver at UTC-8 after British Columbia
+stayed on UTC-7. Run it with an official build then: `npx -y node@22 node_modules/.bin/tsx scripts/seed-blr-scenarios.ts …`.
+
 seed-qa's own events outside Bengaluru refresh the same way, with covers and
 clips put back on the seed's current source:
 
