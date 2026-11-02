@@ -76,8 +76,12 @@ describe("slugs", () => {
     expect(() => localSlug(TORONTO, "evening-ragas")).toThrow()
   })
 
-  it("--clean takes only the city's own prefix", () => {
-    expect(seededEventsWhere(TORONTO)).toEqual({ slug: { startsWith: "toronto-" }, deleted_at: null })
+  it("--clean takes the exact seeded slugs in the seed's own hands, never a prefix", () => {
+    expect(seededEventsWhere(TORONTO, ["toronto-evening-ragas"], { orgId: "org", adminId: "adm" })).toEqual({
+      slug: { in: ["toronto-evening-ragas"] },
+      deleted_at: null,
+      OR: [{ organizer_org_id: "org" }, { organizer_id: "adm", organizer_org_id: null }],
+    })
   })
 })
 
@@ -96,7 +100,7 @@ describe("cityMatchFor — what the remove step may soft-delete", () => {
     const text = JSON.stringify(cityMatchFor(TORONTO)).toLowerCase()
     expect(text).not.toMatch(/bengaluru|bangalore|vancouver/)
     for (const key of TORONTO.matchKeys) expect(text).toContain(`"equals":"${key}"`)
-    expect(text).toContain(`{"city":null},{"address":{"contains":"toronto"`)
+    expect(text).not.toContain(`address`) // by its names only: an address that merely mentions the city is not it
   })
 })
 

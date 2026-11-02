@@ -143,7 +143,16 @@ export function localSlug(city: Pick<SeedCity, "slug">, homeSlug: string): strin
 }
 
 /** `--clean`: this city's seeded events and nothing else. The caller adds `realEventsWhere`, where the kind guard can see it. */
-export const seededEventsWhere = (city: Pick<SeedCity, "slug">) => ({ slug: { startsWith: slugPrefix(city) }, deleted_at: null })
+/**
+ * `--clean`'s events: the exact slugs this seed writes for the city, and only in
+ * the seed's own hands (its events organisation, or the admin's curated rows).
+ * A prefix alone would take a real organizer's "toronto-jazz-night" with it.
+ */
+export const seededEventsWhere = (_city: Pick<SeedCity, "slug">, slugs: string[], owners: { orgId: string | null; adminId: string }) => ({
+  slug: { in: slugs },
+  deleted_at: null,
+  OR: [...(owners.orgId ? [{ organizer_org_id: owners.orgId }] : []), { organizer_id: owners.adminId, organizer_org_id: null }],
+})
 
 const insensitive = "insensitive" as const
 
@@ -159,16 +168,12 @@ const HOME_CITY_MATCH = {
 /**
  * The events the remove step may soft-delete: the city's own, by its catalogue
  * names (`events.city` is stored through the same normaliser, `clean_city_text`).
- * A row with no city counts only when its address names the city.
+ * Bengaluru keeps its old address fallback; any other city matches by name only,
+ * since an address that merely mentions it ("Thane West, near Mumbai") is not it.
  */
 export function cityMatchFor(city: Pick<SeedCity, "slug" | "name" | "matchKeys">) {
   if (isHome(city)) return HOME_CITY_MATCH
-  return {
-    OR: [
-      ...city.matchKeys.map((key) => ({ city: { equals: key, mode: insensitive } })),
-      { AND: [{ city: null }, { address: { contains: city.name, mode: insensitive } }] },
-    ],
-  }
+  return { OR: city.matchKeys.map((key) => ({ city: { equals: key, mode: insensitive } })) }
 }
 
 /* -------------------------------------------------------------------------- */

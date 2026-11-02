@@ -1343,8 +1343,11 @@ async function seedHours(venues: Record<VenueKey, VenueSpec>, city: SeedCity) {
  * the scenario venues under their names in that city. Nothing else: not another
  * city's rows, not the crowd's accounts, never a venue day.
  */
-async function clean(city: SeedCity, venues: Record<VenueKey, VenueSpec>) {
-  const seeded = { ...seededEventsWhere(city), ...realEventsWhere }
+async function clean(city: SeedCity, events: EventSpec[], venues: Record<VenueKey, VenueSpec>) {
+  const admin = await db.user.findUnique({ where: { email: ADMIN_EMAIL }, select: { id: true } })
+  if (!admin) throw new Error(`REFUSING: ${ADMIN_EMAIL} missing, so the seed's own rows cannot be told apart`)
+  const org = await db.organisations.findFirst({ where: { display_name: TEST_ORG_NAMES.events }, select: { id: true } })
+  const seeded = { ...seededEventsWhere(city, events.map((e) => e.slug), { orgId: org?.id ?? null, adminId: admin.id }), ...realEventsWhere }
   const seededVenues = { name: { in: Object.values<VenueSpec>(venues).map((v) => v.name) }, city: city.name, deleted_at: null }
   const [eventCount, venueCount] = await Promise.all([db.events.count({ where: seeded }), db.venues.count({ where: seededVenues })])
   console.log(`${APPLY ? "Soft-delete" : "Would soft-delete"} ${eventCount} ${slugPrefix(city)}* event(s) and ${venueCount} seeded venue(s) in ${city.name}. Nothing else.`)
@@ -1353,9 +1356,9 @@ async function clean(city: SeedCity, venues: Record<VenueKey, VenueSpec>) {
     return
   }
   const at = new Date()
-  const events = await db.events.updateMany({ where: seeded, data: { deleted_at: at, updated_at: at } })
+  const gone = await db.events.updateMany({ where: seeded, data: { deleted_at: at, updated_at: at } })
   const removed = await db.venues.updateMany({ where: seededVenues, data: { deleted_at: at } })
-  console.log(`soft-deleted ${events.count} event(s) and ${removed.count} venue(s)\n`)
+  console.log(`soft-deleted ${gone.count} event(s) and ${removed.count} venue(s)\n`)
 }
 
 async function main() {
@@ -1391,7 +1394,7 @@ async function main() {
   }
   const { city, clock, events, venues } = run
   console.log(`city:     ${city.name} (${city.slug}, ${city.timezone}) — scenario slugs ${slugPrefix(city)}*\n`)
-  if (CLEAN) return clean(city, venues)
+  if (CLEAN) return clean(city, events, venues)
   if (HOURS) return seedHours(venues, city)
   if (REFRESH_TIMES) return refreshTimes()
   await seedCity(city, clock, events, venues)
