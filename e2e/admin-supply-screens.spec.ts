@@ -161,6 +161,17 @@ async function screens(): Promise<Screen[]> {
       },
     },
     {
+      path: "/dashboard/markets",
+      h1: "Markets",
+      check: async (page) => {
+        // The catalogue is seeded by its migration, so every migrated database has both countries.
+        for (const name of ["India", "Canada", "Add a city", "Add a country"]) {
+          await expect(main(page).getByRole("heading", { name, exact: true })).toBeVisible()
+        }
+        await expect(main(page).getByRole("radiogroup", { name: "Canada launch state" })).toBeVisible()
+      },
+    },
+    {
       path: "/dashboard/settings",
       h1: "Settings",
       check: async (page) => {

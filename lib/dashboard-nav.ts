@@ -8,6 +8,7 @@ import {
   IconFileSpreadsheet,
   IconFlag,
   IconHistory,
+  IconWorld,
   IconFileCheck,
   IconInbox,
   IconListDetails,
@@ -328,6 +329,15 @@ export const dashboardNav: DashboardNavItem[] = [
       "What an event offers. Retiring one stops it being offered without rewriting the events that already list it.",
     url: "/dashboard/amenities",
     icon: IconCategory,
+    allowedRoles: ["app_admin"],
+    group: "setup",
+  },
+  {
+    // Countries and cities were rows a migration seeded and nothing else wrote (travel P5).
+    title: "Markets",
+    description: "The countries and cities people can see in the app, and who sees a preview early.",
+    url: "/dashboard/markets",
+    icon: IconWorld,
     allowedRoles: ["app_admin"],
     group: "setup",
   },
