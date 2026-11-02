@@ -23,6 +23,7 @@ import {
   setMarketState,
 } from "@/lib/market-actions"
 import { cityCatalogue, previewMarketsFor } from "@/lib/cities"
+import { db as appDb } from "@/lib/db"
 import { db, closeDb, makeUser, makeEvent, testId } from "./helpers"
 import { clearCityCatalogue } from "../support/city-catalogue"
 
@@ -371,5 +372,79 @@ describe("what an admin types is checked before anything is written", () => {
 
   it("refuses an unknown state", async () => {
     await expect(setCityState(suppliedSlug, "open" as never)).rejects.toThrow("Choose Live, Preview or Hidden.")
+  })
+})
+
+/*
+ * A lost update: two admins on the screen, one saves, the other saves from what
+ * they read before it. The action reads the row, somebody else's write commits,
+ * then the action writes. It must refuse rather than overwrite, and leave no
+ * audit row whose `from` is a state the row was no longer in.
+ */
+describe("a state change made from a stale read is refused", () => {
+  /** The next action's read of `model` is followed at once by `write`, on another connection. */
+  const raceOnce = (model: "cities" | "markets", write: () => Promise<unknown>) => {
+    // `lib/db` exports a Proxy onto the client on globalThis; the spy goes on that client.
+    void appDb.markets
+    const client = (globalThis as unknown as { prisma: { $transaction: (fn: (tx: object) => Promise<unknown>) => Promise<unknown> } }).prisma
+    const real = client.$transaction.bind(client)
+    const bound = (target: object, key: PropertyKey) => {
+      const value = Reflect.get(target, key)
+      return typeof value === "function" ? value.bind(target) : value
+    }
+    jest.spyOn(client, "$transaction").mockImplementationOnce(((fn: (tx: object) => Promise<unknown>) =>
+      real((tx) =>
+        fn(
+          new Proxy(tx, {
+            get: (t, k) =>
+              k !== model
+                ? bound(t, k)
+                : new Proxy(Reflect.get(t, k) as object, {
+                    get: (delegate, m) =>
+                      m !== "findUnique"
+                        ? bound(delegate, m)
+                        : async (args: unknown) => {
+                            const row = await (Reflect.get(delegate, m) as (a: unknown) => Promise<unknown>).call(delegate, args)
+                            await write()
+                            return row
+                          },
+                  }),
+          })
+        )
+      )) as never)
+  }
+
+  afterEach(() => jest.restoreAllMocks())
+
+  it("a city: the other admin's state stands, and nothing is audited", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    const before = await db.cities.findUniqueOrThrow({ where: { slug: suppliedSlug } })
+    expect(before.launch_state).toBe("preview")
+    const audits = await auditRows(before.id)
+    raceOnce("cities", () => db.cities.update({ where: { id: before.id }, data: { launch_state: "hidden" } }))
+
+    await expect(setCityState(suppliedSlug, "hidden")).rejects.toThrow("was changed by someone else just now")
+    expect((await db.cities.findUniqueOrThrow({ where: { id: before.id } })).launch_state).toBe("hidden")
+    expect(await auditRows(before.id)).toBe(audits)
+    await db.cities.update({ where: { id: before.id }, data: { launch_state: "preview" } })
+  })
+
+  it("a country: the same", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    const before = await db.markets.findUniqueOrThrow({ where: { code: CODE } })
+    const to = before.launch_state === "preview" ? "hidden" : "preview"
+    const audits = await auditRows(CODE)
+    raceOnce("markets", () => db.markets.update({ where: { code: CODE }, data: { launch_state: to } }))
+
+    await expect(setMarketState(CODE, to)).rejects.toThrow("was changed by someone else just now")
+    expect(await auditRows(CODE)).toBe(audits)
+    await db.markets.update({ where: { code: CODE }, data: { launch_state: before.launch_state } })
+  })
+
+  it("without a race, the same calls still save (the guard is not refusing everything)", async () => {
+    actingUser = { id: admin, role: "app_admin" }
+    await setCityState(suppliedSlug, "hidden")
+    expect((await db.cities.findUniqueOrThrow({ where: { slug: suppliedSlug } })).launch_state).toBe("hidden")
+    await setCityState(suppliedSlug, "preview")
   })
 })

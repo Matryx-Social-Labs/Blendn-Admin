@@ -122,6 +122,8 @@ async function supplyBySlug(client: Client, catalogue: Catalogue): Promise<Map<s
   return supply
 }
 
+const changedUnderYou = (name: string) => `${name} was changed by someone else just now. Reload to see it, then try again.`
+
 const isEmpty = (s: { events: number; venues: number } | undefined) => !s || (s.events === 0 && s.venues === 0)
 
 /** After a committed save: the app reads the new rows, and the screen re-renders. */
@@ -201,10 +203,12 @@ export async function setCityState(slugArg: string, state: LaunchState): Promise
         `${city.name} can’t go live: it has no upcoming listed events and no listed venues. List an event or a venue in ${city.name} first.`,
       )
     }
-    await tx.cities.update({
-      where: { id: city.id },
+    // From the state read, or not at all: another admin's save in between is not overwritten.
+    const { count } = await tx.cities.updateMany({
+      where: { id: city.id, launch_state: city.launch_state },
       data: { launch_state: to },
     })
+    if (count === 0) throw new Refusal(changedUnderYou(city.name))
     await auditInTx(tx, {
       userId: user.id,
       action: "city.state_changed",
@@ -242,7 +246,8 @@ export async function setMarketState(codeArg: string, state: LaunchState): Promi
           `${market.name} can’t go live: ${empty.name} is set to live with nothing listed. Set it to preview, or list an event or a venue there first.`,
         )
     }
-    await tx.markets.update({ where: { code }, data: { launch_state: to } })
+    const { count } = await tx.markets.updateMany({ where: { code, launch_state: market.launch_state }, data: { launch_state: to } })
+    if (count === 0) throw new Refusal(changedUnderYou(market.name))
     await auditInTx(tx, {
       userId: user.id,
       action: "market.state_changed",
