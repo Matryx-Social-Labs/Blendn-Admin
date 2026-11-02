@@ -122,6 +122,8 @@ async function supplyBySlug(client: Client, catalogue: Catalogue): Promise<Map<s
   return supply
 }
 
+const changedUnderYou = (name: string) => `${name} was changed by someone else since this page loaded. Reload to see it, then try again.`
+
 const isEmpty = (s: { events: number; venues: number } | undefined) => !s || (s.events === 0 && s.venues === 0)
 
 /** After a committed save: the app reads the new rows, and the screen re-renders. */
@@ -185,10 +187,12 @@ export async function getMarkets(): Promise<{ markets: MarketView[] }> {
   }
 }
 
-export async function setCityState(slugArg: string, state: LaunchState): Promise<void> {
+/** `from`: the state the screen showed. A row that is no longer in it was changed by someone else, and is not written over. */
+export async function setCityState(slugArg: string, state: LaunchState, fromArg: LaunchState): Promise<void> {
   const user = await requireAdmin()
   const slug = textFrom(slugArg)
   const to = launchStateFrom(state)
+  const from = launchStateFrom(fromArg)
   const changed = await db.$transaction(async (tx) => {
     const city = await tx.cities.findUnique({
       where: { slug },
@@ -196,31 +200,36 @@ export async function setCityState(slugArg: string, state: LaunchState): Promise
     })
     if (!city) throw new Refusal("No such city.")
     if (city.launch_state === to) return false
+    if (city.launch_state !== from) throw new Refusal(changedUnderYou(city.name))
     if (to === "live" && isEmpty((await supplyBySlug(tx, await catalogueIn(tx))).get(slug))) {
       throw new Refusal(
         `${city.name} can’t go live: it has no upcoming listed events and no listed venues. List an event or a venue in ${city.name} first.`,
       )
     }
-    await tx.cities.update({
-      where: { id: city.id },
+    // From the state shown, or not at all: a save that commits after the read above is not overwritten either.
+    const { count } = await tx.cities.updateMany({
+      where: { id: city.id, launch_state: from },
       data: { launch_state: to },
     })
+    if (count === 0) throw new Refusal(changedUnderYou(city.name))
     await auditInTx(tx, {
       userId: user.id,
       action: "city.state_changed",
       resource: "city",
       resourceId: city.id,
-      details: { slug, from: city.launch_state, to },
+      details: { slug, from, to },
     })
     return true
   })
   if (changed) saved()
 }
 
-export async function setMarketState(codeArg: string, state: LaunchState): Promise<void> {
+/** `from` as in `setCityState`. */
+export async function setMarketState(codeArg: string, state: LaunchState, fromArg: LaunchState): Promise<void> {
   const user = await requireAdmin()
   const code = textFrom(codeArg)
   const to = launchStateFrom(state)
+  const from = launchStateFrom(fromArg)
   const changed = await db.$transaction(async (tx) => {
     const market = await tx.markets.findUnique({
       where: { code },
@@ -228,6 +237,7 @@ export async function setMarketState(codeArg: string, state: LaunchState): Promi
     })
     if (!market) throw new Refusal("No such country.")
     if (market.launch_state === to) return false
+    if (market.launch_state !== from) throw new Refusal(changedUnderYou(market.name))
     if (to === "live") {
       const catalogue = await catalogueIn(tx)
       const supply = await supplyBySlug(tx, catalogue)
@@ -242,13 +252,14 @@ export async function setMarketState(codeArg: string, state: LaunchState): Promi
           `${market.name} can’t go live: ${empty.name} is set to live with nothing listed. Set it to preview, or list an event or a venue there first.`,
         )
     }
-    await tx.markets.update({ where: { code }, data: { launch_state: to } })
+    const { count } = await tx.markets.updateMany({ where: { code, launch_state: from }, data: { launch_state: to } })
+    if (count === 0) throw new Refusal(changedUnderYou(market.name))
     await auditInTx(tx, {
       userId: user.id,
       action: "market.state_changed",
       resource: "market",
       resourceId: code,
-      details: { from: market.launch_state, to },
+      details: { from, to },
     })
     return true
   })
