@@ -1,5 +1,4 @@
 import { refundAllOnCancel } from "@/lib/ticket-refunds"
-import { ticketTimesRefusal } from "@/lib/ticket-views"
 import { logger } from "@/lib/logger"
 import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
@@ -11,7 +10,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { EVENT_TIMES_ORDER_SENTENCE, EventStatusMovedError, EventTimesOrderError, updateEventTracked } from "@/lib/event-change"
+import { EVENT_TIMES_ORDER_SENTENCE, EventStatusMovedError, EventTimesOrderError, EventTimesRefusedError, updateEventTracked } from "@/lib/event-change"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
@@ -191,9 +190,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return errorResponse("Use a valid date and time.", 400)
     if (nextStart.getTime() >= nextEnd.getTime()) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
 
-    // A ticketed event with paid orders moves only later, and not at all once started (an unchanged resent value is no move).
-    const timesRefusal = await ticketTimesRefusal(event, { start: nextStart, end: nextEnd })
-    if (timesRefusal) return errorResponse(timesRefusal.sentence, 409, timesRefusal.code)
+    // A ticketed event with orders moves only later, and not at all once started: decided in `updateEventTracked`, under the row lock.
     // A postponement needs nothing here: payouts are held at Razorpay with no end, and the release job reads the
     // event's floor (the later of start and end, + 3 days) when it runs (lib/payout-release.ts).
 
@@ -525,11 +522,12 @@ export async function PATCH(req: Request, { params }: RouteContext) {
           : {}),
       },
     }, { fromStatus: event.status }).catch((error: unknown) => {
-      if (error instanceof EventStatusMovedError || error instanceof EventTimesOrderError) return error
+      if (error instanceof EventStatusMovedError || error instanceof EventTimesOrderError || error instanceof EventTimesRefusedError) return error
       throw error
     })
     if (updatedEvent instanceof EventStatusMovedError) return errorResponse(updatedEvent.message, 409)
     if (updatedEvent instanceof EventTimesOrderError) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
+    if (updatedEvent instanceof EventTimesRefusedError) return errorResponse(updatedEvent.refusal.sentence, 409, updatedEvent.refusal.code)
 
     // Who published, cancelled or moved it, with the material changes the
     // attendees were told about (SCRUM-89). Straight after the write: the

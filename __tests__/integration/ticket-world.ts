@@ -19,6 +19,8 @@ import { cleanup, db, makeEvent, makeUser, onboard, testId } from "./helpers"
 
 export const WEBHOOK_SECRET = "whsec_itest_tickets_webhook_secret_0123456789"
 export const LINKED_ACCOUNT = "acc_ITESTLINKED001"
+/** The payout hold after an event (and after a payment), as lib/ticket-payments.ts holds it. */
+export const PAYOUT_HOLD_MS = 3 * 86_400_000
 
 export function ticketEnv() {
   const previous = { ...process.env }

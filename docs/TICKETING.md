@@ -70,10 +70,16 @@ are the only releaser.
   (`ticket_order.cancel_refund_manual` audit row, an error log) for a person to
   refund the buyer and recover the share (terms 4.4, 5.5).
 - **Event times**: the dashboard create and edit refuse a start at or after
-  the end (and `updateEventTracked` again under the row lock). Once a ticketed
-  event has paid orders it may only move later — never earlier, never into the
-  past (409 `times_only_later`) — and not at all once started (409
-  `times_locked`) (`ticketTimesRefusal`).
+  the end. Once a ticketed event has paid or held orders it may only move
+  later — never earlier, never into the past (409 `times_only_later`) — and
+  not at all once started (409 `times_locked`). Decided by `ticketTimesRefusal`
+  (`lib/ticket-times.ts`) inside `updateEventTracked`, after the event row is
+  locked `FOR UPDATE`, with the orders counted in that transaction;
+  `reserveTickets` takes the event row `FOR SHARE` before its type locks, so a
+  hold and a time move never interleave.
+- **A payment for an event that has already ended** is refunded as
+  `late_payment` and never paid out; every payout's `release_floor` is at
+  least three days after its payment.
 - Not built: a buyer's full refund on a postponement until 48 hours before the
   new start (organizer terms 5.3): SCRUM-1016. The manual recovery of a
   released share after a cancellation has no screen yet: the audit rows are

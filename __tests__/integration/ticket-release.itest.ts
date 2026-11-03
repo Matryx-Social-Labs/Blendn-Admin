@@ -1,9 +1,11 @@
 import { releaseDuePayouts, RELEASING_RETRY_MS } from "@/lib/payout-release"
 import { holdFloor } from "@/lib/ticket-payments"
+import { reserveTickets } from "@/lib/ticket-holds"
+import { saveTicketType } from "@/lib/ticket-types"
 import { cancelEventRefundAll, refundOrder } from "@/lib/ticket-refunds"
 
 import { closeDb, db } from "./helpers"
-import { buyer, capturedDelivery, deliver, fakeRazorpay, heldOrder, newWorld, settled, teardown, ticketEnv, ticketedEvent, type FakeRazorpay } from "./ticket-world"
+import { buyer, capturedDelivery, deliver, fakeRazorpay, heldOrder, newWorld, PAYOUT_HOLD_MS, settled, teardown, ticketEnv, ticketedEvent, type FakeRazorpay } from "./ticket-world"
 
 /**
  * We are the only releaser of an organizer's payout (SCRUM-1014, security
@@ -274,6 +276,74 @@ describe("refunds and releases share one lock order (security review 6)", () => 
       }
     }
     expect(refunded + flagged).toBe(orderIds.length)
+  })
+})
+
+describe("an edit racing a reserve, and a payment after the end (security review 7)", () => {
+  it("never leaves a held or paid order on an event moved earlier: the edit or the order is refused", async () => {
+    for (let round = 0; round < 6; round++) {
+      const world = await ticketedEvent(w, [{ quantity: 20 }])
+      const start = new Date(Date.now() + 5 * DAY)
+      await db.events.update({ where: { id: world.eventId }, data: { start_time: start, end_time: new Date(start.getTime() + 3 * HOUR) } })
+      const b = await buyer(w)
+      const past = new Date(Date.now() - 2 * DAY)
+      session = { user: { id: world.host, role: "organizer" } }
+      const [edit, held] = await Promise.all([
+        patch(world.eventId, { start_time: past.toISOString(), end_time: new Date(past.getTime() + HOUR).toISOString() }),
+        reserveTickets({ eventId: world.eventId, buyerId: b, lines: [{ ticketTypeId: world.typeIds[0], quantity: 1 }] }),
+      ])
+      session = null
+      const moved = edit.status === 200
+      expect({ round, both: moved && held.ok }).toEqual({ round, both: false })
+      const e = await db.events.findUniqueOrThrow({ where: { id: world.eventId }, select: { start_time: true } })
+      const orders = await db.ticket_orders.count({ where: { event_id: world.eventId, status: { in: ["pending", "paid"] } } })
+      expect({ round, earlierWithOrders: e.start_time < start && orders > 0 }).toEqual({ round, earlierWithOrders: false })
+    }
+  }, 60_000)
+
+  it("does not deadlock: reserves, type edits and time edits on one event at once all finish", async () => {
+    const world = await ticketedEvent(w, [{ quantity: 50 }])
+    const start = new Date(Date.now() + 5 * DAY)
+    await db.events.update({ where: { id: world.eventId }, data: { start_time: start, end_time: new Date(start.getTime() + 3 * HOUR) } })
+    const buyers = await Promise.all(Array.from({ length: 6 }, () => buyer(w)))
+    const host = { id: world.host, role: "organizer" as const }
+    session = { user: host }
+    const results = await Promise.allSettled([
+      ...buyers.map((b) => reserveTickets({ eventId: world.eventId, buyerId: b, lines: [{ ticketTypeId: world.typeIds[0], quantity: 1 }] })),
+      ...[1, 2, 3].map((i) => saveTicketType(world.eventId, host, { id: world.typeIds[0], name: `Tier ${i}`, price: "499", quantity: "50", maxPerOrder: "10", salesStart: "", salesEnd: "", onSale: "on" })),
+      ...[1, 2].map((i) => patch(world.eventId, { start_time: new Date(start.getTime() + i * DAY).toISOString(), end_time: new Date(start.getTime() + i * DAY + 3 * HOUR).toISOString() })),
+    ])
+    session = null
+    const errors = results.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason))
+    expect(errors).toEqual([])
+    const reserves = results.slice(0, buyers.length).map((r) => (r as PromiseFulfilledResult<{ ok: boolean; reason?: string }>).value)
+    expect(reserves.filter((r) => !r.ok && r.reason !== "busy")).toEqual([])
+  }, 60_000)
+
+  it("refunds a payment for an event that has already ended, as late_payment, and owes no payout", async () => {
+    const world = await ticketedEvent(w, [{ quantity: 10 }])
+    const b = await buyer(w)
+    const { orderRef, orderId } = await heldOrder(fake, world.eventId, b, [{ ticketTypeId: world.typeIds[0], quantity: 1 }])
+    // The event ended while the buyer was paying (times written behind the route's back).
+    await db.events.update({ where: { id: world.eventId }, data: { start_time: new Date(Date.now() - 2 * DAY), end_time: new Date(Date.now() - DAY) } })
+    await deliver(capturedDelivery("payment.captured", fake.capture(orderRef)))
+    await settled()
+    const o = await db.ticket_orders.findUniqueOrThrow({ where: { id: orderId } })
+    expect(o.status).not.toBe("paid")
+    expect(o.refund_reason).toBe("late_payment")
+    expect(await db.ticket_payouts.count({ where: { order_id: orderId } })).toBe(0)
+  })
+
+  it("records a release floor at least three days after the payment, whatever the event's times say", async () => {
+    const world = await ticketedEvent(w, [{ quantity: 10 }])
+    // Started an hour ago, ends in an hour: its own floor is three days after the end.
+    await db.events.update({ where: { id: world.eventId }, data: { start_time: new Date(Date.now() - HOUR), end_time: new Date(Date.now() + HOUR) } })
+    const b = await buyer(w)
+    const before = Date.now()
+    const { orderRef, orderId } = await heldOrder(fake, world.eventId, b, [{ ticketTypeId: world.typeIds[0], quantity: 1 }])
+    await deliver(capturedDelivery("payment.captured", fake.capture(orderRef)))
+    await settled()
+    expect((await payoutOf(orderId)).release_floor.getTime()).toBeGreaterThanOrEqual(before + PAYOUT_HOLD_MS)
   })
 })
 

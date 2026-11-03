@@ -1,3 +1,4 @@
+import { ticketTimesRefusal, type TimesRefusal } from "./ticket-times"
 import { Prisma, type event_status } from "@prisma/client"
 import { db } from "@/lib/db"
 
@@ -212,6 +213,13 @@ export class EventTimesOrderError extends Error {
 }
 export const EVENT_TIMES_ORDER_SENTENCE = "The event must end after it starts."
 
+/** A ticketed event's times moved where they may not go (`ticketTimesRefusal`): refused under the row lock. */
+export class EventTimesRefusedError extends Error {
+  constructor(readonly refusal: TimesRefusal) {
+    super(refusal.sentence)
+  }
+}
+
 export async function updateEventTracked(
   args: Prisma.eventsUpdateArgs,
   opts: { fromStatus?: string } = {}
@@ -228,6 +236,9 @@ export async function updateEventTracked(
     if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
     if (updated.start_time.getTime() >= updated.end_time.getTime()) throw new EventTimesOrderError()
+    // Every writer through here: a sold event's times only move later, decided under the row lock (security review 7).
+    const timesRefusal = await ticketTimesRefusal(tx, { id: updated.id, start_time: before.start_time, end_time: before.end_time }, updated)
+    if (timesRefusal) throw new EventTimesRefusedError(timesRefusal)
     const next = nextChange(before.changed_from, before, updated)
     /*
      * A reminder is claimed once, by `reminded_at IS NULL`

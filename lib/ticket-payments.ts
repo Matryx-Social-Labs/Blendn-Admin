@@ -145,8 +145,9 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
     orgId: event?.organizer_org_id ?? null,
     // Only an active linked account is paid; otherwise the payout is recorded as owed to nobody (`no_account`).
     account: event?.organizer_org && payoutsConnected(event.organizer_org) ? event.organizer_org.razorpay_account_id : null,
-    // The payout's own release floor, fixed at payment: moving the event earlier later can never bring the money forward.
-    releaseFloor: event ? holdFloor(event) : new Date(Date.now() + PAYOUT_HOLD_AFTER_EVENT_MS),
+    ended: event !== null && event.end_time <= new Date(),
+    // The payout's own release floor, fixed at payment: the event's floor, and never under three days from the payment.
+    releaseFloor: new Date(Math.max(event ? holdFloor(event).getTime() : 0, Date.now() + PAYOUT_HOLD_AFTER_EVENT_MS)),
   }
 }
 
@@ -196,10 +197,12 @@ async function whyNotSeated(
   tx: Prisma.TransactionClient,
   order: LockedOrder,
   lines: Line[],
-  ctx: { on: boolean; buyerGone: boolean },
+  ctx: { on: boolean; buyerGone: boolean; ended: boolean },
   now: Date
 ): Promise<RefundReason | null> {
   if (order.status === "cancelled" || ctx.buyerGone) return "order_cancelled"
+  // Paid for a night that is already over (security review 7): refunded, never seated or paid out.
+  if (ctx.ended) return "late_payment"
   if (order.status === "pending") return ctx.on ? null : "event_not_on"
   // Expired: its seats went back. Seated again only as a new hold would be, under the type locks.
   const refused = await lateSeatRefusal(tx, { eventId: order.event_id, buyerId: order.buyer_id, lines: lines.map((l) => ({ ticketTypeId: l.ticket_type_id, quantity: l.quantity })) }, now)
