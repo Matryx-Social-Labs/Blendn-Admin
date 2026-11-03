@@ -66,7 +66,7 @@ export const PAYOUT_HOLD_AFTER_EVENT_MS = 3 * 24 * 60 * 60 * 1000
  * (`ticket_payouts.on_hold_until`, fixed when the order was paid), never from
  * the event's end time, which its organizer can edit: moving the end later
  * must not reopen a refund after the money left. Only an order with no payout
- * row yet falls back to the event's end + 3 days. From release on an
+ * row yet falls back to the event's `holdFloor`. From release on an
  * organizer refund is refused (`refundOrder`) and not offered (the Sales
  * panel reads this same rule).
  */
@@ -80,8 +80,8 @@ export const PAYOUT_HOLD_AFTER_EVENT_MS = 3 * 24 * 60 * 60 * 1000
 export const holdFloor = (event: { start_time: Date; end_time: Date }): Date =>
   new Date(Math.max(event.start_time.getTime(), event.end_time.getTime()) + PAYOUT_HOLD_AFTER_EVENT_MS)
 
-export const payoutReleased = (hold: { onHoldUntil: Date | null; eventEnd: Date }, now: Date = new Date()): boolean =>
-  now.getTime() >= (hold.onHoldUntil?.getTime() ?? hold.eventEnd.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS)
+export const payoutReleased = (hold: { onHoldUntil: Date | null; event: { start_time: Date; end_time: Date } }, now: Date = new Date()): boolean =>
+  now.getTime() >= (hold.onHoldUntil ?? holdFloor(hold.event)).getTime()
 
 interface LockedOrder {
   id: string

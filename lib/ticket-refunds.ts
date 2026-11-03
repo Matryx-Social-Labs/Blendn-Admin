@@ -43,7 +43,7 @@ type Actor = { id: string; role: user_role }
 export type RefundRefusal = "ticketing_off" | "payments_off" | "not_found" | "not_paid" | "already_refunding" | "retrying" | "payout_released"
 
 async function canEditEvent(tx: Prisma.TransactionClient, eventId: string, user: Actor) {
-  const event = await tx.events.findUnique({ where: { id: eventId }, select: { ...eventPermissionSelect, status: true, end_time: true } })
+  const event = await tx.events.findUnique({ where: { id: eventId }, select: { ...eventPermissionSelect, status: true, start_time: true, end_time: true } })
   if (!event || !eventPermissions(await actorFor(user), event).canEdit) return null
   return event
 }
@@ -74,7 +74,7 @@ export async function refundOrder(orderId: string, user: Actor, reason: string):
       // The organizer's share left the hold its payout recorded: nothing of theirs is left to reverse (SCRUM-1014).
       // The recorded hold, not the event's end time, which its organizer can edit.
       const payout = await tx.ticket_payouts.findUnique({ where: { order_id: orderId }, select: { on_hold_until: true } })
-      if (payoutReleased({ onHoldUntil: payout?.on_hold_until ?? null, eventEnd: event.end_time })) throw new Refused("payout_released")
+      if (payoutReleased({ onHoldUntil: payout?.on_hold_until ?? null, event })) throw new Refused("payout_released")
       const amount = organizerShare(order)
       await tx.ticket_orders.update({ where: { id: orderId }, data: { refund_requested_at: new Date(), refund_requested_minor: amount, refund_reason: why } })
       if (event.organizer_org_id) {

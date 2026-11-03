@@ -5,7 +5,7 @@ import { db } from "./db"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { labelScopeFor } from "./reports"
-import { organizerShare, PAYOUT_HOLD_AFTER_EVENT_MS, payoutReleased } from "./ticket-payments"
+import { holdFloor, organizerShare, payoutReleased } from "./ticket-payments"
 
 /**
  * What the Tickets tab reads about money and orders (SCRUM-1014): the Sales
@@ -63,8 +63,6 @@ export interface SalesPage {
   currency: string
 }
 
-/** The moment the organizer's share leaves the hold: three days after the event ends. */
-export const releaseAtFor = (endTime: Date) => new Date(endTime.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS)
 
 const statusOf = (o: { status: string; refund_requested_at: Date | null }): SaleStatus =>
   o.status === "refunded" ? "refunded" : o.refund_requested_at ? "refunding" : "paid"
@@ -93,7 +91,7 @@ async function buyersByLabel(eventId: string, q: string, scope: string): Promise
 /** One page of an event's sales, for whoever may edit the event; null for anyone else. */
 export async function salesPage(actor: PermissionActor, eventId: string, query: SalesQuery, now: Date = new Date()): Promise<SalesPage | null> {
   if (!isUuid(eventId)) return null
-  const event = await db.events.findFirst({ where: { id: eventId, deleted_at: null }, select: { ...eventPermissionSelect, end_time: true, ticket_fee_schedule: true } })
+  const event = await db.events.findFirst({ where: { id: eventId, deleted_at: null }, select: { ...eventPermissionSelect, start_time: true, end_time: true, ticket_fee_schedule: true } })
   if (!event || !eventPermissions(actor, event).canEdit) return null
   const scope = labelScopeFor(actor, event.organizer_org_id)
 
@@ -149,7 +147,7 @@ export async function salesPage(actor: PermissionActor, eventId: string, query: 
       refundedAt: o.refunded_at,
       createdAt: o.created_at,
       // The same rule refundOrder enforces, on the same recorded hold: the flag only hides what the lib would refuse.
-      refundable: status === "paid" && !payoutReleased({ onHoldUntil: o.payout?.on_hold_until ?? null, eventEnd: event.end_time }, now),
+      refundable: status === "paid" && !payoutReleased({ onHoldUntil: o.payout?.on_hold_until ?? null, event }, now),
     }
   })
   const currency = (event.ticket_fee_schedule as { currency?: string } | null)?.currency ?? "INR"
@@ -193,7 +191,7 @@ const REASON_BY: Record<string, string> = {
  */
 export async function ticketsSummary(eventId: string, now: Date = new Date()): Promise<TicketsSummary> {
   const [event, types, orders, inside] = await Promise.all([
-    db.events.findUniqueOrThrow({ where: { id: eventId }, select: { end_time: true } }),
+    db.events.findUniqueOrThrow({ where: { id: eventId }, select: { start_time: true, end_time: true } }),
     db.ticket_types.aggregate({ where: { event_id: eventId }, _sum: { quantity: true } }),
     // Per order through its status index, its lines by their primary key: no scan of the event's lines.
     db.$queryRaw<{ status: string; orders: bigint; tickets: bigint; share: bigint }[]>`
@@ -212,7 +210,7 @@ export async function ticketsSummary(eventId: string, now: Date = new Date()): P
   const grossMinor = Number(paid?.share ?? 0) + refundedMinor
   // The latest hold any payout recorded, else the event's end + 3 days: what the organizer waits for.
   const latestHold = await db.ticket_payouts.aggregate({ where: { order: { event_id: eventId } }, _max: { on_hold_until: true } })
-  const releaseAt = latestHold._max.on_hold_until ?? releaseAtFor(event.end_time)
+  const releaseAt = latestHold._max.on_hold_until ?? holdFloor(event)
   return {
     soldTickets: Number(paid?.tickets ?? 0),
     refundedTickets: Number(refunded?.tickets ?? 0),
@@ -221,7 +219,7 @@ export async function ticketsSummary(eventId: string, now: Date = new Date()): P
     refundedMinor,
     payoutMinor: grossMinor - refundedMinor,
     releaseAt,
-    released: payoutReleased({ onHoldUntil: releaseAt, eventEnd: event.end_time }, now),
+    released: payoutReleased({ onHoldUntil: releaseAt, event }, now),
     refundedOrders: Number(refunded?.orders ?? 0),
     refunds: await refundsOf(eventId),
     inside,
