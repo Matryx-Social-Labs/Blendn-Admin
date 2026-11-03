@@ -296,6 +296,10 @@ function priced(input: Parameters<typeof ticketFees>[0]): FeeBreakdown {
 
 async function hold(tx: Prisma.TransactionClient, input: ReserveInput, age: number | null, now: Date) {
   await setLockTimeout(tx)
+  // The event row first, shared (security review 7): an edit moving its times holds it FOR UPDATE and counts the
+  // orders under that lock, so a hold and a time move never interleave. Before the types, as every writer that
+  // locks both (the type writer, `saveTicketType`) takes the event first.
+  await tx.$queryRaw`SELECT id FROM events WHERE id = ${input.eventId}::uuid AND kind = 'event' FOR SHARE`
   let types = await lockTypes(tx, input.eventId)
   const event = await sellingEvent(tx, input.eventId, age, now)
   if (await reclaimExpired(tx, input.eventId, now)) types = await lockTypes(tx, input.eventId)

@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto"
+import { readFileSync } from "node:fs"
+import path from "node:path"
+
+import { ORGANIZER_TICKETING_TERMS } from "./legal-acceptance"
+
 /**
  * The Terms of Use's body, cut out of its standalone HTML page
  * (`docs/legal/terms-of-use.html`) so `/terms` can show it inside the policy
@@ -32,4 +38,37 @@ export function termsBody(html: string): { updated: string; body: string } {
 function toDayMonthYear(us: string): string {
   const [month, day, year] = us.replace(",", "").split(" ")
   return `${day} ${month} ${year}`
+}
+
+const TERMS_START = "<!-- terms:start -->"
+const TERMS_END = "<!-- terms:end -->"
+
+export interface ShownTerms {
+  version: string
+  /** The HTML shown, exactly: what the panel and the public page render. */
+  body: string
+  /** sha256, hex, of `body` as UTF-8: what `legal_acceptances.document_sha256` records. */
+  sha256: string
+}
+
+/**
+ * The Organizer Ticketing Terms' body, cut from `docs/legal/organizer-ticketing-terms.html`
+ * between its two markers (SCRUM-1014). Pure, so the cut and the hash are tested without a file.
+ */
+export function organizerTicketingTermsBody(html: string, version: string): ShownTerms {
+  const start = html.indexOf(TERMS_START)
+  const end = html.indexOf(TERMS_END)
+  if (start < 0 || end < start) throw new Error("organizer-ticketing-terms.html: terms markers not found")
+  const body = html.slice(start + TERMS_START.length, end).trim()
+  return { version, body, sha256: createHash("sha256").update(body, "utf8").digest("hex") }
+}
+
+/**
+ * The terms as the server renders them now. Read on every call, never cached,
+ * so the hash an acceptance records is of the text this deploy shows. Our own
+ * file, never user input, which is what makes rendering its HTML safe.
+ */
+export function readOrganizerTicketingTerms(): ShownTerms {
+  const html = readFileSync(path.join(process.cwd(), "docs/legal/organizer-ticketing-terms.html"), "utf8")
+  return organizerTicketingTermsBody(html, ORGANIZER_TICKETING_TERMS.version)
 }

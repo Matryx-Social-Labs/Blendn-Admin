@@ -145,9 +145,9 @@ async function ticketFor(eventId: string, credential: RedeemCredential): Promise
  * paid — and its row count is the answer, so two scanners at two doors cannot
  * both let one ticket in.
  *
- * TODO(ticketing Phase 4, SCRUM-1007): the door route ("Check tickets") rate
- * limits this per operator and event before calling it; six characters from
- * thirty is guessable at an unlimited door.
+ * The door ("Check tickets", `admitAtDoor` in lib/ticket-door.ts, SCRUM-1014)
+ * rate limits this per operator and per event before calling it; six
+ * characters from thirty is guessable at an unlimited door.
  */
 export async function redeemTicket(input: {
   eventId: string

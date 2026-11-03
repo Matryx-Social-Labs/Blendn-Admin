@@ -32,20 +32,22 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 /* Payouts                                                                   */
 /* ------------------------------------------------------------------------ */
 
-/** Make the Route transfer a `pending` payout owes. Returns the transfer id, or null when nothing is owed. */
+/**
+ * Make the Route transfer a `pending` payout owes. Returns the transfer id, or
+ * null when nothing is owed. The transfer is held at Razorpay indefinitely
+ * (`createTransfer`); only the release job releases it (lib/payout-release.ts).
+ */
 export async function createPayoutTransfer(orderId: string): Promise<string | null> {
   const payout = await db.ticket_payouts.findUnique({
     where: { order_id: orderId },
-    select: { status: true, linked_account_ref: true, amount_minor: true, currency: true, on_hold_until: true, order: { select: { provider_payment_ref: true } } },
+    select: { status: true, linked_account_ref: true, amount_minor: true, currency: true, order: { select: { provider_payment_ref: true } } },
   })
   const paymentId = payout?.order.provider_payment_ref
   if (!payout || payout.status !== "pending" || !payout.linked_account_ref || !paymentId) return null
   const account = payout.linked_account_ref
 
   const existing = (await paymentTransfers(paymentId)).find((t) => t.recipient === account && t.amount === payout.amount_minor)
-  const transfer =
-    existing ??
-    (await createTransfer({ paymentId, account, amountMinor: payout.amount_minor, currency: payout.currency, onHoldUntil: payout.on_hold_until, orderId }))
+  const transfer = existing ?? (await createTransfer({ paymentId, account, amountMinor: payout.amount_minor, currency: payout.currency, orderId }))
 
   const { count } = await db.ticket_payouts.updateMany({
     where: { order_id: orderId, status: "pending" },

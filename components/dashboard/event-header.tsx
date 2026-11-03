@@ -21,11 +21,11 @@ import { eventClock, eventStateFor } from "@/lib/event-phase"
  * night and hands out nobody's link.
  */
 export function EventHeader({
-  data: { event, permissions },
+  data: { event, permissions, ticketing },
   active,
   now = new Date(),
 }: {
-  data: Pick<EventPageData, "event" | "permissions">
+  data: Pick<EventPageData, "event" | "permissions"> & { ticketing?: EventPageData["ticketing"] }
   active: EventTabKey
   now?: Date
 }) {
@@ -54,6 +54,7 @@ export function EventHeader({
     canViewAttendees: permissions.canViewAttendees,
     kind: event.kind,
     status: event.status,
+    ticketing,
   })
   const share = sharesLink({ canEdit: permissions.canEdit, kind: event.kind, status: event.status })
 

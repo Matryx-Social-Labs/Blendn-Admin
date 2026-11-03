@@ -414,7 +414,9 @@ registry.registerPath({
     "A refusal the person can fix says so in `reasonCode`, with `errorCode` and the sentence unchanged: " +
     "403 `FORBIDDEN` + `PROFILE_INCOMPLETE` before onboarding is finished, 403 `AGE_RESTRICTED` + " +
     "`AGE_UNKNOWN` when an age-restricted event meets no age on file (a known age below the line has none). " +
-    "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`).",
+    "404 for a venue day's id: a venue's room is entered by going live there (`POST /api/mobile/venues/{venueId}/live`). " +
+    "While `TICKETING` is on, a native ticketed event answers 403 `tickets_required` to someone who holds no ticket whose order is paid " +
+    "and is not the event's staff; letting a ticket in at the door does not check its holder in.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

@@ -92,20 +92,6 @@ const KNOWN_UNREACHABLE = new Map<string, string>([
   ["isSameSponsorName", "re-exported by lib/sponsor-merge.ts and called through neither path; H-section item"],
   ["maySeeIdentity", "the one-person wrapper over maySeeIdentityFor, kept for its five test files; routes ask identityForRef, which also needs askedOnly (SCRUM-975, A-32)"],
 
-  // --- Ticketing phase 1 (SCRUM-1008): the model and its writers, no routes yet --
-  //
-  // Phase 1 is the data model, the fee calculator, holds and the acceptance
-  // record, behind TICKETING (off). The checkout route (phase 2), the sweeper
-  // cron and the dashboard Tickets tab (phase 4) are their callers; delete
-  // each line as that phase wires it.
-  ["enableTicketing", "ticketing phase 4's turn-on action is its caller; it snapshots the market and fixes the price rule (SCRUM-1010)"],
-  ["refundOrder", "ticketing phase 4's order row Refund button calls it; phase 2 built and tested it (SCRUM-1011)"],
-  ["cancelEventRefundAll", "ticketing phase 4's cancel-event flow calls it once the event is cancelled (SCRUM-1011)"],
-  ["payoutStatus", "ticketing phase 4's Payouts settings and the Tickets tab's turn-on gate read it (SCRUM-1011)"],
-  ["redeemTicket", "ticketing phase 4's door page (\"Check tickets\") calls it behind a rate limit (SCRUM-1010)"],
-  ["recordLegalAcceptance", "ticketing phase 4's turn-on dialog records the terms with it (SCRUM-1007)"],
-  ["latestLegalAcceptance", "ticketing phase 4's Tickets tab shows who accepted with it (SCRUM-1007)"],
-
   // --- Venues: rows can be created and then never corrected -----------------
 
   // --- Safety and moderation: built, documented, never on screen ------------

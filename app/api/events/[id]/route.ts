@@ -1,3 +1,4 @@
+import { refundAllOnCancel } from "@/lib/ticket-refunds"
 import { logger } from "@/lib/logger"
 import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
@@ -9,7 +10,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { EventStatusMovedError, updateEventTracked } from "@/lib/event-change"
+import { EVENT_TIMES_ORDER_SENTENCE, EventStatusMovedError, EventTimesOrderError, EventTimesRefusedError, updateEventTracked } from "@/lib/event-change"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
@@ -178,6 +179,20 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     // Which status moves a client may make (lib/event-status-move.ts).
     const moveRefusal = await statusMoveRefusalFor(event.id, status, event.status)
     if (moveRefusal) return errorResponse(moveRefusal, 400)
+
+    /*
+     * Times (SCRUM-1014): each a real time, the start before the end. The payout floor reads both, so a start
+     * moved past the end is refused rather than read as anything. `updateEventTracked` holds the same rule under
+     * the row lock, against an edit that raced this one.
+     */
+    const nextStart = start_time ? new Date(start_time) : event.start_time
+    const nextEnd = end_time ? new Date(end_time) : event.end_time
+    if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return errorResponse("Use a valid date and time.", 400)
+    if (nextStart.getTime() >= nextEnd.getTime()) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
+
+    // A ticketed event with orders moves only later, and not at all once started: decided in `updateEventTracked`, under the row lock.
+    // A postponement needs nothing here: payouts are held at Razorpay with no end, and the release job reads the
+    // event's floor (the later of start and end, + 3 days) when it runs (lib/payout-release.ts).
 
     // Razorpay's reviewer: never out of draft, never a real venue (lib/review-demo-org.ts).
     const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, {
@@ -507,10 +522,12 @@ export async function PATCH(req: Request, { params }: RouteContext) {
           : {}),
       },
     }, { fromStatus: event.status }).catch((error: unknown) => {
-      if (error instanceof EventStatusMovedError) return error
+      if (error instanceof EventStatusMovedError || error instanceof EventTimesOrderError || error instanceof EventTimesRefusedError) return error
       throw error
     })
     if (updatedEvent instanceof EventStatusMovedError) return errorResponse(updatedEvent.message, 409)
+    if (updatedEvent instanceof EventTimesOrderError) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
+    if (updatedEvent instanceof EventTimesRefusedError) return errorResponse(updatedEvent.refusal.sentence, 409, updatedEvent.refusal.code)
 
     // Who published, cancelled or moved it, with the material changes the
     // attendees were told about (SCRUM-89). Straight after the write: the
@@ -541,6 +558,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     let toldInside: string[] = []
     if (isCancelling) {
       toldInside = (await cancelEventCheckIns(resolvedParams.id)).inside
+      // Every ticket refunded in full, booking fee included (organizer terms 5.2).
+      await refundAllOnCancel(resolvedParams.id, session.user)
     }
 
     // Tell the people who were going.

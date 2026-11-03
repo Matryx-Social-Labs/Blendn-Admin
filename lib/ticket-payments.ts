@@ -60,6 +60,20 @@ export type RefundReason = "late_payment" | "order_cancelled" | "event_not_on"
 /** The payout is held until this long after the event ends: a chargeback comes out of it. */
 export const PAYOUT_HOLD_AFTER_EVENT_MS = 3 * 24 * 60 * 60 * 1000
 
+/**
+ * The earliest an event's payouts may be released (SCRUM-1014): three days
+ * after the later of its start and its end, read from the event as it is when
+ * the release job runs (lib/payout-release.ts). Transfers are held at Razorpay
+ * with no end, so a postponement needs no Razorpay call: the floor moves with
+ * the event. A start is never after its end (the event edit refuses it); the
+ * max is so that a row which somehow says otherwise still holds longer.
+ */
+export const holdFloor = (event: { start_time: Date; end_time: Date }): Date =>
+  new Date(Math.max(event.start_time.getTime(), event.end_time.getTime()) + PAYOUT_HOLD_AFTER_EVENT_MS)
+
+/** An organizer refund is refused once its payout is being released or released (`refundOrder`, the Sales panel). The status is the only source. */
+export const PAYOUT_GONE: ReadonlySet<string> = new Set(["releasing", "released"])
+
 interface LockedOrder {
   id: string
   event_id: string
@@ -117,6 +131,7 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
       select: {
         status: true,
         deleted_at: true,
+        start_time: true,
         end_time: true,
         organizer_org_id: true,
         organizer_org: { select: { razorpay_account_id: true, razorpay_account_status: true } },
@@ -130,7 +145,9 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
     orgId: event?.organizer_org_id ?? null,
     // Only an active linked account is paid; otherwise the payout is recorded as owed to nobody (`no_account`).
     account: event?.organizer_org && payoutsConnected(event.organizer_org) ? event.organizer_org.razorpay_account_id : null,
-    endTime: event?.end_time ?? new Date(),
+    ended: event !== null && event.end_time <= new Date(),
+    // The payout's own release floor, fixed at payment: the event's floor, and never under three days from the payment.
+    releaseFloor: new Date(Math.max(event ? holdFloor(event).getTime() : 0, Date.now() + PAYOUT_HOLD_AFTER_EVENT_MS)),
   }
 }
 
@@ -180,10 +197,12 @@ async function whyNotSeated(
   tx: Prisma.TransactionClient,
   order: LockedOrder,
   lines: Line[],
-  ctx: { on: boolean; buyerGone: boolean },
+  ctx: { on: boolean; buyerGone: boolean; ended: boolean },
   now: Date
 ): Promise<RefundReason | null> {
   if (order.status === "cancelled" || ctx.buyerGone) return "order_cancelled"
+  // Paid for a night that is already over (security review 7): refunded, never seated or paid out.
+  if (ctx.ended) return "late_payment"
   if (order.status === "pending") return ctx.on ? null : "event_not_on"
   // Expired: its seats went back. Seated again only as a new hold would be, under the type locks.
   const refused = await lateSeatRefusal(tx, { eventId: order.event_id, buyerId: order.buyer_id, lines: lines.map((l) => ({ ticketTypeId: l.ticket_type_id, quantity: l.quantity })) }, now)
@@ -191,7 +210,7 @@ async function whyNotSeated(
 }
 
 /** The organizer's share, owed to the organisation's linked account; the transfer is made after the commit. */
-async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: { orgId: string | null; account: string | null; endTime: Date }) {
+async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: { orgId: string | null; account: string | null; releaseFloor: Date }) {
   const amount = organizerShare(order)
   if (!ctx.orgId || amount < 1) return
   await tx.ticket_payouts.create({
@@ -202,7 +221,7 @@ async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: 
       amount_minor: amount,
       currency: order.currency,
       status: ctx.account ? "pending" : "no_account",
-      on_hold_until: new Date(ctx.endTime.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS),
+      release_floor: ctx.releaseFloor,
     },
   })
 }

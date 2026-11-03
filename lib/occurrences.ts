@@ -361,13 +361,11 @@ export async function syncOccurrences(
         data: { start_time: day.startTime, end_time: day.endTime },
       })
     } else {
-      await db.event_occurrences.create({
-        data: {
-          event_id: eventId,
-          occurs_on: day.occursOn,
-          start_time: day.startTime,
-          end_time: day.endTime,
-        },
+      // An upsert on the day: two edits of one event syncing at once both find the day missing (SCRUM-1014 race tests).
+      await db.event_occurrences.upsert({
+        where: { event_id_occurs_on: { event_id: eventId, occurs_on: day.occursOn } },
+        create: { event_id: eventId, occurs_on: day.occursOn, start_time: day.startTime, end_time: day.endTime },
+        update: { start_time: day.startTime, end_time: day.endTime },
       })
     }
   }

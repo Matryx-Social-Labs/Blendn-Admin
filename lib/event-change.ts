@@ -1,3 +1,4 @@
+import { ticketTimesRefusal, type TimesRefusal } from "./ticket-times"
 import { Prisma, type event_status } from "@prisma/client"
 import { db } from "@/lib/db"
 
@@ -204,7 +205,25 @@ export class EventStatusMovedError extends Error {
  * row lock, so a status that moved since (a concurrent cancel) is refused with
  * `EventStatusMovedError` rather than written over.
  */
-export async function updateEventTracked(args: Prisma.eventsUpdateArgs, opts: { fromStatus?: string } = {}) {
+/** An edit that would leave the event starting at or after it ends: refused under the row lock, whatever raced it (SCRUM-1014). */
+export class EventTimesOrderError extends Error {
+  constructor() {
+    super("The event must end after it starts.")
+  }
+}
+export const EVENT_TIMES_ORDER_SENTENCE = "The event must end after it starts."
+
+/** A ticketed event's times moved where they may not go (`ticketTimesRefusal`): refused under the row lock. */
+export class EventTimesRefusedError extends Error {
+  constructor(readonly refusal: TimesRefusal) {
+    super(refusal.sentence)
+  }
+}
+
+export async function updateEventTracked(
+  args: Prisma.eventsUpdateArgs,
+  opts: { fromStatus?: string } = {}
+) {
   const eventId = args.where.id
   if (!eventId) throw new Error("updateEventTracked needs the event's id")
   return db.$transaction(async (tx) => {
@@ -216,6 +235,10 @@ export async function updateEventTracked(args: Prisma.eventsUpdateArgs, opts: { 
     })
     if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
+    if (updated.start_time.getTime() >= updated.end_time.getTime()) throw new EventTimesOrderError()
+    // Every writer through here: a sold event's times only move later, decided under the row lock (security review 7).
+    const timesRefusal = await ticketTimesRefusal(tx, { id: updated.id, start_time: before.start_time, end_time: before.end_time }, updated)
+    if (timesRefusal) throw new EventTimesRefusedError(timesRefusal)
     const next = nextChange(before.changed_from, before, updated)
     /*
      * A reminder is claimed once, by `reminded_at IS NULL`
