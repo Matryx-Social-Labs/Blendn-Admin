@@ -158,8 +158,9 @@ shared environment.
 
 **But build your local database with `db:migrate`, not `db:push`.** They do not
 produce the same schema, and the difference is silent. `schema.prisma` cannot
-express a CHECK constraint, so `db push` creates none — while twenty-seven exist in
-migration SQL and therefore in every deployed environment:
+express a CHECK constraint, so `db push` creates none — while every one below (and
+more: `grep -h 'CHECK (' prisma/migrations/*/migration.sql`) exists in migration SQL
+and therefore in every deployed environment:
 
 | Constraint | What it enforces |
 |---|---|
@@ -189,6 +190,33 @@ migration SQL and therefore in every deployed environment:
 | `cities_centre_in_bounds` | a city's centre is inside its box |
 | `cities_licensed_min_age_floor` | a city's licensed-venue age default is never under the 18+ floor |
 | `mobile_refresh_tokens_revoked_reason_known` | a refresh token's `revoked_reason` is NULL, `password_reset` or `signout_all` — the two `endPhoneSessions` reasons (`lib/session-end.ts`) the refresh turns into `PASSWORD_RESET` / `SESSION_REVOKED_ELSEWHERE` |
+| `markets_ticket_fee_slabs_shape` | a market's service-fee slabs: thresholds and rates the same length, at least one, the first from ticket 1, no NULLs |
+| `markets_ticket_fee_slabs_ascending` | slab thresholds strictly ascending, through the IMMUTABLE SQL function `ticket_fee_slabs_ascending` (also `parseFeeSchedule`'s, `lib/ticket-fees.ts`) |
+| `markets_ticket_fee_rates_range` | slab rates, tax on the fee and processing are 0–10000 bps; the minimum fee is never negative |
+| `markets_ticket_fee_min_when_selling` | a market that is not `off` charges a minimum fee of at least 1 minor unit per paid ticket |
+| `events_ticketing_external_needs_url` | an event linking out to tickets has the link |
+| `events_external_ticket_url_https` | that link is https with a host and no user name, and at most 2048 characters — the floor under `httpsUrl()` |
+| `events_ticketing_native_needs_schedule` | an event selling tickets here has its fee snapshot (`IS NOT NULL` spelled out: `jsonb_typeof(NULL)` would pass) |
+| `events_venue_day_not_ticketed` | a venue day is never ticketed |
+| `events_ticketing_native_needs_enablement` | a native event was turned on by `enableTicketing` (`lib/ticketing-enable.ts`): it has `ticketing_enabled_at` |
+| `events_ticket_fee_rule_with_enabled_at` | `ticket_fee_rule` and `ticketing_enabled_at` are set together: the price rule is decided once, in the database, never by a request |
+| `ticket_types_not_oversold` | `sold + held <= quantity` — the last word under `reserveTickets`'s row lock (`lib/ticket-holds.ts`), read there as sold out |
+| `ticket_types_price_non_negative` / `ticket_types_counts_non_negative` | a price is ≥ 0 (free is 0); quantity, sold and held are ≥ 0 |
+| `ticket_types_max_per_order_range` / `ticket_types_name_length` / `ticket_types_sale_window_order` | 1–100 per order; a name of 1–80 characters after trimming; a sale ends after it starts |
+| `ticket_orders_total_is_its_parts` | an order's total is its subtotal plus service fee, tax and processing — or the subtotal alone when the organiser absorbs the fees |
+| `ticket_orders_paid_has_payment_ref` | a paid or refunded order has a provider payment ref and a paid time: paid only on the provider's word |
+| `ticket_orders_amounts_non_negative` / `ticket_orders_currency_shape` / `ticket_orders_fee_breakdown_object` | no negative amount; an ISO-shaped currency; the breakdown is a JSON object |
+| `ticket_orders_total_positive` | `total_minor > 0`: free tickets are RSVP plus capacity and never an order (ticketing decision §4.4) |
+| `ticket_order_lines_quantity_positive` / `ticket_order_lines_price_non_negative` | a line holds at least one ticket, at a price ≥ 0 |
+| `tickets_door_code_shape` / `tickets_redeemer_needs_time` | a door code is six of `23456789ABCDEFGHJKMNPQRSTVWXYZ` (Crockford base32 less 0 O 1 I L U, `DOOR_CODE_ALPHABET` in `lib/tickets.ts`; unique per event; NOT VALID, so new rows only); who redeemed only with when. No QR column: a QR is `<id>.<HMAC-SHA256(TICKET_QR_KEY, id)>`, derived on demand (`ticketQrPayload`, `verifyTicketQr`) |
+| `legal_acceptances_document_key_shape` / `legal_acceptances_version_shape` / `…_ip_length` | a slug document key, a numeric version (`0.1`), a bounded IP |
+| `legal_acceptances_ip_truncated` / `legal_acceptances_document_sha256_shape` / `legal_acceptances_user_agent_length` | NOT VALID (the table is append-only, so rows from before stay as written): the IP is a network, `a.b.c.0/24` or `x:y:z::/48` (`truncatedIp`); the sha256 of the exact text shown is present; a user agent is at most 200 code points |
+| `organisations_razorpay_account_id_shape` / `organisations_razorpay_active_has_account` | an organisation's Razorpay Route linked account is `acc_` and 14 characters, and an `active` one has its id; `enableTicketing` refuses `payouts_not_connected` unless it is active (`payoutStatus`, SCRUM-1011) |
+| `markets_ticket_tax_label_length` | what the buyer quote calls the tax on our fee (`GST` in India) is 1–24 characters |
+| `ticket_orders_refund_request_shape` | a refund claim (`refund_requested_at`) and its amount come together, the amount 1 to `total_minor`, only on an order with a payment; a reason ≤ 200 |
+| `ticket_orders_refunded_range` / `ticket_orders_refunded_has_refund` | the refunded amount is 0 to `total_minor`; a `refunded` order has Razorpay's refund id, time and an amount ≥ 1 — refunded only on Razorpay's word |
+| `ticket_payouts_status_shape` | a payout `pending` or `on_hold` has a linked account, and `on_hold` has Razorpay's transfer id; `releasing` and `released` have the transfer id and their time (`releasing_at`, `released_at`); `no_account` has neither. Transfers are held at Razorpay with no end and released only by `lib/payout-release.ts`, at GREATEST(`release_floor`, the event's holdFloor now); `release_floor` is set at payment and only raised (trigger `ticket_payouts_release_floor_only_up`, migration SQL) |
+| `ticket_payouts_amount_positive` / `…_reversed_range` / `…_currency_shape` / `…_linked_account_shape` | a payout is ≥ 1 minor unit; reversed 0 to its amount; an org debit ≥ 0; ISO currency; `acc_` account |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
 only in migration SQL too: `events_one_venue_day_per_day` (one venue day per
@@ -201,6 +229,15 @@ crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
 `cities_one_default_per_market`, the seeded `markets` and `cities` rows (on a
 `db push` database the catalogue is empty and every city reads as uncatalogued,
 so nothing is hidden or in preview), the
+`ticket_orders_pending_expiry` partial index (what the hold sweeper,
+`releaseExpiredHolds`, reads), the reconcile job's partial indexes
+`ticket_orders_unconfirmed_payment`, `ticket_orders_unconfirmed_refund` and
+`ticket_payouts_pending` (`lib/ticket-reconcile.ts`), `ticket_payouts_held` (the release job's, `lib/payout-release.ts`), India's `GST` tax label, the `markets` ticketing rows (India `native`,
+Canada `external`: on a `db push` database every market is `off` with no
+minimum and no GST), the `legal_acceptances_append_only` and
+`legal_acceptances_no_truncate` triggers (an acceptance is evidence: a new
+version is a new row, never an edit), the `tickets_order_must_be_paid` trigger
+(a ticket exists only for a paid order), the
 `events_city_clean` and `venues_city_clean` triggers (`clean_city_text`, the database's half of `cityKey`, so a padded or "Toronto, ON" city cannot pass the city rule), the
 system user `blendn-system` that owns
 every venue day, and the `system_user_is_permanent` trigger that refuses its

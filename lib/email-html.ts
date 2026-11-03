@@ -467,3 +467,17 @@ export function passwordResetHtml(name: string, link: string): string {
     about: "account",
   })
 }
+
+/** A ticket order's news for its buyer (SCRUM-1011): tickets ready, or money on its way back. */
+export function ticketOrderHtml(opts: { heading: string; paragraphs: string[]; link: string }): string {
+  return designEmail({
+    title: opts.heading,
+    preheader: opts.paragraphs[0] ?? opts.heading,
+    eyebrow: "Your tickets",
+    heading: opts.heading,
+    paragraphs: opts.paragraphs.map(esc),
+    button: { href: opts.link, label: "Open Blend’n" },
+    note: "Questions about this order? Reply to this email with the order reference above.",
+    about: "ticket order",
+  })
+}

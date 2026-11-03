@@ -88,6 +88,20 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      /*
+       * The pay page and its status door (SCRUM-1011). Its URL carries the
+       * pay token, so no referrer leaves it (Razorpay's script is loaded from
+       * here); it is never indexed and never cached. Listed after the block
+       * above, so its Referrer-Policy is the one sent.
+       */
+      {
+        source: "/pay/:path*",
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Cache-Control", value: "no-store, max-age=0" },
+        ],
+      },
       // CORS for /api/mobile/* is handled per-request in middleware.ts
       // (origin allow-list). Do not add a static wildcard CORS block here -
       // it would apply to every request regardless of origin and override

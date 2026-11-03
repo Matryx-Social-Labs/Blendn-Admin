@@ -33,7 +33,8 @@ const ALLOWED = new Set([
   // exactly the membership `activeMembership` hides, so that its staff, and only they, are
   // told why the event went dark (`ORGANISER_SUSPENDED`). It grants nothing: the answer is
   // a reason on a 404, never access.
-  "lib/event-access.ts",
+  // The door itself (split out of lib/event-access.ts so the custom server can reach it, PR #907).
+  "lib/event-door.ts",
   // "Is this viewer on the host side of this room" (SCRUM-887): any membership, a suspended
   // organisation's included, because it only ever DENIES (a host sees pseudonyms, never a
   // reveal). Spreading `activeMembership` would hand a suspended org's staff the reveals.

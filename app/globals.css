@@ -370,6 +370,24 @@
 }
 
 /*
+ * The Organizer Ticketing Terms in the Tickets tab's scroll panel
+ * (app/dashboard/events/[id]/tickets/setup.tsx): the same file's body as
+ * /terms/organizer-tickets, so plain elements again, set small.
+ */
+.terms-panel h2 {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--foreground);
+  margin: 0.75rem 0 0.25rem;
+}
+.terms-panel p {
+  margin: 0 0 0.625rem;
+}
+.terms-panel strong {
+  color: var(--foreground);
+}
+
+/*
  * The public policy pages' running text (components/policy-page.tsx), and the
  * Terms of Use rendered from docs/legal/terms-of-use.html. Plain elements, so
  * the legal HTML needs no classes of its own; its table of contents keeps

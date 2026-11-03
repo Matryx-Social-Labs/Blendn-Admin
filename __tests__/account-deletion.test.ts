@@ -80,6 +80,8 @@ jest.mock("@/lib/mobile-auth", () => ({
   getAuthenticatedUser: (...a: unknown[]) => mockAuth(...a),
 }))
 jest.mock("@/lib/account-blocklist", () => ({ blockAccountNow: (...a: unknown[]) => mockBlockNow(...a) }))
+const mockCancelHolds = jest.fn().mockResolvedValue(0)
+jest.mock("@/lib/ticket-holds", () => ({ cancelBuyerHolds: (...a: unknown[]) => mockCancelHolds(...a) }))
 const mockEvict = jest.fn()
 jest.mock("@/lib/socket-server", () => ({ evictUserSockets: (...a: unknown[]) => mockEvict(...a) }))
 const mockCloseRoom = jest.fn()
@@ -274,6 +276,21 @@ describe("deleting an account scrubs the matching inputs", () => {
     expect(res.status).toBe(500)
     expect(mockBlockNow).not.toHaveBeenCalled()
     expect(mockEvict).not.toHaveBeenCalled()
+  })
+
+  it("gives their pending ticket holds back after the erasure commits (security L3), and not when it rolls back", async () => {
+    await del()
+    expect(mockCancelHolds).toHaveBeenCalledWith(USER)
+    expect(mockCancelHolds.mock.invocationCallOrder[0]).toBeGreaterThan(mockDb.$transaction.mock.invocationCallOrder[0])
+    mockCancelHolds.mockClear()
+    mockDb.$transaction.mockRejectedValueOnce(new Error("serialization failure"))
+    await del()
+    expect(mockCancelHolds).not.toHaveBeenCalled()
+  })
+
+  it("still erases the account when the holds cannot be given back: they expire on their own", async () => {
+    mockCancelHolds.mockRejectedValueOnce(new Error("lock timeout"))
+    expect((await del()).status).toBeLessThan(300)
   })
 
   it("does it all in one transaction", async () => {

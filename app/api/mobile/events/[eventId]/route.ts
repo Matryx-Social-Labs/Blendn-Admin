@@ -1,3 +1,4 @@
+import { refundAllOnCancel } from "@/lib/ticket-refunds"
 import { mayOpenCity } from "@/lib/browse-scope"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
@@ -37,6 +38,7 @@ import {
   validationErrorResponse,
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
+import { eventTicketing } from "@/lib/ticket-views"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -160,7 +162,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp] =
+    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp, ticketing] =
       await Promise.all([
         eventRead,
         // Counted from check-in rows rather than a stored column. Just the
@@ -209,6 +211,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             },
           },
         }),
+        // Null while TICKETING is off or the event sells nothing (contract §1).
+        eventTicketing(eventId, authUser.userId),
       ])
 
     if (!found) {
@@ -379,6 +383,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         rsvpStatus: userRsvp?.status || null,
       },
       distance,
+      ticketing,
       /*
        * The same disclosure the dedicated route already closed, reachable
        * through a different door.
@@ -539,6 +544,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      */
     if (isCancelling) {
       const { inside } = await cancelEventCheckIns(eventId)
+      // Every ticket refunded in full, booking fee included (organizer terms 5.2).
+      await refundAllOnCancel(eventId, requester)
       // And tell them. `notifyEventCancelled` never throws — the cancellation
       // has already committed and must not be undone by a failed push.
       //

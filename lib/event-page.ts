@@ -6,6 +6,7 @@ import { db } from "./db"
 import { eventDisplayTitle } from "./event-kind"
 import { actorFor } from "./org-membership"
 import { eventPermissions } from "./rbac"
+import { ticketingModeFor } from "./ticket-setup"
 
 /**
  * What every page under one event loads first: the event, and what the viewer
@@ -31,6 +32,7 @@ const eventPageSelect = {
   city: true,
   organizer_id: true,
   kind: true,
+  ticketing_mode: true,
   venue: { select: { name: true, owner_org_id: true, claimed_at: true } },
 } as const
 
@@ -53,8 +55,10 @@ export async function loadEventPage(id: string) {
   const actor = await actorFor(session.user)
   const permissions = eventPermissions(actor, event)
   if (!permissions.canOperate) redirect("/dashboard/events")
+  // How this event may sell tickets (`TICKETING`; its own mode, else its city's market's): the Tickets tab and the door.
+  const ticketing = await ticketingModeFor(event)
   // A venue day's internal title never reaches the page (PL-I16).
-  return { event: { ...event, title: eventDisplayTitle(event) }, actor, permissions }
+  return { event: { ...event, title: eventDisplayTitle(event) }, actor, permissions, ticketing }
 }
 
 export type EventPageData = Awaited<ReturnType<typeof loadEventPage>>

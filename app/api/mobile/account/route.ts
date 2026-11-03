@@ -1,3 +1,4 @@
+import { cancelBuyerHolds } from "@/lib/ticket-holds"
 import { logger } from "@/lib/logger"
 import { deletionReauthRefusal } from "@/lib/deletion-reauth"
 import { Prisma } from "@prisma/client"
@@ -545,6 +546,21 @@ export async function DELETE(request: NextRequest) {
           )`,
     ]
     const erased = await db.$transaction(erasure)
+
+    /*
+     * Their pending ticket holds go back now, not in ten minutes (security L3,
+     * lib/ticket-holds.ts). After the erasure: a hold is row-locked like the
+     * payment webhook takes it, which a batch cannot do, and the deleted
+     * account cannot open a new one. A payment that lands on a cancelled hold
+     * is refunded. A failure leaves the hold to expire on its own.
+     */
+    const deletedId = authUser.userId
+    await cancelBuyerHolds(deletedId).catch((error) =>
+      logger.error("Ticket holds not cancelled on account deletion; they expire on their own", {
+        userId: deletedId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    )
 
     /*
      * After the transaction, not inside it: storage is not transactional and

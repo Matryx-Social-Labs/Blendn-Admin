@@ -153,3 +153,19 @@ describe("a venue day, for its venue's owner (F1)", () => {
     expect(tabs).not.toContain("attendees")
   })
 })
+
+describe("the Tickets tab (SCRUM-1014)", () => {
+  const withTickets = (opts: { canEdit: boolean; ticketing: "native" | "external" | null; kind?: string }) =>
+    eventTabsFor(START, END, { canOperate: true, canViewAttendees: true, status: "published", kind: "event", ...opts }).map((t) => t.key)
+
+  it("is offered to whoever may edit an event whose market sells, native or external", () => {
+    expect(withTickets({ canEdit: true, ticketing: "native" })).toContain("tickets")
+    expect(withTickets({ canEdit: true, ticketing: "external" })).toContain("tickets")
+  })
+
+  it("is not offered to a venue owner, nor while TICKETING is off or the market sells none, nor on a venue day", () => {
+    expect(withTickets({ canEdit: false, ticketing: "native" })).not.toContain("tickets")
+    expect(withTickets({ canEdit: true, ticketing: null })).not.toContain("tickets")
+    expect(withTickets({ canEdit: true, ticketing: "native", kind: "venue_day" })).not.toContain("tickets")
+  })
+})

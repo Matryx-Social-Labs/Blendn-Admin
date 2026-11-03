@@ -239,6 +239,15 @@ export function userLimit(
 }
 
 /**
+ * A per-network limit beside a per-user one, for an authenticated route a
+ * farm of accounts could share (ticket holds, SCRUM-1011): keyed on the
+ * client's network (`clientNetworkFrom`, `x-real-ip` on Railway).
+ */
+export function networkLimit(scope: string, windowMs: number, maxRequests: number): RateLimitConfig {
+  return { windowMs, maxRequests, keyGenerator: (req) => `${scope}:${clientNetworkFrom(req.headers)}` }
+}
+
+/**
  * The same per-user policy for a server action, which has no request to key
  * on and no response to return: true when the caller is over, so the action
  * refuses in a sentence of its own (SCRUM-360). Same bucket shape as

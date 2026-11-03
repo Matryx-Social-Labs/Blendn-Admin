@@ -2224,6 +2224,12 @@
       "observed": "M1521: 1 of 14 failing. M1522: 1 of 14 failing. M1523: 1 of 14 failing. M1524: 1 of 14 failing. M1525: 1 of 14 failing (after asserting retries > 0, not just a number). M1527: 1 of 14 failing. M1528: 1 of 14 failing. M1529: 1 of 14 failing. M1530: 1 of 14 failing. M1531: 1 of 14 failing (after giving the rows distinct ages; with equal ages the heap order rotated them by accident). M1532: 2 of 14 failing. M1533: 1 of 14 failing. M1535: failing (the 300-row pile starves the honest row; 2 of 15). M1536: 1 of 19 failing. M1537: 1 of 19. M1538: 1 of 19. M1539: 2 of 19 failing. Each reverted; 19 of 19.",
       "date": "2026-10-22"
     },
+    "ticket-hold-sweeper.test.ts": {
+      "guards": "SCRUM-1010: lib/background.ts starts the ticket hold sweeper and stops it on shutdown; it runs every 60 s while TICKETING is on and starts no timer while it is off.",
+      "mutation": "startTicketHoldSweeper() removed from background.ts; stopTicketHoldSweeper() removed; the TICKETING check removed from startTicketHoldSweeper; TICKET_HOLD_SWEEP_MS set to 300_000.",
+      "observed": "Each: 1 of 4 failing (start/stop, start/stop, starts nothing while off, every 60 seconds). Reverted; 4 of 4.",
+      "date": "2026-11-02"
+    },
     "photo-sweeper-started.test.ts": {
       "guards": "SCRUM-732: lib/background.ts starts the photo moderation sweeper and stops it on shutdown, and lib/photo-sweeper.ts imports by relative path because server.ts compiles with plain tsc.",
       "mutation": "M1526 the sweeper not started in background.ts. SCRUM-730: M1780 the orphan photo sweeper not stopped on shutdown.",

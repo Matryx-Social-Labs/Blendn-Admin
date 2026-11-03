@@ -283,7 +283,7 @@ describe("the content area owns the only h1", () => {
         pages: true,
       })
     }
-    expect(owned).toHaveLength(8)
+    expect(owned).toHaveLength(10)
   })
 
   it.each(pages)("%s renders the h1 its route calls for", (page) => {

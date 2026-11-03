@@ -7,9 +7,9 @@ import { razorpayKeys } from "./env"
 /**
  * Razorpay, over its REST API (plan v2 §9.2).
  *
- * Plain `fetch`, not the `razorpay` npm SDK: the dashboard makes five calls
- * (create a plan, list plans, create a subscription, cancel it, create an
- * order) and verifies one signature. The SDK would add a dependency and its
+ * Plain `fetch`, not the `razorpay` npm SDK: billing makes a handful of calls
+ * (plans, subscriptions, orders, payment links) and ticketing a few more
+ * (orders, refunds, Route transfers and reversals), and one signature is verified. The SDK would add a dependency and its
  * transitive tree to the server bundle for that, and hide the request shape a
  * reviewer needs to see. The webhook signature is ten lines of `crypto`.
  *
@@ -22,7 +22,8 @@ import { razorpayKeys } from "./env"
  * client component (`checkout.tsx` reaches it only through server actions).
  */
 
-const API = "https://api.razorpay.com/v1"
+const ROOT = "https://api.razorpay.com"
+const API = `${ROOT}/v1`
 const TIMEOUT_MS = 15_000
 /** A page is 100 plans; an account with more than this many is not ours. */
 const MAX_PLAN_PAGES = 5
@@ -81,14 +82,15 @@ function withoutDescription(res: Response, json: unknown): string {
 
 async function call<S extends z.ZodType>(
   schema: S,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   body?: unknown
 ): Promise<z.infer<S>> {
   const keys = razorpayKeys()
   if (!keys) throw new RazorpayError(503, "Razorpay is not configured")
   const auth = Buffer.from(`${keys.keyId}:${keys.keySecret}`).toString("base64")
-  const res = await fetch(`${API}${path}`, {
+  // Route linked accounts are v2 only; everything else is v1.
+  const res = await fetch(path.startsWith("/v2/") ? `${ROOT}${path}` : `${API}${path}`, {
     method,
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -327,3 +329,153 @@ export const PAYMENT_LINK_LIFETIME_MS = PAYMENT_LINK_DAYS * 24 * 60 * 60 * 1000
 
 /** How long Razorpay lets a created subscription wait, for our own "still open" rule. */
 export const CREATED_CHECKOUT_LIFETIME_MS = SUBSCRIPTION_EXPIRES_AFTER_S * 1000
+
+/* -------------------------------------------------------------------------- */
+/* Tickets: orders, refunds, Route transfers (SCRUM-1011)                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A Razorpay order for one ticket order, for the amount read from
+ * `ticket_orders.total_minor` by the caller. The receipt is our order id, so a
+ * person in the Razorpay dashboard can find it; `notes` are for them only, the
+ * webhook resolves the order from `provider_order_ref`. An answer for any other
+ * amount or currency is refused, not stored.
+ */
+export async function createTicketOrder(input: { orderId: string; amountMinor: number; currency: string }): Promise<RazorpayOrder> {
+  const order = await call(orderSchema, "POST", "/orders", {
+    amount: input.amountMinor,
+    currency: input.currency,
+    receipt: input.orderId,
+    notes: { ticket_order_id: input.orderId },
+  })
+  if (order.amount !== input.amountMinor || order.currency !== input.currency) {
+    throw new RazorpayError(502, "Razorpay created the order for another amount")
+  }
+  return order
+}
+
+const ticketPaymentSchema = z.object({
+  id: z.string().min(1),
+  order_id: z.string().nullable().optional(),
+  amount: z.number().int(),
+  currency: z.string(),
+  status: z.string(),
+  created_at: z.number().int(),
+})
+export type RazorpayPayment = z.infer<typeof ticketPaymentSchema>
+
+/** An order's payments, for the reconcile job: a webhook lost is a payment found here. */
+export async function orderPayments(orderRef: string): Promise<RazorpayPayment[]> {
+  return (await call(z.object({ items: z.array(ticketPaymentSchema) }), "GET", `/orders/${encodeURIComponent(orderRef)}/payments`)).items
+}
+
+const refundSchema = z.object({
+  id: z.string().min(1),
+  payment_id: z.string(),
+  amount: z.number().int(),
+  currency: z.string(),
+  status: z.string(),
+})
+export type RazorpayRefund = z.infer<typeof refundSchema>
+
+/** Refund part or all of a payment. Normal speed: instant refunds cost extra and are Razorpay's to offer. */
+export async function refundPayment(input: { paymentId: string; amountMinor: number; orderId: string }): Promise<RazorpayRefund> {
+  return call(refundSchema, "POST", `/payments/${encodeURIComponent(input.paymentId)}/refund`, {
+    amount: input.amountMinor,
+    speed: "normal",
+    receipt: input.orderId,
+    notes: { ticket_order_id: input.orderId },
+  })
+}
+
+/** A payment's refunds: asked before refunding again, so a retry never refunds twice. */
+export async function paymentRefunds(paymentId: string): Promise<RazorpayRefund[]> {
+  return (await call(z.object({ items: z.array(refundSchema) }), "GET", `/payments/${encodeURIComponent(paymentId)}/refunds`)).items
+}
+
+const transferSchema = z.object({
+  id: z.string().min(1),
+  recipient: z.string(),
+  amount: z.number().int(),
+  currency: z.string(),
+})
+export type RazorpayTransfer = z.infer<typeof transferSchema>
+
+/** A payment's Route transfers: asked before transferring again, so a retry never pays an organizer twice. */
+export async function paymentTransfers(paymentId: string): Promise<RazorpayTransfer[]> {
+  return (await call(z.object({ items: z.array(transferSchema) }), "GET", `/payments/${encodeURIComponent(paymentId)}/transfers`)).items
+}
+
+/**
+ * Transfer the organizer's share of a captured payment to their linked
+ * account, held at Razorpay with no end ("If no value is passed, the
+ * settlement is put on hold indefinitely", Route docs): only our release job
+ * releases it (`releaseTransfer`, lib/payout-release.ts). An answer for another
+ * account or amount is refused.
+ */
+export async function createTransfer(input: {
+  paymentId: string
+  account: string
+  amountMinor: number
+  currency: string
+  orderId: string
+}): Promise<RazorpayTransfer> {
+  const { items } = await call(z.object({ items: z.array(transferSchema).length(1) }), "POST", `/payments/${encodeURIComponent(input.paymentId)}/transfers`, {
+    transfers: [
+      {
+        account: input.account,
+        amount: input.amountMinor,
+        currency: input.currency,
+        // Held indefinitely: no on_hold_until, so Razorpay never releases on its own. Only the release job does (SCRUM-1014).
+        on_hold: true,
+        notes: { ticket_order_id: input.orderId },
+      },
+    ],
+  })
+  const transfer = items[0]
+  if (transfer.recipient !== input.account || transfer.amount !== input.amountMinor || transfer.currency !== input.currency) {
+    throw new RazorpayError(502, "Razorpay made the transfer to another account or amount")
+  }
+  return transfer
+}
+
+/**
+ * Release a held Route transfer to the linked account (`PATCH /v1/transfers/:id`
+ * with `on_hold: false`, "Modify settlement hold"). The release job's one
+ * Razorpay call (lib/payout-release.ts). Idempotent: when Razorpay refuses
+ * because the transfer is already released, the transfer is read back and a
+ * transfer no longer on hold counts as released.
+ */
+export async function releaseTransfer(transferId: string): Promise<void> {
+  const path = `/transfers/${encodeURIComponent(transferId)}`
+  const held = z.object({ id: z.string(), on_hold: z.union([z.boolean(), z.number()]).optional() })
+  try {
+    const answer = await call(held, "PATCH", path, { on_hold: false })
+    if (answer.id === transferId && !answer.on_hold) return
+  } catch (error) {
+    if (!(error instanceof RazorpayError) || error.status >= 500) throw error
+  }
+  const now = await call(held, "GET", path)
+  if (now.on_hold) throw new RazorpayError(502, "Razorpay still holds the transfer")
+}
+
+const reversalSchema = z.object({ id: z.string().min(1), transfer_id: z.string(), amount: z.number().int() })
+
+/** Take back part or all of a transfer: a refund's share, out of the organizer's held payout. */
+export async function reverseTransfer(transferId: string, amountMinor: number): Promise<z.infer<typeof reversalSchema>> {
+  return call(reversalSchema, "POST", `/transfers/${encodeURIComponent(transferId)}/reversals`, { amount: amountMinor })
+}
+
+/* -------------------------------------------------------------------------- */
+/* Route linked accounts                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A Route linked account's onboarding state at Razorpay (`activated`,
+ * `under_review`, `needs_clarification`, `suspended`, ...), read before an
+ * admin marks the organization's payouts active (SCRUM-1014). Hosted KYC
+ * onboarding is Razorpay's and out of our scope: this only reads its word.
+ */
+export async function linkedAccountStatus(accountId: string): Promise<string> {
+  return (await call(z.object({ id: z.string(), status: z.string() }), "GET", `/v2/accounts/${encodeURIComponent(accountId)}`)).status
+}
