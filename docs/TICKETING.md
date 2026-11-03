@@ -45,8 +45,20 @@ reconcile job retries it.
 The dashboard event PATCH (`app/api/events/[id]/route.ts`, the only writer of
 an event's start and end) refuses to move them, 409 `times_locked`, once the
 event has started and has paid ticket orders (`ticketTimesLocked`). Before it
-starts they may move; a payout's recorded hold is written once, at payment,
-and an edit never moves it.
+starts they may move, and a hold only ever moves later:
+
+- **Postponed** (the end moves later): every payout not yet released has its
+  hold raised to the new end + 3 days, at Razorpay first (`PATCH
+  /v1/transfers/:id` with `on_hold` and `on_hold_until`, "Modify settlement
+  hold", `modifyTransferHold`) and then in the database inside the edit's own
+  transaction (`lib/payout-holds.ts`, `updateEventTracked`'s `alongside`). If
+  Razorpay refuses or cannot be reached, the edit is refused (503
+  `payout_hold_not_extended`) and nothing is written.
+- **Moved earlier**: no hold changes.
+- **Backstop**: a transfer is never sent with a hold earlier than the event's
+  end as it is then + 3 days (`createPayoutTransfer`).
+- Not built: a buyer's full refund on a postponement until 48 hours before the
+  new start (organizer terms 5.3): SCRUM-1016.
 
 ## What the tab reads
 

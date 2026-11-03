@@ -1,3 +1,4 @@
+import { extendHoldsInTx, extendTransferHolds } from "@/lib/payout-holds"
 import { refundAllOnCancel } from "@/lib/ticket-refunds"
 import { ticketTimesLocked, TIMES_LOCKED_SENTENCE } from "@/lib/ticket-views"
 import { logger } from "@/lib/logger"
@@ -186,6 +187,16 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       (start_time !== undefined && start_time !== null && new Date(start_time).getTime() !== event.start_time.getTime()) ||
       (end_time !== undefined && end_time !== null && new Date(end_time).getTime() !== event.end_time.getTime())
     if (movesTime && (await ticketTimesLocked(event))) return errorResponse(TIMES_LOCKED_SENTENCE, 409, "times_locked")
+    /*
+     * A postponement holds the organizer's money until after the new night (SCRUM-1014): every unreleased
+     * payout's hold is raised to the new end + 3 days at Razorpay now, and in the database with the edit below.
+     * Razorpay refusing one refuses the edit. Moving earlier never shortens a hold.
+     */
+    const newEnd = end_time !== undefined && end_time !== null ? new Date(end_time) : null
+    const postpones = newEnd !== null && newEnd.getTime() > event.end_time.getTime()
+    if (postpones && !(await extendTransferHolds(event.id, newEnd))) {
+      return errorResponse("Couldn’t extend the payout hold for this event’s tickets. Try again.", 503, "payout_hold_not_extended")
+    }
 
     // Razorpay's reviewer: never out of draft, never a real venue (lib/review-demo-org.ts).
     const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, {
@@ -514,7 +525,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             }
           : {}),
       },
-    }, { fromStatus: event.status }).catch((error: unknown) => {
+    }, { fromStatus: event.status, ...(postpones && { alongside: (tx, updated) => extendHoldsInTx(tx, event.id, updated.end_time) }) }).catch((error: unknown) => {
       if (error instanceof EventStatusMovedError) return error
       throw error
     })

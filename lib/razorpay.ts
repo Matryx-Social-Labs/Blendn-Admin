@@ -82,7 +82,7 @@ function withoutDescription(res: Response, json: unknown): string {
 
 async function call<S extends z.ZodType>(
   schema: S,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   body?: unknown
 ): Promise<z.infer<S>> {
@@ -437,6 +437,21 @@ export async function createTransfer(input: {
     throw new RazorpayError(502, "Razorpay made the transfer to another account or amount")
   }
   return transfer
+}
+
+/**
+ * Move a Route transfer's settlement hold (`PATCH /v1/transfers/:id`, "Modify
+ * settlement hold": `on_hold` boolean, `on_hold_until` Unix seconds; answers the
+ * transfer). Used to extend a held payout when its event is postponed
+ * (SCRUM-1014); never to shorten one. An answer that holds less long is refused.
+ */
+export async function modifyTransferHold(transferId: string, onHoldUntil: Date): Promise<void> {
+  const until = Math.floor(onHoldUntil.getTime() / 1000)
+  const answer = await call(z.object({ id: z.string(), on_hold_until: z.number().int().nullable().optional() }), "PATCH", `/transfers/${encodeURIComponent(transferId)}`, {
+    on_hold: true,
+    on_hold_until: until,
+  })
+  if (answer.id !== transferId || (answer.on_hold_until ?? 0) < until) throw new RazorpayError(502, "Razorpay did not extend the transfer's hold")
 }
 
 const reversalSchema = z.object({ id: z.string().min(1), transfer_id: z.string(), amount: z.number().int() })

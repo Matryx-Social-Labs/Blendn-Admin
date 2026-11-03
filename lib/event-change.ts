@@ -204,7 +204,14 @@ export class EventStatusMovedError extends Error {
  * row lock, so a status that moved since (a concurrent cancel) is refused with
  * `EventStatusMovedError` rather than written over.
  */
-export async function updateEventTracked(args: Prisma.eventsUpdateArgs, opts: { fromStatus?: string } = {}) {
+export async function updateEventTracked(
+  args: Prisma.eventsUpdateArgs,
+  opts: {
+    fromStatus?: string
+    /** More writes that must commit with the edit or not at all: a postponement's payout holds (SCRUM-1014). */
+    alongside?: (tx: Prisma.TransactionClient, updated: { start_time: Date; end_time: Date }) => Promise<unknown>
+  } = {}
+) {
   const eventId = args.where.id
   if (!eventId) throw new Error("updateEventTracked needs the event's id")
   return db.$transaction(async (tx) => {
@@ -216,6 +223,7 @@ export async function updateEventTracked(args: Prisma.eventsUpdateArgs, opts: { 
     })
     if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
+    if (opts.alongside) await opts.alongside(tx, updated)
     const next = nextChange(before.changed_from, before, updated)
     /*
      * A reminder is claimed once, by `reminded_at IS NULL`

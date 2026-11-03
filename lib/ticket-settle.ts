@@ -6,7 +6,7 @@ import { sendEmail, ticketOrderEmail } from "./email"
 import { logger } from "./logger"
 import { sendPushNotification } from "./push-notifications"
 import { createTransfer, paymentRefunds, paymentTransfers, refundPayment, reverseTransfer } from "./razorpay"
-import { lockLines, moveSeats, type SettleOutcome } from "./ticket-payments"
+import { lockLines, moveSeats, PAYOUT_HOLD_AFTER_EVENT_MS, type SettleOutcome } from "./ticket-payments"
 
 /**
  * What a ticket payment or refund does after its transaction commits
@@ -36,16 +36,29 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 export async function createPayoutTransfer(orderId: string): Promise<string | null> {
   const payout = await db.ticket_payouts.findUnique({
     where: { order_id: orderId },
-    select: { status: true, linked_account_ref: true, amount_minor: true, currency: true, on_hold_until: true, order: { select: { provider_payment_ref: true } } },
+    select: {
+      status: true,
+      linked_account_ref: true,
+      amount_minor: true,
+      currency: true,
+      on_hold_until: true,
+      order: { select: { provider_payment_ref: true, event: { select: { end_time: true } } } },
+    },
   })
   const paymentId = payout?.order.provider_payment_ref
   if (!payout || payout.status !== "pending" || !payout.linked_account_ref || !paymentId) return null
   const account = payout.linked_account_ref
+  // Backstop (SCRUM-1014): the hold sent is never earlier than the event's end as it is now + 3 days, whatever was recorded.
+  const floor = payout.order.event.end_time.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS
+  const onHoldUntil = new Date(Math.max(payout.on_hold_until.getTime(), floor))
+  if (onHoldUntil.getTime() !== payout.on_hold_until.getTime()) {
+    await db.ticket_payouts.updateMany({ where: { order_id: orderId, status: "pending" }, data: { on_hold_until: onHoldUntil } })
+  }
 
   const existing = (await paymentTransfers(paymentId)).find((t) => t.recipient === account && t.amount === payout.amount_minor)
   const transfer =
     existing ??
-    (await createTransfer({ paymentId, account, amountMinor: payout.amount_minor, currency: payout.currency, onHoldUntil: payout.on_hold_until, orderId }))
+    (await createTransfer({ paymentId, account, amountMinor: payout.amount_minor, currency: payout.currency, onHoldUntil, orderId }))
 
   const { count } = await db.ticket_payouts.updateMany({
     where: { order_id: orderId, status: "pending" },

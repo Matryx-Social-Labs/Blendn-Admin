@@ -111,6 +111,17 @@ export function fakeRazorpay(): FakeRazorpay {
       fake.transfers.set(m[1], [...(fake.transfers.get(m[1]) ?? []), transfer])
       return json({ entity: "collection", count: 1, items: [transfer] })
     }
+    if (method === "PATCH" && (m = path.match(/^\/transfers\/([^/]+)$/))) {
+      // Modify settlement hold (Route): PATCH /v1/transfers/:id { on_hold, on_hold_until }.
+      for (const list of fake.transfers.values()) {
+        const t = list.find((x) => x.id === m![1])
+        if (t) {
+          t.on_hold_until = body.on_hold_until
+          return json({ ...t, entity: "transfer", on_hold: body.on_hold, settlement_status: "on_hold" })
+        }
+      }
+      return json({ error: { description: "The id provided does not exist" } }, 400)
+    }
     if ((m = path.match(/^\/transfers\/([^/]+)\/reversals$/))) {
       fake.reversals.push({ transfer_id: m[1], amount: body.amount })
       return json({ id: `rvrsl_${randomUUID().slice(0, 14)}`, transfer_id: m[1], amount: body.amount })
