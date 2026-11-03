@@ -445,6 +445,12 @@ export async function createTransfer(input: {
  * transfer). Used to extend a held payout when its event is postponed
  * (SCRUM-1014); never to shorten one. An answer that holds less long is refused.
  */
+/** A Route transfer's current settlement hold (`GET /v1/transfers/:id`), or null when it has none. */
+export async function transferHold(transferId: string): Promise<Date | null> {
+  const t = await call(z.object({ id: z.string(), on_hold_until: z.number().int().nullable().optional() }), "GET", `/transfers/${encodeURIComponent(transferId)}`)
+  return t.on_hold_until ? new Date(t.on_hold_until * 1000) : null
+}
+
 export async function modifyTransferHold(transferId: string, onHoldUntil: Date): Promise<void> {
   const until = Math.floor(onHoldUntil.getTime() / 1000)
   const answer = await call(z.object({ id: z.string(), on_hold_until: z.number().int().nullable().optional() }), "PATCH", `/transfers/${encodeURIComponent(transferId)}`, {

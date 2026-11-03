@@ -204,6 +204,14 @@ export class EventStatusMovedError extends Error {
  * row lock, so a status that moved since (a concurrent cancel) is refused with
  * `EventStatusMovedError` rather than written over.
  */
+/** An edit that would leave the event starting at or after it ends: refused under the row lock, whatever raced it (SCRUM-1014). */
+export class EventTimesOrderError extends Error {
+  constructor() {
+    super("The event must end after it starts.")
+  }
+}
+export const EVENT_TIMES_ORDER_SENTENCE = "The event must end after it starts."
+
 export async function updateEventTracked(
   args: Prisma.eventsUpdateArgs,
   opts: {
@@ -223,6 +231,7 @@ export async function updateEventTracked(
     })
     if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
+    if (updated.start_time.getTime() >= updated.end_time.getTime()) throw new EventTimesOrderError()
     if (opts.alongside) await opts.alongside(tx, updated)
     const next = nextChange(before.changed_from, before, updated)
     /*

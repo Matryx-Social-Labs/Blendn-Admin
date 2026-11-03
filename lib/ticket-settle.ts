@@ -4,9 +4,10 @@ import type { Prisma } from "@prisma/client"
 import { db } from "./db"
 import { sendEmail, ticketOrderEmail } from "./email"
 import { logger } from "./logger"
+import { raiseTransferHold, withPayoutLock } from "./payout-holds"
 import { sendPushNotification } from "./push-notifications"
 import { createTransfer, paymentRefunds, paymentTransfers, refundPayment, reverseTransfer } from "./razorpay"
-import { lockLines, moveSeats, PAYOUT_HOLD_AFTER_EVENT_MS, type SettleOutcome } from "./ticket-payments"
+import { holdFloor, lockLines, moveSeats, type SettleOutcome } from "./ticket-payments"
 
 /**
  * What a ticket payment or refund does after its transaction commits
@@ -32,45 +33,55 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 /* Payouts                                                                   */
 /* ------------------------------------------------------------------------ */
 
-/** Make the Route transfer a `pending` payout owes. Returns the transfer id, or null when nothing is owed. */
+/**
+ * Make the Route transfer a `pending` payout owes. Returns the transfer id, or
+ * null when nothing is owed.
+ *
+ * Under the event's payout lock (`withPayoutLock`, lib/payout-holds.ts), with
+ * the payout and the event's times read again inside it, so a postponement
+ * cannot slip between reading the hold and making the transfer (security
+ * review 4). The hold is the recorded one or the event's `holdFloor` now,
+ * whichever is later; a transfer that already exists (a retry) is raised to
+ * it at Razorpay if it holds less, and the row records exactly that hold.
+ */
 export async function createPayoutTransfer(orderId: string): Promise<string | null> {
-  const payout = await db.ticket_payouts.findUnique({
-    where: { order_id: orderId },
-    select: {
-      status: true,
-      linked_account_ref: true,
-      amount_minor: true,
-      currency: true,
-      on_hold_until: true,
-      order: { select: { provider_payment_ref: true, event: { select: { end_time: true } } } },
-    },
-  })
-  const paymentId = payout?.order.provider_payment_ref
-  if (!payout || payout.status !== "pending" || !payout.linked_account_ref || !paymentId) return null
-  const account = payout.linked_account_ref
-  // Backstop (SCRUM-1014): the hold sent is never earlier than the event's end as it is now + 3 days, whatever was recorded.
-  const floor = payout.order.event.end_time.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS
-  const onHoldUntil = new Date(Math.max(payout.on_hold_until.getTime(), floor))
-  if (onHoldUntil.getTime() !== payout.on_hold_until.getTime()) {
-    await db.ticket_payouts.updateMany({ where: { order_id: orderId, status: "pending" }, data: { on_hold_until: onHoldUntil } })
-  }
+  const owner = await db.ticket_orders.findUnique({ where: { id: orderId }, select: { event_id: true } })
+  if (!owner) return null
+  return withPayoutLock(owner.event_id, async () => {
+    const payout = await db.ticket_payouts.findUnique({
+      where: { order_id: orderId },
+      select: {
+        status: true,
+        linked_account_ref: true,
+        amount_minor: true,
+        currency: true,
+        on_hold_until: true,
+        order: { select: { provider_payment_ref: true, event: { select: { start_time: true, end_time: true } } } },
+      },
+    })
+    const paymentId = payout?.order.provider_payment_ref
+    if (!payout || payout.status !== "pending" || !payout.linked_account_ref || !paymentId) return null
+    const account = payout.linked_account_ref
+    // Backstop: never earlier than the event's floor as it is now, whatever was recorded at payment.
+    const onHoldUntil = new Date(Math.max(payout.on_hold_until.getTime(), holdFloor(payout.order.event).getTime()))
 
-  const existing = (await paymentTransfers(paymentId)).find((t) => t.recipient === account && t.amount === payout.amount_minor)
-  const transfer =
-    existing ??
-    (await createTransfer({ paymentId, account, amountMinor: payout.amount_minor, currency: payout.currency, onHoldUntil, orderId }))
+    const existing = (await paymentTransfers(paymentId)).find((t) => t.recipient === account && t.amount === payout.amount_minor)
+    if (existing) await raiseTransferHold(existing.id, onHoldUntil)
+    const transfer =
+      existing ?? (await createTransfer({ paymentId, account, amountMinor: payout.amount_minor, currency: payout.currency, onHoldUntil, orderId }))
 
-  const { count } = await db.ticket_payouts.updateMany({
-    where: { order_id: orderId, status: "pending" },
-    data: { status: "on_hold", provider_transfer_ref: transfer.id },
+    const { count } = await db.ticket_payouts.updateMany({
+      where: { order_id: orderId, status: "pending" },
+      data: { status: "on_hold", provider_transfer_ref: transfer.id, on_hold_until: onHoldUntil },
+    })
+    if (count === 0) {
+      // Refunded while the transfer was being made: the refund marked it reversed, so take this one straight back.
+      await reverseTransfer(transfer.id, payout.amount_minor)
+      await db.ticket_payouts.update({ where: { order_id: orderId }, data: { provider_transfer_ref: transfer.id, reversed_minor: payout.amount_minor } })
+      logger.warn("A ticket payout was transferred after its order was refunded; reversed", { orderId, transferId: transfer.id })
+    }
+    return transfer.id
   })
-  if (count === 0) {
-    // Refunded while the transfer was being made: the refund marked it reversed, so take this one straight back.
-    await reverseTransfer(transfer.id, payout.amount_minor)
-    await db.ticket_payouts.update({ where: { order_id: orderId }, data: { provider_transfer_ref: transfer.id, reversed_minor: payout.amount_minor } })
-    logger.warn("A ticket payout was transferred after its order was refunded; reversed", { orderId, transferId: transfer.id })
-  }
-  return transfer.id
 }
 
 /** Take back a refunded order's transfer, from the organizer's held payout. */

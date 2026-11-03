@@ -1,4 +1,5 @@
-import { extendHoldsInTx, extendTransferHolds } from "@/lib/payout-holds"
+import { raiseHoldsInTx, raiseTransferHolds, withPayoutLock } from "@/lib/payout-holds"
+import { holdFloor } from "@/lib/ticket-payments"
 import { refundAllOnCancel } from "@/lib/ticket-refunds"
 import { ticketTimesLocked, TIMES_LOCKED_SENTENCE } from "@/lib/ticket-views"
 import { logger } from "@/lib/logger"
@@ -12,7 +13,7 @@ import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
 import { db } from "@/lib/db"
-import { EventStatusMovedError, updateEventTracked } from "@/lib/event-change"
+import { EVENT_TIMES_ORDER_SENTENCE, EventStatusMovedError, EventTimesOrderError, updateEventTracked } from "@/lib/event-change"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
 import { eventPermissions } from "@/lib/rbac"
 import { actorFor } from "@/lib/org-membership"
@@ -182,21 +183,21 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const moveRefusal = await statusMoveRefusalFor(event.id, status, event.status)
     if (moveRefusal) return errorResponse(moveRefusal, 400)
 
-    // A started event with paid tickets keeps its times (SCRUM-1014): an unchanged value resent by the form is not a change.
-    const movesTime =
-      (start_time !== undefined && start_time !== null && new Date(start_time).getTime() !== event.start_time.getTime()) ||
-      (end_time !== undefined && end_time !== null && new Date(end_time).getTime() !== event.end_time.getTime())
-    if (movesTime && (await ticketTimesLocked(event))) return errorResponse(TIMES_LOCKED_SENTENCE, 409, "times_locked")
     /*
-     * A postponement holds the organizer's money until after the new night (SCRUM-1014): every unreleased
-     * payout's hold is raised to the new end + 3 days at Razorpay now, and in the database with the edit below.
-     * Razorpay refusing one refuses the edit. Moving earlier never shortens a hold.
+     * Times (SCRUM-1014): each a real time, the start before the end. The payout floor reads both, so a start
+     * moved past the end is refused rather than read as anything. `updateEventTracked` holds the same rule under
+     * the row lock, against an edit that raced this one.
      */
-    const newEnd = end_time !== undefined && end_time !== null ? new Date(end_time) : null
-    const postpones = newEnd !== null && newEnd.getTime() > event.end_time.getTime()
-    if (postpones && !(await extendTransferHolds(event.id, newEnd))) {
-      return errorResponse("Couldn’t extend the payout hold for this event’s tickets. Try again.", 503, "payout_hold_not_extended")
-    }
+    const nextStart = start_time ? new Date(start_time) : event.start_time
+    const nextEnd = end_time ? new Date(end_time) : event.end_time
+    if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return errorResponse("Use a valid date and time.", 400)
+    if (nextStart.getTime() >= nextEnd.getTime()) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
+
+    // A started event with paid tickets keeps its times: an unchanged value resent by the form is not a change.
+    const movesTime = nextStart.getTime() !== event.start_time.getTime() || nextEnd.getTime() !== event.end_time.getTime()
+    if (movesTime && (await ticketTimesLocked(event))) return errorResponse(TIMES_LOCKED_SENTENCE, 409, "times_locked")
+    // A postponement is any move that raises the payout floor (the later of start and end, + 3 days).
+    const postpones = holdFloor({ start_time: nextStart, end_time: nextEnd }).getTime() > holdFloor(event).getTime()
 
     // Razorpay's reviewer: never out of draft, never a real venue (lib/review-demo-org.ts).
     const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, {
@@ -291,7 +292,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const nextSlug = title ? await uniqueEventSlug(title, resolvedParams.id) : null
 
     // The edit and its change record in one transaction (lib/event-change.ts): the row returned carries the written `changed_*`.
-    const updatedEvent = await updateEventTracked({
+    const write = (alongside?: (tx: Prisma.TransactionClient, updated: { start_time: Date; end_time: Date }) => Promise<unknown>) =>
+      updateEventTracked({
       where: { id: resolvedParams.id },
       data: {
         /*
@@ -525,11 +527,30 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             }
           : {}),
       },
-    }, { fromStatus: event.status, ...(postpones && { alongside: (tx, updated) => extendHoldsInTx(tx, event.id, updated.end_time) }) }).catch((error: unknown) => {
-      if (error instanceof EventStatusMovedError) return error
+    }, { fromStatus: event.status, ...(alongside && { alongside }) }).catch((error: unknown) => {
+      if (error instanceof EventStatusMovedError || error instanceof EventTimesOrderError) return error
       throw error
     })
+    /*
+     * A postponement holds the organizer's money until after the new night (security reviews 3, 4): under the
+     * event's payout lock, with its times read again, every unreleased transfer is raised at Razorpay first, then
+     * the payout rows in the edit's own transaction. Razorpay refusing one refuses the edit. Holds only go up.
+     */
+    const HOLD_NOT_RAISED = Symbol("hold not raised")
+    const updatedEvent = !postpones
+      ? await write()
+      : await withPayoutLock(event.id, async () => {
+          const fresh = await db.events.findUniqueOrThrow({ where: { id: event.id }, select: { start_time: true, end_time: true } })
+          const floor = holdFloor({ start_time: start_time ? nextStart : fresh.start_time, end_time: end_time ? nextEnd : fresh.end_time })
+          if (!(await raiseTransferHolds(event.id, floor))) return HOLD_NOT_RAISED
+          // The rows to exactly what Razorpay now holds, so the two never diverge.
+          return write((tx) => raiseHoldsInTx(tx, event.id, floor))
+        })
+    if (updatedEvent === HOLD_NOT_RAISED) {
+      return errorResponse("Couldn’t extend the payout hold for this event’s tickets. Try again.", 503, "payout_hold_not_extended")
+    }
     if (updatedEvent instanceof EventStatusMovedError) return errorResponse(updatedEvent.message, 409)
+    if (updatedEvent instanceof EventTimesOrderError) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
 
     // Who published, cancelled or moved it, with the material changes the
     // attendees were told about (SCRUM-89). Straight after the write: the

@@ -56,6 +56,10 @@ export interface FakeRazorpay {
   failOnce: Set<string>
   /** A captured payment on a Razorpay order, as if the buyer paid: what Checkout does. */
   capture(orderRef: string, amount?: number): Payment
+  /** Milliseconds to hold one call before answering, to make races real. */
+  delay: (method: string, path: string, body: unknown) => number
+  /** Every transfer, by id. */
+  transfer(id: string): Transfer | undefined
 }
 
 export function fakeRazorpay(): FakeRazorpay {
@@ -68,6 +72,8 @@ export function fakeRazorpay(): FakeRazorpay {
     transfers: new Map(),
     reversals: [],
     failOnce: new Set(),
+    delay: () => 0,
+    transfer: (id) => [...fake.transfers.values()].flat().find((t) => t.id === id),
     capture(orderRef, amount) {
       const order = fake.orders.get(orderRef)
       if (!order) throw new Error(`no fake order ${orderRef}`)
@@ -85,6 +91,8 @@ export function fakeRazorpay(): FakeRazorpay {
     const path = url.slice("https://api.razorpay.com/v1".length)
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     fake.calls.push({ method, path, body })
+    const wait = fake.delay(method, path, body)
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait))
     const key = [...fake.failOnce].find((k) => `${method} ${path}`.startsWith(k))
     if (key) {
       fake.failOnce.delete(key)
@@ -110,6 +118,10 @@ export function fakeRazorpay(): FakeRazorpay {
       const transfer = { id: `trf_${randomUUID().slice(0, 14)}`, recipient: t.account, amount: t.amount, currency: t.currency, on_hold_until: t.on_hold_until }
       fake.transfers.set(m[1], [...(fake.transfers.get(m[1]) ?? []), transfer])
       return json({ entity: "collection", count: 1, items: [transfer] })
+    }
+    if (method === "GET" && (m = path.match(/^\/transfers\/([^/]+)$/))) {
+      const t = fake.transfer(m[1])
+      return t ? json({ ...t, entity: "transfer", on_hold: true }) : json({ error: { description: "The id provided does not exist" } }, 400)
     }
     if (method === "PATCH" && (m = path.match(/^\/transfers\/([^/]+)$/))) {
       // Modify settlement hold (Route): PATCH /v1/transfers/:id { on_hold, on_hold_until }.

@@ -184,6 +184,11 @@ export async function POST(req: Request) {
     if (!title || !description || !start_time || !end_time || !timezone) {
       return errorResponse("Missing required fields", 400)
     }
+    // A start before the end, as the edit and the curate form hold it (SCRUM-1014: the payout floor reads both).
+    const startsAt = new Date(start_time)
+    const endsAt = new Date(end_time)
+    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) return errorResponse("Use a valid date and time.", 400)
+    if (startsAt.getTime() >= endsAt.getTime()) return errorResponse("The event must end after it starts.", 400)
 
     // Fix #31: Validate capacity fields
     if (max_capacity !== undefined && max_capacity !== null) {

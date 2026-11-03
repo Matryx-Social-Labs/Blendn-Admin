@@ -70,6 +70,16 @@ export const PAYOUT_HOLD_AFTER_EVENT_MS = 3 * 24 * 60 * 60 * 1000
  * organizer refund is refused (`refundOrder`) and not offered (the Sales
  * panel reads this same rule).
  */
+/**
+ * The earliest an event's payouts may be released (SCRUM-1014, security
+ * review 4): three days after the later of its start and its end. The one
+ * floor every hold is held to: a new payout, its transfer, and a
+ * postponement. A start is never after its end (the event edit refuses it);
+ * the max is so that a row which somehow says otherwise still holds longer.
+ */
+export const holdFloor = (event: { start_time: Date; end_time: Date }): Date =>
+  new Date(Math.max(event.start_time.getTime(), event.end_time.getTime()) + PAYOUT_HOLD_AFTER_EVENT_MS)
+
 export const payoutReleased = (hold: { onHoldUntil: Date | null; eventEnd: Date }, now: Date = new Date()): boolean =>
   now.getTime() >= (hold.onHoldUntil?.getTime() ?? hold.eventEnd.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS)
 
@@ -131,6 +141,7 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
         status: true,
         deleted_at: true,
         end_time: true,
+        start_time: true,
         organizer_org_id: true,
         organizer_org: { select: { razorpay_account_id: true, razorpay_account_status: true } },
       },
@@ -143,7 +154,8 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
     orgId: event?.organizer_org_id ?? null,
     // Only an active linked account is paid; otherwise the payout is recorded as owed to nobody (`no_account`).
     account: event?.organizer_org && payoutsConnected(event.organizer_org) ? event.organizer_org.razorpay_account_id : null,
-    endTime: event?.end_time ?? new Date(),
+    // The hold floor (`holdFloor`): the transfer path raises it again under the payout lock if the event moved since.
+    holdUntil: event ? holdFloor(event) : new Date(Date.now() + PAYOUT_HOLD_AFTER_EVENT_MS),
   }
 }
 
@@ -204,7 +216,7 @@ async function whyNotSeated(
 }
 
 /** The organizer's share, owed to the organisation's linked account; the transfer is made after the commit. */
-async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: { orgId: string | null; account: string | null; endTime: Date }) {
+async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: { orgId: string | null; account: string | null; holdUntil: Date }) {
   const amount = organizerShare(order)
   if (!ctx.orgId || amount < 1) return
   await tx.ticket_payouts.create({
@@ -215,7 +227,7 @@ async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: 
       amount_minor: amount,
       currency: order.currency,
       status: ctx.account ? "pending" : "no_account",
-      on_hold_until: new Date(ctx.endTime.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS),
+      on_hold_until: ctx.holdUntil,
     },
   })
 }

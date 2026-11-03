@@ -45,18 +45,28 @@ reconcile job retries it.
 The dashboard event PATCH (`app/api/events/[id]/route.ts`, the only writer of
 an event's start and end) refuses to move them, 409 `times_locked`, once the
 event has started and has paid ticket orders (`ticketTimesLocked`). Before it
-starts they may move, and a hold only ever moves later:
+starts they may move, and a hold only ever moves later. The rules, in
+`lib/payout-holds.ts`:
 
-- **Postponed** (the end moves later): every payout not yet released has its
-  hold raised to the new end + 3 days, at Razorpay first (`PATCH
-  /v1/transfers/:id` with `on_hold` and `on_hold_until`, "Modify settlement
-  hold", `modifyTransferHold`) and then in the database inside the edit's own
-  transaction (`lib/payout-holds.ts`, `updateEventTracked`'s `alongside`). If
-  Razorpay refuses or cannot be reached, the edit is refused (503
-  `payout_hold_not_extended`) and nothing is written.
+- **One floor**: `holdFloor` = the later of start and end + 3 days, for a new
+  payout, its transfer and a postponement. The edit (and the create route)
+  refuses a start at or after the end, and so does `updateEventTracked` under
+  the row lock.
+- **Postponed** = any move that raises the floor. Under the event's payout lock
+  (`withPayoutLock`, `pg_advisory_xact_lock(hashtext('payout:' || id))`, held
+  across the Razorpay calls) with the times read again, every transferred,
+  unreleased payout is raised at Razorpay (`GET` then `PATCH
+  /v1/transfers/:id`, "Modify settlement hold", skipped when Razorpay already
+  holds it as long), then the rows in the edit's own transaction, only upward.
+  Razorpay refusing one refuses the edit (503 `payout_hold_not_extended`).
+- **Transfers** (`createPayoutTransfer`, settle and reconcile) take the same
+  lock, read the payout and the event's times again, send the later of the
+  recorded hold and the floor, raise a transfer that already exists, and
+  record exactly that hold.
 - **Moved earlier**: no hold changes.
-- **Backstop**: a transfer is never sent with a hold earlier than the event's
-  end as it is then + 3 days (`createPayoutTransfer`).
+- Ceiling: two Razorpay calls per transferred order, eight at a time, inside
+  the request; an event with thousands of transferred orders takes about a
+  minute to postpone.
 - Not built: a buyer's full refund on a postponement until 48 hours before the
   new start (organizer terms 5.3): SCRUM-1016.
 
