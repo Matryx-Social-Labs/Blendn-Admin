@@ -64,6 +64,9 @@ export async function refundOrder(orderId: string, user: Actor, reason: string):
 
   try {
     await db.$transaction(async (tx) => {
+      // One lock order everywhere (security review 6): the payout row, then its order, as the release job's claim.
+      // The payout's status is the only release source: locked, so the release job claims it before us or after.
+      const [payout] = await tx.$queryRaw<{ status: string }[]>`SELECT status::text AS status FROM ticket_payouts WHERE order_id = ${orderId}::uuid FOR UPDATE`
       const [order] = await tx.$queryRaw<
         { event_id: string; status: string; refund_requested_at: Date | null; total_minor: number; service_fee_minor: number; service_fee_tax_minor: number; processing_fee_minor: number }[]
       >`SELECT event_id::text, status::text AS status, refund_requested_at, total_minor, service_fee_minor, service_fee_tax_minor, processing_fee_minor
@@ -72,8 +75,6 @@ export async function refundOrder(orderId: string, user: Actor, reason: string):
       if (!order || !event) throw new Refused("not_found")
       if (order.refund_requested_at) throw new Refused("already_refunding")
       if (order.status !== "paid") throw new Refused("not_paid")
-      // The payout's status is the only source (SCRUM-1014): locked, so the release job claims it before us or after.
-      const [payout] = await tx.$queryRaw<{ status: string }[]>`SELECT status::text AS status FROM ticket_payouts WHERE order_id = ${orderId}::uuid FOR UPDATE`
       if (payout && PAYOUT_GONE.has(payout.status)) throw new Refused("payout_released")
       const amount = organizerShare(order)
       await tx.ticket_orders.update({ where: { id: orderId }, data: { refund_requested_at: new Date(), refund_requested_minor: amount, refund_reason: why } })
@@ -105,7 +106,9 @@ export async function refundOrder(orderId: string, user: Actor, reason: string):
 export type CancelRefusal = "ticketing_off" | "payments_off" | "not_found" | "event_not_cancelled"
 
 /**
- * Every paid order of a cancelled event refunded in full. The event must be
+ * Every paid order of a cancelled event refunded in full, except one whose
+ * payout was already released (or is being): that money has left us, so it is
+ * flagged for manual recovery (`ticket_order.cancel_refund_manual`) instead. The event must be
  * cancelled first (no new order can be held for it then); its open holds are
  * given back. Safe to call again: an order already claimed is not claimed twice.
  */
@@ -121,14 +124,32 @@ export async function cancelEventRefundAll(
     const event = await canEditEvent(tx, eventId, user)
     if (!event) return "not_found" as const
     if (event.status !== "cancelled") return "event_not_cancelled" as const
+    // One lock order everywhere (security review 6): the event's payout rows, then its orders, each in id order.
+    const payouts = await tx.$queryRaw<{ order_id: string; status: string }[]>`
+      SELECT p.order_id::text, p.status::text AS status FROM ticket_payouts p JOIN ticket_orders o ON o.id = p.order_id
+       WHERE o.event_id = ${eventId}::uuid ORDER BY p.order_id FOR UPDATE OF p`
+    await tx.$queryRaw`SELECT id FROM ticket_orders WHERE event_id = ${eventId}::uuid AND status = 'paid' ORDER BY id FOR UPDATE`
+    // Money we no longer hold: the organizer's share was released (or is being). Not refunded from here; flagged for a person.
+    const gone = payouts.filter((p) => PAYOUT_GONE.has(p.status)).map((p) => p.order_id)
     const rows = await tx.$queryRaw<{ id: string }[]>`
       UPDATE ticket_orders
          SET refund_requested_at = now(), refund_requested_minor = total_minor, refund_reason = 'event_cancelled', updated_at = now()
-       WHERE event_id = ${eventId}::uuid AND status = 'paid' AND refund_requested_at IS NULL
+       WHERE event_id = ${eventId}::uuid AND status = 'paid' AND refund_requested_at IS NULL AND NOT (id::text = ANY(${gone}::text[]))
       RETURNING id::text`
     if (event.organizer_org_id) {
-      await auditInTx(tx, { userId: user.id, action: "ticketing.cancel_refund_all", resource: "event", resourceId: eventId, orgId: event.organizer_org_id, details: { orders: rows.length } })
+      await auditInTx(tx, { userId: user.id, action: "ticketing.cancel_refund_all", resource: "event", resourceId: eventId, orgId: event.organizer_org_id, details: { orders: rows.length, manual: gone.length } })
+      for (const orderId of gone) {
+        await auditInTx(tx, {
+          userId: user.id,
+          action: "ticket_order.cancel_refund_manual",
+          resource: "ticket_order",
+          resourceId: orderId,
+          orgId: event.organizer_org_id,
+          details: { eventId, why: "payout already released to the organizer: refund the buyer and recover the share by hand (terms 4.4, 5.5)" },
+        })
+      }
     }
+    if (gone.length) logger.error("Cancelled event has payouts already released: refunds need a person", { eventId, orders: gone })
     return rows.map((r) => r.id)
   }, TX)
   if (!Array.isArray(claimed)) return { ok: false, reason: claimed }

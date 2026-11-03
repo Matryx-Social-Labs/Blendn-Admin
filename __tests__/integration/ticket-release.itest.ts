@@ -1,6 +1,6 @@
 import { releaseDuePayouts, RELEASING_RETRY_MS } from "@/lib/payout-release"
 import { holdFloor } from "@/lib/ticket-payments"
-import { refundOrder } from "@/lib/ticket-refunds"
+import { cancelEventRefundAll, refundOrder } from "@/lib/ticket-refunds"
 
 import { closeDb, db } from "./helpers"
 import { buyer, capturedDelivery, deliver, fakeRazorpay, heldOrder, newWorld, settled, teardown, ticketEnv, ticketedEvent, type FakeRazorpay } from "./ticket-world"
@@ -207,6 +207,73 @@ describe("the refund gate is the payout's status", () => {
       expect(refunds[i].ok).toBe(refunded)
       if (released) expect(refunds[i]).toEqual({ ok: false, reason: "payout_released" })
     }
+  })
+})
+
+describe("a premature release (security review 6)", () => {
+  it("records each payout's release floor at payment, and the database refuses lowering it", async () => {
+    const { eventId, orderIds } = await sold()
+    const p = await payoutOf(orderIds[0])
+    expect(p.release_floor.getTime()).toBe((await floorOf(eventId)).getTime())
+    await expect(db.ticket_payouts.update({ where: { order_id: orderIds[0] }, data: { release_floor: new Date(Date.now() - DAY) } })).rejects.toThrow()
+    // Raising is allowed.
+    await db.ticket_payouts.update({ where: { order_id: orderIds[0] }, data: { release_floor: new Date(p.release_floor.getTime() + DAY) } })
+  })
+
+  it("the recorded floor alone holds the money when the event's times are moved into the past behind the edit's back", async () => {
+    const { eventId, orderIds } = await sold()
+    const recorded = (await payoutOf(orderIds[0])).release_floor
+    // As if the edit route's guard were not there: the times written straight to the row, a week in the past.
+    await db.events.update({ where: { id: eventId }, data: { start_time: new Date(Date.now() - 8 * DAY), end_time: new Date(Date.now() - 7 * DAY) } })
+    fake.calls.length = 0
+    await releaseDuePayouts(new Date())
+    expect((await payoutOf(orderIds[0])).status).toBe("on_hold")
+    expect(releaseCalls()).toEqual([])
+    await releaseDuePayouts(new Date(recorded.getTime() + 60_000))
+    expect((await payoutOf(orderIds[0])).status).toBe("released")
+  })
+
+  it("refuses moving a ticketed event's times earlier, or into the past", async () => {
+    const { eventId, host, start } = await sold()
+    const before = await db.events.findUniqueOrThrow({ where: { id: eventId }, select: { start_time: true, end_time: true } })
+    session = { user: { id: host, role: "organizer" } }
+    const earlier = new Date(start.getTime() - DAY)
+    const sooner = await patch(eventId, { start_time: earlier.toISOString(), end_time: new Date(earlier.getTime() + 3 * HOUR).toISOString() })
+    const past = await patch(eventId, { start_time: new Date(Date.now() - 2 * DAY).toISOString(), end_time: new Date(Date.now() - DAY).toISOString() })
+    const endSooner = await patch(eventId, { end_time: new Date(start.getTime() + HOUR).toISOString() })
+    session = null
+    expect([sooner.status, past.status, endSooner.status]).toEqual([409, 409, 409])
+    expect(await sooner.json()).toMatchObject({ errorCode: "times_only_later" })
+    expect(await db.events.findUniqueOrThrow({ where: { id: eventId }, select: { start_time: true, end_time: true } })).toEqual(before)
+  })
+})
+
+describe("refunds and releases share one lock order (security review 6)", () => {
+  it("cancel-all racing the release job: every order is refunded with its payout held, or released with the refund flagged, never both", async () => {
+    const { eventId, host, orderIds } = await sold(6)
+    const after = new Date((await floorOf(eventId)).getTime() + 60_000)
+    fake.delay = (method, path) => (method === "PATCH" && /^\/transfers\//.test(path) ? 120 : 0)
+    const release = releaseDuePayouts(after)
+    await new Promise((r) => setTimeout(r, 200))
+    await db.events.update({ where: { id: eventId }, data: { status: "cancelled" } })
+    const cancel = await cancelEventRefundAll(eventId, { id: host, role: "organizer" })
+    await release
+    expect(cancel.ok).toBe(true)
+    let refunded = 0
+    let flagged = 0
+    for (const id of orderIds) {
+      const p = await payoutOf(id)
+      const o = await db.ticket_orders.findUniqueOrThrow({ where: { id } })
+      const gone = p.status === "releasing" || p.status === "released"
+      const claimed = o.refund_requested_at !== null
+      expect({ id, both: gone && claimed, neither: !gone && !claimed }).toEqual({ id, both: false, neither: false })
+      if (claimed) refunded++
+      if (gone) {
+        flagged++
+        expect(await db.audit_logs.count({ where: { action: "ticket_order.cancel_refund_manual", resource_id: id } })).toBe(1)
+      }
+    }
+    expect(refunded + flagged).toBe(orderIds.length)
   })
 })
 

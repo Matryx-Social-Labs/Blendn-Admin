@@ -1,5 +1,5 @@
 import { refundAllOnCancel } from "@/lib/ticket-refunds"
-import { ticketTimesLocked, TIMES_LOCKED_SENTENCE } from "@/lib/ticket-views"
+import { ticketTimesRefusal } from "@/lib/ticket-views"
 import { logger } from "@/lib/logger"
 import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
@@ -191,9 +191,9 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return errorResponse("Use a valid date and time.", 400)
     if (nextStart.getTime() >= nextEnd.getTime()) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
 
-    // A started event with paid tickets keeps its times: an unchanged value resent by the form is not a change.
-    const movesTime = nextStart.getTime() !== event.start_time.getTime() || nextEnd.getTime() !== event.end_time.getTime()
-    if (movesTime && (await ticketTimesLocked(event))) return errorResponse(TIMES_LOCKED_SENTENCE, 409, "times_locked")
+    // A ticketed event with paid orders moves only later, and not at all once started (an unchanged resent value is no move).
+    const timesRefusal = await ticketTimesRefusal(event, { start: nextStart, end: nextEnd })
+    if (timesRefusal) return errorResponse(timesRefusal.sentence, 409, timesRefusal.code)
     // A postponement needs nothing here: payouts are held at Razorpay with no end, and the release job reads the
     // event's floor (the later of start and end, + 3 days) when it runs (lib/payout-release.ts).
 

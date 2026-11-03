@@ -185,17 +185,29 @@ export async function missingTicketAtCheckIn(
 }
 
 /**
- * Whether an event's start and end are fixed (SCRUM-1014): it has started and
- * has paid ticket orders: its buyers paid for that night. Before it starts an
- * edit is allowed, and moving it later simply moves its payouts' release with
- * it (`holdFloor`, read by the release job when it runs).
+ * Whether an edit may move a ticketed event's times (SCRUM-1014, security
+ * reviews 2 and 6). Once it has paid (or held) ticket orders: fixed after it has
+ * started (`times_locked`), and before that it may only move **later** (a
+ * postponement), never earlier and never into the past (`times_only_later`).
+ * Its buyers paid for that night; and although each payout's own
+ * `release_floor` already refuses an early release, the edit does not offer
+ * the move at all. Null when the edit is allowed.
  */
-export async function ticketTimesLocked(event: { id: string; start_time: Date }, now: Date = new Date()): Promise<boolean> {
-  if (event.start_time > now) return false
-  return (await db.ticket_orders.count({ where: { event_id: event.id, status: "paid" }, take: 1 })) > 0
+export async function ticketTimesRefusal(
+  event: { id: string; start_time: Date; end_time: Date },
+  next: { start: Date; end: Date },
+  now: Date = new Date()
+): Promise<{ code: "times_locked" | "times_only_later"; sentence: string } | null> {
+  const moves = next.start.getTime() !== event.start_time.getTime() || next.end.getTime() !== event.end_time.getTime()
+  if (!moves) return null
+  // Paid, or held and about to be: a buyer mid-checkout pays for the night they were shown.
+  if ((await db.ticket_orders.count({ where: { event_id: event.id, status: { in: ["paid", "pending"] } }, take: 1 })) === 0) return null
+  if (event.start_time <= now) return { code: "times_locked", sentence: "This event has started and has sold tickets, so its start and end can’t change." }
+  if (next.start < event.start_time || next.end < event.end_time || next.start <= now) {
+    return { code: "times_only_later", sentence: "This event has sold tickets, so it can only move later: not earlier, and not into the past." }
+  }
+  return null
 }
-
-export const TIMES_LOCKED_SENTENCE = "This event has started and has sold tickets, so its start and end can’t change."
 
 export const NO_TICKET_SENTENCE = "This event needs a ticket. Get one on the event page, then check in."
 

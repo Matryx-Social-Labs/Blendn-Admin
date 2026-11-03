@@ -12,14 +12,24 @@ import { PAYOUT_HOLD_AFTER_EVENT_MS } from "./ticket-payments"
  * releases on its own and nothing has to keep its clock in step with our
  * event times.
  *
- * Every few minutes, a payout is released once its event's **current**
- * `holdFloor` (the later of start and end, + 3 days, read from the event in
- * the same statement) has passed, its order is paid with no refund claimed,
- * and its event was not cancelled. A postponement needs no Razorpay call: the
- * floor moves with the event.
+ * Every few minutes, a payout is released once **both** its own
+ * `release_floor` (the event's `holdFloor` when the order was paid, only ever
+ * raised, trigger `ticket_payouts_release_floor_only_up`) and its event's
+ * current `holdFloor` (the later of start and end, + 3 days) have passed, its
+ * order is paid with no refund claimed, and its event was not cancelled. So a
+ * postponement delays it with no Razorpay call, and moving an event earlier,
+ * even into the past, never brings money forward (security review 6).
  *
- * Per payout: one short statement claims it (`FOR UPDATE SKIP LOCKED`,
- * `on_hold` → `releasing`); then Razorpay is told `on_hold: false`; then the
+ * Every field read, asked "can an organizer edit this to make money leave
+ * earlier?": `release_floor` no (written at payment, only raised); event start
+ * and end yes, but only ever as a further delay (GREATEST); event status no
+ * (cancelled stops a release, it never starts one early); order status and
+ * refund claim, payout status: system writers only.
+ *
+ * Per payout: one short statement claims it (`FOR UPDATE OF p, o SKIP
+ * LOCKED`: the payout row, then its order, the one lock order every refund
+ * path takes too; `on_hold` → `releasing`), re-checking the order and event
+ * under the lock; then Razorpay is told `on_hold: false`; then the
  * row is marked `released`. Idempotent: a crash after Razorpay and before our
  * write leaves `releasing`, retried after `RELEASING_RETRY_MS`, and Razorpay's
  * "already released" counts as success (`releaseTransfer`). An organizer
@@ -46,7 +56,8 @@ async function due(now: Date): Promise<string[]> {
      WHERE p.status IN ('on_hold', 'releasing') AND p.provider_transfer_ref IS NOT NULL
        AND (
          (p.status = 'on_hold' AND o.status = 'paid' AND o.refund_requested_at IS NULL
-           AND e.kind = 'event' AND e.status <> 'cancelled' AND GREATEST(e.start_time, e.end_time) + ${HOLD_SECONDS} * interval '1 second' <= ${now})
+           AND e.kind = 'event' AND e.status <> 'cancelled'
+           AND GREATEST(p.release_floor, GREATEST(e.start_time, e.end_time) + ${HOLD_SECONDS} * interval '1 second') <= ${now})
          OR (p.status = 'releasing' AND p.releasing_at < now() - ${`${RELEASING_RETRY_MS / 1000} seconds`}::interval)
        )
      ORDER BY p.created_at
@@ -66,10 +77,11 @@ async function claim(orderId: string, now: Date): Promise<string | null> {
         WHERE p.order_id = ${orderId}::uuid AND p.provider_transfer_ref IS NOT NULL
           AND (
             (p.status = 'on_hold' AND o.status = 'paid' AND o.refund_requested_at IS NULL
-              AND e.kind = 'event' AND e.status <> 'cancelled' AND GREATEST(e.start_time, e.end_time) + ${HOLD_SECONDS} * interval '1 second' <= ${now})
+              AND e.kind = 'event' AND e.status <> 'cancelled'
+           AND GREATEST(p.release_floor, GREATEST(e.start_time, e.end_time) + ${HOLD_SECONDS} * interval '1 second') <= ${now})
             OR (p.status = 'releasing' AND p.releasing_at < now() - ${`${RELEASING_RETRY_MS / 1000} seconds`}::interval)
           )
-          FOR UPDATE OF p SKIP LOCKED)
+          FOR UPDATE OF p, o SKIP LOCKED)
     RETURNING provider_transfer_ref`
   return row?.provider_transfer_ref ?? null
 }

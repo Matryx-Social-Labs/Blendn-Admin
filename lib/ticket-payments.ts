@@ -131,6 +131,7 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
       select: {
         status: true,
         deleted_at: true,
+        start_time: true,
         end_time: true,
         organizer_org_id: true,
         organizer_org: { select: { razorpay_account_id: true, razorpay_account_status: true } },
@@ -144,6 +145,8 @@ async function context(tx: Prisma.TransactionClient, order: LockedOrder) {
     orgId: event?.organizer_org_id ?? null,
     // Only an active linked account is paid; otherwise the payout is recorded as owed to nobody (`no_account`).
     account: event?.organizer_org && payoutsConnected(event.organizer_org) ? event.organizer_org.razorpay_account_id : null,
+    // The payout's own release floor, fixed at payment: moving the event earlier later can never bring the money forward.
+    releaseFloor: event ? holdFloor(event) : new Date(Date.now() + PAYOUT_HOLD_AFTER_EVENT_MS),
   }
 }
 
@@ -204,7 +207,7 @@ async function whyNotSeated(
 }
 
 /** The organizer's share, owed to the organisation's linked account; the transfer is made after the commit. */
-async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: { orgId: string | null; account: string | null }) {
+async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: { orgId: string | null; account: string | null; releaseFloor: Date }) {
   const amount = organizerShare(order)
   if (!ctx.orgId || amount < 1) return
   await tx.ticket_payouts.create({
@@ -215,6 +218,7 @@ async function owePayout(tx: Prisma.TransactionClient, order: LockedOrder, ctx: 
       amount_minor: amount,
       currency: order.currency,
       status: ctx.account ? "pending" : "no_account",
+      release_floor: ctx.releaseFloor,
     },
   })
 }

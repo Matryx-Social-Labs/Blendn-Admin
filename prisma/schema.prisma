@@ -4792,6 +4792,9 @@ model ticket_payouts {
   status                ticket_payout_status @default(pending)
   /// `trf_…`, once Razorpay made the transfer.
   provider_transfer_ref String?              @unique
+  /// The earliest it may be released: `holdFloor` of the event when the order was paid. Only ever raised
+  /// (trigger `ticket_payouts_release_floor_only_up`); released at GREATEST(this, holdFloor(event now)).
+  release_floor         DateTime             @db.Timestamptz(6)
   /// When the release job claimed it, and when Razorpay released it (lib/payout-release.ts).
   releasing_at          DateTime?            @db.Timestamptz(6)
   released_at           DateTime?            @db.Timestamptz(6)

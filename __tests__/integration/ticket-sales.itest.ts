@@ -248,8 +248,8 @@ describe("a refund from the Sales panel", () => {
       // Not started yet: an edit is allowed.
       const start = new Date(Date.now() + 3 * 86_400_000)
       await db.events.update({ where: { id: eventId }, data: { start_time: start, end_time: new Date(start.getTime() + 2 * 3_600_000) } })
-      const earlier = new Date(start.getTime() - 86_400_000)
-      const allowed = await patch({ start_time: earlier.toISOString(), end_time: new Date(earlier.getTime() + 3_600_000).toISOString() })
+      const later = new Date(start.getTime() + 86_400_000)
+      const allowed = await patch({ start_time: later.toISOString(), end_time: new Date(later.getTime() + 3_600_000).toISOString() })
       expect(allowed.status).toBe(200)
       expect((await db.ticket_payouts.findUniqueOrThrow({ where: { order_id: orderId } })).status).toBe("on_hold")
 

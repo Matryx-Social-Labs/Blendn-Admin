@@ -48,13 +48,16 @@ indefinitely", Razorpay Route docs). Razorpay never releases on its own; we
 are the only releaser.
 
 - **The release job** (`lib/payout-release.ts`, every 5 minutes while
-  `TICKETING` is on) releases a payout once its event's **current**
-  `holdFloor` (the later of start and end, + 3 days, `lib/ticket-payments.ts`)
-  has passed, its order is paid with no refund claimed, and its event was not
-  cancelled. The floor is read when the job runs, so a postponement needs no
-  Razorpay call at all.
-- **Per payout**: one statement claims it under `FOR UPDATE SKIP LOCKED`
-  (`on_hold` → `releasing`), then Razorpay is told `on_hold: false`
+  `TICKETING` is on) releases a payout once **both** its own `release_floor`
+  (the event's `holdFloor` when the order was paid; only ever raised, trigger
+  `ticket_payouts_release_floor_only_up`) and its event's current `holdFloor`
+  (the later of start and end, + 3 days) have passed, its order is paid with
+  no refund claimed, and its event was not cancelled. A postponement delays it
+  with no Razorpay call; moving an event earlier, even into the past, never
+  brings money forward.
+- **Per payout**: one statement claims it under `FOR UPDATE OF p, o SKIP
+  LOCKED` (`on_hold` → `releasing`; one lock order everywhere: payout, then
+  order — `refundOrder` and `cancelEventRefundAll` take the same), then Razorpay is told `on_hold: false`
   (`releaseTransfer`, `PATCH /v1/transfers/:id`), then the row is `released`.
   A crash in between is retried after 30 minutes; Razorpay's "already
   released" counts as success.
@@ -62,15 +65,19 @@ are the only releaser.
   row and refuses `payout_released` when it is `releasing` or `released`.
   Event times never decide it. The Sales panel's Refund action reads the same
   status.
+- **Cancel-all** refunds every paid order except one whose payout is already
+  `releasing` or `released`: that money has left us, so it is flagged
+  (`ticket_order.cancel_refund_manual` audit row, an error log) for a person to
+  refund the buyer and recover the share (terms 4.4, 5.5).
 - **Event times**: the dashboard create and edit refuse a start at or after
-  the end (and `updateEventTracked` again under the row lock); once a ticketed
-  event with paid orders has started, its times are fixed (409
-  `times_locked`, `ticketTimesLocked`).
+  the end (and `updateEventTracked` again under the row lock). Once a ticketed
+  event has paid orders it may only move later — never earlier, never into the
+  past (409 `times_only_later`) — and not at all once started (409
+  `times_locked`) (`ticketTimesRefusal`).
 - Not built: a buyer's full refund on a postponement until 48 hours before the
-  new start (organizer terms 5.3): SCRUM-1016. A system refund (cancel-all,
-  late payment) after a payout was released is still made to the buyer; the
-  organizer's share is then theirs to repay (terms 4.4, 5.5), not yet recorded
-  as a debit.
+  new start (organizer terms 5.3): SCRUM-1016. The manual recovery of a
+  released share after a cancellation has no screen yet: the audit rows are
+  the queue.
 
 ## What the tab reads
 
