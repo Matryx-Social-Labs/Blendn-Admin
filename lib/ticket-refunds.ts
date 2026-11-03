@@ -140,3 +140,20 @@ export async function cancelEventRefundAll(
   }
   return { ok: true, refunded, failed, queued: Math.max(0, claimed.length - INLINE_REFUNDS) }
 }
+
+/**
+ * A cancellation's refunds, from every door that cancels an event (the
+ * dashboard and mobile PATCH routes, an admin's status move; SCRUM-1014).
+ * After the cancel has committed, and never thrown: a refund Razorpay could
+ * not make now is claimed and the reconcile job retries it, and a cancelled
+ * event must not read as a failed edit. A free event claims nothing.
+ */
+export async function refundAllOnCancel(eventId: string, user: Actor): Promise<void> {
+  if (!ticketingOn()) return
+  try {
+    const result = await cancelEventRefundAll(eventId, user)
+    if (!result.ok && result.reason !== "ticketing_off") logger.error("Cancelled event's ticket refunds not claimed", { eventId, reason: result.reason })
+  } catch (error) {
+    logger.error("Cancelled event's ticket refunds failed", { eventId, error: error instanceof Error ? error.message : String(error) })
+  }
+}

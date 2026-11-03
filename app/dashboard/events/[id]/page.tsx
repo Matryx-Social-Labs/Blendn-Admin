@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
 
 import { EventHeader } from "@/components/dashboard/event-header"
@@ -73,6 +74,7 @@ export default async function EventDetailPage({
     canViewAttendees: permissions.canViewAttendees,
     kind: event.kind,
     status: event.status,
+    ticketing: data.ticketing,
   })
   // Room chat and Feedback are their own routes; old `?tab=` links still land there.
   if (requestedTab === "feedback") redirect(`/dashboard/events/${event.id}/feedback`)
@@ -98,6 +100,12 @@ export default async function EventDetailPage({
     return (
       <div className="flex flex-col gap-5">
         {header}
+        {/* The door is canOperate's, linked from Live and from Tickets (SCRUM-1014). */}
+        {data.ticketing === "native" && event.ticketing_mode === "native" ? (
+          <Link href={`/dashboard/events/${event.id}/door`} className="w-fit text-[0.8125rem] font-medium underline underline-offset-[3px]">
+            Check tickets at the door
+          </Link>
+        ) : null}
         <LiveTab
           eventId={event.id}
           startAt={event.start_time.toISOString()}

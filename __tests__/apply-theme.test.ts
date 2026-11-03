@@ -122,7 +122,7 @@ describe("the override stays in its subtree", () => {
     }
     for (const dir of ["app", "components", "lib"]) walk(join(ROOT, dir))
     expect(users.length).toBeGreaterThan(0)
-    expect(users.filter((f) => !/^app\/(pricing|about|contact|terms|terms\/tickets|refunds|shipping)\/page\.tsx$/.test(f))).toEqual([])
+    expect(users.filter((f) => !/^app\/(pricing|about|contact|terms|terms\/tickets|terms\/organizer-tickets|refunds|shipping)\/page\.tsx$/.test(f))).toEqual([])
   })
 
   it("keeps the public pages' other frame out of the dashboard too", () => {

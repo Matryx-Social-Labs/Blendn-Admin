@@ -1,3 +1,4 @@
+import { refundAllOnCancel } from "@/lib/ticket-refunds"
 import { mayOpenCity } from "@/lib/browse-scope"
 import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
@@ -543,6 +544,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      */
     if (isCancelling) {
       const { inside } = await cancelEventCheckIns(eventId)
+      // Every ticket refunded in full, booking fee included (organizer terms 5.2).
+      await refundAllOnCancel(eventId, requester)
       // And tell them. `notifyEventCancelled` never throws — the cancellation
       // has already committed and must not be undone by a failed push.
       //

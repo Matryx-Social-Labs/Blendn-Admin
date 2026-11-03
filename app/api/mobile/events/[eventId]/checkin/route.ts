@@ -23,6 +23,7 @@ import { canJoinEvent } from "@/lib/socket-auth"
 import { readJson, isUuid } from "@/lib/api-input"
 import { fenceRefusal, personAtTheDoor, seatAtTheDoor, vagueFixRefusal } from "@/lib/check-in-core"
 import { isReviewAccount, recordReviewBypass } from "@/lib/review-accounts"
+import { missingTicketAtCheckIn, NO_TICKET_SENTENCE } from "@/lib/ticket-views"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -112,6 +113,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const person = await personAtTheDoor(authUser.userId, { eventId, minAge: event.min_age })
     if ("refusal" in person) return person.refusal
+
+    // A native ticketed event lets in ticket holders and its own staff (SCRUM-1014). Redeeming at the
+    // door does not check anybody in: check-in stays the attendee's own act (docs/CHECKIN.md).
+    if (await missingTicketAtCheckIn(event, authUser.userId)) return errorResponse(NO_TICKET_SENTENCE, 403, "tickets_required")
 
     /*
      * Which day are they checking in to?

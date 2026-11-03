@@ -434,6 +434,28 @@ Tests: `presence`, `checkin-kind`, `occurrences`, `event-phase`, `go-live`,
 
 ---
 
+## Ticketed events: the ticket, then the door, then check-in (SCRUM-1014)
+
+While `TICKETING` is on, an event selling tickets here (`ticketing_mode =
+'native'`) lets in at check-in only someone who holds a ticket whose order is
+paid, redeemed at the door or not, and the event's own staff (its
+organization, or the organization that owns its venue). Anyone else gets 403
+`tickets_required`. A refunded order's ticket does not count. Free and
+external-link events are unchanged. The guard is `missingTicketAtCheckIn`
+(`lib/ticket-views.ts`), called by `POST /events/:eventId/checkin` after the
+person checks (onboarding, age) and before the day and the fence.
+
+**Redeeming a ticket at the door does not check its holder in.** They are two
+acts by two people: the door (`/dashboard/events/[id]/door`, `redeemTicket`)
+is staff admitting a ticket, one write, with no person on screen; check-in is
+the attendee's own, from their phone, at the venue, and it is what opens the
+Room and counts them inside. Checking someone in from the door would put a
+person in a room by staff action, without their GPS fix and without them
+opening the app, and would make the door a reader of who people are. So a
+redeemed ticket is not a check-in, and a check-in needs a ticket, not a
+redemption. Presence, occupancy and attendance keep counting check-ins; the
+door's own count is "N of M in" on the door page.
+
 ## Known gaps
 
 - **No client yet sends presence pings.** The endpoint and sweeper are live; the

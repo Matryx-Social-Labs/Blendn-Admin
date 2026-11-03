@@ -125,6 +125,9 @@ const ALLOWED = new Map([
   // `sender` of an announcement is the host (or staff) who sent it -- the
   // organisation's own voice, never an attendee.
   ["app/api/events/[id]/announcements/route.ts", "the sender is a host, not an attendee"],
+  // The organization's own owners ("Owners: …") and the member who accepted the
+  // ticketing terms: its people, never an attendee. Buyers are labels (lib/ticket-sales.ts).
+  ["app/dashboard/events/[id]/tickets/page.tsx", "names the organization's owners and its accepting member, never a buyer"],
 ])
 
 function sourceFiles(dir: string, acc: string[] = []): string[] {

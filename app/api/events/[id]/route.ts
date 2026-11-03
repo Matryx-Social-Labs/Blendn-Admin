@@ -1,3 +1,4 @@
+import { refundAllOnCancel } from "@/lib/ticket-refunds"
 import { logger } from "@/lib/logger"
 import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
@@ -541,6 +542,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     let toldInside: string[] = []
     if (isCancelling) {
       toldInside = (await cancelEventCheckIns(resolvedParams.id)).inside
+      // Every ticket refunded in full, booking fee included (organizer terms 5.2).
+      await refundAllOnCancel(resolvedParams.id, session.user)
     }
 
     // Tell the people who were going.

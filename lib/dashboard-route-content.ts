@@ -231,6 +231,12 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
   if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/feedback")) {
     return { title: "Feedback", description: "What the people who came said afterwards." }
   }
+  if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/tickets")) {
+    return { title: "Tickets", description: "Sell tickets, refund them, and see when the money lands." }
+  }
+  if (pathname.startsWith("/dashboard/events/") && pathname.endsWith("/door")) {
+    return { title: "Check tickets", description: "Type the code on their ticket, or scan it." }
+  }
   if (pathname.startsWith("/dashboard/events/")) {
     return { title: "Event", description: "Setup, performance, and what happened on the night." }
   }
@@ -279,7 +285,7 @@ export function routeHeading(pathname: string, role: string | undefined): RouteC
  */
 export const OWNED_HEADERS: RegExp[] = [
   /^\/dashboard\/events\/[^/]+$/,
-  /^\/dashboard\/events\/[^/]+\/(edit|messaging|feedback)$/,
+  /^\/dashboard\/events\/[^/]+\/(edit|messaging|feedback|tickets|door)$/,
   /^\/dashboard\/venues\/[^/]+$/,
   /^\/dashboard\/venues\/[^/]+\/claim$/,
   /^\/dashboard\/organisers\/[^/]+$/,

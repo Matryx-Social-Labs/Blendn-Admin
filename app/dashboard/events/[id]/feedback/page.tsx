@@ -58,6 +58,7 @@ export default async function FeedbackPage({
     canViewAttendees: permissions.canViewAttendees,
     kind: event.kind,
     status: event.status,
+    ticketing: data.ticketing,
   }).some((t) => t.key === "feedback")
   if (!offered) redirect(`/dashboard/events/${event.id}`)
   // Built from the event the loader read: one read, not two. A venue sees

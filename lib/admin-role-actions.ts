@@ -1,5 +1,6 @@
 "use server"
 
+import { refundAllOnCancel } from "./ticket-refunds"
 import { Refusal } from "./refusal"
 import crypto from "crypto"
 import { sharePct } from "@/lib/dashboard-format"
@@ -278,6 +279,8 @@ export async function updateEventStatus(eventId: string, status: event_status) {
 
   if (isCancellingEvent(status, before.status)) {
     const { inside } = await cancelEventCheckIns(eventId)
+    // Every ticket refunded in full, booking fee included (organizer terms 5.2).
+    await refundAllOnCancel(eventId, admin)
     await notifyEventCancelled(eventId, before.title, inside)
   }
 

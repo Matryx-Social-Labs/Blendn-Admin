@@ -5,6 +5,7 @@ import { z } from "zod"
 import { isUuid } from "./api-input"
 import { errorResponse, ErrorCode } from "./api-response"
 import { db } from "./db"
+import { activeMembership } from "./org-membership"
 import { ticketingOn } from "./env"
 import { parseFeeSchedule, type FeeBreakdown } from "./ticket-fees"
 import type { ReserveRefusal } from "./ticket-holds"
@@ -162,6 +163,28 @@ export async function ticketsRequired(eventId: string): Promise<boolean> {
   const event = await db.events.findUnique({ where: { id: eventId }, select: { ticketing_mode: true } })
   return event?.ticketing_mode === "native"
 }
+
+/**
+ * Whether the mobile check-in must refuse this person (SCRUM-1014, the hole
+ * #907 left open): on a native ticketed event, someone who is not the event's
+ * staff (its organization, the venue's owner) and holds no valid ticket, one
+ * whose order is paid. Redeemed at the door or not: the door and check-in
+ * are separate acts, and the ticket is what both ask for.
+ */
+export async function missingTicketAtCheckIn(
+  event: { id: string; ticketing_mode: string; organizer_org_id: string | null; venue?: { owner_org_id: string | null } | null },
+  userId: string
+): Promise<boolean> {
+  if (!ticketingOn() || event.ticketing_mode !== "native") return false
+  const staffOrgs = [event.organizer_org_id, event.venue?.owner_org_id ?? null].filter((o): o is string => o !== null)
+  const [staff, ticket] = await Promise.all([
+    staffOrgs.length ? db.organisation_members.findFirst({ where: { user_id: userId, org_id: { in: staffOrgs }, ...activeMembership }, select: { id: true } }) : null,
+    db.tickets.findFirst({ where: { event_id: event.id, holder_id: userId, order: { status: "paid" } }, select: { id: true } }),
+  ])
+  return !staff && !ticket
+}
+
+export const NO_TICKET_SENTENCE = "This event needs a ticket. Get one on the event page, then check in."
 
 /* ------------------------------------------------------------------------ */
 /* Orders and tickets                                                        */

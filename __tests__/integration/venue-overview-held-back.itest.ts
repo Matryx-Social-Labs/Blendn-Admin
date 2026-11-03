@@ -107,6 +107,8 @@ describe("a venue owner's view of a three-person night", () => {
         slug: testId("three"),
         title: "Three person night",
         description: "integration fixture",
+        // Fixed, like every other date here: "created <today>" read as a 3 on the 3rd of a month.
+        created_at: new Date("2026-08-20T00:00:00.000Z"),
         start_time: start,
         end_time: new Date(start.getTime() + 2 * HOUR),
         timezone: "UTC",
@@ -144,6 +146,7 @@ describe("a venue owner's view of a three-person night", () => {
         slug: testId("walkins"),
         title: "Walk-in night",
         description: "integration fixture",
+        created_at: new Date("2026-08-20T00:00:00.000Z"),
         start_time: new Date("2026-09-26T14:00:00.000Z"),
         end_time: new Date("2026-09-26T16:00:00.000Z"),
         timezone: "UTC",

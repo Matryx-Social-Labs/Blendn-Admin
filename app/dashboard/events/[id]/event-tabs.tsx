@@ -1,7 +1,7 @@
 import { PillTabs } from "@/components/dashboard/kit"
 import { livePhaseFor } from "@/lib/event-phase"
 
-export type EventTabKey = "overview" | "live" | "attendees" | "chat" | "announcements" | "feedback" | "share"
+export type EventTabKey = "overview" | "live" | "attendees" | "chat" | "announcements" | "tickets" | "feedback" | "share"
 
 /**
  * Event detail navigation, in the kit's order (step 15).
@@ -27,6 +27,8 @@ export function eventTabsFor(
     /** `venue_day` is a venue's hidden daily room: no feedback digest, no public link. */
     kind: string
     status: string
+    /** How the event may sell tickets (`loadEventPage`'s `ticketing`): null while `TICKETING` is off or its market sells none. */
+    ticketing?: "native" | "external" | null
   }
 ): Array<{ key: EventTabKey; label: string }> {
   const phase = livePhaseFor(startAt, endAt)
@@ -42,6 +44,8 @@ export function eventTabsFor(
     // Not on a venue day for its venue's owner, who moderates the room and
     // never sees who was in it (F1).
     if (opts.canViewAttendees) tabs.push({ key: "attendees", label: "Attendees" })
+    // Setup, sales and refunds are whoever runs the event's (SCRUM-1014); the door is canOperate's, its own page.
+    if (opts.canEdit && opts.kind === "event" && opts.ticketing) tabs.push({ key: "tickets", label: "Tickets" })
     tabs.push({ key: "chat", label: "Room chat" })
     // Speaking into the room and placing sponsors is whoever runs the event;
     // a venue owner announcing into a night they do not run is K3.12 (R37).
@@ -64,11 +68,12 @@ export function sharesLink(opts: { canEdit: boolean; kind: string; status: strin
   return opts.canEdit && opts.kind !== "venue_day" && opts.status === "published"
 }
 
-/** Where a tab lives. Room chat and Feedback are their own routes; the rest are `?tab=`. */
+/** Where a tab lives. Room chat, Tickets and Feedback are their own routes; the rest are `?tab=`. */
 export function eventTabHref(eventId: string, key: EventTabKey): string {
   if (key === "overview") return `/dashboard/events/${eventId}`
   if (key === "chat") return `/dashboard/events/${eventId}/messaging`
   if (key === "feedback") return `/dashboard/events/${eventId}/feedback`
+  if (key === "tickets") return `/dashboard/events/${eventId}/tickets`
   return `/dashboard/events/${eventId}?tab=${key}`
 }
 

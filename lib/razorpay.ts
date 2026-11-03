@@ -22,7 +22,8 @@ import { razorpayKeys } from "./env"
  * client component (`checkout.tsx` reaches it only through server actions).
  */
 
-const API = "https://api.razorpay.com/v1"
+const ROOT = "https://api.razorpay.com"
+const API = `${ROOT}/v1`
 const TIMEOUT_MS = 15_000
 /** A page is 100 plans; an account with more than this many is not ours. */
 const MAX_PLAN_PAGES = 5
@@ -88,7 +89,8 @@ async function call<S extends z.ZodType>(
   const keys = razorpayKeys()
   if (!keys) throw new RazorpayError(503, "Razorpay is not configured")
   const auth = Buffer.from(`${keys.keyId}:${keys.keySecret}`).toString("base64")
-  const res = await fetch(`${API}${path}`, {
+  // Route linked accounts are v2 only; everything else is v1.
+  const res = await fetch(path.startsWith("/v2/") ? `${ROOT}${path}` : `${API}${path}`, {
     method,
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -442,4 +444,18 @@ const reversalSchema = z.object({ id: z.string().min(1), transfer_id: z.string()
 /** Take back part or all of a transfer: a refund's share, out of the organizer's held payout. */
 export async function reverseTransfer(transferId: string, amountMinor: number): Promise<z.infer<typeof reversalSchema>> {
   return call(reversalSchema, "POST", `/transfers/${encodeURIComponent(transferId)}/reversals`, { amount: amountMinor })
+}
+
+/* -------------------------------------------------------------------------- */
+/* Route linked accounts                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A Route linked account's onboarding state at Razorpay (`activated`,
+ * `under_review`, `needs_clarification`, `suspended`, ...), read before an
+ * admin marks the organization's payouts active (SCRUM-1014). Hosted KYC
+ * onboarding is Razorpay's and out of our scope: this only reads its word.
+ */
+export async function linkedAccountStatus(accountId: string): Promise<string> {
+  return (await call(z.object({ id: z.string(), status: z.string() }), "GET", `/v2/accounts/${encodeURIComponent(accountId)}`)).status
 }
