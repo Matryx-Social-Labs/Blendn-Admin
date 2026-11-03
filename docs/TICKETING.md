@@ -30,7 +30,7 @@ that authorizes for itself, and answers in a sentence.
 | `reviewPayoutAccountFor` | `reviewPayoutAccount` | app_admin only. `active` only when Razorpay's `GET /v2/accounts/:id` says `activated` (`linkedAccountStatus`, `lib/razorpay.ts`); without Razorpay keys the row records `razorpay: "not_checked"`. Or `rejected`. Audit `payouts.account_reviewed`. |
 | `turnOnTicketSelling` | `turnOnTicketing` (`lib/ticket-setup.ts`) | canEdit. The page's terms hash must equal the server's hash of the file it serves now (`terms_changed` otherwise). Payouts connected and a native market are checked before anything is recorded. If the organization has not accepted the version in force, `recordLegalAcceptance` with the **server's** `document_sha256` (owners and admins only); then the refund policy and who pays are written, then `enableTicketing`. |
 | `saveTicketTypeForm` | `saveTicketType` (`lib/ticket-types.ts`) | canEdit, event selling natively. At most 20 types an event, hidden ones counted, under a `FOR NO KEY UPDATE` lock on the event. Price > 0 (free is RSVP plus capacity). Quantity ≥ sold + held. Most per order 1–10. Window in the event's timezone. Off sale = `hidden`. A price change applies to new orders only (orders keep `unit_price_minor` and `total_minor`) and writes `ticket_type.price_changed` with what was sold. |
-| `refundSale` | `refundOrder` (`lib/ticket-refunds.ts`) | canEdit on the order's event. Refunds the organizer's share (the booking fee is kept, terms 5.4), behind a confirmation dialog whose default is Keep. Not offered once the payout is released. |
+| `refundSale` | `refundOrder` (`lib/ticket-refunds.ts`) | canEdit on the order's event. Refunds the organizer's share (the booking fee is kept, terms 5.4), behind a confirmation dialog whose default is Keep. Refused (`payout_released`) once the order's payout has left its hold: `payoutReleased` reads the hold the payout **recorded** (`ticket_payouts.on_hold_until`), never the event's editable end time, inside `refundOrder` so every caller gets it; the Sales panel's Refund action reads the same rule. |
 | `saveTicketLink` | `saveExternalTicketLink` | canEdit, the city's market is `external`. https only (`httpsUrl`); the app's "Tickets on <site>" is derived from the link's host. Nothing fetches the link. Empty turns the event back to free. |
 | `admitTicket` | `admitAtDoor` (`lib/ticket-door.ts`) | canOperate, checked before any attempt counts. 30 attempts a minute per operator at the event, 300 a minute for the event, then `redeemTicket` (one conditional UPDATE). Answers a code, the type and a time: never a person. |
 
@@ -39,6 +39,14 @@ that already exist (the dashboard and mobile event PATCH routes, the admin
 status move): `refundAllOnCancel` calls `cancelEventRefundAll` after the cancel
 commits and never throws; a refund Razorpay cannot make now is claimed and the
 reconcile job retries it.
+
+## An event's times once tickets are sold
+
+The dashboard event PATCH (`app/api/events/[id]/route.ts`, the only writer of
+an event's start and end) refuses to move them, 409 `times_locked`, once the
+event has started and has paid ticket orders (`ticketTimesLocked`). Before it
+starts they may move; a payout's recorded hold is written once, at payment,
+and an edit never moves it.
 
 ## What the tab reads
 

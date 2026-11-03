@@ -1,4 +1,5 @@
 import { refundAllOnCancel } from "@/lib/ticket-refunds"
+import { ticketTimesLocked, TIMES_LOCKED_SENTENCE } from "@/lib/ticket-views"
 import { logger } from "@/lib/logger"
 import { errorResponse } from "@/lib/api-response"
 import { NextResponse } from "next/server"
@@ -179,6 +180,12 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     // Which status moves a client may make (lib/event-status-move.ts).
     const moveRefusal = await statusMoveRefusalFor(event.id, status, event.status)
     if (moveRefusal) return errorResponse(moveRefusal, 400)
+
+    // A started event with paid tickets keeps its times (SCRUM-1014): an unchanged value resent by the form is not a change.
+    const movesTime =
+      (start_time !== undefined && start_time !== null && new Date(start_time).getTime() !== event.start_time.getTime()) ||
+      (end_time !== undefined && end_time !== null && new Date(end_time).getTime() !== event.end_time.getTime())
+    if (movesTime && (await ticketTimesLocked(event))) return errorResponse(TIMES_LOCKED_SENTENCE, 409, "times_locked")
 
     // Razorpay's reviewer: never out of draft, never a real venue (lib/review-demo-org.ts).
     const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, {

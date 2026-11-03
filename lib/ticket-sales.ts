@@ -128,11 +128,10 @@ export async function salesPage(actor: PermissionActor, eventId: string, query: 
       fees_absorbed: true,
       refund_requested_at: true,
       refunded_at: true,
+      payout: { select: { on_hold_until: true } },
       lines: { select: { quantity: true, ticket_type: { select: { name: true, sort: true } } } },
     },
   })
-  // The same rule refundOrder enforces: the flag only hides what the lib would refuse.
-  const released = payoutReleased(event.end_time, now)
   const rows = orders.map((o): SaleRow => {
     const status = statusOf(o)
     const lines = [...o.lines].sort((a, b) => a.ticket_type.sort - b.ticket_type.sort)
@@ -149,7 +148,8 @@ export async function salesPage(actor: PermissionActor, eventId: string, query: 
       status,
       refundedAt: o.refunded_at,
       createdAt: o.created_at,
-      refundable: status === "paid" && !released,
+      // The same rule refundOrder enforces, on the same recorded hold: the flag only hides what the lib would refuse.
+      refundable: status === "paid" && !payoutReleased({ onHoldUntil: o.payout?.on_hold_until ?? null, eventEnd: event.end_time }, now),
     }
   })
   const currency = (event.ticket_fee_schedule as { currency?: string } | null)?.currency ?? "INR"
@@ -210,7 +210,9 @@ export async function ticketsSummary(eventId: string, now: Date = new Date()): P
   const refunded = of("refunded")
   const refundedMinor = Number(refunded?.share ?? 0)
   const grossMinor = Number(paid?.share ?? 0) + refundedMinor
-  const releaseAt = releaseAtFor(event.end_time)
+  // The latest hold any payout recorded, else the event's end + 3 days: what the organizer waits for.
+  const latestHold = await db.ticket_payouts.aggregate({ where: { order: { event_id: eventId } }, _max: { on_hold_until: true } })
+  const releaseAt = latestHold._max.on_hold_until ?? releaseAtFor(event.end_time)
   return {
     soldTickets: Number(paid?.tickets ?? 0),
     refundedTickets: Number(refunded?.tickets ?? 0),
@@ -219,7 +221,7 @@ export async function ticketsSummary(eventId: string, now: Date = new Date()): P
     refundedMinor,
     payoutMinor: grossMinor - refundedMinor,
     releaseAt,
-    released: payoutReleased(event.end_time, now),
+    released: payoutReleased({ onHoldUntil: releaseAt, eventEnd: event.end_time }, now),
     refundedOrders: Number(refunded?.orders ?? 0),
     refunds: await refundsOf(eventId),
     inside,

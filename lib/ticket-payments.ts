@@ -61,12 +61,17 @@ export type RefundReason = "late_payment" | "order_cancelled" | "event_not_on"
 export const PAYOUT_HOLD_AFTER_EVENT_MS = 3 * 24 * 60 * 60 * 1000
 
 /**
- * Whether the organizer's share has left the hold: three days after the event
- * ended, Razorpay releases it to their bank. From then on an organizer refund
- * is not offered and not made (`refundOrder`): the money is no longer ours to
- * reverse. The Sales panel's Refund action reads the same rule.
+ * Whether an order's organizer share has left the hold, when Razorpay releases
+ * it to their bank. Read from the hold its payout **recorded**
+ * (`ticket_payouts.on_hold_until`, fixed when the order was paid), never from
+ * the event's end time, which its organizer can edit: moving the end later
+ * must not reopen a refund after the money left. Only an order with no payout
+ * row yet falls back to the event's end + 3 days. From release on an
+ * organizer refund is refused (`refundOrder`) and not offered (the Sales
+ * panel reads this same rule).
  */
-export const payoutReleased = (eventEnd: Date, now: Date = new Date()): boolean => now.getTime() >= eventEnd.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS
+export const payoutReleased = (hold: { onHoldUntil: Date | null; eventEnd: Date }, now: Date = new Date()): boolean =>
+  now.getTime() >= (hold.onHoldUntil?.getTime() ?? hold.eventEnd.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS)
 
 interface LockedOrder {
   id: string

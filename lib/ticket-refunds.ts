@@ -71,8 +71,10 @@ export async function refundOrder(orderId: string, user: Actor, reason: string):
       if (!order || !event) throw new Refused("not_found")
       if (order.refund_requested_at) throw new Refused("already_refunding")
       if (order.status !== "paid") throw new Refused("not_paid")
-      // The organizer's share left the hold three days after the event: nothing of theirs is left to reverse (SCRUM-1014).
-      if (payoutReleased(event.end_time)) throw new Refused("payout_released")
+      // The organizer's share left the hold its payout recorded: nothing of theirs is left to reverse (SCRUM-1014).
+      // The recorded hold, not the event's end time, which its organizer can edit.
+      const payout = await tx.ticket_payouts.findUnique({ where: { order_id: orderId }, select: { on_hold_until: true } })
+      if (payoutReleased({ onHoldUntil: payout?.on_hold_until ?? null, eventEnd: event.end_time })) throw new Refused("payout_released")
       const amount = organizerShare(order)
       await tx.ticket_orders.update({ where: { id: orderId }, data: { refund_requested_at: new Date(), refund_requested_minor: amount, refund_reason: why } })
       if (event.organizer_org_id) {

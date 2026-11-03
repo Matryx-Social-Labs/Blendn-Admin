@@ -184,6 +184,19 @@ export async function missingTicketAtCheckIn(
   return !staff && !ticket
 }
 
+/**
+ * Whether an event's start and end are fixed (SCRUM-1014): it has started and
+ * has paid ticket orders. Its buyers paid for that night, and a payout's hold
+ * was recorded from it. Before it starts an edit is allowed: it never touches
+ * a recorded hold (`ticket_payouts.on_hold_until` is written once, at payment).
+ */
+export async function ticketTimesLocked(event: { id: string; start_time: Date }, now: Date = new Date()): Promise<boolean> {
+  if (event.start_time > now) return false
+  return (await db.ticket_orders.count({ where: { event_id: event.id, status: "paid" }, take: 1 })) > 0
+}
+
+export const TIMES_LOCKED_SENTENCE = "This event has started and has sold tickets, so its start and end can’t change."
+
 export const NO_TICKET_SENTENCE = "This event needs a ticket. Get one on the event page, then check in."
 
 /* ------------------------------------------------------------------------ */
