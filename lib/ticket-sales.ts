@@ -5,7 +5,7 @@ import { db } from "./db"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { labelScopeFor } from "./reports"
-import { organizerShare, PAYOUT_HOLD_AFTER_EVENT_MS } from "./ticket-payments"
+import { organizerShare, PAYOUT_HOLD_AFTER_EVENT_MS, payoutReleased } from "./ticket-payments"
 
 /**
  * What the Tickets tab reads about money and orders (SCRUM-1014): the Sales
@@ -131,7 +131,8 @@ export async function salesPage(actor: PermissionActor, eventId: string, query: 
       lines: { select: { quantity: true, ticket_type: { select: { name: true, sort: true } } } },
     },
   })
-  const released = now >= releaseAtFor(event.end_time)
+  // The same rule refundOrder enforces: the flag only hides what the lib would refuse.
+  const released = payoutReleased(event.end_time, now)
   const rows = orders.map((o): SaleRow => {
     const status = statusOf(o)
     const lines = [...o.lines].sort((a, b) => a.ticket_type.sort - b.ticket_type.sort)
@@ -218,7 +219,7 @@ export async function ticketsSummary(eventId: string, now: Date = new Date()): P
     refundedMinor,
     payoutMinor: grossMinor - refundedMinor,
     releaseAt,
-    released: now >= releaseAt,
+    released: payoutReleased(event.end_time, now),
     refundedOrders: Number(refunded?.orders ?? 0),
     refunds: await refundsOf(eventId),
     inside,

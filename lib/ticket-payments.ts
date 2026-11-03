@@ -60,6 +60,14 @@ export type RefundReason = "late_payment" | "order_cancelled" | "event_not_on"
 /** The payout is held until this long after the event ends: a chargeback comes out of it. */
 export const PAYOUT_HOLD_AFTER_EVENT_MS = 3 * 24 * 60 * 60 * 1000
 
+/**
+ * Whether the organizer's share has left the hold: three days after the event
+ * ended, Razorpay releases it to their bank. From then on an organizer refund
+ * is not offered and not made (`refundOrder`): the money is no longer ours to
+ * reverse. The Sales panel's Refund action reads the same rule.
+ */
+export const payoutReleased = (eventEnd: Date, now: Date = new Date()): boolean => now.getTime() >= eventEnd.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS
+
 interface LockedOrder {
   id: string
   event_id: string

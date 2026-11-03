@@ -1,5 +1,10 @@
 import { randomUUID } from "crypto"
 
+// The Sales panel's server action, called as a crafted request would call it: the session is the only input it trusts.
+let session: { user: { id: string; role: "organizer" } } | null = null
+jest.mock("@/lib/auth", () => ({ getAuth: async () => session }))
+jest.mock("next/cache", () => ({ revalidatePath: jest.fn() }))
+
 import { actorFor } from "@/lib/org-membership"
 import { attendeeLabel } from "@/lib/pseudonym"
 import { refundOrder } from "@/lib/ticket-refunds"
@@ -178,6 +183,35 @@ describe("a refund from the Sales panel", () => {
     expect(s.refunds).toEqual([expect.objectContaining({ ref: orderId.slice(0, 8).toUpperCase(), by: expect.stringContaining("Test") })])
     const audit = await db.audit_logs.findFirst({ where: { action: "ticket_order.refund", resource_id: orderId } })
     expect(audit).toMatchObject({ user_id: host, org_id: orgId })
+  })
+
+  it("refuses an organizer refund once the payout is released, in refundOrder and through a crafted action call, writing nothing", async () => {
+    const { eventId, host, typeIds } = await ticketedEvent(w, [{ quantity: 10 }])
+    const b = await buyer(w)
+    const { orderRef, orderId } = await heldOrder(fake, eventId, b, [{ ticketTypeId: typeIds[0], quantity: 1 }])
+    await deliver(capturedDelivery("payment.captured", fake.capture(orderRef)))
+    await settled()
+    // Control: before release the same organizer may refund another order of the same event.
+    const b2 = await buyer(w)
+    const second = await heldOrder(fake, eventId, b2, [{ ticketTypeId: typeIds[0], quantity: 1 }])
+    await deliver(capturedDelivery("payment.captured", fake.capture(second.orderRef)))
+    await settled()
+    expect(await refundOrder(second.orderId, { id: host, role: "organizer" }, "organizer")).toEqual({ ok: true })
+
+    // The event ended more than three days ago: the organizer's share has left the hold.
+    await db.events.update({ where: { id: eventId }, data: { start_time: new Date(Date.now() - 6 * 86_400_000), end_time: new Date(Date.now() - 5 * 86_400_000) } })
+    const auditsBefore = await db.audit_logs.count({ where: { action: "ticket_order.refund", resource_id: orderId } })
+    expect(await refundOrder(orderId, { id: host, role: "organizer" }, "organizer")).toEqual({ ok: false, reason: "payout_released" })
+
+    session = { user: { id: host, role: "organizer" } }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { refundSale } = require("@/app/dashboard/events/[id]/tickets/actions") as typeof import("@/app/dashboard/events/[id]/tickets/actions")
+    expect(await refundSale(eventId, orderId)).toMatchObject({ ok: false })
+    session = null
+
+    const order = await db.ticket_orders.findUniqueOrThrow({ where: { id: orderId } })
+    expect(order).toMatchObject({ status: "paid", refund_requested_at: null, refund_requested_minor: null })
+    expect(await db.audit_logs.count({ where: { action: "ticket_order.refund", resource_id: orderId } })).toBe(auditsBefore)
   })
 
   it("offers no refund once the payout is released", async () => {

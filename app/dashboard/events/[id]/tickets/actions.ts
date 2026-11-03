@@ -114,6 +114,7 @@ export async function refundSale(eventId: string, orderId: string): Promise<Acti
     already_refunding: "This order is already being refunded.",
     not_paid: "Only a paid order can be refunded.",
     payments_off: "Payments are not set up on this server.",
+    payout_released: "The payout for this event has been released, so it can’t be refunded from here.",
   }
   const message = sentence[res.reason] ?? "That order could not be refunded."
   // Claimed and queued is done from here: the reconcile job makes it, and the row says "Refunding".

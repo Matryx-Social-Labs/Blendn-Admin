@@ -8,7 +8,7 @@ import { logger } from "./logger"
 import { actorFor } from "./org-membership"
 import { eventPermissionSelect, eventPermissions } from "./rbac"
 import { cancelEventHolds } from "./ticket-holds"
-import { organizerShare } from "./ticket-payments"
+import { organizerShare, payoutReleased } from "./ticket-payments"
 import { executeRefund } from "./ticket-settle"
 
 /**
@@ -26,6 +26,8 @@ import { executeRefund } from "./ticket-settle"
  * - `refundOrder`, a buyer's request granted: the ticket price. The booking
  *   fee is kept, so the refund is the organizer's share and the share's
  *   transfer is reversed whole: we and they each end where they started.
+ *   Only while the share is on hold (`payoutReleased`): after release it is
+ *   refused, whoever calls it.
  * - `cancelEventRefundAll`, the organizer cancelled: everything the buyer
  *   paid, booking fee included. We refund our fee; Razorpay keeps its
  *   processing, which is charged to the organisation (`org_debit_minor`).
@@ -38,10 +40,10 @@ const INLINE_REFUNDS = 100
 
 type Actor = { id: string; role: user_role }
 
-export type RefundRefusal = "ticketing_off" | "payments_off" | "not_found" | "not_paid" | "already_refunding" | "retrying"
+export type RefundRefusal = "ticketing_off" | "payments_off" | "not_found" | "not_paid" | "already_refunding" | "retrying" | "payout_released"
 
 async function canEditEvent(tx: Prisma.TransactionClient, eventId: string, user: Actor) {
-  const event = await tx.events.findUnique({ where: { id: eventId }, select: { ...eventPermissionSelect, status: true } })
+  const event = await tx.events.findUnique({ where: { id: eventId }, select: { ...eventPermissionSelect, status: true, end_time: true } })
   if (!event || !eventPermissions(await actorFor(user), event).canEdit) return null
   return event
 }
@@ -69,6 +71,8 @@ export async function refundOrder(orderId: string, user: Actor, reason: string):
       if (!order || !event) throw new Refused("not_found")
       if (order.refund_requested_at) throw new Refused("already_refunding")
       if (order.status !== "paid") throw new Refused("not_paid")
+      // The organizer's share left the hold three days after the event: nothing of theirs is left to reverse (SCRUM-1014).
+      if (payoutReleased(event.end_time)) throw new Refused("payout_released")
       const amount = organizerShare(order)
       await tx.ticket_orders.update({ where: { id: orderId }, data: { refund_requested_at: new Date(), refund_requested_minor: amount, refund_reason: why } })
       if (event.organizer_org_id) {
