@@ -186,9 +186,9 @@ export async function missingTicketAtCheckIn(
 
 /**
  * Whether an event's start and end are fixed (SCRUM-1014): it has started and
- * has paid ticket orders. Its buyers paid for that night, and a payout's hold
- * was recorded from it. Before it starts an edit is allowed: it never touches
- * a recorded hold (`ticket_payouts.on_hold_until` is written once, at payment).
+ * has paid ticket orders: its buyers paid for that night. Before it starts an
+ * edit is allowed, and moving it later simply moves its payouts' release with
+ * it (`holdFloor`, read by the release job when it runs).
  */
 export async function ticketTimesLocked(event: { id: string; start_time: Date }, now: Date = new Date()): Promise<boolean> {
   if (event.start_time > now) return false

@@ -43,7 +43,7 @@ export function ticketEnv() {
 
 type Payment = { id: string; order_id: string; amount: number; currency: string; status: string; created_at: number }
 type Refund = { id: string; payment_id: string; amount: number; currency: string; status: string }
-type Transfer = { id: string; recipient: string; amount: number; currency: string; on_hold_until?: number }
+type Transfer = { id: string; recipient: string; amount: number; currency: string; on_hold?: boolean | number; on_hold_until?: number }
 
 export interface FakeRazorpay {
   calls: Array<{ method: string; path: string; body: unknown }>
@@ -115,24 +115,22 @@ export function fakeRazorpay(): FakeRazorpay {
     if ((m = path.match(/^\/payments\/([^/]+)\/transfers$/))) {
       if (method === "GET") return json({ items: fake.transfers.get(m[1]) ?? [] })
       const t = body.transfers[0]
-      const transfer = { id: `trf_${randomUUID().slice(0, 14)}`, recipient: t.account, amount: t.amount, currency: t.currency, on_hold_until: t.on_hold_until }
+      const transfer: Transfer = { id: `trf_${randomUUID().slice(0, 14)}`, recipient: t.account, amount: t.amount, currency: t.currency, on_hold: t.on_hold }
+      if (t.on_hold_until !== undefined) transfer.on_hold_until = t.on_hold_until
       fake.transfers.set(m[1], [...(fake.transfers.get(m[1]) ?? []), transfer])
       return json({ entity: "collection", count: 1, items: [transfer] })
     }
     if (method === "GET" && (m = path.match(/^\/transfers\/([^/]+)$/))) {
       const t = fake.transfer(m[1])
-      return t ? json({ ...t, entity: "transfer", on_hold: true }) : json({ error: { description: "The id provided does not exist" } }, 400)
+      return t ? json({ ...t, entity: "transfer", on_hold: Boolean(t.on_hold) }) : json({ error: { description: "The id provided does not exist" } }, 400)
     }
     if (method === "PATCH" && (m = path.match(/^\/transfers\/([^/]+)$/))) {
-      // Modify settlement hold (Route): PATCH /v1/transfers/:id { on_hold, on_hold_until }.
-      for (const list of fake.transfers.values()) {
-        const t = list.find((x) => x.id === m![1])
-        if (t) {
-          t.on_hold_until = body.on_hold_until
-          return json({ ...t, entity: "transfer", on_hold: body.on_hold, settlement_status: "on_hold" })
-        }
-      }
-      return json({ error: { description: "The id provided does not exist" } }, 400)
+      // Modify settlement hold (Route): PATCH /v1/transfers/:id { on_hold }. A transfer already released answers an error.
+      const t = fake.transfer(m[1])
+      if (!t) return json({ error: { description: "The id provided does not exist" } }, 400)
+      if (!t.on_hold && body.on_hold === false) return json({ error: { description: "Settlement for this transfer is already released" } }, 400)
+      t.on_hold = body.on_hold
+      return json({ ...t, entity: "transfer", on_hold: Boolean(t.on_hold), settlement_status: t.on_hold ? "on_hold" : "pending" })
     }
     if ((m = path.match(/^\/transfers\/([^/]+)\/reversals$/))) {
       fake.reversals.push({ transfer_id: m[1], amount: body.amount })

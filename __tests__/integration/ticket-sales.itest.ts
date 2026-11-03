@@ -198,8 +198,8 @@ describe("a refund from the Sales panel", () => {
     await settled()
     expect(await refundOrder(second.orderId, { id: host, role: "organizer" }, "organizer")).toEqual({ ok: true })
 
-    // The hold recorded on the order's payout has passed: Razorpay released the organizer's share.
-    await db.ticket_payouts.update({ where: { order_id: orderId }, data: { on_hold_until: new Date(Date.now() - 60_000) } })
+    // The release job released the organizer's share.
+    await db.ticket_payouts.update({ where: { order_id: orderId }, data: { status: "released", released_at: new Date() } })
     const auditsBefore = await db.audit_logs.count({ where: { action: "ticket_order.refund", resource_id: orderId } })
     expect(await refundOrder(orderId, { id: host, role: "organizer" }, "organizer")).toEqual({ ok: false, reason: "payout_released" })
 
@@ -214,13 +214,13 @@ describe("a refund from the Sales panel", () => {
     expect(await db.audit_logs.count({ where: { action: "ticket_order.refund", resource_id: orderId } })).toBe(auditsBefore)
   })
 
-  it("trusts the recorded hold, not the event's end time: moving end_time later does not reopen a released refund", async () => {
+  it("trusts the payout's status, not the event's end time: moving end_time later does not reopen a released refund", async () => {
     const { eventId, host, typeIds, orgId } = await ticketedEvent(w, [{ quantity: 10 }])
     const b = await buyer(w)
     const { orderRef, orderId } = await heldOrder(fake, eventId, b, [{ ticketTypeId: typeIds[0], quantity: 1 }])
     await deliver(capturedDelivery("payment.captured", fake.capture(orderRef)))
     await settled()
-    await db.ticket_payouts.update({ where: { order_id: orderId }, data: { on_hold_until: new Date(Date.now() - 60_000) } })
+    await db.ticket_payouts.update({ where: { order_id: orderId }, data: { status: "released", released_at: new Date() } })
     // The end time pushed a month out, as an edit that slipped past the route would.
     await db.events.update({ where: { id: eventId }, data: { end_time: new Date(Date.now() + 30 * 86_400_000) } })
 
@@ -231,13 +231,12 @@ describe("a refund from the Sales panel", () => {
     expect(orgId).toBeTruthy()
   })
 
-  it("refuses moving a started event's times once it has paid tickets, allows it before, and never moves a recorded hold", async () => {
+  it("refuses moving a started event's times once it has paid tickets, and allows it before", async () => {
     const { eventId, host, typeIds } = await ticketedEvent(w, [{ quantity: 10 }])
     const b = await buyer(w)
     const { orderRef, orderId } = await heldOrder(fake, eventId, b, [{ ticketTypeId: typeIds[0], quantity: 1 }])
     await deliver(capturedDelivery("payment.captured", fake.capture(orderRef)))
     await settled()
-    const hold = (await db.ticket_payouts.findUniqueOrThrow({ where: { order_id: orderId } })).on_hold_until
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const route = require("@/app/api/events/[id]/route") as typeof import("@/app/api/events/[id]/route")
     const patch = (body: Record<string, unknown>) =>
@@ -246,13 +245,13 @@ describe("a refund from the Sales panel", () => {
       })
     session = { user: { id: host, role: "organizer" } }
     try {
-      // Not started yet: an edit is allowed, and the recorded hold stays where it was.
+      // Not started yet: an edit is allowed.
       const start = new Date(Date.now() + 3 * 86_400_000)
       await db.events.update({ where: { id: eventId }, data: { start_time: start, end_time: new Date(start.getTime() + 2 * 3_600_000) } })
       const earlier = new Date(start.getTime() - 86_400_000)
       const allowed = await patch({ start_time: earlier.toISOString(), end_time: new Date(earlier.getTime() + 3_600_000).toISOString() })
       expect(allowed.status).toBe(200)
-      expect((await db.ticket_payouts.findUniqueOrThrow({ where: { order_id: orderId } })).on_hold_until.getTime()).toBe(hold.getTime())
+      expect((await db.ticket_payouts.findUniqueOrThrow({ where: { order_id: orderId } })).status).toBe("on_hold")
 
       // Started: the times are fixed.
       const started = new Date(Date.now() - 3_600_000)
@@ -276,9 +275,9 @@ describe("a refund from the Sales panel", () => {
     const { orderRef, orderId } = await heldOrder(fake, eventId, b, [{ ticketTypeId: typeIds[0], quantity: 1 }])
     await deliver(capturedDelivery("payment.captured", fake.capture(orderRef)))
     await settled()
-    // The event ended more than three days ago, and the hold its payout recorded has passed.
+    // The event ended more than three days ago, and the release job released the payout.
     await db.events.update({ where: { id: eventId }, data: { start_time: new Date(Date.now() - 6 * 86_400_000), end_time: new Date(Date.now() - 5 * 86_400_000) } })
-    await db.ticket_payouts.update({ where: { order_id: orderId }, data: { on_hold_until: new Date(Date.now() - 2 * 86_400_000) } })
+    await db.ticket_payouts.update({ where: { order_id: orderId }, data: { status: "released", released_at: new Date() } })
     const page = await salesPage(await actorFor({ id: host, role: "organizer" }), eventId, { page: 1 })
     expect(page!.rows[0]).toMatchObject({ status: "paid", refundable: false })
     expect((await ticketsSummary(eventId)).released).toBe(true)

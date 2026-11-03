@@ -214,11 +214,7 @@ export const EVENT_TIMES_ORDER_SENTENCE = "The event must end after it starts."
 
 export async function updateEventTracked(
   args: Prisma.eventsUpdateArgs,
-  opts: {
-    fromStatus?: string
-    /** More writes that must commit with the edit or not at all: a postponement's payout holds (SCRUM-1014). */
-    alongside?: (tx: Prisma.TransactionClient, updated: { start_time: Date; end_time: Date }) => Promise<unknown>
-  } = {}
+  opts: { fromStatus?: string } = {}
 ) {
   const eventId = args.where.id
   if (!eventId) throw new Error("updateEventTracked needs the event's id")
@@ -232,7 +228,6 @@ export async function updateEventTracked(
     if (opts.fromStatus !== undefined && before.status !== opts.fromStatus) throw new EventStatusMovedError(before.status)
     const updated = await tx.events.update(args)
     if (updated.start_time.getTime() >= updated.end_time.getTime()) throw new EventTimesOrderError()
-    if (opts.alongside) await opts.alongside(tx, updated)
     const next = nextChange(before.changed_from, before, updated)
     /*
      * A reminder is claimed once, by `reminded_at IS NULL`

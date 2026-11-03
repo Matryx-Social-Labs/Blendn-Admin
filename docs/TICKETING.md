@@ -30,7 +30,7 @@ that authorizes for itself, and answers in a sentence.
 | `reviewPayoutAccountFor` | `reviewPayoutAccount` | app_admin only. `active` only when Razorpay's `GET /v2/accounts/:id` says `activated` (`linkedAccountStatus`, `lib/razorpay.ts`); without Razorpay keys the row records `razorpay: "not_checked"`. Or `rejected`. Audit `payouts.account_reviewed`. |
 | `turnOnTicketSelling` | `turnOnTicketing` (`lib/ticket-setup.ts`) | canEdit. The page's terms hash must equal the server's hash of the file it serves now (`terms_changed` otherwise). Payouts connected and a native market are checked before anything is recorded. If the organization has not accepted the version in force, `recordLegalAcceptance` with the **server's** `document_sha256` (owners and admins only); then the refund policy and who pays are written, then `enableTicketing`. |
 | `saveTicketTypeForm` | `saveTicketType` (`lib/ticket-types.ts`) | canEdit, event selling natively. At most 20 types an event, hidden ones counted, under a `FOR NO KEY UPDATE` lock on the event. Price > 0 (free is RSVP plus capacity). Quantity ≥ sold + held. Most per order 1–10. Window in the event's timezone. Off sale = `hidden`. A price change applies to new orders only (orders keep `unit_price_minor` and `total_minor`) and writes `ticket_type.price_changed` with what was sold. |
-| `refundSale` | `refundOrder` (`lib/ticket-refunds.ts`) | canEdit on the order's event. Refunds the organizer's share (the booking fee is kept, terms 5.4), behind a confirmation dialog whose default is Keep. Refused (`payout_released`) once the order's payout has left its hold: `payoutReleased` reads the hold the payout **recorded** (`ticket_payouts.on_hold_until`), never the event's editable end time, inside `refundOrder` so every caller gets it; the Sales panel's Refund action reads the same rule. |
+| `refundSale` | `refundOrder` (`lib/ticket-refunds.ts`) | canEdit on the order's event. Refunds the organizer's share (the booking fee is kept, terms 5.4), behind a confirmation dialog whose default is Keep. Refused (`payout_released`) once the order's payout is `releasing` or `released`, read under the payout row's lock inside `refundOrder`, so every caller gets it; never from event times. The Sales panel's Refund action reads the same status. |
 | `saveTicketLink` | `saveExternalTicketLink` | canEdit, the city's market is `external`. https only (`httpsUrl`); the app's "Tickets on <site>" is derived from the link's host. Nothing fetches the link. Empty turns the event back to free. |
 | `admitTicket` | `admitAtDoor` (`lib/ticket-door.ts`) | canOperate, checked before any attempt counts. 30 attempts a minute per operator at the event, 300 a minute for the event, then `redeemTicket` (one conditional UPDATE). Answers a code, the type and a time: never a person. |
 
@@ -40,35 +40,37 @@ status move): `refundAllOnCancel` calls `cancelEventRefundAll` after the cancel
 commits and never throws; a refund Razorpay cannot make now is claimed and the
 reconcile job retries it.
 
-## An event's times once tickets are sold
+## Payouts: held until we release them
 
-The dashboard event PATCH (`app/api/events/[id]/route.ts`, the only writer of
-an event's start and end) refuses to move them, 409 `times_locked`, once the
-event has started and has paid ticket orders (`ticketTimesLocked`). Before it
-starts they may move, and a hold only ever moves later. The rules, in
-`lib/payout-holds.ts`:
+Every Route transfer is created held at Razorpay with **no end** (`on_hold`,
+no `on_hold_until`: "If no value is passed, the settlement is put on hold
+indefinitely", Razorpay Route docs). Razorpay never releases on its own; we
+are the only releaser.
 
-- **One floor**: `holdFloor` = the later of start and end + 3 days, for a new
-  payout, its transfer and a postponement. The edit (and the create route)
-  refuses a start at or after the end, and so does `updateEventTracked` under
-  the row lock.
-- **Postponed** = any move that raises the floor. Under the event's payout lock
-  (`withPayoutLock`, `pg_advisory_xact_lock(hashtext('payout:' || id))`, held
-  across the Razorpay calls) with the times read again, every transferred,
-  unreleased payout is raised at Razorpay (`GET` then `PATCH
-  /v1/transfers/:id`, "Modify settlement hold", skipped when Razorpay already
-  holds it as long), then the rows in the edit's own transaction, only upward.
-  Razorpay refusing one refuses the edit (503 `payout_hold_not_extended`).
-- **Transfers** (`createPayoutTransfer`, settle and reconcile) take the same
-  lock, read the payout and the event's times again, send the later of the
-  recorded hold and the floor, raise a transfer that already exists, and
-  record exactly that hold.
-- **Moved earlier**: no hold changes.
-- Ceiling: two Razorpay calls per transferred order, eight at a time, inside
-  the request; an event with thousands of transferred orders takes about a
-  minute to postpone.
+- **The release job** (`lib/payout-release.ts`, every 5 minutes while
+  `TICKETING` is on) releases a payout once its event's **current**
+  `holdFloor` (the later of start and end, + 3 days, `lib/ticket-payments.ts`)
+  has passed, its order is paid with no refund claimed, and its event was not
+  cancelled. The floor is read when the job runs, so a postponement needs no
+  Razorpay call at all.
+- **Per payout**: one statement claims it under `FOR UPDATE SKIP LOCKED`
+  (`on_hold` → `releasing`), then Razorpay is told `on_hold: false`
+  (`releaseTransfer`, `PATCH /v1/transfers/:id`), then the row is `released`.
+  A crash in between is retried after 30 minutes; Razorpay's "already
+  released" counts as success.
+- **The refund gate is the payout's status**: `refundOrder` locks the payout
+  row and refuses `payout_released` when it is `releasing` or `released`.
+  Event times never decide it. The Sales panel's Refund action reads the same
+  status.
+- **Event times**: the dashboard create and edit refuse a start at or after
+  the end (and `updateEventTracked` again under the row lock); once a ticketed
+  event with paid orders has started, its times are fixed (409
+  `times_locked`, `ticketTimesLocked`).
 - Not built: a buyer's full refund on a postponement until 48 hours before the
-  new start (organizer terms 5.3): SCRUM-1016.
+  new start (organizer terms 5.3): SCRUM-1016. A system refund (cancel-all,
+  late payment) after a payout was released is still made to the buyer; the
+  organizer's share is then theirs to repay (terms 4.4, 5.5), not yet recorded
+  as a debit.
 
 ## What the tab reads
 

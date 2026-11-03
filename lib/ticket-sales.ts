@@ -5,7 +5,7 @@ import { db } from "./db"
 import { attendeeLabel } from "./pseudonym"
 import { eventPermissionSelect, eventPermissions, type PermissionActor } from "./rbac"
 import { labelScopeFor } from "./reports"
-import { holdFloor, organizerShare, payoutReleased } from "./ticket-payments"
+import { holdFloor, organizerShare, PAYOUT_GONE } from "./ticket-payments"
 
 /**
  * What the Tickets tab reads about money and orders (SCRUM-1014): the Sales
@@ -89,9 +89,9 @@ async function buyersByLabel(eventId: string, q: string, scope: string): Promise
 }
 
 /** One page of an event's sales, for whoever may edit the event; null for anyone else. */
-export async function salesPage(actor: PermissionActor, eventId: string, query: SalesQuery, now: Date = new Date()): Promise<SalesPage | null> {
+export async function salesPage(actor: PermissionActor, eventId: string, query: SalesQuery): Promise<SalesPage | null> {
   if (!isUuid(eventId)) return null
-  const event = await db.events.findFirst({ where: { id: eventId, deleted_at: null }, select: { ...eventPermissionSelect, start_time: true, end_time: true, ticket_fee_schedule: true } })
+  const event = await db.events.findFirst({ where: { id: eventId, deleted_at: null }, select: { ...eventPermissionSelect, ticket_fee_schedule: true } })
   if (!event || !eventPermissions(actor, event).canEdit) return null
   const scope = labelScopeFor(actor, event.organizer_org_id)
 
@@ -126,7 +126,7 @@ export async function salesPage(actor: PermissionActor, eventId: string, query: 
       fees_absorbed: true,
       refund_requested_at: true,
       refunded_at: true,
-      payout: { select: { on_hold_until: true } },
+      payout: { select: { status: true } },
       lines: { select: { quantity: true, ticket_type: { select: { name: true, sort: true } } } },
     },
   })
@@ -146,8 +146,8 @@ export async function salesPage(actor: PermissionActor, eventId: string, query: 
       status,
       refundedAt: o.refunded_at,
       createdAt: o.created_at,
-      // The same rule refundOrder enforces, on the same recorded hold: the flag only hides what the lib would refuse.
-      refundable: status === "paid" && !payoutReleased({ onHoldUntil: o.payout?.on_hold_until ?? null, event }, now),
+      // The same rule refundOrder enforces, the payout's status: the flag only hides what the lib would refuse.
+      refundable: status === "paid" && !PAYOUT_GONE.has(o.payout?.status ?? ""),
     }
   })
   const currency = (event.ticket_fee_schedule as { currency?: string } | null)?.currency ?? "INR"
@@ -189,7 +189,7 @@ const REASON_BY: Record<string, string> = {
  * The money behind the hero and the payout panel. The caller has already
  * asked `eventPermissions(...).canEdit`: the page does, before anything here.
  */
-export async function ticketsSummary(eventId: string, now: Date = new Date()): Promise<TicketsSummary> {
+export async function ticketsSummary(eventId: string): Promise<TicketsSummary> {
   const [event, types, orders, inside] = await Promise.all([
     db.events.findUniqueOrThrow({ where: { id: eventId }, select: { start_time: true, end_time: true } }),
     db.ticket_types.aggregate({ where: { event_id: eventId }, _sum: { quantity: true } }),
@@ -208,9 +208,13 @@ export async function ticketsSummary(eventId: string, now: Date = new Date()): P
   const refunded = of("refunded")
   const refundedMinor = Number(refunded?.share ?? 0)
   const grossMinor = Number(paid?.share ?? 0) + refundedMinor
-  // The latest hold any payout recorded, else the event's end + 3 days: what the organizer waits for.
-  const latestHold = await db.ticket_payouts.aggregate({ where: { order: { event_id: eventId } }, _max: { on_hold_until: true } })
-  const releaseAt = latestHold._max.on_hold_until ?? holdFloor(event)
+  // Released when every transferred payout is; then on the day the last one went, else the event's floor now.
+  const [held, last] = await Promise.all([
+    db.ticket_payouts.count({ where: { order: { event_id: eventId }, status: { in: ["pending", "on_hold", "releasing"] } } }),
+    db.ticket_payouts.aggregate({ where: { order: { event_id: eventId }, status: "released" }, _max: { released_at: true } }),
+  ])
+  const released = held === 0 && last._max.released_at !== null
+  const releaseAt = released ? last._max.released_at! : holdFloor(event)
   return {
     soldTickets: Number(paid?.tickets ?? 0),
     refundedTickets: Number(refunded?.tickets ?? 0),
@@ -219,7 +223,7 @@ export async function ticketsSummary(eventId: string, now: Date = new Date()): P
     refundedMinor,
     payoutMinor: grossMinor - refundedMinor,
     releaseAt,
-    released: payoutReleased({ onHoldUntil: releaseAt, event }, now),
+    released,
     refundedOrders: Number(refunded?.orders ?? 0),
     refunds: await refundsOf(eventId),
     inside,

@@ -1,5 +1,4 @@
 import { cancelBuyerHolds, releaseExpiredHolds } from "@/lib/ticket-holds"
-import { PAYOUT_HOLD_AFTER_EVENT_MS } from "@/lib/ticket-payments"
 import { reconcileTicketPayments } from "@/lib/ticket-reconcile"
 import { cancelEventRefundAll, refundOrder } from "@/lib/ticket-refunds"
 import { createPayoutTransfer, executeRefund } from "@/lib/ticket-settle"
@@ -84,7 +83,9 @@ describe("a captured payment", () => {
     expect(share).toBe(2 * 49_900)
     const transfers = rzp.transfers.get(payment.id) ?? []
     expect(transfers).toHaveLength(1)
-    expect(transfers[0]).toMatchObject({ recipient: LINKED_ACCOUNT, amount: share, currency: "INR", on_hold_until: Math.floor((o.endTime.getTime() + PAYOUT_HOLD_AFTER_EVENT_MS) / 1000) })
+    // Held with no end: only our release job releases it (SCRUM-1014).
+    expect(transfers[0]).toMatchObject({ recipient: LINKED_ACCOUNT, amount: share, currency: "INR", on_hold: true })
+    expect(transfers[0]).not.toHaveProperty("on_hold_until")
     const payout = await db.ticket_payouts.findUniqueOrThrow({ where: { order_id: o.orderId } })
     expect(payout).toMatchObject({ status: "on_hold", provider_transfer_ref: transfers[0].id, amount_minor: share, org_id: o.orgId })
   })

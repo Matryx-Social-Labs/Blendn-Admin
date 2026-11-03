@@ -4763,12 +4763,16 @@ enum razorpay_account_status {
   rejected
 }
 
-/// Where a ticket payout is (SCRUM-1011). See `ticket_payouts`.
+/// Where a ticket payout is (SCRUM-1011, SCRUM-1014). See `ticket_payouts`.
 enum ticket_payout_status {
   /// Owed, the transfer not made yet: the reconcile job retries.
   pending
-  /// Transferred, held at Razorpay until `on_hold_until`; Razorpay releases it then.
+  /// Transferred and held at Razorpay indefinitely (`on_hold`, no end): only the release job releases it.
   on_hold
+  /// Claimed by the release job, Razorpay being told to release. Retried after 30 minutes. Blocks an organizer refund.
+  releasing
+  /// Released at Razorpay: the organizer's money has left the hold. No organizer refund from here.
+  released
   /// Taken back by a refund. `org_debit_minor` is what the organisation still owes.
   reversed
   /// The organisation had no linked account when the order was paid.
@@ -4776,7 +4780,8 @@ enum ticket_payout_status {
 }
 
 /// The organizer's share of one paid order: a Razorpay Route transfer to the organisation's
-/// linked account, on hold until three days after the event ends (chargebacks come out of it).
+/// linked account, held indefinitely at Razorpay and released by our release job once the event's
+/// current holdFloor (the later of start and end, + 3 days) has passed (chargebacks come out of it).
 /// Shape CHECKs (status vs refs, amounts) in migration SQL. Restrict: a money record.
 model ticket_payouts {
   order_id              String               @id @db.Uuid
@@ -4787,7 +4792,9 @@ model ticket_payouts {
   status                ticket_payout_status @default(pending)
   /// `trf_…`, once Razorpay made the transfer.
   provider_transfer_ref String?              @unique
-  on_hold_until         DateTime             @db.Timestamptz(6)
+  /// When the release job claimed it, and when Razorpay released it (lib/payout-release.ts).
+  releasing_at          DateTime?            @db.Timestamptz(6)
+  released_at           DateTime?            @db.Timestamptz(6)
   reversed_minor        Int                  @default(0)
   /// Owed by the organisation after a reversal: the processing Razorpay keeps on a cancellation.
   org_debit_minor       Int                  @default(0)

@@ -408,16 +408,16 @@ export async function paymentTransfers(paymentId: string): Promise<RazorpayTrans
 
 /**
  * Transfer the organizer's share of a captured payment to their linked
- * account, held until `onHoldUntil` (three days after the event ends), when
- * Razorpay releases it to their bank. An answer for another account or amount
- * is refused.
+ * account, held at Razorpay with no end ("If no value is passed, the
+ * settlement is put on hold indefinitely", Route docs): only our release job
+ * releases it (`releaseTransfer`, lib/payout-release.ts). An answer for another
+ * account or amount is refused.
  */
 export async function createTransfer(input: {
   paymentId: string
   account: string
   amountMinor: number
   currency: string
-  onHoldUntil: Date
   orderId: string
 }): Promise<RazorpayTransfer> {
   const { items } = await call(z.object({ items: z.array(transferSchema).length(1) }), "POST", `/payments/${encodeURIComponent(input.paymentId)}/transfers`, {
@@ -426,8 +426,8 @@ export async function createTransfer(input: {
         account: input.account,
         amount: input.amountMinor,
         currency: input.currency,
-        on_hold: 1,
-        on_hold_until: Math.floor(input.onHoldUntil.getTime() / 1000),
+        // Held indefinitely: no on_hold_until, so Razorpay never releases on its own. Only the release job does (SCRUM-1014).
+        on_hold: true,
         notes: { ticket_order_id: input.orderId },
       },
     ],
@@ -440,24 +440,23 @@ export async function createTransfer(input: {
 }
 
 /**
- * Move a Route transfer's settlement hold (`PATCH /v1/transfers/:id`, "Modify
- * settlement hold": `on_hold` boolean, `on_hold_until` Unix seconds; answers the
- * transfer). Used to extend a held payout when its event is postponed
- * (SCRUM-1014); never to shorten one. An answer that holds less long is refused.
+ * Release a held Route transfer to the linked account (`PATCH /v1/transfers/:id`
+ * with `on_hold: false`, "Modify settlement hold"). The release job's one
+ * Razorpay call (lib/payout-release.ts). Idempotent: when Razorpay refuses
+ * because the transfer is already released, the transfer is read back and a
+ * transfer no longer on hold counts as released.
  */
-/** A Route transfer's current settlement hold (`GET /v1/transfers/:id`), or null when it has none. */
-export async function transferHold(transferId: string): Promise<Date | null> {
-  const t = await call(z.object({ id: z.string(), on_hold_until: z.number().int().nullable().optional() }), "GET", `/transfers/${encodeURIComponent(transferId)}`)
-  return t.on_hold_until ? new Date(t.on_hold_until * 1000) : null
-}
-
-export async function modifyTransferHold(transferId: string, onHoldUntil: Date): Promise<void> {
-  const until = Math.floor(onHoldUntil.getTime() / 1000)
-  const answer = await call(z.object({ id: z.string(), on_hold_until: z.number().int().nullable().optional() }), "PATCH", `/transfers/${encodeURIComponent(transferId)}`, {
-    on_hold: true,
-    on_hold_until: until,
-  })
-  if (answer.id !== transferId || (answer.on_hold_until ?? 0) < until) throw new RazorpayError(502, "Razorpay did not extend the transfer's hold")
+export async function releaseTransfer(transferId: string): Promise<void> {
+  const path = `/transfers/${encodeURIComponent(transferId)}`
+  const held = z.object({ id: z.string(), on_hold: z.union([z.boolean(), z.number()]).optional() })
+  try {
+    const answer = await call(held, "PATCH", path, { on_hold: false })
+    if (answer.id === transferId && !answer.on_hold) return
+  } catch (error) {
+    if (!(error instanceof RazorpayError) || error.status >= 500) throw error
+  }
+  const now = await call(held, "GET", path)
+  if (now.on_hold) throw new RazorpayError(502, "Razorpay still holds the transfer")
 }
 
 const reversalSchema = z.object({ id: z.string().min(1), transfer_id: z.string(), amount: z.number().int() })

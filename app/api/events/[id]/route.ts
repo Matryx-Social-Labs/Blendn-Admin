@@ -1,5 +1,3 @@
-import { raiseHoldsInTx, raiseTransferHolds, withPayoutLock } from "@/lib/payout-holds"
-import { holdFloor } from "@/lib/ticket-payments"
 import { refundAllOnCancel } from "@/lib/ticket-refunds"
 import { ticketTimesLocked, TIMES_LOCKED_SENTENCE } from "@/lib/ticket-views"
 import { logger } from "@/lib/logger"
@@ -196,8 +194,8 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     // A started event with paid tickets keeps its times: an unchanged value resent by the form is not a change.
     const movesTime = nextStart.getTime() !== event.start_time.getTime() || nextEnd.getTime() !== event.end_time.getTime()
     if (movesTime && (await ticketTimesLocked(event))) return errorResponse(TIMES_LOCKED_SENTENCE, 409, "times_locked")
-    // A postponement is any move that raises the payout floor (the later of start and end, + 3 days).
-    const postpones = holdFloor({ start_time: nextStart, end_time: nextEnd }).getTime() > holdFloor(event).getTime()
+    // A postponement needs nothing here: payouts are held at Razorpay with no end, and the release job reads the
+    // event's floor (the later of start and end, + 3 days) when it runs (lib/payout-release.ts).
 
     // Razorpay's reviewer: never out of draft, never a real venue (lib/review-demo-org.ts).
     const reviewRefusal = await reviewOrgRefusal(event.organizer_org_id, {
@@ -292,8 +290,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     const nextSlug = title ? await uniqueEventSlug(title, resolvedParams.id) : null
 
     // The edit and its change record in one transaction (lib/event-change.ts): the row returned carries the written `changed_*`.
-    const write = (alongside?: (tx: Prisma.TransactionClient, updated: { start_time: Date; end_time: Date }) => Promise<unknown>) =>
-      updateEventTracked({
+    const updatedEvent = await updateEventTracked({
       where: { id: resolvedParams.id },
       data: {
         /*
@@ -527,28 +524,10 @@ export async function PATCH(req: Request, { params }: RouteContext) {
             }
           : {}),
       },
-    }, { fromStatus: event.status, ...(alongside && { alongside }) }).catch((error: unknown) => {
+    }, { fromStatus: event.status }).catch((error: unknown) => {
       if (error instanceof EventStatusMovedError || error instanceof EventTimesOrderError) return error
       throw error
     })
-    /*
-     * A postponement holds the organizer's money until after the new night (security reviews 3, 4): under the
-     * event's payout lock, with its times read again, every unreleased transfer is raised at Razorpay first, then
-     * the payout rows in the edit's own transaction. Razorpay refusing one refuses the edit. Holds only go up.
-     */
-    const HOLD_NOT_RAISED = Symbol("hold not raised")
-    const updatedEvent = !postpones
-      ? await write()
-      : await withPayoutLock(event.id, async () => {
-          const fresh = await db.events.findUniqueOrThrow({ where: { id: event.id }, select: { start_time: true, end_time: true } })
-          const floor = holdFloor({ start_time: start_time ? nextStart : fresh.start_time, end_time: end_time ? nextEnd : fresh.end_time })
-          if (!(await raiseTransferHolds(event.id, floor))) return HOLD_NOT_RAISED
-          // The rows to exactly what Razorpay now holds, so the two never diverge.
-          return write((tx) => raiseHoldsInTx(tx, event.id, floor))
-        })
-    if (updatedEvent === HOLD_NOT_RAISED) {
-      return errorResponse("Couldn’t extend the payout hold for this event’s tickets. Try again.", 503, "payout_hold_not_extended")
-    }
     if (updatedEvent instanceof EventStatusMovedError) return errorResponse(updatedEvent.message, 409)
     if (updatedEvent instanceof EventTimesOrderError) return errorResponse(EVENT_TIMES_ORDER_SENTENCE, 400)
 

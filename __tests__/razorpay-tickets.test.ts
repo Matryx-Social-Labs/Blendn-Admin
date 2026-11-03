@@ -7,6 +7,7 @@ import {
   paymentRefunds,
   paymentTransfers,
   refundPayment,
+  releaseTransfer,
   reverseTransfer,
 } from "@/lib/razorpay"
 
@@ -84,10 +85,9 @@ describe("refundPayment", () => {
 })
 
 describe("Route transfers", () => {
-  it("transfers the share to the linked account, on hold until the given time", async () => {
-    const until = new Date("2026-11-11T18:30:00Z")
+  it("transfers the share to the linked account, held with no end: only our release job releases it", async () => {
     const sent = answer({ entity: "collection", count: 1, items: [{ id: "trf_1", recipient: "acc_ABCDEFGHIJKLMN", amount: 99_800, currency: "INR", on_hold: true }] })
-    const transfer = await createTransfer({ paymentId: "pay_1", account: "acc_ABCDEFGHIJKLMN", amountMinor: 99_800, currency: "INR", onHoldUntil: until, orderId: ORDER_ID })
+    const transfer = await createTransfer({ paymentId: "pay_1", account: "acc_ABCDEFGHIJKLMN", amountMinor: 99_800, currency: "INR", orderId: ORDER_ID })
     expect(transfer.id).toBe("trf_1")
     expect(sent[0]).toMatchObject({
       url: "https://api.razorpay.com/v1/payments/pay_1/transfers",
@@ -98,19 +98,25 @@ describe("Route transfers", () => {
             account: "acc_ABCDEFGHIJKLMN",
             amount: 99_800,
             currency: "INR",
-            on_hold: 1,
-            on_hold_until: Math.floor(until.getTime() / 1000),
+            on_hold: true,
             notes: { ticket_order_id: ORDER_ID },
           },
         ],
       },
     })
+    expect((sent[0].body as { transfers: Array<Record<string, unknown>> }).transfers[0]).not.toHaveProperty("on_hold_until")
+  })
+
+  it("releases a held transfer with on_hold false, and counts one Razorpay already released as released", async () => {
+    const sent = answer({ id: "trf_1", on_hold: false })
+    await releaseTransfer("trf_1")
+    expect(sent[0]).toMatchObject({ url: "https://api.razorpay.com/v1/transfers/trf_1", method: "PATCH", body: { on_hold: false } })
   })
 
   it("refuses a transfer answer to another account", async () => {
     answer({ items: [{ id: "trf_1", recipient: "acc_SOMEONEELSE123", amount: 99_800, currency: "INR" }] })
     await expect(
-      createTransfer({ paymentId: "pay_1", account: "acc_ABCDEFGHIJKLMN", amountMinor: 99_800, currency: "INR", onHoldUntil: new Date(), orderId: ORDER_ID })
+      createTransfer({ paymentId: "pay_1", account: "acc_ABCDEFGHIJKLMN", amountMinor: 99_800, currency: "INR", orderId: ORDER_ID })
     ).rejects.toThrow()
   })
 

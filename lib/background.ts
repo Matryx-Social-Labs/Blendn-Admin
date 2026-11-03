@@ -17,6 +17,7 @@ import { startPresenceSweeper, stopPresenceSweeper } from "./presence-sweeper"
 import { startReminderSweeper, stopReminderSweeper } from "./reminder-sweeper"
 import { startSentimentSweeper, stopSentimentSweeper } from "./sentiment-sweeper"
 import { startTicketHoldSweeper, stopTicketHoldSweeper } from "./ticket-hold-sweeper"
+import { startPayoutReleaser, stopPayoutReleaser } from "./payout-release"
 import { startTicketReconciler, stopTicketReconciler } from "./ticket-reconcile"
 
 /**
@@ -81,6 +82,8 @@ export function startBackgroundWork(): void {
   startTicketHoldSweeper()
   // Ticket payments, refunds and payouts nobody confirmed, every five minutes (SCRUM-1011). Same flag.
   startTicketReconciler()
+  // Organizers' payouts released once their event's floor has passed (SCRUM-1014); we are the only releaser. Same flag.
+  startPayoutReleaser()
 
   logger.info("Background work started", {
     // Listed exhaustively: this said three while starting four, so the log
@@ -98,6 +101,7 @@ export function startBackgroundWork(): void {
       // Only when TICKETING is on; listed so the log still says what was asked for.
       "ticket-holds",
       "ticket-reconcile",
+      "payout-release",
     ],
   })
 }
@@ -121,4 +125,5 @@ export function stopBackgroundWork(): void {
   stopModerationRecheckSweeper()
   stopTicketHoldSweeper()
   stopTicketReconciler()
+  stopPayoutReleaser()
 }

@@ -215,7 +215,7 @@ and therefore in every deployed environment:
 | `markets_ticket_tax_label_length` | what the buyer quote calls the tax on our fee (`GST` in India) is 1–24 characters |
 | `ticket_orders_refund_request_shape` | a refund claim (`refund_requested_at`) and its amount come together, the amount 1 to `total_minor`, only on an order with a payment; a reason ≤ 200 |
 | `ticket_orders_refunded_range` / `ticket_orders_refunded_has_refund` | the refunded amount is 0 to `total_minor`; a `refunded` order has Razorpay's refund id, time and an amount ≥ 1 — refunded only on Razorpay's word |
-| `ticket_payouts_status_shape` | a payout `pending` or `on_hold` has a linked account, and `on_hold` has Razorpay's transfer id; `no_account` has neither |
+| `ticket_payouts_status_shape` | a payout `pending` or `on_hold` has a linked account, and `on_hold` has Razorpay's transfer id; `releasing` and `released` have the transfer id and their time (`releasing_at`, `released_at`); `no_account` has neither. Transfers are held at Razorpay with no end and released only by `lib/payout-release.ts` |
 | `ticket_payouts_amount_positive` / `…_reversed_range` / `…_currency_shape` / `…_linked_account_shape` | a payout is ≥ 1 minor unit; reversed 0 to its amount; an org debit ≥ 0; ISO currency; `acc_` account |
 
 Nor can it express a partial index, a trigger or a data row, and these exist
@@ -232,7 +232,7 @@ so nothing is hidden or in preview), the
 `ticket_orders_pending_expiry` partial index (what the hold sweeper,
 `releaseExpiredHolds`, reads), the reconcile job's partial indexes
 `ticket_orders_unconfirmed_payment`, `ticket_orders_unconfirmed_refund` and
-`ticket_payouts_pending` (`lib/ticket-reconcile.ts`), India's `GST` tax label, the `markets` ticketing rows (India `native`,
+`ticket_payouts_pending` (`lib/ticket-reconcile.ts`), `ticket_payouts_held` (the release job's, `lib/payout-release.ts`), India's `GST` tax label, the `markets` ticketing rows (India `native`,
 Canada `external`: on a `db push` database every market is `off` with no
 minimum and no GST), the `legal_acceptances_append_only` and
 `legal_acceptances_no_truncate` triggers (an acceptance is evidence: a new
