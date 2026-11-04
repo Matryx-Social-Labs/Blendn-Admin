@@ -1175,6 +1175,18 @@ day, a different one tomorrow, so which five of a larger set lead is stable
 and fair over time. It is not start-time order. `isFeatured` stays for older builds and is the same fact as
 `featured !== null`. Computed by `featuredOf` in `lib/featured.ts`.
 
+**`promoted`, `ticketed` and `fromPrice` on each event (2026-11, SCRUM-1022).**
+`promoted` is `featured?.kind === "promoted"` as one boolean (false everywhere
+until a placement is sold); a row that is promoted always says so in words.
+`ticketed` is true when the event sells tickets here (`ticketing_mode`
+`native`) or links to the organiser's own page (`external`), on a deployment
+with `TICKETING=true`. `fromPrice` is `{ minor, currency }` — the lowest price
+on sale now — only for `native` tickets, and never a hidden tier, a free tier,
+a sold-out tier or one outside its sale window; null otherwise, and for every
+`external` event (that price is not ours to state). One `ticket_types` query
+per page, none when nothing on the page sells natively (`lib/event-list-price.ts`).
+Older clients ignore all three.
+
 **"Here now" is `hereCount`, not `checkInCount`.** Each event (and the
 detail's `stats`) carries both. `checkInCount` — and `currentCapacity`, the
 same number — is everybody who checked in, left or not, so a night's headline

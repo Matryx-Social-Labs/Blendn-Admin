@@ -372,6 +372,21 @@ export const EventDetailSchema = z
         "Radius in metres around latitude/longitude that contains the whole check-in area (outline or circle) plus its buffer. Derived from the event's geofence, which is a copy of its venue's taken when the event was saved. The server judges check-in against the real area; this circle only contains it.",
     }),
     isFeatured: z.boolean(),
+    promoted: z.boolean().openapi({
+      description:
+        "A paid placement (`featured.kind === \"promoted\"`), as one boolean a row can say in words: always labelled \"Promoted\". False everywhere until placements are sold.",
+    }),
+    ticketed: z.boolean().openapi({
+      description:
+        "Tickets apply: the event sells them here (`native`) or links to the organiser's own page (`external`), on a deployment with ticketing on. False for every free RSVP event.",
+    }),
+    fromPrice: z
+      .object({ minor: z.number().int().positive(), currency: z.string().length(3) })
+      .nullable()
+      .openapi({
+        description:
+          "The lowest price on sale now, in minor units: only for `native` tickets, never a hidden tier, never a free tier, never a sold-out or ended one, never an external page's. Null otherwise; a row then shows no price.",
+      }),
     isRecurring: z.boolean(),
     doorPolicy: z.enum(["open", "guest_list", "members_only", "invite_only"]).openapi({
       description:

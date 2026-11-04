@@ -8,6 +8,7 @@ import { eventHost } from "@/lib/event-host"
 import { appUrl } from "@/lib/email"
 import { eventSession, sessionOccurrencesSelect } from "@/lib/occurrences"
 import { eventVenue, eventVenueSelect } from "@/lib/venue-visibility"
+import { listPrices, type ListPrice } from "@/lib/event-list-price"
 import { featuredOf, featuredSeed, type Featured } from "@/lib/featured"
 import { eventTallies, type EventTallies } from "@/lib/event-tallies"
 
@@ -42,6 +43,9 @@ export const eventListSelect = {
   current_capacity: true,
   door_policy: true,
   is_featured: true,
+  // What a row may say about tickets (`lib/event-list-price.ts`): the mode, and the snapshot holding its currency.
+  ticketing_mode: true,
+  ticket_fee_schedule: true,
   /*
    * `organizer` is the row's CREATOR, which for a curated event is the admin
    * who ran the curation -- so that column alone would ship a founder's real
@@ -166,7 +170,8 @@ async function transformEvent(
   attended: Map<string, number>,
   here: Map<string, number>,
   tallies: EventTallies,
-  featured: Featured | null
+  featured: Featured | null,
+  price: ListPrice
 ) {
   return {
     id: event.id,
@@ -239,6 +244,17 @@ async function transformEvent(
     isFeatured: event.is_featured,
     // `{ kind, rank, by }` or null (lib/featured.ts); `isFeatured` above is the same fact for builds before it.
     featured,
+    /*
+     * A paid placement, as one boolean the row can say in words ("Promoted"). Nothing sells a placement yet, so it is
+     * false everywhere today; it moves the day `featuredKind` learns `promoted`.
+     */
+    promoted: featured?.kind === "promoted",
+    /*
+     * Tickets (`lib/event-list-price.ts`): `ticketed`, and `fromPrice` `{ minor, currency }` only when a ticket is on
+     * sale: never a hidden tier's price, never a free-only "From 0", never for an organiser's own (external) page.
+     */
+    ticketed: price.ticketed,
+    fromPrice: price.fromPrice,
     /*
      * Resolved, never passed through.
      *
@@ -350,6 +366,9 @@ export async function listCounts(events: readonly { id: string }[]): Promise<Lis
   return { attended, here, tallies }
 }
 
+/** A row whose event has no price entry (never, by construction; a guard, not a branch anyone takes). */
+const NO_PRICE: ListPrice = { ticketed: false, fromPrice: null }
+
 export async function transformEvents(
   events: EventListItem[],
   ctx: TransformContext
@@ -358,7 +377,10 @@ export async function transformEvents(
   // One budget for the page, made here so it cannot be shared between requests.
   const withBudget = { ...ctx, geocodes: ctx.geocodes ?? geocodeBudget() }
   const featured = featuredOf(events, ctx.featuredSeed ?? featuredSeed(undefined, new Date()))
+  const prices = await listPrices(events)
   return Promise.all(
-    events.map((event) => transformEvent(event, withBudget, attended, here, tallies, featured.get(event.id) ?? null))
+    events.map((event) =>
+      transformEvent(event, withBudget, attended, here, tallies, featured.get(event.id) ?? null, prices.get(event.id) ?? NO_PRICE)
+    )
   )
 }
