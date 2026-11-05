@@ -116,7 +116,7 @@ export function TypesPanel(p: Props) {
     >
       {atCap && editing ? <p className="text-[0.8125rem] text-faint-foreground">{p.max} types is the most an event can have. Take one off sale and edit it instead.</p> : null}
       {p.types.length === 0 && open !== BLANK ? <p className="text-sm text-muted-foreground">No ticket types yet. Add one to start selling.</p> : null}
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-[0.75rem] text-faint-foreground">

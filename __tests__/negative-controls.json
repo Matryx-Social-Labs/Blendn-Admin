@@ -35,6 +35,12 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "tickets-long-text.test.tsx": {
+      "guards": "Long-text audit (owner 2026-11-05): the Tickets tab's Sales selects are held to the form's width (min-w-0 max-w-full), and every overflow-x-auto table wrapper on the tab is `relative`, so sr-only labels inside a wide table are placed in it, not against the page.",
+      "mutation": "MLT1 page.tsx `select` class without min-w-0 max-w-full (the code as it was). MLT2 the three table wrappers as plain `overflow-x-auto` (as they were).",
+      "observed": "MLT1: 1 of 4 failing (the class list had neither). MLT2: the wrapper cases failing for page.tsx and types-panel.tsx. Both are the shipped code before this change and both showed in a 375 drive of a seeded worst-case event (select 37-392 px past a 359 px panel; the page scrolled 13 px sideways). Fixed: 6/6, select 37-338, scrollWidth 375.",
+      "date": "2026-11-05"
+    },
     "city-gate-routes.test.ts": {
       "guards": "SCRUM-709 P1: every route under events/[eventId] and venues/[venueId] calls the launch gate or is named with a reason, a reason cannot outlive its route, and attendeeEventAccess and the check-in door still hold it.",
       "mutation": "A1 lib/event-access.ts loses the mayOpenEvent call. A2 the check-in door loses it. A15 a new route with no gate is added under events/[eventId].",
