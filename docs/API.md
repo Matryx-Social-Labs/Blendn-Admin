@@ -3973,18 +3973,22 @@ createdAt, updatedAt }`, where `host` is the organisation's public name (or
 
 `GET`/`PUT /events/:eventId/board/alerts`: `{ offersMatch, replies, hostPosts }`,
 all `false` until turned on, for this event only; a PUT changes the keys it
-sends (an unknown key is 400). They gate pushes, never the bell:
+sends (an unknown key is 400). The discovery alerts are opt-in; they gate pushes,
+never the bell:
 
 | Switch | Push `type` | Sent when |
 |---|---|---|
 | `offersMatch` | `board_match` (push only) | an offer with a sub-kind is posted and you have a live search for what it answers (ride↔ride, spots↔buddy, ticket↔ticket); never across a block or a friendship |
-| `replies` | `board_request`, `board_request_accepted` | an ask on your post; a yes to yours (the bell row is written either way) |
+| `replies` | — | gates nothing since 2026-11-06; stored and returned so an installed build's PUT still works |
 | `hostPosts` | `board_host_post` (push only) | the host's pinned post goes up or its words change |
 
 The Lobby's own pushes say "Lobby" as the title and the event as the iOS
 subtitle, carry no pseudonym and no words of a post, and carry `eventId` plus
-`postId` (or `hostPostId`) so the tap opens the post. **The ask pushes are opt-in
-now**: an installed build with no switches gets the bell row and no push.
+`postId` (or `hostPostId`) so the tap opens the post. **An ask on your post
+(`board_request`) and a yes to yours (`board_request_accepted`) are always pushed**
+(owner, 2026-11-06): they are one person to another, so no per-event switch
+holds them back, only the account's `matches` preference, as before the Lobby.
+`board_match` keeps its throttle.
 
 **A taken-down post is told to its author** (SV9). When a moderator removes a
 post, or the automatic check takes one down, its author gets a

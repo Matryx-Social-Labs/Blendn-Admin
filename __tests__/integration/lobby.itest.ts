@@ -449,22 +449,28 @@ describe("alerts", () => {
     expect((await at({ everything: true })).status).toBe(400)
   })
 
-  it("gate the Lobby's pushes on the switch for that event: on, off, another event's, and no event at all", async () => {
+  it("send an ask and a yes always (person to person), and gate only the discovery alerts on the switch for that event", async () => {
     const eventId = await upcoming()
     const elsewhere = await upcoming()
     const me = await poster("lob-gate", eventId)
     await db.push_tokens.create({ data: { user_id: me.id, token: `ExponentPushToken[${testId("t")}]`, platform: "ios" } })
     const reachable = (data: Parameters<typeof pushGates>[0]) => db.push_tokens.count({ where: { user_id: me.id, ...pushGates(data) } })
 
-    expect(await reachable({ type: "board_request", eventId })).toBe(0)
-    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: elsewhere, replies: true } })
-    expect(await reachable({ type: "board_request", eventId })).toBe(0)
-    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: eventId, replies: true } })
+    // An ask on your post and a yes to yours: on with no switches at all (owner, 2026-11-06).
     expect(await reachable({ type: "board_request", eventId })).toBe(1)
     expect(await reachable({ type: "board_request_accepted", eventId })).toBe(1)
-    expect(await reachable({ type: "board_match", eventId })).toBe(0)
-    expect(await reachable({ type: "board_host_post", eventId })).toBe(0)
-    expect(await reachable({ type: "board_request" })).toBe(0)
+    // The discovery alerts: off until turned on, for this event only.
+    for (const type of ["board_match", "board_host_post"] as const) expect(await reachable({ type, eventId })).toBe(0)
+    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: elsewhere, offers_match: true, host_posts: true } })
+    for (const type of ["board_match", "board_host_post"] as const) expect(await reachable({ type, eventId })).toBe(0)
+    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: eventId, offers_match: true, host_posts: true } })
+    for (const type of ["board_match", "board_host_post"] as const) expect(await reachable({ type, eventId })).toBe(1)
+    expect(await reachable({ type: "board_match" })).toBe(0)
+    // The account's own "matches" switch still silences an ask, as it did before the Lobby.
+    await db.profiles.update({ where: { id: me.id }, data: { push_matches: false } })
+    expect(await reachable({ type: "board_request", eventId })).toBe(0)
+    expect(await reachable({ type: "board_request_accepted", eventId })).toBe(0)
+    await db.profiles.update({ where: { id: me.id }, data: { push_matches: true } })
     // Control: a kind with no Lobby switch is untouched by it.
     expect(await reachable({ type: "friend_request" })).toBe(1)
     await db.push_tokens.deleteMany({ where: { user_id: me.id } })

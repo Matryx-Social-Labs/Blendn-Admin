@@ -105,8 +105,10 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      * messages would let them unlock their own quotes.
      */
     const src = code("lib/feedback-digest.ts")
-    expect(src).toMatch(/categoryContributors = new Map<string, Set<string>>/)
-    expect(src).toMatch(/people\.add\(row\.message\.user_id\)/)
+    // One rule (`tallyFeedback`) for the digest, the live screen and the purge's frozen tally (2026-11-06).
+    expect(src).toMatch(/const people = new Map<string, Set<string>>\(\)/)
+    expect(src).toMatch(/if \(row\.userId\) who\.add\(row\.userId\)/)
+    expect(src).toMatch(/userId: row\.message\?\.user_id \?\? null/)
   })
 
   it("derives `quotable` from the rule, not from a constant", () => {
@@ -121,7 +123,7 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      */
     const src = code("lib/feedback-digest.ts")
     expect(src).toMatch(
-      /if \(!mayQuote\(\{\s*contributors: categoryContributors\.get\(row\.category\)\?\.size \?\? 0,\s*population,?\s*\}\)\) return \[\]/
+      /if \(!row\.message \|\| !mayQuote\(\{\s*contributors: categoryContributors\.get\(row\.category\) \?\? 0,\s*population,?\s*\}\)\) return \[\]/
     )
   })
 

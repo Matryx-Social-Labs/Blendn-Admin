@@ -7,7 +7,7 @@ import { db } from "./db"
 import { discloseCategories } from "./disclosure"
 import { occupancyFrom } from "./occupancy"
 import { headcount } from "./presence-sessions"
-import { escalates } from "./sentiment/taxonomy"
+import { tallyFeedback } from "./feedback-digest"
 import { pickOccurrence, resolveOccurrence, type OccurrenceSlot } from "./occurrences"
 
 import { deriveAlerts, type LiveFigures, type LiveSnapshot } from "./live-metrics"
@@ -284,23 +284,12 @@ export async function readLiveSnapshot(
     .filter((n) => n > 0)
   const buckets = busyBuckets.length >= MIN_BUCKETS_FOR_BASELINE ? busyBuckets : []
 
-  const sentiment = { positive: 0, neutral: 0, negative: 0 }
-  const categoryCounts = new Map<string, number>()
-  const categoryContributors = new Map<string, Set<string>>()
-  for (const row of feedback) {
-    sentiment[row.sentiment] += 1
-    // Only what needs attention: positives by category are noise on a live
-    // screen whose job is surfacing problems. The escalating set is asked for
-    // by name rather than spelled `=== "safety_conduct"` inline: the literal
-    // was copied into four files, so the day a second category escalates,
-    // three of them keep the old answer and nobody finds out.
-    if (row.sentiment === "negative" || escalates(row.category)) {
-      categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
-      const people = categoryContributors.get(row.category) ?? new Set<string>()
-      people.add(row.message.user_id)
-      categoryContributors.set(row.category, people)
-    }
-  }
+  // Only what needs attention, counted as the Feedback tab counts it (`tallyFeedback`).
+  const {
+    counts: sentiment,
+    categoryCounts,
+    contributors: categoryContributors,
+  } = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, userId: row.message?.user_id ?? null })))
 
   const figures: LiveFigures = {
     eventId,

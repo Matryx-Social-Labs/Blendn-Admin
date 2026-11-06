@@ -306,12 +306,13 @@ export interface DisclosedCategory {
  */
 export function discloseCategories(
   counts: ReadonlyMap<string, number>,
-  contributors: ReadonlyMap<string, ReadonlySet<string>>,
+  /** Distinct people per category (`tallyFeedback`). */
+  contributors: ReadonlyMap<string, number>,
   population: number
 ): DisclosedCategory[] {
   return Array.from(counts.entries())
     .map(([category, count]) => {
-      const disclosure = discloseFigure({ count, contributors: contributors.get(category)?.size ?? 0, population })
+      const disclosure = discloseFigure({ count, contributors: contributors.get(category) ?? 0, population })
       return { category, count: disclosure.value, suppressed: disclosure.suppressed, suppressionReason: disclosure.reason }
     })
     .sort((a, b) => (b.count ?? 0) - (a.count ?? 0))
