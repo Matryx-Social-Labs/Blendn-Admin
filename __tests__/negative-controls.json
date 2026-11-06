@@ -2625,6 +2625,12 @@
       "mutation": "(a) the post select's COALESCE removed; (b) the post's pending-report hold inverted (NOT EXISTS -> EXISTS).",
       "observed": "(a) 3 of 10 failing: no post was ever purged, because NOT NULL drops every unmoderated row (the bug this test's first run found); (b) 4 of 10. Restored; 10/10.",
       "date": "2026-11-06"
+    },
+    "feedback-retention.itest.ts": {
+      "guards": "SCRUM-1026 (owner, 2026-11-06), with lobby-retention.itest.ts: the purge keeps chat_group_members rows and blanks anonymous_name once the person has no message left in a room past its time (a held message keeps its author's name; a room inside the window keeps every name); 'came back' and a person's rooms are unchanged; a dismissed report's description goes with its excerpt 180 days after the dismissal, and a recent dismissal, an upheld and a pending report keep both.",
+      "mutation": "lib/lobby-retention.ts: (C1) the blanking UPDATE not run; (C2) the no-message-left NOT EXISTS made always true; (C3) UPDATE replaced by DELETE of the member rows; (C4) `description: null` dropped from the report update; (C5) the `reviewed_at < since` bound dropped; (C6) the predicate back to excerpt-only; (C7) the room's closesAt bound dropped from membersToBlank.",
+      "observed": "C1 2 of 19 failing; C2 1 (the held author's name went); C3 3 (member rows and the regular's rooms); C4 1; C5 1 (the 10-day dismissal lost its words); C6 1 (a description-only report kept it); C7 1 (the recent room's name went). Restored; 19/19.",
+      "date": "2026-11-06"
     }
   },
   "grandfathered": [

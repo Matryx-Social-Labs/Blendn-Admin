@@ -24,8 +24,17 @@ import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
  * and before the event's first message goes its per-category contributor
  * counts and its room's size are frozen (`event_feedback_tallies`), so the
  * Feedback tab reads the same after the purge as before it, with no id, no
- * words and no pseudonym left. A dismissed report's `excerpt` goes 180 days
- * after the dismissal.
+ * words and no pseudonym left. A dismissed report's `excerpt`, and the
+ * reporter's own `description`, go 180 days after the dismissal.
+ *
+ * **Who was in the room stays; what they were called goes** (owner,
+ * 2026-11-06). `chat_group_members` rows are kept (the room's size, a person's
+ * rooms), but each one's `anonymous_name` is set NULL in the same pass that
+ * takes the room's messages, once none of that person's messages is left in
+ * the room. A member whose held message is still there keeps the name the
+ * message was written under, until the message goes. Every reader falls back
+ * to "Attendee" (or "Someone") for a NULL name, and a closed room is
+ * unreachable from the app anyway.
  *
  * **Removed content is held 180 days from its removal**, whatever the close
  * says (IT Rules 2021, r.3(1)(g)):
@@ -50,6 +59,7 @@ export const RETENTION_DAYS = 180
 const DAY_MS = 24 * 60 * 60 * 1000
 const MESSAGE_BATCH = 5_000
 const POST_BATCH = 500
+const MEMBER_BATCH = 5_000
 
 export type PurgeMode = "off" | "log" | "delete"
 
@@ -68,7 +78,9 @@ export interface PurgePass {
   alertPreferences: number
   /** Feedback rows detached from a purged message (kept, anonymous). */
   feedback: number
-  /** Dismissed reports whose excerpt went. */
+  /** Member rows whose room pseudonym was blanked (the rows are kept). */
+  pseudonyms: number
+  /** Dismissed reports whose excerpt and description went. */
   excerpts: number
   /** Objects whose delete failed: their rows are kept for the next pass. */
   kept: number
@@ -147,9 +159,28 @@ async function deleteObjects<T extends { id: string }>(rows: T[], urlOf: (row: T
   return { ids, photos, kept }
 }
 
+/**
+ * Member rows of a room past its time that still carry a pseudonym, and whose
+ * person has no message left in the room once `going` (this pass's purge) is
+ * gone. An event's room, or a post's room still held by a message.
+ */
+const membersToBlank = (since: Date, going: string[]) => Prisma.sql`
+  SELECT cm.id
+    FROM chat_group_members cm
+    JOIN chat_groups g ON g.id = cm.chat_group_id
+    LEFT JOIN board_posts bp ON bp.id = g.board_post_id
+    JOIN events e ON e.id = COALESCE(g.event_id, bp.event_id)
+   WHERE g.kind IN ('event', 'board_post')
+     AND ${closesAt} < ${since}
+     AND cm.anonymous_name IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM chat_messages m
+                      WHERE m.chat_group_id = cm.chat_group_id AND m.user_id = cm.user_id
+                        AND NOT (m.id = ANY(${going}::uuid[])))
+   LIMIT ${MEMBER_BATCH}`
+
 /** One bounded pass. Idempotent: every delete is of rows the selects just found past their time. */
 export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode = purgeModeFromEnv()): Promise<PurgePass> {
-  const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, feedback: 0, excerpts: 0, kept: 0, hasMore: false }
+  const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, feedback: 0, pseudonyms: 0, excerpts: 0, kept: 0, hasMore: false }
   if (mode === "off") return pass
   const since = new Date(now.getTime() - RETENTION_DAYS * DAY_MS)
 
@@ -158,10 +189,11 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
   pass.hasMore = messages.length === MESSAGE_BATCH || posts.length === POST_BATCH
 
   if (mode === "log") {
-    const [hostPosts, prefs, feedback, excerpts] = await Promise.all([
+    const [hostPosts, prefs, feedback, pseudonyms, excerpts] = await Promise.all([
       db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_host_posts h JOIN events e ON e.id = h.event_id WHERE ${closesAt} < ${since}`,
       db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_alert_preferences a JOIN events e ON e.id = a.event_id WHERE ${closesAt} < ${now}`,
       db.event_feedback.count({ where: { message_id: { in: messages.map((m) => m.id) } } }),
+      db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM (${membersToBlank(since, messages.map((m) => m.id))}) b`,
       db.message_reports.count({ where: dismissedPastTheirTime(since) }),
     ])
     return {
@@ -172,6 +204,7 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
       hostPosts: Number(hostPosts[0]?.n ?? 0),
       alertPreferences: Number(prefs[0]?.n ?? 0),
       feedback,
+      pseudonyms: Number(pseudonyms[0]?.n ?? 0),
       excerpts,
     }
   }
@@ -187,6 +220,9 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
     pass.feedback = detached.count
     pass.messages = deleted.count
   }
+  // After the messages, so a person whose messages just went is reached; one whose message is held is not.
+  pass.pseudonyms = await db.$executeRaw`UPDATE chat_group_members SET anonymous_name = NULL, updated_at = now() WHERE id IN (${membersToBlank(since, [])})`
+  if (pass.pseudonyms === MEMBER_BATCH) pass.hasMore = true
 
   const postsGone = await deleteObjects(posts, (p) => p.photo_url)
   if (postsGone.ids.length) {
@@ -202,12 +238,16 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
 
   pass.hostPosts = await db.$executeRaw`DELETE FROM board_host_posts h USING events e WHERE e.id = h.event_id AND ${closesAt} < ${since}`
   pass.alertPreferences = await db.$executeRaw`DELETE FROM board_alert_preferences a USING events e WHERE e.id = a.event_id AND ${closesAt} < ${now}`
-  pass.excerpts = (await db.message_reports.updateMany({ where: dismissedPastTheirTime(since), data: { excerpt: null } })).count
+  pass.excerpts = (await db.message_reports.updateMany({ where: dismissedPastTheirTime(since), data: { excerpt: null, description: null } })).count
   return pass
 }
 
-/** A dismissed report (`reviewed`) 180 days after its dismissal, still holding the words it quoted. */
-const dismissedPastTheirTime = (since: Date) => ({ status: "reviewed" as const, reviewed_at: { lt: since }, excerpt: { not: null } })
+/** A dismissed report (`reviewed`) 180 days after its dismissal, still holding the words it quoted or the reporter's own. */
+const dismissedPastTheirTime = (since: Date) => ({
+  status: "reviewed" as const,
+  reviewed_at: { lt: since },
+  OR: [{ excerpt: { not: null } }, { description: { not: null } }],
+})
 
 /**
  * Before an event's first message goes: what its feedback adds up to, counted

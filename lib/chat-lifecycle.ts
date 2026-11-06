@@ -172,7 +172,7 @@ async function runSweep(): Promise<void> {
     const decided = await recheckPendingPhotos()
     if (decided > 0) logger.info("Lobby photos judged on recheck", { decided })
     const purge = await purgeClosedLobbies()
-    if (purge.messages + purge.posts + purge.hostPosts + purge.alertPreferences > 0 || purge.kept > 0) {
+    if (purge.messages + purge.posts + purge.hostPosts + purge.alertPreferences + purge.pseudonyms + purge.excerpts > 0 || purge.kept > 0) {
       logger.info(purge.mode === "delete" ? "Lobby purge" : "Lobby purge (dry run: LOBBY_PURGE=delete deletes)", { ...purge })
     }
   } catch (error) {
