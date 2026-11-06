@@ -330,7 +330,7 @@ describe("an admin takes a reported post down", () => {
 
     await asAdmin()
     await expect(resolveReport("message", report.id, "remove_message")).rejects.toThrow(
-      /only a room message or a board post/i
+      /only a room message or a Lobby post/i
     )
     expect((await db.message_reports.findUniqueOrThrow({ where: { id: report.id } })).status).toBe("pending")
   })

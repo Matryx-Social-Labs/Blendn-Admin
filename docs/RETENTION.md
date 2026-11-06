@@ -92,7 +92,7 @@ deletes their account:
   180-day purge erases what is left under `profile/<id>/` in both buckets, and
   the rows with it. Photos pulled before SCRUM-479 recorded no verdict and are
   not kept.
-- **Board posts:** `moderation_status = 'hidden'`. Account deletion deletes the
+- **Lobby posts:** `moderation_status = 'hidden'`. Account deletion deletes the
   author's other posts but keeps these.
 - **Events:** soft-deleted or delisted, with `event_reports` and `audit_logs`.
 

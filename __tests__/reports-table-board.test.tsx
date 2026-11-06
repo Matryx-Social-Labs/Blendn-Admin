@@ -49,7 +49,7 @@ it("names a board post by its kind, and an ask as an ask", () => {
     row("c", { boardKind: "chat" }),
     row("d", { messageType: "board_request", boardKind: null, removable: false, excerpt: "can i come?" }),
   ])
-  for (const label of ["Board · offer", "Board · seeking", "Board · chat", "Board ask"]) expect(html).toContain(label)
+  for (const label of ["Lobby · offer", "Lobby · seeking", "Lobby · chat", "Lobby ask"]) expect(html).toContain(label)
   expect(html).toContain("can i come?")
 })
 

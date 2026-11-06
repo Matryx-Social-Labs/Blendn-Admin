@@ -22,6 +22,6 @@ export async function GET(request: NextRequest) {
     return successResponse(await blendsOf(authUser.userId))
   } catch (error) {
     logger.error("List blends error", { error: error instanceof Error ? error.message : String(error) })
-    return serverErrorResponse("Failed to load your Blends")
+    return serverErrorResponse("Failed to load your Mixes")
   }
 }

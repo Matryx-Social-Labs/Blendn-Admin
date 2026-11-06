@@ -55,7 +55,7 @@ const PASS = [
   "App views → RSVPs (app views only)",
 ]
 const ANALYTICS = [
-  "Every Event Pass feature, for every event",
+  "Every Event Insights feature, for every event",
   "Who came back within 30, 60 and 90 days",
   "RSVP pacing against your median, not just your last event",
   "Every event side by side",
@@ -114,7 +114,7 @@ export default async function PlanPage({
         <p className="text-[1.625rem] font-bold tabular-nums">₹0</p>
       </PlanCard>
 
-      <PlanCard name="Event Pass" tag={<ProTag />} items={PASS}>
+      <PlanCard name="Event Insights" tag={<ProTag />} items={PASS}>
         <div className="flex flex-col gap-1">
           <p className="text-[1.625rem] font-bold tabular-nums">
             {rupees(grossRupees(BILLING_PLANS.event_pass))}{" "}
@@ -196,7 +196,7 @@ function StatusPanel({ view, pending, pendingFor }: { view: PlanPageData; pendin
     headline = "Payment sent"
     detail =
       pendingFor === "pass"
-        ? "The Event Pass opens that event's analytics as soon as Razorpay confirms the payment, usually within a minute."
+        ? "Event Insights opens that event's analytics as soon as Razorpay confirms the payment, usually within a minute."
         : "Analytics switches on as soon as Razorpay confirms the payment, usually within a minute."
   } else if (view.free.reason === "free_window" && view.free.until) {
     headline = `Free · Analytics open until ${day(view.free.until)}`

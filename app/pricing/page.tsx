@@ -21,10 +21,10 @@ interface Row {
 
 const HOSTS: Row[] = [
   { name: "Free", detail: "Events, GPS check-in, live headcount, room chat and each event's own numbers", billed: "—", plan: null },
-  { name: "Event Pass", detail: "Deeper analytics for one event, for good", billed: "Once, per event", plan: BILLING_PLANS.event_pass },
+  { name: "Event Insights", detail: "Deeper analytics for one event, for good", billed: "Once, per event", plan: BILLING_PLANS.event_pass },
   {
     name: "Analytics",
-    detail: "Every Event Pass feature for every event, plus return rates and comparisons",
+    detail: "Every Event Insights feature for every event, plus return rates and comparisons",
     billed: "Monthly",
     plan: BILLING_PLANS.analytics_monthly,
   },

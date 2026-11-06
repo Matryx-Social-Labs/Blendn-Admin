@@ -303,7 +303,7 @@ describe("an Event Pass", () => {
       data: { subject_kind: "org", subject_id: orgId, product: "event_pass", event_id: eventId, source: "razorpay", external_ref: `order_${randomUUID()}`, starts_at: new Date(Date.now() - 1000) },
     })
     as(owner, "organizer")
-    await expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("already has an Event Pass")
+    await expect(actions.startEventPassCheckout(eventId)).rejects.toThrow("already has Event Insights")
     expect(calls).toHaveLength(0)
   })
 

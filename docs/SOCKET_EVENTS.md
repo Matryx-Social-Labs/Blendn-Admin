@@ -15,7 +15,7 @@ On connect, server emits:
 ## Rooms
 
 - `user:{userId}` — personal room, auto-joined on connect
-- `chat:{chatGroupId}` — chat rooms of every kind (joined via `join:chat`): an event's room, a board post's, a crew's and a Blend's (step 8)
+- `chat:{chatGroupId}` — chat rooms of every kind (joined via `join:chat`): an event's room, a Lobby post's, a crew's and a Mix's (step 8)
 - `event:{eventId}` — event-level updates (joined via `join:event`)
 - `conversation:{conversationId}` — private conversations (joined via `join:conversation`)
 
@@ -29,7 +29,7 @@ the database before the socket is added to the room (`lib/socket-auth.ts`):
 
 | Room | Who may join |
 |------|--------------|
-| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` and anyone who left by choice — **and** whoever the room's owner admits (`lib/room-kind.ts`, step 7). An event's room: as before. A board post's: its author, or an asker the author accepted and not in a block with the author either way; a member row alone is not enough. Closed with its post, its event, and 12 h after the event ends. A crew's: its members now — not suspended, the crew not dissolved; a member who leaves or is removed is taken out at once. A Blend's: the people checked in on either side when it matched (its member rows, a snapshot — a late arrival has none) still on their side, or the matched person — never somebody kept apart (a block or a closed conversation) from anyone on the other side: that pair is taken out at once and the room goes on for the rest; closed 12 h after the occurrence ends, or early when a side's crew dissolves or is hidden, which empties its sockets. Names: first names in a crew's room, tonight's event-room pseudonyms in a Blend's (`namesInRoom`). An unknown kind or a missing owner: nobody |
+| `chat:{chatGroupId}` | Members of the chat group, excluding `banned` and anyone who left by choice — **and** whoever the room's owner admits (`lib/room-kind.ts`, step 7). An event's room: as before. A Lobby post's: its author, or an asker the author accepted and not in a block with the author either way; a member row alone is not enough. Closed with its post, its event, and 12 h after the event ends. A crew's: its members now — not suspended, the crew not dissolved; a member who leaves or is removed is taken out at once. A Mix's: the people checked in on either side when it matched (its member rows, a snapshot — a late arrival has none) still on their side, or the matched person — never somebody kept apart (a block or a closed conversation) from anyone on the other side: that pair is taken out at once and the room goes on for the rest; closed 12 h after the occurrence ends, or early when a side's crew dissolves or is hidden, which empties its sockets. Names: first names in a crew's room, tonight's event-room pseudonyms in a Mix's (`namesInRoom`). An unknown kind or a missing owner: nobody |
 | `conversation:{conversationId}` | The two participants only |
 | `event:{eventId}` | Anyone, for `public`/`unlisted` events. For `private`: the organizer, or a user with an RSVP |
 
@@ -115,8 +115,8 @@ person's **room handle** for the event: `rh_` + an opaque string
   The same person at another event has a different, unrelated handle.
 - **A handle belongs to one room, of one kind** (step 7). An event's room is
   scoped by its event, exactly as before, so every handle a client already
-  holds still resolves. A room of another kind (a board post's, a crew's or a
-  Blend's) is scoped by its own id and its kind, so a handle from it is
+  holds still resolves. A room of another kind (a Lobby post's, a crew's or a
+  Mix's) is scoped by its own id and its kind, so a handle from it is
   refused in every other room, an event's included, and names nobody on the
   profile, friend or block routes. Treat it as opaque, as now.
 - Compare with your own id exactly as before: your bubbles, your own check-in
@@ -179,7 +179,7 @@ already know each other's ids.
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `private:message` | Same as above | Notification when not in conversation room |
-| `board:postRemoved` | `user:{id}` (the author's own) | `{ eventId, postId }`. Your board post was taken down by a moderator or the automatic check; goes with a `board_post_removed` push and bell row. Never to anybody else, and never the post's words |
+| `board:postRemoved` | `user:{id}` (the author's own) | `{ eventId, postId }`. Your Lobby post was taken down by a moderator or the automatic check; goes with a `board_post_removed` push and bell row. Never to anybody else, and never the post's words |
 | `event:cancelled` | `event:{id}` and `event:room:{id}` | `{ eventId }`. The event was cancelled: everyone checked in has been checked out (their check-in is `cancelled`, their presence closed `ended`). One emit to the rooms however many are inside, never one per person; carries nothing but the id. The same people get an `event_cancelled` push (`docs/API.md`, *What pushes, and when*). Not sent when nobody was inside |
 | `private:revealed` | `{ conversationId }` | Somebody in one of your DMs showed who they are: re-read `GET /conversations/:id`. To the OTHER participant's `user:{id}` room only, never the conversation room; content-free (the id both sides already hold, so no name, photo or handle, and nothing for the handle rules to hide). Once both sides have revealed (the friend offer is possible) the same event goes to both. Sent from `POST /conversations/:id/reveal` and from a room reveal carrying into the DMs it opened (`revealConversationsFrom`: one event per DM that reveal moved). A closed conversation (unmatch or block) sends nothing. The reveal push still goes out; this is the live half for a screen already open |
 | `notification:new` | `{ kind }` | A row landed in the notifications bell; the app refreshes its badge. Never sent for messages, which write no row |

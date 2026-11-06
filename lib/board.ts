@@ -122,7 +122,7 @@ export function mayPostToBoard(
  * The board closes at doors — for reading as well as writing. After that the
  * room is the place, gated on presence rather than intent.
  */
-export const BOARD_CLOSED = "The board closes when the doors open — the room is open instead"
+export const BOARD_CLOSED = "The Lobby closes when the doors open — the room is open instead"
 
 /**
  * Every refused re-ask reads this, whatever the row underneath says.

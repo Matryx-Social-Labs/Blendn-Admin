@@ -241,7 +241,7 @@ never what is bookable.
 
 Confirmed by the owner on 2026-10-01. In this section **Designed** means in plan
 v2 or the claude.ai design kit, not the Figma; **Built** and **Served** keep their
-meanings above. The steps are in `docs/ROADMAP.md`. Only the Board's endpoints
+meanings above. The steps are in `docs/ROADMAP.md`. Only the Lobby's endpoints
 and the public event claim page exist today.
 
 ### Places — every venue live
@@ -264,15 +264,15 @@ and the public event claim page exist today.
 
 | | |
 |---|---|
-| Designed | Crews of 2–12 friends with a name, bio and persistent crew chat; "We're here", with each member checking in on their own GPS; crew ↔ crew and crew ↔ person matching; a Blend room on a mutual like; one tap reveals the crew, except members who chose "keep me anonymous" (plan §6) |
+| Designed | Crews of 2–12 friends with a name, bio and persistent crew chat; "We're here", with each member checking in on their own GPS; crew ↔ crew and crew ↔ person matching; a Mix room on a mutual like; one tap reveals the crew, except members who chose "keep me anonymous" (plan §6) |
 | Built | Nothing |
 | Served | Nothing. Needs chat rooms that do not belong to an event first (plan §7) |
 
-### The Board
+### The Lobby
 
 | | |
 |---|---|
-| Designed | The board off event detail: compose, ask to join, the inbox in Banter, accept opens a conversation without the match opener (plan step 6) |
+| Designed | The Lobby off event detail: compose, ask to join, the inbox in Banter, accept opens a conversation without the match opener (plan step 6) |
 | Built | Nothing |
 | Served | `/events/:eventId/board` and `/board/requests` — the server is done |
 
@@ -288,7 +288,7 @@ and the public event claim page exist today.
 
 | | |
 |---|---|
-| Designed | Blind offers: a venue targets regulars, lapsed or first-timers and sees sent / opened / redeemed, never people. A live door pass, one per day, that staff mark redeemed. "Let this venue know I'm a regular", per venue, revocable (plan §2) |
+| Designed | Blind offers: a venue targets regulars, lapsed or first-timers and sees sent / opened / redeemed, never people. A live offer code, one per day, that staff mark redeemed. "Let this venue know I'm a regular", per venue, revocable (plan §2) |
 | Built | Nothing |
 | Served | Nothing |
 

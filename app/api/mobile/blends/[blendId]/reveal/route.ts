@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (limited) return limited
 
     const { blendId } = await params
-    if (!isUuid(blendId)) return notFoundResponse("Blend not found")
+    if (!isUuid(blendId)) return notFoundResponse("Mix not found")
     const result = await revealInBlend(authUser.userId, blendId)
     return isRefusal(result) ? refusalResponse(result) : successResponse(result)
   } catch (error) {

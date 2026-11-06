@@ -582,7 +582,7 @@ function RegularsOffers({
           ) : null}
           {!isAdmin ? (
             <Link href={`/dashboard/venues/${venueId}/door`} className="text-[0.8125rem] underline underline-offset-4">
-              Redeem a pass at the door →
+              Redeem an offer code at the door →
             </Link>
           ) : null}
         </div>

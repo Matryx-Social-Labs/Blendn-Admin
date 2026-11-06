@@ -170,7 +170,7 @@ export const EventCitiesResponseSchema = z
           .nullable()
           .openapi({
             description:
-              "Where to point a map for this city: the mean of its listed events' points, or of its places' points when it has no events (rows with no point, or 0,0, left out). A catalogued city with none falls back to its catalogue centre. Null only for an uncatalogued city with no point; keep the map where it is.",
+              "Where to point a map for this city: the mean of its listed events' points, or of its places' points when it has no events (rows with no point, or 0,0, left out). A catalogued city with none falls back to its catalogue center. Null only for an uncatalogued city with no point; keep the map where it is.",
           }),
       })
     ),

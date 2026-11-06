@@ -113,8 +113,8 @@ export function AddForms({ markets }: { markets: MarketView[] }) {
           </div>
           {cityInput("matchNames", "Match names", { placeholder: "e.g. toronto, north york", help: "Every spelling of the city that events and venues use, comma-separated" })}
           <div className="grid grid-cols-2 gap-3">
-            {cityInput("centreLat", "Centre latitude", { inputMode: "decimal" })}
-            {cityInput("centreLon", "Centre longitude", { inputMode: "decimal" })}
+            {cityInput("centreLat", "Center latitude", { inputMode: "decimal" })}
+            {cityInput("centreLon", "Center longitude", { inputMode: "decimal" })}
           </div>
           <div className="grid grid-cols-2 gap-3 @3xl/main:grid-cols-4">
             {cityInput("minLat", "Min latitude", { inputMode: "decimal" })}

@@ -149,7 +149,7 @@ export const EventChatResponseSchema = z
 export const ChatGroupSchema = z
   .object({
     id: z.string().uuid(),
-    kind: z.literal("event").describe("Always `event` (a venue day's room is one too). Crew and Blend rooms are in `rooms`."),
+    kind: z.literal("event").describe("Always `event` (a venue day's room is one too). Crew and Mix rooms are in `rooms`."),
     name: z.string(),
     type: z.string(),
     hereCount: z
@@ -219,8 +219,8 @@ export const ChatRoomListItemSchema = z
     kind: z.enum(["crew", "blend"]).describe("Open it as that room, never as an event's."),
     name: z.string(),
     crewId: z.string().uuid().nullable().describe("A crew's chat: its crew (`GET /crews/{crewId}`)."),
-    blendId: z.string().uuid().nullable().describe("A Blend's room: its Blend (`GET /blends`)."),
-    closesAt: z.string().datetime().nullable().describe("A Blend's clock — gone from this list then. Null for a crew's chat."),
+    blendId: z.string().uuid().nullable().describe("A Mix's room: its Mix (`GET /blends`)."),
+    closesAt: z.string().datetime().nullable().describe("A Mix's clock — gone from this list then. Null for a crew's chat."),
     unreadCount: z.number().describe("Messages you can see and have not read: none from somebody in a block with you."),
     mute: RoomMuteSchema,
     lastMessageAt: z.string().datetime().nullable().describe("The newest message you can see — never one from somebody in a block with you."),
@@ -234,7 +234,7 @@ export const ChatRoomListItemSchema = z
         createdAt: z.string().datetime(),
         user: z
           .object({ id: RoomUserRefSchema, name: z.string() })
-          .describe("As the room names people: a crewmate's first name; in a Blend, tonight's pseudonym (a reveal names people on GET /blends, never in the chat)."),
+          .describe("As the room names people: a crewmate's first name; in a Mix, tonight's pseudonym (a reveal names people on GET /blends, never in the chat)."),
       })
       .nullable(),
     membership: z.object({ role: z.string(), joinedAt: z.string().datetime(), status: z.enum(["active", "muted"]) }),
@@ -248,7 +248,7 @@ export const ChatGroupListResponseSchema = z
     rooms: z
       .array(ChatRoomListItemSchema)
       .describe(
-        "My crews' chats and my Blends' rooms while open, each as its door admits me now (never a Blend across a block), newest message I can see first. Not paged: sent with page 1, [] after."
+        "My crews' chats and my Mixes' rooms while open, each as its door admits me now (never a Mix across a block), newest message I can see first. Not paged: sent with page 1, [] after."
       ),
     pagination: PaginationMetaSchema,
   })

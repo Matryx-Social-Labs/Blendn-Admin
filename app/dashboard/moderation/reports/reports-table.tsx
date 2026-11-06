@@ -25,7 +25,7 @@ const TOAST: Record<ReportDecision, string> = {
   suspend: "Account suspended and signed out",
   reinstate: "Account reinstated",
   delist: "Event delisted — removed from the feed, search and city counts",
-  hide_crew: "Crew hidden — no card, likes or Blends; its members keep their crew",
+  hide_crew: "Crew hidden — no card, likes or Mixes; its members keep their crew",
   dissolve_crew: "Crew dissolved and its chat archived",
 }
 
@@ -55,7 +55,7 @@ export function ReportsTable({
         await resolveReport(row.kind, row.id, decision)
         toast.success(
           decision === "remove_message" && row.messageType === "board_post"
-            ? "Post removed from the board"
+            ? "Post removed from the Lobby"
             : TOAST[decision]
         )
         router.refresh()
@@ -77,7 +77,7 @@ export function ReportsTable({
         title={status === "pending" ? "No reports waiting" : `Nothing ${status}`}
         description={
           status === "pending"
-            ? "Reports arrive when someone uses Report on a person, a message, a board post or ask, a crew, or an event in the app."
+            ? "Reports arrive when someone uses Report on a person, a message, a Lobby post or ask, a crew, or an event in the app."
             : "Reports land here once an admin has ruled on them. Reviewed means looked at, resolved means acted on."
         }
       />
@@ -122,8 +122,8 @@ function aboutLabel(row: ReportRow): string {
   if (row.messageType === "private") return "DM"
   // The kind is the point: an offer of a seat is two strangers arranging to
   // meet away from a venue.
-  if (row.messageType === "board_post") return `Board · ${row.boardKind ?? "post"}`
-  if (row.messageType === "board_request") return "Board ask"
+  if (row.messageType === "board_post") return `Lobby · ${row.boardKind ?? "post"}`
+  if (row.messageType === "board_request") return "Lobby ask"
   if (row.messageType === "crew") return "Crew"
   if (row.messageType === "venue_offer") return "Venue offer"
   return "Room message"

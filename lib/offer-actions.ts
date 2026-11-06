@@ -91,7 +91,7 @@ import { venueDayBounds } from "@/lib/venue-day"
  */
 
 const NOT_YOUR_VENUE = "This venue isn’t yours to send offers from."
-const NOT_A_PASS_HERE = "That code isn’t a live pass here. Ask them to open the pass again."
+const NOT_A_PASS_HERE = "That code isn’t a live offer code here. Ask them to open the offer again."
 const UNDER_FLOOR = `Fewer than ${MIN_CELL} regulars right now, so nothing was sent. A regular has come on ${REGULAR_NIGHTS} or more nights in the last ${REGULAR_WINDOW_DAYS}.`
 const MAX_DAYS = 14
 /** A pass shown in the last three minutes is one being shown at the door. */
@@ -325,9 +325,9 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
   const matching = onScreen.filter((s) => codeMatches(s.id, code, now))
   if (matching.length === 0) return wrong(NOT_A_PASS_HERE)
   // Two passes on screen with one code: refuse rather than guess whose (L3).
-  if (matching.length > 1) throw new Refusal("Two passes show that code right now. Wait for it to change, then type the new one.")
+  if (matching.length > 1) throw new Refusal("Two live offer codes match that right now. Wait for it to change, then type the new one.")
   const pass = matching[0]
-  if (pass.redeemed_at) throw new Refusal("This pass was already redeemed.")
+  if (pass.redeemed_at) throw new Refusal("This offer code was already redeemed.")
   if (pass.offer.ends_at <= now) throw new Refusal("This offer has ended.")
 
   // Again just before the write: this account's wrong codes in flight may have locked it since this one arrived.
@@ -339,12 +339,12 @@ export async function redeemPass(input: { venueId: string; code: string }): Prom
         where: { id: pass.id, redeemed_at: null },
         data: { redeemed_at: now, redeemed_night: tonight },
       })
-      if (count === 0) throw new Refusal("This pass was already redeemed.")
+      if (count === 0) throw new Refusal("This offer code was already redeemed.")
       await auditInTx(tx, { userId: user.id, action: "venue_offer.redeem", resource: "venue", resourceId: venueId, details: { offerId: pass.offer.id } })
     })
   } catch (error) {
     if (violatedConstraint(error, "venue_offer_sends_one_pass_a_night")) {
-      throw new Refusal("They’ve already used a pass here tonight. One a night.")
+      throw new Refusal("They’ve already used an offer here tonight. One a night.")
     }
     if (!(error instanceof Refusal)) logger.error("Pass redemption failed", { venueId, error: error instanceof Error ? error.message : String(error) })
     throw error

@@ -411,21 +411,21 @@ describe("the person’s side and the pass", () => {
     const send = await db.venue_offer_sends.findFirstOrThrow({ where: { offer_id: offerId, user_id: R[0].id } })
 
     as(otherOwner)
-    expect(await refusal(actions.redeemPass({ venueId: A, code }))).toBe("That code isn’t a live pass here. Ask them to open the pass again.")
+    expect(await refusal(actions.redeemPass({ venueId: A, code }))).toBe("That code isn’t a live offer code here. Ask them to open the offer again.")
     // A code with a 0, 1, I or O cannot be a pass: the door says so rather than calling it well-formed (SCRUM-899).
     expect(await refusal(actions.redeemPass({ venueId: A, code: "A1B2C3" }))).toBe(BAD_CODE_SHAPE)
     // A code from a minute ago: a screenshot.
     as(staff)
     expect(await refusal(actions.redeemPass({ venueId: A, code: passCode(send.id, passStep(new Date()) - 2) }))).toBe(
-      "That code isn’t a live pass here. Ask them to open the pass again."
+      "That code isn’t a live offer code here. Ask them to open the offer again."
     )
 
     const [a, b] = await Promise.allSettled([actions.redeemPass({ venueId: A, code }), actions.redeemPass({ venueId: A, code })])
     const ok = [a, b].filter((r) => r.status === "fulfilled") as PromiseFulfilledResult<{ text: string }>[]
     expect(ok).toHaveLength(1)
     expect(Object.keys(ok[0].value)).toEqual(["text"])
-    expect([a, b].find((r) => r.status === "rejected")).toMatchObject({ reason: { message: "This pass was already redeemed." } })
-    expect(await refusal(actions.redeemPass({ venueId: A, code }))).toBe("This pass was already redeemed.")
+    expect([a, b].find((r) => r.status === "rejected")).toMatchObject({ reason: { message: "This offer code was already redeemed." } })
+    expect(await refusal(actions.redeemPass({ venueId: A, code }))).toBe("This offer code was already redeemed.")
     expect(await db.audit_logs.count({ where: { resource: "venue", resource_id: A, action: "venue_offer.redeem" } })).toBe(1)
 
     const after = await openOffer(R[0].token, offerId)
@@ -441,7 +441,7 @@ describe("the person’s side and the pass", () => {
     await db.venue_offer_sends.update({ where: { id: send.id }, data: { pass_seen_at: new Date() } })
     as(staff)
     expect(await refusal(actions.redeemPass({ venueId: A, code: passCode(send.id, passStep(new Date())) }))).toBe(
-      "They’ve already used a pass here tonight. One a night."
+      "They’ve already used an offer here tonight. One a night."
     )
   })
 
@@ -753,7 +753,7 @@ describe("review pass 2", () => {
     const spy = jest.spyOn(passCodeModule, "codeMatches").mockReturnValue(true)
     try {
       as(staff)
-      expect(await refusal(actions.redeemPass({ venueId: A, code: "ABCDEF" }))).toBe("Two passes show that code right now. Wait for it to change, then type the new one.")
+      expect(await refusal(actions.redeemPass({ venueId: A, code: "ABCDEF" }))).toBe("Two live offer codes match that right now. Wait for it to change, then type the new one.")
     } finally {
       spy.mockRestore()
     }
@@ -840,7 +840,7 @@ describe("review pass 2", () => {
   it("someone outside the venue’s organisation never touches its counters (DoS scan)", async () => {
     as(otherOwner)
     const answers = await Promise.all(Array.from({ length: 20 }, () => refusal(actions.redeemPass({ venueId: A, code: "ZZZZZ2" }))))
-    expect(new Set(answers)).toEqual(new Set(["That code isn’t a live pass here. Ask them to open the pass again."]))
+    expect(new Set(answers)).toEqual(new Set(["That code isn’t a live offer code here. Ask them to open the offer again."]))
     expect(await rateLimitStore.peek(`door-fail-venue:${A}`)).toBe(0)
     expect(await rateLimitStore.peek(`door-fail:${A}:${otherOwner}`)).toBe(0)
   })

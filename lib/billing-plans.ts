@@ -65,7 +65,7 @@ export const BILLING_PLANS: Record<BillingPlanKey, BillingPlan> = {
     key: "event_pass",
     product: "event_pass",
     kind: "order",
-    label: "Event Pass",
+    label: "Event Insights",
     listRupees: 499,
   },
   venue_pro_monthly: {

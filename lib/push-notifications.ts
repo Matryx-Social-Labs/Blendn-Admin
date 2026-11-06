@@ -830,7 +830,7 @@ export async function notifyBoardRequest(
   return sendPushNotification({
     userId: recipientId,
     title: "Someone answered your post",
-    body: "Open the board to see who is asking.",
+    body: "Open the Lobby to see who is asking.",
     data: { type: "board_request", eventId, requestId },
   })
 }
@@ -850,8 +850,8 @@ export async function notifyBoardPostRemoved(
 ): Promise<boolean> {
   return sendPushNotification({
     userId: authorId,
-    title: "Your board post was taken down",
-    body: "It didn’t meet the board’s rules. Open the board to see where things stand.",
+    title: "Your Lobby post was taken down",
+    body: "It didn’t meet the Lobby’s rules. Open the Lobby to see where things stand.",
     data: { type: "board_post_removed", eventId, postId },
   })
 }

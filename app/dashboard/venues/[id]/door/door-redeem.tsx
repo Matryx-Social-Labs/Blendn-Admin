@@ -33,7 +33,7 @@ export function DoorRedeem({ venueId }: { venueId: string }) {
   return (
     <form onSubmit={redeem} className="flex flex-col gap-3">
       <label htmlFor="pass-code" className="text-[0.75rem] text-muted-foreground">
-        Pass code
+        Offer code
       </label>
       <Input
         id="pass-code"

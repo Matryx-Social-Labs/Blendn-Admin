@@ -137,7 +137,7 @@ describe("analyticsAccessLine", () => {
     const line = analyticsAccessLine({ ...base, reason: "free_window", freeUntil: "2026-10-23T20:00:00.000Z", firstFreeEvent: first }, day)
     expect(line.headline).toBe("Open until D(2026-10-23)")
     expect(line.detail).toContain(`Sunday Soul Sante, ${FIRST_EVENT_RULE}, ended D(2026-09-23)`)
-    expect(line.detail).toContain("After that Sunday Soul Sante stays open for good, and an Event Pass or Analytics opens the rest.")
+    expect(line.detail).toContain("After that Sunday Soul Sante stays open for good, and Event Insights or Analytics opens the rest.")
   })
 
   it("says an open window with no date yet is open for now, by the rule in plain words", () => {
