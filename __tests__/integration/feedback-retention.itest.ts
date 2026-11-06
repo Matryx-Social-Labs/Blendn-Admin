@@ -113,6 +113,12 @@ describe("feedback through the 180-day purge", () => {
     for (const name of pseudonyms) expect(kept).not.toContain(name)
   })
 
+  it("keeps every member row, the room's size with it, and blanks every pseudonym", async () => {
+    const members = await db.chat_group_members.findMany({ where: { chat_group_id: room }, select: { user_id: true, anonymous_name: true } })
+    expect(members.map((m) => m.user_id).sort()).toEqual([...people].sort())
+    for (const m of members) expect(m.anonymous_name).toBeNull()
+  })
+
   it("is the same on the next pass", async () => {
     await purgeClosedLobbies(new Date(), "delete")
     expect((await figures("host")).figures).toEqual(before.host.figures)
@@ -120,30 +126,41 @@ describe("feedback through the 180-day purge", () => {
   })
 })
 
-describe("a dismissed report's excerpt", () => {
-  it("goes 180 days after the dismissal; a recent dismissal, an upheld and a pending report keep theirs", async () => {
+describe("a dismissed report's excerpt and description", () => {
+  it("go 180 days after the dismissal; a recent dismissal, an upheld and a pending report keep theirs", async () => {
     const reporter = people[7]
-    const report = (status: "pending" | "reviewed" | "resolved", reviewedDaysAgo: number | null) =>
+    const report = (status: "pending" | "reviewed" | "resolved", reviewedDaysAgo: number | null, excerpt = true) =>
       db.message_reports.create({
         data: {
           reporter_id: reporter,
           message_id: crypto.randomUUID(),
-          message_type: "board_post",
+          message_type: excerpt ? "board_post" : "group",
           reason: "spam",
-          excerpt: `Ride from Indiranagar ${testId("x")}`,
+          ...(excerpt && { excerpt: `Ride from Indiranagar ${testId("x")}` }),
+          description: `He followed me to the cab stand ${testId("d")}`,
           status,
           ...(reviewedDaysAgo !== null && { reviewed_at: ago(reviewedDaysAgo) }),
         },
         select: { id: true },
       })
     const aged = await report("reviewed", 190)
+    // A room message's report carries no excerpt; its description goes all the same.
+    const agedNoExcerpt = await report("reviewed", 190, false)
     const fresh = await report("reviewed", 10)
     const upheld = await report("resolved", 190)
     const pending = await report("pending", null)
 
+    const dryRun = await purgeClosedLobbies(new Date(), "log")
+    expect(dryRun.excerpts).toBeGreaterThanOrEqual(2)
     await purgeClosedLobbies(new Date(), "delete")
-    const excerpt = async (r: { id: string }) => (await db.message_reports.findUniqueOrThrow({ where: { id: r.id } })).excerpt
-    expect(await excerpt(aged)).toBeNull()
-    for (const r of [fresh, upheld, pending]) expect(await excerpt(r)).not.toBeNull()
+    const kept = async (r: { id: string }) =>
+      db.message_reports.findUniqueOrThrow({ where: { id: r.id }, select: { excerpt: true, description: true, reason: true, status: true } })
+    expect(await kept(aged)).toMatchObject({ excerpt: null, description: null, reason: "spam", status: "reviewed" })
+    expect(await kept(agedNoExcerpt)).toMatchObject({ excerpt: null, description: null })
+    for (const r of [fresh, upheld, pending]) {
+      const row = await kept(r)
+      expect(row.excerpt).not.toBeNull()
+      expect(row.description).not.toBeNull()
+    }
   })
 })
