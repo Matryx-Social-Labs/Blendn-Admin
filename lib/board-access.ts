@@ -9,6 +9,8 @@ import {
   type BoardEntitlement,
   type BoardWriteDenial,
 } from "./board"
+import { CHAT_WINDOW_HOURS } from "./chat-window"
+import { realEventsWhere, venueDaysWhere } from "./event-kind"
 import { BOARD } from "./constants"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
@@ -61,6 +63,25 @@ export function liveRequest(now: Date = new Date()): {
     status: "pending",
     event: { end_time: { gt: now } },
     post: { deleted_at: null },
+  }
+}
+
+/**
+ * Asks whose Lobby has not closed (SCRUM-1026): a venue day's at its reset,
+ * any other event's a day after it ends (`chatClosesAt`). After that an ask
+ * is in no list, and its words are read by nobody in the app.
+ */
+export function lobbyNotClosed(now: Date = new Date()) {
+  const dayAgo = new Date(now.getTime() - CHAT_WINDOW_HOURS * 60 * 60 * 1000)
+  return {
+    AND: [
+      {
+        OR: [
+          { event: { ...venueDaysWhere, end_time: { gt: now } } },
+          { event: { ...realEventsWhere, end_time: { gt: dayAgo } } },
+        ],
+      },
+    ],
   }
 }
 
@@ -306,7 +327,7 @@ export async function boardPseudonymsAcross(
 }
 
 /** What refused board text is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
-export const BOARD_REFUSAL = "This can’t go on the board."
+export const BOARD_REFUSAL = "This can’t go in the Lobby."
 
 export interface BoardTextVerdict {
   /** The sentence to refuse with, or null to let it through. */
@@ -335,7 +356,7 @@ export async function checkBoardText(text: string): Promise<BoardTextVerdict> {
   const contact = checkContactInfo(text)
   if (contact) {
     return {
-      refusal: `${contact.reason} The board is anonymous, so contact details can’t go on it.`,
+      refusal: `${contact.reason} The Lobby is anonymous, so contact details can’t go on it.`,
       unchecked: false,
     }
   }
@@ -555,7 +576,7 @@ export async function seatBoardRoom(
       create: {
         kind: "board_post",
         board_post_id: post.id,
-        name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Board",
+        name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Lobby",
         status: "active",
       },
       update: {},

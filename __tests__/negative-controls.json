@@ -35,6 +35,24 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "banned-names.test.ts": {
+      "guards": "SCRUM-1027 naming review (owner 2026-11-05): the retired names (Board, blend in, Blend as the crew match, Event Pass, door pass, spaces left, Liking as, centre) never come back in a string a person reads under app/, components/ and lib/.",
+      "mutation": "lib/billing-plans.ts: the event_pass label put back to \"Event Pass\".",
+      "observed": "1 of 3 failing, naming lib/billing-plans.ts and the old name. Restored; 3/3.",
+      "date": "2026-11-06"
+    },
+    "door-verdict-long-text.test.tsx": {
+      "guards": "SCRUM-1027 (owner 2026-11-05): the door verdict's headline is \"Let in\" alone and the ticket type its own line under it, at the long-text fixture's worst.",
+      "mutation": "Ran against the glued headline (`Let in · ${typeName}`) before the change.",
+      "observed": "4 of 4 failing before; 4/4 after.",
+      "date": "2026-11-06"
+    },
+    "tickets-long-text.test.tsx": {
+      "guards": "Long-text audit (owner 2026-11-05): the Tickets tab's Sales selects are held to the form's width (min-w-0 max-w-full), and every overflow-x-auto table wrapper on the tab is `relative`, so sr-only labels inside a wide table are placed in it, not against the page.",
+      "mutation": "MLT1 page.tsx `select` class without min-w-0 max-w-full (the code as it was). MLT2 the three table wrappers as plain `overflow-x-auto` (as they were).",
+      "observed": "MLT1: 1 of 4 failing (the class list had neither). MLT2: the wrapper cases failing for page.tsx and types-panel.tsx. Both are the shipped code before this change and both showed in a 375 drive of a seeded worst-case event (select 37-392 px past a 359 px panel; the page scrolled 13 px sideways). Fixed: 6/6, select 37-338, scrollWidth 375.",
+      "date": "2026-11-05"
+    },
     "city-gate-routes.test.ts": {
       "guards": "SCRUM-709 P1: every route under events/[eventId] and venues/[venueId] calls the launch gate or is named with a reason, a reason cannot outlive its route, and attendeeEventAccess and the check-in door still hold it.",
       "mutation": "A1 lib/event-access.ts loses the mayOpenEvent call. A2 the check-in door loses it. A15 a new route with no gate is added under events/[eventId].",
@@ -2583,6 +2601,30 @@
       "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",
       "observed": "M944h: 1 of 6 failing (a wrong password deleted the account). Restored; 6/6. Review: wrong passwords count in sign-in's own windows (mobile per-account 10/15 min + per-email), shared with the sign-in door, then 429, each audited (test red first: the 11th try deleted the account); a provider token is taken once, keyed on its verified claims (test red first: a re-encoded copy passed); the per-account window answers before the per-email ones (test red first: 25 refused tries filled the per-email cap). 9/9.",
       "date": "2026-11-01"
+    },
+    "lobby-lifecycle.test.ts": {
+      "guards": "SCRUM-1026: the Lobby is open until doors (start - 90 min, = CHECK_IN_LEAD_MINUTES), read-only from doors, closed at the room's own close (end + 24 h; a venue day's at its reset).",
+      "mutation": "lib/board.ts: the `now >= doorsAt(event)` read-only line removed.",
+      "observed": "1 of 7 failing (the Lobby stayed open at doors). Restored; 7/7.",
+      "date": "2026-11-06"
+    },
+    "lobby.itest.ts": {
+      "guards": "SCRUM-1026: a pending Lobby photo reaches its author only (no other response holds its URL); the per-event alert switch gates the Lobby pushes; ticket sub-kinds are hidden on native-ticket events; a closed Lobby's asks leave GET /board/requests.",
+      "mutation": "(a) lib/lobby-photo.ts the `post.author_id !== viewerId` return removed; (b) lib/push-notifications.ts eventSwitchOn dropped from pushGates; (c) lib/lobby.ts the ticket filter in livePostsWhere removed; (d) the `...open` filter on the asker's settled slice removed.",
+      "observed": "(a) 3 of 16 failing; (b) 1 of 16; (c) 1 of 16; (d) 1 of 16. Each restored; 16/16. The EXIF strip: the stored bytes carry none of METADATA while the upload carried GPSLatitude.",
+      "date": "2026-11-06"
+    },
+    "lobby-pin.itest.ts": {
+      "guards": "SCRUM-1026: the host's pinned post needs eventPermissions(...).canEdit (organisation-shaped), shows the org's name and never the writer, and is audited.",
+      "mutation": "app/api/events/[id]/lobby-pin/route.ts: `.canEdit` read as `.canOperate`.",
+      "observed": "2 of 6 failing (the venue owner pinned). Restored; 6/6.",
+      "date": "2026-11-06"
+    },
+    "lobby-retention.itest.ts": {
+      "guards": "SCRUM-1026: the 180-day purge deletes closed content past its time and holds removed or reported content 180 days from removal (a pending report until decided); a dry run deletes nothing.",
+      "mutation": "(a) the post select's COALESCE removed; (b) the post's pending-report hold inverted (NOT EXISTS -> EXISTS).",
+      "observed": "(a) 3 of 10 failing: no post was ever purged, because NOT NULL drops every unmoderated row (the bug this test's first run found); (b) 4 of 10. Restored; 10/10.",
+      "date": "2026-11-06"
     }
   },
   "grandfathered": [

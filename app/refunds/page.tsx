@@ -37,17 +37,17 @@ export default function RefundsPage() {
         <li>A plan that was started but never paid for ends at once, with nothing charged.</li>
       </ul>
 
-      <h2>Event Pass</h2>
+      <h2>Event Insights</h2>
       <p>
-        An Event Pass is a single payment that opens one event&apos;s analytics as soon as the payment is confirmed,
+        Event Insights is a single payment that opens one event&apos;s analytics as soon as the payment is confirmed,
         for good. Because it is delivered on payment, it is not refundable once delivered, except in the cases
         below.
       </p>
 
       <h2>When we refund in full</h2>
       <ul>
-        <li>You were charged twice for the same thing, such as a second subscription or a second pass for the same event.</li>
-        <li>You paid and the plan or pass was not delivered, and we cannot deliver it.</li>
+        <li>You were charged twice for the same thing, such as a second subscription or a second Event Insights purchase for the same event.</li>
+        <li>You paid and the plan or Event Insights was not delivered, and we cannot deliver it.</li>
         <li>You were charged an amount other than the price shown on our <Link href="/pricing">Pricing</Link> page.</li>
         <li>A sponsor payment link was paid twice, or after the charge it was for had been withdrawn.</li>
       </ul>

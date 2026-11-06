@@ -616,11 +616,12 @@ describe("a room its owner closes stops reaching the people in it (E3, E4)", () 
     expect(await until(async () => !(await inRoom(w.groupId, w.people.accepted.id)))).toBe(true)
   })
 
-  it("the sweeper archives a board room twelve hours after its event, and takes its people out (E2)", async () => {
+  it("the sweeper archives a board room a day after its event, with the event's room, and takes its people out (E2, SCRUM-1026)", async () => {
     const { w, asker } = await joinedWorld("cl-clock")
     const fresh = await world("cl-clock-fresh")
-    await db.events.update({ where: { id: w.eventId }, data: { end_time: new Date(Date.now() - 13 * 60 * 60_000) } })
-    await db.events.update({ where: { id: fresh.eventId }, data: { end_time: new Date(Date.now() - 11 * 60 * 60_000) } })
+    await db.events.update({ where: { id: w.eventId }, data: { end_time: new Date(Date.now() - 25 * 60 * 60_000) } })
+    // Thirteen hours: past the old twelve-hour close, inside the day.
+    await db.events.update({ where: { id: fresh.eventId }, data: { end_time: new Date(Date.now() - 13 * 60 * 60_000) } })
     for (let pass = 0; pass < 20 && (await sweepExpiredChats()).hasMore; pass++);
     const rooms = await db.chat_groups.findMany({ where: { id: { in: [w.groupId, fresh.groupId] } }, select: { id: true, status: true } })
     expect(Object.fromEntries(rooms.map((g) => [g.id, g.status]))).toEqual({ [w.groupId]: "archived", [fresh.groupId]: "active" })

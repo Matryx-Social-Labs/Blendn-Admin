@@ -1,8 +1,9 @@
 // Relative imports: chat-lifecycle.ts reaches this from server.ts, which plain
 // tsc compiles with the @/ alias left verbatim (see the note there).
-import type { chat_group_kind, chat_group_status, Prisma } from "@prisma/client"
+import type { chat_group_kind, chat_group_status, event_kind, Prisma } from "@prisma/client"
 import { db } from "./db"
 import {
+  chatClosesAt,
   chatWindowState,
   eventHidesRoom,
   leftByChoice,
@@ -26,7 +27,8 @@ import type { RoomScope } from "./room-handle"
  *   board_post  the post's author, or an asker the author accepted — not one
  *               in a block with the author either way (the board reads a block
  *               as a withdrawn post); closed with the post, with a hidden
- *               event, and for writes `OWNER_ROOM_HOURS` after the event ends
+ *               event, and a day after the event ends, with the event's room
+ *               (`chatClosesAt`, SCRUM-1026): no writes, and no reads either
  *   crew        a member of the crew now — not suspended, the crew not
  *               dissolved. Real names inside (`namesInRoom`, lib/identity.ts)
  *   blend       one of the people here when it matched (its member rows, a
@@ -51,10 +53,11 @@ import type { RoomScope } from "./room-handle"
  */
 
 /**
- * How long after its event ends a room owned by something AT that event stays
- * open for writes: a board post's now, a Blend's once it has an owner (plan v2
- * §6, "closes 12 h after the event"). The chat sweeper archives it then
- * (`chat-lifecycle`).
+ * How long after its occurrence ends a Blend's room stays open for writes (plan
+ * v2 §6, "closes 12 h after the event"). The chat sweeper archives it then
+ * (`chat-lifecycle`). A board post's room used to close on this too; it closes
+ * with its event's room now, a day after the end (SCRUM-1026, one lifecycle
+ * for the Lobby, the room and the posts' rooms).
  */
 export const OWNER_ROOM_HOURS = 12
 
@@ -68,8 +71,8 @@ function boardPostSelect(viewerIds: string[]) {
     select: {
       author_id: true,
       deleted_at: true,
-      // start_time beside end_time, as every window read selects them (chat-window-select.test.ts).
-      event: { select: { status: true, deleted_at: true, start_time: true, end_time: true } },
+      // start_time beside end_time, as every window read selects them (chat-window-select.test.ts); kind for a venue day's clock.
+      event: { select: { status: true, deleted_at: true, start_time: true, end_time: true, kind: true } },
       requests: { where: { from_user_id: { in: viewerIds }, status: "accepted" as const }, select: { from_user_id: true } },
       // A block either way between the author and a viewer (E4).
       author: {
@@ -90,7 +93,7 @@ function boardPostSelect(viewerIds: string[]) {
 interface BoardPostOwner {
   author_id: string
   deleted_at: Date | null
-  event: { status: string; deleted_at: Date | null; end_time: Date }
+  event: { status: string; deleted_at: Date | null; end_time: Date; kind?: event_kind }
   /** Accepted asks, by asker (`boardPostSelect`: the caller's only). */
   requests: { from_user_id: string }[]
   author: { blocked_users: { blocked_id: string }[]; blocked_by: { blocker_id: string }[] }
@@ -388,11 +391,14 @@ export function roomOwnerDenial(
 export function roomReadDenialFor<E extends Parameters<typeof roomReadDenial>[1]>(
   room: RoomOwners<E>,
   membership: Parameters<typeof roomReadDenial>[0],
-  userId: string
+  userId: string,
+  now: Date = new Date()
 ): ReadDenial | null {
-  if (room.kind === "event") return room.event ? roomReadDenial(membership, room.event) : "hidden"
+  if (room.kind === "event") return room.event ? roomReadDenial(membership, room.event, now) : "hidden"
   const owner = roomOwnerDenial(room, userId)
   if (owner) return owner
+  // Closed with its event's room, and gone with it (SCRUM-1026): kept server-side only, read by nobody.
+  if (room.kind === "board_post" && room.board_post && now >= chatClosesAt(room.board_post.event)) return "hidden"
   if (!membership) return "not_member"
   if (membership.status === "banned") return "banned"
   if (leftByChoice(membership)) return "not_member"
@@ -427,8 +433,8 @@ export function mayWriteToRoomFor<E extends Parameters<typeof mayWriteToRoom>[1]
 
 /**
  * Whether the room takes writes now. An event's room has its calendar window
- * (`chatWindowState`). A board post's closes `OWNER_ROOM_HOURS` after its
- * event ends — on the clock, whether or not the sweeper has archived it yet —
+ * (`chatWindowState`). A board post's closes with it, a day after its event
+ * ends (`chatClosesAt`) — on the clock, whether or not the sweeper has archived it yet —
  * and before that when locked or archived. A crew's has no clock: it is open
  * until it is locked or archived (a dissolved crew's is). A Blend's closes at
  * its `closes_at` (the occurrence's end + `OWNER_ROOM_HOURS`), or earlier when
@@ -439,7 +445,7 @@ export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
     kind: chat_group_kind
     status: chat_group_status
     event: E | null
-    board_post?: { event: { end_time: Date } } | null
+    board_post?: { event: { end_time: Date; kind?: event_kind } } | null
     blend?: { closes_at: Date; closed_at: Date | null } | null
   },
   now: Date = new Date()
@@ -453,7 +459,7 @@ export function roomWindowFor<E extends Parameters<typeof chatWindowState>[0]>(
   }
   if (room.kind !== "board_post" || !room.board_post) return { open: false, reason: "hidden" }
   if (room.status !== "active") return { open: false, reason: room.status }
-  if (now >= ownerRoomClosesAt(room.board_post.event)) return { open: false, reason: "window_closed" }
+  if (now >= chatClosesAt(room.board_post.event)) return { open: false, reason: "window_closed" }
   return { open: true }
 }
 

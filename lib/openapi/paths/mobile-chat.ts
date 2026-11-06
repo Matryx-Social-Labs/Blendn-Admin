@@ -58,7 +58,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups",
   tags: ["Mobile Chat"],
   summary: "List chat groups",
-  description: "List the rooms the user is a member of, with last message and unread count. `groups`: event and venue-day rooms, paged, each `kind: \"event\"` with its `event`. `rooms`: the user's crews' chats and their Blends' rooms while open (`kind` `crew` or `blend`, with `crewId`/`blendId`), not paged — a person is in at most ten crews and a night's few Blends — so sent with page 1 and `[]` after. No preview, unread count or `rooms` time comes from somebody in a block with the caller. A board post's room is not listed.",
+  description: "List the rooms the user is a member of, with last message and unread count. `groups`: event and venue-day rooms, paged, each `kind: \"event\"` with its `event`. `rooms`: the user's crews' chats and their Mixes' rooms while open (`kind` `crew` or `blend`, with `crewId`/`blendId`), not paged — a person is in at most ten crews and a night's few Mixes — so sent with page 1 and `[]` after. No preview, unread count or `rooms` time comes from somebody in a block with the caller. A Lobby post's room is not listed.",
   security: bearerAuth,
   request: {
     query: z.object({
@@ -247,11 +247,11 @@ registry.registerPath({
   method: "post",
   path: "/api/mobile/chat/groups/{chatGroupId}/members/{userId}/report",
   tags: ["Mobile Safety"],
-  summary: "Report a person in a crew's or a Blend's room",
+  summary: "Report a person in a crew's or a Mix's room",
   description:
     "`userId` is the handle that room showed you (`GET /crews/{id}`, `GET /blends`). Members of the room only. Lands in the same admin queue as " +
     "`POST /users/{userId}/report`, with the room's kind in the description. Nobody is told who reported. 400 for yourself; 404 `NOT_FOUND` for a malformed id, " +
-    "a room you are not let into, a room that is not a crew's or a Blend's, a handle from another room, a forged one, or somebody not in the room. " +
+    "a room you are not let into, a room that is not a crew's or a Mix's, a handle from another room, a forged one, or somebody not in the room. " +
     "Capped per minute and per day, as every report is.",
   security: bearerAuth,
   request: {
@@ -276,7 +276,7 @@ registry.registerPath({
   path: "/api/mobile/chat/groups/{chatGroupId}/participants",
   tags: ["Mobile Chat"],
   summary: "List group participants",
-  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies. In a room that is not an event's (a board post's), only the people its owner admits are listed. In an event's room, only the people in it now (checked in to its event) and its hosts: a member who checked out or whose window expired is not listed. `totalCount` is the people listed, not the headcount (`hereCount`). In an event's room a person you may recognise there (they revealed in it, or a friend who allows it: the same rule as `GET /events/:eventId/checkins`) comes with their `name` and their first photo as `avatar`; everyone else is the pseudonym with `avatar` null.",
+  description: "Readable by an `active`, `muted` or `left` member. A `banned` member gets 403 `USER_BANNED` with a sentence saying who removed them; a draft (hidden) event's room answers 404 — the same rule the socket join applies. In a room that is not an event's (a Lobby post's), only the people its owner admits are listed. In an event's room, only the people in it now (checked in to its event) and its hosts: a member who checked out or whose window expired is not listed. `totalCount` is the people listed, not the headcount (`hereCount`). In an event's room a person you may recognise there (they revealed in it, or a friend who allows it: the same rule as `GET /events/:eventId/checkins`) comes with their `name` and their first photo as `avatar`; everyone else is the pseudonym with `avatar` null.",
   security: bearerAuth,
   request: {
     params: z.object({ chatGroupId: z.string().uuid() }),

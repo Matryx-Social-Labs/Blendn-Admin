@@ -563,7 +563,7 @@ registry.registerPath({
   tags: ["Mobile Users"],
   summary: "Get user public profile",
   description: ROOM_BAN_GATE +
-    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true. A friend's raw id (a friendship, no block either way, no open pseudonymous conversation) is named like `GET /friends/{userId}` does (SCRUM-863). A crew's, Blend's or board post's handle is that room's card for somebody it admits now — a crew's first name, a Blend's or post's pseudonym, the same five fields — and 404 for anyone else (SCRUM-864).",
+    "What a room card opens. `userId` may be a room handle, and `id` echoes it as sent (SCRUM-371). A handle is answered in that room's terms — revealed there, or a friend with `friends_see_me_in_rooms` on — never from a reveal, like or conversation elsewhere. For somebody the room keeps anonymous only `id`, `name` (their pseudonym there), `age`, `location`, `isOwnProfile` and `identityVisible` come back. `connection` is present only when `identityVisible` is true. A friend's raw id (a friendship, no block either way, no open pseudonymous conversation) is named like `GET /friends/{userId}` does (SCRUM-863). A crew's, Mix's or Lobby post's handle is that room's card for somebody it admits now — a crew's first name, a Mix's or post's pseudonym, the same five fields — and 404 for anyone else (SCRUM-864).",
   security: bearerAuth,
   request: { params: z.object({ userId: UserRefParamSchema }) },
   responses: {
@@ -734,8 +734,8 @@ registry.registerPath({
 
 const NotificationPreferencesSchema = z
   .object({
-    matches: z.boolean().describe("Matches and friends: match, reveal and its request, friend request and accepted, board ask and its answer."),
-    crew: z.boolean().describe("Your crew: invite, \"We're here\", a Blend."),
+    matches: z.boolean().describe("Matches and friends: match, reveal and its request, friend request and accepted, Lobby ask and its answer."),
+    crew: z.boolean().describe("Your crew: invite, \"We're here\", a Mix."),
     night: z.boolean().describe("After the night: \"How was it?\"."),
   })
   .openapi("NotificationPreferences")
@@ -746,7 +746,7 @@ registry.registerPath({
   tags: ["Mobile Notifications"],
   summary: "The rooms you silenced",
   description:
-    "Settings › Notifications › Muted rooms, newest mute first. Each row is a `GET /chat/groups` row (`kind` is `event`, `crew` or `blend`; `mute` says until when), built by the same code. Listed: a mute in force now (not lapsed) in a room that list would show: live, through its owner's door (a dissolved crew, a closed Blend, a Blend across a block, a ban or a leave are not). Keyset-paged on when you muted the room (reading it does not move it) then the room id; `limit` 1-100 (default 50), and a `cursor` an earlier answer did not give is a 400. A page may be shorter than `limit` with a `nextCursor` when many rooms in a row are not listed. Rate-limited as a read.",
+    "Settings › Notifications › Muted rooms, newest mute first. Each row is a `GET /chat/groups` row (`kind` is `event`, `crew` or `blend`; `mute` says until when), built by the same code. Listed: a mute in force now (not lapsed) in a room that list would show: live, through its owner's door (a dissolved crew, a closed Mix, a Mix across a block, a ban or a leave are not). Keyset-paged on when you muted the room (reading it does not move it) then the room id; `limit` 1-100 (default 50), and a `cursor` an earlier answer did not give is a 400. A page may be shorter than `limit` with a `nextCursor` when many rooms in a row are not listed. Rate-limited as a read.",
   security: bearerAuth,
   request: { query: z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), cursor: z.string().optional() }) },
   responses: {
@@ -850,7 +850,7 @@ const NotificationSchema = z.object({
         .string()
         .optional()
         .describe(
-          "The counterpart, by the name the reader sees it by now, and only while they may: a match's pseudonym (conversation open, no block), the Blend room's name (the room's door admits the reader), the inviting crew (the Crews screen would list the invite: open, not lapsed, the inviter a member and a friend, no block with anyone in it; or a member; the crew neither dissolved nor hidden). Absent otherwise and on every other kind."
+          "The counterpart, by the name the reader sees it by now, and only while they may: a match's pseudonym (conversation open, no block), the Mix room's name (the room's door admits the reader), the inviting crew (the Crews screen would list the invite: open, not lapsed, the inviter a member and a friend, no block with anyone in it; or a member; the crew neither dissolved nor hidden). Absent otherwise and on every other kind."
         ),
       visual: z
         .discriminatedUnion("type", [
@@ -868,7 +868,7 @@ const NotificationSchema = z.object({
     })
     .optional()
     .describe(
-      "What the row can say for the reader beyond the push's nameless words, only where they may already see it: a friend request's asker (name and photo) while it waits; a match's room pseudonym (also as `context`); a crew's emblem seed, with `context` naming the Blend's room or the inviting crew while the reader may see them; an event's cover. Absent when it cannot be resolved: draw the kind's own tile. `stack` is not sent."
+      "What the row can say for the reader beyond the push's nameless words, only where they may already see it: a friend request's asker (name and photo) while it waits; a match's room pseudonym (also as `context`); a crew's emblem seed, with `context` naming the Mix's room or the inviting crew while the reader may see them; an event's cover. Absent when it cannot be resolved: draw the kind's own tile. `stack` is not sent."
     ),
   open: z
     .boolean()
@@ -1238,7 +1238,7 @@ registry.registerPath({
   summary: "List blocked users",
   description:
     "`blocked_id` is an opaque ref to the block (`bk_…`), not the person's account id: somebody " +
-    "blocked by their board post or room handle was never shown an id, and this list must not be " +
+    "blocked by their Lobby post or room handle was never shown an id, and this list must not be " +
     "where it arrives. Send it back to `DELETE /users/{userId}/block` to unblock. A name and photo " +
     "appear only where the identity rules allow. Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, " +
     "otherwise default 100, 1-100) with `pagination.totalCount` the whole list.",

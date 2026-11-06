@@ -102,7 +102,7 @@ describe("a post gets the room’s checks first", () => {
   it("refuses abuse, without teaching the filter, and stores nothing", async () => {
     const res = await post(author.token, "you are a retard")
     expect(res.status).toBe(422)
-    expect((await res.json()).error).toBe("This can’t go on the board.")
+    expect((await res.json()).error).toBe("This can’t go in the Lobby.")
     expect(await db.board_posts.count({ where: { event_id: eventId, body: { contains: "retard" } } })).toBe(0)
   })
 })

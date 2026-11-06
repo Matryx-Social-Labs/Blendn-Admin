@@ -129,6 +129,8 @@ Historical note, because this paragraph used to say otherwise: `canManageEvent` 
 
 `lib/socket-server.ts` initializes Socket.io on the shared HTTP server. Rooms are scoped per event/conversation. Handles group chat (`chat_groups`/`chat_messages`), private DMs (`private_conversations`/`private_messages`), typing indicators, check-in/check-out, and presence. See `docs/SOCKET_EVENTS.md` for the event catalog and `docs/chat-moderation.md` / `docs/client-chat-moderation-guide.md` for how moderation integrates with the socket flow from the client's perspective.
 
+**The Lobby, the room and the posts' rooms share one lifecycle** (SCRUM-1026): the Lobby (`/events/:id/board`) is open until doors (`doorsAt`: start − 90 min, when check-in opens), read-only from doors, and closed with the room a day after the end (`chatClosesAt`; `lobbyState` in `lib/board.ts`). The room opens at doors — there is no pre-event room. After the close nobody reads any of it in the app (`roomReadDenial`, `roomReadDenialFor`); it is kept server-side and purged 180 days on, removed or reported content 180 days from its removal (`lib/lobby-retention.ts`, a dry run unless `LOBBY_PURGE=delete`).
+
 **A chat room has a kind** (`chat_groups.kind`: `event`, `board_post`, and `crew` / `blend` from step 8) and one owner of that kind. Who may enter — socket join, every `/chat/groups/:id` read and write, typing — is `lib/room-kind.ts` (`roomOwnerDenial`, `roomReadDenialFor`, `mayWriteToRoomFor`): an event's room is today's rule unchanged; any other asks its owner, and a member row alone is never enough. A room's handles are minted in `roomScope(room)` — its event for an event's room (unchanged for installed clients), its own id and kind otherwise — so a handle never resolves in another room. A room that is not an event's is re-asked on every delivery, and a writer that closes its owner empties it (`lib/room-close.ts`). `board_post_id` is ON DELETE RESTRICT: a post with a room is never deleted, only taken off the board. A new reader of `chat_group.event` must decide what it does for a room with none: `__tests__/chat-group-event-readers.test.ts` counts them.
 
 ### Countries and cities are data
@@ -183,6 +185,11 @@ and therefore in every deployed environment:
 | `blends_one_b` | a Blend's side B is a crew or one person (side A is always a crew) |
 | `ended_friendships_canonical_pair` | a friendship that ended is stored once, `user1_id < user2_id` in the `C` collation, like `friendships` — read by `lib/room-people.ts` for the 24 h an unfriend keeps the pair apart in rooms |
 | `blends_pair_order` | two crews in one order only (`a_crew_id < b_crew_id`, uuid order — no collation), so a pair is one Blend |
+| `board_posts_sub_kind_fits` | a Lobby post's sub-kind fits its kind: an offer of `ride`/`spots`/`ticket`, a search for `ride`/`buddy`/`ticket`, a chat post none |
+| `board_posts_photo_has_status` | a post's photo always has a moderation state (`pending`/`approved`/`rejected`), and a state always has a photo |
+| `board_posts_photo_alt_fits` | alt text needs a photo, and is at most 200 characters |
+| `board_posts_photo_decided_at` | an approved or rejected photo has `photo_checked_at` (a rejection's 180-day hold counts from it), and only those |
+| `board_host_posts_body_length` | the host's pinned Lobby post is 1–500 characters |
 | `markets_code_shape` / `markets_currency_shape` | a market is an ISO-shaped country code (two capitals) with an ISO-shaped currency (three) |
 | `cities_slug_shape` | a city slug is lower-case words joined by hyphens |
 | `cities_timezone_known` | `cities.timezone` has the shape of an IANA name, as `venues_timezone_known` |

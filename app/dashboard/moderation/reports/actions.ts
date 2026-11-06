@@ -243,6 +243,8 @@ export async function getReportQueue(status: report_status = "pending") {
             body: true,
             deleted_at: true,
             moderation_status: true,
+            // A post's photo is reviewed with it, whatever its moderation state (SCRUM-1026).
+            photo_url: true,
             event_id: true,
             event: { select: { title: true } },
             author: person,
@@ -286,6 +288,10 @@ export async function getReportQueue(status: report_status = "pending") {
   const crewById = new Map(crews.map((c) => [c.id, c]))
   const offerById = new Map(offers.map((o) => [o.id, o]))
   const imageByReport = await reportedImages(messageReports, groupById, privateById, status)
+  // Lobby photos are sealed copies in the private bucket: signed for this page, as a room image is.
+  const boardImageByPost = new Map(
+    await Promise.all(boardPosts.flatMap((p) => (p.photo_url ? [p] : [])).map(async (p) => [p.id, { url: await readableUrl(p.photo_url as string) }] as const))
+  )
 
   /*
    * How many reports in this tab name the same thing. Grouped by subject so a
@@ -402,7 +408,7 @@ export async function getReportQueue(status: report_status = "pending") {
           // What was reported, as it was then; the live body if it predates
           // the snapshot.
           excerpt: (r.excerpt ?? post?.body ?? "").slice(0, 200) || null,
-          image: null,
+          image: (post && boardImageByPost.get(post.id)) ?? null,
           messageType: "board_post",
           boardKind: post?.kind ?? null,
           messageDeleted: post?.deleted_at != null,
@@ -577,7 +583,7 @@ export async function resolveReport(
   if (decision === "remove_message") {
     const r = report as { message_id: string; message_type: string }
     if (kind !== "message" || (r.message_type !== "group" && r.message_type !== "board_post")) {
-      throw new Refusal("Only a room message or a board post can be removed")
+      throw new Refusal("Only a room message or a Lobby post can be removed")
     }
     // Erased with its author's account: there is nothing to take down, and
     // "removed" would be a record of an action that did not happen.

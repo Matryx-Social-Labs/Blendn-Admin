@@ -385,7 +385,7 @@ describe("resolveReport", () => {
       message_type: "private",
     })
     await expect(resolveReport("message", "mr1", "remove_message")).rejects.toThrow(
-      /only a room message or a board post/i
+      /only a room message or a Lobby post/i
     )
     expect(mockDb.$transaction).not.toHaveBeenCalled()
   })

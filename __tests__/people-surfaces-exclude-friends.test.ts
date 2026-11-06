@@ -27,7 +27,8 @@ export const PEOPLE_SURFACES = [
   // B3
   "lib/crews/presence.ts",
   "lib/crews/like.ts",
-  "app/api/mobile/events/[eventId]/board/route.ts",
+  // The Lobby's reads (list, post, preview, room card) hide friends through `hiddenAuthorsFor` there.
+  "lib/lobby.ts",
   "app/api/mobile/events/[eventId]/board/[postId]/requests/route.ts",
   "lib/board-access.ts",
   "lib/trust.ts",

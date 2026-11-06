@@ -48,7 +48,7 @@ gives them owners (`chat_groups.kind`, `lib/room-kind.ts`). What applies where:
 | Polls, announcements, sponsored messages | yes | no | Written only through `/events/:eventId/...` routes, which find the room by its event; a poll outside the event in its URL does not exist (`lib/polls.ts`) |
 | Sentiment (the live Mood bar, the digest) | yes | no | It is how people feel about an event; `lib/sentiment-sweeper.ts` reads `kind = 'event'` only |
 | Organizer review (`/api/events/{eventId}/chat/moderation`) | yes | no | Scoped to the event's room. Flags from other rooms reach the platform queue (`/dashboard/moderation`, admins only), labelled "Unknown event" until those rooms ship |
-| A taken-down post closes its room | — | yes | `deleted_at` on the post closes the board room's door, and the takedown empties the room's sockets (`closePostRooms`). Account erasure keeps a post with a room (RESTRICT) and archives the room, so its messages, flags and reports stay for their 180 days |
+| A taken-down post closes its room | — | yes | `deleted_at` on the post closes the Lobby room's door, and the takedown empties the room's sockets (`closePostRooms`). Account erasure keeps a post with a room (RESTRICT) and archives the room, so its messages, flags and reports stay for their 180 days |
 
 ---
 

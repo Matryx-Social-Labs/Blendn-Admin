@@ -186,7 +186,7 @@ describe("reporting a person in a crew’s or Blend’s room by handle", () => {
     expect(done).toMatchObject({ status: 201, body: { data: { reported: true } } })
     const row = await db.user_reports.findFirstOrThrow({ where: { reporter_id: b1.id } })
     expect([a1.id, a2.id]).toContain(row.reported_id)
-    expect(row.description).toBe("In a Blend’s room. rude")
+    expect(row.description).toBe("In a Mix’s room. rude")
 
     // A crew's room: a crewmate by the crew's handle.
     const crew = (await api.detail(a1, w.A.crewId)).body.data

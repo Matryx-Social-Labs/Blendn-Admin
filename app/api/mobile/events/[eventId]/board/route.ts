@@ -2,12 +2,16 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { BOARD_CLOSED, boardRefusal, mayReadBoard } from "@/lib/board"
-import { boardPseudonyms, boardWriteDenial, checkBoardText, entitlementFor, hideBoardPostIfFlagged, visibleBoardRequests } from "@/lib/board-access"
+import { boardRefusal, lobbyPhase, lobbyState, lobbyStateRefusal, PHOTO_ALT_MAX, subKindFits, subKindsFor } from "@/lib/board"
+import { boardPseudonyms, boardWriteDenial, checkBoardText, hideBoardPostIfFlagged } from "@/lib/board-access"
+import { chatClosesAt, doorsAt } from "@/lib/chat-window"
 import { BOARD } from "@/lib/constants"
-import { blockCounterparties } from "@/lib/conversations"
-import { notStrangersTo } from "@/lib/room-people"
 import { db } from "@/lib/db"
+import { filteredWhere, hiddenAuthorsFor, hidesTickets, hostPostFor, livePostsWhere, lobbyCounts, lobbyEventSelect, matchRecipients, postSelect, shapePosts } from "@/lib/lobby"
+import { moderateLobbyPhoto } from "@/lib/lobby-photo"
+import { lobbyDoor } from "@/lib/lobby-route"
+import { notifyLobbyMatch } from "@/lib/push-notifications"
+import { discardSealedChatMedia, isOwnChatMedia, NOT_OWN_MEDIA, sealChatMedia } from "@/lib/validations/chat"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -41,128 +45,137 @@ interface RouteParams {
 /** How many of an author's own taken-down posts the board read lists. */
 const TAKEN_DOWN_SHOWN = 20
 
+const listQuerySchema = z.object({
+  kind: z.enum(["offer", "seeking", "chat"]).optional(),
+  subKind: z.enum(["ride", "spots", "ticket", "buddy"]).optional(),
+  /** "Mine", or "Replies to me" (`lib/lobby.ts`). */
+  filter: z.enum(["mine", "replies"]).optional(),
+})
+
 // GET /api/mobile/events/[eventId]/board
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const user = await getAuthenticatedUser(request)
-    if (!user) return unauthorizedResponse("Authentication required")
-
     const { eventId } = await params
-    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    /*
+     * Readable until the room closes (SCRUM-1026). It used to close for
+     * reading at doors, and the plans people had made there (who is driving
+     * whom) vanished at the moment they were needed. From doors it is
+     * read-only, and a day after the end it closes with the room.
+     */
+    const door = await lobbyDoor(request, eventId)
+    if (door instanceof Response) return door
+    const { userId, event, state } = door
 
-    const denied = await attendeeEventAccess(user.userId, eventId, "participate")
-    if (denied) return eventAccessResponse(denied)
-    const event = await db.events.findUnique({
-      where: { id: eventId, deleted_at: null },
-      select: { id: true, start_time: true },
-    })
-    if (!event) return notFoundResponse("Event not found")
-    // Closed for reading too, on the same clock the writes use. A board still
-    // readable after doors is a list of who came alone, open during the night.
-    if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
+    const filters = listQuerySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams))
+    if (!filters.success) return validationErrorResponse(filters.error)
+    const filter = { kind: filters.data.kind, subKind: filters.data.subKind, mine: filters.data.filter === "mine", replies: filters.data.filter === "replies" }
 
-    const denial = mayReadBoard(await entitlementFor(eventId, user.userId))
-    if (denial) {
-      const { message, reasonCode } = boardRefusal(denial, "read")
-      return errorResponse(message, 403, undefined, reasonCode)
-    }
-
-    // Both directions, as the ask already is: somebody who blocked you, or whom
-    // you blocked, is not on your board.
-    // And friends (the owner's rule): a board author is a pseudonym, and a friend must never meet a friend as one.
-    const blocked = [...(await blockCounterparties(user.userId)), ...(await notStrangersTo(user.userId))]
+    // Both directions, as the ask already is, and friends (the owner's rule): a friend must never meet a friend as a pseudonym.
+    const hidden = await hiddenAuthorsFor(userId)
 
     /*
-     * Live posts only, newest first, a page at a time (`?limit=` default 100, `?cursor=`), and the author as a pseudonym.
-     *
-     * `anonymous_name` comes from `chat_group_members`, the same handle the
-     * room uses — so somebody who posts on the board and then talks in the room
-     * is recognisably the same person to people at that event, and nobody
-     * else. A second naming scheme would either break that continuity or
-     * create a handle that follows them between events.
+     * Live posts only, newest first, a page at a time (`?limit=` default 100, `?cursor=`), filtered on the server
+     * (`?kind=`, `?subKind=`, `?filter=mine|replies`), and the author as a pseudonym — the room's handle, so somebody
+     * who posts here and then talks in the room is recognisably the same person at that event and nowhere else.
      */
     const query = parseListQuery(request.nextUrl.searchParams, LIST_PAGE.PEOPLE)
     if (query === "bad_cursor") return errorResponse("Invalid cursor", 400)
     const { limit, after } = query
 
-    const live = { event_id: eventId, deleted_at: null, author_id: { notIn: blocked } }
+    const base = livePostsWhere(event, hidden)
+    const where = filteredWhere(base, filter, userId)
     const [totalCount, rows] = await Promise.all([
-      db.board_posts.count({ where: live }),
+      db.board_posts.count({ where }),
       db.board_posts.findMany({
-      where: after ? { AND: [live, createdBefore(after)] } : live,
-      orderBy: NEWEST_FIRST,
-      take: limit + 1,
-      select: {
-        id: true,
-        kind: true,
-        body: true,
-        spaces_left: true,
-        created_at: true,
-        author_id: true,
-        // Not the silenced ones, except your own: see `visibleBoardRequests`.
-        _count: { select: { requests: { where: visibleBoardRequests(user.userId) } } },
-      },
-    }),
+        where: after ? { AND: [where, createdBefore(after)] } : where,
+        orderBy: NEWEST_FIRST,
+        take: limit + 1,
+        select: postSelect(userId),
+      }),
     ])
     const page = keysetPage(rows, limit, (p) => ({ at: p.created_at, id: p.id }))
-    const posts = page.items
-
-    const pseudonymOf = await boardPseudonyms(
-      eventId,
-      posts.map((p) => p.author_id)
-    )
+    const posts = await shapePosts(eventId, page.items, userId)
 
     /*
-     * Your own posts a moderator or the automatic check took down, so the app
-     * can say so (SV9). Yours only, newest first, a few: the author is the one
-     * person the board tells, and a withdrawal by the author is not here.
+     * The first page carries what the screen draws around the list: the
+     * counts for the filter chips, the host's pinned post, whether you can post
+     * (and if not, why — the composer's slot says it), and your own posts a
+     * moderator or the automatic check took down (SV9). Later pages are posts.
      */
-    const takenDown = after ? [] : await db.board_posts.findMany({
-      where: { event_id: eventId, author_id: user.userId, deleted_at: { not: null }, moderation_status: { in: ["removed", "hidden"] } },
-      orderBy: { deleted_at: "desc" },
-      take: TAKEN_DOWN_SHOWN,
-      select: { id: true, kind: true, body: true, created_at: true, deleted_at: true },
-    })
+    const first = after === null
+    const [counts, pinned, compose, takenDown, you] = first
+      ? await Promise.all([lobbyCounts(base, userId), hostPostFor(event), composeFor(eventId, userId, state), takenDownFor(eventId, userId), youAt(eventId, userId)])
+      : [null, null, null, [], null]
 
+    const ticketsHidden = hidesTickets(event)
     return successResponse({
-      takenDown: takenDown.map((p) => ({
-        id: p.id,
-        kind: p.kind,
-        body: p.body,
-        createdAt: p.created_at,
-        takenDownAt: p.deleted_at,
-      })),
-      posts: posts.map((p) => ({
-        id: p.id,
-        kind: p.kind,
-        body: p.body,
-        spacesLeft: p.spaces_left,
-        createdAt: p.created_at,
-        author: pseudonymOf.get(p.author_id) ?? "Attendee",
-        /** Yours, so the client can offer to withdraw rather than to answer. */
-        mine: p.author_id === user.userId,
-        /*
-         * A count, never who. The same rule the room's reactions follow: how
-         * many people have asked is useful, and naming them would disclose who
-         * is looking for company to everybody browsing.
-         */
-        requestCount: p._count.requests,
-      })),
+      state,
+      phase: lobbyPhase(state),
+      doorsAt: doorsAt(event),
+      closesAt: chatClosesAt(event),
+      ticketsHidden,
+      subKinds: subKindsFor(ticketsHidden),
+      ...(first && { counts, pinned, compose, you }),
+      takenDown,
+      posts,
       pagination: { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount } satisfies ListPagination,
     })
   } catch (error) {
     logger.error("Board read error", {
       error: error instanceof Error ? error.message : String(error),
     })
-    return serverErrorResponse("Failed to load the board")
+    return serverErrorResponse("Failed to load the Lobby")
   }
 }
 
+/**
+ * Your own room name at this event, for the composer's "Posting as" (C-A): the
+ * handle your posts go up under, which before your first post nothing else says.
+ * Yours only; the Lobby never names anybody else to the client.
+ */
+async function youAt(eventId: string, userId: string) {
+  const pseudonym = (await boardPseudonyms(eventId, [userId])).get(userId) ?? null
+  return { pseudonym }
+}
+
+/** Whether the caller may post now, and if not the sentence and `reasonCode` the composer's slot shows. */
+async function composeFor(eventId: string, userId: string, state: "open" | "read_only") {
+  if (state !== "open") return { allowed: false, ...lobbyStateRefusal(state) }
+  const denial = await boardWriteDenial(eventId, userId)
+  return denial ? { allowed: false, ...boardRefusal(denial, "write") } : { allowed: true, message: null, reasonCode: null }
+}
+
+/**
+ * Your own posts a moderator or the automatic check took down, so the app can
+ * say so (SV9). Yours only, newest first, a few: the author is the one person
+ * the Lobby tells, and a withdrawal by the author is not here.
+ */
+async function takenDownFor(eventId: string, userId: string) {
+  const rows = await db.board_posts.findMany({
+    where: { event_id: eventId, author_id: userId, deleted_at: { not: null }, moderation_status: { in: ["removed", "hidden"] } },
+    orderBy: { deleted_at: "desc" },
+    take: TAKEN_DOWN_SHOWN,
+    select: { id: true, kind: true, body: true, created_at: true, deleted_at: true },
+  })
+  return rows.map((p) => ({ id: p.id, kind: p.kind, body: p.body, createdAt: p.created_at, takenDownAt: p.deleted_at }))
+}
+
+const photoSchema = z.object({
+  /** The upload's `publicUrl` from `POST /uploads/presigned-url` (`folder: "chat"`): your own, on our bucket. */
+  url: z.string().url().max(2048),
+  /** What a screen reader says instead of "Photo". Optional. */
+  alt: z.string().trim().max(PHOTO_ALT_MAX).optional(),
+})
+
 const postSchema = z.object({
   kind: z.enum(["offer", "seeking", "chat"]),
+  /** What about: an offer of a `ride`, `spots` or a spare `ticket`; a search for a `ride`, somebody to go with (`buddy`) or a `ticket`. */
+  subKind: z.enum(["ride", "spots", "ticket", "buddy"]).optional(),
   body: z.string().trim().min(1, "Say something").max(BOARD.MAX_POST_LENGTH),
   /** Only meaningful on an offer; the CHECK constraint enforces that too. */
   spacesLeft: z.number().int().min(0).max(20).optional(),
+  /** One photo per post. */
+  photo: photoSchema.optional(),
 })
 
 // POST /api/mobile/events/[eventId]/board
@@ -183,24 +196,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const input = validation.data
 
     if (input.spacesLeft !== undefined && input.kind !== "offer") {
-      return errorResponse("Only an offer has spaces", 400)
+      return errorResponse("Only an offer has spots", 400)
     }
+    if (input.subKind && !subKindFits(input.kind, input.subKind)) {
+      return errorResponse("That type doesn’t go with that post", 400)
+    }
+    if (input.photo && !isOwnChatMedia(input.photo.url, user.userId)) return errorResponse(NOT_OWN_MEDIA, 400)
 
     /*
-     * The board closes at doors.
-     *
-     * After that the live room is the place, and it is gated on presence
-     * rather than intent. A board that stayed open would be a second room with
-     * a weaker gate running beside the real one.
+     * Posting ends at doors (SCRUM-1026): from then the Lobby is read-only and
+     * the room is the place, gated on presence rather than intent. A Lobby that
+     * stayed writable would be a second room with a weaker gate beside it.
      */
     const denied = await attendeeEventAccess(user.userId, eventId, "participate")
     if (denied) return eventAccessResponse(denied)
-    const event = await db.events.findUnique({
-      where: { id: eventId, deleted_at: null },
-      select: { id: true, start_time: true },
-    })
+    const event = await db.events.findUnique({ where: { id: eventId, deleted_at: null }, select: lobbyEventSelect })
     if (!event) return notFoundResponse("Event not found")
-    if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
+    const state = lobbyState(event)
+    if (state !== "open") {
+      const { message, reasonCode } = lobbyStateRefusal(state)
+      return errorResponse(message, 403, undefined, reasonCode)
+    }
+    // A ticket sold here cannot be passed on yet, so the Lobby does not carry one (owner decision 5).
+    if (input.subKind === "ticket" && hidesTickets(event)) {
+      return errorResponse("Tickets for this event are sold on Blend’n and can’t be passed on in the Lobby yet", 422, undefined, "LOBBY_TICKETS_HIDDEN")
+    }
 
     const denial = await boardWriteDenial(eventId, user.userId)
     if (denial) {
@@ -212,16 +232,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const verdict = await checkBoardText(input.body)
     if (verdict.refusal) return errorResponse(verdict.refusal, 422)
 
-    const created = await db.board_posts.create({
-      data: {
-        event_id: eventId,
-        author_id: user.userId,
-        kind: input.kind,
-        body: input.body,
-        ...(input.spacesLeft !== undefined && { spaces_left: input.spacesLeft }),
-      },
-      select: { id: true, kind: true, body: true, spaces_left: true, created_at: true },
-    })
+    // The server's own copy, with its location stripped; others see it once moderation approves it.
+    const sealed = input.photo ? await sealChatMedia(input.photo.url, user.userId) : null
+    if (sealed && "refusal" in sealed) return errorResponse(sealed.refusal, 422)
+
+    let created
+    try {
+      created = await db.board_posts.create({
+        data: {
+          event_id: eventId,
+          author_id: user.userId,
+          kind: input.kind,
+          ...(input.subKind && { sub_kind: input.subKind }),
+          body: input.body,
+          // A spare ticket is one ticket: "1 left" unless they say otherwise.
+          ...(input.spacesLeft !== undefined
+            ? { spaces_left: input.spacesLeft }
+            : input.kind === "offer" && input.subKind === "ticket" && { spaces_left: 1 }),
+          ...(sealed && { photo_url: sealed.url, photo_status: "pending" as const, ...(input.photo?.alt && { photo_alt: input.photo.alt }) }),
+        },
+        select: postSelect(user.userId),
+      })
+    } catch (error) {
+      await discardSealedChatMedia(sealed)
+      throw error
+    }
 
     // OpenAI ran out of time: look again without the bound, as the room does.
     if (verdict.unchecked) {
@@ -232,17 +267,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         })
       )
     }
+    // The photo's own check, after the response; the sweep retries one that does not land.
+    if (sealed) void moderateLobbyPhoto(created.id)
+    // "Someone offers what you're looking for", to the people who asked to hear it.
+    if (created.kind === "offer" && created.sub_kind && created.sub_kind !== "buddy") {
+      const subKind = created.sub_kind
+      void matchRecipients({ event_id: eventId, author_id: user.userId, sub_kind: subKind })
+        .then((ids) => notifyLobbyMatch(ids, event, created.id, subKind))
+        .catch((error) => logger.warn("Lobby match push failed", { postId: created.id, error: String(error) }))
+    }
 
-    return successResponse(
-      {
-        id: created.id,
-        kind: created.kind,
-        body: created.body,
-        spacesLeft: created.spaces_left,
-        createdAt: created.created_at,
-      },
-      201
-    )
+    const [shaped] = await shapePosts(eventId, [created], user.userId)
+    return successResponse(shaped, 201)
   } catch (error) {
     logger.error("Board post error", {
       error: error instanceof Error ? error.message : String(error),

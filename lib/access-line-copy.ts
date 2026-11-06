@@ -34,7 +34,7 @@ export function analyticsAccessLine(access: AnalyticsPageView["access"], day: (i
   if (access.reason === "free_window" && access.freeUntil && first) {
     return {
       headline: `Open until ${day(access.freeUntil)}`,
-      detail: `${first.title}, ${FIRST_EVENT_RULE}, ended ${day(first.endedAt)}. Everything here is open until 30 days after it. After that ${first.title} stays open for good, and an Event Pass or Analytics opens the rest.`,
+      detail: `${first.title}, ${FIRST_EVENT_RULE}, ended ${day(first.endedAt)}. Everything here is open until 30 days after it. After that ${first.title} stays open for good, and Event Insights or Analytics opens the rest.`,
     }
   }
   if (access.reason === "free_window") {
@@ -46,7 +46,7 @@ export function analyticsAccessLine(access: AnalyticsPageView["access"], day: (i
   return {
     headline: "Free plan",
     detail: first
-      ? `${first.title} stays open for good. An Event Pass opens another event; Analytics opens everything.`
-      : "An Event Pass opens one event; Analytics opens everything.",
+      ? `${first.title} stays open for good. Event Insights opens another event; Analytics opens everything.`
+      : "Event Insights opens one event; Analytics opens everything.",
   }
 }

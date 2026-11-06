@@ -108,7 +108,7 @@ export function cityRowFrom(raw: CityInput): CityRowInput {
   const [centreLon, minLon, maxLon] = [lon(input.centreLon), lon(input.minLon), lon(input.maxLon)]
   if (!(minLat < maxLat && minLon < maxLon)) throw new Refusal("Min must be less than max.")
   if (centreLat < minLat || centreLat > maxLat || centreLon < minLon || centreLon > maxLon) {
-    throw new Refusal("The centre must sit inside the bounds.")
+    throw new Refusal("The center must sit inside the bounds.")
   }
 
   const ageText = String(input.licensedMinAge ?? "").trim()

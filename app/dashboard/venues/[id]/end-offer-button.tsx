@@ -26,7 +26,7 @@ export function EndOfferButton({ offerId }: { offerId: string }) {
     start(async () => {
       try {
         await endOffer({ offerId, reason })
-        toast.success("Offer ended. Its passes no longer work.")
+        toast.success("Offer ended. Its offer codes no longer work.")
         setOpen(false)
         router.refresh()
       } catch (err) {

@@ -318,7 +318,7 @@ describe("what an admin types is checked before anything is written", () => {
     [{ name: " " }, "Name the city."],
     [{ matchNames: " , " }, "At least one spelling, comma-separated."],
     [{ minLat: 12 }, "Min must be less than max."],
-    [{ centreLat: 30 }, "The centre must sit inside the bounds."],
+    [{ centreLat: 30 }, "The center must sit inside the bounds."],
     [{ licensedMinAge: "17" }, "A whole number from 18 to 21, or leave it empty."],
     [{ licensedMinAge: "22" }, "A whole number from 18 to 21, or leave it empty."],
     [{ centreLat: 91, minLat: 10, maxLat: 11 }, "Latitude is between -90 and 90."],

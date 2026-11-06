@@ -41,7 +41,7 @@ export async function canJoinChat(userId: string, chatGroupId: string): Promise<
       chat_group: {
         select: {
           kind: true,
-          event: { select: { status: true, deleted_at: true, kind: true } },
+          event: { select: { status: true, deleted_at: true, kind: true, start_time: true, end_time: true } },
         },
       },
     },

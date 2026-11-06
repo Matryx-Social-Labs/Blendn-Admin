@@ -239,7 +239,7 @@ export function EventPassBuy({
   const eventId = events.find((e) => e.id === chosen)?.id ?? events[0]?.id ?? ""
 
   if (events.length === 0) {
-    return <p className="text-[0.8125rem] text-muted-foreground">Every event you have already has a pass, or you haven&apos;t run one yet.</p>
+    return <p className="text-[0.8125rem] text-muted-foreground">Every event you have already has Event Insights, or you haven&apos;t run one yet.</p>
   }
 
   function onBuy() {
@@ -249,7 +249,7 @@ export function EventPassBuy({
       try {
         const checkout = await startEventPassCheckout(eventId)
         open(
-          { key: checkout.keyId, order_id: checkout.orderId, amount: checkout.amountMinor, currency: "INR", description: `Event Pass · ${price} incl. GST` },
+          { key: checkout.keyId, order_id: checkout.orderId, amount: checkout.amountMinor, currency: "INR", description: `Event Insights · ${price} incl. GST` },
           "pass",
           checkout.orderId
         )
@@ -276,7 +276,7 @@ export function EventPassBuy({
         </select>
       </label>
       <Button ref={button} variant="outline" aria-disabled={!buy.usable || busy || !eventId} onClick={onBuy}>
-        {busy ? "Starting…" : `Buy Event Pass · ${price}`}
+        {busy ? "Starting…" : `Buy Event Insights · ${price}`}
       </Button>
       <Unavailable reason={buy.reason} failed={buy.failed} retry={buy.retry} />
       <Failure message={failure} />

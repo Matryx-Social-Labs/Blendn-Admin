@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, ListPaginationSchema, ListQuerySchema, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
+import { ErrorResponseSchema, MODERATION_UNAVAILABLE_NOTE, moderationUnavailableError, PARTICIPATION_GATE, standardErrors, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
   EventQuerySchema,
   CheckinRequestSchema,
@@ -78,127 +78,15 @@ registry.registerPath({
   },
 })
 
-registry.registerPath({
-  method: "get",
-  path: "/api/mobile/events/{eventId}/board",
-  tags: ["Mobile Events"],
-  summary: "The pre-event board",
-  description:
-    PARTICIPATION_GATE +
-    "Going alone, and looking for somebody to go with. Readable by anyone who " +
-    "RSVP'd or favourited — somebody deciding whether to go is exactly who it is " +
-    "for. Authors are pseudonyms, the same handle the room uses; the request " +
-    "count is a number and never a list of who asked. An age-restricted event's " +
-    "board answers 403 `AGE_RESTRICTED` for an under-age or unknown age (`reasonCode` `AGE_UNKNOWN` for the latter), before " +
-    "the RSVP/favourite gate. Closed once the doors open (`start_time`): 403 " +
-    "\"The board closes when the doors open — the room is open instead\". Posts " +
-    "by anybody blocked either way are left out.",
-  security: bearerAuth,
-  request: { params: z.object({ eventId: z.string() }), query: ListQuerySchema },
-  responses: {
-    200: {
-      description: "Live posts, newest first, a page at a time (`?limit=` default 100, at most 100; `?cursor=`)",
-      content: {
-        "application/json": {
-          schema: wrap(
-            z.object({
-              posts: z.array(
-                z.object({
-                  id: z.string(),
-                  kind: z.enum(["offer", "seeking", "chat"]),
-                  body: z.string(),
-                  spacesLeft: z.number().nullable(),
-                  createdAt: z.string(),
-                  author: z.string(),
-                  mine: z.boolean(),
-                  requestCount: z.number(),
-                })
-              ),
-              pagination: ListPaginationSchema,
-              takenDown: z
-                .array(
-                  z.object({
-                    id: z.string(),
-                    kind: z.enum(["offer", "seeking", "chat"]),
-                    body: z.string(),
-                    createdAt: z.string(),
-                    takenDownAt: z.string(),
-                  })
-                )
-                .optional()
-                .describe(
-                  "YOUR posts a moderator or the automatic check took down, newest first, at most 20 (SV9). Yours only: another reader gets []. Your own withdrawals are not here. A `board_post_removed` push, bell row and `board:postRemoved` socket event say so when it happens."
-                ),
-            })
-          ),
-        },
-      },
-    },
-    ...standardErrors,
-  },
-})
-
-registry.registerPath({
-  method: "post",
-  path: "/api/mobile/events/{eventId}/board",
-  tags: ["Mobile Events"],
-  summary: "Post to the board",
-  description:
-    PARTICIPATION_GATE +
-    "Requires RSVP 'going' (not merely committed — offering a seat in a car you " +
-    "may not be driving to is worse than not offering), a complete profile, and " +
-    "room under both request caps. Closes when the doors open: after that the " +
-    "room is the place, and it is gated on presence rather than intent. The " +
-    "text gets the room's checks before it is stored (keywords, contact " +
-    "details, OpenAI); a hit is a 422 and nothing is stored — contact details " +
-    "say so, anything else reads \"This can't go on the board.\"",
-  security: bearerAuth,
-  request: {
-    params: z.object({ eventId: z.string() }),
-    body: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            kind: z.enum(["offer", "seeking", "chat"]),
-            body: z.string().min(1).max(500),
-            spacesLeft: z.number().int().min(0).max(20).optional(),
-          }),
-        },
-      },
-    },
-  },
-  responses: {
-    201: {
-      description: "Posted",
-      content: {
-        "application/json": {
-          schema: wrap(
-            z.object({
-              id: z.string(),
-              kind: z.string(),
-              body: z.string(),
-              spacesLeft: z.number().nullable(),
-              createdAt: z.string(),
-            })
-          ),
-        },
-      },
-    },
-    ...standardErrors,
-    422: {
-      description: "Refused by moderation; nothing stored",
-      content: { "application/json": { schema: ErrorResponseSchema } },
-    },
-  },
-})
+// GET and POST /api/mobile/events/{eventId}/board: lib/openapi/paths/mobile-lobby.ts
 
 registry.registerPath({
   method: "delete",
   path: "/api/mobile/events/{eventId}/board/{postId}",
   tags: ["Mobile Events"],
-  summary: "Withdraw your own board post",
+  summary: "Withdraw your own Lobby post",
   description:
-    "Soft — the post leaves every board read, and requests filed against it " +
+    "Soft — the post leaves every Lobby read, and requests filed against it " +
     "stop counting toward their senders' caps. Somebody else's post, or one " +
     "already withdrawn, is a 404.",
   security: bearerAuth,
@@ -321,7 +209,7 @@ registry.registerPath({
     "403 `AGE_RESTRICTED` for a viewer below the line (see lib/event-access.ts), and `reasonCode` says which refusal it is: " +
     "`AGE_RESTRICTED` (a known age below the line), `AGE_UNKNOWN`, `PROFILE_INCOMPLETE`, and for an event hidden because its " +
     "organisation was suspended a 404 `NOT_FOUND` with `reasonCode` `ORGANISER_SUSPENDED`, which every route that refuses such an event " +
-    "says the same way to the same people (RSVP, save, board, room preview, the door, the guest list, crews, chat). " +
+    "says the same way to the same people (RSVP, save, Lobby, room preview, the door, the guest list, crews, chat). " +
     "Also carries `changedAt`/`changedFields`/`changedFrom` (changed while you are going) and `days`/`dayCount`/`dayNumber` (a multi-day run).",
   security: bearerAuth,
   request: {
@@ -754,7 +642,7 @@ registry.registerPath({
     "\"Room for one more\" on and 6 or fewer active members (403). About the person, nothing is said: if they are not here now, not opted in " +
     "to crews tonight, kept apart from anybody in the crew (a block or a closed conversation), or — when your crew is out for dating — not " +
     "out for dating too, the answer is `{ liked: true, blend: null }`, exactly as for a like that stood, and nothing is stored. " +
-    "Answers `{ liked: true, blend }`: `blend` is the Blend room when they had liked your crew. Nothing is said in your crew chat: a line only for a like that stood would tell the crew what the answer hides.",
+    "Answers `{ liked: true, blend }`: `blend` is the Mix room when they had liked your crew. Nothing is said in your crew chat: a line only for a like that stood would tell the crew what the answer hides.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -896,10 +784,10 @@ registry.registerPath({
 const RoomNotOpenYetSchema = z
   .object({
     success: z.literal(false),
-    error: z.string().describe("\"This chat opens 24 hours before the event starts.\""),
+    error: z.string().describe("\"The room opens when the doors open.\""),
     errorCode: z.literal("CHAT_CLOSED"),
     reasonCode: z.literal("NOT_OPEN_YET"),
-    opensAt: z.string().datetime().nullable().describe("When the room opens: the event's start minus 24 hours."),
+    opensAt: z.string().datetime().nullable().describe("When the room opens: at doors, 90 minutes before the event's start (when check-in opens). There is no pre-event room any more: the Lobby is the only \"before\" (SCRUM-1026)."),
     chatGroupId: z.string().uuid().optional().describe("Only when the room already exists. Reading it does not join you."),
   })
   .openapi("RoomNotOpenYet")
@@ -913,7 +801,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/chat",
   tags: ["Mobile Events"],
   summary: "Get event chat messages (must be checked in)",
-  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP inside the pre-event window); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404. Somebody who left the room themselves is NOT rejoined: 403 `LEFT_ROOM` with `chatGroupId` in the body (rejoin with `DELETE /chat/groups/{chatGroupId}/leave`, or by checking in). `mute` is your own mute of the room's pushes." + NOT_OPEN_YET_NOTE,
+  description: "Returns paginated messages. Moderation-hidden messages are included for the sender only, with `content: null` and `moderation_hidden: true` — render these as placeholders. A non-member is joined if entitled (checked in, or RSVP going or saved while the room is open: from doors to a day after the end); a `banned` member is refused 403 `USER_BANNED` instead of being served the room; a draft event answers 404. Somebody who left the room themselves is NOT rejoined: 403 `LEFT_ROOM` with `chatGroupId` in the body (rejoin with `DELETE /chat/groups/{chatGroupId}/leave`, or by checking in). `mute` is your own mute of the room's pushes. A day after the event ends the room is closed to everyone, members included: 403 `CHAT_CLOSED` with `reasonCode` `ROOM_CLOSED` (SCRUM-1026; it is kept server-side only, then purged)." + NOT_OPEN_YET_NOTE,
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
@@ -1093,10 +981,10 @@ registry.registerPath({
   method: "get",
   path: "/api/mobile/board/requests",
   tags: ["Mobile Events"],
-  summary: "Your board requests, both directions",
+  summary: "Your Lobby requests, both directions",
   description:
     "Not scoped to an event: a request is answered from a notification days " +
-    "after the board was last opened. Pending first, then newest — a decided " +
+    "after the Lobby was last opened. Pending first, then newest — a decided " +
     "request is history and an undecided one is a person waiting. A decline is " +
     "never delivered: in `outgoing` a declined ask reads `status: \"pending\"`, " +
     "`decidedAt: null`, live until it lapses with its event or post, and sorts " +
@@ -1148,8 +1036,8 @@ const blocked = {
   content: { "application/json": { schema: wrap(z.object({ blocked: z.literal(true) })) } },
 }
 const BY_POST =
-  "The board never gives the client a user id, so the author is resolved on the server " +
-  "and never returned. Allowed for anyone who can read this event's board (RSVP'd or " +
+  "The Lobby never gives the client a user id, so the author is resolved on the server " +
+  "and never returned. Allowed for anyone who can read this event's Lobby (RSVP'd or " +
   "favourited) or has an ask on the post — a withdrawn or removed post included. " +
   "Anything else, including no such post, is 404. Your own post is 400."
 
@@ -1157,10 +1045,10 @@ registry.registerPath({
   method: "post",
   path: "/api/mobile/events/{eventId}/board/{postId}/report",
   tags: ["Mobile Events"],
-  summary: "Report a board post",
+  summary: "Report a Lobby post",
   description:
     BY_POST +
-    " Lands in the admin reports queue as \"Board · offer|seeking|chat\" (stored in " +
+    " Lands in the admin reports queue as \"Lobby · offer|seeking|chat\" (stored in " +
     "`message_reports` as `message_type: \"board_post\"`). Rate limited per user.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string(), postId: z.string() }), ...boardReportBody },
@@ -1171,7 +1059,7 @@ registry.registerPath({
   method: "post",
   path: "/api/mobile/events/{eventId}/board/{postId}/block",
   tags: ["Mobile Events"],
-  summary: "Block a board post's author",
+  summary: "Block a Lobby post's author",
   description: BY_POST + " Then exactly POST /users/{userId}/block for that author.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string(), postId: z.string() }) },
@@ -1182,11 +1070,11 @@ registry.registerPath({
   method: "post",
   path: "/api/mobile/board/requests/{requestId}/report",
   tags: ["Mobile Events"],
-  summary: "Report a board ask",
+  summary: "Report a Lobby ask",
   description:
     "Either of the ask's two people may report it; the report is about the other one, " +
     "resolved on the server and never returned. Anyone else, or no such ask, is 404. Lands " +
-    "in the admin reports queue as \"Board ask\" (`message_type: \"board_request\"`). " +
+    "in the admin reports queue as \"Lobby ask\" (`message_type: \"board_request\"`). " +
     "Rate limited per user.",
   security: bearerAuth,
   request: { params: z.object({ requestId: z.string() }), ...boardReportBody },
@@ -1197,7 +1085,7 @@ registry.registerPath({
   method: "post",
   path: "/api/mobile/board/requests/{requestId}/block",
   tags: ["Mobile Events"],
-  summary: "Block the other person on a board ask",
+  summary: "Block the other person on a Lobby ask",
   description:
     "Either of the ask's two people may block the other, by the ask. Anyone else, or no " +
     "such ask, is 404. Then exactly POST /users/{userId}/block for that person.",
@@ -1210,13 +1098,13 @@ registry.registerPath({
   method: "patch",
   path: "/api/mobile/board/requests/{requestId}",
   tags: ["Mobile Events"],
-  summary: "Answer a board request",
+  summary: "Answer a Lobby request",
   description:
     "Accept or decline if you were asked; withdraw if you did the asking — " +
     "'withdrawn' is a separate status from 'declined' because afterwards, " +
     "which of the two people ended it is the thing worth knowing. Accepting " +
     "opens a pseudonymous conversation scoped to the event, marked with its " +
-    "board request so the client can tell it from a match. Still possible " +
+    "Lobby request so the client can tell it from a match. Still possible " +
     "after the doors open: a pending request holds a slot in the asker's cap, " +
     "so an unanswerable one would consume it for ever. Accepting an `offer` " +
     "with a number of seats spends one atomically; the last seat goes to " +

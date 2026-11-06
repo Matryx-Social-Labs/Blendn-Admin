@@ -160,7 +160,7 @@ export default async function TicketsPage({
           {summary.refunds.length === 0 ? (
             <p className="text-sm text-muted-foreground">No refunds.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-[0.75rem] text-faint-foreground">
@@ -310,7 +310,7 @@ function SalesPanel({
   const from = sales.total ? (sales.page - 1) * SALES_PAGE_SIZE + 1 : 0
   const to = Math.min(sales.total, sales.page * SALES_PAGE_SIZE)
   const pages = pageList(sales.page, sales.pages)
-  const select = "h-8 rounded-md border border-input bg-transparent px-2.5 text-[0.8125rem] dark:bg-input/30 pointer-coarse:h-11"
+  const select = "h-8 min-w-0 max-w-full rounded-md border border-input bg-transparent px-2.5 text-[0.8125rem] dark:bg-input/30 pointer-coarse:h-11"
 
   return (
     <Panel title={<span id="sales">Sales</span>} hint="Buyers appear as their attendee label, as in Attendees and the exports.">
@@ -342,7 +342,7 @@ function SalesPanel({
       {sales.rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">{query.q || query.typeId || query.status !== "all" ? "No orders match." : "No orders yet."}</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[0.75rem] text-faint-foreground">

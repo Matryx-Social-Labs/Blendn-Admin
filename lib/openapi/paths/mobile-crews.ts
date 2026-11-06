@@ -179,7 +179,7 @@ registry.registerPath({
   summary: "Report a crew's card",
   description:
     "Its name or bio. Reaches the admin queue with the name and bio as they read now; a moderator can hide the crew (no card, likes or " +
-    "Blends; its members keep it) or dissolve it. Nobody in the crew is told. A second report from you while the first waits is the same " +
+    "Mixes; its members keep it) or dissolve it. Nobody in the crew is told. A second report from you while the first waits is the same " +
     "report (201 either way). 404 for a crew that is not there. Capped per minute and per day.",
   security: bearerAuth,
   request: {
@@ -351,9 +351,9 @@ registry.registerPath({
     "to crews tonight (403), and the crew must have room for one more, be 6 or fewer active members, and not be out for dating unless you are. " +
     "403 when the host turned crews off. A crew not here (or hidden), anybody on one side kept apart from anybody on the other (a block or a " +
     "closed conversation — asked again inside the transaction that would write the like, so nothing is stored), two crews sharing a member, " +
-    "or a guardrail about the other side is the same 404. If they liked you back, `blend` is the one Blend room it made — two likes at the " +
-    "same instant still make one; a Blend between you that has closed answers `blend: null`. Liking twice is liking once. Nothing anywhere " +
-    "says who liked first. The Blend's room is the people checked in on either side at that moment (and the person): somebody who arrives " +
+    "or a guardrail about the other side is the same 404. If they liked you back, `blend` is the one Mix room it made — two likes at the " +
+    "same instant still make one; a Mix between you that has closed answers `blend: null`. Liking twice is liking once. Nothing anywhere " +
+    "says who liked first. The Mix's room is the people checked in on either side at that moment (and the person): somebody who arrives " +
     "later is not in it.",
   security: bearerAuth,
   request: {
@@ -370,12 +370,12 @@ registry.registerPath({
   method: "post",
   path: "/api/mobile/blends/{blendId}/reveal",
   tags,
-  summary: "Reveal my crew in this Blend",
+  summary: "Reveal my crew in this Mix",
   description:
-    "One tap, in an open Blend I am in: each member of my crew who is checked in now and in this Blend's room, except anybody who has " +
+    "One tap, in an open Mix I am in: each member of my crew who is checked in now and in this Mix's room, except anybody who has " +
     "switched on \"keep me anonymous\" (read again as it is written) — consent was taken when they joined. The matched person in a crew ↔ " +
-    "person Blend reveals only themselves. Shown to this Blend's people, by first name and one photo, and to nobody else: not the event's " +
-    "room or its deck, not a DM, not another Blend. Never un-revealed by anything later (D-10). 404 for a Blend that is not open or not mine. " +
+    "person Mix reveals only themselves. Shown to this Mix's people, by first name and one photo, and to nobody else: not the event's " +
+    "room or its deck, not a DM, not another Mix. Never un-revealed by anything later (D-10). 404 for a Mix that is not open or not mine. " +
     "No count comes back: who of your crew revealed and who kept private is never told to your own crew.",
   security: bearerAuth,
   request: { params: z.object({ blendId: z.string().uuid() }) },
@@ -390,9 +390,9 @@ registry.registerPath({
 
 const BlendPersonSchema = z
   .object({
-    userId: z.string().describe("Yours is your own id; anyone else's is their handle in the Blend's room"),
+    userId: z.string().describe("Yours is your own id; anyone else's is their handle in the Mix's room"),
     pseudonym: z.string().describe("Tonight's pseudonym"),
-    name: z.string().nullable().describe("First name, only when revealed in this Blend, or recognised in the event's room"),
+    name: z.string().nullable().describe("First name, only when revealed in this Mix, or recognised in the event's room"),
     photo: z.string().nullable(),
   })
   .openapi("BlendPerson")
@@ -401,20 +401,20 @@ registry.registerPath({
   method: "get",
   path: "/api/mobile/blends",
   tags,
-  summary: "My open Blends",
+  summary: "My open Mixes",
   description:
-    "Each Blend I am let into now: its room (`chatGroupId`, a room of kind `blend`), when it closes (the occurrence's end + 12 h, or earlier " +
+    "Each Mix I am let into now: its room (`chatGroupId`, a room of kind `blend`), when it closes (the occurrence's end + 12 h, or earlier " +
     "when a side's crew dissolves or is hidden), and its two sides — the people who were here when it matched, by tonight's pseudonym, " +
-    "named only when revealed in this Blend (or recognised in the event's room), with \"N revealed · M keep it private\" for THEIR crew. " +
+    "named only when revealed in this Mix (or recognised in the event's room), with \"N revealed · M keep it private\" for THEIR crew. " +
     "My own side is a count and me (`mine: true`, `people` = me alone, `revealed`/`keptPrivate` null): which crewmate revealed and " +
     "which kept private is never told to the crew. Never " +
     "somebody kept apart from me (a block or a closed conversation), nor anybody who turned \"show online\" off. A block across the " +
-    "sides takes that pair out of the Blend; it goes on for everyone else. Anyone may leave it on their own " +
+    "sides takes that pair out of the Mix; it goes on for everyone else. Anyone may leave it on their own " +
     "(`POST /chat/groups/{chatGroupId}/leave`).",
   security: bearerAuth,
   responses: {
     200: {
-      description: "Blends",
+      description: "Mixes",
       ...json(
         wrap(
           z.object({
@@ -436,7 +436,7 @@ registry.registerPath({
                     keptPrivate: z.number().int().nullable().describe("Their side only; null on mine"),
                     revealedCount: z.number().int().nullable().describe("Same number as `revealed`, under the name the reveal toast reads. Their side only; null on mine"),
                     privateCount: z.number().int().nullable().describe("Same number as `keptPrivate`. Their side only; null on mine"),
-                    crewRevealed: z.boolean().nullable().describe("Mine only (null on theirs): whether anybody on my side has tapped reveal in this Blend. Stored per side at the tap, whoever consented: never which member"),
+                    crewRevealed: z.boolean().nullable().describe("Mine only (null on theirs): whether anybody on my side has tapped reveal in this Mix. Stored per side at the tap, whoever consented: never which member"),
                     people: z.array(BlendPersonSchema).describe("Their side: each person. Mine: me alone"),
                   })
                 ),

@@ -375,7 +375,7 @@ export async function startEventPassCheckout(eventId: string): Promise<OrderChec
         throw new Refusal("Analytics already covers every event your organisation runs.")
       }
       if (await hasEntitlement(subject, "event_pass", { eventId: id })) {
-        throw new Refusal("That event already has an Event Pass.")
+        throw new Refusal("That event already has Event Insights.")
       }
       // Nothing to sell while it is open anyway: the free window, or the first
       // event that cleared the floor (lib/analytics-access.ts).

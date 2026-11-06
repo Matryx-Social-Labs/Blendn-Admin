@@ -52,7 +52,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         id: true,
         kind: true,
         event_id: true,
-        event: { select: { status: true, deleted_at: true, kind: true } },
+        event: { select: { status: true, deleted_at: true, kind: true, start_time: true, end_time: true } },
       },
     })
     // The owner's door, for this room's kind alone (`withOwnerDoor`).

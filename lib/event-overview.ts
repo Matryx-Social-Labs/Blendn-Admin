@@ -4,7 +4,7 @@ import { discloseHeadcount, discloseStars, liveCountBucket, liveCountLabel, MIN_
 import { publishedRatingGroups } from "@/lib/rating-batches"
 import { phoneCheckInRadius } from "@/lib/geofence"
 import { distinctAttendees, turnUpPct as turnUp } from "@/lib/counting"
-import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
+import { DOORS_LEAD_MINUTES } from "@/lib/chat-window"
 import { eventStateFor, publishBlockers, type EventState, type PublishBlocker } from "@/lib/event-phase"
 
 /**
@@ -198,8 +198,9 @@ export async function getEventOverview(
             },
             {
               label: "Room opens",
-              value: `${PRE_EVENT_CHAT_HOURS}h before`,
-              hint: "the chat, for people who said they are going",
+              // At doors, with check-in: the Lobby is the only "before" now (SCRUM-1026).
+              value: "At doors",
+              hint: `${DOORS_LEAD_MINUTES} min before the start, when check-in opens`,
             },
             {
               label: "Check-in fence",

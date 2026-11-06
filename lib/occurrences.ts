@@ -1,6 +1,7 @@
 // Relative, not "@/lib/db" — reachable from server.ts via lib/occupancy.ts, and
 // `build:server` emits the alias verbatim into the require(). Enforced by
 // __tests__/server-import-boundary.test.ts.
+import { DOORS_LEAD_MINUTES } from "./chat-window"
 import { db } from "./db"
 
 /**
@@ -23,7 +24,7 @@ export interface OccurrenceSlot {
 }
 
 /** How far before a session's start check-in opens. Doors, not the programme. */
-export const CHECK_IN_LEAD_MINUTES = 90
+export const CHECK_IN_LEAD_MINUTES = DOORS_LEAD_MINUTES
 
 /**
  * Whether people can still be arriving: from the doors, `CHECK_IN_LEAD_MINUTES`

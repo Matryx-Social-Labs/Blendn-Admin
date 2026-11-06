@@ -37,7 +37,7 @@ import { hereNowAt } from "./presence"
  * who on it revealed and who kept anonymous is never told to your own crew.
  */
 
-const NO_BLEND: CrewRefusal = { refusal: "Blend not found", status: 404 }
+const NO_BLEND: CrewRefusal = { refusal: "Mix not found", status: 404 }
 
 const inRoom = { status: { in: ["active" as const, "muted" as const] }, left_at: null }
 

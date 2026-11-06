@@ -363,8 +363,8 @@ async function announceBlend(blend: { blendId: string; chatGroupId: string }, li
     if (userIds.length === 0) return
     await sendBulkPushNotifications({
       userIds,
-      title: "It’s a Blend",
-      body: "Your crew and another matched tonight. Say hi in the Blend.",
+      title: "It’s a Mix",
+      body: "Your crew and another matched tonight. Say hi in the Mix.",
       data: { type: "blend", blendId: blend.blendId, chatGroupId: blend.chatGroupId },
     })
   } catch (error) {

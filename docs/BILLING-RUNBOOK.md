@@ -174,7 +174,7 @@ Analytics keeps its own index.
   well, cancel the subscription at Razorpay, or Revoke on the organisation.
 - A refund Razorpay delivered before its payment (`payment_events.error`
   `unknown_ref`) is applied when the payment lands: a subscription charge,
-  an Event Pass or a link. The earlier delivery is then marked processed.
+  Event Insights or a link. The earlier delivery is then marked processed.
 - A dispute opened or lost ends it; a dispute won restores it.
 - `entitlement.duplicate_pass` in `audit_logs` (and a logger error) means an
   organisation paid twice for one event's pass. Refund the second order from

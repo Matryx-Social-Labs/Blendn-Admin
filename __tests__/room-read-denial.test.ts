@@ -8,7 +8,8 @@ import { bannedRefusal } from "@/lib/moderation/actions"
  * Who may read a room (SCRUM-205). One rule for the socket join and every
  * HTTP read; the integration test drives it through the three routes.
  */
-const published = { status: "published", deleted_at: null, kind: "event" as const }
+// Ends tomorrow: open. The close is pinned below.
+const published = { status: "published", deleted_at: null, kind: "event" as const, end_time: new Date(Date.now() + 86_400_000) }
 
 it.each([
   ["active", null],
@@ -31,11 +32,32 @@ it("refuses somebody with no membership row", () => {
 })
 
 it("hides a draft event's room even from an active member", () => {
-  expect(roomReadDenial({ status: "active", left_at: null, last_allowed_at: null }, { status: "draft", deleted_at: null, kind: "event" })).toBe("hidden")
+  expect(roomReadDenial({ status: "active", left_at: null, last_allowed_at: null }, { ...published, status: "draft" })).toBe("hidden")
 })
 
 it("hides a deleted event's room even from an active member (SCRUM-303)", () => {
-  expect(roomReadDenial({ status: "active", left_at: null, last_allowed_at: null }, { status: "published", deleted_at: new Date(), kind: "event" })).toBe("hidden")
+  expect(roomReadDenial({ status: "active", left_at: null, last_allowed_at: null }, { ...published, deleted_at: new Date() })).toBe("hidden")
+})
+
+describe("a closed room is gone (SCRUM-1026)", () => {
+  const ENDS = new Date("2026-08-16T22:00:00Z")
+  const ended = { status: "published", deleted_at: null, kind: "event" as const, end_time: ENDS }
+  const member = { status: "left", left_at: null, last_allowed_at: null }
+  const hoursAfter = (h: number) => new Date(ENDS.getTime() + h * 3_600_000)
+
+  it("is read by its members until a day after the end", () => {
+    expect(roomReadDenial(member, ended, hoursAfter(23.9))).toBeNull()
+  })
+
+  it("is hidden from everyone, members included, from a day after the end", () => {
+    expect(roomReadDenial(member, ended, hoursAfter(24))).toBe("hidden")
+    expect(roomReadDenial({ ...member, status: "active" }, ended, hoursAfter(24 * 30))).toBe("hidden")
+  })
+
+  it("leaves a venue day to its own clock (the reset, answered as not_live)", () => {
+    const day = { ...ended, kind: "venue_day" as const }
+    expect(roomReadDenial({ status: "active", left_at: null, last_allowed_at: hoursAfter(-1) }, day, hoursAfter(25))).toBe("not_live")
+  })
 })
 
 it("says who removed them", () => {
