@@ -5,7 +5,8 @@ import { errorResponse } from "@/lib/api-response"
 import { isUuid, readJson } from "@/lib/api-input"
 import { auditInTx, getRequestIp } from "@/lib/audit-log"
 import { getAuth } from "@/lib/auth"
-import { HOST_POST_MAX, lobbyState } from "@/lib/board"
+import { lobbyState } from "@/lib/board"
+import { BOARD } from "@/lib/constants"
 import { db } from "@/lib/db"
 import { hostPostFor, lobbyEventSelect } from "@/lib/lobby"
 import { logger } from "@/lib/logger"
@@ -13,6 +14,7 @@ import { actorFor } from "@/lib/org-membership"
 import { notifyLobbyHostPost } from "@/lib/push-notifications"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
+import { characters } from "@/lib/utils"
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -56,7 +58,7 @@ export async function GET(_: Request, { params }: RouteContext) {
   }
 }
 
-const pinSchema = z.object({ body: z.string().trim().min(1, "Say something").max(HOST_POST_MAX) }).strict()
+const pinSchema = z.object({ body: z.string().trim().min(1, "Say something").max(BOARD.MAX_HOST_POST_LENGTH) }).strict()
 
 export async function PUT(request: Request, { params }: RouteContext) {
   try {
@@ -84,7 +86,7 @@ export async function PUT(request: Request, { params }: RouteContext) {
         action: before ? "lobby.pin.edit" : "lobby.pin.set",
         resource: "event",
         resourceId: event.id,
-        details: { hostPostId: pin.id, length: body.length },
+        details: { hostPostId: pin.id, length: characters(body) },
         ipAddress: getRequestIp(request),
       })
       return { pin, changed: before?.body !== body }

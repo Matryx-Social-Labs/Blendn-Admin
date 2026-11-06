@@ -133,6 +133,17 @@ describe("who may pin", () => {
     await expect(db.board_host_posts.update({ where: { event_id: eventId }, data: { body: "" } })).rejects.toThrow(/board_host_posts_body_length/)
   })
 
+  it("counts characters as the CHECK does (char_length): 500 emoji fit and are stored, the 501st is refused", async () => {
+    as(creator)
+    const full = "🎉".repeat(500)
+    expect((await put({ body: full })).status).toBe(200)
+    const [row] = await db.$queryRaw<{ n: number }[]>`SELECT char_length(body)::int AS n FROM board_host_posts WHERE event_id = ${eventId}::uuid`
+    expect(row.n).toBe(500)
+    const audit = await db.audit_logs.findFirst({ where: { action: "lobby.pin.edit", resource_id: eventId }, orderBy: { created_at: "desc" }, select: { details: true } })
+    expect(audit?.details).toMatchObject({ length: 500 })
+    expect((await put({ body: `${full}🎉` })).status).toBe(400)
+  })
+
   it("unpins, audited, and the Lobby has no pinned post", async () => {
     as(creator)
     expect(await (await del()).json()).toEqual({ pinned: null, removed: true })
