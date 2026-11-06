@@ -239,7 +239,7 @@ export function DoorClient({ eventId, timezone, initialCount }: { eventId: strin
             <span className="sr-only">Wait a minute, then type the code again.</span>
           </p>
         ) : null}
-        {reply ? <Result reply={reply} time={time} onNext={reset} nextRef={next} /> : null}
+        {reply ? <DoorVerdict reply={reply} time={time} onNext={reset} nextRef={next} /> : null}
       </section>
 
       <section className="rounded-panel border border-border bg-card" aria-labelledby="door-seen">
@@ -277,11 +277,12 @@ export function DoorClient({ eventId, timezone, initialCount }: { eventId: strin
   )
 }
 
-function Result({ reply: r, time, onNext, nextRef }: { reply: DoorReply; time: (iso: string) => string; onNext: () => void; nextRef: React.RefObject<HTMLButtonElement | null> }) {
+/** The verdict panel. "Let in" alone is the headline; the ticket type is its own line under it (owner, 2026-11-05). */
+export function DoorVerdict({ reply: r, time, onNext, nextRef }: { reply: DoorReply; time: (iso: string) => string; onNext: () => void; nextRef: React.RefObject<HTMLButtonElement | null> }) {
   const ok = r.kind === "let_in"
   const [big, why, hint, again] =
     r.kind === "let_in"
-      ? [`Let in · ${r.typeName}`, `Ticket ${r.nth} of ${r.of} on this order · ${time(r.at)}`, null, "Next ticket"]
+      ? ["Let in", `Ticket ${r.nth} of ${r.of} on this order · ${time(r.at)}`, null, "Next ticket"]
       : r.kind === "used"
         ? ["Already used", `${r.typeName} · let in at ${time(r.at)}`, "Don’t let them in. If they say it’s theirs, the buyer can see the order in their app.", "Next ticket"]
         : r.kind === "invalid"
@@ -299,6 +300,7 @@ function Result({ reply: r, time, onNext, nextRef }: { reply: DoorReply; time: (
       )}
     >
       <p className={cn("text-[1.375rem] font-bold leading-tight", ok ? "text-success" : "text-[oklch(0.8_0.13_12.5)]")}>{big}</p>
+      {r.kind === "let_in" ? <p className="max-w-full break-words text-base font-semibold">{r.typeName}</p> : null}
       <p className="text-sm">{why}</p>
       {hint ? <p className="text-[0.8125rem] text-muted-foreground">{hint}</p> : null}
       <Button ref={nextRef} variant="outline" className="mt-2 h-11 w-full" onClick={onNext}>

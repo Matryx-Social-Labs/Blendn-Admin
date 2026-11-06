@@ -26,7 +26,7 @@ export default function ShippingPage() {
           Razorpay confirms the payment, usually within a minute. Each renewal keeps them on without anything to do.
         </li>
         <li>
-          <strong>An Event Pass</strong> opens that event&apos;s analytics as soon as the payment is confirmed.
+          <strong>Event Insights</strong> opens that event&apos;s analytics as soon as the payment is confirmed.
         </li>
         <li>
           <strong>A sponsor payment</strong> settles the agreed charge, and the placement runs as agreed with the
@@ -40,7 +40,7 @@ export default function ShippingPage() {
 
       <h2>If it has not arrived</h2>
       <p>
-        If a paid plan or pass is not on your Plan page within 24 hours of the payment, email{" "}
+        If a paid plan or Event Insights is not on your Plan page within 24 hours of the payment, email{" "}
         <a href={`mailto:${COMPANY.email}`}>{COMPANY.email}</a> or call <a href={COMPANY.phoneHref}>{COMPANY.phone}</a>{" "}
         with the payment reference. We will switch it on, or refund it in full under our{" "}
         <Link href="/refunds">cancellation and refund policy</Link>.

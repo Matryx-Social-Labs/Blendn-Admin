@@ -306,7 +306,7 @@ export async function boardPseudonymsAcross(
 }
 
 /** What refused board text is told. One sentence for every non-contact refusal, so it teaches nothing about the filter. */
-export const BOARD_REFUSAL = "This can’t go on the board."
+export const BOARD_REFUSAL = "This can’t go in the Lobby."
 
 export interface BoardTextVerdict {
   /** The sentence to refuse with, or null to let it through. */
@@ -335,7 +335,7 @@ export async function checkBoardText(text: string): Promise<BoardTextVerdict> {
   const contact = checkContactInfo(text)
   if (contact) {
     return {
-      refusal: `${contact.reason} The board is anonymous, so contact details can’t go on it.`,
+      refusal: `${contact.reason} The Lobby is anonymous, so contact details can’t go on it.`,
       unchecked: false,
     }
   }
@@ -555,7 +555,7 @@ export async function seatBoardRoom(
       create: {
         kind: "board_post",
         board_post_id: post.id,
-        name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Board",
+        name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Lobby",
         status: "active",
       },
       update: {},

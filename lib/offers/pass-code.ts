@@ -23,14 +23,14 @@ export const PASS_CODE_LENGTH = 6
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 /** What the door says when typed characters cannot be a pass — the ones the alphabet leaves out are the ones easiest to mistype (SCRUM-899). */
-export const BAD_CODE_SHAPE = "A pass code is six letters and numbers, never 0, 1, I or O. Check the code and try again."
+export const BAD_CODE_SHAPE = "An offer code is six letters and numbers, never 0, 1, I or O. Check the code and try again."
 
 let derived: { secret: string; key: Buffer } | null = null
 
 function passKey(): Buffer {
   const secret = process.env.NEXTAUTH_SECRET
   // Loudly: an empty key would make every pass forgeable.
-  if (!secret) throw new Error("NEXTAUTH_SECRET is required to issue door passes")
+  if (!secret) throw new Error("NEXTAUTH_SECRET is required to issue offer codes")
   if (derived?.secret !== secret) {
     derived = { secret, key: Buffer.from(hkdfSync("sha256", secret, Buffer.alloc(0), "blendn door-pass v1", 32)) }
   }

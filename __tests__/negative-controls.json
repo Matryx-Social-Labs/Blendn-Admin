@@ -35,6 +35,18 @@
     "2026-10-26: M2203 to M2238 are feat/razorpay-verification's (policy pages, the second review's status moves, admin-suspension shapes and route-level doors, the Razorpay review seed and its security fixes, the review-organisation guard, the policy-page frame guard), taken after origin/dev's last (M2202)."
   ],
   "verified": {
+    "banned-names.test.ts": {
+      "guards": "SCRUM-1027 naming review (owner 2026-11-05): the retired names (Board, blend in, Blend as the crew match, Event Pass, door pass, spaces left, Liking as, centre) never come back in a string a person reads under app/, components/ and lib/.",
+      "mutation": "lib/billing-plans.ts: the event_pass label put back to \"Event Pass\".",
+      "observed": "1 of 3 failing, naming lib/billing-plans.ts and the old name. Restored; 3/3.",
+      "date": "2026-11-06"
+    },
+    "door-verdict-long-text.test.tsx": {
+      "guards": "SCRUM-1027 (owner 2026-11-05): the door verdict's headline is \"Let in\" alone and the ticket type its own line under it, at the long-text fixture's worst.",
+      "mutation": "Ran against the glued headline (`Let in · ${typeName}`) before the change.",
+      "observed": "4 of 4 failing before; 4/4 after.",
+      "date": "2026-11-06"
+    },
     "tickets-long-text.test.tsx": {
       "guards": "Long-text audit (owner 2026-11-05): the Tickets tab's Sales selects are held to the form's width (min-w-0 max-w-full), and every overflow-x-auto table wrapper on the tab is `relative`, so sr-only labels inside a wide table are placed in it, not against the page.",
       "mutation": "MLT1 page.tsx `select` class without min-w-0 max-w-full (the code as it was). MLT2 the three table wrappers as plain `overflow-x-auto` (as they were).",

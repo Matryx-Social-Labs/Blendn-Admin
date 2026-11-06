@@ -56,7 +56,7 @@ Dashboard → Account & Settings → Business website details.
 > use the Blend'n dashboard (dashboard.blendn.app), a web application, to run
 > their events. Using the dashboard is free; we sell optional software
 > subscriptions on it: Analytics for organizers (₹1,999 a month or ₹19,990 a
-> year before GST), an Event Pass for one event's analytics (₹499 before GST),
+> year before GST), Event Insights for one event's analytics (₹499 before GST),
 > and Venue Pro for venues (₹2,999 a month or ₹29,990 a year before GST), plus
 > sponsored placements for brands, paid through Razorpay payment links at
 > agreed prices. Everything sold is a digital service delivered to the
@@ -70,7 +70,7 @@ Dashboard → Account & Settings → Business website details.
 > organizer account with its own demo organisation and one draft event; it sees
 > no real users' data, and it cannot publish events, add venues or invite
 > anyone; its events stay drafts. The paid plans are on the Plan page (left menu → Plan):
-> Analytics monthly or yearly, and the Event Pass. Checkout opens Razorpay
+> Analytics monthly or yearly, and Event Insights. Checkout opens Razorpay
 > Checkout once live keys are issued; until then the page says payments are not
 > switched on yet. Every policy page is linked at the foot of the sign-in page.
 
@@ -88,7 +88,7 @@ Privacy, Refund, Shipping, Contact with the address and phone).
 **Recommendation: apply for domestic live mode first, and international
 later.** Nothing charges CAD yet: INR is hardcoded in `lib/razorpay.ts` and the
 Plan page, and the Canada price pack you approved on 19 October 2026 (Analytics
-CA$59, Event Pass CA$15, Venue Pro CA$79) is not built. When it is, the
+CA$59, Event Insights CA$15, Venue Pro CA$79) is not built. When it is, the
 answers are:
 
 | Question | Answer |
@@ -119,7 +119,7 @@ answers are:
    unset DATABASE_URL
    ```
 
-   Every event of the demo organisation is deleted (soft: an Event Pass or
+   Every event of the demo organisation is deleted (soft: Event Insights or
    payment keeps pointing at it), any venue it added is retired, the
    organisation is suspended and the account closed.
 

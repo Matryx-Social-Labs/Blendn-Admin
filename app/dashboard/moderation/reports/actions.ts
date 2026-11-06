@@ -577,7 +577,7 @@ export async function resolveReport(
   if (decision === "remove_message") {
     const r = report as { message_id: string; message_type: string }
     if (kind !== "message" || (r.message_type !== "group" && r.message_type !== "board_post")) {
-      throw new Refusal("Only a room message or a board post can be removed")
+      throw new Refusal("Only a room message or a Lobby post can be removed")
     }
     // Erased with its author's account: there is nothing to take down, and
     // "removed" would be a record of an action that did not happen.

@@ -84,7 +84,7 @@ registry.registerPath({
   description:
     "The identified profile, for a friend only; 404 for anyone else whether or not they exist. Separate from " +
     "`GET /users/{userId}`, which is what a room card opens — a friend there is still a pseudonym. " +
-    "`conversationId` is an open DM, if there is one; null while it is still a pseudonymous one (a match or board DM not revealed on both sides). " +
+    "`conversationId` is an open DM, if there is one; null while it is still a pseudonymous one (a match or Lobby DM not revealed on both sides). " +
     "A room handle resolves here only for a friend you can already recognise in that room (`friends_see_me_in_rooms` on); " +
     "any other handle is the same 404 as a stranger, so the route cannot say which card on a roster is a friend (SCRUM-371).",
   security: bearerAuth,
@@ -275,7 +275,7 @@ registry.registerPath({
     "Exactly one of `token` (somebody's invite link) or `userId` (only for a match where you have BOTH revealed: an " +
     "open conversation that came from a mutual like, neither side closed or blocked. A room handle resolves too, but " +
     "a handle its room keeps anonymous is refused as unknown). Idempotent and cannot nag: asking again neither notifies again " +
-    "nor un-dismisses. `friends` when they had already asked you. Between two people still pseudonyms to each other (an open match or board DM not revealed on both sides) the request is HELD: still `requested`, but no push, not in the recipient's list, not acceptable, until both reveal, when it is released and delivered.  400 for yourself, `reasonCode` `CANNOT_ADD_SELF`. " +
+    "nor un-dismisses. `friends` when they had already asked you. Between two people still pseudonyms to each other (an open match or Lobby DM not revealed on both sides) the request is HELD: still `requested`, but no push, not in the recipient's list, not acceptable, until both reveal, when it is released and delivered.  400 for yourself, `reasonCode` `CANNOT_ADD_SELF`. " +
     "A request made by `userId` notifies with `data.via` = `match`, never an event or room. " +
     "One 404 differs: it carries `reasonCode` `NOT_A_REVEALED_MATCH` when you are in an open match with that person, " +
     "they have already revealed to you, and you have not revealed back (you know who they are). While they are still a " +

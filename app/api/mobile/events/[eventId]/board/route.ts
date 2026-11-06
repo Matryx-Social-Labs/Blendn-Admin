@@ -154,7 +154,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     logger.error("Board read error", {
       error: error instanceof Error ? error.message : String(error),
     })
-    return serverErrorResponse("Failed to load the board")
+    return serverErrorResponse("Failed to load the Lobby")
   }
 }
 
@@ -183,7 +183,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const input = validation.data
 
     if (input.spacesLeft !== undefined && input.kind !== "offer") {
-      return errorResponse("Only an offer has spaces", 400)
+      return errorResponse("Only an offer has spots", 400)
     }
 
     /*

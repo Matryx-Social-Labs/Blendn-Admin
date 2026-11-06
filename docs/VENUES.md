@@ -295,7 +295,7 @@ then delete or archive the rows) is a follow-up: SCRUM-528.
 is closed:
 
 - The by-id attendee routes — `GET /events/:id`, RSVP, favourite, interest,
-  the board, the room preview, rating and the plain event check-in — answer a
+  the Lobby, the room preview, rating and the plain event check-in — answer a
   venue day's id with `404`, as for an unknown id (`attendeeEventAccess`, and
   the check-in and rating routes themselves).
 - The presence sweeper has a venue-day pass with its own bounds (F5): expiries

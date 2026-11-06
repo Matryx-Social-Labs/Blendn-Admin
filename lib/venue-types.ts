@@ -38,8 +38,8 @@ export const VENUE_TYPE_GROUPS: VenueTypeGroup[] = [
     label: "Events & hospitality",
     types: [
       { value: "banquet_hall", label: "Banquet hall" },
-      { value: "convention_centre", label: "Convention or exhibition centre" },
-      { value: "conference_centre", label: "Conference centre" },
+      { value: "convention_centre", label: "Convention or exhibition center" },
+      { value: "conference_centre", label: "Conference center" },
       { value: "hotel", label: "Hotel" },
       { value: "resort", label: "Resort" },
       { value: "farmhouse", label: "Farmhouse" },

@@ -125,7 +125,7 @@ export function AreaControls({
         ) : null}
         <p className="w-full text-[0.75rem] text-muted-foreground">
           {fence?.type === "circle"
-            ? "Drag the centre to move it and the white handle to size it — the place as it is, not bigger to be safe."
+            ? "Drag the center to move it and the white handle to size it — the place as it is, not bigger to be safe."
             : "Drag a corner to reshape it; right-click one to remove it. The ring follows the outline — there is no radius to set."}
         </p>
       </div>

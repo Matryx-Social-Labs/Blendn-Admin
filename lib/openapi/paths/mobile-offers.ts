@@ -15,12 +15,12 @@ const OfferSchema = z
     venue: z.object({ id: z.string().uuid(), name: z.string() }),
     text: z.string().max(140).describe("The venue's words."),
     sentAt: z.string().datetime(),
-    redeemedAt: z.string().datetime().nullable().describe("When the pass was redeemed at the door; null until it was."),
+    redeemedAt: z.string().datetime().nullable().describe("When the offer code was redeemed at the door; null until it was."),
     endsAt: z.string().datetime(),
     state: z
       .enum(["live", "redeemed", "used_tonight", "ended"])
       .describe(
-        "`live`: the pass can be shown. `used_tonight`: another of this venue's passes was redeemed tonight (one a night; only on GET /offers/{offerId}). `ended`: past its end, or the venue was retired or changed hands."
+        "`live`: the offer code can be shown. `used_tonight`: another of this venue's offer codes was redeemed tonight (one a night; only on GET /offers/{offerId}). `ended`: past its end, or the venue was retired or changed hands."
       ),
   })
   .openapi("VenueOffer")
@@ -68,10 +68,10 @@ registry.registerPath({
   method: "get",
   path: "/api/mobile/offers/{offerId}",
   tags: ["Mobile Offers"],
-  summary: "Open an offer, and its door pass",
+  summary: "Open an offer, and its offer code",
   description:
     "The first open is what the venue's \"opened\" counts. While `live`, `pass` carries the current code: " +
-    "ask again before `rotatesAt` while the pass is on screen. Staff redeem it on the dashboard; the next " +
+    "ask again before `rotatesAt` while the offer code is on screen. Staff redeem it on the dashboard; the next " +
     "answer says `redeemed`. 404 for an offer you were not sent, the same as for none.",
   security: bearerAuth,
   request: { params: z.object({ offerId: z.string().uuid() }) },

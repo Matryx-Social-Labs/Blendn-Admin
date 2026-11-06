@@ -85,7 +85,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       where: { id: postId, event_id: eventId, deleted_at: null },
       select: { id: true, author_id: true, kind: true, spaces_left: true },
     })
-    if (!post) return notFoundResponse("That post is no longer on the board")
+    if (!post) return notFoundResponse("That post is no longer in the Lobby")
 
     if (post.author_id === user.userId) {
       return errorResponse("That is your own post", 400)
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // A friend's post is not on your board, and an ask to it is answered as a taken-down
     // post: the blocked author's answer (the owner's rule, D19).
     if (blocked.includes(post.author_id) || (await knownToEachOther(user.userId, post.author_id))) {
-      return notFoundResponse("That post is no longer on the board")
+      return notFoundResponse("That post is no longer in the Lobby")
     }
 
     // A chat post asks nothing of anybody, so there is nothing to ask to join.

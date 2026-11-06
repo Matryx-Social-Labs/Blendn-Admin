@@ -8,7 +8,7 @@ import { mayRedeemAtVenue } from "@/lib/rbac"
 import { DoorRedeem } from "./door-redeem"
 
 export const dynamic = "force-dynamic"
-export const metadata = { title: "Redeem a pass" }
+export const metadata = { title: "Redeem an offer code" }
 
 /**
  * The door (step 12): staff redeem a regular's pass.
@@ -44,7 +44,7 @@ export default async function DoorPage({ params }: { params: Promise<{ id: strin
     <div className="mx-auto flex w-full max-w-[420px] flex-col gap-5">
       <Panel title={venue.name} hint="the door">
         <p className="text-[0.8125rem] text-muted-foreground">
-          Ask them to open the offer in Blendn. Type the six characters on their pass — they change every 30 seconds — and tap
+          Ask them to open the offer in Blendn. Type the six characters of their offer code — they change every 30 seconds — and tap
           Redeemed.
         </p>
         <DoorRedeem venueId={venue.id} />
