@@ -9,6 +9,8 @@ import {
   type BoardEntitlement,
   type BoardWriteDenial,
 } from "./board"
+import { CHAT_WINDOW_HOURS } from "./chat-window"
+import { realEventsWhere, venueDaysWhere } from "./event-kind"
 import { BOARD } from "./constants"
 import { blockCounterparties } from "./conversations"
 import { db } from "./db"
@@ -61,6 +63,25 @@ export function liveRequest(now: Date = new Date()): {
     status: "pending",
     event: { end_time: { gt: now } },
     post: { deleted_at: null },
+  }
+}
+
+/**
+ * Asks whose Lobby has not closed (SCRUM-1026): a venue day's at its reset,
+ * any other event's a day after it ends (`chatClosesAt`). After that an ask
+ * is in no list, and its words are read by nobody in the app.
+ */
+export function lobbyNotClosed(now: Date = new Date()) {
+  const dayAgo = new Date(now.getTime() - CHAT_WINDOW_HOURS * 60 * 60 * 1000)
+  return {
+    AND: [
+      {
+        OR: [
+          { event: { ...venueDaysWhere, end_time: { gt: now } } },
+          { event: { ...realEventsWhere, end_time: { gt: dayAgo } } },
+        ],
+      },
+    ],
   }
 }
 

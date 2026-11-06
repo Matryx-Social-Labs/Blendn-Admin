@@ -69,7 +69,7 @@ function pollWith(counts: number[], over: Record<string, unknown> = {}) {
     options: optionRows(counts.length),
     message: {
       deleted_at: null,
-      chat_group: { event_id: EVENT, event: { status: "published", deleted_at: null }, members: [{ status: "active", banned_by: null }] },
+      chat_group: { event_id: EVENT, event: { status: "published", deleted_at: null, end_time: new Date(Date.now() + 86_400_000) }, members: [{ status: "active", banned_by: null }] },
     },
     ...over,
   })

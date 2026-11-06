@@ -300,7 +300,8 @@ test.describe("mobile API contract", () => {
       expect(res.status()).toBe(403)
       expect(Object.keys(body).sort()).toEqual(["error", "errorCode", "opensAt", "reasonCode", "success"].sort())
       expect(body).toMatchObject({ success: false, errorCode: "CHAT_CLOSED", reasonCode: "NOT_OPEN_YET" })
-      expect(body.opensAt).toBe(new Date(start.getTime() - 24 * 60 * 60 * 1000).toISOString())
+      // At doors: 90 minutes before the start (SCRUM-1026; it was a day before).
+      expect(body.opensAt).toBe(new Date(start.getTime() - 90 * 60 * 1000).toISOString())
     } finally {
       await ctx.dispose()
       await db.chat_group_members.deleteMany({ where: { chat_group: { event_id: event.id } } })

@@ -7,7 +7,8 @@ import { join, relative } from "path"
  * venue must call it or say here why it does not, and a reason cannot outlive its route.
  */
 const ROOT = join(__dirname, "../app/api/mobile")
-const GATE = /\b(attendeeEventAccess|mayOpenEvent|mayOpenCity|inClosedCity)\b/
+// `lobbyDoor` (lib/lobby-route.ts) is the Lobby's reads' door, and calls `attendeeEventAccess` (pinned below).
+const GATE = /\b(attendeeEventAccess|mayOpenEvent|mayOpenCity|inClosedCity|lobbyDoor)\b/
 
 const IN_THE_ROOM = "needs a live check-in, whose door is gated; somebody inside keeps it when a city closes"
 
@@ -15,7 +16,6 @@ const NOT_THE_GATE: Record<string, string> = {
   "events/[eventId]/announce": "a host's broadcast, authorised by eventPermissions; hosts are never gated by launch state",
   "events/[eventId]/board/[postId]/block": "acts on a post already seen; safety is never gated",
   "events/[eventId]/board/[postId]/report": "acts on a post already seen; safety is never gated",
-  "events/[eventId]/board/[postId]": "the author's own post, and the board read is gated",
   "events/[eventId]/chat": IN_THE_ROOM,
   "events/[eventId]/checkins": IN_THE_ROOM,
   "events/[eventId]/checkout": "leaving: refusing it would hold a person in a closed room",
@@ -63,5 +63,7 @@ describe("the launch gate on routes by id", () => {
     const access = readFileSync(join(__dirname, "../lib/event-door.ts"), "utf8") // the rules; lib/event-access.ts re-exports them
     expect(access).toMatch(/await mayOpenEvent\(userId, eventId, event\.city\)/)
     expect(read("events/[eventId]/checkin")).toMatch(/await mayOpenEvent\(authUser\.userId, eventId, event\.city\)/)
+    // The Lobby's door, which every Lobby read goes through.
+    expect(readFileSync(join(__dirname, "../lib/lobby-route.ts"), "utf8")).toMatch(/await attendeeEventAccess\(user\.userId, eventId, "participate"\)/)
   })
 })

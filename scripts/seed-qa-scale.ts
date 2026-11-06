@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { preferredPseudonymFor, pseudonymSchemeFor, type PseudonymScheme } from "../lib/anonymous-names"
+import { DOORS_LEAD_MINUTES } from "../lib/chat-window"
 import { realEventsWhere, SYSTEM_USER_ID } from "../lib/event-kind"
 import PORTRAITS from "./seed-blr-portraits.json"
 import { environmentRefusal } from "./test-accounts"
@@ -352,7 +353,8 @@ async function boardEvent(now: Date) {
       ...realEventsWhere,
       deleted_at: null,
       status: "published",
-      start_time: { gt: now },
+      // Doors ahead: the Lobby takes posts until doors (`lobbyState`), DOORS_LEAD_MINUTES before the start.
+      start_time: { gt: new Date(now.getTime() + DOORS_LEAD_MINUTES * 60_000) },
       slug: named ?? { startsWith: `${EVENT_SLUG_PREFIX}soon-` },
     },
     orderBy: [{ start_time: "asc" }, { slug: "asc" }],

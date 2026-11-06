@@ -3,7 +3,9 @@ import { join } from "path"
 import {
   chatClosedMessage,
   chatClosesAt,
+  chatOpensAt,
   chatWindowState,
+  DOORS_LEAD_MINUTES,
   entitlementAdmits,
   mayWriteToRoom,
   roomEntitlement,
@@ -231,8 +233,15 @@ describe("the room has a floor now, not only a ceiling", () => {
     }
   })
 
-  it("opens 24 hours before the start", () => {
-    expect(chatWindowState(TIMED, OPEN_GROUP, before(23)).open).toBe(true)
+  it("opens at doors, not a day before (SCRUM-1026: the Lobby is the only \"before\")", () => {
+    // The old 24-hour pre-event room: shut now.
+    expect(chatWindowState(TIMED, OPEN_GROUP, before(23)).open).toBe(false)
+    expect(chatWindowState(TIMED, OPEN_GROUP, before(2)).open).toBe(false)
+    // Doors: check-in opens, and so does the room.
+    expect(chatOpensAt(TIMED)).toEqual(new Date(STARTS.getTime() - DOORS_LEAD_MINUTES * 60_000))
+    expect(chatWindowState(TIMED, OPEN_GROUP, new Date(STARTS.getTime() - DOORS_LEAD_MINUTES * 60_000)).open).toBe(true)
+    expect(chatWindowState(TIMED, OPEN_GROUP, new Date(STARTS.getTime() - DOORS_LEAD_MINUTES * 60_000 - 1)).open).toBe(false)
+    expect(chatWindowState(TIMED, OPEN_GROUP, before(1)).open).toBe(true)
   })
 
   it("is open during the event, as it always was", () => {

@@ -344,9 +344,12 @@ describe("the board", () => {
   /** The seed picks its board event by this clock, so it must be the route's. */
   it("is open until doors: the route's clock, which the seed's pick uses", () => {
     const route = readFileSync(join(__dirname, "..", "app", "api", "mobile", "events", "[eventId]", "board", "route.ts"), "utf8")
-    expect(route.match(/if \(event\.start_time <= new Date\(\)\) return errorResponse\(BOARD_CLOSED, 403\)/g)).toHaveLength(2)
+    // Posting is refused unless the Lobby is open, which ends at doors (`lobbyState`, SCRUM-1026).
+    expect(route).toMatch(/const state = lobbyState\(event\)\s+if \(state !== "open"\)/)
+    const board = readFileSync(join(__dirname, "..", "lib", "board.ts"), "utf8")
+    expect(board).toMatch(/if \(now >= doorsAt\(event\)\) return "read_only"/)
     const seed = readFileSync(join(__dirname, "..", "scripts", "seed-qa-scale.ts"), "utf8")
-    expect(seed).toMatch(/start_time: \{ gt: now \}/)
+    expect(seed).toMatch(/start_time: \{ gt: new Date\(now\.getTime\(\) \+ DOORS_LEAD_MINUTES \* 60_000\) \}/)
   })
 
   it("is on an upcoming seeded night, which is always ahead of now", () => {

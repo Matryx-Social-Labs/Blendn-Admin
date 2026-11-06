@@ -55,7 +55,8 @@ const mockDb = {
   notifications: { deleteMany: jest.fn() },
   password_reset_tokens: { deleteMany: jest.fn() },
   message_requests: { updateMany: jest.fn() },
-  board_posts: { deleteMany: jest.fn(), updateMany: jest.fn() },
+  board_posts: { deleteMany: jest.fn(), updateMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+  board_alert_preferences: { deleteMany: jest.fn() },
   // The rooms of their posts: read before the transaction, archived inside it (step 7, E1).
   chat_groups: { findMany: jest.fn().mockResolvedValue([{ id: "room-1" }]), updateMany: jest.fn() },
   // Their asks, read before the transaction to keep any with an open report.
@@ -93,9 +94,15 @@ jest.mock("@/lib/waitlist", () => ({ promoteFromWaitlist: (...a: unknown[]) => m
 
 const mockDeletePrefix = jest.fn().mockResolvedValue(3)
 const mockWithdraw = jest.fn().mockResolvedValue(undefined)
+const SEALED_LOBBY_PHOTO_KEY = "chat/sealed/0b6c3f0e-6a59-4d0e-9a3e-1f2b3c4d5e6f"
+const SEALED_LOBBY_PHOTO = `https://blendn-media-private.fly.storage.tigris.dev/${SEALED_LOBBY_PHOTO_KEY}`
+const mockDeleteFile = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tigris", () => ({
   deletePrefix: (...a: unknown[]) => mockDeletePrefix(...a),
   withdrawFromPublic: (...a: unknown[]) => mockWithdraw(...a),
+  deleteFile: (...a: unknown[]) => mockDeleteFile(...a),
+  // The real rule, for a key that names nobody: `chat/sealed/<uuid>`.
+  sealedChatKey: (url: string) => (url.endsWith(SEALED_LOBBY_PHOTO_KEY) ? SEALED_LOBBY_PHOTO_KEY : null),
 }))
 const RETAINED = new Set(["chat/kept-image.jpg"])
 const RETAINED_PHOTOS = new Set(["profile/u1/pulled.jpg"])
@@ -328,8 +335,31 @@ describe("deleting an account scrubs the matching inputs", () => {
     // `not: "hidden"`, which in Prisma would also skip every unmoderated post.
     await del()
     expect(mockDb.board_posts.deleteMany).toHaveBeenCalledWith({
-      where: { author_id: USER, moderation_status: null, room: { is: null } },
+      where: { author_id: USER, moderation_status: null, room: { is: null }, OR: [{ photo_status: null }, { photo_status: { in: ["pending", "approved"] } }] },
     })
+  })
+
+  it("keeps a post whose photo moderation rejected, off the Lobby: removed content (SCRUM-1026)", async () => {
+    await del()
+    expect(mockDb.board_posts.updateMany).toHaveBeenCalledWith({
+      where: { author_id: USER, photo_status: "rejected", deleted_at: null },
+      data: { deleted_at: expect.any(Date) },
+    })
+  })
+
+  it("takes a kept post's photo with its words, and erases the photos that go from storage (SCRUM-1026)", async () => {
+    mockDb.board_posts.findMany.mockResolvedValueOnce([{ photo_url: SEALED_LOBBY_PHOTO }])
+    await del()
+    expect(mockDb.board_posts.findMany).toHaveBeenCalledWith({
+      where: { author_id: USER, moderation_status: null, photo_status: { in: ["pending", "approved"] } },
+      select: { photo_url: true },
+    })
+    expect(mockDb.board_posts.updateMany).toHaveBeenCalledWith({
+      where: { author_id: USER, moderation_status: null, photo_status: { in: ["pending", "approved"] } },
+      data: { photo_url: null, photo_status: null, photo_alt: null, photo_checked_at: null },
+    })
+    expect(mockDb.board_alert_preferences.deleteMany).toHaveBeenCalledWith({ where: { user_id: USER } })
+    expect(mockDeleteFile).toHaveBeenCalledWith(SEALED_LOBBY_PHOTO_KEY)
   })
 
   it("keeps a post that has a room, off the board and without its words, and archives the room (E1)", async () => {

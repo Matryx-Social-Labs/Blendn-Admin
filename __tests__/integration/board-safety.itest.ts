@@ -44,7 +44,7 @@ import { NextRequest } from "next/server"
  * - a push to the asker on decline                      → "sends the asker nothing"
  */
 jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }))
-import { ALREADY_ASKED, BOARD_CLOSED } from "@/lib/board"
+import { ALREADY_ASKED, LOBBY_CLOSED, LOBBY_READ_ONLY } from "@/lib/board"
 import * as boardAccess from "@/lib/board-access"
 import { boardWriteDenial, isLiveToTheAsker, outstandingAsk } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
@@ -470,29 +470,43 @@ describe("blocks reach the board, both ways", () => {
 })
 
 describe("doors and kinds", () => {
-  it("refuses to show the board after doors, with the board-closed sentence", async () => {
+  it("stays readable from doors, read-only, until a day after the end; then it is closed (SCRUM-1026)", async () => {
     const at = await upcoming()
     const viewer = await person("doors-viewer", at)
-    expect((await boardOf(viewer, at)).status).toBe(200)
+    const open = await boardOf(viewer, at)
+    expect(open.status).toBe(200)
+    expect((await open.json()).data.state).toBe("open")
 
-    await db.events.update({ where: { id: at }, data: { start_time: new Date(Date.now() - 60_000) } })
-    const res = await boardOf(viewer, at)
-    expect(res.status).toBe(403)
-    expect((await res.json()).error).toBe(BOARD_CLOSED)
+    // Doors: 90 minutes before the start. An hour before is past them.
+    const start = new Date(Date.now() + 60 * 60_000)
+    await db.events.update({ where: { id: at }, data: { start_time: start, end_time: new Date(start.getTime() + 3 * 3_600_000) } })
+    const readOnly = await boardOf(viewer, at)
+    expect(readOnly.status).toBe(200)
+    expect((await readOnly.json()).data.state).toBe("read_only")
+
+    // A minute short of a day after the end: still readable. At it: closed.
+    const ended = (msAgo: number) => db.events.update({ where: { id: at }, data: { start_time: new Date(Date.now() - msAgo - 3_600_000), end_time: new Date(Date.now() - msAgo) } })
+    await ended(24 * 3_600_000 - 60_000)
+    expect((await boardOf(viewer, at)).status).toBe(200)
+    await ended(24 * 3_600_000)
+    const closed = await boardOf(viewer, at)
+    expect(closed.status).toBe(403)
+    expect(await closed.json()).toMatchObject({ error: LOBBY_CLOSED, reasonCode: "LOBBY_CLOSED" })
   })
 
-  it("refuses posting and asking after doors too, in the same words", async () => {
+  it("refuses posting and asking from doors, in the read-only words", async () => {
     const at = await upcoming()
     const author = await person("doors2-author", at)
     const asker = await person("doors2-asker", at)
     const post = await offer(author, 2, "offer", at)
-    await db.events.update({ where: { id: at }, data: { start_time: new Date(Date.now() - 60_000) } })
+    const start = new Date(Date.now() + 89 * 60_000)
+    await db.events.update({ where: { id: at }, data: { start_time: start, end_time: new Date(start.getTime() + 3 * 3_600_000) } })
 
     for (const res of [await postTo(author, at), await ask(asker, post, at)]) {
       expect(res.status).toBe(403)
-      expect((await res.json()).error).toBe(BOARD_CLOSED)
+      expect(await res.json()).toMatchObject({ error: LOBBY_READ_ONLY, reasonCode: "LOBBY_READ_ONLY" })
     }
-    expect(BOARD_CLOSED).toMatch(/doors open/)
+    expect(await db.board_requests.count({ where: { post_id: post } })).toBe(0)
   })
 
   it("refuses an ask on a chat post, and stores nothing", async () => {

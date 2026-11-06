@@ -2601,6 +2601,30 @@
       "mutation": "M944h lib/deletion-reauth.ts the password comparison always passes.",
       "observed": "M944h: 1 of 6 failing (a wrong password deleted the account). Restored; 6/6. Review: wrong passwords count in sign-in's own windows (mobile per-account 10/15 min + per-email), shared with the sign-in door, then 429, each audited (test red first: the 11th try deleted the account); a provider token is taken once, keyed on its verified claims (test red first: a re-encoded copy passed); the per-account window answers before the per-email ones (test red first: 25 refused tries filled the per-email cap). 9/9.",
       "date": "2026-11-01"
+    },
+    "lobby-lifecycle.test.ts": {
+      "guards": "SCRUM-1026: the Lobby is open until doors (start - 90 min, = CHECK_IN_LEAD_MINUTES), read-only from doors, closed at the room's own close (end + 24 h; a venue day's at its reset).",
+      "mutation": "lib/board.ts: the `now >= doorsAt(event)` read-only line removed.",
+      "observed": "1 of 7 failing (the Lobby stayed open at doors). Restored; 7/7.",
+      "date": "2026-11-06"
+    },
+    "lobby.itest.ts": {
+      "guards": "SCRUM-1026: a pending Lobby photo reaches its author only (no other response holds its URL); the per-event alert switch gates the Lobby pushes; ticket sub-kinds are hidden on native-ticket events; a closed Lobby's asks leave GET /board/requests.",
+      "mutation": "(a) lib/lobby-photo.ts the `post.author_id !== viewerId` return removed; (b) lib/push-notifications.ts eventSwitchOn dropped from pushGates; (c) lib/lobby.ts the ticket filter in livePostsWhere removed; (d) the `...open` filter on the asker's settled slice removed.",
+      "observed": "(a) 3 of 16 failing; (b) 1 of 16; (c) 1 of 16; (d) 1 of 16. Each restored; 16/16. The EXIF strip: the stored bytes carry none of METADATA while the upload carried GPSLatitude.",
+      "date": "2026-11-06"
+    },
+    "lobby-pin.itest.ts": {
+      "guards": "SCRUM-1026: the host's pinned post needs eventPermissions(...).canEdit (organisation-shaped), shows the org's name and never the writer, and is audited.",
+      "mutation": "app/api/events/[id]/lobby-pin/route.ts: `.canEdit` read as `.canOperate`.",
+      "observed": "2 of 6 failing (the venue owner pinned). Restored; 6/6.",
+      "date": "2026-11-06"
+    },
+    "lobby-retention.itest.ts": {
+      "guards": "SCRUM-1026: the 180-day purge deletes closed content past its time and holds removed or reported content 180 days from removal (a pending report until decided); a dry run deletes nothing.",
+      "mutation": "(a) the post select's COALESCE removed; (b) the post's pending-report hold inverted (NOT EXISTS -> EXISTS).",
+      "observed": "(a) 3 of 10 failing: no post was ever purged, because NOT NULL drops every unmoderated row (the bug this test's first run found); (b) 4 of 10. Restored; 10/10.",
+      "date": "2026-11-06"
     }
   },
   "grandfathered": [

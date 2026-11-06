@@ -84,6 +84,8 @@ model User {
   event_check_ins        event_check_ins[]
   presence_sessions presence_sessions[]
   board_posts       board_posts[]    @relation("BoardAuthor")
+  board_host_posts_written board_host_posts[] @relation("BoardHostPostWriter")
+  board_alert_preferences  board_alert_preferences[]
   board_requests_sent     board_requests[] @relation("BoardRequestFrom")
   board_requests_received board_requests[] @relation("BoardRequestTo")
   product_events         product_events[]
@@ -655,6 +657,8 @@ model events {
   event_issues      event_issues[]
   board_posts       board_posts[]
   board_requests    board_requests[]
+  board_host_post   board_host_posts?
+  board_alert_preferences board_alert_preferences[]
   match_preferences  event_match_preferences[]
   likes              event_likes[]
   peer_ratings       peer_ratings[]
@@ -1371,6 +1375,10 @@ enum notification_kind {
   board_request
   /// The person you asked said yes; there is a conversation now.
   board_request_accepted
+  /// Somebody offers what you are looking for in an event's Lobby (opt-in per event). Push only.
+  board_match
+  /// The host's pinned Lobby post went up or changed (opt-in per event). Push only.
+  board_host_post
   /// Somebody asked to be friends.
   friend_request
   /// The person you asked said yes; you are friends now.
@@ -3990,9 +3998,9 @@ model event_issues {
 /// ## Why this is not the chatroom
 ///
 /// The room is gated on PRESENCE — you are here. The board is gated on INTENT —
-/// you are going. They answer different questions at different times, and the
-/// board is archived at doors so the live room starts clean rather than opening
-/// onto three weeks of "anyone got a spare ticket".
+/// you are going. They answer different questions at different times: the
+/// Lobby (this board) is read-only from doors so the live room starts clean,
+/// and both close a day after the end (SCRUM-1026, `lobbyState`).
 model board_posts {
   id       String @id @default(uuid()) @db.Uuid
   event_id String @db.Uuid
@@ -4008,6 +4016,23 @@ model board_posts {
   /// left" and "this post was never about spaces" are different states, and a
   /// zero would render as a full car.
   spaces_left Int?
+
+  /// What the offer or the ask is about, when it says (the Lobby's plain types):
+  /// an offer of a `ride`, `spots` or a spare `ticket`; a search for a `ride`,
+  /// somebody to go with (`buddy`) or a `ticket`. Null on `chat`, and on posts
+  /// from before it existed. `board_posts_sub_kind_fits` in the migration.
+  sub_kind board_post_sub_kind?
+
+  /// One photo per post: the server's sealed copy (`chat/sealed/<uuid>`,
+  /// private bucket, metadata stripped), never the upload. Served only through
+  /// a signed URL, to its author while `pending` and to everybody once
+  /// `approved`; a `rejected` one is kept for its 180 days and served to nobody.
+  photo_url        String?
+  photo_status     board_photo_status?
+  /// The author's description of the photo, for screen readers. Optional, 200 at most.
+  photo_alt        String?
+  /// When moderation decided (`approved` or `rejected`); a rejection's removal time.
+  photo_checked_at DateTime? @db.Timestamptz(6)
 
   /// Same nullable String as `chat_messages.moderation_status`, deliberately.
   ///
@@ -4033,6 +4058,46 @@ model board_posts {
   @@index([event_id, deleted_at, created_at])
   /// "What have I posted", and the cap on posting.
   @@index([author_id, created_at])
+  /// The recheck of photos moderation could not judge yet (`lib/lobby-photo.ts`).
+  @@index([photo_status, created_at])
+}
+
+/// The host's pinned post in the Lobby: one per event, written by somebody the
+/// event's organisation lets edit it (`eventPermissions(...).canEdit`). Shown
+/// under the host's public label (`broadcastAuthorName`), never a person.
+/// `written_by` is who typed it, for the audit trail only.
+model board_host_posts {
+  id         String   @id @default(uuid()) @db.Uuid
+  event_id   String   @unique @db.Uuid
+  body       String
+  written_by String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  event  events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  writer User?  @relation("BoardHostPostWriter", fields: [written_by], references: [id], onDelete: SetNull)
+
+  @@index([written_by])
+}
+
+/// A person's Lobby alerts for one event: three switches, all off until they
+/// turn one on (owner decision 4, 2026-11-05). No row is all off.
+model board_alert_preferences {
+  user_id      String
+  event_id     String   @db.Uuid
+  /// Somebody offers what you are looking for (`board_match`).
+  offers_match Boolean  @default(false)
+  /// An ask on your post, or a yes to yours (`board_request`, `board_request_accepted`).
+  replies      Boolean  @default(false)
+  /// The host's pinned post goes up or changes (`board_host_post`).
+  host_posts   Boolean  @default(false)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  user  User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, event_id])
+  @@index([event_id])
 }
 
 /// Asking one person, rather than answering an open post.
@@ -4098,6 +4163,19 @@ enum board_post_kind {
   offer
   seeking
   chat
+}
+
+enum board_post_sub_kind {
+  ride
+  spots
+  ticket
+  buddy
+}
+
+enum board_photo_status {
+  pending
+  approved
+  rejected
 }
 
 enum board_request_status {
