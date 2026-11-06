@@ -4,7 +4,7 @@ process.env.MOBILE_JWT_SECRET =
   process.env.MOBILE_JWT_SECRET ?? "itest-mobile-secret-0123456789abcdefghij"
 
 import { signAccessToken } from "@/lib/mobile-auth"
-import { PRE_EVENT_CHAT_HOURS } from "@/lib/chat-window"
+import { DOORS_LEAD_MINUTES } from "@/lib/chat-window"
 import { cleanup, closeDb, db, makeEvent, makeUser, onboard, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -80,7 +80,7 @@ describe("the room before its window", () => {
   beforeAll(async () => {
     const e = await eventStartingIn(3 * 24)
     eventId = e.eventId
-    opensAt = new Date(e.start.getTime() - PRE_EVENT_CHAT_HOURS * HOUR).toISOString()
+    opensAt = new Date(e.start.getTime() - DOORS_LEAD_MINUTES * 60_000).toISOString()
     rsvp = await person("opens-rsvp")
     saver = await person("opens-saver")
     outsider = await person("opens-outsider")
@@ -138,16 +138,31 @@ describe("the room before its window", () => {
     expect(send.status).toBe(403)
     expect(send.json).toEqual({
       success: false,
-      error: "This chat opens 24 hours before the event starts.",
+      error: "The room opens when the doors open.",
       errorCode: "FORBIDDEN",
     })
     expect(await memberRows(eventId)).toBe(0)
   })
 })
 
+describe("no pre-event room (SCRUM-1026)", () => {
+  it("is shut a day before, where it used to open for people who RSVP'd", async () => {
+    const { eventId, start } = await eventStartingIn(12)
+    const guest = await person("opens-a-day-out")
+    await db.event_rsvps.create({ data: { event_id: eventId, user_id: guest.id, status: "going" } })
+
+    const res = await ask("GET", eventId, guest)
+
+    expect(res.status).toBe(403)
+    expect(res.json).toMatchObject({ reasonCode: "NOT_OPEN_YET", opensAt: new Date(start.getTime() - DOORS_LEAD_MINUTES * 60_000).toISOString() })
+    expect(await memberRows(eventId)).toBe(0)
+  })
+})
+
 describe("the room inside its window", () => {
-  it("opens as it always did for somebody who RSVP'd", async () => {
-    const { eventId } = await eventStartingIn(2)
+  it("opens at doors for somebody who RSVP'd", async () => {
+    // An hour before the start: past doors (90 minutes before), so open.
+    const { eventId } = await eventStartingIn(1)
     const guest = await person("opens-inside")
     await db.event_rsvps.create({ data: { event_id: eventId, user_id: guest.id, status: "going" } })
 

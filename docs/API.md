@@ -3183,7 +3183,12 @@ was collected as free text: "Software" and "software engineering" were two
 buckets that could never match, and the fix cost two PRs. A validator that only
 checked `z.string()` would repeat it exactly.
 
-### Pre-event chat — who is in the room, and when it opens
+### Who is in the room, and when it opens
+
+**No pre-event chat since SCRUM-1026.** The room opens at doors (`start_time` −
+90 minutes, when check-in opens) and closes a day after the end; the Lobby is the
+only "before". What follows is the history of the floor; the numbers are now
+doors, not 24 hours.
 
 The room used to have **one** way in: `event_check_ins.status === "checked_in"`,
 a tap *at the venue with GPS agreeing*. It now has three, ranked:
@@ -3197,17 +3202,17 @@ a tap *at the venue with GPS agreeing*. It now has three, ranked:
 **The window gained a floor.** `chatWindowState` was open from the moment the
 group existed until `end_time + 24h`. That had no lower bound because it did not
 need one — you cannot check in to an event that has not started, so the floor was
-implicit in the only way in. Pre-event chat removes that, so the room now opens
-`PRE_EVENT_CHAT_HOURS` (24) before `start_time`, mirroring the window on the
-other side.
+implicit in the only way in. Pre-event chat removed that, so the room opened
+24 hours before `start_time`; since SCRUM-1026 it opens at doors (`chatOpensAt`
+= `doorsAt`).
 
 Without a floor, favouriting a festival three months out would be a licence to
 sit in its chatroom for three months — and a room with no event around it is a
 public channel that happens to be named after a date.
 
 **The bound is also the mitigation for a weaker filter.** An RSVP is a tap from
-anywhere; a check-in is a tap at the venue. The pre-event room therefore admits a
-much broader group than the live one, and a day is what keeps that group small.
+anywhere; a check-in is a tap at the venue. An RSVP or a save admits only while
+the room is open (doors to a day after the end).
 
 **Being checked in ignores the clock**, deliberately: it is proof you are there,
 and somebody standing inside an event that started early must not be refused
@@ -3217,8 +3222,8 @@ their own room.
 `waitlisted` specifically means the event is full — putting somebody in the room
 for a thing they may never get into is worse than telling them no.
 
-**Two refusals, not one.** *"RSVP to this event to join the chat"* and *"This
-chat opens 24 hours before the event starts"* have different remedies, and a
+**Two refusals, not one.** *"RSVP to this event to join the chat"* and *"The
+room opens when the doors open."* have different remedies, and a
 single message would tell somebody who already RSVP'd that they are not welcome.
 
 **A missing `start_time` means no floor.** Several callers select only
@@ -3804,13 +3809,20 @@ Requires `OPENAI_API_KEY` env var. Degrades gracefully to keyword-only if absent
 | POST | `/events/:eventId/board/:postId/report` | `message_reports` with `message_type: "board_post"` — shown as "Lobby · offer\|seeking\|chat" |
 | POST | `/board/requests/:requestId/report` | `message_reports` with `message_type: "board_request"` — shown as "Lobby ask" |
 
-### The pre-event Lobby
+### The Lobby
+
+The routes keep their `/board` paths so installed builds keep working; the
+screens call it the Lobby (SCRUM-1026).
 
 | Method | Endpoint | Gate |
 |--------|----------|------|
-| GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** favourited; before doors. Posts by anybody blocked either way are left out |
-| POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps; the text passes moderation |
+| GET | `/events/:eventId/board` | RSVP'd (any committed status) **or** saved; until the room closes. Posts by anybody blocked either way, or a friend, are left out |
+| POST | `/events/:eventId/board` | RSVP'd **going**, complete profile, under both caps, before doors; the text passes moderation |
+| GET | `/events/:eventId/board/:postId` | The list's gate: one post, for a post link |
 | DELETE | `/events/:eventId/board/:postId` | Your own post (anyone else's is a 404) |
+| GET | `/events/:eventId/board/preview` | Anyone the event is open to: counts; the latest two posts only for a reader |
+| GET | `/events/:eventId/board/summary` | A reader, or anybody checked in: "From the Lobby" for the room |
+| GET, PUT | `/events/:eventId/board/alerts` | A reader: your three alert switches for this event |
 | POST | `/events/:eventId/board/:postId/requests` | Same as posting, plus not blocked, not a `chat` post, not a full offer, and not asked before |
 | GET | `/board/requests` | Yours, both directions |
 | PATCH | `/board/requests/:requestId` | `{ action: accept \| decline \| withdraw }` |
@@ -3832,8 +3844,8 @@ requires a **complete profile**: name, age, two structured interests, one
 intent. Server-enforced, and deliberately not `profiles.onboarded`, which is a
 client-set boolean no API has ever checked.
 
-**No photo.** The Lobby is pseudonymous, so a photo would be collected and never
-shown.
+**No profile photo is asked for.** The Lobby is pseudonymous. A post may carry
+one photo of its own (below).
 
 Two caps, bounding different abuses: **5 unanswered requests at once** bounds a
 spray, and **20 per rolling week** bounds persistence — the first alone is
@@ -3845,12 +3857,117 @@ nowhere else. `requestCount` is a number and never a list: how many have asked
 is useful, naming them would disclose who is looking for company to everyone
 browsing.
 
-**The Lobby closes at doors** — for reading as well as posting and asking, all
-three **403** *"The Lobby closes when the doors open — the room is open
-instead"*, judged on the event's `start_time`. After that the room is the place,
-and it is gated on presence rather than intent — a Lobby that stayed open would
-be a second room with a weaker gate running beside the real one, and a readable
-one would be a list of who came alone, open during the night.
+#### One lifecycle (SCRUM-1026)
+
+| When | The Lobby | The room | A post's room |
+|---|---|---|---|
+| publish → doors | open: read, post, ask | shut (`NOT_OPEN_YET`, `opensAt` = doors) | open |
+| doors → end + 24 h | **read-only**: read, answer asks, withdraw, report, block | open | open |
+| end + 24 h → | **closed** | closed | closed |
+| close + 180 days | purged | messages purged | purged |
+
+**Doors** are `start_time` − 90 minutes, when check-in opens (`doorsAt`,
+`CHECK_IN_LEAD_MINUTES`). The room's 24-hour pre-event chat for people who
+RSVP'd is gone: the Lobby is the only "before". A post or an ask from doors is
+**403** `reasonCode` `LOBBY_READ_ONLY` (*"The doors are open, so the Lobby is
+read-only now. The room is open instead."*); every Lobby route after the close is
+**403** `LOBBY_CLOSED` (*"The Lobby has closed. The Lobby and the room close a
+day after the event ends."*). The list carries `state` (`open` / `read_only`),
+`doorsAt` and `closesAt`.
+
+**After the close nobody reads any of it in the app**, members included: the
+room (`GET /events/:id/chat` answers 403 `CHAT_CLOSED` + `ROOM_CLOSED`; every
+`/chat/groups/:id` read and the socket join answer as for a room that is gone),
+a post's room (it used to close 12 hours after the end; it closes with the room
+now), and the asks on `GET /board/requests`. It is kept server-side only, for
+safety, reports and legal requests, and hard-deleted 180 days after the close by
+the chat sweeper (`lib/lobby-retention.ts`): room messages, posts with their asks
+and photos, the posts' rooms, the host's note. Removed or reported content is
+held 180 days from its removal, and anything with a pending report until it is
+decided. Alert switches go at the close. The purge is a dry run that logs what it
+would delete until `LOBBY_PURGE=delete` is set. See `docs/RETENTION.md`.
+
+#### Types, spots and the list
+
+A post's `kind` stays `offer`, `seeking` or `chat`; `subKind` says what about —
+an offer of a `ride`, `spots` or a spare `ticket`, a search for a `ride`,
+somebody to go with (`buddy`) or a `ticket`. Optional; one that does not fit
+its kind is **400** (and refused by `board_posts_sub_kind_fits`). Spots stay
+`spacesLeft`; a spare ticket is `1` unless the author says otherwise. On an event
+whose tickets are sold on Blend'n (`ticketing_mode: native`, with `TICKETING`
+on), both ticket sub-kinds are hidden: refused with **422**
+`LOBBY_TICKETS_HIDDEN`, left out of every read, and missing from `subKinds`.
+
+`GET /events/:eventId/board` filters on the server: `?kind=`, `?subKind=`, and
+`?filter=mine` (your posts) or `?filter=replies` (your posts somebody asked on,
+and posts whose author said yes to you). Paged by `?limit=`/`?cursor=` as
+before (pinned at 2,000 posts). The first page also has `counts`
+(`all, offer, seeking, chat, offerRides, mine, replies`, exact — the 1.2k form is
+the client's), `pinned` (the host's post) and `compose`
+(`{ allowed, message, reasonCode }` for the composer's slot: `BOARD_NOT_GOING`,
+`BOARD_PROFILE_INCOMPLETE`, `BOARD_TOO_MANY_OUTSTANDING`, `BOARD_WEEKLY_LIMIT`,
+`LOBBY_READ_ONLY`). Each post adds `eventId`, `subKind` and `photo`.
+
+`GET /events/:eventId/board/preview` is the event page's card: `counts` (no
+`mine`/`replies`) and `latest`, the newest two. Somebody who neither saved nor
+RSVP'd gets `canRead: false`, the counts and `latest: []`.
+
+`GET /events/:eventId/board/summary` is "From the Lobby" in the room: `joined`
+(the posts you are in through an accepted ask either way — `postId`, `kind`,
+`subKind`, `body`, `mine`, `author`, `others`, `chatGroupId` when it has a room
+you are in, `requestId` for your accepted ask), `asks: { yours, waitingOnYou }`,
+`pinned` and `readUntil`.
+
+#### A photo
+
+One per post: `photo: { url, alt? }` on the POST, where `url` is the upload's
+`publicUrl` from `POST /uploads/presigned-url` with `folder: "chat"` (JPEG, PNG
+or WebP, 10 MB at most, size bound into the URL). Your own upload only — anything
+else is **400**. The server reads it, strips its EXIF/GPS and every other
+metadata block (`stripImageMetadata`), stores its own copy in the private bucket
+under a key that names nobody (`chat/sealed/<uuid>`) and deletes the upload. The
+post then carries `photo: { status, url, alt }`:
+
+- `pending` until OpenAI's omni-moderation has looked (checked after the
+  response; the sweeper retries one it could not). Only its author gets it, with
+  a URL; anybody else gets `photo: null` and never the URL.
+- `approved`: everybody who can read the Lobby gets a signed URL (15 minutes).
+- `rejected` (a `hide` or a borderline `flag`): its author gets
+  `{ status: "rejected", url: null }` ("Your photo wasn't posted."), nobody else
+  anything. The post stays, text only; the object is kept 180 days as removed
+  content.
+
+Alt text is optional, 200 characters at most. A report on a post covers its
+photo, and the reports queue shows it (signed); *Remove post* takes both down.
+
+#### The host's pinned post
+
+`GET | PUT | DELETE /api/events/:id/lobby-pin` (dashboard session), for anybody
+the event's organisation lets edit it (`eventPermissions(...).canEdit`; a venue
+owner who only operates the event cannot). One per event, 1–500 characters,
+editable and unpinnable until the Lobby closes (then **409**). Shown on the list's
+first page, the room's card and the pins as `pinned: { id, body, host,
+createdAt, updatedAt }`, where `host` is the organisation's public name (or
+"Organizer") — never the person who wrote it, who is recorded only in
+`written_by` and the audit log (`lobby.pin.set`, `lobby.pin.edit`,
+`lobby.pin.clear`, resource `event`).
+
+#### Alerts
+
+`GET`/`PUT /events/:eventId/board/alerts`: `{ offersMatch, replies, hostPosts }`,
+all `false` until turned on, for this event only; a PUT changes the keys it
+sends (an unknown key is 400). They gate pushes, never the bell:
+
+| Switch | Push `type` | Sent when |
+|---|---|---|
+| `offersMatch` | `board_match` (push only) | an offer with a sub-kind is posted and you have a live search for what it answers (ride↔ride, spots↔buddy, ticket↔ticket); never across a block or a friendship |
+| `replies` | `board_request`, `board_request_accepted` | an ask on your post; a yes to yours (the bell row is written either way) |
+| `hostPosts` | `board_host_post` (push only) | the host's pinned post goes up or its words change |
+
+The Lobby's own pushes say "Lobby" as the title and the event as the iOS
+subtitle, carry no pseudonym and no words of a post, and carry `eventId` plus
+`postId` (or `hostPostId`) so the tap opens the post. **The ask pushes are opt-in
+now**: an installed build with no switches gets the bell row and no push.
 
 **A taken-down post is told to its author** (SV9). When a moderator removes a
 post, or the automatic check takes one down, its author gets a

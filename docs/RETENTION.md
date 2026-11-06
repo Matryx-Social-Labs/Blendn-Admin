@@ -92,12 +92,42 @@ deletes their account:
   180-day purge erases what is left under `profile/<id>/` in both buckets, and
   the rows with it. Photos pulled before SCRUM-479 recorded no verdict and are
   not kept.
-- **Lobby posts:** `moderation_status = 'hidden'`. Account deletion deletes the
-  author's other posts but keeps these.
+- **Lobby posts:** `moderation_status = 'hidden'` or `'removed'`, and posts whose
+  photo moderation rejected (`photo_status = 'rejected'`, `photo_checked_at` the
+  removal). Account deletion deletes the author's other posts, and their photos
+  from storage, but keeps these.
 - **Events:** soft-deleted or delisted, with `event_reports` and `audit_logs`.
 
-No sweeper or cascade removes any of these. The `User` row is never deleted,
-and neither are events or rooms.
+The `User` row is never deleted, and neither are events or event rooms.
+
+## Event content: the Lobby, the room and the posts' rooms (SCRUM-1026)
+
+Owner decision 6 (2026-11-05; the DPDP and IT Rules points to be confirmed by
+the lawyer). The Lobby, an event's room and its posts' rooms close for users at
+the same moment, a day after the event ends (a venue day's at its reset), and no
+app read returns them afterwards. They are kept server-side only, for safety,
+reports and legal requests, and 180 days after the close the chat sweeper
+(`lib/lobby-retention.ts`, every 15 minutes) hard-deletes:
+
+- the room's messages and each post's room's messages (their reactions, flags
+  and polls cascade; a reply's parent is set null), and any image they carry;
+- Lobby posts, with their asks (`board_requests` cascades) and their photo in
+  storage, and each post's room once it is empty;
+- the host's pinned post.
+
+Alert switches (`board_alert_preferences`) go at the close.
+
+**Held from removal, not from the close:** a message removed by anyone but its
+author (a host, a moderator, the pipeline) or carrying a moderation flag nobody
+cleared; a post moderation took down or whose photo it rejected; anything with a
+report upheld (`resolved`) within 180 days. Anything with a report still
+`pending` is held until it is decided. A held message keeps its post and its
+room. A storage delete that fails keeps its row for the next pass.
+
+**Not yet:** the purge is a dry run that logs counts until `LOBBY_PURGE=delete`
+is set on the service. Turn it on once the privacy policy says these windows
+(draft: `.context/plans/privacy-retention-draft.md`). Dismissed reports keep
+their `excerpt`; derived `event_feedback` rows go with their messages.
 
 **Stored media is `no-cache`.** Every profile photo and chat image is the
 server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so

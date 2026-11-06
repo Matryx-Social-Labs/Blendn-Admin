@@ -10,26 +10,16 @@ import type { chat_group_status, event_kind, event_status } from "@prisma/client
  */
 export const CHAT_WINDOW_HOURS = 24
 
-/**
- * How long *before* an event starts its room opens.
+/*
+ * The room opens at doors (SCRUM-1026, owner decision 7, 2026-11-05).
  *
- * The room used to have no lower bound at all: it was open from the moment the
- * group existed, which did not matter while the only way in was checking in —
- * you cannot check in to an event that has not started, so the floor was
- * implicit.
- *
- * Pre-event chat for people who RSVP'd removes that floor, and something has to
- * replace it. Without one, somebody who RSVPs to a festival three months out
- * sits in its chatroom for three months, and a room with no event around it is
- * just a public channel that happens to be named after a date.
- *
- * Twenty-four, mirroring the window on the other side. It is also the mitigation
- * for the weaker filter: an RSVP is a tap, where a check-in is a tap *at the
- * venue with GPS agreeing*, so the pre-event room admits a much broader group
- * than the live one. Bounding it to a day keeps that group small and keeps the
- * room about the event.
+ * It used to open `PRE_EVENT_CHAT_HOURS` (24) before the start for people who
+ * RSVP'd or saved the event, so for the last day the room and the Lobby were
+ * two "before" spaces side by side. The Lobby is the only one now: it is open
+ * from publish to doors, then read-only until the room closes, and the room's
+ * floor is the start itself. Everything that read the old constant reads
+ * `chatOpensAt`.
  */
-export const PRE_EVENT_CHAT_HOURS = 24
 
 export type ChatWindowState =
   | { open: true }
@@ -101,10 +91,23 @@ export function eventHidesRoom(event: { status?: string; deleted_at: Date | null
   return event.status === "draft" || event.deleted_at !== null
 }
 
-/** When an event's pre-event room opens; null when the start is unknown (no floor). */
+/**
+ * How far before an event's start its doors open: check-in opens
+ * (`CHECK_IN_LEAD_MINUTES` is this), the room opens, and the Lobby turns
+ * read-only. One moment for all three, so nobody standing at the venue meets
+ * a room that has not opened, and the Lobby hands over to the room rather than
+ * running beside it.
+ */
+export const DOORS_LEAD_MINUTES = 90
+
+/** When an event's doors open. */
+export function doorsAt(event: { start_time: Date }): Date {
+  return new Date(event.start_time.getTime() - DOORS_LEAD_MINUTES * 60 * 1000)
+}
+
+/** When an event's room opens: at doors. Null when the start is unknown (no floor). */
 export function chatOpensAt(event: { start_time?: Date | null }): Date | null {
-  if (!event.start_time) return null
-  return new Date(event.start_time.getTime() - PRE_EVENT_CHAT_HOURS * 60 * 60 * 1000)
+  return event.start_time ? doorsAt({ start_time: event.start_time }) : null
 }
 
 export function chatWindowState(
@@ -150,7 +153,7 @@ export function chatClosedMessage(
   if (reason === "locked") return "This chat is locked."
   // Says when, not just no. "Closed" for a room that has never opened reads as
   // a fault, and the person asking is someone who RSVP'd and is keen.
-  if (reason === "not_open_yet") return "This chat opens 24 hours before the event starts."
+  if (reason === "not_open_yet") return "The room opens when the doors open."
   return "This chat has closed. Event chats stay open for 24 hours after the event ends."
 }
 
@@ -310,10 +313,19 @@ export type ReadDenial = "hidden" | "not_member" | "banned" | "not_live"
 
 export function roomReadDenial(
   membership: { status: string; left_at: Date | null; last_allowed_at: Date | null } | null | undefined,
-  event: { status: string; deleted_at: Date | null; kind: event_kind },
+  event: { status: string; deleted_at: Date | null; kind: event_kind; end_time: Date },
   now: Date = new Date()
 ): ReadDenial | null {
   if (eventHidesRoom(event)) return "hidden"
+  /*
+   * Closed is gone (SCRUM-1026): a day after the event ends the room, its
+   * Lobby and its posts' rooms close for users at once, and what they held is
+   * kept server-side only, for 180 days (`lib/lobby-retention.ts`). It used to
+   * stay readable to its members for ever. `end_time` is required so a caller
+   * cannot forget the clock. A venue day's closes at its reset, which
+   * `liveInVenueDay` below already answers as `not_live`.
+   */
+  if (event.kind !== "venue_day" && now >= chatClosesAt(event)) return "hidden"
   if (!membership) return "not_member"
   if (membership.status === "banned") return "banned"
   if (!liveInVenueDay(event, membership, now)) return "not_live"
@@ -368,8 +380,8 @@ export function roomEntitlement(input: {
  * must not get one, or somebody standing in the venue of an event that started
  * early would be refused their own room.
  *
- * The weaker two are only good inside the pre-event window, which is what stops
- * an RSVP from being a permanent licence to a channel.
+ * The weaker two are only good inside the window (doors to a day after the
+ * end), which is what stops an RSVP from being a permanent licence to a channel.
  */
 export function entitlementAdmits(
   entitlement: RoomEntitlement,

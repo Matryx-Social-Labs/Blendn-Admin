@@ -7,6 +7,7 @@ import {
   isLiveRequest,
   isLiveToTheAsker,
   liveRequest,
+  lobbyNotClosed,
   outstandingAsk,
   VISIBLE_TO_AUTHOR,
 } from "@/lib/board-access"
@@ -67,6 +68,8 @@ export async function GET(request: NextRequest) {
     const blockedIds = await blockCounterparties(user.userId)
     const blocked = new Set(blockedIds)
     const newest = { created_at: "desc" as const }
+    // A closed Lobby's asks are in no list (SCRUM-1026): kept server-side only, then purged.
+    const open = lobbyNotClosed(now)
 
     /*
      * Each direction in three slices, so the page cannot be filled by history.
@@ -89,7 +92,7 @@ export async function GET(request: NextRequest) {
         select,
       }),
       db.board_requests.findMany({
-        where: { to_user_id: user.userId, ...VISIBLE_TO_AUTHOR, from_user_id: { notIn: blockedIds }, status: { not: "pending" } },
+        where: { to_user_id: user.userId, ...VISIBLE_TO_AUTHOR, from_user_id: { notIn: blockedIds }, status: { not: "pending" }, ...open },
         orderBy: [{ status: "asc" }, newest],
         take: PAGE,
         select,
@@ -100,6 +103,7 @@ export async function GET(request: NextRequest) {
           ...VISIBLE_TO_AUTHOR,
           from_user_id: { notIn: blockedIds },
           status: "pending",
+          ...open,
           // any-kind: this person's own asks, sorted by whether their night is over; any room's ends the same way.
           OR: [{ event: { end_time: { lte: now } } }, { post: { deleted_at: { not: null } } }],
         },
@@ -122,6 +126,7 @@ export async function GET(request: NextRequest) {
       db.board_requests.findMany({
         where: {
           from_user_id: user.userId,
+          ...open,
           OR: [
             { status: { in: ["accepted", "withdrawn"] } },
             { status: "declined", asker_withdrawn_at: { not: null } },
@@ -136,6 +141,7 @@ export async function GET(request: NextRequest) {
           from_user_id: user.userId,
           status: { in: ["pending", "declined"] },
           asker_withdrawn_at: null,
+          ...open,
           // any-kind: as above — the asker's own, closed when the night is over.
           OR: [
             { event: { end_time: { lte: now } } },

@@ -14,7 +14,7 @@ import { eraseUserEntitlements } from "@/lib/entitlements"
 import { revenuecatSecretKey } from "@/lib/env"
 import { deleteSubscriber } from "@/lib/revenuecat-api"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
-import { deletePrefix, withdrawFromPublic } from "@/lib/tigris"
+import { deleteFile, deletePrefix, sealedChatKey, withdrawFromPublic } from "@/lib/tigris"
 import { eraseChatMedia, retainedChatMediaKeys, retainedProfilePhotoKeys } from "@/lib/retained-media"
 import { promoteFromWaitlist } from "@/lib/waitlist"
 import { performCheckout } from "@/lib/checkout"
@@ -105,6 +105,18 @@ export async function DELETE(request: NextRequest) {
      * are the evidence, so the scrub below leaves them until a reviewer has
      * looked (SCRUM-322 review). Read before the transaction, as above.
      */
+    /*
+     * Their Lobby photos that go with them (SCRUM-1026): every one not held as
+     * removed content. A photo moderation rejected is removed content and stays
+     * for its 180 days, with its post; so does any photo on a post under a
+     * moderation status (the post itself is kept). Read before the transaction,
+     * erased from storage after it, like the chat images.
+     */
+    const lobbyPhotos = await db.board_posts.findMany({
+      where: { author_id: authUser.userId, moderation_status: null, photo_status: { in: ["pending", "approved"] } },
+      select: { photo_url: true },
+    })
+
     const reportedAsks = (
       await db.message_reports.findMany({
         where: {
@@ -445,7 +457,26 @@ export async function DELETE(request: NextRequest) {
        * be the way to destroy the evidence. It is already hidden, so nobody
        * is left holding an offer they cannot take.
        */
-      db.board_posts.deleteMany({ where: { author_id: authUser.userId, moderation_status: null, room: { is: null } } }),
+      db.board_posts.deleteMany({
+        where: {
+          author_id: authUser.userId,
+          moderation_status: null,
+          room: { is: null },
+          // A post whose photo moderation rejected is removed content too (SCRUM-1026): kept, below.
+          OR: [{ photo_status: null }, { photo_status: { in: ["pending", "approved"] } }],
+        },
+      }),
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, photo_status: "rejected", deleted_at: null },
+        data: { deleted_at: deletedAt },
+      }),
+      // A kept post's photo goes with its words, unless moderation rejected it (erased from storage below).
+      db.board_posts.updateMany({
+        where: { author_id: authUser.userId, moderation_status: null, photo_status: { in: ["pending", "approved"] } },
+        data: { photo_url: null, photo_status: null, photo_alt: null, photo_checked_at: null },
+      }),
+      // Their Lobby alert switches: nothing to keep.
+      db.board_alert_preferences.deleteMany({ where: { user_id: authUser.userId } }),
 
       /*
        * EXCEPT a post with a room (step 7, E1). The room is other people's
@@ -648,6 +679,18 @@ export async function DELETE(request: NextRequest) {
      * someone reported, and a profile photo moderation pulled, stay for their
      * 180 days (docs/RETENTION.md, r.3(1)(g)).
      */
+    // Their Lobby photos (read before the transaction): sealed copies, whose keys name nobody.
+    for (const { photo_url } of lobbyPhotos) {
+      const key = photo_url ? sealedChatKey(photo_url) : null
+      if (!key) continue
+      await deleteFile(key).catch((error) =>
+        logger.error("Account deletion: Lobby photo NOT removed from storage", {
+          userId: erasedId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
+    }
+
     for (const folder of ["profile", "chat"] as const) {
       try {
         let gone: number

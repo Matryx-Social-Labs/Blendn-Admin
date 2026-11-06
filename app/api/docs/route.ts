@@ -1,6 +1,7 @@
 // Side-effect imports: register all path definitions with the OpenAPI registry
 import "@/lib/openapi/paths/mobile-auth"
 import "@/lib/openapi/paths/mobile-events"
+import "@/lib/openapi/paths/mobile-lobby"
 import "@/lib/openapi/paths/mobile-chat"
 import "@/lib/openapi/paths/mobile-conversations"
 import "@/lib/openapi/paths/mobile-profiles"

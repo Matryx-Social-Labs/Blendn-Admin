@@ -56,8 +56,11 @@ describe("every author-facing read of board asks uses the shared filter (a scan)
   })
 
   it("has no bare count of a post's requests on the board list", () => {
+    // The Lobby's reads count through `postSelect` in lib/lobby.ts (SCRUM-1026).
     expect(read("app/api/mobile/events/[eventId]/board/route.ts")).not.toMatch(/requests:\s*true/)
-    expect(read("app/api/mobile/events/[eventId]/board/route.ts")).toMatch(/visibleBoardRequests/)
+    expect(read("app/api/mobile/events/[eventId]/board/route.ts")).toMatch(/postSelect\(/)
+    expect(read("lib/lobby.ts")).not.toMatch(/requests:\s*true/)
+    expect(read("lib/lobby.ts")).toMatch(/visibleBoardRequests/)
   })
 
   it("keeps the shared constants where the readers import them from", () => {

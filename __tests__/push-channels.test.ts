@@ -37,6 +37,9 @@ const LEGACY: Record<Kind, string> = {
   // SV7 and SV9.
   event_cancelled: "events",
   board_post_removed: "messages",
+  // The Lobby's opt-in alerts (SCRUM-1026).
+  board_match: "messages",
+  board_host_post: "messages",
 }
 
 /** Flow 9: each kind on one of the channels people see in settings, or `default`. */
@@ -56,6 +59,8 @@ const FLOW9: Record<Kind, string> = {
   rating_request: "after-the-night",
   report_actioned: "default",
   board_post_removed: "default",
+  board_match: "matches",
+  board_host_post: "events",
 }
 
 const data = (type: Kind): NotificationData => ({ type, eventId: "e1", conversationId: "c1", chatGroupId: "g1" })

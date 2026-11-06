@@ -307,7 +307,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       throw error
     }
 
-    notifyBoardRequestAccepted(boardRequest.from_user_id, conversation.id).catch((error) =>
+    notifyBoardRequestAccepted(boardRequest.from_user_id, conversation.id, boardRequest.event_id).catch((error) =>
       logger.warn("Board acceptance notification failed", {
         requestId,
         error: String(error),

@@ -323,6 +323,57 @@ registry.registerPath({
   },
 })
 
+// === The Lobby's pinned host post (SCRUM-1026) ===
+
+const LobbyPinSchema = z
+  .object({ id: z.string().uuid(), body: z.string(), host: z.string(), createdAt: z.string(), updatedAt: z.string() })
+  .nullable()
+const LOBBY_PIN =
+  "One per event, for anybody the event's organisation lets edit it (`eventPermissions(...).canEdit`). Shown in the Lobby and the room's " +
+  "\"From the Lobby\" card under the host's public label, never the person who wrote it. Every change is audited (`lobby.pin.set`, `lobby.pin.edit`, `lobby.pin.clear`)."
+
+registry.registerPath({
+  method: "get",
+  path: "/api/events/{id}/lobby-pin",
+  tags: ["Dashboard Announcements"],
+  summary: "The Lobby's pinned host post",
+  description: LOBBY_PIN,
+  security: sessionAuth,
+  request: { params: z.object({ id: z.string().uuid() }) },
+  responses: {
+    200: { description: "The pinned post, or null", content: { "application/json": { schema: z.object({ pinned: LobbyPinSchema, state: z.enum(["open", "read_only", "closed"]) }) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "put",
+  path: "/api/events/{id}/lobby-pin",
+  tags: ["Dashboard Announcements"],
+  summary: "Pin or edit the Lobby's host post",
+  description: LOBBY_PIN + " 409 once the Lobby has closed. People who turned on \"The host posts\" for this event get a push when the words change.",
+  security: sessionAuth,
+  request: { params: z.object({ id: z.string().uuid() }), body: { content: { "application/json": { schema: z.object({ body: z.string().min(1).max(500) }) } } } },
+  responses: {
+    200: { description: "Pinned", content: { "application/json": { schema: z.object({ pinned: LobbyPinSchema }) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/events/{id}/lobby-pin",
+  tags: ["Dashboard Announcements"],
+  summary: "Unpin the Lobby's host post",
+  description: LOBBY_PIN,
+  security: sessionAuth,
+  request: { params: z.object({ id: z.string().uuid() }) },
+  responses: {
+    200: { description: "Unpinned", content: { "application/json": { schema: z.object({ pinned: z.null(), removed: z.boolean() }) } } },
+    ...standardErrors,
+  },
+})
+
 // === Chat Member Management ===
 
 // PATCH /api/events/{id}/chat/members/{userId}

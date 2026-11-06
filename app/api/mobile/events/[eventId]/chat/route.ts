@@ -24,6 +24,7 @@ import {
   chatClosedMessage,
   chatWindowState,
   entitlementAdmits,
+  eventHidesRoom,
   LEFT_ROOM_MESSAGE,
   leftByChoice,
   mayWriteToRoom,
@@ -174,6 +175,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // the CHECK — there is no room, never a stand-in event.
     const roomEvent = chatGroup.event
     if (!roomEvent) return notFoundResponse("Chat not available for this event")
+    /*
+     * Closed is gone (SCRUM-1026): a day after the end the room is read by
+     * nobody in the app, member or not, and kept server-side only. Said as a
+     * close, not a 404, so the app can show the closed state; the read rule
+     * below answers the same for every other reader of the room.
+     */
+    if (!eventHidesRoom(roomEvent) && roomEvent.kind !== "venue_day" && new Date() >= chatClosesAt(roomEvent)) {
+      return errorResponse(chatClosedMessage("window_closed"), 403, ErrorCode.CHAT_CLOSED, "ROOM_CLOSED")
+    }
 
     // Check if user is a member of the chat group
     const membership = await db.chat_group_members.findUnique({
@@ -246,7 +256,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
        *
        * Checking in is a tap *at the venue with GPS agreeing*. An RSVP or a
        * saved event is a tap from anywhere, so it admits a much broader group —
-       * which is exactly why it is only good inside `PRE_EVENT_CHAT_HOURS`.
+       * which is exactly why it is only good inside the window (doors to a day after the end).
        * Without that bound, tapping a heart on a festival three months out
        * would be a licence to a public channel for three months.
        */

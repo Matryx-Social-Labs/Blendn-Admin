@@ -2,11 +2,12 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { ALREADY_ASKED, BOARD_CLOSED, boardRefusal } from "@/lib/board"
+import { ALREADY_ASKED, boardRefusal, lobbyState, lobbyStateRefusal } from "@/lib/board"
 import { asTheAskerSees, boardWriteDenial, checkBoardText } from "@/lib/board-access"
 import { lockPair, pairIsLinked } from "@/lib/friends"
 import { knownToEachOther } from "@/lib/room-people"
 import { BOARD } from "@/lib/constants"
+import { hidesTickets } from "@/lib/lobby"
 import { blockCounterparties } from "@/lib/conversations"
 import { db } from "@/lib/db"
 import { attendeeEventAccess, eventAccessResponse } from "@/lib/event-access"
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { message } = validation.data
 
     /*
-     * The board closes at doors, and so does asking.
+     * Asking ends at doors, with posting: the Lobby is read-only from then (SCRUM-1026).
      *
      * An accepted request opens a conversation, so a request answered after the
      * event started would open one on the strength of an intent that has
@@ -76,16 +77,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (denied) return eventAccessResponse(denied)
     const event = await db.events.findUnique({
       where: { id: eventId, deleted_at: null },
-      select: { id: true, start_time: true },
+      select: { id: true, start_time: true, end_time: true, kind: true, ticketing_mode: true },
     })
     if (!event) return notFoundResponse("Event not found")
-    if (event.start_time <= new Date()) return errorResponse(BOARD_CLOSED, 403)
+    const state = lobbyState(event)
+    if (state !== "open") {
+      const refusal = lobbyStateRefusal(state)
+      return errorResponse(refusal.message, 403, undefined, refusal.reasonCode)
+    }
 
     const post = await db.board_posts.findFirst({
       where: { id: postId, event_id: eventId, deleted_at: null },
-      select: { id: true, author_id: true, kind: true, spaces_left: true },
+      select: { id: true, author_id: true, kind: true, sub_kind: true, spaces_left: true },
     })
-    if (!post) return notFoundResponse("That post is no longer in the Lobby")
+    // A ticket post on a native-ticket event is not in anybody's Lobby (owner decision 5).
+    if (!post || (post.sub_kind === "ticket" && hidesTickets(event))) return notFoundResponse("That post is no longer in the Lobby")
 
     if (post.author_id === user.userId) {
       return errorResponse("That is your own post", 400)

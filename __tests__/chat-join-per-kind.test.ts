@@ -1,7 +1,8 @@
 jest.mock("@/lib/db", () => ({ db: {} }))
 import { readFileSync } from "fs"
 import { join } from "path"
-import { mayWriteToRoomFor, ownerRoomClosesAt, roomOwnerDenial, roomReadDenialFor, roomScope, roomWindowFor } from "@/lib/room-kind"
+import { chatClosesAt } from "@/lib/chat-window"
+import { mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope, roomWindowFor } from "@/lib/room-kind"
 
 /**
  * The door of a room of every kind (CR-G01, F8, plan v2 §7).
@@ -20,10 +21,10 @@ const read = (f: string) => readFileSync(join(ROOT, f), "utf8")
 const AUTHOR = "u_author"
 const ASKER = "u_asker"
 const STRANGER = "u_stranger"
-const published = { status: "published", deleted_at: null, kind: "event" as const }
+// In the future: these rooms are open. A room's close is pinned below (SCRUM-1026: a closed room is read by nobody).
+const END = new Date("2030-10-02T18:00:00Z")
+const published = { status: "published", deleted_at: null, kind: "event" as const, end_time: END }
 const active = { status: "active", left_at: null, last_allowed_at: null }
-
-const END = new Date("2026-10-02T18:00:00Z")
 
 /**
  * A board post's room as `boardPostDoor(viewer)` reads it: the viewer's
@@ -61,13 +62,13 @@ function boardRoom(
 const BEFORE_CLOSE = new Date(END.getTime() + 60 * 60 * 1000)
 
 describe("an event's room is today's rule, unchanged", () => {
-  const room = (event: { status: string; deleted_at: Date | null; kind: "event" } | null) => ({ kind: "event" as const, event, board_post: null })
+  const room = (event: { status: string; deleted_at: Date | null; kind: "event"; end_time: Date } | null) => ({ kind: "event" as const, event, board_post: null })
 
   it("admits a member and refuses a stranger, a ban and a hidden event", () => {
     expect(roomReadDenialFor(room(published), active, STRANGER)).toBeNull()
     expect(roomReadDenialFor(room(published), null, STRANGER)).toBe("not_member")
     expect(roomReadDenialFor(room(published), { status: "banned", left_at: null, last_allowed_at: null }, STRANGER)).toBe("banned")
-    expect(roomReadDenialFor(room({ status: "draft", deleted_at: null, kind: "event" }), active, STRANGER)).toBe("hidden")
+    expect(roomReadDenialFor(room({ ...published, status: "draft" }), active, STRANGER)).toBe("hidden")
   })
 
   it("refuses an event room whose event is missing, rather than inventing one", () => {
@@ -111,13 +112,19 @@ describe("a board post's room: the author, or an asker the author accepted", () 
     expect(mayWriteToRoomFor(boardRoom({ ...author, deleted: true }), { status: "active", last_allowed_at: null }, AUTHOR, BEFORE_CLOSE)).toEqual({ reason: "hidden" })
   })
 
-  it("closes twelve hours after its event ends, on the clock, whether or not the sweeper has run (E2)", () => {
-    const closes = ownerRoomClosesAt({ end_time: END })
-    expect(closes.toISOString()).toBe("2026-10-03T06:00:00.000Z")
+  it("closes a day after its event ends, with the event's room, on the clock, whether or not the sweeper has run (E2, SCRUM-1026)", () => {
+    const closes = chatClosesAt({ end_time: END })
+    expect(closes.toISOString()).toBe("2030-10-03T18:00:00.000Z")
+    // It used to close at twelve hours: open then now.
+    const twelve = new Date(END.getTime() + 12 * 3_600_000)
     const room = boardRoom({ viewer: AUTHOR })
+    expect(roomWindowFor(room, twelve)).toEqual({ open: true })
     expect(roomWindowFor(room, new Date(closes.getTime() - 1))).toEqual({ open: true })
     expect(roomWindowFor(room, closes)).toEqual({ open: false, reason: "window_closed" })
     expect(mayWriteToRoomFor(room, { status: "active", last_allowed_at: null }, AUTHOR, closes)).toEqual({ reason: "window_closed" })
+    // And from then nobody reads it, its author included.
+    expect(roomReadDenialFor(room, active, AUTHOR, new Date(closes.getTime() - 1))).toBeNull()
+    expect(roomReadDenialFor(room, active, AUTHOR, closes)).toBe("hidden")
   })
 
   it("closes for an asker in a block with the author, either way — the board reads a block as a withdrawn post (E4)", () => {

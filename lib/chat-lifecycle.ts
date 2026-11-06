@@ -4,9 +4,10 @@
 import { db } from "./db"
 import { logger } from "./logger"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
-import { OWNER_ROOM_HOURS } from "./room-kind"
 import { closeRoomSockets } from "./room-close"
 import { purgeLapsedCrewLikes, repairCrews } from "./crews/sweep"
+import { recheckPendingPhotos } from "./lobby-photo"
+import { purgeClosedLobbies } from "./lobby-retention"
 
 /** Bounded so one pass cannot hold locks for an unbounded period. */
 const SWEEP_BATCH = 500
@@ -53,9 +54,9 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
   })
 
   /*
-   * A board post's room closes `OWNER_ROOM_HOURS` after the post's event ends
-   * (E2), and a Blend's at its `closes_at` (the occurrence's end + the same
-   * twelve hours). Their doors already refuse on the clock (`roomWindowFor`,
+   * A board post's room closes with its event's room, a day after the event
+   * ends (SCRUM-1026; it was twelve hours), and a Blend's at its `closes_at`
+   * (the occurrence's end + twelve hours). Their doors already refuse on the clock (`roomWindowFor`,
    * `roomOwnerDenial`); this archives them, releases their members and takes
    * their sockets out (E3). A crew's room never closes on a clock, and a Blend
    * closed early (its crew dissolved or hidden) was archived when it closed.
@@ -65,7 +66,7 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
       status: "active",
       kind: "board_post",
       // any-kind: a post's room closes on its post's night, whatever kind of event it was.
-      board_post: { event: { end_time: { lt: new Date(now - OWNER_ROOM_HOURS * 60 * 60 * 1000) } } },
+      board_post: { event: { end_time: { lt: cutoff } } },
     },
     select: { id: true },
     take: SWEEP_BATCH,
@@ -120,8 +121,8 @@ export async function sweepExpiredChats(): Promise<SweepResult> {
     }),
   ])
 
-  // Only another kind's: an archived event room stays readable to its members, as before.
-  for (const { id } of [...ownerExpired, ...blendRooms]) closeRoomSockets(id)
+  // Every closed room's sockets: a closed event room is no longer readable either (SCRUM-1026).
+  for (const id of ids) closeRoomSockets(id)
 
   return {
     // What changed, not what was selected.
@@ -161,6 +162,21 @@ async function runSweep(): Promise<void> {
     if (purged > 0) logger.info("Purged crew likes that never made a Blend", { purged })
   } catch (error) {
     logger.error("Crew repair sweep failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+  /*
+   * The Lobby (SCRUM-1026): photos whose first moderation did not land, and
+   * what closed rooms and Lobbies held, 180 days on (lib/lobby-retention.ts;
+   * a dry run unless LOBBY_PURGE=delete). Its own catch, like the crews'.
+   */
+  try {
+    const decided = await recheckPendingPhotos()
+    if (decided > 0) logger.info("Lobby photos judged on recheck", { decided })
+    const purge = await purgeClosedLobbies()
+    if (purge.messages + purge.posts + purge.hostPosts + purge.alertPreferences > 0 || purge.kept > 0) {
+      logger.info(purge.mode === "delete" ? "Lobby purge" : "Lobby purge (dry run: LOBBY_PURGE=delete deletes)", { ...purge })
+    }
+  } catch (error) {
+    logger.error("Lobby sweep failed", { error: error instanceof Error ? error.message : String(error) })
   }
 }
 

@@ -15,7 +15,7 @@ const expo = new Expo()
 
 // Types for notification payloads
 export interface NotificationData {
-  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "event_cancelled" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned" | "board_post_removed"
+  type: "private_message" | "group_message" | "event_checkin" | "event_update" | "event_cancelled" | "announcement" | "message_request" | "message_request_response" | "waitlist_promoted" | "match" | "reveal_request" | "reveal" | "board_request" | "board_request_accepted" | "board_match" | "board_host_post" | "friend_request" | "friend_accepted" | "rating_request" | "crew_invite" | "crew_here" | "blend" | "venue_offer" | "event_changed" | "report_actioned" | "board_post_removed"
   conversationId?: string
   chatGroupId?: string
   eventId?: string
@@ -27,6 +27,8 @@ export interface NotificationData {
 interface SendNotificationOptions {
   userId: string
   title: string
+  /** iOS's second line under the title (the Lobby's pushes put the event here). */
+  subtitle?: string
   body: string
   data?: NotificationData
   badge?: number
@@ -138,7 +140,11 @@ function deliveryForFlow9(data: NotificationData): Delivery {
     case "friend_accepted":
     case "board_request":
     case "board_request_accepted":
+    case "board_match":
       return { channelId: "matches" }
+    // Only the host's latest note is true.
+    case "board_host_post":
+      return replaced("events", data.eventId && `lobby-host:${data.eventId}`)
     case "crew_invite":
     case "crew_here":
     case "blend":
@@ -224,6 +230,9 @@ export const NOT_IN_THE_BELL: NotificationData["type"][] = [
   "private_message",
   "group_message",
   "event_checkin",
+  // The Lobby's opt-in alerts: the Lobby itself is where they are read, and no installed build knows the kinds.
+  "board_match",
+  "board_host_post",
 ]
 
 /**
@@ -315,6 +324,29 @@ const switchedOn = (data?: NotificationData) => {
   return column ? { user: { NOT: { profile: { is: { [column]: false } } } } } : {}
 }
 
+/**
+ * The Lobby's three switches, per event (`board_alert_preferences`; owner
+ * decision 4, 2026-11-05: opt-in per event, all off until turned on). These
+ * include rather than exclude: no row, or the switch off, is no push. The
+ * bell row of an ask or a yes is written either way. A Lobby push without its
+ * event goes to nobody.
+ */
+const EVENT_SWITCH_FOR_KIND: Partial<Record<NotificationData["type"], "offers_match" | "replies" | "host_posts">> = {
+  board_match: "offers_match",
+  board_host_post: "host_posts",
+  board_request: "replies",
+  board_request_accepted: "replies",
+}
+
+const eventSwitchOn = (data?: NotificationData) => {
+  const column = data?.type ? EVENT_SWITCH_FOR_KIND[data.type] : undefined
+  if (!column) return {}
+  return { user: { board_alert_preferences: { some: { event_id: data?.eventId ?? "00000000-0000-0000-0000-000000000000", [column]: true } } } }
+}
+
+/** Every per-kind gate on a push's devices, ANDed: each names `user`, so spreading them would keep only the last. */
+export const pushGates = (data?: NotificationData) => ({ AND: [consentFor(data), switchedOn(data), eventSwitchOn(data)] })
+
 /** A device to push to, and which Android channels it has (`CHANNEL_SET_FLOW9`). */
 interface PushTarget {
   token: string
@@ -323,7 +355,7 @@ interface PushTarget {
 
 async function getUserPushTokens(userId: string, data?: NotificationData): Promise<PushTarget[]> {
   const tokens = await db.push_tokens.findMany({
-    where: { user_id: userId, ...NOT_OPTED_OUT, ...consentFor(data), ...switchedOn(data) },
+    where: { user_id: userId, ...NOT_OPTED_OUT, ...pushGates(data) },
     select: { token: true, channel_set: true },
     orderBy: { updated_at: "desc" },
     take: 5, // Limit to 5 most recent tokens per user
@@ -343,8 +375,7 @@ async function getBulkUserPushTokens(userIds: string[], data?: NotificationData)
       // an announcement to a full room is the loudest sender in the product,
       // so a preference that works everywhere except here would look broken.
       ...NOT_OPTED_OUT,
-      ...consentFor(data),
-      ...switchedOn(data),
+      ...pushGates(data),
     },
     select: { user_id: true, token: true, channel_set: true },
     orderBy: { updated_at: "desc" },
@@ -510,7 +541,7 @@ async function badgesFor(userIds: string[]): Promise<Map<string, number>> {
 }
 
 export async function sendPushNotification(options: SendNotificationOptions): Promise<boolean> {
-  const { userId, title, body, data, sound = "default" } = options
+  const { userId, title, subtitle, body, data, sound = "default" } = options
 
   // First, and outside the try: the centre records what was *sent*, not what
   // was successfully delivered. See `recordNotification`.
@@ -542,6 +573,7 @@ export async function sendPushNotification(options: SendNotificationOptions): Pr
         to: pushToken,
         sound,
         title,
+        ...(subtitle && { subtitle }),
         body,
         data: withRowId(payloadFor(data, channelSet), notificationId) as Record<string, unknown>,
         badge,
@@ -644,7 +676,7 @@ async function recordBulk(
 export async function sendBulkPushNotifications(
   options: SendBulkNotificationOptions
 ): Promise<{ sent: number; failed: number }> {
-  const { userIds, title, body, data, sound = "default" } = options
+  const { userIds, title, subtitle, body, data, sound = "default" } = options
 
   /*
    * Every recipient gets a row, not just the ones with a device.
@@ -679,6 +711,7 @@ export async function sendBulkPushNotifications(
           to: pushToken,
           sound,
           title,
+          ...(subtitle && { subtitle }),
           body,
           data: { ...withRowId(payload, rowIds.get(userId)), userId } as Record<string, unknown>,
           badge: options.badge ?? badges.get(userId),
@@ -856,16 +889,68 @@ export async function notifyBoardPostRemoved(
   })
 }
 
-/** They said yes. There is a conversation now, and no decline to send back. */
+/** They said yes. There is a conversation now, and no decline to send back. `eventId` is the switch it rides on. */
 export async function notifyBoardRequestAccepted(
   recipientId: string,
-  conversationId: string
+  conversationId: string,
+  eventId: string
 ): Promise<boolean> {
   return sendPushNotification({
     userId: recipientId,
     title: "Your ask was accepted",
     body: "You can message them now.",
-    data: { type: "board_request_accepted", conversationId },
+    data: { type: "board_request_accepted", conversationId, eventId },
+  })
+}
+
+/** At most one "someone offers what you're looking for" per person per event in this long. */
+export const LOBBY_MATCH_PUSH_WINDOW_MS = 30 * 60 * 1000
+
+/** What a Lobby match push names the thing by: the offer's sub-kind. */
+const MATCH_WORDS = { ride: "a ride", spots: "spots", ticket: "a spare ticket" } as const
+
+/**
+ * Somebody offers what you are looking for in this event's Lobby (opt-in per
+ * event, `offers_match`). "Lobby" as the title, the event on its own line, and
+ * no pseudonym or words of the post: a lock screen is not an authenticated
+ * surface (`notifyBoardRequest` follows the same rule). Opens the post.
+ */
+export async function notifyLobbyMatch(
+  recipientIds: string[],
+  event: { id: string; title: string },
+  postId: string,
+  subKind: keyof typeof MATCH_WORDS
+): Promise<{ sent: number; failed: number }> {
+  // At most one per person per event per window: an offerer posting ten offers is one push, not ten (security review).
+  const first = await Promise.all(recipientIds.map((id) => firstInWindow(`lobby-match:${event.id}:${id}`, LOBBY_MATCH_PUSH_WINDOW_MS)))
+  const userIds = recipientIds.filter((_, i) => first[i])
+  if (userIds.length === 0) return { sent: 0, failed: 0 }
+  return sendBulkPushNotifications({
+    userIds,
+    title: "Lobby",
+    subtitle: clip(event.title, 60),
+    body: `Someone is offering ${MATCH_WORDS[subKind]}. You’re looking for one.`,
+    data: { type: "board_match", eventId: event.id, postId },
+  })
+}
+
+/**
+ * The host's pinned post went up or changed (opt-in per event, `host_posts`).
+ * The note is the host speaking, as an announcement is, so the push carries it.
+ */
+export async function notifyLobbyHostPost(
+  recipientIds: string[],
+  event: { id: string; title: string },
+  hostPostId: string,
+  body: string
+): Promise<{ sent: number; failed: number }> {
+  if (recipientIds.length === 0) return { sent: 0, failed: 0 }
+  return sendBulkPushNotifications({
+    userIds: recipientIds,
+    title: "Lobby",
+    subtitle: clip(event.title, 60),
+    body: clip(body, 120),
+    data: { type: "board_host_post", eventId: event.id, hostPostId },
   })
 }
 

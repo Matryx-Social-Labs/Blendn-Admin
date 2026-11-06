@@ -1,5 +1,7 @@
+import type { board_post_kind, board_post_sub_kind, event_kind } from "@prisma/client"
 import { z } from "zod"
 
+import { chatClosesAt, doorsAt } from "./chat-window"
 import { BOARD } from "./constants"
 import { MIN_INTERESTS_TO_RANK } from "./interest-coverage"
 
@@ -118,11 +120,84 @@ export function mayPostToBoard(
   return null
 }
 
-/**
- * The board closes at doors — for reading as well as writing. After that the
- * room is the place, gated on presence rather than intent.
+/*
+ * The Lobby's one lifecycle (SCRUM-1026, owner decisions 3, 6 and 7, 2026-11-05):
+ *
+ *   publish → doors            open: read, post, ask
+ *   doors → end + 24 h         read-only: read, answer an ask, withdraw, report, block
+ *   end + 24 h →               closed: gone from the app, for the Lobby, the room
+ *                              and the posts' rooms at the same moment
+ *
+ * "Doors" is `doorsAt` (check-in opens) and the close is `chatClosesAt`, the
+ * room's own clock, so the three can never drift apart. What was there is kept
+ * server-side only for 180 days and then purged (`lib/lobby-retention.ts`).
  */
-export const BOARD_CLOSED = "The Lobby closes when the doors open — the room is open instead"
+export type LobbyState = "open" | "read_only" | "closed"
+
+export function lobbyState(event: { start_time: Date; end_time: Date; kind?: event_kind }, now: Date = new Date()): LobbyState {
+  if (now >= chatClosesAt(event)) return "closed"
+  if (now >= doorsAt(event)) return "read_only"
+  return "open"
+}
+
+/** A write after doors: the Lobby is still readable, and the room is the place. */
+export const LOBBY_READ_ONLY = "The doors are open, so the Lobby is read-only now. The room is open instead."
+/** Anything after the close. */
+export const LOBBY_CLOSED = "The Lobby has closed. The Lobby and the room close a day after the event ends."
+
+/** The refusal for a Lobby that is not open to this, with its `reasonCode`. */
+export function lobbyStateRefusal(state: Exclude<LobbyState, "open">): { message: string; reasonCode: string } {
+  return state === "closed"
+    ? { message: LOBBY_CLOSED, reasonCode: "LOBBY_CLOSED" }
+    : { message: LOBBY_READ_ONLY, reasonCode: "LOBBY_READ_ONLY" }
+}
+
+/*
+ * The plain post types (owner decision, the Lobby's "Offering / Looking for /
+ * Just saying"). The stored kinds stay `offer`, `seeking` and `chat`; the
+ * sub-kind says what about, and is optional so a post can still just be an
+ * offer. `board_posts_sub_kind_fits` holds the same table in the database.
+ */
+export const SUB_KINDS = {
+  offer: ["ride", "spots", "ticket"],
+  seeking: ["ride", "buddy", "ticket"],
+  chat: [],
+} as const satisfies Record<board_post_kind, readonly board_post_sub_kind[]>
+
+export function subKindFits(kind: board_post_kind, subKind: board_post_sub_kind): boolean {
+  return (SUB_KINDS[kind] as readonly string[]).includes(subKind)
+}
+
+/**
+ * Tickets sold on Blend'n have no transfer yet, so on a native-ticket event a
+ * spare ticket and "a ticket" are not things the Lobby carries: not offered in
+ * the composer, refused on a post, and left out of every read (owner decision 5).
+ */
+export function lobbyHidesTickets(event: { ticketing_mode: string }, ticketingIsOn: boolean): boolean {
+  return ticketingIsOn && event.ticketing_mode === "native"
+}
+
+/** The sub-kinds this event's Lobby offers, for the composer. */
+export function subKindsFor(hidesTickets: boolean): Record<board_post_kind, board_post_sub_kind[]> {
+  const keep = (list: readonly board_post_sub_kind[]) => list.filter((s) => !(hidesTickets && s === "ticket"))
+  return { offer: keep(SUB_KINDS.offer), seeking: keep(SUB_KINDS.seeking), chat: [] }
+}
+
+/**
+ * What an offer answers, for "Someone offers what you're looking for": a ride
+ * a ride, a spare ticket a ticket, and spots at a table somebody looking for
+ * people to go with.
+ */
+export const OFFER_ANSWERS: Record<"ride" | "spots" | "ticket", board_post_sub_kind> = {
+  ride: "ride",
+  spots: "buddy",
+  ticket: "ticket",
+}
+
+/** Alt text for a post's photo: what a screen reader says instead of "Photo". */
+export const PHOTO_ALT_MAX = 200
+/** The host's pinned post. */
+export const HOST_POST_MAX = 500
 
 /**
  * Every refused re-ask reads this, whatever the row underneath says.
