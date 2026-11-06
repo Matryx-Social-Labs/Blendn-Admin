@@ -206,6 +206,12 @@ export async function joinedThrough(event: LobbyEvent, viewerId: string, hidden:
     },
   })
   const pseudonymOf = await boardPseudonyms(event.id, posts.map((p) => p.author_id))
+  // The 1:1 an accepted ask of yours opened (`origin_board_request_id`), so the card's row can open it.
+  const askIds = posts.flatMap((p) => p.requests.filter((r) => r.from_user_id === viewerId).map((r) => r.id))
+  const conversations = askIds.length
+    ? await db.private_conversations.findMany({ where: { origin_board_request_id: { in: askIds } }, select: { id: true, origin_board_request_id: true } })
+    : []
+  const conversationOf = new Map(conversations.map((c) => [c.origin_board_request_id, c.id]))
   return posts.map((p) => {
     const mine = p.author_id === viewerId
     const myAsk = p.requests.find((r) => r.from_user_id === viewerId)
@@ -222,6 +228,8 @@ export async function joinedThrough(event: LobbyEvent, viewerId: string, hidden:
       chatGroupId: p.room && p.room.members.length > 0 ? p.room.id : null,
       /** Your accepted ask on it: its conversation is reached through `/board/requests`. */
       requestId: myAsk?.id ?? null,
+      /** The conversation that accepted ask opened, when it still exists. */
+      conversationId: (myAsk && conversationOf.get(myAsk.id)) ?? null,
     }
   })
 }

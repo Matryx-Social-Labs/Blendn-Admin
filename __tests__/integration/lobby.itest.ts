@@ -300,6 +300,15 @@ describe("filters, counts and the first page", () => {
     expect(page.json.data.counts).toEqual({ all: 3, offer: 1, seeking: 1, chat: 1, offerRides: 1, mine: 1, replies: 2 })
     expect(page.json.data.compose).toEqual({ allowed: true, message: null, reasonCode: null })
     expect(page.json.data.state).toBe("open")
+    // Your own room name, for "Posting as": the handle your posts go up under, and nobody else's.
+    const myPost = (await list(me, eventId, "?filter=mine")).json.data.posts[0]
+    expect(page.json.data.you).toEqual({ pseudonym: myPost.author })
+    expect(typeof myPost.author).toBe("string")
+    expect((await list(other, eventId)).json.data.you.pseudonym).not.toBe(myPost.author)
+    // Later pages are posts only.
+    const firstOfOne = (await list(me, eventId, "?limit=1")).json.data
+    expect(firstOfOne.you).toBeDefined()
+    expect((await list(me, eventId, `?limit=1&cursor=${firstOfOne.pagination.nextCursor}`)).json.data.you).toBeUndefined()
 
     const ids = async (q: string) => (await list(me, eventId, q)).json.data.posts.map((p: { id: string }) => p.id).sort()
     expect(await ids("?kind=offer")).toEqual([ride.id])
@@ -340,10 +349,16 @@ describe("From the Lobby", () => {
     await db.board_host_posts.create({ data: { event_id: eventId, body: "Doors at 6 sharp. Side lane." } })
 
     const forAsker = (await (await summaryRoute.GET(req("GET", "/x", asker.token), { params: Promise.resolve({ eventId }) })).json()).data
-    expect(forAsker.joined).toEqual([expect.objectContaining({ postId: post.id, mine: false, others: 1, requestId: ask.id, chatGroupId: null })])
+    expect(forAsker.joined).toEqual([expect.objectContaining({ postId: post.id, mine: false, others: 1, requestId: ask.id, chatGroupId: null, conversationId: null })])
+    // The 1:1 the accept opened is named on the row, so the room's card can open it.
+    const [user1_id, user2_id] = [asker.id, author.id].sort()
+    const dm = await db.private_conversations.create({ data: { user1_id, user2_id, origin_board_request_id: ask.id }, select: { id: true } })
+    const withDm = (await (await summaryRoute.GET(req("GET", "/x", asker.token), { params: Promise.resolve({ eventId }) })).json()).data
+    expect(withDm.joined[0]).toMatchObject({ requestId: ask.id, conversationId: dm.id })
     expect(forAsker.pinned).toMatchObject({ body: "Doors at 6 sharp. Side lane.", host: "Organizer" })
     const forAuthor = (await (await summaryRoute.GET(req("GET", "/x", author.token), { params: Promise.resolve({ eventId }) })).json()).data
-    expect(forAuthor.joined).toEqual([expect.objectContaining({ postId: post.id, mine: true, others: 1, requestId: null })])
+    expect(forAuthor.joined).toEqual([expect.objectContaining({ postId: post.id, mine: true, others: 1, requestId: null, conversationId: null })])
+    await db.private_conversations.delete({ where: { id: dm.id } })
 
     const stranger = await outsider("lob-s-c")
     expect((await summaryRoute.GET(req("GET", "/x", stranger.token), { params: Promise.resolve({ eventId }) })).status).toBe(403)

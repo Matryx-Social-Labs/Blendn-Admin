@@ -120,6 +120,10 @@ registry.registerPath({
                 .object({ allowed: z.boolean(), message: z.string().nullable(), reasonCode: z.string().nullable() })
                 .optional()
                 .describe("First page only. `reasonCode`: `BOARD_NOT_GOING` (\"Say you're going to post\"), `BOARD_PROFILE_INCOMPLETE`, `BOARD_TOO_MANY_OUTSTANDING`, `BOARD_WEEKLY_LIMIT`, `LOBBY_READ_ONLY`."),
+              you: z
+                .object({ pseudonym: z.string().nullable() })
+                .optional()
+                .describe("First page only. Your own room name at this event, the handle your posts go up under (the composer's \"Posting as\"). Never anybody else's."),
               posts: z.array(PostSchema),
               pagination: ListPaginationSchema,
               takenDown: z
@@ -250,7 +254,8 @@ registry.registerPath({
                   author: z.string(),
                   others: z.number().int().describe("How many others are in it with you."),
                   chatGroupId: z.string().uuid().nullable().describe("The post's room (`/chat/groups/{id}`), once it has one and you are seated in it."),
-                  requestId: z.string().uuid().nullable().describe("Your accepted ask on it; its conversation is on `GET /board/requests`."),
+                  requestId: z.string().uuid().nullable().describe("Your accepted ask on it."),
+                  conversationId: z.string().uuid().nullable().describe("The 1:1 conversation your accepted ask opened (`/conversations/{id}`), while it exists; null on your own post and on a group room."),
                 })
               ).optional(),
               asks: z.object({ yours: z.number().int(), waitingOnYou: z.number().int() }).optional(),
