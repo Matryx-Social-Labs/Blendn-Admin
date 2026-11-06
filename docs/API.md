@@ -3873,7 +3873,11 @@ RSVP'd is gone: the Lobby is the only "before". A post or an ask from doors is
 read-only now. The room is open instead."*); every Lobby route after the close is
 **403** `LOBBY_CLOSED` (*"The Lobby has closed. The Lobby and the room close a
 day after the event ends."*). The list carries `state` (`open` / `read_only`),
-`doorsAt` and `closesAt`.
+`doorsAt` and `closesAt`, and `phase`: `before` until doors, `live` from them
+(on the list, a post, the preview and the room's card). A live Lobby nobody
+posted in is an ordinary empty read — `phase: "live"`, `posts: []`, zero counts —
+so the client can say "Nobody posted in the Lobby. The room is open." with
+"Open the room".
 
 **After the close nobody reads any of it in the app**, members included: the
 room (`GET /events/:id/chat` answers 403 `CHAT_CLOSED` + `ROOM_CLOSED`; every
@@ -3916,7 +3920,17 @@ RSVP'd gets `canRead: false`, the counts and `latest: []`.
 (the posts you are in through an accepted ask either way — `postId`, `kind`,
 `subKind`, `body`, `mine`, `author`, `others`, `chatGroupId` when it has a room
 you are in, `requestId` for your accepted ask), `asks: { yours, waitingOnYou }`,
-`pinned` and `readUntil`.
+`pinned`, `readUntil` and `hasContent: true`. With nothing to show — no post you
+are in, no host note, no ask waiting — it is only
+`{ state, phase, readUntil, hasContent: false }`, never an empty card: the room
+shows no card. A host note alone is content, and the card is just the note
+(design H-A, picked 2026-11-06).
+
+**Names on the screens** (owner, 2026-11-06): "the Lobby" and "the room"
+(lowercase), "Posting as" in the composer and "Sending as" on likes, "asks" in
+the Lobby ("Requests" stays for DMs), the filters "Mine" and "Replies to me",
+and "room name" for your pseudonym. Picked designs: L-A cards, P-A preview card,
+C-A one-sheet compose, H-A "From the Lobby" pinned at the top of the room.
 
 #### A photo
 

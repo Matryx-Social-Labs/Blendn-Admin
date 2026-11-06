@@ -15,6 +15,10 @@ const STATE = z
   .enum(["open", "read_only"])
   .describe("`open` until doors (90 minutes before the start, when check-in opens); `read_only` from doors until the room closes, a day after the end. A closed Lobby answers 403 `LOBBY_CLOSED` instead.")
 
+const PHASE = z
+  .enum(["before", "live"])
+  .describe("`before` while the Lobby is the place (until doors); `live` once doors have opened and the room is. A live Lobby with no posts reads \"Nobody posted in the Lobby. The room is open.\" with \"Open the room\".")
+
 const LIFECYCLE =
   "One lifecycle with the room and the posts' rooms: open (read, post, ask) until doors, read-only from doors " +
   "(read, answer asks, withdraw, report, block), and closed a day after the event ends, at the same moment as the room. " +
@@ -105,6 +109,7 @@ registry.registerPath({
           schema: wrap(
             z.object({
               state: STATE,
+              phase: PHASE,
               doorsAt: z.string(),
               closesAt: z.string(),
               ticketsHidden: z.boolean(),
@@ -174,7 +179,7 @@ registry.registerPath({
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid(), postId: z.string().uuid() }) },
   responses: {
-    200: { description: "The post", content: { "application/json": { schema: wrap(z.object({ state: STATE, closesAt: z.string(), post: PostSchema })) } } },
+    200: { description: "The post", content: { "application/json": { schema: wrap(z.object({ state: STATE, phase: PHASE, closesAt: z.string(), post: PostSchema })) } } },
     ...standardErrors,
   },
 })
@@ -197,6 +202,7 @@ registry.registerPath({
           schema: wrap(
             z.object({
               state: STATE,
+              phase: PHASE,
               canRead: z.boolean(),
               doorsAt: z.string(),
               closesAt: z.string(),
@@ -218,7 +224,8 @@ registry.registerPath({
   summary: "\"From the Lobby\", for the room",
   description:
     LIFECYCLE.replace("Not saved and not RSVP'd: 403 `BOARD_NOT_COMMITTED`. ", "Neither saved, RSVP'd nor checked in: 403 `BOARD_NOT_COMMITTED`. ") +
-    "The rides and groups you are in through the Lobby (an ask of yours accepted, or one you accepted), each with its room when it has one and you are in it; how many asks are still waiting either way; the host's pinned post; and until when the Lobby can be read.",
+    "The rides and groups you are in through the Lobby (an ask of yours accepted, or one you accepted), each with its room when it has one and you are in it; how many asks are still waiting either way; the host's pinned post; and until when the Lobby can be read. " +
+    "Nothing to show is `hasContent: false` with no card fields at all: the room shows no card. A host note alone is content (the card is just the note).",
   security: bearerAuth,
   request: { params: eventParams },
   responses: {
@@ -229,8 +236,10 @@ registry.registerPath({
           schema: wrap(
             z.object({
               state: STATE,
+              phase: PHASE,
               readUntil: z.string(),
-              pinned: HostPostSchema,
+              hasContent: z.boolean(),
+              pinned: HostPostSchema.optional().describe("Only with `hasContent: true`."),
               joined: z.array(
                 z.object({
                   postId: z.string().uuid(),
@@ -243,8 +252,8 @@ registry.registerPath({
                   chatGroupId: z.string().uuid().nullable().describe("The post's room (`/chat/groups/{id}`), once it has one and you are seated in it."),
                   requestId: z.string().uuid().nullable().describe("Your accepted ask on it; its conversation is on `GET /board/requests`."),
                 })
-              ),
-              asks: z.object({ yours: z.number().int(), waitingOnYou: z.number().int() }),
+              ).optional(),
+              asks: z.object({ yours: z.number().int(), waitingOnYou: z.number().int() }).optional(),
             })
           ),
         },

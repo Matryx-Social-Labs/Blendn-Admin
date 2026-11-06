@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger"
 import { NextRequest } from "next/server"
 import { z } from "zod"
 
-import { boardRefusal, lobbyState, lobbyStateRefusal, PHOTO_ALT_MAX, subKindFits, subKindsFor } from "@/lib/board"
+import { boardRefusal, lobbyPhase, lobbyState, lobbyStateRefusal, PHOTO_ALT_MAX, subKindFits, subKindsFor } from "@/lib/board"
 import { boardWriteDenial, checkBoardText, hideBoardPostIfFlagged } from "@/lib/board-access"
 import { chatClosesAt, doorsAt } from "@/lib/chat-window"
 import { BOARD } from "@/lib/constants"
@@ -110,6 +110,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const ticketsHidden = hidesTickets(event)
     return successResponse({
       state,
+      phase: lobbyPhase(state),
       doorsAt: doorsAt(event),
       closesAt: chatClosesAt(event),
       ticketsHidden,

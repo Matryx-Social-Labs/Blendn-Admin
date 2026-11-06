@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 
 import { errorResponse, serverErrorResponse, successResponse } from "@/lib/api-response"
-import { boardRefusal } from "@/lib/board"
+import { boardRefusal, lobbyPhase } from "@/lib/board"
 import { outstandingAsk, liveRequest, VISIBLE_TO_AUTHOR } from "@/lib/board-access"
 import { chatClosesAt } from "@/lib/chat-window"
 import { blockCounterparties } from "@/lib/conversations"
@@ -43,13 +43,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       db.board_requests.count({ where: { event_id: eventId, from_user_id: userId, ...outstandingAsk(now, blocked) } }),
       db.board_requests.count({ where: { event_id: eventId, to_user_id: userId, ...VISIBLE_TO_AUTHOR, from_user_id: { notIn: blocked }, ...liveRequest(now) } }),
     ])
-    return successResponse({
-      state,
-      readUntil: chatClosesAt(event),
-      pinned,
-      joined,
-      asks: { yours, waitingOnYou },
-    })
+    const base = { state, phase: lobbyPhase(state), readUntil: chatClosesAt(event) }
+    /*
+     * Nothing to show is said, not drawn (owner, 2026-11-06): no post you are
+     * in, no host note, no ask waiting, and the room shows no card at all. A
+     * host note alone is content: the card is just the note.
+     */
+    const hasContent = joined.length > 0 || pinned !== null || yours + waitingOnYou > 0
+    if (!hasContent) return successResponse({ ...base, hasContent: false })
+    return successResponse({ ...base, hasContent: true, pinned, joined, asks: { yours, waitingOnYou } })
   } catch (error) {
     logger.error("Lobby summary error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to load the Lobby")

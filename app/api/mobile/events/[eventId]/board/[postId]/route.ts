@@ -13,6 +13,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
 import { closePostRooms } from "@/lib/room-close"
+import { lobbyPhase } from "@/lib/board"
 import { chatClosesAt } from "@/lib/chat-window"
 import { hiddenAuthorsFor, livePostsWhere, postSelect, shapePosts } from "@/lib/lobby"
 import { lobbyDoor } from "@/lib/lobby-route"
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
     if (!row) return notFoundResponse("That post is no longer in the Lobby")
     const [post] = await shapePosts(eventId, [row], userId)
-    return successResponse({ state, closesAt: chatClosesAt(event), post })
+    return successResponse({ state, phase: lobbyPhase(state), closesAt: chatClosesAt(event), post })
   } catch (error) {
     logger.error("Lobby post read error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to load the post")

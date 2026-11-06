@@ -140,6 +140,16 @@ export function lobbyState(event: { start_time: Date; end_time: Date; kind?: eve
   return "open"
 }
 
+/**
+ * What the screens draw from: `before` while the Lobby is the place, `live`
+ * once doors have opened and the room is (owner, 2026-11-06: a live event's
+ * empty Lobby reads "Nobody posted in the Lobby. The room is open.").
+ */
+export type LobbyPhase = "before" | "live"
+export function lobbyPhase(state: Exclude<LobbyState, "closed">): LobbyPhase {
+  return state === "open" ? "before" : "live"
+}
+
 /** A write after doors: the Lobby is still readable, and the room is the place. */
 export const LOBBY_READ_ONLY = "The doors are open, so the Lobby is read-only now. The room is open instead."
 /** Anything after the close. */

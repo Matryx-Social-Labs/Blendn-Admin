@@ -350,6 +350,52 @@ describe("From the Lobby", () => {
   })
 })
 
+describe("a live event whose Lobby nobody posted in (owner, 2026-11-06)", () => {
+  async function liveEmpty() {
+    const eventId = await upcoming()
+    // An hour before the start: past doors, so the room is open and the Lobby read-only.
+    const start = new Date(Date.now() + 3_600_000)
+    await db.events.update({ where: { id: eventId }, data: { start_time: start, end_time: new Date(start.getTime() + 3 * 3_600_000) } })
+    return { eventId, me: await poster("lob-empty", eventId) }
+  }
+  const at = (route: { GET: (r: NextRequest, c: { params: Promise<{ eventId: string }> }) => Promise<Response> }, who: Person, eventId: string) =>
+    route.GET(req("GET", "/x", who.token), { params: Promise.resolve({ eventId }) })
+
+  it("reads empty and live, with zero counts and a read-only composer", async () => {
+    const { eventId, me } = await liveEmpty()
+    const page = await list(me, eventId)
+    expect(page.status).toBe(200)
+    expect(page.json.data).toMatchObject({ state: "read_only", phase: "live", posts: [], pinned: null, counts: { all: 0, offer: 0, seeking: 0, chat: 0, offerRides: 0, mine: 0, replies: 0 } })
+    expect(page.json.data.compose).toMatchObject({ allowed: false, reasonCode: "LOBBY_READ_ONLY" })
+
+    const preview = await at(previewRoute, me, eventId)
+    expect(preview.status).toBe(200)
+    expect((await preview.json()).data).toMatchObject({ phase: "live", canRead: true, latest: [], counts: { all: 0, offerRides: 0 } })
+  })
+
+  it("gives the room no card at all: hasContent false, and no empty card payload", async () => {
+    const { eventId, me } = await liveEmpty()
+    const res = await at(summaryRoute, me, eventId)
+    expect(res.status).toBe(200)
+    const data = (await res.json()).data
+    expect(data).toEqual({ state: "read_only", phase: "live", readUntil: expect.any(String), hasContent: false })
+  })
+
+  it("is just the host's note when that is all there is", async () => {
+    const { eventId, me } = await liveEmpty()
+    await db.board_host_posts.create({ data: { event_id: eventId, body: "Doors at 6. Side lane." } })
+    const data = (await (await at(summaryRoute, me, eventId)).json()).data
+    expect(data).toMatchObject({ phase: "live", hasContent: true, pinned: { body: "Doors at 6. Side lane." }, joined: [], asks: { yours: 0, waitingOnYou: 0 } })
+    expect((await list(me, eventId)).json.data).toMatchObject({ phase: "live", posts: [], pinned: { body: "Doors at 6. Side lane." } })
+  })
+
+  it("is before, not live, while the Lobby is open (the control)", async () => {
+    const eventId = await upcoming()
+    const me = await poster("lob-empty-before", eventId)
+    expect((await list(me, eventId)).json.data.phase).toBe("before")
+  })
+})
+
 describe("alerts", () => {
   it("are all off until turned on, per event, and only the keys sent change", async () => {
     const eventId = await upcoming()

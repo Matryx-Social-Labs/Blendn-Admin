@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 
 import { serverErrorResponse, successResponse } from "@/lib/api-response"
+import { lobbyPhase } from "@/lib/board"
 import { chatClosesAt, doorsAt } from "@/lib/chat-window"
 import { db } from "@/lib/db"
 import { hiddenAuthorsFor, livePostsWhere, lobbyCounts, postSelect, shapePosts } from "@/lib/lobby"
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     ])
     return successResponse({
       state,
+      phase: lobbyPhase(state),
       canRead: mayRead,
       doorsAt: doorsAt(event),
       closesAt: chatClosesAt(event),
