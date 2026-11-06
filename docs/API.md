@@ -3910,7 +3910,9 @@ before (pinned at 2,000 posts). The first page also has `counts`
 the client's), `pinned` (the host's post) and `compose`
 (`{ allowed, message, reasonCode }` for the composer's slot: `BOARD_NOT_GOING`,
 `BOARD_PROFILE_INCOMPLETE`, `BOARD_TOO_MANY_OUTSTANDING`, `BOARD_WEEKLY_LIMIT`,
-`LOBBY_READ_ONLY`). Each post adds `eventId`, `subKind` and `photo`.
+`LOBBY_READ_ONLY`) and `you` (`{ pseudonym }`: your own room name at this
+event, the handle your posts go up under, for the composer's "Posting as"; never
+anybody else's). Each post adds `eventId`, `subKind` and `photo`.
 
 `GET /events/:eventId/board/preview` is the event page's card: `counts` (no
 `mine`/`replies`) and `latest`, the newest two. Somebody who neither saved nor
@@ -3919,7 +3921,8 @@ RSVP'd gets `canRead: false`, the counts and `latest: []`.
 `GET /events/:eventId/board/summary` is "From the Lobby" in the room: `joined`
 (the posts you are in through an accepted ask either way — `postId`, `kind`,
 `subKind`, `body`, `mine`, `author`, `others`, `chatGroupId` when it has a room
-you are in, `requestId` for your accepted ask), `asks: { yours, waitingOnYou }`,
+you are in, `requestId` for your accepted ask and `conversationId` for the 1:1 it
+opened), `asks: { yours, waitingOnYou }`,
 `pinned`, `readUntil` and `hasContent: true`. With nothing to show — no post you
 are in, no host note, no ask waiting — it is only
 `{ state, phase, readUntil, hasContent: false }`, never an empty card: the room

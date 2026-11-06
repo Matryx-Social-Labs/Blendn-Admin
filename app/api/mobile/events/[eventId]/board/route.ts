@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { z } from "zod"
 
 import { boardRefusal, lobbyPhase, lobbyState, lobbyStateRefusal, PHOTO_ALT_MAX, subKindFits, subKindsFor } from "@/lib/board"
-import { boardWriteDenial, checkBoardText, hideBoardPostIfFlagged } from "@/lib/board-access"
+import { boardPseudonyms, boardWriteDenial, checkBoardText, hideBoardPostIfFlagged } from "@/lib/board-access"
 import { chatClosesAt, doorsAt } from "@/lib/chat-window"
 import { BOARD } from "@/lib/constants"
 import { db } from "@/lib/db"
@@ -103,9 +103,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * moderator or the automatic check took down (SV9). Later pages are posts.
      */
     const first = after === null
-    const [counts, pinned, compose, takenDown] = first
-      ? await Promise.all([lobbyCounts(base, userId), hostPostFor(event), composeFor(eventId, userId, state), takenDownFor(eventId, userId)])
-      : [null, null, null, []]
+    const [counts, pinned, compose, takenDown, you] = first
+      ? await Promise.all([lobbyCounts(base, userId), hostPostFor(event), composeFor(eventId, userId, state), takenDownFor(eventId, userId), youAt(eventId, userId)])
+      : [null, null, null, [], null]
 
     const ticketsHidden = hidesTickets(event)
     return successResponse({
@@ -115,7 +115,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       closesAt: chatClosesAt(event),
       ticketsHidden,
       subKinds: subKindsFor(ticketsHidden),
-      ...(first && { counts, pinned, compose }),
+      ...(first && { counts, pinned, compose, you }),
       takenDown,
       posts,
       pagination: { limit, hasMore: page.hasMore, nextCursor: page.nextCursor, totalCount } satisfies ListPagination,
@@ -126,6 +126,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     })
     return serverErrorResponse("Failed to load the Lobby")
   }
+}
+
+/**
+ * Your own room name at this event, for the composer's "Posting as" (C-A): the
+ * handle your posts go up under, which before your first post nothing else says.
+ * Yours only; the Lobby never names anybody else to the client.
+ */
+async function youAt(eventId: string, userId: string) {
+  const pseudonym = (await boardPseudonyms(eventId, [userId])).get(userId) ?? null
+  return { pseudonym }
 }
 
 /** Whether the caller may post now, and if not the sentence and `reasonCode` the composer's slot shows. */
