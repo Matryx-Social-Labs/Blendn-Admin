@@ -27,6 +27,12 @@ import { curationState } from "@/lib/curation"
 import { eventRefusals, refusalSummary } from "@/lib/check-in-refusals"
 import { CurationHealth } from "./curation-health"
 import { eventClock } from "@/lib/event-phase"
+import { lobbyState } from "@/lib/board"
+import { broadcastAuthorName, broadcastAuthorSelect } from "@/lib/broadcast-author"
+import { chatClosesAt, doorsAt } from "@/lib/chat-window"
+import { lobbyMoment } from "@/lib/dashboard-format"
+import { db } from "@/lib/db"
+import { LobbyNotePanel } from "./lobby-note"
 
 export const dynamic = "force-dynamic"
 
@@ -154,9 +160,24 @@ export default async function EventDetailPage({
     // What the sponsored-message routes allow, asked the same way they ask it,
     // so the composer offers only what will be accepted (SCRUM-308).
     const mayAuthorSponsored = canBroadcast(actor, event, "sponsored", (await resolveSponsorGrant(actor, event.id)) ?? undefined)
+    // The Lobby note (SCRUM-1026): first and full width, read here so the panel opens drawn.
+    const lobby = await db.events.findUniqueOrThrow({
+      where: { id: event.id },
+      select: { ...broadcastAuthorSelect, board_host_post: { select: { body: true, updated_at: true } } },
+    })
+    const pinned = lobby.board_host_post
     return (
       <div className="flex flex-col gap-5">
         {header}
+        <LobbyNotePanel
+          eventId={event.id}
+          host={broadcastAuthorName(lobby)}
+          note={pinned && { body: pinned.body, updatedAt: pinned.updated_at.toISOString() }}
+          state={lobbyState(event, now)}
+          doors={lobbyMoment(doorsAt(event), event.timezone)}
+          closes={lobbyMoment(chatClosesAt(event), event.timezone)}
+          now={now.toISOString()}
+        />
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @4xl/main:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <Panel title="Into the room" hint="announcements, polls and sponsored messages">
             <EventMessaging eventId={event.id} mayAuthorSponsored={mayAuthorSponsored} />

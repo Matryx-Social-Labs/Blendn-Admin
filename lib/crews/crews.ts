@@ -18,6 +18,7 @@ import { checkIdentityKeywords } from "../moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "../moderation/openai-moderation"
 import type { ModerationResult } from "../moderation/types"
 import { recordScreenedText, TEXT_NOT_ALLOWED } from "../moderation/user-text"
+import { characters } from "../utils"
 import { sendPushNotification } from "../push-notifications"
 import { closeRoomSockets, leaveRoomSockets } from "../room-close"
 import { blocksBetween } from "./blocks"
@@ -74,9 +75,6 @@ export const CREW_TAGS = {
 export type CrewTag = keyof typeof CREW_TAGS
 
 const TAG_SLUGS = Object.keys(CREW_TAGS) as [CrewTag, ...CrewTag[]]
-
-/** Characters as a person counts them — and as Postgres's `char_length` does. */
-export const characters = (text: string): number => [...text].length
 
 /*
  * Folded before anything reads them (lib/moderation/fold.ts): the keyword

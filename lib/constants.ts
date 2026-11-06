@@ -175,6 +175,8 @@ export const BOARD = {
   MAX_POST_LENGTH: 500,
   /** Longest an ask may be. "Can I join?" needs no essay. */
   MAX_REQUEST_LENGTH: 300,
+  /** Longest the host's pinned Lobby note may be (CHECK `board_host_posts_body_length`, char_length 1–500). */
+  MAX_HOST_POST_LENGTH: 500,
 } as const
 
 /**

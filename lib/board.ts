@@ -206,8 +206,6 @@ export const OFFER_ANSWERS: Record<"ride" | "spots" | "ticket", board_post_sub_k
 
 /** Alt text for a post's photo: what a screen reader says instead of "Photo". */
 export const PHOTO_ALT_MAX = 200
-/** The host's pinned post. */
-export const HOST_POST_MAX = 500
 
 /**
  * Every refused re-ask reads this, whatever the row underneath says.
