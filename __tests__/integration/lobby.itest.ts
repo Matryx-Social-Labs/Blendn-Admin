@@ -43,6 +43,7 @@ const alertsRoute = require("@/app/api/mobile/events/[eventId]/board/alerts/rout
 const messagesRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route")
 const eventChat = require("@/app/api/mobile/events/[eventId]/chat/route") as typeof import("@/app/api/mobile/events/[eventId]/chat/route")
 const myRequests = require("@/app/api/mobile/board/requests/route") as typeof import("@/app/api/mobile/board/requests/route")
+const requestsRoute = require("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -149,6 +150,24 @@ describe("types and spots", () => {
     // The database holds the same table, whoever writes.
     await expect(db.board_posts.create({ data: { event_id: eventId, author_id: me.id, kind: "seeking", sub_kind: "spots", body: "x" } })).rejects.toThrow(/board_posts_sub_kind_fits/)
     await expect(db.board_posts.create({ data: { event_id: eventId, author_id: me.id, kind: "chat", sub_kind: "ride", body: "x" } })).rejects.toThrow(/board_posts_sub_kind_fits/)
+  })
+
+  it("counts a post's body and an ask's message in characters, as a person (and char_length) does: an emoji is one", async () => {
+    const eventId = await upcoming()
+    const me = await poster("lob-chars", eventId)
+    const asker = await poster("lob-chars-ask", eventId)
+
+    const full = await create(me, eventId, { kind: "offer", subKind: "ride", body: "🚗".repeat(500), spacesLeft: 2 })
+    expect(full.status).toBe(201)
+    const { id: postId } = (await full.json()).data
+    expect((await create(me, eventId, { kind: "chat", body: "🚗".repeat(501) })).status).toBe(400)
+
+    const ask = (message: string) =>
+      requestsRoute.POST(req("POST", `/api/mobile/events/${eventId}/board/${postId}/requests`, asker.token, { message }), { params: Promise.resolve({ eventId, postId }) })
+    expect((await ask("🙋".repeat(301))).status).toBe(400)
+    expect((await ask("🙋".repeat(300))).status).toBe(201)
+    const [row] = await db.$queryRaw<{ n: number }[]>`SELECT char_length(message)::int AS n FROM board_requests WHERE post_id = ${postId}::uuid`
+    expect(row.n).toBe(300)
   })
 
   it("counts a spare ticket as one left, and keeps the field name installed builds read (`spacesLeft`)", async () => {
@@ -281,6 +300,13 @@ describe("a photo", () => {
     storageHoldsTheUpload()
     expect((await create(author, eventId, { kind: "chat", body: "x", photo: { url: uploadOf(author), alt: "a".repeat(201) } })).status).toBe(400)
     await expect(db.board_posts.update({ where: { id: postId }, data: { photo_alt: "a".repeat(201) } })).rejects.toThrow(/board_posts_photo_alt_fits/)
+    // In characters, as the CHECK counts: 200 emoji are 200, not 400.
+    expect((await create(author, eventId, { kind: "chat", body: "x", photo: { url: uploadOf(author), alt: "📸".repeat(201) } })).status).toBe(400)
+    storageHoldsTheUpload()
+    const fits = await create(author, eventId, { kind: "chat", body: "x", photo: { url: uploadOf(author), alt: "📸".repeat(200) } })
+    expect(fits.status).toBe(201)
+    const [row] = await db.$queryRaw<{ n: number }[]>`SELECT char_length(photo_alt)::int AS n FROM board_posts WHERE id = ${(await fits.json()).data.id}::uuid`
+    expect(row.n).toBe(200)
   })
 })
 

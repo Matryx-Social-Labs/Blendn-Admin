@@ -957,8 +957,10 @@ export async function notifyLobbyHostPost(
   })
 }
 
-function clip(text: string, max: number): string {
-  return text.length > max ? text.substring(0, max - 3) + "..." : text
+/** A preview at most `max` characters long, cut between code points so an emoji is never halved into "�". */
+export function clip(text: string, max: number): string {
+  const chars = [...text]
+  return chars.length > max ? chars.slice(0, max - 3).join("") + "..." : text
 }
 
 /**

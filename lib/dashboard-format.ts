@@ -200,3 +200,27 @@ export function sharePct(part: number, whole: number): number {
 export function neverPublished(users: { published: number; suspended: boolean }[]): number {
   return users.filter((u) => u.published === 0 && !u.suspended).length
 }
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A moment on the Lobby's clock: "Sun 8 Nov, 4:30 PM", or "Tue 10 Nov, 12 AM"
+ * on the hour. The event's own zone, with no zone label (the design chain's
+ * rule: the city is in the header).
+ */
+export function lobbyMoment(d: Date, timezone: string): string {
+  const clock = eventClock(timezone)
+  const day = clock.format(d, { weekday: "short", day: "numeric", month: "short" })
+  const onTheHour = clock.format(d, { minute: "numeric" }) === "0"
+  const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", ...(onTheHour ? {} : { minute: "2-digit" }), timeZone: clock.zone }).format(d)
+  return `${day}, ${time}`
+}
+
+/** "just now", "25 min ago", "3 h ago", "3 d ago": how long since `iso`, as of `now` (passed, so a render stays pure). */
+export function updatedAgo(iso: string, now: string): string {
+  const minutes = Math.floor((Date.parse(now) - Date.parse(iso)) / 60_000)
+  if (minutes < 1) return "just now"
+  if (minutes < 60) return `${minutes} min ago`
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`
+  return `${Math.floor(minutes / (24 * 60))} d ago`
+}
