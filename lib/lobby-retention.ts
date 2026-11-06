@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client"
 
 import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { db } from "./db"
+import { tallyFeedback } from "./feedback-digest"
 import { logger } from "./logger"
 import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
 
@@ -17,6 +18,14 @@ import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
  * post's), Lobby posts with their asks (`board_requests` cascades) and their
  * photos in storage, the posts' rooms, the host's pinned posts. Alert switches
  * go at the close itself: they have nothing to keep.
+ *
+ * **What the room felt stays** (owner, 2026-11-06). An event's `event_feedback`
+ * rows are kept, detached from their message and from whoever corrected them,
+ * and before the event's first message goes its per-category contributor
+ * counts and its room's size are frozen (`event_feedback_tallies`), so the
+ * Feedback tab reads the same after the purge as before it, with no id, no
+ * words and no pseudonym left. A dismissed report's `excerpt` goes 180 days
+ * after the dismissal.
  *
  * **Removed content is held 180 days from its removal**, whatever the close
  * says (IT Rules 2021, r.3(1)(g)):
@@ -57,6 +66,10 @@ export interface PurgePass {
   photos: number
   hostPosts: number
   alertPreferences: number
+  /** Feedback rows detached from a purged message (kept, anonymous). */
+  feedback: number
+  /** Dismissed reports whose excerpt went. */
+  excerpts: number
   /** Objects whose delete failed: their rows are kept for the next pass. */
   kept: number
   hasMore: boolean
@@ -136,7 +149,7 @@ async function deleteObjects<T extends { id: string }>(rows: T[], urlOf: (row: T
 
 /** One bounded pass. Idempotent: every delete is of rows the selects just found past their time. */
 export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode = purgeModeFromEnv()): Promise<PurgePass> {
-  const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, kept: 0, hasMore: false }
+  const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, feedback: 0, excerpts: 0, kept: 0, hasMore: false }
   if (mode === "off") return pass
   const since = new Date(now.getTime() - RETENTION_DAYS * DAY_MS)
 
@@ -145,9 +158,11 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
   pass.hasMore = messages.length === MESSAGE_BATCH || posts.length === POST_BATCH
 
   if (mode === "log") {
-    const [hostPosts, prefs] = await Promise.all([
+    const [hostPosts, prefs, feedback, excerpts] = await Promise.all([
       db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_host_posts h JOIN events e ON e.id = h.event_id WHERE ${closesAt} < ${since}`,
       db.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM board_alert_preferences a JOIN events e ON e.id = a.event_id WHERE ${closesAt} < ${now}`,
+      db.event_feedback.count({ where: { message_id: { in: messages.map((m) => m.id) } } }),
+      db.message_reports.count({ where: dismissedPastTheirTime(since) }),
     ])
     return {
       ...pass,
@@ -156,11 +171,22 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
       photos: [...messages.map((m) => m.media_url), ...posts.map((p) => p.photo_url)].filter((u) => u && sealedChatKey(u)).length,
       hostPosts: Number(hostPosts[0]?.n ?? 0),
       alertPreferences: Number(prefs[0]?.n ?? 0),
+      feedback,
+      excerpts,
     }
   }
 
   const gone = await deleteObjects(messages, (m) => m.media_url)
-  if (gone.ids.length) pass.messages = (await db.chat_messages.deleteMany({ where: { id: { in: gone.ids } } })).count
+  if (gone.ids.length) {
+    await freezeFeedbackTallies(gone.ids)
+    const [detached, deleted] = await db.$transaction([
+      // Kept, and nobody's: the message link (ON DELETE CASCADE would take the row) and the staff id that corrected it.
+      db.event_feedback.updateMany({ where: { message_id: { in: gone.ids } }, data: { message_id: null, corrected_by: null } }),
+      db.chat_messages.deleteMany({ where: { id: { in: gone.ids } } }),
+    ])
+    pass.feedback = detached.count
+    pass.messages = deleted.count
+  }
 
   const postsGone = await deleteObjects(posts, (p) => p.photo_url)
   if (postsGone.ids.length) {
@@ -176,5 +202,34 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
 
   pass.hostPosts = await db.$executeRaw`DELETE FROM board_host_posts h USING events e WHERE e.id = h.event_id AND ${closesAt} < ${since}`
   pass.alertPreferences = await db.$executeRaw`DELETE FROM board_alert_preferences a USING events e WHERE e.id = a.event_id AND ${closesAt} < ${now}`
+  pass.excerpts = (await db.message_reports.updateMany({ where: dismissedPastTheirTime(since), data: { excerpt: null } })).count
   return pass
+}
+
+/** A dismissed report (`reviewed`) 180 days after its dismissal, still holding the words it quoted. */
+const dismissedPastTheirTime = (since: Date) => ({ status: "reviewed" as const, reviewed_at: { lt: since }, excerpt: { not: null } })
+
+/**
+ * Before an event's first message goes: what its feedback adds up to, counted
+ * as the digest counts it, while every author is still known. Once per event
+ * (the first pass that reaches it); a later pass finds the tally and skips it.
+ */
+async function freezeFeedbackTallies(messageIds: string[]): Promise<void> {
+  const reached = await db.event_feedback.findMany({
+    // any-kind: a venue day's room is classified and purged like any event's, so its feedback is frozen too.
+    where: { message_id: { in: messageIds }, event: { feedback_tally: null } },
+    distinct: ["event_id"],
+    select: { event_id: true },
+  })
+  for (const { event_id } of reached) {
+    const [rows, population] = await Promise.all([
+      db.event_feedback.findMany({ where: { event_id }, select: { sentiment: true, category: true, message: { select: { user_id: true } } } }),
+      db.chat_group_members.count({ where: { chat_group: { event_id } } }),
+    ])
+    const { contributors } = tallyFeedback(rows.map((r) => ({ sentiment: r.sentiment, category: r.category, userId: r.message?.user_id ?? null })))
+    await db.event_feedback_tallies.createMany({
+      data: [{ event_id, population, contributors: Object.fromEntries(contributors) }],
+      skipDuplicates: true,
+    })
+  }
 }

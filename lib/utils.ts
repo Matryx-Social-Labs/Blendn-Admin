@@ -1,6 +1,9 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
+/** Characters as a person counts them, and as Postgres's `char_length` does: code points ("🎉" is one). */
+export const characters = (text: string): number => [...text].length
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }

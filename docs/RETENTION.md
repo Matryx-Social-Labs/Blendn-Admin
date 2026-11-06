@@ -117,6 +117,21 @@ reports and legal requests, and 180 days after the close the chat sweeper
 
 Alert switches (`board_alert_preferences`) go at the close.
 
+**What the room felt is kept, anonymously** (owner, 2026-11-06). The purge does
+not delete `event_feedback`: before it takes an event's first message it freezes
+the event's figures in `event_feedback_tallies` (distinct people per category,
+counted as the digest counts them, and the room's member count), then detaches
+each feedback row from its message (`message_id` null) and from the staff member
+who corrected it (`corrected_by` null). What stays is mood, category,
+confidence, source and times: no user id, no words, no pseudonym. The Feedback
+tab (`buildFeedbackDigest`) reads the frozen figures once they exist, so every
+count, category and suppression reads the same after the purge as before; only
+the quotes go, because they are the words. Account deletion still takes a
+person's feedback rows with their messages (ON DELETE CASCADE), as before.
+
+**A dismissed report's excerpt** (`message_reports.excerpt`, status `reviewed`)
+goes 180 days after the dismissal. An upheld or a pending report keeps it.
+
 **Held from removal, not from the close:** a message removed by anyone but its
 author (a host, a moderator, the pipeline) or carrying a moderation flag nobody
 cleared; a post moderation took down or whose photo it rejected; anything with a
@@ -126,8 +141,7 @@ room. A storage delete that fails keeps its row for the next pass.
 
 **Not yet:** the purge is a dry run that logs counts until `LOBBY_PURGE=delete`
 is set on the service. Turn it on once the privacy policy says these windows
-(draft: `.context/plans/privacy-retention-draft.md`). Dismissed reports keep
-their `excerpt`; derived `event_feedback` rows go with their messages.
+(draft: `.context/plans/privacy-retention-draft.md`).
 
 **Stored media is `no-cache`.** Every profile photo and chat image is the
 server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so

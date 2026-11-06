@@ -14,13 +14,13 @@ interface RouteParams {
 }
 
 /*
- * The Lobby's alerts for one event (SCRUM-1026, owner decision 4): three
- * switches, all off until turned on. They gate the push only; the bell row of
- * an ask or a yes is written either way.
+ * The Lobby's alerts for one event (SCRUM-1026, owner decision 4): the
+ * discovery alerts, off until turned on. They gate the push only.
  *
  *   offersMatch  somebody offers what you are looking for   board_match
- *   replies      an ask on your post, or a yes to yours      board_request, board_request_accepted
  *   hostPosts    the host's pinned post goes up or changes   board_host_post
+ *   replies      gates nothing since 2026-11-06 (owner): an ask on your post and a yes
+ *                to yours are always pushed. Kept so an installed build's PUT is not a 400.
  */
 
 export async function GET(request: NextRequest, { params }: RouteParams) {

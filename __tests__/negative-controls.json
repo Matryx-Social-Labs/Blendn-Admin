@@ -757,8 +757,8 @@
     },
     "what-an-organiser-sees.test.ts": {
       "guards": "see the test's own docblock; the mutation below proves it is not vacuous Since step 15 the feedback digest's checks read lib/feedback-digest.ts, where the digest moved so the page builds it from its loader's event.",
-      "mutation": "Replace app/dashboard/events/[id]/feedback/actions.ts with an empty stub (`export {}`), run this suite, revert M558 (step 15): in lib/feedback-digest.ts, contributors counted by feedback row (`people.add(row.id)`) instead of by person.",
-      "observed": "4 failing M558: 1 failing ('counts distinct people per category, not messages'); reverted.",
+      "mutation": "Replace app/dashboard/events/[id]/feedback/actions.ts with an empty stub (`export {}`), run this suite, revert M558 (step 15): in lib/feedback-digest.ts, contributors counted by feedback row (`people.add(row.id)`) instead of by person. 2026-11-06 (the count moved into `tallyFeedback`, shared with the live screen and the purge's frozen tally): `who.add(row.userId)` replaced by `who.add(String(who.size))` (one per row).",
+      "observed": "4 failing M558: 1 failing ('counts distinct people per category, not messages'); reverted. 2026-11-06: 1 failing (the same test); restored, 17/17.",
       "date": "2026-08-25",
       "source": "run-at-integration-merge"
     },

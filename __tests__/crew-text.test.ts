@@ -6,7 +6,8 @@ jest.mock("@/lib/moderation/openai-moderation", () => ({
 
 import { findProfileContactInfo, findContactInfo } from "@/lib/moderation/contact-info"
 import { foldText, hasInvisibleChars } from "@/lib/moderation/fold"
-import { characters, createCrewSchema, crewTextRefusal } from "@/lib/crews/crews"
+import { createCrewSchema, crewTextRefusal } from "@/lib/crews/crews"
+import { characters } from "@/lib/utils"
 import { CREW } from "@/lib/constants"
 
 /**

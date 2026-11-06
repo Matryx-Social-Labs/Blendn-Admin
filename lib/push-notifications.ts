@@ -325,17 +325,20 @@ const switchedOn = (data?: NotificationData) => {
 }
 
 /**
- * The Lobby's three switches, per event (`board_alert_preferences`; owner
+ * The Lobby's discovery alerts, per event (`board_alert_preferences`; owner
  * decision 4, 2026-11-05: opt-in per event, all off until turned on). These
- * include rather than exclude: no row, or the switch off, is no push. The
- * bell row of an ask or a yes is written either way. A Lobby push without its
- * event goes to nobody.
+ * include rather than exclude: no row, or the switch off, is no push. A Lobby
+ * push without its event goes to nobody.
+ *
+ * An ask on your post and a yes to yours (`board_request`,
+ * `board_request_accepted`) are not here: they are one person to another, and
+ * are always sent, under the account's `push_matches` alone (owner,
+ * 2026-11-06). That leaves the `replies` switch gating nothing; it is still
+ * stored and returned for installed builds.
  */
-const EVENT_SWITCH_FOR_KIND: Partial<Record<NotificationData["type"], "offers_match" | "replies" | "host_posts">> = {
+const EVENT_SWITCH_FOR_KIND: Partial<Record<NotificationData["type"], "offers_match" | "host_posts">> = {
   board_match: "offers_match",
   board_host_post: "host_posts",
-  board_request: "replies",
-  board_request_accepted: "replies",
 }
 
 const eventSwitchOn = (data?: NotificationData) => {
@@ -889,7 +892,7 @@ export async function notifyBoardPostRemoved(
   })
 }
 
-/** They said yes. There is a conversation now, and no decline to send back. `eventId` is the switch it rides on. */
+/** They said yes. There is a conversation now, and no decline to send back. Always sent (under `push_matches`); `eventId` is for the tap. */
 export async function notifyBoardRequestAccepted(
   recipientId: string,
   conversationId: string,
@@ -954,8 +957,10 @@ export async function notifyLobbyHostPost(
   })
 }
 
-function clip(text: string, max: number): string {
-  return text.length > max ? text.substring(0, max - 3) + "..." : text
+/** A preview at most `max` characters long, cut between code points so an emoji is never halved into "�". */
+export function clip(text: string, max: number): string {
+  const chars = [...text]
+  return chars.length > max ? chars.slice(0, max - 3).join("") + "..." : text
 }
 
 /**

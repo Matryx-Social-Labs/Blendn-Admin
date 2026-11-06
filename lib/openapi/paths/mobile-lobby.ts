@@ -271,7 +271,7 @@ registry.registerPath({
 const AlertsSchema = z
   .object({
     offersMatch: z.boolean().describe("Someone offers what you're looking for (push `board_match`)."),
-    replies: z.boolean().describe("An ask on your post, or a yes to yours (pushes `board_request`, `board_request_accepted`; the bell row is written either way)."),
+    replies: z.boolean().describe("Stored and returned for installed builds; gates nothing since 2026-11-06. An ask on your post and a yes to yours (`board_request`, `board_request_accepted`) are always pushed, under the account's `matches` preference alone."),
     hostPosts: z.boolean().describe("The host's pinned post goes up or changes (push `board_host_post`)."),
   })
   .openapi("LobbyAlerts")
@@ -281,7 +281,7 @@ registry.registerPath({
   path: "/api/mobile/events/{eventId}/board/alerts",
   tags: ["Mobile Events"],
   summary: "Your Lobby alerts for this event",
-  description: LIFECYCLE + "Three switches, all off until you turn one on, for this event only. Pushes say \"Lobby\" as the title and the event as the subtitle (iOS), and open the post.",
+  description: LIFECYCLE + "The discovery alerts, off until you turn one on, for this event only: `offersMatch` and `hostPosts` (`replies` is kept for installed builds and gates nothing; asks and yeses are always pushed). Pushes say \"Lobby\" as the title and the event as the subtitle (iOS), and open the post.",
   security: bearerAuth,
   request: { params: eventParams },
   responses: { 200: { description: "The switches", content: { "application/json": { schema: wrap(AlertsSchema) } } }, ...standardErrors },

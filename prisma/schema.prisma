@@ -675,6 +675,7 @@ model events {
   sponsors           event_sponsors[]
   rsvps              event_rsvps[]
   feedback           event_feedback[]
+  feedback_tally     event_feedback_tallies?
   entitlements       entitlements[]
   billing_checkouts  billing_checkouts[]
   ticket_types       ticket_types[]
@@ -2623,7 +2624,7 @@ enum venue_link_status {
 model event_feedback {
   id           String             @id @default(uuid()) @db.Uuid
   event_id     String             @db.Uuid
-  message_id   String             @unique @db.Uuid
+  message_id   String?            @unique @db.Uuid
   sentiment    feedback_sentiment
   category     issue_category
   /// 0-1. Drives whether the UI presents this as certain or as a guess — a
@@ -2634,12 +2635,29 @@ model event_feedback {
   corrected_at DateTime?          @db.Timestamptz(6)
   created_at   DateTime           @default(now()) @db.Timestamptz(6)
 
-  event   events        @relation(fields: [event_id], references: [id], onDelete: Cascade)
-  message chat_messages @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  event   events         @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  /// Null once the 180-day purge has taken the message (`lib/lobby-retention.ts`): the row stays, as
+  /// what the room felt, with nothing that says who. Account deletion still takes it with the message.
+  message chat_messages? @relation(fields: [message_id], references: [id], onDelete: Cascade)
 
   @@index([event_id, created_at])
   @@index([event_id, category])
   @@index([event_id, sentiment])
+}
+
+/// What an event's feedback added up to, frozen by the 180-day purge before it takes the event's first
+/// message (owner, 2026-11-06): distinct people per category, counted as the digest counts them
+/// (`tallyFeedback`), and how many were in the room. Counts only, never an id, so the Feedback tab
+/// reads the same after the purge as before it.
+model event_feedback_tallies {
+  event_id     String   @id @db.Uuid
+  /// People in the room (member rows), the disclosure rules' population.
+  population   Int
+  /// `{ [category]: distinct people }`.
+  contributors Json
+  frozen_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
 }
 
 enum feedback_sentiment {

@@ -84,7 +84,6 @@ export async function buildFeedbackDigest(
           content: true,
           created_at: true,
           user_id: true,
-          chat_group: { select: { id: true } },
         },
       },
     },
@@ -95,43 +94,33 @@ export async function buildFeedbackDigest(
    * response. Sending the id and letting the client render a name would be the
    * same mistake as the chat route made — the UI looked anonymous while the
    * payload was not.
+   *
+   * The event's room, asked by the event (one room per event): after the
+   * 180-day purge a feedback row has no message to reach it through.
    */
-  const chatGroupId = feedback[0]?.message.chat_group?.id
-  const members = chatGroupId
+  const [room, frozen] = await Promise.all([
+    db.chat_groups.findUnique({ where: { event_id: eventId }, select: { id: true } }),
+    db.event_feedback_tallies.findUnique({ where: { event_id: eventId }, select: { population: true, contributors: true } }),
+  ])
+  const members = room
     ? await db.chat_group_members.findMany({
-        where: { chat_group_id: chatGroupId },
+        where: { chat_group_id: room.id },
         select: { user_id: true, anonymous_name: true },
       })
     : []
   const pseudonyms = new Map(members.map((m) => [m.user_id, m.anonymous_name]))
 
+  const tally = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, userId: row.message?.user_id ?? null })))
+  const { counts, categoryCounts } = tally
   /*
-   * How many people are in the room. The denominator every suppression rule
-   * below needs, and the reason this digest had none.
+   * How many people are in the room, and how many said something in each
+   * category: the denominators every suppression rule below needs. Once the
+   * purge has frozen them (it does so before the first message goes, while
+   * every author is still known), they are read from there, so the figures
+   * after the purge are the figures before it.
    */
-  const population = members.length
-
-  const counts = { positive: 0, neutral: 0, negative: 0 }
-  const categoryCounts = new Map<string, number>()
-  /*
-   * Distinct **people** per category, not messages. A category is identifying
-   * when few people contributed to it, and one person posting six complaints is
-   * one person -- counting messages would let a single upset attendee unlock
-   * their own quotes.
-   */
-  const categoryContributors = new Map<string, Set<string>>()
-  for (const row of feedback) {
-    counts[row.sentiment] += 1
-    // Only what needs attention — a breakdown of the compliments is not a
-    // to-do list. Same escalating set as the live screen, asked for by name so
-    // the two cannot drift apart.
-    if (row.sentiment === "negative" || escalates(row.category)) {
-      categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
-      const people = categoryContributors.get(row.category) ?? new Set<string>()
-      people.add(row.message.user_id)
-      categoryContributors.set(row.category, people)
-    }
-  }
+  const population = frozen?.population ?? members.length
+  const categoryContributors = frozen ? new Map(Object.entries(frozen.contributors as Record<string, number>)) : tally.contributors
 
   const ratings: StarSpread = spreadsByEventId(ratingGroups).get(eventId) ?? [0, 0, 0, 0, 0]
 
@@ -194,7 +183,8 @@ export async function buildFeedbackDigest(
     messages: venue
       ? []
       : feedback.flatMap((row) => {
-          if (!mayQuote({ contributors: categoryContributors.get(row.category)?.size ?? 0, population })) return []
+          // A purged row has no words to quote, and no author.
+          if (!row.message || !mayQuote({ contributors: categoryContributors.get(row.category) ?? 0, population })) return []
           return [
             {
               id: row.id,
@@ -211,3 +201,35 @@ export async function buildFeedbackDigest(
   }
 }
 
+/** A feedback row as the tally reads it: `userId` is null once the purge has detached its message. */
+export interface TallyRow {
+  sentiment: feedback_sentiment
+  category: issue_category
+  userId: string | null
+}
+
+/**
+ * Moods, and the categories that need attention with how many distinct
+ * **people** raised each — not messages: a category is identifying when few
+ * people contributed to it, and one person posting six complaints is one
+ * person, so counting messages would let a single upset attendee unlock their
+ * own quotes. Only negatives and the escalating set are broken down (a
+ * breakdown of the compliments is not a to-do list), asked for by name so the
+ * live screen and this digest cannot drift apart. One rule for the digest, the
+ * live screen and the purge's frozen tally.
+ */
+export function tallyFeedback(rows: readonly TallyRow[]) {
+  const counts = { positive: 0, neutral: 0, negative: 0 }
+  const categoryCounts = new Map<string, number>()
+  const people = new Map<string, Set<string>>()
+  for (const row of rows) {
+    counts[row.sentiment] += 1
+    if (row.sentiment !== "negative" && !escalates(row.category)) continue
+    categoryCounts.set(row.category, (categoryCounts.get(row.category) ?? 0) + 1)
+    const who = people.get(row.category) ?? new Set<string>()
+    if (row.userId) who.add(row.userId)
+    people.set(row.category, who)
+  }
+  const contributors = new Map([...people].map(([category, who]) => [category, who.size]))
+  return { counts, categoryCounts, contributors }
+}

@@ -43,6 +43,7 @@ const alertsRoute = require("@/app/api/mobile/events/[eventId]/board/alerts/rout
 const messagesRoute = require("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route") as typeof import("@/app/api/mobile/chat/groups/[chatGroupId]/messages/route")
 const eventChat = require("@/app/api/mobile/events/[eventId]/chat/route") as typeof import("@/app/api/mobile/events/[eventId]/chat/route")
 const myRequests = require("@/app/api/mobile/board/requests/route") as typeof import("@/app/api/mobile/board/requests/route")
+const requestsRoute = require("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route") as typeof import("@/app/api/mobile/events/[eventId]/board/[postId]/requests/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const users: string[] = []
@@ -149,6 +150,24 @@ describe("types and spots", () => {
     // The database holds the same table, whoever writes.
     await expect(db.board_posts.create({ data: { event_id: eventId, author_id: me.id, kind: "seeking", sub_kind: "spots", body: "x" } })).rejects.toThrow(/board_posts_sub_kind_fits/)
     await expect(db.board_posts.create({ data: { event_id: eventId, author_id: me.id, kind: "chat", sub_kind: "ride", body: "x" } })).rejects.toThrow(/board_posts_sub_kind_fits/)
+  })
+
+  it("counts a post's body and an ask's message in characters, as a person (and char_length) does: an emoji is one", async () => {
+    const eventId = await upcoming()
+    const me = await poster("lob-chars", eventId)
+    const asker = await poster("lob-chars-ask", eventId)
+
+    const full = await create(me, eventId, { kind: "offer", subKind: "ride", body: "🚗".repeat(500), spacesLeft: 2 })
+    expect(full.status).toBe(201)
+    const { id: postId } = (await full.json()).data
+    expect((await create(me, eventId, { kind: "chat", body: "🚗".repeat(501) })).status).toBe(400)
+
+    const ask = (message: string) =>
+      requestsRoute.POST(req("POST", `/api/mobile/events/${eventId}/board/${postId}/requests`, asker.token, { message }), { params: Promise.resolve({ eventId, postId }) })
+    expect((await ask("🙋".repeat(301))).status).toBe(400)
+    expect((await ask("🙋".repeat(300))).status).toBe(201)
+    const [row] = await db.$queryRaw<{ n: number }[]>`SELECT char_length(message)::int AS n FROM board_requests WHERE post_id = ${postId}::uuid`
+    expect(row.n).toBe(300)
   })
 
   it("counts a spare ticket as one left, and keeps the field name installed builds read (`spacesLeft`)", async () => {
@@ -281,6 +300,13 @@ describe("a photo", () => {
     storageHoldsTheUpload()
     expect((await create(author, eventId, { kind: "chat", body: "x", photo: { url: uploadOf(author), alt: "a".repeat(201) } })).status).toBe(400)
     await expect(db.board_posts.update({ where: { id: postId }, data: { photo_alt: "a".repeat(201) } })).rejects.toThrow(/board_posts_photo_alt_fits/)
+    // In characters, as the CHECK counts: 200 emoji are 200, not 400.
+    expect((await create(author, eventId, { kind: "chat", body: "x", photo: { url: uploadOf(author), alt: "📸".repeat(201) } })).status).toBe(400)
+    storageHoldsTheUpload()
+    const fits = await create(author, eventId, { kind: "chat", body: "x", photo: { url: uploadOf(author), alt: "📸".repeat(200) } })
+    expect(fits.status).toBe(201)
+    const [row] = await db.$queryRaw<{ n: number }[]>`SELECT char_length(photo_alt)::int AS n FROM board_posts WHERE id = ${(await fits.json()).data.id}::uuid`
+    expect(row.n).toBe(200)
   })
 })
 
@@ -423,22 +449,28 @@ describe("alerts", () => {
     expect((await at({ everything: true })).status).toBe(400)
   })
 
-  it("gate the Lobby's pushes on the switch for that event: on, off, another event's, and no event at all", async () => {
+  it("send an ask and a yes always (person to person), and gate only the discovery alerts on the switch for that event", async () => {
     const eventId = await upcoming()
     const elsewhere = await upcoming()
     const me = await poster("lob-gate", eventId)
     await db.push_tokens.create({ data: { user_id: me.id, token: `ExponentPushToken[${testId("t")}]`, platform: "ios" } })
     const reachable = (data: Parameters<typeof pushGates>[0]) => db.push_tokens.count({ where: { user_id: me.id, ...pushGates(data) } })
 
-    expect(await reachable({ type: "board_request", eventId })).toBe(0)
-    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: elsewhere, replies: true } })
-    expect(await reachable({ type: "board_request", eventId })).toBe(0)
-    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: eventId, replies: true } })
+    // An ask on your post and a yes to yours: on with no switches at all (owner, 2026-11-06).
     expect(await reachable({ type: "board_request", eventId })).toBe(1)
     expect(await reachable({ type: "board_request_accepted", eventId })).toBe(1)
-    expect(await reachable({ type: "board_match", eventId })).toBe(0)
-    expect(await reachable({ type: "board_host_post", eventId })).toBe(0)
-    expect(await reachable({ type: "board_request" })).toBe(0)
+    // The discovery alerts: off until turned on, for this event only.
+    for (const type of ["board_match", "board_host_post"] as const) expect(await reachable({ type, eventId })).toBe(0)
+    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: elsewhere, offers_match: true, host_posts: true } })
+    for (const type of ["board_match", "board_host_post"] as const) expect(await reachable({ type, eventId })).toBe(0)
+    await db.board_alert_preferences.create({ data: { user_id: me.id, event_id: eventId, offers_match: true, host_posts: true } })
+    for (const type of ["board_match", "board_host_post"] as const) expect(await reachable({ type, eventId })).toBe(1)
+    expect(await reachable({ type: "board_match" })).toBe(0)
+    // The account's own "matches" switch still silences an ask, as it did before the Lobby.
+    await db.profiles.update({ where: { id: me.id }, data: { push_matches: false } })
+    expect(await reachable({ type: "board_request", eventId })).toBe(0)
+    expect(await reachable({ type: "board_request_accepted", eventId })).toBe(0)
+    await db.profiles.update({ where: { id: me.id }, data: { push_matches: true } })
     // Control: a kind with no Lobby switch is untouched by it.
     expect(await reachable({ type: "friend_request" })).toBe(1)
     await db.push_tokens.deleteMany({ where: { user_id: me.id } })
