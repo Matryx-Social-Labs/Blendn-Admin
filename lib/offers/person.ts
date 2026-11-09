@@ -1,6 +1,6 @@
 import "server-only"
 
-import { Prisma } from "@prisma/client"
+import { Prisma, type venue_type } from "@prisma/client"
 
 import { ageFrom, isAdult } from "../age"
 import { db } from "../db"
@@ -24,7 +24,8 @@ export type OfferState = "live" | "redeemed" | "used_tonight" | "ended"
 export interface PersonOffer {
   /** The offer's id: the same for everyone it went to, and answered only for them. */
   id: string
-  venue: { id: string; name: string }
+  /** `venueType`: the venue's kind (`venues.venue_type`), so the pass can draw its tile; null when it has none. */
+  venue: { id: string; name: string; venueType: venue_type | null }
   text: string
   sentAt: string
   /** When the pass was redeemed at the door; null until it was. */
@@ -49,7 +50,7 @@ const sendSelect = {
       text: true,
       ends_at: true,
       org_id: true,
-      venue: { select: { id: true, name: true, owner_org_id: true, deleted_at: true, timezone: true, day_reset_hour: true } },
+      venue: { select: { id: true, name: true, venue_type: true, owner_org_id: true, deleted_at: true, timezone: true, day_reset_hour: true } },
     },
   },
 } as const
@@ -63,7 +64,7 @@ type SendRow = {
     text: string
     ends_at: Date
     org_id: string
-    venue: { id: string; name: string; owner_org_id: string | null; deleted_at: Date | null }
+    venue: { id: string; name: string; venue_type: venue_type | null; owner_org_id: string | null; deleted_at: Date | null }
   }
 }
 
@@ -81,7 +82,7 @@ function baseState(send: SendRow, now: Date): OfferState {
 function shape(send: SendRow, state: OfferState): PersonOffer {
   return {
     id: send.offer.id,
-    venue: { id: send.offer.venue.id, name: send.offer.venue.name },
+    venue: { id: send.offer.venue.id, name: send.offer.venue.name, venueType: send.offer.venue.venue_type },
     text: send.offer.text,
     sentAt: send.sent_at.toISOString(),
     redeemedAt: send.redeemed_at?.toISOString() ?? null,
