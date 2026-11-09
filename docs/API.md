@@ -4543,7 +4543,7 @@ a yes given in the app. Without it the offer still arrives — the bell line and
 
 ```json
 { "success": true, "data": { "offers": [ {
-  "id": "…", "venue": { "id": "…", "name": "Toit" },
+  "id": "…", "venue": { "id": "…", "name": "Toit", "venueType": "brewery" },
   "text": "First drink on the house, Thu–Sun before 10",
   "sentAt": "2026-10-11T12:00:00.000Z", "redeemedAt": null, "endsAt": "2026-10-18T12:00:00.000Z",
   "state": "live"
@@ -4552,7 +4552,10 @@ a yes given in the app. Without it the offer still arrives — the bell line and
 
 Newest first, at most 50. `state`: `live` (the pass can be shown), `redeemed`,
 `ended` (past its end, ended by an admin, or the venue was retired or changed
-hands). Reading the list opens nothing.
+hands). Reading the list opens nothing. `venue.venueType` is the venue's type
+(a `venue_type` value, as on `GET /venues/:venueId`), so the pass can draw its
+tile; null when the venue has none. The same `venue` comes on
+`GET /offers/:offerId`.
 
 ### GET /offers/:offerId — the offer and its offer code
 

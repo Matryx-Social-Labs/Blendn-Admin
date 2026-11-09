@@ -12,7 +12,11 @@ import { standardErrors, wrap, bearerAuth } from "@/lib/openapi/schemas/common"
 const OfferSchema = z
   .object({
     id: z.string().uuid().describe("The offer's id: the same for everyone it went to, answered only for them."),
-    venue: z.object({ id: z.string().uuid(), name: z.string() }),
+    venue: z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      venueType: z.string().nullable().describe("The venue's type (`pub_bar`, `cafe`, …, the `venue_type` enum), for the pass's tile; null when it has none."),
+    }),
     text: z.string().max(140).describe("The venue's words."),
     sentAt: z.string().datetime(),
     redeemedAt: z.string().datetime().nullable().describe("When the offer code was redeemed at the door; null until it was."),
