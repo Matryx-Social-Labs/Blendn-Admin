@@ -10,6 +10,7 @@ import { emitChatMessageHidden } from "@/lib/socket-server"
 import { requireAdmin } from "@/lib/current-user"
 import { db } from "@/lib/db"
 import { trustSignalsFor } from "@/lib/trust"
+import { clipCharacters } from "@/lib/utils"
 
 export interface ModerationRow {
   id: string
@@ -156,7 +157,7 @@ export async function getModerationQueue(status: moderation_status_type = "pendi
   const rows: ModerationRow[] = flags.map((flag) => ({
     id: flag.id,
     ageHours: Math.floor((now - flag.created_at.getTime()) / (60 * 60 * 1000)),
-    excerpt: flag.message.content.slice(0, 140),
+    excerpt: clipCharacters(flag.message.content, 140),
     eventTitle: flag.message.chat_group?.event?.title ?? "Unknown event",
     eventId: flag.message.chat_group?.event_id ?? null,
     source: flag.source,
