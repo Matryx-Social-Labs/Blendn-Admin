@@ -21,6 +21,7 @@ import { checkContactInfo } from "./moderation/contact-info"
 import { checkKeywords } from "./moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "./moderation/openai-moderation"
 import { violatedConstraint } from "./prisma-errors"
+import { clipCharacters } from "./utils"
 
 /**
  * The database half of the board's gates.
@@ -467,7 +468,7 @@ export async function fileBoardReport(input: {
           message_type: input.type,
           reason: input.reason,
           ...(input.description && { description: input.description }),
-          ...(input.excerpt && { excerpt: input.excerpt.slice(0, 500) }),
+          ...(input.excerpt && { excerpt: clipCharacters(input.excerpt, 500) }),
         },
       })
       if (input.type === "board_post") {
@@ -576,7 +577,7 @@ export async function seatBoardRoom(
       create: {
         kind: "board_post",
         board_post_id: post.id,
-        name: post.body.replace(/\s+/g, " ").trim().slice(0, ROOM_NAME_MAX) || "Lobby",
+        name: clipCharacters(post.body.replace(/\s+/g, " ").trim(), ROOM_NAME_MAX) || "Lobby",
         status: "active",
       },
       update: {},

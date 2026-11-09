@@ -23,7 +23,8 @@ const LIFECYCLE =
   "One lifecycle with the room and the posts' rooms: open (read, post, ask) until doors, read-only from doors " +
   "(read, answer asks, withdraw, report, block), and closed a day after the event ends, at the same moment as the room. " +
   "A closed Lobby answers 403 with `reasonCode` `LOBBY_CLOSED` (\"The Lobby has closed. The Lobby and the room close a day after the event ends.\"); " +
-  "a write after doors 403 `LOBBY_READ_ONLY`. Not saved and not RSVP'd: 403 `BOARD_NOT_COMMITTED`. "
+  "a write after doors 403 `LOBBY_READ_ONLY`. An event the caller cannot open at all (a draft, a private event they are not part of, a city not open to them) " +
+  "is 404 first, closed or not, as its event page and an unknown id answer. Not saved and not RSVP'd: 403 `BOARD_NOT_COMMITTED`. "
 
 const PhotoSchema = z
   .object({

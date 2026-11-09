@@ -129,8 +129,23 @@ count, category and suppression reads the same after the purge as before; only
 the quotes go, because they are the words. Account deletion still takes a
 person's feedback rows with their messages (ON DELETE CASCADE), as before.
 
-**A dismissed report's excerpt** (`message_reports.excerpt`, status `reviewed`)
-goes 180 days after the dismissal. An upheld or a pending report keeps it.
+**Who was in the room is kept; what they were called is not** (owner,
+2026-11-06). The purge keeps every `chat_group_members` row (the room's size,
+and which rooms a person was in, are read elsewhere), but in the same pass that
+takes the room's messages it sets each row's `anonymous_name` to NULL, so
+nothing links a person to the name the room knew them by. A row is blanked once
+none of that person's messages is left in the room: a member whose message is
+held (below) keeps the name it was written under until the message goes. Event
+rooms and a post's room alike; a post's room that empties is deleted with its
+members, as before. Every reader of the column already falls back to
+"Attendee" (or "Someone") for NULL, and a closed room is unreachable from the
+app. "Came back" (`lib/loop-closure.ts`) counts check-ins, not member rows, so
+it reads the same.
+
+**A dismissed report's words** (status `reviewed`): the `excerpt` it quoted and
+the reporter's own `description` both go 180 days after the dismissal, for every
+kind of report. The report itself stays (who, what, reason, status, dates). An
+upheld or a pending report keeps both.
 
 **Held from removal, not from the close:** a message removed by anyone but its
 author (a host, a moderator, the pipeline) or carrying a moderation flag nobody

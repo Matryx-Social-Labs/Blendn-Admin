@@ -3872,7 +3872,10 @@ RSVP'd is gone: the Lobby is the only "before". A post or an ask from doors is
 **403** `reasonCode` `LOBBY_READ_ONLY` (*"The doors are open, so the Lobby is
 read-only now. The room is open instead."*); every Lobby route after the close is
 **403** `LOBBY_CLOSED` (*"The Lobby has closed. The Lobby and the room close a
-day after the event ends."*). The list carries `state` (`open` / `read_only`),
+day after the event ends."*). An event the caller cannot open at all — a draft, a
+private event they are not part of, a city not open to them — is **404** before
+any of this, closed or not, exactly as its event page and an unknown id answer
+(SCRUM-1033). The list carries `state` (`open` / `read_only`),
 `doorsAt` and `closesAt`, and `phase`: `before` until doors, `live` from them
 (on the list, a post, the preview and the room's card). A live Lobby nobody
 posted in is an ordinary empty read — `phase: "live"`, `posts: []`, zero counts —

@@ -15,7 +15,8 @@ jest.mock("@/lib/tigris", () => ({
 import { randomUUID } from "crypto"
 
 import { purgeClosedLobbies, purgeModeFromEnv } from "@/lib/lobby-retention"
-import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
+import { loopClosure } from "@/lib/loop-closure"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
 
 const DAY = 86_400_000
 const users: string[] = []
@@ -52,7 +53,12 @@ let recent: { id: string; room: string }
 let host = ""
 let author = ""
 let reporter = ""
+let regular = ""
 const ids: Record<string, string> = {}
+/** What each member row was called in its room, by row id. */
+const handles: Record<string, string> = {}
+let cameBackBefore = 0
+const cameBack = async () => (await loopClosure()).find((s) => s.label === "came back")!.value
 const photo = sealed()
 const heldPhoto = sealed()
 
@@ -100,7 +106,35 @@ beforeAll(async () => {
   await db.board_host_posts.create({ data: { event_id: recent.id, body: "Doors at 7" } })
   await db.board_alert_preferences.create({ data: { user_id: author, event_id: old.id, replies: true } })
   await db.board_alert_preferences.create({ data: { user_id: author, event_id: recent.id, replies: true } })
+
+  /*
+   * Who was in the rooms, by the names the rooms gave them: the author, whose
+   * held messages are still in the old room; the reporter, who never wrote
+   * there; and a regular who came to both nights ("came back").
+   */
+  regular = await makeUser(testId("ret-regular"))
+  users.push(regular)
+  await onboard(regular)
+  const member = async (key: string, room: string, user_id: string) => {
+    const anonymous_name = testId(key)
+    handles[key] = (await db.chat_group_members.create({ data: { chat_group_id: room, user_id, anonymous_name, status: "left" }, select: { id: true } })).id
+    handles[`${key}:name`] = anonymous_name
+  }
+  await member("oldAuthor", old.room, author)
+  await member("oldReader", old.room, reporter)
+  await member("oldRegular", old.room, regular)
+  await member("recentRegular", recent.room, regular)
+  for (const event of [old.id, recent.id]) {
+    const { end_time } = await db.events.findUniqueOrThrow({ where: { id: event }, select: { end_time: true } })
+    await db.event_rsvps.create({ data: { event_id: event, user_id: regular } })
+    await db.event_check_ins.create({
+      data: { event_id: event, occurrence_id: await occurrenceOf(event), user_id: regular, status: "checked_out", check_in_time: new Date(end_time.getTime() - 2 * 3_600_000), check_out_time: end_time },
+    })
+  }
+  cameBackBefore = await cameBack()
 })
+
+const nameOf = async (key: string) => (await db.chat_group_members.findUnique({ where: { id: handles[key] }, select: { anonymous_name: true } }))?.anonymous_name
 
 const exists = {
   message: async (id: string) => (await db.chat_messages.count({ where: { id } })) === 1,
@@ -126,6 +160,8 @@ describe("a dry run", () => {
     expect(mockDeleteFile).not.toHaveBeenCalled()
     for (const id of [ids.plain, ids.removedLongAgo, ids.postRoomMessage]) expect(await exists.message(id)).toBe(true)
     for (const id of [ids.postWithPhoto, ids.postRemovedLongAgo]) expect(await exists.post(id)).toBe(true)
+    expect(pass.pseudonyms).toBeGreaterThanOrEqual(2)
+    expect(await nameOf("oldReader")).toBe(handles["oldReader:name"])
   })
 
   it("does nothing at all when off", async () => {
@@ -167,10 +203,25 @@ describe("the purge", () => {
     expect(await db.board_alert_preferences.count({ where: { event_id: { in: [old.id, recent.id] } } })).toBe(0)
   })
 
+  it("keeps every member row of a purged room, with its pseudonym blanked", async () => {
+    for (const key of ["oldReader", "oldRegular"]) expect(await nameOf(key)).toBeNull()
+  })
+
+  it("keeps the pseudonym of a member whose held messages are still in the room", async () => {
+    expect(await nameOf("oldAuthor")).toBe(handles["oldAuthor:name"])
+  })
+
+  it("leaves 'came back' and the regular's rooms as they were", async () => {
+    expect(await cameBack()).toBe(cameBackBefore)
+    expect(cameBackBefore).toBeGreaterThanOrEqual(1)
+    expect(await db.chat_group_members.count({ where: { user_id: regular } })).toBe(2)
+  })
+
   it("leaves everything inside the window alone (the control)", async () => {
     expect(await exists.message(ids.recentMessage)).toBe(true)
     expect(await exists.post(ids.recentPost)).toBe(true)
     expect(await db.board_host_posts.count({ where: { event_id: recent.id } })).toBe(1)
+    expect(await nameOf("recentRegular")).toBe(handles["recentRegular:name"])
     // The event room itself, and the event, are not content: they stay.
     expect(await db.chat_groups.count({ where: { id: old.room } })).toBe(1)
   })
