@@ -73,17 +73,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const country = parsed.data.country?.trim() || null
     await db.city_demand.upsert({
       where: { user_id_city_key: { user_id: authUser.userId, city_key: key } },
       // `city` is refreshed on the way through so a spelling improvement in the
-      // geocoder reaches the dashboard label without a backfill.
-      update: { opens: { increment: 1 }, last_seen: new Date(), city },
-      create: {
-        user_id: authUser.userId,
-        city,
-        city_key: key,
-        country: parsed.data.country?.trim() || null,
-      },
+      // geocoder reaches the dashboard label without a backfill. So is
+      // `country`, when sent: a row written before the app sent one stayed null
+      // for good (SCRUM-997). An open that sends none never clears it.
+      update: { opens: { increment: 1 }, last_seen: new Date(), city, ...(country ? { country } : {}) },
+      create: { user_id: authUser.userId, city, city_key: key, country },
     })
 
     // Nothing useful to return. The client fired this and moved on; it must not
