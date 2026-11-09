@@ -2614,6 +2614,12 @@
       "observed": "(a) 3 of 16 failing; (b) 1 of 16; (c) 1 of 16; (d) 1 of 16. Each restored; 16/16. The EXIF strip: the stored bytes carry none of METADATA while the upload carried GPSLatitude.",
       "date": "2026-11-06"
     },
+    "lobby-text-length.test.ts": {
+      "guards": "SCRUM-1033: every cut of Lobby text (the report's excerpt, the post room's name, the dashboard's quoted excerpt) goes through clipCharacters, never String#slice, so a surrogate pair or a grapheme is never split.",
+      "mutation": "lib/board-access.ts: the post room's name put back to `.trim().slice(0, ROOM_NAME_MAX)`.",
+      "observed": "1 of 11 failing, naming `.slice(0, ROOM_NAME_MAX)`. Restored; 11/11. Before the fix 5 of 11 failed (clipCharacters missing, clip halving a family and a flag, the excerpt ending in a lone surrogate, the scan).",
+      "date": "2026-11-09"
+    },
     "lobby-pin.itest.ts": {
       "guards": "SCRUM-1026: the host's pinned post needs eventPermissions(...).canEdit (organisation-shaped), shows the org's name and never the writer, and is audited.",
       "mutation": "app/api/events/[id]/lobby-pin/route.ts: `.canEdit` read as `.canOperate`.",
