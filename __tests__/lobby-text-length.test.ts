@@ -1,8 +1,14 @@
+import { readFileSync } from "fs"
+import { join } from "path"
 import { z } from "zod"
 
+import { fileBoardReport } from "@/lib/board-access"
 import { BOARD } from "@/lib/constants"
+import { db } from "@/lib/db"
 import { clip } from "@/lib/push-notifications"
-import { characters } from "@/lib/utils"
+import { characters, clipCharacters } from "@/lib/utils"
+
+jest.mock("@/lib/db", () => ({ db: {} }))
 
 const HOST_POST_MAX = BOARD.MAX_HOST_POST_LENGTH
 
@@ -48,5 +54,84 @@ describe("clip, the push preview", () => {
 
   it("leaves text that fits alone", () => {
     expect(clip(party.repeat(120), 120)).toBe(party.repeat(120))
+  })
+})
+
+/*
+ * SCRUM-1033: a post is counted in code points everywhere — the route's zod
+ * `.max()`, the client's counter (`codePoints`, 280 inside the server's 500)
+ * and Postgres's `char_length` — and every cut of a post's text (the push
+ * preview, the report's excerpt, the room's name, the dashboard's quote) is
+ * `clipCharacters`: at most N code points, and only ever between graphemes,
+ * so a family, a flag or a skin tone is never left half drawn.
+ */
+const family = "👨‍👩‍👧" // five code points, one grapheme
+const flag = "🇮🇳" // two code points, one grapheme
+const CLIENT_POST_MAX = 280 // the app's counter (blendn lib/lobby.ts LOBBY_POST_MAX)
+
+describe("a post of 280 emoji", () => {
+  const post = z.string().trim().min(1).max(BOARD.MAX_POST_LENGTH)
+
+  it("is taken by the counter and the route alike when each emoji is one code point", () => {
+    const body = party.repeat(CLIENT_POST_MAX)
+    expect(characters(body)).toBe(CLIENT_POST_MAX)
+    expect(post.safeParse(body).success).toBe(true)
+  })
+
+  it("is refused by the counter and the route alike when each emoji is several", () => {
+    for (const emoji of [family, flag]) {
+      const body = emoji.repeat(CLIENT_POST_MAX)
+      expect(characters(body)).toBeGreaterThan(BOARD.MAX_POST_LENGTH)
+      expect(post.safeParse(body).success).toBe(false)
+    }
+  })
+})
+
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+describe("clipCharacters", () => {
+  it("leaves text that fits alone", () => {
+    expect(clipCharacters(party.repeat(5), 5)).toBe(party.repeat(5))
+  })
+
+  it("cuts at most max code points, and only between graphemes", () => {
+    expect(clipCharacters(family.repeat(3), 7)).toBe(family)
+    expect(clipCharacters(flag.repeat(3), 5)).toBe(flag.repeat(2))
+    expect(clipCharacters(`a${party.repeat(10)}`, 4)).toBe(`a${party.repeat(3)}`)
+  })
+})
+
+describe("clip, on emoji of several code points", () => {
+  it("never leaves a family or a flag half drawn", () => {
+    for (const emoji of [family, flag]) {
+      const clipped = clip(emoji.repeat(100), 120)
+      expect(characters(clipped)).toBeLessThanOrEqual(120)
+      expect(clipped.endsWith(`${emoji}...`)).toBe(true)
+      expect(clipped.slice(0, -3)).toBe(emoji.repeat(clipped.slice(0, -3).length / emoji.length))
+    }
+  })
+})
+
+describe("the report's excerpt", () => {
+  it("is cut between graphemes, never inside a surrogate pair", async () => {
+    const created: { excerpt?: string }[] = []
+    const tx = {
+      message_reports: { create: jest.fn(async ({ data }: { data: { excerpt?: string } }) => created.push(data)) },
+      board_posts: { updateMany: jest.fn() },
+    }
+    ;(db as unknown as { $transaction: unknown }).$transaction = (fn: (t: typeof tx) => Promise<void>) => fn(tx)
+    await fileBoardReport({ reporterId: "r", type: "board_post", id: "p", reason: "spam", excerpt: `a${party.repeat(600)}` })
+    const excerpt = created[0].excerpt ?? ""
+    expect(excerpt).not.toMatch(loneSurrogate)
+    expect(characters(excerpt)).toBe(500)
+  })
+})
+
+describe("every cut of Lobby text", () => {
+  it("goes through clipCharacters, not String#slice (UTF-16 units)", () => {
+    for (const file of ["lib/board-access.ts", "app/dashboard/moderation/reports/actions.ts"]) {
+      const source = readFileSync(join(__dirname, "..", file), "utf8")
+      expect({ file, slices: source.match(/\.slice\(0, *[\w.]+\)/g) ?? [] }).toEqual({ file, slices: [] })
+    }
   })
 })

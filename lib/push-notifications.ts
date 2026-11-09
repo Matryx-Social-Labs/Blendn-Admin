@@ -9,6 +9,7 @@ import { db } from "./db"
 import { hit } from "./rate-limit-store"
 import { isRoomMuted } from "./room-mute"
 import { badgeCountsFor } from "./badge-count"
+import { characters, clipCharacters } from "./utils"
 
 // Create a new Expo SDK client
 const expo = new Expo()
@@ -957,10 +958,9 @@ export async function notifyLobbyHostPost(
   })
 }
 
-/** A preview at most `max` characters long, cut between code points so an emoji is never halved into "�". */
+/** A preview at most `max` characters long, cut between graphemes so an emoji is never halved (`clipCharacters`). */
 export function clip(text: string, max: number): string {
-  const chars = [...text]
-  return chars.length > max ? chars.slice(0, max - 3).join("") + "..." : text
+  return characters(text) > max ? clipCharacters(text, max - 3) + "..." : text
 }
 
 /**

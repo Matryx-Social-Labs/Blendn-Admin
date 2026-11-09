@@ -494,6 +494,32 @@ describe("doors and kinds", () => {
     expect(await closed.json()).toMatchObject({ error: LOBBY_CLOSED, reasonCode: "LOBBY_CLOSED" })
   })
 
+  /*
+   * SCRUM-1033: an ended event's Lobby said "Event not found" on staging. Every
+   * one of those was an event the caller could not open at all — a city not
+   * open to them, or a private event they were not part of — and its event
+   * page said the same. An event they can open answers LOBBY_CLOSED; one they
+   * cannot answers exactly what an id that does not exist answers.
+   */
+  it("answers a closed private Lobby LOBBY_CLOSED to its attendee, and to a stranger what a missing event answers (SCRUM-1033)", async () => {
+    const host = await makeUser(testId("bs-priv-host"), "organizer")
+    users.push(host)
+    const at = await makeEvent(host, { visibility: "private" })
+    events.push(at)
+    await db.events.update({ where: { id: at }, data: { start_time: new Date(Date.now() - 30 * 3_600_000), end_time: new Date(Date.now() - 25 * 3_600_000) } })
+    const attendee = await person("priv-attendee", at)
+    const stranger = await person("priv-stranger", eventId)
+
+    const closed = await boardOf(attendee, at)
+    expect(closed.status).toBe(403)
+    expect(await closed.json()).toMatchObject({ error: LOBBY_CLOSED, reasonCode: "LOBBY_CLOSED" })
+
+    const missing = await boardOf(stranger, "00000000-0000-4000-8000-000000000000")
+    const hidden = await boardOf(stranger, at)
+    expect(hidden.status).toBe(404)
+    expect(await hidden.text()).toBe(await missing.text())
+  })
+
   it("refuses posting and asking from doors, in the read-only words", async () => {
     const at = await upcoming()
     const author = await person("doors2-author", at)

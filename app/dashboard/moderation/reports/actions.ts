@@ -20,6 +20,7 @@ import { closeCrewBlendsLocked, dissolveCrewLocked } from "@/lib/crews/sweep"
 import { blockAccountNow } from "@/lib/account-blocklist"
 import { notifyReportActioned } from "@/lib/push-notifications"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
+import { clipCharacters } from "@/lib/utils"
 
 /**
  * What a person reported, and what an admin can do about it.
@@ -367,7 +368,7 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectName: `Crew · ${crew?.name ?? "gone"}`,
           subjectSuspended: false,
           // The name and bio as they read when it was reported.
-          excerpt: (r.excerpt ?? "").slice(0, 200) || null,
+          excerpt: clipCharacters(r.excerpt ?? "", 200) || null,
           image: null,
           messageType: "crew",
           boardKind: null,
@@ -387,7 +388,7 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectId: null,
           subjectName: `Offer · ${offer?.venue.name ?? "gone"}${offer && offer.ends_at.getTime() <= now ? " (ended)" : ""}`,
           subjectSuspended: false,
-          excerpt: (r.excerpt ?? "").slice(0, 200) || null,
+          excerpt: clipCharacters(r.excerpt ?? "", 200) || null,
           image: null,
           messageType: "venue_offer",
           boardKind: null,
@@ -407,7 +408,7 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectSuspended: post?.author.suspended_at != null,
           // What was reported, as it was then; the live body if it predates
           // the snapshot.
-          excerpt: (r.excerpt ?? post?.body ?? "").slice(0, 200) || null,
+          excerpt: clipCharacters(r.excerpt ?? post?.body ?? "", 200) || null,
           image: (post && boardImageByPost.get(post.id)) ?? null,
           messageType: "board_post",
           boardKind: post?.kind ?? null,
@@ -427,7 +428,7 @@ export async function getReportQueue(status: report_status = "pending") {
           subjectId: about?.id ?? null,
           subjectName: displayName(about),
           subjectSuspended: about?.suspended_at != null,
-          excerpt: (r.excerpt ?? ask?.message ?? "").slice(0, 200) || null,
+          excerpt: clipCharacters(r.excerpt ?? ask?.message ?? "", 200) || null,
           image: null,
           messageType: "board_request",
           boardKind: null,
@@ -448,7 +449,7 @@ export async function getReportQueue(status: report_status = "pending") {
         subjectSuspended: author?.suspended_at != null,
         // A message deleted between the report and the review leaves the row
         // saying so rather than showing an empty quote.
-        excerpt: (group?.content ?? priv?.message_text ?? "").slice(0, 200) || null,
+        excerpt: clipCharacters(group?.content ?? priv?.message_text ?? "", 200) || null,
         image: imageByReport.get(r.id) ?? null,
         messageType: r.message_type === "private" ? "private" : "group",
         boardKind: null,
