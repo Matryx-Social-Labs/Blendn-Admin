@@ -6,6 +6,7 @@ process.env.MOBILE_JWT_SECRET =
   process.env.MOBILE_JWT_SECRET ?? "itest-mobile-secret-0123456789abcdefghij"
 
 import { signAccessToken } from "@/lib/mobile-auth"
+import { flushProductEvents } from "@/lib/product-events"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom } from "./helpers"
 
@@ -197,6 +198,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   shared.__blendnSocketIo = undefined
+  // The routes record product events in a batch; write it before the pool closes, not after the suite has gone.
+  await flushProductEvents()
   await db.event_likes.deleteMany({ where: { OR: [{ liker_id: { in: users } }, { liked_id: { in: users } }] } })
   await db.private_messages.deleteMany({ where: { conversation: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } } })
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
