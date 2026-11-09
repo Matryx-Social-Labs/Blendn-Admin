@@ -25,6 +25,8 @@ const detail = require("@/app/api/mobile/venues/[venueId]/route") as typeof impo
 const list = require("@/app/api/mobile/venues/route") as typeof import("@/app/api/mobile/venues/route")
 const upcomingRoute = require("@/app/api/mobile/venues/[venueId]/upcoming/route") as typeof import("@/app/api/mobile/venues/[venueId]/upcoming/route")
 const regular = require("@/app/api/mobile/venues/[venueId]/regular/route") as typeof import("@/app/api/mobile/venues/[venueId]/regular/route")
+const offersList = require("@/app/api/mobile/offers/route") as typeof import("@/app/api/mobile/offers/route")
+const offerOpen = require("@/app/api/mobile/offers/[offerId]/route") as typeof import("@/app/api/mobile/offers/[offerId]/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const DAY = 86_400_000
@@ -434,5 +436,32 @@ describe("an offer says when it was redeemed", () => {
     const at = new Date()
     await db.venue_offer_sends.update({ where: { id: send.id }, data: { opened_at: new Date(at.getTime() - 1000), redeemed_at: at, redeemed_night: new Date(at.toISOString().slice(0, 10)) } })
     expect((await myOffers(p.id))[0]).toMatchObject({ state: "redeemed", redeemedAt: at.toISOString() })
+  })
+})
+
+describe("an offer names its venue's type, for the pass's tile", () => {
+  it("`venue.venueType` is the venue's type on the open and in the list, and null for a venue with none", async () => {
+    const p = await adult("rv_offer_type")
+    const sendAt = async (venueId: string, text: string) => {
+      const offer = await db.venue_offers.create({
+        data: { venue_id: venueId, org_id: orgId, text, audience_size: 5, ends_at: new Date(Date.now() + DAY) },
+      })
+      await db.venue_offer_sends.create({ data: { offer_id: offer.id, venue_id: venueId, user_id: p.id } })
+      return offer.id
+    }
+    const bar = await sendAt(await venue("Typed bar", { venue_type: "pub_bar" }), "A free pint")
+    const untyped = await sendAt(await venue("Untyped"), "A free coffee")
+
+    const opened = await body(await get(offerOpen, `/api/mobile/offers/${bar}`, p, { offerId: bar }))
+    expect(opened.status).toBe(200)
+    expect(opened.data.offer.venue).toEqual({ id: expect.any(String), name: expect.stringContaining("Typed bar"), venueType: "pub_bar" })
+
+    // Control: a venue with no type says so, rather than the field being dropped or defaulted.
+    const bare = await body(await get(offerOpen, `/api/mobile/offers/${untyped}`, p, { offerId: untyped }))
+    expect(bare.data.offer.venue).toHaveProperty("venueType", null)
+
+    const listed = await body(await get(offersList, "/api/mobile/offers", p))
+    const types = Object.fromEntries(listed.data.offers.map((o: { id: string; venue: { venueType: unknown } }) => [o.id, o.venue.venueType]))
+    expect(types).toEqual({ [bar]: "pub_bar", [untyped]: null })
   })
 })
