@@ -158,6 +158,14 @@ room. A storage delete that fails keeps its row for the next pass.
 is set on the service. Turn it on once the privacy policy says these windows
 (draft: `.context/plans/privacy-retention-draft.md`).
 
+**Tonight's question answers go at 30 days** (owner, 2026-11-10):
+`event_match_preferences.tonight_answer` is set NULL 30 days after the event's
+last night ends (`purgeTonightAnswers`, same sweeper). The row and the person's
+other preferences stay. It is not behind `LOBBY_PURGE`: an answer is not held
+content. One refused by moderation is never stored, and no report copies an
+answer (a person report keeps only the reporter's reason and description), so
+an open report holds nothing here.
+
 **Stored media is `no-cache`.** Every profile photo and chat image is the
 server's sealed copy (`sealUpload`), stored with `Cache-Control: no-cache`, so
 deleting it (account deletion, a removed photo, a moderation takedown) stops it
