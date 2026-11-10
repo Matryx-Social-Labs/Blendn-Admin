@@ -47,6 +47,12 @@ describe("screenUserText", () => {
     expect(screenUserText("u1", "message_request", { message: "you magi" })).toEqual({ field: "message" })
   })
 
+  it("holds tonight's answer to the chat rule, as everything else said in that room is", () => {
+    expect(screenUserText("u1", "tonight_answer", { tonightAnswer: "you magi" })).toEqual({ field: "tonightAnswer" })
+    // Control: the identity rule would only have flagged it.
+    expect(screenUserText("u1", "profile", { bio: "you magi" })).toBeNull()
+  })
+
   it("skips empty and absent fields, and records nothing when all pass", () => {
     expect(screenUserText("u1", "profile", { name: "Asha", bio: null, occupation: undefined, education: "" })).toBeNull()
     expect(auditLog).not.toHaveBeenCalled()

@@ -10,6 +10,7 @@ import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { profileBadges } from "@/lib/profile-badges"
 import { identityForRef, nonEventRoomCard } from "@/lib/identity"
+import { tonightFor } from "@/lib/tonight"
 import { savedCount } from "@/lib/saved-events"
 import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
@@ -130,6 +131,15 @@ export async function GET(
       return notFoundResponse("User not found")
     }
 
+    /*
+     * Tonight's question and their answer (Flow 5 · P-A), for a card opened
+     * from an event's room only: a raw id has no room, so it never carries
+     * one. Only to somebody in that room now, never to its host or venue
+     * owner, and the same in both branches below -- the answer sits beside
+     * the pseudonym already, so naming them adds nothing to it.
+     */
+    const tonight = room && authUser.userId !== userId ? await tonightFor(authUser.userId, room, userId) : null
+
     // Format the response
     // Build photos array: prefer profile gallery, fall back to single user image
     const photos: string[] = (user.profile?.photos && user.profile.photos.length > 0)
@@ -179,6 +189,7 @@ export async function GET(
         location: await normalizeLocationToCity(user.profile?.location),
         isOwnProfile: false,
         identityVisible: false,
+        ...(tonight && { tonight }),
       })
     }
 
@@ -248,6 +259,7 @@ export async function GET(
       },
       isOwnProfile,
       identityVisible: identified,
+      ...(tonight && { tonight }),
       // The interests you have in common, by name, for the outlined chips (SCRUM-858).
       ...(identified && !isOwnProfile && { sharedInterests: await sharedInterestNames(authUser.userId, user.user_interests) }),
       /*

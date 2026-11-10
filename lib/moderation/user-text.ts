@@ -29,7 +29,10 @@ import type { ModerationResult } from "./types"
 /** The `reasonCode` on a refusal. `errorCode` stays `VALIDATION_FAILED`. */
 export const TEXT_NOT_ALLOWED = "TEXT_NOT_ALLOWED"
 
-export type TextSurface = "profile" | "crew" | "message_request" | "oauth_name"
+export type TextSurface = "profile" | "crew" | "message_request" | "oauth_name" | "tonight_answer"
+
+/** Surfaces held to the chat rule: words said to a room, not a name or a card. */
+const MESSAGE_SURFACES: ReadonlySet<TextSurface> = new Set(["message_request", "tonight_answer"])
 
 /** What the screen decided about one text: refuse it, let it through flagged for review, or nothing to say. */
 export type TextVerdict = { action: "refuse" | "flag"; result: ModerationResult } | null
@@ -83,8 +86,9 @@ export function recordScreenedText(
 /**
  * The first of these fields that may not be saved, recorded, or null. Flagged
  * fields are recorded and let through. Empty and absent fields are skipped
- * (clearing a bio is always allowed). `message_request` is a message; every
- * other surface is identity text.
+ * (clearing a bio is always allowed). `message_request` and `tonight_answer`
+ * (said to a room, so the room's rule) are messages; every other surface is
+ * identity text.
  */
 export function screenUserText(
   userId: string | null,
@@ -93,7 +97,7 @@ export function screenUserText(
 ): { field: string } | null {
   for (const [field, text] of Object.entries(fields)) {
     if (!text) continue
-    const verdict = surface === "message_request" ? messageTextVerdict(text) : identityTextVerdict(text)
+    const verdict = MESSAGE_SURFACES.has(surface) ? messageTextVerdict(text) : identityTextVerdict(text)
     if (!verdict) continue
     recordScreenedText(userId, surface, field, verdict)
     if (verdict.action === "refuse") return { field }

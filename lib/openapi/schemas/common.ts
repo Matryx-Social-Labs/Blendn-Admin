@@ -254,3 +254,11 @@ export const BadgeSchema = z
     label: z.string().describe("\"Regular here\", \"Shows up\", \"5+ nights this month\", \"Out together often\""),
   })
   .openapi("Badge")
+
+/** A room's lens (Flow 5 · P-A, `lib/tonight.ts`): what leads on a person card there, and tonight's question. */
+export const RoomLensSchema = z
+  .object({
+    key: z.string().describe("`work`, `music`, `arts`, `social`, `active` or `venue_night` -- data (`room_lenses`), so more may come; render an unknown key as the plain card."),
+    question: z.string().nullable().describe("Tonight's question, in plain English. Null: this lens asks nothing (a venue night)."),
+  })
+  .openapi("RoomLens")
