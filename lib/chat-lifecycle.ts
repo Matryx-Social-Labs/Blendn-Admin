@@ -7,7 +7,7 @@ import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { closeRoomSockets } from "./room-close"
 import { purgeLapsedCrewLikes, repairCrews } from "./crews/sweep"
 import { recheckPendingPhotos } from "./lobby-photo"
-import { purgeClosedLobbies } from "./lobby-retention"
+import { purgeClosedLobbies, purgeTonightAnswers } from "./lobby-retention"
 
 /** Bounded so one pass cannot hold locks for an unbounded period. */
 const SWEEP_BATCH = 500
@@ -177,6 +177,13 @@ async function runSweep(): Promise<void> {
     }
   } catch (error) {
     logger.error("Lobby sweep failed", { error: error instanceof Error ? error.message : String(error) })
+  }
+  /* Tonight's question answers, 30 days after the event (lib/lobby-retention.ts). Not behind LOBBY_PURGE; its own catch. */
+  try {
+    const answers = await purgeTonightAnswers()
+    if (answers.answers > 0) logger.info("Purged Tonight's question answers", { ...answers })
+  } catch (error) {
+    logger.error("Tonight answer purge failed", { error: error instanceof Error ? error.message : String(error) })
   }
 }
 
