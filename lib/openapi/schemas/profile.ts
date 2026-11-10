@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { ACCOUNT_MAX_AGE } from "@/lib/age"
 import { registry } from "@/lib/openapi/registry"
-import { FriendOfferSchema, PagedPaginationSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PagedPaginationSchema, RoomLensSchema, UserRefParamSchema } from "./common"
 
 /**
  * These mirror `lib/validations/profile.ts`, and a test holds them to it.
@@ -390,6 +390,10 @@ export const UserPublicProfileSchema = z
       .optional()
       .describe("The names of the interests you and this person both picked. Only for somebody else you may see (`identityVisible`). Additive."),
     isOwnProfile: z.boolean(),
+    tonight: z
+      .object({ lens: RoomLensSchema, answer: z.string().nullable() })
+      .optional()
+      .describe("Tonight's question and their answer (null: none yet). Only through an event room handle, only to somebody checked in to that room now, never to anyone who runs or hosts the event, and only when the room asks a question; absent otherwise. The same whether or not `identityVisible`."),
     identityVisible: z
       .boolean()
       .describe(

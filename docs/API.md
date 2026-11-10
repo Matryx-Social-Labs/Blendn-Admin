@@ -910,7 +910,8 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | POST | `/events/:eventId/peer-ratings` | Rate someone you met. A refusal is `403 FORBIDDEN` with `reasonCode` `NOT_ENDED` (the night is still running) or `NOT_CONNECTED` (not someone you connected with, already rated, or blocked) |
 | GET | `/events/:eventId/matches` | Who else was in the room, ranked. 403 `USER_BANNED` for a member a host removed from the room (the chat's answer) |
 | POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
-| PUT | `/events/:eventId/matches/preferences` | Your intent and reveal, for this event |
+| GET | `/events/:eventId/matches/preferences` | Your own intent, reveal, crews opt-in and tonight's answer here, plus the room's `lens`. In the room only |
+| PUT | `/events/:eventId/matches/preferences` | Your intent, reveal and tonight's answer, for this event |
 
 ### Peer ratings and trust
 
@@ -1076,6 +1077,36 @@ both people agreed to talk, and two likes are exactly that.
 revealed?: boolean, remember?: boolean }`. Per event, because both change —
 someone open to dating on a Friday is often only there for the talk on Tuesday.
 `remember` also writes the profile default.
+
+### Tonight's question (Flow 5 · P-A)
+
+A room has a **lens**: which fields lead on a person card there, and the one
+question it asks tonight. The event's category picks it, from data
+(`category_lenses` → `room_lenses`), so a new category or a new question is a
+row, never a deploy. The event's categories are tried primary first, each as
+itself and then as its parent. A venue day is always `venue_night`, which asks
+nothing. When nothing maps, `lens` is `null` and the app draws the plain card.
+
+| Lens | Seeded for | Question |
+|---|---|---|
+| `work` | tech, networking, business-professional | What are you working on? |
+| `music` | music, nightlife | Who are you hoping they play? |
+| `arts` | arts-culture | What are you here to see? |
+| `social` | food-drink, social, community, markets-fairs, learning, nightlife-comedy | What should nobody miss? |
+| `active` | sports, ipl, outdoor, wellness | First time, or a regular? |
+| `venue_night` | every venue day | — |
+
+`PUT .../preferences` takes `tonightAnswer: string | null`.
+- **The value:** whitespace collapses to one line, and the answer is at most 140 characters. Null or blank clears it.
+- **Moderation:** it is held to the room's chat rule (`400 VALIDATION_FAILED`, `reasonCode: TEXT_NOT_ALLOWED`, `field: "tonightAnswer"`).
+- **No question:** in a room that asks none, the answer is a `400 VALIDATION_FAILED`.
+- **What comes back:** GET and PUT both answer `{ intent, revealed, openToCrews, tonightAnswer, lens }`.
+
+**Who reads an answer:** people checked in to that room now, as attendees, beside the pseudonym the room already shows.
+- `GET .../matches` gives each card a `tonightAnswer` and the response a `lens`. Answers are read for the returned page only.
+- `GET /users/:handle` gives `tonight: { lens, answer }`, but only for an **event room handle**. A raw id never carries it.
+- **Never to anyone who runs or hosts the event** (`eventPermissions().canOperate`: its organising org, its venue's owner, an admin), even checked in as an attendee. Their cards say `null` and their sheets carry no `tonight`.
+- The roster (`GET .../checkins`) carries no answers.
 
 ### A member a host banned from the room
 

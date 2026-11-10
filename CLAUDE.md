@@ -235,7 +235,9 @@ crew), `blends_open_closes_at` (the Blend sweeper's open-only index),
 `venues_one_per_source_record` (a seeded venue's dataset record, once),
 `cities_one_default_per_market`, the seeded `markets` and `cities` rows (on a
 `db push` database the catalogue is empty and every city reads as uncatalogued,
-so nothing is hidden or in preview), the
+so nothing is hidden or in preview), the seeded `room_lenses` and
+`category_lenses` rows (on a `db push` database every room's lens is null, so
+nothing asks tonight's question — `lib/tonight.ts`), the
 `ticket_orders_pending_expiry` partial index (what the hold sweeper,
 `releaseExpiredHolds`, reads), the reconcile job's partial indexes
 `ticket_orders_unconfirmed_payment`, `ticket_orders_unconfirmed_refund` and

@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-response"
 import { logger } from "@/lib/logger"
 import { matchesForEvent } from "@/lib/matches"
+import { lensForEvent } from "@/lib/tonight"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { isUuid } from "@/lib/api-input"
@@ -46,12 +47,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const banned = await roomBanRefusal(eventId, authUser.userId)
     if (banned) return banned
 
-    const matches = await matchesForEvent(eventId, authUser.userId, limit)
+    // The room's lens: what leads on these cards, and whether they carry tonight's answers (lib/tonight.ts).
+    const lens = await lensForEvent(eventId)
+    const matches = await matchesForEvent(eventId, authUser.userId, limit, !!lens?.question)
     if (matches === null) {
       return forbiddenResponse("Check in to see who else is here")
     }
 
-    return successResponse({ matches })
+    return successResponse({ matches, lens })
   } catch (error) {
     logger.error("Matches error", {
       error: error instanceof Error ? error.message : String(error),

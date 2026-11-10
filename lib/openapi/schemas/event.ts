@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema } from "./common"
+import { BadgeSchema, OverlapSchema, PaginationMetaSchema, DeviceInfoSchema, RoomUserRefSchema, RoomLensSchema } from "./common"
 import { EventTicketingSchema } from "./tickets"
 
 /** Likes and waves name somebody only by this event's handle (SCRUM-371). */
@@ -659,8 +659,13 @@ export const MatchListResponseSchema = z
           .nullable()
           .describe("Their own sign, \"Leo ♌\", when they chose to show one and the card has Tier B left — never beside a Tier B line before a reveal, never below eight people."),
         badges: z.array(BadgeSchema).describe("Earned by check-ins. Empty below the eight-person floor (they are attendance facts)."),
+        tonightAnswer: z
+          .string()
+          .nullable()
+          .describe("Their answer to tonight's question, beside the pseudonym. Null when they gave none, when the room asks no question, and on every card when you run or host the event."),
       })
     ),
+    lens: RoomLensSchema.nullable().describe("The room's lens; null when the event's categories map to none (draw the plain card)."),
   })
   .openapi("MatchListResponse")
 
@@ -717,8 +722,23 @@ export const MatchPreferencesSchema = z
     /** @deprecated Means both. Kept for builds already in the store. */
     /** Also write the profile default, not just this event. */
     remember: z.boolean().optional(),
+    tonightAnswer: z
+      .string()
+      .nullable()
+      .optional()
+      .describe("Your answer to tonight's question: whitespace collapsed to one line, at most 140 characters, held to the room's chat rule (400 `TEXT_NOT_ALLOWED`, `field: tonightAnswer`). Null or blank clears it. 400 `VALIDATION_FAILED` when the room asks no question."),
   })
   .openapi("MatchPreferences")
+
+export const MatchPreferencesStateSchema = z
+  .object({
+    intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])),
+    revealed: z.boolean(),
+    openToCrews: z.boolean(),
+    tonightAnswer: z.string().nullable(),
+    lens: RoomLensSchema.nullable(),
+  })
+  .openapi("MatchPreferencesState")
 
 export const AttendeeListResponseSchema = z
   .object({

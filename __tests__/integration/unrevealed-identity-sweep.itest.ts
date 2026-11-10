@@ -8,7 +8,7 @@ process.env.MOBILE_JWT_SECRET =
 import { signAccessToken } from "@/lib/mobile-auth"
 import { flushProductEvents } from "@/lib/product-events"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
 
 /**
  * Every mobile GET, read by somebody an unrevealed match has not revealed to,
@@ -27,6 +27,11 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putIn
  * pseudonyms are written by the product), the viewer reveals and the other
  * does not, and the other then messages, chats in the room, posts on the
  * board and waves. Then the viewer reads everything.
+ *
+ * The other also answers tonight's question (Flow 5 · P-A, lib/tonight.ts):
+ * the answer reaches the viewer beside the pseudonym, so the sweep must see
+ * it arrive (or it proves nothing about the new fields) and still find no
+ * identity; and a host who runs the room, checked in, must find it nowhere.
  */
 
 const ROOT = join(__dirname, "..", "..")
@@ -45,6 +50,8 @@ const events: string[] = []
 const SECRET_NAME = "Benedict Quixotewright"
 const SECRET_PHOTO = "https://cdn.itest.invalid/benedict-quixotewright.jpg"
 const SECRET_BLUR = "https://cdn.itest.invalid/benedict-quixotewright.blur.jpg"
+/** The other's answer to tonight's question: room words, readable by the room, never by its host. */
+const TONIGHT_ANSWER = "Restoring a 1962 Vespa in my garage"
 
 async function person(label: string, name: string, photo: string, blur: string): Promise<Person> {
   const id = await makeUser(label)
@@ -129,6 +136,9 @@ let viewer: Person
 let other: Person
 let eventId: string
 let conversationId: string
+let hostId: string
+const lensSlugs: string[] = []
+const categoryIds: string[] = []
 const refs: Record<string, string[]> = {}
 
 /** What `other` must never be to `viewer` while unrevealed: their id, name, email, photo and blur. */
@@ -142,8 +152,16 @@ beforeAll(async () => {
 
   const host = await makeUser("uis-host", "organizer")
   users.push(host)
+  hostId = host
   eventId = await makeEvent(host)
   events.push(eventId)
+  // A category whose lens asks a question, so the other can answer it.
+  const slug = testId("uis-work")
+  const category = await db.categories.create({ data: { name: slug, slug } })
+  categoryIds.push(category.id)
+  await db.category_lenses.create({ data: { category_slug: slug, lens_key: "work" } })
+  lensSlugs.push(slug)
+  await db.event_categories.create({ data: { event_id: eventId, category_id: category.id, primary: true } })
   const occurrenceId = await occurrenceOf(eventId)
   for (const p of [viewer, other]) {
     await db.event_rsvps.create({ data: { event_id: eventId, user_id: p.id, status: "going" } })
@@ -154,6 +172,7 @@ beforeAll(async () => {
   for (const p of [viewer, other]) {
     await ok(call(prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, p, { method: "PUT", body: { intent: ["friendship"], revealed: false }, params: { eventId } }), "preferences")
   }
+  await ok(call(prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, other, { method: "PUT", body: { tonightAnswer: TONIGHT_ANSWER }, params: { eventId } }), "tonight's answer")
 
   const deck = route("events/[eventId]/matches")
   const likes = route("events/[eventId]/matches/likes")
@@ -205,6 +224,10 @@ afterAll(async () => {
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.board_posts.deleteMany({ where: { event_id: { in: events } } }).catch(() => undefined)
   await cleanup(users, events)
+  await db.category_lenses.deleteMany({ where: { category_slug: { in: lensSlugs } } })
+  await db.categories.deleteMany({ where: { id: { in: categoryIds } } })
+  await db.organisation_members.deleteMany({ where: { user_id: hostId } })
+  await db.organisations.deleteMany({ where: { display_name: { startsWith: "itest_uis-org" } } })
   await closeDb()
 })
 
@@ -269,6 +292,35 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       .map((x) => `${x.e.event} to ${x.e.rooms.join(",")} leaks ${x.leaked.map((s) => (s === other.id ? "<raw id>" : s)).join(", ")}`)
     expect(found).toEqual([])
   })
+
+  it("reached the viewer with the other's answer, on the deck and the person sheet, beside no identity", async () => {
+    const deck = await call(route("events/[eventId]/matches").GET, `/api/mobile/events/${eventId}/matches`, viewer, { params: { eventId } })
+    expect(deck.body.data.matches.find((m: { userId: string }) => m.userId === refs.room[0])?.tonightAnswer).toBe(TONIGHT_ANSWER)
+    const sheet = await call(route("users/[userId]").GET, `/api/mobile/users/${refs.room[0]}`, viewer, { params: { userId: refs.room[0] } })
+    expect(sheet.body.data.tonight?.answer).toBe(TONIGHT_ANSWER)
+    expect(leaksIn(deck.text)).toEqual([])
+    expect(leaksIn(sheet.text)).toEqual([])
+  })
+
+  it("hands the answer to no GET a host who runs the room can make, checked in or not", async () => {
+    const org = await db.organisations.create({ data: { display_name: testId("uis-org") } })
+    await db.organisation_members.create({ data: { org_id: org.id, user_id: hostId, role: "staff" } })
+    await db.events.update({ where: { id: eventId }, data: { organizer_org_id: org.id } })
+    await putInRoom({ eventId, occurrenceId: await occurrenceOf(eventId), userId: hostId })
+    const host: Person = { id: hostId, token: signAccessToken(hostId, `${hostId}@itest.invalid`) }
+
+    const found: string[] = []
+    const answered = new Set<string>()
+    for (const { rel, params } of calls()) {
+      const path = `/api/mobile/${rel.replace(/\[([^\]]+)\]/g, (_, n: string) => params[n])}`
+      const r = await call(route(rel).GET, path, host, { params })
+      if (r.status < 300) answered.add(rel)
+      if (r.text.includes(TONIGHT_ANSWER)) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
+    }
+    // The deck and the person sheet answered the host: withheld there, not merely refused.
+    expect([...answered]).toEqual(expect.arrayContaining(["events/[eventId]/matches", "users/[userId]"]))
+    expect(found).toEqual([])
+  }, 120_000)
 
   it("does find them once they reveal, so the sweep can see a leak at all", async () => {
     await ok(call(route("conversations/[conversationId]/reveal").POST, `/api/mobile/conversations/${conversationId}/reveal`, other, { method: "POST", body: {}, params: { conversationId } }), "reveal back")

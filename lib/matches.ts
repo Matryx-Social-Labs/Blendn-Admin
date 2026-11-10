@@ -1,3 +1,4 @@
+import { answersFor, operatesEvent } from "@/lib/tonight"
 import { ConversationClosedError, closedPairKeys, openConversation } from "@/lib/conversations"
 import { lockPair, pairIsLinked, releaseHeldRequests } from "@/lib/friends"
 import { notStrangersTo } from "@/lib/room-people"
@@ -91,6 +92,12 @@ export interface MatchCard {
   sign: string | null
   /** Earned by check-ins ("Regular here", "Shows up", "5+ nights this month"). Empty in a small room. */
   badges: Badge[]
+  /**
+   * Their answer to tonight's question (lib/tonight.ts), under the pseudonym
+   * this card already shows. Null when they gave none, when the room asks no
+   * question, and for EVERY card when the viewer runs or hosts the event.
+   */
+  tonightAnswer: string | null
 }
 
 /** Interest-tree leaves that are IPL teams: category id → team code ("CSK"). */
@@ -193,7 +200,9 @@ export function expandInterests(
 export async function matchesForEvent(
   eventId: string,
   viewerId: string,
-  limit = 50
+  limit = 50,
+  /** Whether this room asks tonight's question (`lensForEvent(...).question`): only then are answers read. */
+  asksQuestion = false
 ): Promise<MatchCard[] | null> {
   const viewerCheckIn = await db.event_check_ins.findFirst({
     // Event-level rather than per-occurrence: attending any day of a run puts
@@ -572,7 +581,7 @@ export async function matchesForEvent(
    */
   const page = rankMatches(viewer, candidates, rankOpts)
   const pageIds = page.map((m) => m.userId)
-  const [recognised, pseudonyms] = await Promise.all([
+  const [recognised, pseudonyms, answers] = await Promise.all([
     visibleInRoom(viewerId, eventId, pageIds),
     pageIds.length
       ? db.chat_group_members.findMany({
@@ -580,6 +589,10 @@ export async function matchesForEvent(
           select: { user_id: true, anonymous_name: true },
         })
       : [],
+    // The page's answers only, never the room's: a concert of 12k reads 50. Nothing for a host (`operatesEvent`).
+    asksQuestion && pageIds.length
+      ? operatesEvent(viewerId, eventId).then((operates) => (operates ? new Map<string, string>() : answersFor(eventId, pageIds)))
+      : new Map<string, string>(),
   ])
   const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
   const onPage = new Set(pageIds)
@@ -668,6 +681,7 @@ export async function matchesForEvent(
       // Attendance facts, so the attendance floor (`roomIsBigEnough`), and only if they show badges.
       badges:
         m.roomIsBigEnough && profileOf.get(m.userId)?.show_badges !== false ? badgesFor(badgeFacts(m.userId)) : [],
+      tonightAnswer: answers.get(m.userId) ?? null,
     }
   })
 }
