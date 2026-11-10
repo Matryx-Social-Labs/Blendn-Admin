@@ -269,4 +269,25 @@ describe("tonight's answer", () => {
     expect(r.body.data.tonightAnswer).toBeNull()
     expect((await profile(b, handleOfA)).body.data.tonight).toEqual({ lens: { key: "work", question: "What are you working on?" }, answer: null })
   })
+
+  it("is not readable on the person sheet once a host bans its author from the room, as the deck already drops them", async () => {
+    const BANNED_ANSWER = "Teaching my cat to fetch"
+    const d = await person("tq-d")
+    await putInRoom({ eventId, occurrenceId: await occurrenceOf(eventId), userId: d.id })
+    expect((await setAnswer(d, eventId, BANNED_ANSWER)).status).toBe(200)
+    const card = ((await deck(b, eventId)).body.data.matches as { userId: string; tonightAnswer: string | null }[]).find(
+      (m) => m.tonightAnswer === BANNED_ANSWER
+    )
+    // Control: before the ban, b reads it on the sheet.
+    expect((await profile(b, card!.userId)).text).toContain(BANNED_ANSWER)
+
+    const group = await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active", member_count: 0 } })
+    await db.chat_group_members.create({
+      data: { chat_group_id: group.id, user_id: d.id, anonymous_name: testId("Otter"), status: "banned", banned_by: host.id },
+    })
+
+    expect((await deck(b, eventId)).text).not.toContain(BANNED_ANSWER)
+    const p = await profile(b, card!.userId)
+    expect(p.text).not.toContain(BANNED_ANSWER)
+  })
 })
