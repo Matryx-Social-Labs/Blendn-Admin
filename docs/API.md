@@ -1108,6 +1108,8 @@ nothing. When nothing maps, `lens` is `null` and the app draws the plain card.
 - **Never to anyone who runs or hosts the event** (`eventPermissions().canOperate`: its organising org, its venue's owner, an admin), even checked in as an attendee. Their cards say `null` and their sheets carry no `tonight`.
 - The roster (`GET .../checkins`) carries no answers.
 
+**How long:** 30 days after the event's last night ends the answer is cleared; `GET .../preferences` then says `tonightAnswer: null` (`docs/RETENTION.md`).
+
 ### A member a host banned from the room
 
 A ban closes the room's people, not only its chat. To a member a host banned
