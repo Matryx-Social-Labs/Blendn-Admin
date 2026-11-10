@@ -32,6 +32,7 @@ import {
   PeerRatingRequestSchema,
   RatablePeersResponseSchema,
   MatchPreferencesSchema,
+  MatchPreferencesStateSchema,
   InterestedUsersResponseSchema,
   EventSummarySchema,
 } from "@/lib/openapi/schemas/event"
@@ -691,20 +692,36 @@ registry.registerPath({
   },
 })
 
-// PUT /api/mobile/events/{eventId}/matches/preferences
+// GET + PUT /api/mobile/events/{eventId}/matches/preferences
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/matches/preferences",
+  tags: ["Mobile Events"],
+  summary: "Your own choices for this room, and its lens",
+  description: ROOM_BAN_GATE +
+    "Your row only: intent, reveal, open to crews, your answer to tonight's question, and the room's `lens` (what leads on a card here and the question it asks). In the room only (403 otherwise), as PUT. Nothing about anybody else.",
+  security: bearerAuth,
+  request: { params: z.object({ eventId: z.string().uuid() }) },
+  responses: {
+    200: { description: "Your preferences", content: { "application/json": { schema: wrap(MatchPreferencesStateSchema) } } },
+    ...standardErrors,
+  },
+})
+
 registry.registerPath({
   method: "put",
   path: "/api/mobile/events/{eventId}/matches/preferences",
   tags: ["Mobile Events"],
-  summary: "Set your intent and reveal for this event",
-  description: ROOM_BAN_GATE,
+  summary: "Set your intent, reveal and tonight's answer for this event",
+  description: ROOM_BAN_GATE +
+    "Answers the same body as GET. `tonightAnswer` is read by people checked in to this room, beside your pseudonym, and never by anyone who runs or hosts it.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
     body: { content: { "application/json": { schema: MatchPreferencesSchema } } },
   },
   responses: {
-    200: { description: "Saved", content: { "application/json": { schema: wrap(MatchPreferencesSchema) } } },
+    200: { description: "Saved", content: { "application/json": { schema: wrap(MatchPreferencesStateSchema) } } },
     ...standardErrors,
   },
 })

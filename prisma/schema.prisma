@@ -2780,6 +2780,11 @@ model event_match_preferences {
   /// it at: null or past means no. A crew never appears in the deck of
   /// somebody who did not ask for crews, and Tuesday's answer is not Wednesday's.
   open_to_crews_until DateTime? @db.Timestamptz(6)
+  /// Their answer to the room's question tonight (`room_lenses.question`), in
+  /// their own words. Optional, one line, screened by the chat rule on write.
+  /// Read by people in this room under the pseudonym; never by anyone who runs
+  /// the event (`lib/tonight.ts`). Null is "no answer".
+  tonight_answer String? @db.VarChar(140)
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -2790,6 +2795,33 @@ model event_match_preferences {
   /// The constraint that makes the ambiguity impossible rather than unlikely.
   @@unique([event_id, user_id])
   @@index([user_id])
+}
+
+/// How a room shows a person (Flow 5 · P-A): which fields lead on the person
+/// card, and the one question it asks tonight. `work`, `music`, `arts`,
+/// `social`, `active`, and `venue_night` (a venue day's, which asks nothing).
+///
+/// Data, so a new question is an UPDATE and a new category a row in
+/// `category_lenses`, never a deploy. Seeded in the migration that made it.
+model room_lenses {
+  key      String  @id
+  /// Plain English that works in any country. Null: this lens asks nothing.
+  question String? @db.VarChar(140)
+
+  categories category_lenses[]
+}
+
+/// Which lens an event's category gives its room, keyed on the category's
+/// slug (parent or child: a child's row wins over its parent's). A slug, not a
+/// foreign key, so the rows ship in a migration before any category exists.
+/// Resolution: `lensForEvent` in lib/tonight.ts.
+model category_lenses {
+  category_slug String @id
+  lens_key      String
+
+  lens room_lenses @relation(fields: [lens_key], references: [key], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([lens_key])
 }
 
 /// A mutual like is the only thing that opens a conversation, and the only

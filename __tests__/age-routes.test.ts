@@ -22,6 +22,8 @@ const mockDb = {
   chat_group_members: { findFirst: jest.fn().mockResolvedValue(null) },
 }
 jest.mock("@/lib/db", () => ({ db: mockDb }))
+// The room's lens is its own suite (tonight-answer.itest.ts): a room that asks nothing, here.
+jest.mock("@/lib/tonight", () => ({ lensForEvent: jest.fn().mockResolvedValue(null) }))
 
 const mockAuth = jest.fn()
 jest.mock("@/lib/mobile-auth", () => ({

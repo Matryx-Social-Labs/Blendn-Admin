@@ -9,6 +9,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
   errorResponse,
+  ErrorCode,
 } from "@/lib/api-response"
 import { ageFrom, datingAgeRefusal } from "@/lib/age"
 import { db } from "@/lib/db"
@@ -19,10 +20,27 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { readJson, isUuid } from "@/lib/api-input"
 import { revealConversationsFrom } from "@/lib/matches"
+import { lensForEvent, type RoomLens } from "@/lib/tonight"
+import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
 }
+
+/** `varchar(140)`, counted as Postgres counts it: characters (code points), not UTF-16 units. */
+const TONIGHT_ANSWER_MAX = 140
+
+/**
+ * Their answer to tonight's question: one line on a card, so whitespace runs
+ * (newlines included) collapse to one space. Empty after that is "no answer".
+ * The outer `max` only bounds the work done on hostile input.
+ */
+const tonightAnswerSchema = z
+  .string()
+  .max(TONIGHT_ANSWER_MAX * 8)
+  .transform((s) => s.replace(/\s+/g, " ").trim())
+  .refine((s) => [...s].length <= TONIGHT_ANSWER_MAX, { message: `Keep it to ${TONIGHT_ANSWER_MAX} characters` })
+  .nullable()
 
 const preferencesSchema = z.object({
   // Same rule as `intent_default`, from the same place. The per-event screen
@@ -35,6 +53,8 @@ const preferencesSchema = z.object({
    * until they say so.
    */
   openToCrews: z.boolean().optional(),
+  /** Tonight's question, answered (`room_lenses`, lib/tonight.ts). `null` or blank clears it. */
+  tonightAnswer: tonightAnswerSchema.optional(),
 
   /*
    * Two remembers, because one of them was writing something it never said.
@@ -57,6 +77,66 @@ const preferencesSchema = z.object({
    */
   remember: z.boolean().optional(),
 })
+
+type CheckIn = { id: string; occurrence: { end_time: Date } }
+
+/** Their check-in in this room, or the refusal: banned by the host, or not in it. */
+async function roomCheckIn(eventId: string, userId: string): Promise<{ checkIn: CheckIn } | { refusal: Response }> {
+  // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
+  const banned = await roomBanRefusal(eventId, userId)
+  if (banned) return { refusal: banned }
+  const checkIn = await db.event_check_ins.findFirst({
+    where: { event_id: eventId, user_id: userId, ...inRoomWhere(userId) },
+    select: { id: true, occurrence: { select: { end_time: true } } },
+    orderBy: { check_in_time: "desc" },
+  })
+  return checkIn ? { checkIn } : { refusal: forbiddenResponse("Check in to this event first") }
+}
+
+function preferencesBody(
+  row: { intent: string[]; revealed: boolean; open_to_crews_until: Date | null; tonight_answer: string | null } | null,
+  lens: RoomLens | null
+) {
+  return {
+    intent: row?.intent ?? [],
+    revealed: row?.revealed ?? false,
+    openToCrews: !!row?.open_to_crews_until && row.open_to_crews_until > new Date(),
+    tonightAnswer: row?.tonight_answer ?? null,
+    /** The room's lens: what leads on a card here, and the question it asks (null: none). Null when nothing maps. */
+    lens,
+  }
+}
+
+const preferencesSelect = { intent: true, revealed: true, open_to_crews_until: true, tonight_answer: true } as const
+
+/**
+ * Your own answers for this room, and its lens -- what Room settings shows.
+ * Only yours: this route reads nobody else's row. In the room only, as PUT.
+ */
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    const limited = await rateLimit(request, userLimit("read", "match-prefs", authUser.userId))
+    if (limited) return limited
+
+    const inRoom = await roomCheckIn(eventId, authUser.userId)
+    if ("refusal" in inRoom) return inRoom.refusal
+    const [row, lens] = await Promise.all([
+      db.event_match_preferences.findUnique({
+        where: { event_id_user_id: { event_id: eventId, user_id: authUser.userId } },
+        select: preferencesSelect,
+      }),
+      lensForEvent(eventId),
+    ])
+    return successResponse(preferencesBody(row, lens))
+  } catch (error) {
+    logger.error("Read match preferences error", { error: error instanceof Error ? error.message : String(error) })
+    return serverErrorResponse("Failed to load preferences")
+  }
+}
 
 /**
  * Why you are here tonight, and whether you want to be named.
@@ -88,19 +168,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const parsed = preferencesSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
     const { intent, revealed, openToCrews, remember } = parsed.data
+    // Blank is "no answer": stored as null, never as "".
+    const tonightAnswer = parsed.data.tonightAnswer === undefined ? undefined : parsed.data.tonightAnswer || null
     // The deprecated flag means both, which is what it always did.
     const rememberIntent = parsed.data.rememberIntent ?? remember ?? false
     const rememberReveal = parsed.data.rememberReveal ?? remember ?? false
 
-    // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
-    const banned = await roomBanRefusal(eventId, authUser.userId)
-    if (banned) return banned
-    const checkIn = await db.event_check_ins.findFirst({
-      where: { event_id: eventId, user_id: authUser.userId, ...inRoomWhere(authUser.userId) },
-      select: { id: true, occurrence: { select: { end_time: true } } },
-      orderBy: { check_in_time: "desc" },
-    })
-    if (!checkIn) return forbiddenResponse("Check in to this event first")
+    const inRoom = await roomCheckIn(eventId, authUser.userId)
+    if ("refusal" in inRoom) return inRoom.refusal
+    const { checkIn } = inRoom
     /*
      * "Open to joining a crew tonight" means tonight: it lasts until the end of
      * the occurrence they are checked in at, and lapses by itself — the row is
@@ -130,6 +206,18 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     }
 
     /*
+     * Tonight's answer: only to a question the room asks (a venue night asks
+     * none), and held to the room's chat rule -- it is read by the same people
+     * as a chat line, under the same pseudonym. Clearing is always allowed.
+     */
+    const lens = await lensForEvent(eventId)
+    if (tonightAnswer) {
+      if (!lens?.question) return errorResponse("This room has no question tonight", 400, ErrorCode.VALIDATION_FAILED)
+      const refused = screenUserText(authUser.userId, "tonight_answer", { tonightAnswer })
+      if (refused) return textNotAllowedResponse(refused.field, "That can’t go in your answer.")
+    }
+
+    /*
      * One row per person per event — not per check-in.
      *
      * This used to update the check-in row that `findFirst` happened to return.
@@ -146,14 +234,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         intent: intent ?? [],
         revealed: revealed ?? false,
         open_to_crews_until: openToCrewsUntil ?? null,
+        tonight_answer: tonightAnswer ?? null,
       },
       update: {
         ...(intent !== undefined ? { intent } : {}),
         ...(revealed !== undefined ? { revealed } : {}),
         ...(openToCrewsUntil !== undefined ? { open_to_crews_until: openToCrewsUntil } : {}),
+        ...(tonightAnswer !== undefined ? { tonight_answer: tonightAnswer } : {}),
         updated_at: new Date(),
       },
-      select: { intent: true, revealed: true, open_to_crews_until: true },
+      select: preferencesSelect,
     })
 
     /*
@@ -181,11 +271,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       })
     }
 
-    return successResponse({
-      intent: updated.intent,
-      revealed: updated.revealed,
-      openToCrews: !!updated.open_to_crews_until && updated.open_to_crews_until > new Date(),
-    })
+    return successResponse(preferencesBody(updated, lens))
   } catch (error) {
     logger.error("Match preferences error", {
       error: error instanceof Error ? error.message : String(error),
