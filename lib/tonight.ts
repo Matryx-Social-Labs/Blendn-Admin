@@ -2,6 +2,7 @@ import { db } from "@/lib/db"
 import { inRoomWhere } from "@/lib/event-kind"
 import { actorFor } from "@/lib/org-membership"
 import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
+import { eventRoomBan } from "@/lib/room-kind"
 
 /**
  * Tonight's question (Flow 5 · P-A, SCRUM-1042).
@@ -90,7 +91,7 @@ export async function mayReadAnswers(viewerId: string, eventId: string): Promise
 /**
  * The tonight block for one person on a room card (`GET /users/:handle`), or
  * null: when the viewer may not read answers here, or the room asks nothing.
- * `answer` is null when they have not answered.
+ * `answer` is null when they have not answered, or a host banned them here.
  */
 export async function tonightFor(
   viewerId: string,
@@ -100,11 +101,16 @@ export async function tonightFor(
   if (!(await mayReadAnswers(viewerId, eventId))) return null
   const lens = await lensForEvent(eventId)
   if (!lens?.question) return null
-  const row = await db.event_match_preferences.findUnique({
-    where: { event_id_user_id: { event_id: eventId, user_id: targetId } },
-    select: { tonight_answer: true },
-  })
-  return { lens, answer: row?.tonight_answer ?? null }
+  const [row, banned] = await Promise.all([
+    db.event_match_preferences.findUnique({
+      where: { event_id_user_id: { event_id: eventId, user_id: targetId } },
+      select: { tonight_answer: true },
+    }),
+    eventRoomBan(eventId, targetId),
+  ])
+  // A host banned them from this room: the deck drops them (`notHostBannedFrom`),
+  // so their sheet reads as unanswered -- the same as the deck, and no tell.
+  return { lens, answer: banned ? null : (row?.tonight_answer ?? null) }
 }
 
 /** Answers for a page of people in one room, by user id. Only non-empty ones. */
