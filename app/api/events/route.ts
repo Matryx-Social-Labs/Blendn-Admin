@@ -5,6 +5,7 @@ import { getAuth } from "@/lib/auth"
 import { eventWriteSchema, parseJsonField } from "@/lib/validations/event"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { resolveEventCity } from "@/lib/location"
+import { eventCityToStore } from "@/lib/cities"
 import { hostsEvent, visibleEventsScope } from "@/lib/event-visibility"
 import { liveCountBucket } from "@/lib/disclosure"
 import { db } from "@/lib/db"
@@ -250,6 +251,8 @@ export async function POST(req: Request) {
      * trade.
      */
     const resolvedCity = await resolveEventCity(city, latitude, longitude)
+    // A neighbourhood typed as the city is stored as the catalogue city at the pin (SCRUM-1038).
+    const storedCity = await eventCityToStore(resolvedCity, latitude, longitude)
 
     const event = await db.events.create({
       data: {
@@ -262,7 +265,7 @@ export async function POST(req: Request) {
         ...(short_description !== undefined && { short_description }),
         ...(venue_name !== undefined && { venue_name }),
         ...(address !== undefined && { address }),
-        ...(resolvedCity !== undefined && { city: resolvedCity }),
+        ...(storedCity !== undefined && { city: storedCity }),
         ...(state !== undefined && { state }),
         ...(country !== undefined && { country }),
         ...(postal_code !== undefined && { postal_code }),
