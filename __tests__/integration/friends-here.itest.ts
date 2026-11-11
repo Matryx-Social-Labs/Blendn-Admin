@@ -9,6 +9,7 @@ import { conversationPair } from "@/lib/conversations"
 import { db as appDb } from "@/lib/db"
 import { friendsHere } from "@/lib/friends-here"
 import { requestFriend, unfriend } from "@/lib/friends"
+import { blockPairIn } from "@/lib/block-pair"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, testId } from "./helpers"
 
@@ -115,6 +116,7 @@ const list = (eventId: string, as: Person, query = "") =>
   call(route.GET, `/api/mobile/events/${eventId}/friends-here${query}`, as, { params: { eventId } })
 
 afterAll(async () => {
+  await db.blocked_users.deleteMany({ where: { OR: [{ blocker_id: { in: users } }, { blocked_id: { in: users } }] } })
   await db.friend_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
   await db.friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
@@ -193,6 +195,33 @@ describe("who is in Friends here", () => {
     const [user1_id, user2_id] = conversationPair(viewer.id, friend.id)
     await db.private_conversations.create({ data: { user1_id, user2_id, user1_pseudonym: "Otter", user2_pseudonym: "Heron" } })
     expect((await list(eventId, viewer)).body.data.friends.map((f: { userId: string }) => f.userId)).toEqual([plain.id])
+  })
+
+  it("search finds friends only: never a stranger here by the same name, nor a friend after a block either way", async () => {
+    const { eventId, occurrence } = await room()
+    const viewer = await person("fh-9v")
+    const [friend, stranger, blocker] = [
+      await person("fh-9f", { name: "Quillon Friend" }),
+      await person("fh-9x", { name: "Quillon Stranger" }),
+      await person("fh-9b", { name: "Quillon Blocker" }),
+    ]
+    for (const p of [viewer, friend, stranger, blocker]) await here(eventId, occurrence, p)
+    await friends(viewer, friend)
+    await friends(viewer, blocker)
+    const found = async (q: string) =>
+      (await list(eventId, viewer, `?order=name&q=${encodeURIComponent(q)}`)).body.data as { friends: { userId: string }[]; total: number }
+
+    // Control: both friends are found by the word they share; the stranger never is.
+    expect((await found("quillon")).friends.map((f) => f.userId).sort()).toEqual([friend.id, blocker.id].sort())
+    expect(await found("quillon stranger")).toEqual({ friends: [], total: 0, nextCursor: null })
+    expect((await found("stranger")).total).toBe(0)
+
+    // The friend blocks the viewer, and the viewer blocks the other: neither is found, by any query, either way.
+    await appDb.$transaction((tx) => blockPairIn(tx, blocker.id, viewer.id))
+    await appDb.$transaction((tx) => blockPairIn(tx, viewer.id, friend.id))
+    expect(await found("quillon")).toEqual({ friends: [], total: 0, nextCursor: null })
+    expect((await list(eventId, viewer)).body.data.total).toBe(0)
+    expect((await list(eventId, blocker)).body.data.total).toBe(0)
   })
 })
 

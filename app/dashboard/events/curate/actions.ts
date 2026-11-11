@@ -1,5 +1,6 @@
 "use server"
 
+import { eventCityToStore } from "@/lib/cities"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { httpsUrl } from "@/lib/https-url"
@@ -79,6 +80,8 @@ export async function curateEvent(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" }
   }
   const v = parsed.data
+  // A neighbourhood typed as the city is stored as the catalogue city at the pin (SCRUM-1038).
+  const storedCity = await eventCityToStore(v.city, v.latitude, v.longitude)
 
   const start = new Date(v.start_time)
   const end = new Date(v.end_time)
@@ -106,11 +109,11 @@ export async function curateEvent(
         description: curatedDescription({
           title: v.title,
           venueName: v.venue_name,
-          city: v.city,
+          city: storedCity,
         }),
         venue_name: v.venue_name,
         address: v.address,
-        city: v.city,
+        city: storedCity,
         start_time: start,
         end_time: end,
         timezone: v.timezone,
@@ -173,7 +176,7 @@ export async function curateEvent(
       resourceId: event.id,
       // The source domain, not the whole URL: enough to answer "where are we
       // curating from" without putting a query string in the audit trail.
-      details: { title: v.title, city: v.city, source: sourceDomain(v.source_url) },
+      details: { title: v.title, city: storedCity, source: sourceDomain(v.source_url) },
     })
 
     revalidatePath("/dashboard/events")
