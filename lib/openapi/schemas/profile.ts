@@ -458,6 +458,13 @@ export const MessageRequestSchema = z
     message: z.string().nullable(),
     status: z.string(),
     createdAt: z.string().datetime(),
+    metIn: z
+      .object({ kind: z.enum(["event", "venue_day"]), name: z.string() })
+      .nullable()
+      .optional()
+      .describe(
+        "On the list only: where the two met, for \"Met in the room at …\" — the room of the handle the request was sent by, when the two shared it. `name` is the event's title, or a venue day's venue. Never an id, a handle or a pseudonym. Null for a raw id, an older request, or a room that is gone or hidden."
+      ),
   })
   .openapi("MessageRequest")
 
