@@ -9,6 +9,7 @@ import { phoneCheckInRadius } from "@/lib/geofence"
 import { canPublish, validateLocationInput } from "@/lib/geofence-input"
 import { uniqueEventSlug } from "@/lib/event-slug"
 import { resolveEventCity } from "@/lib/location"
+import { eventCityToStore } from "@/lib/cities"
 import { db } from "@/lib/db"
 import { EVENT_TIMES_ORDER_SENTENCE, EventStatusMovedError, EventTimesOrderError, EventTimesRefusedError, updateEventTracked } from "@/lib/event-change"
 import { cancelEventCheckIns, eventWriteAction, isCancellingEvent } from "@/lib/event-cancellation"
@@ -271,9 +272,12 @@ export async function PATCH(req: Request, { params }: RouteContext) {
      * organiser typed deliberately.
      */
     const movedPin = latitude !== undefined && longitude !== undefined
-    const resolvedCity = movedPin
-      ? await resolveEventCity(city, latitude, longitude)
-      : city
+    // A neighbourhood typed as the city is stored as the catalogue city at the pin (SCRUM-1038), moved or not.
+    const resolvedCity = await eventCityToStore(
+      movedPin ? await resolveEventCity(city, latitude, longitude) : city,
+      latitude ?? event.latitude,
+      longitude ?? event.longitude
+    )
     // `?? undefined` is gone from here too: the payload guards on
     // `resolvedCity != null`, so null and undefined are already equivalent at
     // the point of use, and the coalesce was only converting one into the other.

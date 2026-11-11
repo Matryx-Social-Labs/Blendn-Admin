@@ -130,6 +130,45 @@ export function cityFor(catalogue: Catalogue, name: string | null | undefined): 
   return catalogue.cityByKey.get(cityKey(name)) ?? null
 }
 
+/** The catalogue city whose bounds hold this point; where boxes overlap, the one whose centre is nearest. */
+function cityAt(catalogue: Catalogue, lat: number, lon: number): CatalogueCity | null {
+  const distance = (c: CatalogueCity) => (c.centre.latitude - lat) ** 2 + (c.centre.longitude - lon) ** 2
+  return catalogue.cities
+    .filter(({ bounds: b }) => lat >= b.minLat && lat <= b.maxLat && lon >= b.minLon && lon <= b.maxLon)
+    .reduce<CatalogueCity | null>((best, c) => (!best || distance(c) < distance(best) ? c : best), null)
+}
+
+/**
+ * The city to store on an event (SCRUM-1038). `events.city` is free text, and a neighbourhood typed there
+ * ("Koramangala") was stored as is: a name the catalogue does not know is a city of its own on every list, with no
+ * country. The pin says which city it is. A name the catalogue knows is kept as given (reads fold spellings); one it
+ * does not know, at a point inside a catalogue city, becomes that city; anything else is kept, because a city we do
+ * not serve yet is still a city. Null and undefined pass through, so a PATCH that leaves the city alone still does.
+ */
+export function cityToStore<T extends string | null | undefined>(
+  catalogue: Catalogue,
+  city: T,
+  lat: number | null | undefined,
+  lon: number | null | undefined
+): T | string {
+  if (!city || cityFor(catalogue, city) || lat == null || lon == null) return city
+  return cityAt(catalogue, lat, lon)?.name ?? city
+}
+
+/** `cityToStore` against the live catalogue. A catalogue that cannot be read keeps the city: never a refused save. */
+export async function eventCityToStore<T extends string | null | undefined>(
+  city: T,
+  lat: number | null | undefined,
+  lon: number | null | undefined
+): Promise<T | string> {
+  try {
+    return cityToStore(await cityCatalogue(), city, lat, lon)
+  } catch (error) {
+    logger.warn("City catalogue unavailable; event city stored as given", { error: error instanceof Error ? error.message : String(error) })
+    return city
+  }
+}
+
 /** A stored `home_city_id` as the client names it. A row the catalogue has not caught up with reads as none. */
 export function citySlugFor(catalogue: Catalogue, id: string | null | undefined): string | null {
   return catalogue.cities.find((c) => c.id === id)?.slug ?? null
