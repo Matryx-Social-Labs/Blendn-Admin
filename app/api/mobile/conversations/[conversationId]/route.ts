@@ -95,6 +95,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       /** False for an accepted message request: real names throughout, nothing to reveal. */
       pseudonymous: isPseudonymous(conversation),
       youRevealed: isUser1 ? conversation.user1_revealed : conversation.user2_revealed,
+      /** Your own room pseudonym in this conversation, so the reveal strip draws your side as they see it. Null for a message request. */
+      yourPseudonym: (isUser1 ? conversation.user1_pseudonym : conversation.user2_pseudonym) ?? null,
       theyRevealed,
       /** Whether to offer "add as friend": a match, both revealed (lib/friend-offer.ts). */
       friend,

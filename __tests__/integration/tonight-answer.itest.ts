@@ -441,6 +441,10 @@ describe("a match's conversation carries its room's lens (Flow 5 D-A opener, SCR
       const r = await detail(who, c.id)
       expect(r.status).toBe(200)
       expect(r.body.data.lens).toEqual({ key: "music", question: music?.question })
+      // Your own pseudonym, never theirs: the other side's is `otherUser.name`.
+      const yours = who.id === c.user1_id ? c.user1_pseudonym : c.user2_pseudonym
+      expect(r.body.data.yourPseudonym).toBe(yours)
+      expect(r.body.data.otherUser.name).not.toBe(yours)
     }
   })
 
@@ -452,5 +456,6 @@ describe("a match's conversation carries its room's lens (Flow 5 D-A opener, SCR
     const r = await detail(a, request.id)
     expect(r.body.data.fromMatch).toBe(false)
     expect(r.body.data.lens).toBeNull()
+    expect(r.body.data.yourPseudonym).toBeNull()
   })
 })
