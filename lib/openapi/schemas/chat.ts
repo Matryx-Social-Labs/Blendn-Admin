@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
-import { FriendOfferSchema, PaginationMetaSchema, RoomUserRefSchema, UserRefParamSchema } from "./common"
+import { FriendOfferSchema, PaginationMetaSchema, RoomLensSchema, RoomUserRefSchema, UserRefParamSchema } from "./common"
 
 // Request schemas
 export const SendMessageRequestSchema = z
@@ -385,6 +385,10 @@ export const ConversationDetailSchema = z
     id: z.string().uuid(),
     otherUser: DmUserSchema,
     friend: FriendOfferSchema,
+    yourPseudonym: z.string().nullable().describe("Your own room pseudonym in this conversation (your side of the reveal strip). Null for a message request."),
+    lens: RoomLensSchema.nullable().describe(
+      "The lens of the room this pair matched in (Flow 5 D-A): the thread opens with its `question`. Null for a message request, a match with no room, or a room whose categories map to no lens. The same for both sides; never an answer."
+    ),
     createdAt: z.string().datetime(),
     lastMessageAt: z.string().datetime().nullable(),
   })
