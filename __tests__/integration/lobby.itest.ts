@@ -353,7 +353,11 @@ describe("the event page's preview", () => {
   it("gives counts to anybody, and posts only to somebody who saved or is going", async () => {
     const eventId = await upcoming()
     const me = await poster("lob-p-me", eventId)
-    for (const body of ["one", "two", "three"]) await db.board_posts.create({ data: { event_id: eventId, author_id: me.id, kind: "offer", sub_kind: "ride", body } })
+    // A second apart: three inserts can share a timestamp, and a tie is broken by the random id (NEWEST_FIRST).
+    const t = Date.now()
+    for (const [i, body] of ["one", "two", "three"].entries()) {
+      await db.board_posts.create({ data: { event_id: eventId, author_id: me.id, kind: "offer", sub_kind: "ride", body, created_at: new Date(t - (3 - i) * 1000) } })
+    }
 
     const mine = (await (await previewRoute.GET(req("GET", "/x", me.token), { params: Promise.resolve({ eventId }) })).json()).data
     expect(mine).toMatchObject({ canRead: true, counts: { all: 3, offerRides: 3 } })
