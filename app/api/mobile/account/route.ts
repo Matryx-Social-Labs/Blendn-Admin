@@ -431,11 +431,13 @@ export async function DELETE(request: NextRequest) {
        * The request row is a two-party artifact and stays — the recipient's
        * inbox should not develop holes. The `message` is one party's words, so
        * only the ones they SENT are scrubbed. Requests they received are
-       * somebody else's sentence and are not theirs to erase.
+       * somebody else's sentence and are not theirs to erase. Where they met
+       * (`met_in_event_id`, "Met in the room at …") goes with their words: it
+       * says the erased person was in that room.
        */
       db.message_requests.updateMany({
         where: { sender_id: authUser.userId },
-        data: { message: null },
+        data: { message: null, met_in_event_id: null },
       }),
 
       /*
