@@ -677,6 +677,7 @@ model events {
   feedback           event_feedback[]
   feedback_tally     event_feedback_tallies?
   entitlements       entitlements[]
+  message_requests   message_requests[]
   billing_checkouts  billing_checkouts[]
   ticket_types       ticket_types[]
   ticket_orders      ticket_orders[]
@@ -3514,20 +3515,27 @@ model blocked_users {
 
 // Message Requests
 model message_requests {
-  id           String                 @id @default(uuid()) @db.Uuid
-  sender_id    String
-  recipient_id String
-  status       message_request_status @default(pending)
-  message      String?
-  created_at   DateTime               @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime               @default(now()) @db.Timestamptz(6)
-  responded_at DateTime?              @db.Timestamptz(6)
+  id              String                 @id @default(uuid()) @db.Uuid
+  sender_id       String
+  recipient_id    String
+  status          message_request_status @default(pending)
+  message         String?
+  created_at      DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime               @default(now()) @db.Timestamptz(6)
+  responded_at    DateTime?              @db.Timestamptz(6)
+  /// The room the request was sent from, for "Met in the room at …" (Flow 5 · B-A): the event of the
+  /// handle the sender used, set only when the two of them shared that room (`haveSharedAnEvent`).
+  /// Null for a raw id, for a request from before this column, and once the event is gone. Not named
+  /// `event_id`: a nullable `event` is a room's (`__tests__/chat-group-event-readers.test.ts`).
+  met_in_event_id String?                @db.Uuid
 
-  sender    User @relation("MessageRequestSender", fields: [sender_id], references: [id], onDelete: Cascade)
-  recipient User @relation("MessageRequestRecipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+  sender       User    @relation("MessageRequestSender", fields: [sender_id], references: [id], onDelete: Cascade)
+  recipient    User    @relation("MessageRequestRecipient", fields: [recipient_id], references: [id], onDelete: Cascade)
+  met_in_event events? @relation(fields: [met_in_event_id], references: [id], onDelete: SetNull)
 
   @@unique([sender_id, recipient_id])
   @@index([recipient_id, status])
+  @@index([met_in_event_id])
 }
 
 // ── Friends ───────────────────────────────────────────

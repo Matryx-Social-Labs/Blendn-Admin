@@ -297,10 +297,12 @@ export async function mayConverse(a: string, b: string): Promise<boolean> {
  * merely intended to come was never in the room with anyone.
  *
  * At a venue's day the windows must have overlapped (below).
+ *
+ * `within` asks about one room only: where a request says the two met (Flow 5).
  */
-export async function haveSharedAnEvent(a: string, b: string): Promise<boolean> {
+export async function haveSharedAnEvent(a: string, b: string, within?: string): Promise<boolean> {
   const mine = await db.event_check_ins.findMany({
-    where: { user_id: a, check_in_time: { not: null } },
+    where: { user_id: a, check_in_time: { not: null }, ...(within && { event_id: within }) },
     select: { event_id: true, event: { select: { kind: true } } },
     distinct: ["event_id"],
   })

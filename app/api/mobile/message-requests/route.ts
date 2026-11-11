@@ -5,7 +5,7 @@ import { z } from "zod"
 import { randomUUID } from "crypto"
 import { haveSharedAnEvent, pairIsClosed } from "@/lib/conversations"
 import { identityForRef } from "@/lib/identity"
-import { userIdFromRef } from "@/lib/room-handle"
+import { resolveUserRef, userIdFromRef } from "@/lib/room-handle"
 import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
 import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -156,6 +156,16 @@ export async function POST(request: NextRequest) {
       return errorResponse("You can only message people from an event you have both attended")
     }
 
+    /*
+     * Where they met, for the recipient's "Met in the room at …" (Flow 5 · B-A): the room of the handle the
+     * sender used, only if the two of them really shared it. A handle can travel (a screenshot, a forward), and a
+     * request may be allowed by another room they shared; neither makes this one where they met. A raw id has none.
+     * Read before the refusals below, so the silent 201 does the same reads as a real request.
+     */
+    const handleEventId = resolveUserRef(ref)?.eventId ?? null
+    const metInEventId =
+      handleEventId && (await haveSharedAnEvent(authUser.userId, recipientId, handleEventId)) ? handleEventId : null
+
     // Check if a request already exists between these users (in either direction)
     const existingRequest = await db.message_requests.findFirst({
       where: {
@@ -266,6 +276,7 @@ export async function POST(request: NextRequest) {
         recipient_id: recipientId,
         message,
         status: "pending",
+        met_in_event_id: metInEventId,
       },
       include: {
         recipient: { select: { id: true } },
@@ -317,6 +328,22 @@ export async function POST(request: NextRequest) {
   }
 }
 
+const metInSelect = { kind: true, title: true, status: true, deleted_at: true, venue: { select: { name: true } } } as const
+
+/**
+ * Where the two met, as the recipient reads it: the room's kind and the name a page gives it — the event's title,
+ * or a venue day's venue (never its stored "Venue day · …" title). Nothing that identifies the room or the sender
+ * in it: no event id, no handle, no pseudonym. Null for no room, and for one that is gone or hidden (a draft is a
+ * suspended or unpublished event).
+ */
+function metInFor(
+  event: { kind: "event" | "venue_day"; title: string; status: string; deleted_at: Date | null; venue: { name: string } | null } | null
+): { kind: "event" | "venue_day"; name: string } | null {
+  if (!event || event.deleted_at || event.status === "draft") return null
+  const name = event.kind === "venue_day" ? event.venue?.name : event.title
+  return name ? { kind: event.kind, name } : null
+}
+
 // GET: List incoming message requests
 export async function GET(request: NextRequest) {
   try {
@@ -358,6 +385,7 @@ export async function GET(request: NextRequest) {
             image: true,
           },
         },
+        met_in_event: { select: metInSelect },
       },
       orderBy: { created_at: "desc" },
       skip: offset,
@@ -376,6 +404,7 @@ export async function GET(request: NextRequest) {
         message: r.message,
         status: r.status,
         createdAt: r.created_at,
+        metIn: metInFor(r.met_in_event),
       })),
       totalCount,
     })

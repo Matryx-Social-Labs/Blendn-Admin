@@ -2003,6 +2003,25 @@ answer `201` with the created-request shape and a fresh id, write nothing and
 notify nobody. The 409s are unchanged for everyone else — the app can read the
 same facts from `GET /users/:userId`'s `connection`.
 
+### GET /message-requests: where you met (`metIn`)
+
+Each request carries `metIn: { kind: "event" | "venue_day", name } | null`, for
+the Requests row's "Met in the room at …" (Flow 5 · B-A). A request records the
+room of the handle it was sent by (`message_requests.met_in_event_id`), and only when
+the two shared that room by `haveSharedAnEvent`'s rule for that one room (a
+venue day: windows that overlapped). A handle that travelled, or a request
+allowed by another room they shared, records nothing.
+
+- `name` is what a page calls the room: the event's title, or a venue day's
+  venue name (never the stored "Venue day · …" title).
+- Nothing else about the room: no event id, no handle, and never the sender's
+  pseudonym in it. The request already names its sender; `metIn` does not tie
+  that name to a room name.
+- `null` for a raw id, a request from before the column, and a room that is
+  deleted (`ON DELETE SET NULL`), soft-deleted or hidden (`draft`).
+- Recipient only. The create response does not echo it, and no host or
+  dashboard surface reads it.
+
 ### Lists are paged (SCRUM-760)
 
 Every list a person accumulates is a **cursor page with a total**, so a person
