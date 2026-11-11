@@ -159,7 +159,8 @@ is set on the service. Turn it on once the privacy policy says these windows
 (draft: `.context/plans/privacy-retention-draft.md`).
 
 **Tonight's question answers go at 30 days** (owner, 2026-11-10):
-`event_match_preferences.tonight_answer` is set NULL 30 days after the event's
+`event_match_preferences.tonight_answer`, and `work_intent` beside it (why they
+were there, read by the same people), are set NULL 30 days after the event's
 last night ends (`purgeTonightAnswers`, same sweeper). The row and the person's
 other preferences stay. It is not behind `LOBBY_PURGE`: an answer is not held
 content. One refused by moderation is never stored, and no report copies an

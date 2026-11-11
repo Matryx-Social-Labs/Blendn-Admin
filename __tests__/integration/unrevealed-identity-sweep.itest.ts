@@ -52,6 +52,8 @@ const SECRET_PHOTO = "https://cdn.itest.invalid/benedict-quixotewright.jpg"
 const SECRET_BLUR = "https://cdn.itest.invalid/benedict-quixotewright.blur.jpg"
 /** The other's answer to tonight's question: room words, readable by the room, never by its host. */
 const TONIGHT_ANSWER = "Restoring a 1962 Vespa in my garage"
+/** Why the other is here (the work lens): the same readers as the answer, and a host gets it nowhere. As it appears in a body. */
+const WORK_INTENT = `"workIntent":"build"`
 
 async function person(label: string, name: string, photo: string, blur: string): Promise<Person> {
   const id = await makeUser(label)
@@ -172,7 +174,7 @@ beforeAll(async () => {
   for (const p of [viewer, other]) {
     await ok(call(prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, p, { method: "PUT", body: { intent: ["friendship"], revealed: false }, params: { eventId } }), "preferences")
   }
-  await ok(call(prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, other, { method: "PUT", body: { tonightAnswer: TONIGHT_ANSWER }, params: { eventId } }), "tonight's answer")
+  await ok(call(prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, other, { method: "PUT", body: { tonightAnswer: TONIGHT_ANSWER, workIntent: "build" }, params: { eventId } }), "tonight's answer")
 
   const deck = route("events/[eventId]/matches")
   const likes = route("events/[eventId]/matches/likes")
@@ -298,11 +300,14 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     expect(deck.body.data.matches.find((m: { userId: string }) => m.userId === refs.room[0])?.tonightAnswer).toBe(TONIGHT_ANSWER)
     const sheet = await call(route("users/[userId]").GET, `/api/mobile/users/${refs.room[0]}`, viewer, { params: { userId: refs.room[0] } })
     expect(sheet.body.data.tonight?.answer).toBe(TONIGHT_ANSWER)
+    // Its why-I'm-here too: the control for the host search below, which looks for this fragment.
+    expect(deck.text).toContain(WORK_INTENT)
+    expect(sheet.text).toContain(WORK_INTENT)
     expect(leaksIn(deck.text)).toEqual([])
     expect(leaksIn(sheet.text)).toEqual([])
   })
 
-  it("hands the answer to no GET a host who runs the room can make, checked in or not", async () => {
+  it("hands the answer and the why-I'm-here to no GET a host who runs the room can make, checked in or not", async () => {
     const org = await db.organisations.create({ data: { display_name: testId("uis-org") } })
     await db.organisation_members.create({ data: { org_id: org.id, user_id: hostId, role: "staff" } })
     await db.events.update({ where: { id: eventId }, data: { organizer_org_id: org.id } })
@@ -315,7 +320,7 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       const path = `/api/mobile/${rel.replace(/\[([^\]]+)\]/g, (_, n: string) => params[n])}`
       const r = await call(route(rel).GET, path, host, { params })
       if (r.status < 300) answered.add(rel)
-      if (r.text.includes(TONIGHT_ANSWER)) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
+      if (r.text.includes(TONIGHT_ANSWER) || r.text.includes(WORK_INTENT)) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
     }
     // The deck and the person sheet answered the host: withheld there, not merely refused.
     expect([...answered]).toEqual(expect.arrayContaining(["events/[eventId]/matches", "users/[userId]"]))

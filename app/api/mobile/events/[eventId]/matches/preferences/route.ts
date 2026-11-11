@@ -20,7 +20,7 @@ import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { readJson, isUuid } from "@/lib/api-input"
 import { revealConversationsFrom } from "@/lib/matches"
-import { lensForEvent, type RoomLens } from "@/lib/tonight"
+import { lensForEvent, WORK_LENS, type RoomLens } from "@/lib/tonight"
 import { screenUserText, textNotAllowedResponse } from "@/lib/moderation/user-text"
 
 interface RouteParams {
@@ -55,6 +55,8 @@ const preferencesSchema = z.object({
   openToCrews: z.boolean().optional(),
   /** Tonight's question, answered (`room_lenses`, lib/tonight.ts). `null` or blank clears it. */
   tonightAnswer: tonightAnswerSchema.optional(),
+  /** Why you are here, at a work-lens event only ("Here to hire"). One pick; `null` clears it. */
+  workIntent: z.enum(["hire", "find_work", "build", "learn"]).nullable().optional(),
 
   /*
    * Two remembers, because one of them was writing something it never said.
@@ -94,7 +96,13 @@ async function roomCheckIn(eventId: string, userId: string): Promise<{ checkIn: 
 }
 
 function preferencesBody(
-  row: { intent: string[]; revealed: boolean; open_to_crews_until: Date | null; tonight_answer: string | null } | null,
+  row: {
+    intent: string[]
+    revealed: boolean
+    open_to_crews_until: Date | null
+    tonight_answer: string | null
+    work_intent: string | null
+  } | null,
   lens: RoomLens | null
 ) {
   return {
@@ -102,12 +110,13 @@ function preferencesBody(
     revealed: row?.revealed ?? false,
     openToCrews: !!row?.open_to_crews_until && row.open_to_crews_until > new Date(),
     tonightAnswer: row?.tonight_answer ?? null,
+    workIntent: row?.work_intent ?? null,
     /** The room's lens: what leads on a card here, and the question it asks (null: none). Null when nothing maps. */
     lens,
   }
 }
 
-const preferencesSelect = { intent: true, revealed: true, open_to_crews_until: true, tonight_answer: true } as const
+const preferencesSelect = { intent: true, revealed: true, open_to_crews_until: true, tonight_answer: true, work_intent: true } as const
 
 /**
  * Your own answers for this room, and its lens -- what Room settings shows.
@@ -167,7 +176,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
     const parsed = preferencesSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { intent, revealed, openToCrews, remember } = parsed.data
+    const { intent, revealed, openToCrews, remember, workIntent } = parsed.data
     // Blank is "no answer": stored as null, never as "".
     const tonightAnswer = parsed.data.tonightAnswer === undefined ? undefined : parsed.data.tonightAnswer || null
     // The deprecated flag means both, which is what it always did.
@@ -216,6 +225,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       const refused = screenUserText(authUser.userId, "tonight_answer", { tonightAnswer })
       if (refused) return textNotAllowedResponse(refused.field, "That can’t go in your answer.")
     }
+    // Why you are here: the work lens's card only. Clearing is always allowed.
+    if (workIntent && lens?.key !== WORK_LENS) {
+      return errorResponse("This room does not ask why you are here", 400, ErrorCode.VALIDATION_FAILED)
+    }
 
     /*
      * One row per person per event — not per check-in.
@@ -235,12 +248,14 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         revealed: revealed ?? false,
         open_to_crews_until: openToCrewsUntil ?? null,
         tonight_answer: tonightAnswer ?? null,
+        work_intent: workIntent ?? null,
       },
       update: {
         ...(intent !== undefined ? { intent } : {}),
         ...(revealed !== undefined ? { revealed } : {}),
         ...(openToCrewsUntil !== undefined ? { open_to_crews_until: openToCrewsUntil } : {}),
         ...(tonightAnswer !== undefined ? { tonight_answer: tonightAnswer } : {}),
+        ...(workIntent !== undefined ? { work_intent: workIntent } : {}),
         updated_at: new Date(),
       },
       select: preferencesSelect,

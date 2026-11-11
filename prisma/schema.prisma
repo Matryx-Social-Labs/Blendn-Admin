@@ -2786,6 +2786,9 @@ model event_match_preferences {
   /// Read by people in this room under the pseudonym; never by anyone who runs
   /// the event (`lib/tonight.ts`). Null is "no answer".
   tonight_answer String? @db.VarChar(140)
+  /// Why they are here, at a work-lens event only ("Here to hire"): one pick,
+  /// set in Room settings. Same readers as `tonight_answer`, same 30-day purge.
+  work_intent work_intent?
 
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -2919,6 +2922,14 @@ enum connection_intent {
   networking
   friendship
   just_here
+}
+
+/// "Here to …" on a person's card at a work-lens event (`event_match_preferences.work_intent`).
+enum work_intent {
+  hire
+  find_work
+  build
+  learn
 }
 
 enum check_in_kind {

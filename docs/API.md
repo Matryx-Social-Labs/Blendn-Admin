@@ -911,7 +911,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 | GET | `/events/:eventId/matches` | Who else was in the room, ranked. 403 `USER_BANNED` for a member a host removed from the room (the chat's answer) |
 | POST | `/events/:eventId/matches/likes` | Like someone; mutual opens a conversation |
 | GET | `/events/:eventId/matches/preferences` | Your own intent, reveal, crews opt-in and tonight's answer here, plus the room's `lens`. In the room only |
-| PUT | `/events/:eventId/matches/preferences` | Your intent, reveal and tonight's answer, for this event |
+| PUT | `/events/:eventId/matches/preferences` | Your intent, reveal, tonight's answer and why you are here (work lens), for this event |
 
 ### Peer ratings and trust
 
@@ -1100,15 +1100,20 @@ nothing. When nothing maps, `lens` is `null` and the app draws the plain card.
 - **The value:** whitespace collapses to one line, and the answer is at most 140 characters. Null or blank clears it.
 - **Moderation:** it is held to the room's chat rule (`400 VALIDATION_FAILED`, `reasonCode: TEXT_NOT_ALLOWED`, `field: "tonightAnswer"`).
 - **No question:** in a room that asks none, the answer is a `400 VALIDATION_FAILED`.
-- **What comes back:** GET and PUT both answer `{ intent, revealed, openToCrews, tonightAnswer, lens }`.
+- **What comes back:** GET and PUT both answer `{ intent, revealed, openToCrews, tonightAnswer, workIntent, lens }`.
+
+`PUT .../preferences` also takes `workIntent: "hire" | "find_work" | "build" | "learn" | null`: why you are here, the "Here to hire" pill on a work-lens card. One pick.
+- **Only in the `work` lens:** anywhere else a value is a `400 VALIDATION_FAILED`. Null clears it, anywhere.
+- **Read** exactly as the answer is, below. It is `null` outside the `work` lens even if a row holds one (an event whose category changed).
 
 **Who reads an answer:** people checked in to that room now, as attendees, beside the pseudonym the room already shows.
-- `GET .../matches` gives each card a `tonightAnswer` and the response a `lens`. Answers are read for the returned page only.
-- `GET /users/:handle` gives `tonight: { lens, answer }`, but only for an **event room handle**. A raw id never carries it.
+- `GET .../matches` gives each card a `tonightAnswer` and a `workIntent`, and the response a `lens`. Answers are read for the returned page only.
+- `GET /users/:handle` gives `tonight: { lens, answer, workIntent }`, but only for an **event room handle**. A raw id never carries it.
 - **Never to anyone who runs or hosts the event** (`eventPermissions().canOperate`: its organising org, its venue's owner, an admin), even checked in as an attendee. Their cards say `null` and their sheets carry no `tonight`.
+- **A member the host banned from the room** reads as unanswered on the sheet (`answer` and `workIntent` null), as the deck already drops them.
 - The roster (`GET .../checkins`) carries no answers.
 
-**How long:** 30 days after the event's last night ends the answer is cleared; `GET .../preferences` then says `tonightAnswer: null` (`docs/RETENTION.md`).
+**How long:** 30 days after the event's last night ends the answer and the `workIntent` are cleared; `GET .../preferences` then says `null` for both (`docs/RETENTION.md`).
 
 ### A member a host banned from the room
 
