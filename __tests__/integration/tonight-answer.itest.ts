@@ -403,3 +403,54 @@ describe("why I'm here (the work lens)", () => {
     expect((await profile(b, handleOfA)).body.data.tonight.workIntent).toBeNull()
   })
 })
+
+describe("a match's conversation carries its room's lens (Flow 5 D-A opener, SCRUM-1042)", () => {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const detailRoute = require("@/app/api/mobile/conversations/[conversationId]/route") as typeof import("@/app/api/mobile/conversations/[conversationId]/route")
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const detail = (as: Person, conversationId: string) =>
+    call(detailRoute.GET as never, `/api/mobile/conversations/${conversationId}`, as, { params: { conversationId } })
+  let a: Person
+  let b: Person
+  let eventId: string
+
+  beforeAll(async () => {
+    a = await person("dm-lens-a")
+    b = await person("dm-lens-b")
+    const music = await mapped("dm-lens-music", "music")
+    eventId = await eventIn(a.id, [{ id: music.id, primary: true }])
+  })
+
+  async function conversation(data: { origin_event_id?: string | null; pseudonyms?: boolean }) {
+    const [user1_id, user2_id] = [a.id, b.id].sort()
+    await db.private_conversations.deleteMany({ where: { user1_id, user2_id } })
+    return db.private_conversations.create({
+      data: {
+        user1_id,
+        user2_id,
+        origin_event_id: data.origin_event_id ?? null,
+        ...(data.pseudonyms !== false && { user1_pseudonym: testId("Fox"), user2_pseudonym: testId("Lynx") }),
+      },
+    })
+  }
+
+  it("a match from a room with a question: the room's lens, to both sides", async () => {
+    const c = await conversation({ origin_event_id: eventId })
+    const music = await db.room_lenses.findUnique({ where: { key: "music" } })
+    for (const who of [a, b]) {
+      const r = await detail(who, c.id)
+      expect(r.status).toBe(200)
+      expect(r.body.data.lens).toEqual({ key: "music", question: music?.question })
+    }
+  })
+
+  it("null for a match whose event maps to no lens, and for a message request (never a match)", async () => {
+    const unmapped = await eventIn(a.id, [{ id: (await category("dm-lens-none")).id, primary: true }])
+    expect((await detail(a, (await conversation({ origin_event_id: unmapped })).id)).body.data.lens).toBeNull()
+    // A message request has no pseudonyms; even with an origin it is not a match, so it carries no opener.
+    const request = await conversation({ origin_event_id: eventId, pseudonyms: false })
+    const r = await detail(a, request.id)
+    expect(r.body.data.fromMatch).toBe(false)
+    expect(r.body.data.lens).toBeNull()
+  })
+})

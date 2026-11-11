@@ -5,6 +5,7 @@ import { evictBlockedFromBlends } from "@/lib/crews/like"
 import { cameFromMatch, displayNameInConversation, mayShowRealName, isPseudonymous } from "@/lib/conversation-identity"
 import { db } from "@/lib/db"
 import { friendOffersFor } from "@/lib/friend-offer"
+import { lensForEvent } from "@/lib/tonight"
 import { idInConversation } from "@/lib/conversation-ref"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { closeConversationRoom } from "@/lib/socket-server"
@@ -69,7 +70,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // kept pseudonymous would make the rule one tap deep.
     const theyRevealed = mayShowRealName(conversation, otherUser.id)
     const isUser1 = conversation.user1_id === authUser.userId
-    const friend = (await friendOffersFor(authUser.userId, [conversation])).get(conversation.id)
+    const [friends, lens] = await Promise.all([
+      friendOffersFor(authUser.userId, [conversation]),
+      /*
+       * The room this pair matched in asks one question; the thread opens with it (Flow 5 D-A). Category data, never
+       * an answer or an identity, so both sides get it alike. Only a match: a message request was never in a room together.
+       */
+      cameFromMatch(conversation) && conversation.origin_event_id ? lensForEvent(conversation.origin_event_id) : null,
+    ])
+    const friend = friends.get(conversation.id)
 
     return successResponse({
       id: conversation.id,
@@ -81,6 +90,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       /** Same field as the inbox, so the thread header and the row agree. */
       fromMatch: cameFromMatch(conversation),
+      /** The lens of the room they matched in, `{ key, question }`, or null (no room, no mapping, or not a match). */
+      lens,
       /** False for an accepted message request: real names throughout, nothing to reveal. */
       pseudonymous: isPseudonymous(conversation),
       youRevealed: isUser1 ? conversation.user1_revealed : conversation.user2_revealed,

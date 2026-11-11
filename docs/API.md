@@ -2537,6 +2537,13 @@ back.
 `image` on their state — the inbox has to hold the pseudonym on its own, since
 it renders before anything is opened.
 
+`GET /conversations/:id` also returns `lens` (`{ key, question }` or `null`):
+the lens of the room a match was made in (`origin_event_id`, resolved as the
+room does in `lib/tonight.ts`), so the thread can open with tonight's question
+(Flow 5 D-A). It is category data, never anybody's answer, and the same for both
+sides. `null` for a message request, a match with no room, or a room that maps
+to no lens.
+
 Conversations from an accepted **message request** have no pseudonym and show
 real names throughout, as they always have.
 
