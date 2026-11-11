@@ -25,6 +25,8 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putIn
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const route = require("@/app/api/mobile/message-requests/route") as typeof import("@/app/api/mobile/message-requests/route")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const account = require("@/app/api/mobile/account/route") as typeof import("@/app/api/mobile/account/route")
 
 interface Person {
   id: string
@@ -212,5 +214,24 @@ describe("Met in: the room a request came from", () => {
     await db.$transaction((tx) => blockPairIn(tx, b.id, a.id))
     expect(await fromSender(b, a)).toBeUndefined()
     expect((await inbox(b)).raw).not.toContain("Blocked here")
+  })
+
+  it("a sender who deletes their account takes where they met with them; the request row stays, as its words go", async () => {
+    const { eventId, occurrence } = await room("Erased later")
+    const [a, b, c] = await Promise.all([person("mi-da"), person("mi-db"), person("mi-dc")])
+    for (const p of [a, b, c]) await putInRoom({ eventId, occurrenceId: occurrence, userId: p.id })
+    expect((await ask(a, roomHandle(eventId, b.id))).status).toBe(201)
+    expect((await ask(c, roomHandle(eventId, b.id))).status).toBe(201)
+
+    const erased = await account.DELETE(
+      new NextRequest("http://localhost/api/mobile/account", { method: "DELETE", headers: { authorization: `Bearer ${a.token}` } })
+    )
+    expect(erased.status).toBe(200)
+    expect(await db.message_requests.findMany({ where: { sender_id: a.id }, select: { message: true, met_in_event_id: true } })).toEqual([
+      { message: null, met_in_event_id: null },
+    ])
+    expect((await fromSender(b, a))?.metIn ?? null).toBeNull()
+    // Control: another sender's request from the same room keeps its room.
+    expect((await fromSender(b, c))?.metIn).toEqual({ kind: "event", name: "Erased later" })
   })
 })
