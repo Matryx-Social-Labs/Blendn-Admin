@@ -49,7 +49,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // The room's lens: what leads on these cards, and whether they carry tonight's answers (lib/tonight.ts).
     const lens = await lensForEvent(eventId)
-    const matches = await matchesForEvent(eventId, authUser.userId, limit, !!lens?.question)
+    const matches = await matchesForEvent(eventId, authUser.userId, limit, lens)
     if (matches === null) {
       return forbiddenResponse("Check in to see who else is here")
     }

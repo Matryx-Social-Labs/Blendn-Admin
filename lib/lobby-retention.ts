@@ -275,9 +275,10 @@ async function freezeFeedbackTallies(messageIds: string[]): Promise<void> {
 }
 
 /**
- * Tonight's question answers (`event_match_preferences.tonight_answer`), 30
- * days after the event's last night ends (owner, 2026-11-10). The answer is
- * set NULL; the row and the person's other preferences stay.
+ * Tonight's question answers (`event_match_preferences.tonight_answer`), and
+ * why they were there (`work_intent`, read by the same people), 30 days after
+ * the event's last night ends (owner, 2026-11-10). Both are set NULL; the row
+ * and the person's other preferences stay.
  *
  * Not behind `LOBBY_PURGE`: that switch exists for content held for safety and
  * legal requests, and an answer is neither. One refused by moderation is never
@@ -292,12 +293,12 @@ export async function purgeTonightAnswers(now: Date = new Date()): Promise<{ ans
   const since = new Date(now.getTime() - TONIGHT_ANSWER_DAYS * DAY_MS)
   // any-kind: an answer on any event goes at 30 days (a venue night asks no question, so it holds none to begin with).
   const answers = await db.$executeRaw`
-    UPDATE event_match_preferences SET tonight_answer = NULL, updated_at = now()
+    UPDATE event_match_preferences SET tonight_answer = NULL, work_intent = NULL, updated_at = now()
      WHERE id IN (
        SELECT p.id
          FROM event_match_preferences p
          JOIN events e ON e.id = p.event_id
-        WHERE p.tonight_answer IS NOT NULL
+        WHERE (p.tonight_answer IS NOT NULL OR p.work_intent IS NOT NULL)
           AND e.end_time < ${since}
           -- A run still going: any night that ended inside the window keeps the answers.
           AND NOT EXISTS (SELECT 1 FROM event_occurrences o WHERE o.event_id = e.id AND o.end_time >= ${since})

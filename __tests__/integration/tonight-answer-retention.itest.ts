@@ -33,7 +33,7 @@ async function endedEvent(daysAgo: number, host: string) {
 const answer = async (event_id: string, user_id: string) =>
   db.event_match_preferences.findUnique({
     where: { event_id_user_id: { event_id, user_id } },
-    select: { tonight_answer: true, intent: true, revealed: true },
+    select: { tonight_answer: true, work_intent: true, intent: true, revealed: true },
   })
 
 let previousMode: string | undefined
@@ -58,9 +58,11 @@ beforeAll(async () => {
   })
   for (const event_id of [old, recent, liveSeries]) {
     await db.event_match_preferences.create({
-      data: { event_id, user_id: person, intent: ["friendship"], revealed: true, tonight_answer: `answer for ${event_id}` },
+      data: { event_id, user_id: person, intent: ["friendship"], revealed: true, tonight_answer: `answer for ${event_id}`, work_intent: "hire" },
     })
   }
+  // Why they were here (the work lens), with no answer beside it: cleared on its own too.
+  await db.event_match_preferences.create({ data: { event_id: old, user_id: reporter, work_intent: "learn" } })
   // A pending report on the person: it quotes no answer, so it holds none.
   await db.user_reports.create({ data: { reporter_id: reporter, reported_id: person, reason: "harassment" } })
 
@@ -76,12 +78,14 @@ describe("the answer purge", () => {
   })
 
   it("clears the answer of an event that ended more than 30 days ago, whatever LOBBY_PURGE says and with a report open", async () => {
-    expect(await answer(old, person)).toEqual({ tonight_answer: null, intent: ["friendship"], revealed: true })
+    expect(await answer(old, person)).toEqual({ tonight_answer: null, work_intent: null, intent: ["friendship"], revealed: true })
+    expect((await answer(old, reporter))?.work_intent).toBeNull()
     expect(pass.answers).toBeGreaterThanOrEqual(1)
   })
 
   it("keeps the answer of an event that ended inside the window (the control)", async () => {
     expect((await answer(recent, person))?.tonight_answer).toBe(`answer for ${recent}`)
+    expect((await answer(recent, person))?.work_intent).toBe("hire")
   })
 
   it("keeps the answer while any night of the event ended inside the window", async () => {

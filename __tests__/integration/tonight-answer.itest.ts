@@ -237,7 +237,7 @@ describe("tonight's answer", () => {
     const p = await profile(b, handleOfA)
     expect(p.status).toBe(200)
     expect(p.body.data.identityVisible).toBe(false)
-    expect(p.body.data.tonight).toEqual({ lens: { key: "work", question: "What are you working on?" }, answer: ANSWER })
+    expect(p.body.data.tonight).toEqual({ lens: { key: "work", question: "What are you working on?" }, answer: ANSWER, workIntent: null })
   })
 
   it("never reaches somebody who was not in the room, nor anyone asking by raw id", async () => {
@@ -267,7 +267,7 @@ describe("tonight's answer", () => {
     const r = await setAnswer(a, eventId, "   ")
     expect(r.status).toBe(200)
     expect(r.body.data.tonightAnswer).toBeNull()
-    expect((await profile(b, handleOfA)).body.data.tonight).toEqual({ lens: { key: "work", question: "What are you working on?" }, answer: null })
+    expect((await profile(b, handleOfA)).body.data.tonight).toEqual({ lens: { key: "work", question: "What are you working on?" }, answer: null, workIntent: null })
   })
 
   it("is not readable on the person sheet once a host bans its author from the room, as the deck already drops them", async () => {
@@ -289,5 +289,117 @@ describe("tonight's answer", () => {
     expect((await deck(b, eventId)).text).not.toContain(BANNED_ANSWER)
     const p = await profile(b, card!.userId)
     expect(p.text).not.toContain(BANNED_ANSWER)
+  })
+})
+
+describe("why I'm here (the work lens)", () => {
+  let a: Person
+  let b: Person
+  let host: Person
+  let outsider: Person
+  let eventId: string
+  let musicEvent: string
+  let orgId: string
+  let handleOfA: string
+
+  const setIntent = (as: Person, event: string, workIntent: unknown) =>
+    call(prefsPut, prefsPath(event), as, { method: "PUT", body: { workIntent }, params: { eventId: event } })
+  type Card = { userId: string; workIntent: string | null; tonightAnswer: string | null }
+  const cardsOf = async (as: Person, event: string) => (await deck(as, event)).body.data.matches as Card[]
+
+  beforeAll(async () => {
+    a = await person("wi-a")
+    b = await person("wi-b")
+    host = await person("wi-host", "organizer")
+    outsider = await person("wi-outsider")
+    eventId = await eventIn(host.id, [{ id: (await mapped("wi-work", "work")).id, primary: true }])
+    musicEvent = await eventIn(host.id, [{ id: (await mapped("wi-music", "music")).id, primary: true }])
+    const org = await db.organisations.create({ data: { display_name: testId("wi-org") } })
+    orgs.push(org.id)
+    orgId = org.id
+    await db.events.update({ where: { id: eventId }, data: { organizer_org_id: orgId } })
+    for (const ev of [eventId, musicEvent]) {
+      const occurrence = await occurrenceOf(ev)
+      for (const p of [a, b, host]) await putInRoom({ eventId: ev, occurrenceId: occurrence, userId: p.id })
+    }
+  }, 60_000)
+
+  it("starts unset, and is not yours to write until you are in the room", async () => {
+    expect((await call(prefsGet, prefsPath(eventId), a, { params: { eventId } })).body.data.workIntent).toBeNull()
+    expect((await setIntent(outsider, eventId, "hire")).status).toBe(403)
+  })
+
+  it("takes one of hire, find_work, build or learn, and nothing else", async () => {
+    for (const v of ["find_work", "build", "learn", "hire"]) {
+      const r = await setIntent(a, eventId, v)
+      expect(r.status).toBe(200)
+      expect(r.body.data.workIntent).toBe(v)
+    }
+    for (const bad of ["boss", "", ["hire"], 3]) expect((await setIntent(a, eventId, bad)).status).toBe(400)
+    const row = await db.event_match_preferences.findUnique({ where: { event_id_user_id: { event_id: eventId, user_id: a.id } } })
+    expect(row?.work_intent).toBe("hire")
+  })
+
+  it("is left alone by a write that does not name it", async () => {
+    expect((await setAnswer(a, eventId, "A bike-share map")).status).toBe(200)
+    expect((await call(prefsGet, prefsPath(eventId), a, { params: { eventId } })).body.data.workIntent).toBe("hire")
+  })
+
+  it("is refused in a room that is not the work lens, and clearing there is always allowed", async () => {
+    const r = await setIntent(a, musicEvent, "hire")
+    expect(r.status).toBe(400)
+    expect((await setIntent(a, musicEvent, null)).status).toBe(200)
+  })
+
+  it("reaches another attendee on the deck and on the person sheet", async () => {
+    const card = (await cardsOf(b, eventId)).find((m) => m.workIntent === "hire")
+    expect(card).toBeDefined()
+    handleOfA = card!.userId
+    const p = await profile(b, handleOfA)
+    expect(p.body.data.identityVisible).toBe(false)
+    expect(p.body.data.tonight).toMatchObject({ lens: { key: "work" }, workIntent: "hire" })
+  })
+
+  it("is read only in a work-lens room, even when a row holds one (a category changed after it was set)", async () => {
+    await db.event_match_preferences.update({
+      where: { event_id_user_id: { event_id: musicEvent, user_id: a.id } },
+      data: { work_intent: "build" },
+    })
+    const cards = await cardsOf(b, musicEvent)
+    expect(cards.length).toBeGreaterThan(0)
+    expect(cards.every((m) => m.workIntent === null)).toBe(true)
+    for (const c of cards) expect((await profile(b, c.userId)).body.data.tonight.workIntent).toBeNull()
+  })
+
+  it("never reaches somebody who was not in the room, nor anyone asking by raw id", async () => {
+    expect((await profile(outsider, handleOfA)).text).not.toContain("workIntent")
+    expect((await profile(b, a.id)).text).not.toContain("workIntent")
+  })
+
+  it("reaches a checked-in organizer outside the org (the control), and never one who runs the event", async () => {
+    expect((await cardsOf(host, eventId)).some((m) => m.workIntent === "hire")).toBe(true)
+    expect((await profile(host, handleOfA)).body.data.tonight.workIntent).toBe("hire")
+
+    await db.organisation_members.create({ data: { org_id: orgId, user_id: host.id, role: "staff" } })
+    expect((await cardsOf(host, eventId)).every((m) => m.workIntent === null)).toBe(true)
+    const p = await profile(host, handleOfA)
+    expect(p.text).not.toContain("workIntent")
+  })
+
+  it("clears with null", async () => {
+    expect((await setIntent(a, eventId, null)).body.data.workIntent).toBeNull()
+    expect((await profile(b, handleOfA)).body.data.tonight.workIntent).toBeNull()
+    expect((await setIntent(a, eventId, "hire")).status).toBe(200)
+  })
+
+  it("is not readable on the person sheet once a host bans its author from the room", async () => {
+    // Control: before the ban, b reads it.
+    expect((await profile(b, handleOfA)).body.data.tonight.workIntent).toBe("hire")
+    const group = await db.chat_groups.create({ data: { event_id: eventId, name: "room", status: "active", member_count: 0 } })
+    await db.chat_group_members.create({
+      data: { chat_group_id: group.id, user_id: a.id, anonymous_name: testId("Bison"), status: "banned", banned_by: host.id },
+    })
+    expect((await cardsOf(b, eventId)).some((m) => m.workIntent === "hire")).toBe(false)
+    expect((await profile(b, handleOfA)).body.data.tonight.workIntent).toBeNull()
   })
 })
