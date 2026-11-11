@@ -18,6 +18,7 @@ exports[`the match deck names a page of cards, and the cards are what they were 
     "tonightAnswer": null,
     "who": "plain-1",
     "workField": null,
+    "workIntent": null,
     "youLiked": false,
   },
   {
@@ -36,6 +37,7 @@ exports[`the match deck names a page of cards, and the cards are what they were 
     "tonightAnswer": null,
     "who": "revealed-1",
     "workField": null,
+    "workIntent": null,
     "youLiked": false,
   },
   {
@@ -54,6 +56,7 @@ exports[`the match deck names a page of cards, and the cards are what they were 
     "tonightAnswer": null,
     "who": "plain-2",
     "workField": null,
+    "workIntent": null,
     "youLiked": false,
   },
 ]

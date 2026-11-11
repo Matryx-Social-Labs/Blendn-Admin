@@ -663,6 +663,9 @@ export const MatchListResponseSchema = z
           .string()
           .nullable()
           .describe("Their answer to tonight's question, beside the pseudonym. Null when they gave none, when the room asks no question, and on every card when you run or host the event."),
+        workIntent: z.enum(["hire", "find_work", "build", "learn"])
+          .nullable()
+          .describe("Why they are here, at a work-lens event (\"Here to hire\"). The same readers as `tonightAnswer`; null when they gave none, outside the `work` lens, and on every card when you run or host the event."),
       })
     ),
     lens: RoomLensSchema.nullable().describe("The room's lens; null when the event's categories map to none (draw the plain card)."),
@@ -727,6 +730,10 @@ export const MatchPreferencesSchema = z
       .nullable()
       .optional()
       .describe("Your answer to tonight's question: whitespace collapsed to one line, at most 140 characters, held to the room's chat rule (400 `TEXT_NOT_ALLOWED`, `field: tonightAnswer`). Null or blank clears it. 400 `VALIDATION_FAILED` when the room asks no question."),
+    workIntent: z.enum(["hire", "find_work", "build", "learn"])
+      .nullable()
+      .optional()
+      .describe("Why you are here (\"Here to hire\"), one pick, only where the room's lens is `work` (400 `VALIDATION_FAILED` elsewhere). Null clears it, anywhere. Read by the same people as `tonightAnswer`."),
   })
   .openapi("MatchPreferences")
 
@@ -736,6 +743,7 @@ export const MatchPreferencesStateSchema = z
     revealed: z.boolean(),
     openToCrews: z.boolean(),
     tonightAnswer: z.string().nullable(),
+    workIntent: z.enum(["hire", "find_work", "build", "learn"]).nullable(),
     lens: RoomLensSchema.nullable(),
   })
   .openapi("MatchPreferencesState")

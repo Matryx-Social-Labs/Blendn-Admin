@@ -699,7 +699,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Your own choices for this room, and its lens",
   description: ROOM_BAN_GATE +
-    "Your row only: intent, reveal, open to crews, your answer to tonight's question, and the room's `lens` (what leads on a card here and the question it asks). In the room only (403 otherwise), as PUT. Nothing about anybody else.",
+    "Your row only: intent, reveal, open to crews, your answer to tonight's question, why you are here (work lens), and the room's `lens` (what leads on a card here and the question it asks). In the room only (403 otherwise), as PUT. Nothing about anybody else.",
   security: bearerAuth,
   request: { params: z.object({ eventId: z.string().uuid() }) },
   responses: {
@@ -714,7 +714,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Set your intent, reveal and tonight's answer for this event",
   description: ROOM_BAN_GATE +
-    "Answers the same body as GET. `tonightAnswer` is read by people checked in to this room, beside your pseudonym, and never by anyone who runs or hosts it.",
+    "Answers the same body as GET. `tonightAnswer` and `workIntent` are read by people checked in to this room, beside your pseudonym, and never by anyone who runs or hosts it.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),

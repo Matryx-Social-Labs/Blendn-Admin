@@ -391,9 +391,13 @@ export const UserPublicProfileSchema = z
       .describe("The names of the interests you and this person both picked. Only for somebody else you may see (`identityVisible`). Additive."),
     isOwnProfile: z.boolean(),
     tonight: z
-      .object({ lens: RoomLensSchema, answer: z.string().nullable() })
+      .object({
+        lens: RoomLensSchema,
+        answer: z.string().nullable(),
+        workIntent: z.enum(["hire", "find_work", "build", "learn"]).nullable().describe("Why they are here (\"Here to hire\"): the `work` lens only, else null."),
+      })
       .optional()
-      .describe("Tonight's question and their answer (null: none yet). Only through an event room handle, only to somebody checked in to that room now, never to anyone who runs or hosts the event, and only when the room asks a question; absent otherwise. The same whether or not `identityVisible`."),
+      .describe("Tonight's question and their answer (null: none yet), and at a work-lens event why they are here. Only through an event room handle, only to somebody checked in to that room now, never to anyone who runs or hosts the event, and only when the room asks a question; absent otherwise. The same whether or not `identityVisible`."),
     identityVisible: z
       .boolean()
       .describe(
