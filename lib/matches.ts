@@ -17,6 +17,7 @@ import type { Gender } from "@/lib/dating"
 import { ageFrom } from "@/lib/age"
 import { MIN_ROOM_FOR_WORK_FIELD, workFieldLabel } from "@/lib/work-fields"
 import { roomHandle } from "@/lib/room-handle"
+import { waveStandings } from "@/lib/waves"
 import { notHostBannedFrom } from "@/lib/room-kind"
 import { visibleInRoom } from "@/lib/identity"
 import { IPL_PARENT_SLUG } from "@/lib/about-you"
@@ -89,6 +90,8 @@ export interface MatchCard {
    * (owner ruling 2026-11-12); a like is not, and is never read for this.
    */
   wavedAtYou: boolean
+  /** The conversation a mutual wave here opened (`waveStandings`): Say hi after a restart. Null otherwise, and to a host. */
+  conversationId: string | null
   /**
    * Display-only lines both of you share, as sentences: an IPL team, a
    * this-or-that answer, and — budgeted, Tier B — a language, a home state or
@@ -594,7 +597,7 @@ export async function matchesForEvent(
   const pageIds = page.map((m) => m.userId)
   // A host is never a reader of the room's words, nor of who arrived when (`operatesEvent`).
   const operating = operatesEvent(viewerId, eventId)
-  const [recognised, pseudonyms, answers, operates, waves] = await Promise.all([
+  const [recognised, pseudonyms, answers, operates, standings] = await Promise.all([
     visibleInRoom(viewerId, eventId, pageIds),
     pageIds.length
       ? db.chat_group_members.findMany({
@@ -607,22 +610,9 @@ export async function matchesForEvent(
       ? operating.then((operates) => (operates ? new Map<string, PersonAnswers>() : answersFor(eventId, pageIds, lens)))
       : new Map<string, PersonAnswers>(),
     operating,
-    // The page's waves, both ways (SCRUM-1042): Wave / Wave back / ✓ Waved on the card. Waves only, never a like.
-    pageIds.length
-      ? db.event_waves.findMany({
-          where: {
-            event_id: eventId,
-            OR: [
-              { from_id: viewerId, to_id: { in: pageIds } },
-              { to_id: viewerId, from_id: { in: pageIds } },
-            ],
-          },
-          select: { from_id: true, to_id: true },
-        })
-      : [],
+    // The page's waves, both ways (SCRUM-1042): Wave / Wave back / ✓ Waved / Say hi on the card. Waves only, never a like.
+    waveStandings(eventId, viewerId, pageIds),
   ])
-  const youWaved = new Set(waves.filter((w) => w.from_id === viewerId).map((w) => w.to_id))
-  const wavedAtYou = new Set(waves.filter((w) => w.to_id === viewerId).map((w) => w.from_id))
   const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
   const onPage = new Set(pageIds)
   const ranked = rankMatches(
@@ -706,9 +696,11 @@ export async function matchesForEvent(
       sharedEvents: m.sharedEvents,
       sharedPlans: m.sharedPlans,
       youLiked: liked.has(m.userId),
-      youWaved: youWaved.has(m.userId),
+      youWaved: standings.get(m.userId)?.youWaved ?? false,
       // Hosts never wave or get waved at (the waves route refuses both), so both are false for a host.
-      wavedAtYou: wavedAtYou.has(m.userId),
+      wavedAtYou: standings.get(m.userId)?.wavedAtYou ?? false,
+      // The conversation your mutual opened here (`waveStandings`), so Say hi reaches it after a restart. Never to a host.
+      conversationId: operates ? null : (standings.get(m.userId)?.conversationId ?? null),
       overlaps: card.overlaps,
       sign: card.sign,
       // Attendance facts, so the attendance floor (`roomIsBigEnough`), and only if they show badges.

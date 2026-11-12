@@ -17,11 +17,13 @@ import { signAccessToken } from "@/lib/mobile-auth"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { roomHandle } from "@/lib/room-handle"
 import { WAVE_LIMITS, waveCapFor } from "@/lib/waves"
+import { matchesForEvent } from "@/lib/matches"
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const wavesRoute = require("@/app/api/mobile/events/[eventId]/waves/route") as typeof import("@/app/api/mobile/events/[eventId]/waves/route")
 const waitingRoute = require("@/app/api/mobile/waves/route") as typeof import("@/app/api/mobile/waves/route")
+const userRoute = require("@/app/api/mobile/users/[userId]/route") as typeof import("@/app/api/mobile/users/[userId]/route")
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 type Handler = (req: NextRequest, ctx: { params: Promise<never> }) => Promise<Response>
@@ -185,6 +187,88 @@ describe("two waves open the anonymous conversation; the push goes to the first 
     await new Promise((r) => setTimeout(r, 200))
     expect(await matchBells(ben)).toEqual([])
     expect(await matchBells(ana)).toEqual([])
+  })
+})
+
+describe("the deck card and the person card carry the conversation a mutual opened (Say hi after a restart)", () => {
+  /** `viewer`'s deck card for `other`: the whole room, so earlier fixtures cannot push them off the page. */
+  const cardFor = async (viewer: Person, other: Person, event: string = eventId) =>
+    (await matchesForEvent(event, viewer.id, 1000))!.find((c) => c.userId === roomHandle(event, other.id))
+  const personCard = (viewer: Person, other: Person, event: string = eventId) => {
+    const handle = roomHandle(event, other.id)
+    return call(userRoute.GET, `/api/mobile/users/${handle}`, viewer, { params: { userId: handle } })
+  }
+  const pairOf = (a: Person, b: Person) => [a.id, b.id].sort() as [string, string]
+
+  it("both sides: the deck card's conversationId and the person card's wave.conversationId are the one the mutual opened", async () => {
+    const ana = await person("rw-cv-a")
+    const ben = await person("rw-cv-b")
+    await wave(ana, ben)
+    const opened = (await wave(ben, ana)).body.data.conversationId as string
+
+    expect(await cardFor(ana, ben)).toMatchObject({ youWaved: true, wavedAtYou: true, conversationId: opened })
+    expect(await cardFor(ben, ana)).toMatchObject({ youWaved: true, wavedAtYou: true, conversationId: opened })
+    const card = await personCard(ana, ben)
+    expect(card.body.data.wave).toEqual({ conversationId: opened })
+    // A conversation id, never an account id, beside the handle.
+    expect(JSON.stringify(card.body)).not.toContain(ben.id)
+    expect((await personCard(ben, ana)).body.data.wave).toEqual({ conversationId: opened })
+  })
+
+  it("an old like answered by a wave is the same mutual: the waver's card has its conversation", async () => {
+    const ana = await person("rw-cl-a")
+    const dan = await person("rw-cl-d")
+    await db.event_likes.create({ data: { event_id: eventId, liker_id: dan.id, liked_id: ana.id } })
+    const opened = (await wave(ana, dan)).body.data.conversationId as string
+    expect(await cardFor(ana, dan)).toMatchObject({ youWaved: true, wavedAtYou: false, conversationId: opened })
+  })
+
+  it("control: a one-way wave carries none, on either card", async () => {
+    const ana = await person("rw-c1-a")
+    const ben = await person("rw-c1-b")
+    await wave(ana, ben)
+    expect(await cardFor(ana, ben)).toMatchObject({ youWaved: true, conversationId: null })
+    expect(await cardFor(ben, ana)).toMatchObject({ wavedAtYou: true, conversationId: null })
+    expect((await personCard(ana, ben)).body.data.wave).toBeUndefined()
+    expect((await personCard(ben, ana)).body.data.wave).toBeUndefined()
+  })
+
+  it("control: a match from likes alone is no wave, so no Say hi from this card", async () => {
+    const ana = await person("rw-cll-a")
+    const ben = await person("rw-cll-b")
+    const [user1_id, user2_id] = pairOf(ana, ben)
+    await db.private_conversations.create({ data: { user1_id, user2_id, origin_event_id: eventId, user1_pseudonym: "x", user2_pseudonym: "y" } })
+    expect(await cardFor(ana, ben)).toMatchObject({ conversationId: null })
+    expect((await personCard(ana, ben)).body.data.wave).toBeUndefined()
+  })
+
+  it("never a conversation from anywhere else, a board ask here, or one that was closed", async () => {
+    const make = async (label: string, data: Record<string, unknown>) => {
+      const a = await person(`${label}-a`)
+      const b = await person(`${label}-b`)
+      const [user1_id, user2_id] = pairOf(a, b)
+      await db.private_conversations.create({ data: { user1_id, user2_id, ...data } })
+      await seedWaves([{ from: a.id, to: b.id }, { from: b.id, to: a.id }])
+      return [a, b] as const
+    }
+    // A message request's conversation (no room): the pair's link must not reach this room's card.
+    const [ra, rb] = await make("rw-cx-r", {})
+    // A board ask accepted at this event: pseudonymous, from this event, but not a match.
+    const [ba, bb] = await make("rw-cx-b", {
+      origin_event_id: eventId,
+      origin_board_request_id: "00000000-0000-4000-8000-000000000001",
+      user1_pseudonym: "x",
+      user2_pseudonym: "y",
+    })
+    // A match from this room, since unmatched.
+    const [ca, cb] = await make("rw-cx-c", { origin_event_id: eventId, user1_pseudonym: "x", user2_pseudonym: "y", closed_at: new Date() })
+    for (const [x, y] of [[ra, rb], [ba, bb]] as const) {
+      expect(await cardFor(x, y)).toMatchObject({ youWaved: true, wavedAtYou: true, conversationId: null })
+      expect((await personCard(x, y)).body.data.wave).toBeUndefined()
+    }
+    // A closed pair is not on the deck at all; the person card carries nothing either.
+    expect(await cardFor(ca, cb)).toBeUndefined()
+    expect((await personCard(ca, cb)).body.data.wave).toBeUndefined()
   })
 })
 
@@ -380,6 +464,15 @@ describe("hosts never", () => {
     await seedWaves([{ from: guest.id, to: host.id, event: hostRoom }])
     const rooms = (await call(waitingRoute.GET, "/api/mobile/waves", host)).body.data.rooms
     expect(rooms.map((r: { eventId: string }) => r.eventId)).not.toContain(hostRoom)
+    // Nor a conversation on a host's person card, even with a match from that room written straight in.
+    await seedWaves([{ from: host.id, to: guest.id, event: hostRoom }])
+    const [user1_id, user2_id] = [guest.id, host.id].sort()
+    await db.private_conversations.create({ data: { user1_id, user2_id, origin_event_id: hostRoom, user1_pseudonym: "x", user2_pseudonym: "y" } })
+    const handle = roomHandle(hostRoom, guest.id)
+    const card = await call(userRoute.GET, `/api/mobile/users/${handle}`, host, { params: { userId: handle } })
+    expect(card.status).toBe(200)
+    expect(card.body.data.wave).toBeUndefined()
+    expect((await matchesForEvent(hostRoom, host.id, 1000))!.find((c) => c.userId === handle)).toMatchObject({ conversationId: null })
   })
 })
 
