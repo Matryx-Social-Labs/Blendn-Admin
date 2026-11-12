@@ -2216,7 +2216,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 **Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can only be sent in a direct message". Photos go in a DM (`POST /conversations/:id/messages`). `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
-1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
+1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429. A resend with a `clientId` that already landed is answered with the first write before this check, on both room write paths, so it never counts toward the burst (SCRUM-1050)
 2. **Keyword filter** (sync, <1ms) — slurs/profanity in 9 languages → saves as hidden, returns `moderation_hidden: true`
 3. **OpenAI Moderation** (pre-emit, 1s timeout) — AI content analysis → hides before broadcast
 
