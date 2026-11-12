@@ -74,7 +74,7 @@ it("conversation leave: over the report cap, the leave still happens and only th
   const b = await person("fu_lv_b")
   const [user1_id, user2_id] = conversationPair(a.id, b.id)
   const conv = await db.private_conversations.create({ data: { user1_id, user2_id } })
-  for (let i = 0; i < 31; i++) await overUserLimit("reportDay", "report-conversation-day", a.id)
+  for (let i = 0; i < 31; i++) await overUserLimit("reportDay", "report-day", a.id)
 
   const res = await leave.POST(
     new NextRequest(`http://localhost/api/mobile/conversations/${conv.id}/leave`, {

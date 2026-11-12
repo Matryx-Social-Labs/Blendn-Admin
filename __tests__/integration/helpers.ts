@@ -118,6 +118,15 @@ export async function onboard(...userIds: string[]) {
   }
 }
 
+/**
+ * Accounts past their first day. A user made here is minutes old, and an
+ * account under 24 h sends 3 message requests a day (SCRUM-1050); a suite that
+ * asks more than that of one person is about something else.
+ */
+export async function establish(...userIds: string[]) {
+  await db.user.updateMany({ where: { id: { in: userIds } }, data: { createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) } })
+}
+
 export async function makeEvent(
   organizerId: string,
   overrides: Partial<{ visibility: "public" | "private" | "unlisted"; deleted_at: Date | null }> = {}

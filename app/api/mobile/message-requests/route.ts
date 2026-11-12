@@ -11,6 +11,7 @@ import { db } from "@/lib/db"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { participationRefusal } from "@/lib/event-access"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
+import { countSilentRequest, requestSenderRefusal } from "@/lib/message-request-caps"
 import { sendPushNotification } from "@/lib/push-notifications"
 import {
   successResponse,
@@ -64,6 +65,10 @@ export async function POST(request: NextRequest) {
     // Not onboarded and no adult age on file: may not take part yet (SCRUM-331).
     const unfinished = await participationRefusal(authUser.userId)
     if (unfinished) return forbiddenResponse(unfinished)
+
+    // The sender's own caps (new account, unanswered), before anything about the recipient is read.
+    const capped = await requestSenderRefusal(request, authUser.userId)
+    if (capped) return capped
 
     const body = await readJson(request)
     const parsed = createRequestSchema.safeParse(body)
@@ -152,8 +157,9 @@ export async function POST(request: NextRequest) {
      *
      * "Ever", not "right now", deliberately. See `haveSharedAnEvent`.
      */
+    // The same answer as an id nobody has: a raw id must not say whether its owner was at one of your events (SCRUM-1050).
     if (!(await haveSharedAnEvent(authUser.userId, recipientId))) {
-      return errorResponse("You can only message people from an event you have both attended")
+      return notFoundResponse("User not found")
     }
 
     /*
@@ -247,6 +253,7 @@ export async function POST(request: NextRequest) {
       // exists" about an id the match's pseudonym is hiding. They are already in
       // your inbox, where the conversation is.
       if ((await identityForRef(authUser.userId, ref)).identified) return conflictResponse(refusal)
+      await countSilentRequest(authUser.userId)
       return successResponse(
         {
           request: {

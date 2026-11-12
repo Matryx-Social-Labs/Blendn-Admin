@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const limited =
       (await rateLimit(request, userLimit("safety", "report-user", authUser.userId))) ??
-      (await rateLimit(request, userLimit("reportDay", "report-user-day", authUser.userId)))
+      (await rateLimit(request, userLimit("reportDay", "report-day", authUser.userId)))
     if (limited) return limited
 
     // A room handle or a raw id (SCRUM-371); a forged handle reads as unknown. The same reading as block

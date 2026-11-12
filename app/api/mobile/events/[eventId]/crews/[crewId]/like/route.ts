@@ -32,7 +32,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
-    const limited = await rateLimit(request, userLimit("write", "crew-like", authUser.userId))
+    const limited =
+      (await rateLimit(request, userLimit("write", "crew-like", authUser.userId))) ??
+      // 30 a day (SCRUM-1050), counted at the door so a refused like counts as a landed one: no answer below tells them apart.
+      (await rateLimit(request, userLimit("crewLikeDay", "crew-like-day", authUser.userId)))
     if (limited) return limited
 
     const { eventId, crewId } = await params

@@ -5,7 +5,8 @@ import { join } from "path"
  * API M8 (security audit): the per-minute `safety` limit stops a burst, not a
  * patient script filing ~28k reports a day into a queue that shows the oldest
  * hundred. Every route that files a report carries the `reportDay` allowance,
- * so a new one cannot ship without it.
+ * so a new one cannot ship without it. One scope, `report-day`, for every door: the
+ * cap is 30 a day in total, not 30 per kind of report (SCRUM-1050).
  */
 const MOBILE = join(__dirname, "..", "app", "api", "mobile")
 
@@ -25,6 +26,6 @@ describe("report routes", () => {
   })
 
   it.each(routes.map((r) => [r.slice(MOBILE.length)]))("%s applies the daily report cap", (route) => {
-    expect(readFileSync(join(MOBILE, route), "utf8")).toContain('userLimit("reportDay"')
+    expect(readFileSync(join(MOBILE, route), "utf8")).toContain('userLimit("reportDay", "report-day"')
   })
 })

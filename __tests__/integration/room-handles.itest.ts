@@ -32,7 +32,7 @@ import { io as connect, type Socket as ClientSocket } from "socket.io-client"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
 import { resolveUserRef, roomHandle } from "@/lib/room-handle"
-import { cleanup, closeDb, db, makeUser, onboard, testId } from "./helpers"
+import { cleanup, closeDb, db, makeUser, onboard, testId, establish } from "./helpers"
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const checkinRoute = require("@/app/api/mobile/events/[eventId]/checkin/route") as typeof import("@/app/api/mobile/events/[eventId]/checkin/route")
@@ -72,6 +72,7 @@ async function person(label: string): Promise<Person> {
   const id = await makeUser(testId(label))
   users.push(id)
   await onboard(id)
+  await establish(id)
   return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
 }
 

@@ -21,7 +21,7 @@ import { blockPairIn } from "@/lib/block-pair"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { roomHandle } from "@/lib/room-handle"
 import { venueDayFor } from "@/lib/venue-day"
-import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId } from "./helpers"
+import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putInRoom, testId, establish } from "./helpers"
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const route = require("@/app/api/mobile/message-requests/route") as typeof import("@/app/api/mobile/message-requests/route")
@@ -49,6 +49,7 @@ async function person(label: string): Promise<Person> {
   const id = await makeUser(testId(label))
   users.push(id)
   await onboard(id)
+  await establish(id)
   await db.user.update({ where: { id }, data: { name: `Real ${label}`, image: `https://img.invalid/${label}.jpg` } })
   return { id, token: signAccessToken(id, `${id}@itest.invalid`) }
 }
@@ -167,9 +168,9 @@ describe("Met in: the room a request came from", () => {
     expect(listed.requests.find((r) => r.sender.id === a.id)?.metIn).toEqual({ kind: "venue_day", name: v.name })
     expect(listed.raw).not.toContain("Venue day")
 
-    // Never met: the request is refused outright (no shared room), so nothing claims one.
+    // Never met: the request is refused outright (no shared room, answered as nobody: SCRUM-1050), so nothing claims one.
     const refused = await ask(late, roomHandle(day.id, a.id))
-    expect(refused.status).toBe(400)
+    expect(refused.status).toBe(404)
     expect(await db.message_requests.count({ where: { sender_id: late.id } })).toBe(0)
   })
 
