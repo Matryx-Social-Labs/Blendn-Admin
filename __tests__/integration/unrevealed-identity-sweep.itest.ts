@@ -139,6 +139,8 @@ let other: Person
 let eventId: string
 let conversationId: string
 let hostId: string
+/** A night before this one that both came to, the other a pseudonym there: "You've both been to" must never list it. */
+let pastId: string
 const lensSlugs: string[] = []
 const categoryIds: string[] = []
 const refs: Record<string, string[]> = {}
@@ -215,6 +217,20 @@ beforeAll(async () => {
 
   const group = await db.chat_groups.findFirst({ where: { event_id: eventId }, select: { id: true } })
   refs.chatGroupId = group ? [group.id] : []
+
+  pastId = await makeEvent(host)
+  events.push(pastId)
+  const lastWeek = { start_time: new Date(Date.now() - 7 * 86_400_000), end_time: new Date(Date.now() - 7 * 86_400_000 + 7_200_000) }
+  await db.events.update({ where: { id: pastId }, data: lastWeek })
+  await db.event_occurrences.updateMany({ where: { event_id: pastId }, data: lastWeek })
+  const pastOccurrence = await occurrenceOf(pastId)
+  const pastRoom = await db.chat_groups.create({ data: { event_id: pastId, name: "room" }, select: { id: true } })
+  for (const p of [viewer, other]) {
+    await db.event_check_ins.create({
+      data: { event_id: pastId, occurrence_id: pastOccurrence, user_id: p.id, kind: "attendee", status: "checked_out", check_in_time: lastWeek.start_time, check_out_time: lastWeek.end_time },
+    })
+    await db.chat_group_members.create({ data: { chat_group_id: pastRoom.id, user_id: p.id, anonymous_name: testId("Zq Last Week") } })
+  }
 }, 60_000)
 
 afterAll(async () => {
@@ -272,7 +288,7 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       if (leaked.length) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status} leaks ${leaked.map((s) => (s === other.id ? "<raw id>" : s)).join(", ")}`)
     }
     // A sweep that called nothing proves nothing: the routes the ticket is about must be in it, and answering.
-    for (const must of ["conversations", "conversations/[conversationId]", "conversations/[conversationId]/messages", "events/[eventId]/matches", "profiles/[userId]"]) {
+    for (const must of ["conversations", "conversations/[conversationId]", "conversations/[conversationId]/messages", "events/[eventId]/matches", "profiles/[userId]", "users/[userId]/shared-events"]) {
       expect(tried.some((t) => t.split(" ")[1] === must && t.startsWith("2"))).toBe(true)
     }
     expect(tried.length).toBeGreaterThan(40)
@@ -327,9 +343,24 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     expect(found).toEqual([])
   }, 120_000)
 
+  it("lists no past night they were a pseudonym at, by any ref the viewer holds (SCRUM-1042)", async () => {
+    for (const ref of [...refs.room, ...refs.dm]) {
+      const r = await call(route("users/[userId]/shared-events").GET, `/api/mobile/users/${ref}/shared-events`, viewer, { params: { userId: ref } })
+      expect(r.status).toBe(200)
+      expect(r.body.data.events).toEqual([])
+      expect(r.text).not.toContain(pastId)
+    }
+  })
+
   it("does find them once they reveal, so the sweep can see a leak at all", async () => {
     await ok(call(route("conversations/[conversationId]/reveal").POST, `/api/mobile/conversations/${conversationId}/reveal`, other, { method: "POST", body: {}, params: { conversationId } }), "reveal back")
     const r = await call(route("conversations").GET, "/api/mobile/conversations", viewer)
     expect(leaksIn(r.text)).toEqual(expect.arrayContaining([other.id, SECRET_NAME]))
+    // And once they had named themselves at last week's night, it is a night you have both been to.
+    await db.event_match_preferences.create({ data: { event_id: pastId, user_id: other.id, revealed: true } })
+    // By the id the inbox hands over once they have revealed (asserted just above): the DM's handle stays its room's.
+    const ref = other.id
+    const shared = await call(route("users/[userId]/shared-events").GET, `/api/mobile/users/${ref}/shared-events`, viewer, { params: { userId: ref } })
+    expect(shared.body.data.events.map((e: { id: string }) => e.id)).toEqual([pastId])
   })
 })

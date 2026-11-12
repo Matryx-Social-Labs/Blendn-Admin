@@ -574,6 +574,45 @@ registry.registerPath({
 
 registry.registerPath({
   method: "get",
+  path: "/api/mobile/users/{userId}/shared-events",
+  tags: ["Mobile Users"],
+  summary: "Past events you have both been to",
+  description: ROOM_BAN_GATE +
+    "\"You've both been to\" on the person page (SCRUM-1042): ended events (not venue days) you and this person were both checked in to, newest first (`startTime` desc, id breaking ties). " +
+    "Only events where they were not a pseudonym to you: they revealed there, they revealed to you in the conversation that event's mutual like opened, or they let friends recognise them in rooms and you are friends. " +
+    "Never an event the caller's organisation ran or whose venue it owns. `userId` may be a room handle, gated as `GET /users/{userId}` gates the name: a ref that does not name them to you (or names them only by their pending request) answers an empty list, never an error. " +
+    "A block either way is a 404; a closed conversation, or yourself, an empty list; a cursor that is not one of ours, a 400. `pagination.totalCount` is the whole list on every page. Default `limit` 20, at most 100.",
+  security: bearerAuth,
+  request: { params: z.object({ userId: UserRefParamSchema }), query: ListQuerySchema },
+  responses: {
+    200: {
+      description: "Shared events",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              events: z.array(
+                z.object({
+                  id: z.string().uuid(),
+                  title: z.string(),
+                  startTime: z.string().datetime(),
+                  timezone: z.string().describe("The event's IANA zone, for its date."),
+                  venueName: z.string().nullable(),
+                  coverImageUrl: z.string().nullable(),
+                })
+              ),
+              pagination: ListPaginationSchema,
+            })
+          ),
+        },
+      },
+    },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
   path: "/api/mobile/users/{userId}/favorites",
   tags: ["Mobile Users"],
   summary: "Get user's favorite events",

@@ -18,6 +18,7 @@ import { buildLiveSnapshot } from "@/lib/live-snapshot"
 import { actorFor } from "@/lib/org-membership"
 import { attendeeLabel } from "@/lib/pseudonym"
 import { buildReport } from "@/lib/reports"
+import { sharedEvents } from "@/lib/shared-events"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 /*
@@ -207,6 +208,8 @@ describe.each(HOSTS)("%s sees pseudonyms only", (_who, role, id) => {
     expect([...(await visibleInRoom(id(), eventA, [ana]))]).toEqual([])
     // Nor through the unscoped gate's "public in a room you were in".
     expect([...(await maySeeIdentityFor(id(), [ana]))]).toEqual([])
+    // Nor as "You've both been to" (SCRUM-1042): their own night is never a shared event with her.
+    expect((await sharedEvents(id(), ana, { limit: 20, after: null })).events).toEqual([])
   })
 })
 
@@ -363,6 +366,8 @@ describe("a host's exports cannot be lined up against the room (L3, L4)", () => 
 describe("the controls", () => {
   it("an ordinary attendee in the room still sees Ana, who revealed there", async () => {
     expect([...(await visibleInRoom(ben, eventA, [ana]))]).toEqual([ana])
+    // And has been to that night with her: the host's empty list above is the rule, not an empty world.
+    expect((await sharedEvents(ben, ana, { limit: 20, after: null })).events.map((e) => e.id)).toEqual([eventA])
   })
 
   it("the platform's admin reads her real identity in the room feed and the queue", async () => {
