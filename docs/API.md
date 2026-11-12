@@ -1119,6 +1119,7 @@ nothing. When nothing maps, `lens` is `null` and the app draws the plain card.
 
 **Who reads an answer:** people checked in to that room now, as attendees, beside the pseudonym the room already shows.
 - `GET .../matches` gives each card a `tonightAnswer` and a `workIntent`, and the response a `lens`. Answers are read for the returned page only.
+  Each card also carries `checkInTime` (ISO; SCRUM-1042), when they checked in, as the roster already says beside the same handle; `null` on every card for anyone who runs or hosts the event.
 - `GET /users/:handle` gives `tonight: { lens, answer, workIntent }`, but only for an **event room handle**. A raw id never carries it.
 - **Never to anyone who runs or hosts the event** (`eventPermissions().canOperate`: its organising org, its venue's owner, an admin), even checked in as an attendee. Their cards say `null` and their sheets carry no `tonight`.
 - **A member the host banned from the room** reads as unanswered on the sheet (`answer` and `workIntent` null), as the deck already drops them.
