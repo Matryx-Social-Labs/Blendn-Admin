@@ -72,7 +72,8 @@ describe("the match deck", () => {
     // One call only: a deck records what it showed, and a second would rank differently.
     const { result: cards, sql } = await counter.during(() => matchesForEvent(eventId, viewer.id, PAGE))
 
-    const shaped = cards!.map(({ userId, ...card }) => ({ who: label.get(resolveUserRef(userId)!.userId), ...card }))
+    // The check-in time is the fixture's clock, so the snapshot holds only that it was sent (SCRUM-1042).
+    const shaped = cards!.map(({ userId, checkInTime, ...card }) => ({ who: label.get(resolveUserRef(userId)!.userId), ...card, checkInTime: typeof checkInTime }))
     expect(shaped).toMatchSnapshot()
 
     // Before: a pseudonym row and five reveal-rule lists for every one of the

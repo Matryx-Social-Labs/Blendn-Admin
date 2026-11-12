@@ -100,6 +100,8 @@ export interface MatchCard {
   tonightAnswer: string | null
   /** "Here to hire" and the like (lib/tonight.ts): the work lens only, and the same readers as `tonightAnswer`. */
   workIntent: WorkIntent | null
+  /** When they checked in here (ISO), as the roster says it; null for a viewer who runs or hosts the event. */
+  checkInTime: string | null
 }
 
 /** Interest-tree leaves that are IPL teams: category id → team code ("CSK"). */
@@ -583,7 +585,9 @@ export async function matchesForEvent(
    */
   const page = rankMatches(viewer, candidates, rankOpts)
   const pageIds = page.map((m) => m.userId)
-  const [recognised, pseudonyms, answers] = await Promise.all([
+  // A host is never a reader of the room's words, nor of who arrived when (`operatesEvent`).
+  const operating = operatesEvent(viewerId, eventId)
+  const [recognised, pseudonyms, answers, operates] = await Promise.all([
     visibleInRoom(viewerId, eventId, pageIds),
     pageIds.length
       ? db.chat_group_members.findMany({
@@ -593,10 +597,9 @@ export async function matchesForEvent(
       : [],
     // The page's answers only, never the room's: a concert of 12k reads 50. Nothing for a host (`operatesEvent`).
     lens && pageIds.length
-      ? operatesEvent(viewerId, eventId).then((operates) =>
-          operates ? new Map<string, PersonAnswers>() : answersFor(eventId, pageIds, lens)
-        )
+      ? operating.then((operates) => (operates ? new Map<string, PersonAnswers>() : answersFor(eventId, pageIds, lens)))
       : new Map<string, PersonAnswers>(),
+    operating,
   ])
   const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
   const onPage = new Set(pageIds)
@@ -638,6 +641,7 @@ export async function matchesForEvent(
   ).catch(() => {})
 
   const interestsOf = new Map(candidates.map((c) => [c.userId, c.interestIds]))
+  const checkedInOf = new Map(candidates.map((c) => [c.userId, c.checkedInAt]))
   const profileOf = new Map(eligible.map((c) => [c.user_id, c.user.profile]))
 
   /*
@@ -687,6 +691,11 @@ export async function matchesForEvent(
         m.roomIsBigEnough && profileOf.get(m.userId)?.show_badges !== false ? badgesFor(badgeFacts(m.userId)) : [],
       tonightAnswer: answers.get(m.userId)?.tonightAnswer ?? null,
       workIntent: answers.get(m.userId)?.workIntent ?? null,
+      /*
+       * When they checked in here, as the roster (`GET /events/:id/checkins`) already says beside the same handle: the
+       * person sheet's "Here 40 min" (SCRUM-1042). Never to a host, who gets arrivals as counts, never a minute per person.
+       */
+      checkInTime: operates ? null : (checkedInOf.get(m.userId)?.toISOString() ?? null),
     }
   })
 }

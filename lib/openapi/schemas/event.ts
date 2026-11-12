@@ -666,6 +666,11 @@ export const MatchListResponseSchema = z
         workIntent: z.enum(["hire", "find_work", "build", "learn"])
           .nullable()
           .describe("Why they are here, at a work-lens event (\"Here to hire\"). The same readers as `tonightAnswer`; null when they gave none, outside the `work` lens, and on every card when you run or host the event."),
+        checkInTime: z
+          .string()
+          .datetime()
+          .nullable()
+          .describe("When they checked in here, as the roster says beside the same handle: the person sheet's \"Here 40 min\" (SCRUM-1042). Null on every card when you run or host the event. Additive."),
       })
     ),
     lens: RoomLensSchema.nullable().describe("The room's lens; null when the event's categories map to none (draw the plain card)."),
