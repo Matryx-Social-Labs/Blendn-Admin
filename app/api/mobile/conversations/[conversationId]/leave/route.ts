@@ -96,7 +96,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * happen and only the report is dropped, said in `reportAccepted: false`:
      * a cap must never stand between somebody and a block.
      */
-    const reportDropped = Boolean(parsed.data.report) && (await overUserLimit("reportDay", "report-conversation-day", authUser.userId))
+    const reportDropped = Boolean(parsed.data.report) && (await overUserLimit("reportDay", "report-day", authUser.userId))
     const report = reportDropped ? undefined : parsed.data.report
 
     const conversation = await db.private_conversations.findUnique({

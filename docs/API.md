@@ -1998,15 +1998,22 @@ what makes the recipient's decision possible — "Someone wants to connect" is a
 coin flip.
 
 **Limits.** 20 requests per sender per day (`429`), on top of the per-minute
-limit. The `message` goes through the deterministic text check (keyword and
+limit. An account under 24 hours old sends **3 a day**. And **at most 10
+unanswered at once**: requests from the last 7 days that were not accepted (a
+decline and a block are never told, so they hold a slot as a pending one does),
+plus the silent `201`s below, so the cap cannot tell those apart either. Each
+answers as every rate limit does: `429`, `errorCode: "RATE_LIMITED"`,
+`retryAfter` and `Retry-After`. All three are checked before the recipient is
+read, so a refusal says nothing about them (SCRUM-1050). The `message` goes through the deterministic text check (keyword and
 contact details); a hit is `400` `VALIDATION_FAILED` with `reasonCode:
 "TEXT_NOT_ALLOWED"` and `field: "message"`, its `error` a sentence to show as
 is. Nothing is stored or sent.
 
 Guards, in order: rate limit, self-send, recipient exists **and is listed** (`show_online` on; off answers `404 User not found`, by handle or id, as for an id nobody has: SCRUM-904), blocks either way,
 closed pair (an unmatch — same 404 as a block, so the refusal never says "this
-person ended it"), `haveSharedAnEvent`, existing request, existing
-conversation. And
+person ended it"), `haveSharedAnEvent` (the same `404 User not found` too, so an
+id never says whether its owner was at one of your events; it was a `400`,
+SCRUM-1050), existing request, existing conversation. And
 `@@unique([sender_id, recipient_id])` means **one request per pair for all
 time** — decline it and that person can never send another.
 
@@ -2216,7 +2223,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 **Words only (R9, SCRUM-626).** A room takes no media: `type` other than `text`, or any `metadata` at all, is `400 VALIDATION_FAILED` with `errors[].message` "Photos can only be sent in a direct message". Photos go in a DM (`POST /conversations/:id/messages`). `metadata` was `{ mediaUrl }` (SCRUM-426), and before that a free record an attendee could use to draw a message as a sponsored card; the server's own writers (sponsored messages, broadcasts) still set a message's `metadata` and `type`, and older image messages are still read back as they were. The same rules apply to `POST /events/:eventId/chat`.
 
 **Moderation (pre-emit):** Messages go through a 3-layer pipeline **before** being broadcast to other users:
-1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429
+1. **Spam check** (sync) — burst rate, duplicate, link density → blocks with 429. A resend with a `clientId` that already landed is answered with the first write before this check, on both room write paths, so it never counts toward the burst (SCRUM-1050)
 2. **Keyword filter** (sync, <1ms) — slurs/profanity in 9 languages → saves as hidden, returns `moderation_hidden: true`
 3. **OpenAI Moderation** (pre-emit, 1s timeout) — AI content analysis → hides before broadcast
 
@@ -2639,7 +2646,8 @@ prevent. Omit `report.messageId` to report the person rather than a message.
 **Report limits (all report routes).** `reason` is at most 200 characters and
 `description` at most 2000 (`400` beyond). Every report route (message, user,
 event, room, and a conversation leave that carries a `report`) shares one
-allowance of 30 reports per user per day: `429` after that (except the leave, below). A conversation
+allowance of 30 reports per user per day: `429` after that (except the leave, below). One allowance
+across every report door, the Lobby's, crews' and offers' included: 30 in total, not 30 per kind (SCRUM-1050). A conversation
 leave over the allowance is never refused: the leave and block still happen, the
 report is dropped, and the response says `reportAccepted: false`.
 
@@ -2999,7 +3007,9 @@ crew"*, from the member who tapped — transparency instead of a quorum. Only
 for a like of a crew: a like of a person gets no line, because a line only for a
 like that stood would tell the crew what the answer hides. Nobody else is told: no push, no bell row, and the card's
 `youLiked` is only ever about your side. Liking twice is liking once. When the
-host turned crews off, every crew like is 403.
+host turned crews off, every crew like is 403. **30 crew likes a day** per person
+(both doors: a crew, and a person with `asCrewId`), counted before anything is
+looked at, as a `429` rate limit (SCRUM-1050).
 
 **Crew ↔ person** has guardrails (§8.3): the person turned on `openToCrews` —
 which lasts until the end of the occurrence they said it at, and `false` clears
@@ -4138,7 +4148,8 @@ motivated to take a post down is the one about to be reported for it.
   about whichever of its two people did not file it.
 - **One report per person per post or ask while it is pending.** A second tap is
   the same `201` and no new row (a partial unique). Reports are limited to 20 a
-  minute and **30 a day** per person — a queue showing the oldest hundred is
+  minute and **30 a day** per person, in total across every report door (one
+  `report-day` bucket, SCRUM-1050) — a queue showing the oldest hundred is
   otherwise one script away from burying everybody else's.
 - **The evidence is kept.** A report stores the words as they were when it was
   filed (`excerpt`), and stamps the post `moderation_status = "reported"`.

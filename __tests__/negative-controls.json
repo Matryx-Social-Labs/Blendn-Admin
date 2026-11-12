@@ -156,10 +156,10 @@
       "date": "2026-10-26"
     },
     "report-routes-daily-cap.test.ts": {
-      "guards": "API M8: every app/api/mobile/**/report/route.ts applies userLimit(\"reportDay\").",
-      "mutation": "app/api/mobile/offers/[offerId]/report/route.ts as it was before this fix (only the per-minute `safety` limit).",
-      "observed": "2026-10-25: fails, '/offers/[offerId]/report/route.ts applies the daily report cap' (1 failed, 9 passed). Fixed; green.",
-      "date": "2026-10-25"
+      "guards": "API M8, and SCRUM-1050: every app/api/mobile/**/report/route.ts applies userLimit(\"reportDay\", \"report-day\") -- one shared daily scope, 30 reports a day in total across the doors.",
+      "mutation": "app/api/mobile/offers/[offerId]/report/route.ts back to a scope of its own, userLimit(\"reportDay\", \"offer-report-day\"). (2026-10-25: the route as it was before API M8, only the per-minute `safety` limit.)",
+      "observed": "2026-11-12: fails, '/offers/[offerId]/report/route.ts applies the daily report cap' (1 failed, 9 passed). Restored; 10/10. (2026-10-25: the same, 1 failed, 9 passed.)",
+      "date": "2026-11-12"
     },
     "batched-checkout.itest.ts": {
       "guards": "perf/loops-dashboard: performCheckouts (the sweepers' batched checkout) ends in the same check-in rows, closed sessions (source and instant), chat-room telling (friend, show-online-off, blocked copies) and room:friends signal as performCheckout one person at a time over two rooms, in <=30 statements instead of ~130, is idempotent, and an expiry acts only on the window it read.",

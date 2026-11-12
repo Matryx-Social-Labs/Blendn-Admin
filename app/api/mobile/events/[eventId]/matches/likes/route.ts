@@ -65,6 +65,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const parsed = likeSchema.safeParse(await readJson(request))
     if (!parsed.success) return validationErrorResponse(parsed.error)
+    // A like on a crew's behalf is a crew like: the crew-like door's 30 a day, counted before anybody is looked at (SCRUM-1050).
+    if (parsed.data.asCrewId) {
+      const overDay = await rateLimit(request, userLimit("crewLikeDay", "crew-like-day", authUser.userId))
+      if (overDay) return overDay
+    }
     // Only the handle this room's deck showed you, or your own id (refused
     // just below). Anything else — a raw id, another room's handle, a forged
     // one — is nobody here and is answered as an unknown id: a raw-id like

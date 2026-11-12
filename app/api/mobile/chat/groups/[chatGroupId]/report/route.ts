@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const limited =
       (await rateLimit(request, userLimit("safety", "report-room", authUser.userId))) ??
-      (await rateLimit(request, userLimit("reportDay", "report-room-day", authUser.userId)))
+      (await rateLimit(request, userLimit("reportDay", "report-day", authUser.userId)))
     if (limited) return limited
 
     const validation = reportRoomSchema.safeParse(await readJson(request))

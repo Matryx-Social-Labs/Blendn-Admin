@@ -34,7 +34,7 @@ import {
   type RoomEntitlement,
 } from "@/lib/chat-window"
 import { chatQuerySchema, sendMessageSchema } from "@/lib/validations/chat"
-import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
+import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { claimAnonymousName } from "@/lib/anonymous-names"
 import { moderateMessage, checkSpam, preSaveCheck } from "@/lib/moderation"
 import { deliverToRoom, previewFor } from "@/lib/room-delivery"
@@ -613,6 +613,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!roomEvent) return notFoundResponse("Chat not available for this event")
 
     /*
+     * A retry of a send that already landed: answered with the first write, as
+     * the group door does — before the spam check, so a resend never counts
+     * toward the burst (SCRUM-1050), and before moderation, so a retried
+     * flagged message replays its hidden answer instead of colliding with its
+     * own first write.
+     */
+    const replay = await replayRoomRetry(authUser.userId, clientId, chatGroup.id)
+    if (replay) return replay
+
+    /*
      * Same rule as the other write path — see lib/chat-window.ts.
      *
      * Applied after the create-on-demand branch on purpose: a room created for
@@ -787,14 +797,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // --- Pre-save moderation: keywords and contact details (sync, <1ms) ---
-    // A retry of a send that already landed: answered with the first write —
-    // before moderation, so a retried flagged message replays its hidden
-    // answer instead of colliding with its own first write.
-    if (clientId) {
-      const existing = await findRoomSend(authUser.userId, clientId)
-      if (existing) return answerRoomRetry(existing, chatGroup.id)
-    }
-
     const preSave = preSaveCheck(content)
     if (preSave) {
       // Save but immediately mark as hidden — never emitted to other users

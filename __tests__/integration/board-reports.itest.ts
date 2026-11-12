@@ -428,7 +428,7 @@ describe("report abuse (review #5)", () => {
   it("refuses with 429 once the day's thirty are spent", async () => {
     const author = await person("rd-author", true)
     const viewer = await person("rd-viewer", true)
-    for (let n = 0; n < 30; n++) await hit(`rl:report-board-day:${viewer.id}`, 24 * 60 * 60 * 1000)
+    for (let n = 0; n < 30; n++) await hit(`rl:report-day:${viewer.id}`, 24 * 60 * 60 * 1000)
     const res = await reportPost(viewer, await offer(author))
     expect(res.status).toBe(429)
     expect(await db.message_reports.count({ where: { reporter_id: viewer.id } })).toBe(0)

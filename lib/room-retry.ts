@@ -20,6 +20,20 @@ export function findRoomSend(userId: string, clientId: string) {
   })
 }
 
+/**
+ * The retry answer both room doors give, or null when this is a new send.
+ *
+ * Called before `checkSpam` on both doors: a resend of a message already in
+ * the room is not a new message, so it never counts toward the burst and is
+ * never refused SPAM_BURST (SCRUM-1050). The event door ran the spam check
+ * first; `integration/room-send.itest.ts` pins the order on both.
+ */
+export async function replayRoomRetry(userId: string, clientId: string | undefined, chatGroupId: string) {
+  if (!clientId) return null
+  const existing = await findRoomSend(userId, clientId)
+  return existing ? answerRoomRetry(existing, chatGroupId) : null
+}
+
 export async function answerRoomRetry(
   existing: NonNullable<Awaited<ReturnType<typeof findRoomSend>>>,
   chatGroupId: string

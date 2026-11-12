@@ -43,10 +43,10 @@ const post = (h: Handler, as: { token: string }, params: Record<string, string>,
 
 const huge = "x".repeat(5000)
 const routes: Array<[string, Handler, Record<string, string>, string, unknown]> = [
-  ["message", messageReport.POST as Handler, { messageId: ID }, "report-message-day", { messageType: "group", reason: "spam" }],
-  ["user", userReport.POST as Handler, { userId: ID }, "report-user-day", { reason: "spam" }],
-  ["event", eventReport.POST as Handler, { eventId: ID }, "report-event-day", { reason: "spam" }],
-  ["room", roomReport.POST as Handler, { chatGroupId: ID }, "report-room-day", { reason: "spam" }],
+  ["message", messageReport.POST as Handler, { messageId: ID }, "report-day", { messageType: "group", reason: "spam" }],
+  ["user", userReport.POST as Handler, { userId: ID }, "report-day", { reason: "spam" }],
+  ["event", eventReport.POST as Handler, { eventId: ID }, "report-day", { reason: "spam" }],
+  ["room", roomReport.POST as Handler, { chatGroupId: ID }, "report-day", { reason: "spam" }],
 ]
 
 describe.each(routes)("%s report", (_name, handler, params, scope, body) => {
