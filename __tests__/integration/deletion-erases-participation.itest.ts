@@ -196,3 +196,44 @@ it("stops being here now in a room they were standing in, and keeps the attendan
   await db.presence_sessions.deleteMany({ where: { event_id: eventId } })
   await db.event_check_ins.deleteMany({ where: { event_id: eventId } })
 })
+
+it("erases their waves and likes either way, so nobody's 'waved at you' list keeps a deleted person (SCRUM-1042, staging read-back)", async () => {
+  /*
+   * Driven on staging 2026-11-12: three throwaway accounts waved, then deleted
+   * themselves, and all four `event_waves` rows stayed. Deletion keeps the
+   * `User` row, so nothing cascades: a wave from a deleted account stayed on
+   * the recipient's list and Banter row, and an old like (a hidden wave) could
+   * still count toward a mutual.
+   */
+  const host = await makeUser("dep-wave-host", "organizer")
+  const [leaver, other, bystander] = await Promise.all([makeUser("dep-wave-leaver"), makeUser("dep-wave-other"), makeUser("dep-wave-by")])
+  users.push(host, leaver, other, bystander)
+  await db.profiles.create({ data: { id: leaver, name: "Leaver", date_of_birth: new Date("1996-05-12") } })
+  const event_id = await makeEvent(host)
+  events.push(event_id)
+  await db.event_waves.createMany({
+    data: [
+      { event_id, from_id: leaver, to_id: other },
+      { event_id, from_id: other, to_id: leaver },
+      // Control: a wave between two people who stay is untouched.
+      { event_id, from_id: other, to_id: bystander },
+    ],
+  })
+  await db.event_likes.createMany({
+    data: [
+      { event_id, liker_id: leaver, liked_id: other },
+      { event_id, liker_id: bystander, liked_id: leaver },
+      { event_id, liker_id: bystander, liked_id: other },
+    ],
+  })
+  const { email } = await db.user.findUniqueOrThrow({ where: { id: leaver }, select: { email: true } })
+
+  const res = await accountRoute.DELETE(req("DELETE", "/api/mobile/account", signAccessToken(leaver, email)))
+  expect(res.status).toBe(200)
+
+  const either = (a: string) => ({ OR: [{ from_id: a }, { to_id: a }] })
+  expect(await db.event_waves.count({ where: either(leaver) })).toBe(0)
+  expect(await db.event_likes.count({ where: { OR: [{ liker_id: leaver }, { liked_id: leaver }] } })).toBe(0)
+  expect(await db.event_waves.count({ where: { from_id: other, to_id: bystander } })).toBe(1)
+  expect(await db.event_likes.count({ where: { liker_id: bystander, liked_id: other } })).toBe(1)
+})
