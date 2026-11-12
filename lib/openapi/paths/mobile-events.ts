@@ -25,6 +25,8 @@ import {
   AttendeeListResponseSchema,
   LikeRequestSchema,
   LikeResponseSchema,
+  ReceivedWavesResponseSchema,
+  WavesWaitingResponseSchema,
   RoomPreviewResponseSchema,
   WaveRequestSchema,
   WaveResponseSchema,
@@ -671,23 +673,61 @@ registry.registerPath({
   },
 })
 
-// POST /api/mobile/events/{eventId}/waves
+// POST + GET /api/mobile/events/{eventId}/waves
 registry.registerPath({
   method: "post",
   path: "/api/mobile/events/{eventId}/waves",
   tags: ["Mobile Events"],
-  summary: "Wave at someone in the room",
+  summary: "Wave at someone in the room (recorded)",
   description: ROOM_BAN_GATE +
-    "Ephemeral: emits `room:wave` to the recipient and stores nothing. Both people must be checked in now.\n\n" +
-    "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`) and starts no window: a raw id asked who is here, and the per-pair window then told which handle it was. Your own id is 400.\n\n" +
-    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, or a block either way; deliberately indistinguishable), `WAVE_TOO_SOON` (429, one per pair per 10 minutes, with `retryAfter`)",
+    "Recorded (SCRUM-1042): one wave per person per room, never re-sent — a second tap answers `{ sent: true, mutual: false }` and stores and emits nothing. " +
+    "A new wave needs both people checked in now. A **wave back** (they waved at you here) may be sent until the room closes, even if either of you has left. " +
+    "Two waves, or a wave and an old like (read as a hidden wave, never shown), open the anonymous conversation: `mutual: true` with `conversationId` and `pseudonyms`, `room:match` to both, and the match push to the earlier one only. " +
+    "Otherwise `room:wave` goes to the recipient. No push for a single wave.\n\n" +
+    "**Limits, read before anything about the recipient:** 20 per room per hour, 60 a day; 5 per room per hour and 15 a day for an account under 24 h; 5 per room per hour once 20 of your waves in the last 24 h are unanswered. Counted from stored waves, so a refused wave never counts.\n\n" +
+    "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`). Your own id is 400.\n\n" +
+    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them), `WAVE_TOO_SOON` (429, a new wave at the same person within 10 minutes in another room, with `retryAfter`)",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
     body: { content: { "application/json": { schema: WaveRequestSchema } } },
   },
   responses: {
-    200: { description: "Delivered to whoever has the app open", content: { "application/json": { schema: wrap(WaveResponseSchema) } } },
+    200: { description: "Recorded (or already recorded)", content: { "application/json": { schema: wrap(WaveResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/events/{eventId}/waves",
+  tags: ["Mobile Events"],
+  summary: "Who waved at you in this room",
+  description: ROOM_BAN_GATE +
+    "Newest first, 20 a page (`cursor` from `nextCursor`). Room handles and the roster's name only, never an id or a photo. Hidden: anybody blocked either way, a pair that left each other, friends, anybody you reported, suspended, hidden from the roster or banned from the room. A like is never listed. " +
+    "Readable by a guest who was checked in here while the room is open; after it closes `open: false` and an empty list. A host or staff gets 403 `NOT_CHECKED_IN`.",
+  security: bearerAuth,
+  request: {
+    params: z.object({ eventId: z.string().uuid() }),
+    query: z.object({ cursor: z.string().optional() }),
+  },
+  responses: {
+    200: { description: "Waves received here", content: { "application/json": { schema: wrap(ReceivedWavesResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+// GET /api/mobile/waves
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/waves",
+  tags: ["Mobile Events"],
+  summary: "Rooms where a wave is waiting for you (Banter's pinned rows)",
+  description:
+    "One entry per open room with an unanswered wave: how many, and the newest, as `GET /events/{eventId}/waves` names it. Never a room you run or host or were banned from, never a closed room. At most 20 rooms.",
+  security: bearerAuth,
+  responses: {
+    200: { description: "Waiting waves by room", content: { "application/json": { schema: wrap(WavesWaitingResponseSchema) } } },
     ...standardErrors,
   },
 })

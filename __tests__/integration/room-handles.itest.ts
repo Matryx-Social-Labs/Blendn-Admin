@@ -418,13 +418,14 @@ describe("a friend who holds your real id reads the room and finds nothing", () 
       params: { eventId },
     })
     expect(wave.status).toBe(200)
-    // One wave per pair per ten minutes still holds by handle.
+    // One wave per pair per room holds by handle (W1, SCRUM-1042): the second is the first answer, and one row on Ben.
     const again = await call(wavesRoute.POST, `/api/mobile/events/${eventId}/waves`, ana, {
       method: "POST",
       body: { toUserId: hBen },
       params: { eventId },
     })
-    expect(again.status).toBe(429)
+    expect(again).toEqual(wave)
+    expect(await db.event_waves.count({ where: { event_id: eventId, from_id: ana.id, to_id: ben.id } })).toBe(1)
 
     const request = await call(requestsRoute.POST, "/api/mobile/message-requests", ana, {
       method: "POST",

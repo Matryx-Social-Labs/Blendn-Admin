@@ -80,8 +80,15 @@ export interface MatchCard {
    */
   age: number | null
   insideNow: boolean
-  /** Whether *you* have liked them. Never whether they have liked you. */
+  /** Whether *you* have liked them. Never whether they have liked you. Kept for installed builds (SCRUM-1042). */
   youLiked: boolean
+  /** Whether you waved at them here (✓ Waved). One per room, never again (W1). */
+  youWaved: boolean
+  /**
+   * Whether they waved at you here (Wave back). A wave is visible by design
+   * (owner ruling 2026-11-12); a like is not, and is never read for this.
+   */
+  wavedAtYou: boolean
   /**
    * Display-only lines both of you share, as sentences: an IPL team, a
    * this-or-that answer, and — budgeted, Tier B — a language, a home state or
@@ -587,7 +594,7 @@ export async function matchesForEvent(
   const pageIds = page.map((m) => m.userId)
   // A host is never a reader of the room's words, nor of who arrived when (`operatesEvent`).
   const operating = operatesEvent(viewerId, eventId)
-  const [recognised, pseudonyms, answers, operates] = await Promise.all([
+  const [recognised, pseudonyms, answers, operates, waves] = await Promise.all([
     visibleInRoom(viewerId, eventId, pageIds),
     pageIds.length
       ? db.chat_group_members.findMany({
@@ -600,7 +607,22 @@ export async function matchesForEvent(
       ? operating.then((operates) => (operates ? new Map<string, PersonAnswers>() : answersFor(eventId, pageIds, lens)))
       : new Map<string, PersonAnswers>(),
     operating,
+    // The page's waves, both ways (SCRUM-1042): Wave / Wave back / ✓ Waved on the card. Waves only, never a like.
+    pageIds.length
+      ? db.event_waves.findMany({
+          where: {
+            event_id: eventId,
+            OR: [
+              { from_id: viewerId, to_id: { in: pageIds } },
+              { to_id: viewerId, from_id: { in: pageIds } },
+            ],
+          },
+          select: { from_id: true, to_id: true },
+        })
+      : [],
   ])
+  const youWaved = new Set(waves.filter((w) => w.from_id === viewerId).map((w) => w.to_id))
+  const wavedAtYou = new Set(waves.filter((w) => w.to_id === viewerId).map((w) => w.from_id))
   const pseudonymOf = new Map(pseudonyms.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
   const onPage = new Set(pageIds)
   const ranked = rankMatches(
@@ -684,6 +706,9 @@ export async function matchesForEvent(
       sharedEvents: m.sharedEvents,
       sharedPlans: m.sharedPlans,
       youLiked: liked.has(m.userId),
+      youWaved: youWaved.has(m.userId),
+      // Hosts never wave or get waved at (the waves route refuses both), so both are false for a host.
+      wavedAtYou: wavedAtYou.has(m.userId),
       overlaps: card.overlaps,
       sign: card.sign,
       // Attendance facts, so the attendance floor (`roomIsBigEnough`), and only if they show badges.
@@ -813,7 +838,19 @@ export async function likeAtEvent(
     create: { event_id: eventId, liker_id: likerId, liked_id: likedId },
     update: {},
   })
+  return openIfMutual(eventId, likerId, likedId)
+}
 
+/**
+ * The second gesture of a pair at one event opens their anonymous
+ * conversation: `actorId` just liked or waved at `otherId`, and `otherId` had
+ * already waved at or liked them here (SCRUM-1042: an old like counts as a
+ * hidden wave, so a like still waiting is answered by a wave and the other way
+ * round). Called by `likeAtEvent` and by `POST /events/:id/waves`.
+ */
+export async function openIfMutual(eventId: string, actorId: string, otherId: string): Promise<LikeOutcome> {
+  const likerId = actorId
+  const likedId = otherId
   /*
    * Not a match when the pair already have anything between them
    * (`pairIsLinked`: a friendship, any conversation open or closed, any friend
@@ -837,10 +874,18 @@ export async function likeAtEvent(
     const opened = await db.$transaction(async (tx) => {
       await lockPair(tx, likerId, likedId)
       const linked = await pairIsLinked(tx, likerId, likedId)
-      const back = await tx.event_likes.findUnique({
-        where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likedId, liked_id: likerId } },
-        select: { id: true },
-      })
+      const [likedBack, wavedBack] = await Promise.all([
+        tx.event_likes.findUnique({
+          where: { event_id_liker_id_liked_id: { event_id: eventId, liker_id: likedId, liked_id: likerId } },
+          select: { id: true },
+        }),
+        tx.event_waves.findUnique({
+          where: { event_id_from_id_to_id: { event_id: eventId, from_id: likedId, to_id: likerId } },
+          select: { id: true },
+        }),
+      ])
+      // An old like counts as a hidden wave (approval 11): either answers, and neither is ever shown.
+      const back = likedBack ?? wavedBack
       if (!back || linked) return null
 
       /*
@@ -878,8 +923,9 @@ export async function likeAtEvent(
     })
     if (!opened) return { mutual: false }
     const { conversation, pseudonymRows } = opened
+    const byUser = new Map(pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
     /*
-     * Only the EARLIER liker gets the push.
+     * Only the EARLIER liker (or waver) gets the push (approval 7, P-A).
      *
      * The person who just tapped Like is holding the phone and gets the mutual
      * back in this response — notifying them is a notification for something
@@ -888,9 +934,9 @@ export async function likeAtEvent(
      *
      * Fire and forget: a push failure must never fail the like that caused it.
      */
-    notifyMatch(likedId, conversation.id).catch(() => {})
+    // Named by the pseudonym this conversation snapshotted, never a real name, even for somebody who revealed.
+    notifyMatch(likedId, conversation.id, byUser.get(likerId) || "Attendee").catch(() => {})
 
-    const byUser = new Map(pseudonymRows.map((p) => [p.user_id, p.anonymous_name || "Attendee"]))
     return {
       mutual: true,
       conversationId: conversation.id,

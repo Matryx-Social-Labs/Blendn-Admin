@@ -809,12 +809,19 @@ async function removeInvalidPushToken(token: string): Promise<void> {
 /** A mutual like. Sent to the EARLIER liker only — see below. */
 export async function notifyMatch(
   recipientId: string,
-  conversationId: string
+  conversationId: string,
+  pseudonym: string
 ): Promise<boolean> {
+  /*
+   * "You and {pseudonym} both waved" (owner, approval 7 P-A, 2026-11-12). The
+   * room pseudonym the conversation snapshotted and nothing else: never a real
+   * name, a photo or an id, because a lock screen is not an authenticated
+   * surface. The caller passes `pseudonyms[actor]` from `openIfMutual`.
+   */
   return sendPushNotification({
     userId: recipientId,
-    title: "You have a new match",
-    body: "Someone you liked has liked you back.",
+    title: "You both waved",
+    body: `You and ${pseudonym} both waved`,
     data: { type: "match", conversationId },
   })
 }

@@ -647,6 +647,8 @@ export const MatchListResponseSchema = z
         insideNow: z.boolean(),
         /** Whether you liked them. Never whether they liked you. */
         youLiked: z.boolean(),
+        youWaved: z.boolean().describe("You waved at them here (✓ Waved). One wave per person per room, never again."),
+        wavedAtYou: z.boolean().describe("They waved at you here (Wave back). Waves only: a like is never read for this."),
         sharedEvents: z.number().int().describe("Nights you were both at before this one. 0 below the eight-person floor."),
         sharedPlans: z.number().int().describe("Future events you are both going to. 0 below the floor."),
         overlaps: z
@@ -714,8 +716,46 @@ export const WaveRequestSchema = z
   .openapi("WaveRequest")
 
 export const WaveResponseSchema = z
-  .object({ sent: z.literal(true) })
+  .object({
+    sent: z.literal(true),
+    /** Their wave (or an old like of theirs) was waiting: the anonymous conversation just opened. False for a second tap. */
+    mutual: z.boolean(),
+    /** On a mutual only. */
+    conversationId: z.string().optional(),
+    /** On a mutual only: both room pseudonyms, never names (the "You both waved" moment). */
+    pseudonyms: z.object({ you: z.string(), them: z.string() }).optional(),
+  })
   .openapi("WaveResponse")
+
+export const ReceivedWaveSchema = z
+  .object({
+    userId: z.string().describe("Their handle in this room (`rh_…`), never an account id. Wave back, Block and Report take it."),
+    displayName: z.string().describe("The roster's rule: their pseudonym here, or a first name if they chose to be named in this room."),
+    wavedAt: z.string().datetime(),
+    wavedBack: z.boolean().describe("You answered it (your wave back, or a like of yours from before)."),
+  })
+  .openapi("ReceivedWave")
+
+export const ReceivedWavesResponseSchema = z
+  .object({
+    open: z.boolean().describe("False once the room has closed: nothing left to answer, and the list is empty."),
+    total: z.number().int().describe("Every wave you may see here, not just this page."),
+    waves: z.array(ReceivedWaveSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .openapi("ReceivedWavesResponse")
+
+export const WavesWaitingResponseSchema = z
+  .object({
+    rooms: z.array(
+      z.object({
+        eventId: z.string().uuid(),
+        waiting: z.number().int().describe("Waves here you have not answered."),
+        latest: ReceivedWaveSchema,
+      })
+    ),
+  })
+  .openapi("WavesWaitingResponse")
 
 export const MatchPreferencesSchema = z
   .object({

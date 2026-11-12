@@ -26,7 +26,9 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard, putIn
  * like each other off the deck (so the match, its conversation and its
  * pseudonyms are written by the product), the viewer reveals and the other
  * does not, and the other then messages, chats in the room, posts on the
- * board and waves. Then the viewer reads everything.
+ * board and waves. Then the viewer reads everything — the recorded wave's
+ * room list and Banter row included (SCRUM-1042), which a host must never
+ * read a wave from.
  *
  * The other also answers tonight's question (Flow 5 · P-A, lib/tonight.ts):
  * the answer reaches the viewer beside the pseudonym, so the sweep must see
@@ -238,6 +240,7 @@ afterAll(async () => {
   // The routes record product events in a batch; write it before the pool closes, not after the suite has gone.
   await flushProductEvents()
   await db.event_likes.deleteMany({ where: { OR: [{ liker_id: { in: users } }, { liked_id: { in: users } }] } })
+  await db.event_waves.deleteMany({ where: { OR: [{ from_id: { in: users } }, { to_id: { in: users } }] } })
   await db.private_messages.deleteMany({ where: { conversation: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } } })
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.board_posts.deleteMany({ where: { event_id: { in: events } } }).catch(() => undefined)
@@ -323,6 +326,18 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     expect(leaksIn(sheet.text)).toEqual([])
   })
 
+  it("reached the viewer with the other's recorded wave, on the room's list, Banter's row and the deck, by handle beside no identity (SCRUM-1042)", async () => {
+    const list = await call(route("events/[eventId]/waves").GET, `/api/mobile/events/${eventId}/waves`, viewer, { params: { eventId } })
+    expect(list.body.data.waves.map((w: { userId: string }) => w.userId)).toEqual([refs.room[0]])
+    // Answered already: the viewer's like was the answer (an old like is a hidden wave), so Banter has nothing waiting.
+    expect(list.body.data.waves[0].wavedBack).toBe(true)
+    const banter = await call(route("waves").GET, "/api/mobile/waves", viewer)
+    expect(banter.body.data.rooms).toEqual([])
+    const deck = await call(route("events/[eventId]/matches").GET, `/api/mobile/events/${eventId}/matches`, viewer, { params: { eventId } })
+    expect(deck.body.data.matches.find((m: { userId: string }) => m.userId === refs.room[0])?.wavedAtYou).toBe(true)
+    for (const r of [list, banter, deck]) expect(leaksIn(r.text)).toEqual([])
+  })
+
   it("hands the answer and the why-I'm-here to no GET a host who runs the room can make, checked in or not", async () => {
     const org = await db.organisations.create({ data: { display_name: testId("uis-org") } })
     await db.organisation_members.create({ data: { org_id: org.id, user_id: hostId, role: "staff" } })
@@ -336,7 +351,9 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       const path = `/api/mobile/${rel.replace(/\[([^\]]+)\]/g, (_, n: string) => params[n])}`
       const r = await call(route(rel).GET, path, host, { params })
       if (r.status < 300) answered.add(rel)
-      if (r.text.includes(TONIGHT_ANSWER) || r.text.includes(WORK_INTENT)) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
+      // Nor any wave, wave count or wave-derived field (SCRUM-1042: hosts never wave or get waved at).
+      const waveDerived = ['"wavedAt"', '"waiting"', '"wavedAtYou":true', '"youWaved":true'].some((t) => r.text.includes(t))
+      if (r.text.includes(TONIGHT_ANSWER) || r.text.includes(WORK_INTENT) || waveDerived) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
     }
     // The deck and the person sheet answered the host: withheld there, not merely refused.
     expect([...answered]).toEqual(expect.arrayContaining(["events/[eventId]/matches", "users/[userId]"]))

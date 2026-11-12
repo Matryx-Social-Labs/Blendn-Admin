@@ -30,6 +30,7 @@ const mockDb = {
   // duplicate key would silently win, so it is extended here rather than added
   // again above.
   event_likes: { findMany: jest.fn(), groupBy: jest.fn() },
+  event_waves: { findMany: jest.fn(async () => []) },
   chat_group_members: { findMany: jest.fn() },
   categories: { findMany: jest.fn() },
   // Matching v2's display traits and badges (lib/overlaps.ts): none here.

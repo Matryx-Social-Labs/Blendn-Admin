@@ -22,9 +22,34 @@ const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8")
  * appearing on lock screens.
  */
 
+describe("the match push names a room pseudonym and nothing else (approval 7, P-A, 2026-11-12)", () => {
+  /*
+   * The owner's copy is "You and {pseudonym} both waved". The one thing it may
+   * interpolate is the pseudonym the conversation snapshotted -- what the room
+   * already called them -- never a real name, a photo or an id, even for
+   * somebody who revealed. Pinned at the call site, because the leak would
+   * arrive as a different argument.
+   */
+  const push = read("lib/push-notifications.ts")
+  const start = push.indexOf("export async function notifyMatch")
+  const fn = push.slice(start, push.indexOf("\n}\n", start))
+
+  it("interpolates exactly one value, the pseudonym parameter", () => {
+    expect(fn).toContain("body: `You and ${pseudonym} both waved`")
+    expect(fn).toContain('title: "You both waved"')
+    expect(fn.match(/\$\{/g)).toHaveLength(1)
+  })
+
+  it("is handed the snapshotted pseudonym of the one who just tapped, never a name", () => {
+    const src = read("lib/matches.ts")
+    expect(src).toMatch(/notifyMatch\(likedId, conversation\.id, byUser\.get\(likerId\) \|\| "Attendee"\)/)
+    // `byUser` is the pseudonym snapshot the conversation was opened with.
+    expect(src).toMatch(/const byUser = new Map\(pseudonymRows\.map\(\(p\) => \[p\.user_id, p\.anonymous_name \|\| "Attendee"\]\)\)/)
+  })
+})
+
 describe("no notification body carries an identity", () => {
   const bodies = [
-    ["match", notifyMatch],
     ["reveal request", notifyRevealRequest],
     ["reveal", notifyReveal],
   ] as const
@@ -46,9 +71,9 @@ describe("no notification body carries an identity", () => {
     expect(body).not.toContain("pseudonym")
   })
 
-  it("each takes only a recipient and a conversation id", () => {
+  it("each takes only a recipient and a conversation id (the match push also its pseudonym, above)", () => {
     // No name parameter to pass means no name to accidentally interpolate.
-    expect(notifyMatch).toHaveLength(2)
+    expect(notifyMatch).toHaveLength(3)
     expect(notifyRevealRequest).toHaveLength(2)
     expect(notifyReveal).toHaveLength(2)
   })
@@ -73,12 +98,12 @@ describe("the match notification goes to the person who does not know yet", () =
      * gets the mutual in the response, so pushing to them is a notification for
      * something they are already looking at.
      */
-    expect(src).toMatch(/notifyMatch\(likedId, conversation\.id\)/)
+    expect(src).toMatch(/notifyMatch\(likedId, conversation\.id,/)
     expect(src).not.toMatch(/notifyMatch\(likerId/)
   })
 
   it("is fire-and-forget, so a push failure cannot fail the like", () => {
-    expect(src).toMatch(/notifyMatch\([^)]*\)\.catch\(/)
+    expect(src).toMatch(/notifyMatch\(.*\)\.catch\(/)
   })
 
   it("only fires on a mutual, after the conversation exists", () => {

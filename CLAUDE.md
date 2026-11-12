@@ -185,6 +185,7 @@ and therefore in every deployed environment:
 | `blends_one_b` | a Blend's side B is a crew or one person (side A is always a crew) |
 | `ended_friendships_canonical_pair` | a friendship that ended is stored once, `user1_id < user2_id` in the `C` collation, like `friendships` — read by `lib/room-people.ts` for the 24 h an unfriend keeps the pair apart in rooms |
 | `blends_pair_order` | two crews in one order only (`a_crew_id < b_crew_id`, uuid order — no collation), so a pair is one Blend |
+| `event_waves_not_self` | nobody waves at themselves (recorded waves, `lib/waves.ts`) |
 | `board_posts_sub_kind_fits` | a Lobby post's sub-kind fits its kind: an offer of `ride`/`spots`/`ticket`, a search for `ride`/`buddy`/`ticket`, a chat post none |
 | `board_posts_photo_has_status` | a post's photo always has a moderation state (`pending`/`approved`/`rejected`), and a state always has a photo |
 | `board_posts_photo_alt_fits` | alt text needs a photo, and is at most 200 characters |
