@@ -53,6 +53,8 @@ jest.mock("@/lib/conversations", () => ({
 // Friends are left out of the pool. None here: these fixtures are about
 // multi-day check-ins, not about who knows whom.
 jest.mock("@/lib/friends", () => ({ friendIdsOf: jest.fn().mockResolvedValue([]) }))
+// The deck asks whether the viewer runs the event for every page now (its cards' `checkInTime`, SCRUM-1042): an attendee here.
+jest.mock("@/lib/tonight", () => ({ ...jest.requireActual("@/lib/tonight"), operatesEvent: jest.fn().mockResolvedValue(false) }))
 
 import { matchesForEvent } from "@/lib/matches"
 import { resolveUserRef } from "@/lib/room-handle"

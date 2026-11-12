@@ -263,6 +263,18 @@ describe("tonight's answer", () => {
     expect(p.body.data.tonight).toBeUndefined()
   })
 
+  it("carries each person's check-in time on the deck, as the roster does, to an attendee; to its host, none (SCRUM-1042)", async () => {
+    // After the test above, host is staff of the organising org.
+    const d = await deck(b, eventId)
+    const cards = d.body.data.matches as { userId: string; checkInTime: string | null }[]
+    const aRow = await db.event_check_ins.findFirstOrThrow({ where: { event_id: eventId, user_id: a.id }, select: { check_in_time: true } })
+    expect(cards.find((m) => m.userId === handleOfA)?.checkInTime).toBe(aRow.check_in_time!.toISOString())
+    const h = await deck(host, eventId)
+    expect(h.status).toBe(200)
+    expect((h.body.data.matches as { checkInTime: unknown }[]).length).toBeGreaterThan(0)
+    expect((h.body.data.matches as { checkInTime: unknown }[]).every((m) => m.checkInTime === null)).toBe(true)
+  })
+
   it("clears with null or an empty string", async () => {
     const r = await setAnswer(a, eventId, "   ")
     expect(r.status).toBe(200)
