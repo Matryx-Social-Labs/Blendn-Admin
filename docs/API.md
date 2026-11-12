@@ -2892,7 +2892,7 @@ at an event. `lib/crews/`.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/crews` | My crews `{ crews, invites, invitesPagination }` — open invites waiting for me that an accept would take, by the inviting friend's first name, a page at a time (`?limit=`, `?cursor=`; see *Lists are paged*) |
-| POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous? }` → 201 `{ crewId, chatGroupId, invited }` |
+| POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous?, emblemSeed? }` → 201 `{ crewId, chatGroupId, invited }`. `emblemSeed` is the emblem's look as the app's Shuffle left it, 16 lowercase hex characters (`^[0-9a-f]{16}$`, else 400); omitted, the server draws one. It never changes after: PATCH has no such field |
 | GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
 | PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
 | POST | `/crews/:crewId/invites` | Any member invites their own friends `{ userIds }` → `{ invited }` |

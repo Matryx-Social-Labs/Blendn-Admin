@@ -119,6 +119,12 @@ export const createCrewSchema = z.object({
   inviteUserIds: z.array(z.string().min(1).max(64)).max(CREW.MAX_MEMBERS - 1).default([]),
   revealConsent,
   keepMeAnonymous: z.boolean().default(false),
+  /**
+   * The emblem's look, as the app's Shuffle left it (SCRUM-1053): what
+   * `randomBytes(8)` would have drawn, so a crew made without one looks no
+   * different. Fixed from here on: `updateCrewSchema` has no such field.
+   */
+  emblemSeed: z.string().regex(/^[0-9a-f]{16}$/).optional(),
 })
 
 export const updateCrewSchema = z
@@ -337,7 +343,7 @@ export async function createCrew(
         intent: (input.intent ?? []) as connection_intent[],
         tags: input.tags ?? [],
         open_to_solo: input.openToSolo ?? false,
-        emblem_seed: randomBytes(8).toString("hex"),
+        emblem_seed: input.emblemSeed ?? randomBytes(8).toString("hex"),
         created_by: creatorId,
         members: {
           create: { user_id: creatorId, role: "owner", consented_reveal_at: now, keep_me_anonymous: input.keepMeAnonymous },

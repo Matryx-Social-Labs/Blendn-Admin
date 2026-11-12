@@ -149,6 +149,11 @@ registry.registerPath({
         inviteUserIds: z.array(z.string()).max(11).optional(),
         revealConsent: Consent,
         keepMeAnonymous: z.boolean().optional().describe("\"Keep me anonymous even when my crew reveals\""),
+        emblemSeed: z
+          .string()
+          .regex(/^[0-9a-f]{16}$/)
+          .optional()
+          .describe("The emblem's look as Shuffle left it: 16 lowercase hex characters, or 400. Omitted, the server draws one. Fixed once made: no edit changes it"),
       })
     ),
   },

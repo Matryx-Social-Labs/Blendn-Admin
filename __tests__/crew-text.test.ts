@@ -103,6 +103,16 @@ describe("a crew’s shape (CR-U01)", () => {
     expect(createCrewSchema.safeParse({ ...base, name: "Lot", tags: ["anything we like"] }).success).toBe(false)
   })
 
+  it("an emblem seed is optional, and when sent is exactly 16 lowercase hex characters (Shuffle at Make)", () => {
+    const ok = (emblemSeed: unknown) => createCrewSchema.safeParse({ ...base, name: "Lot", emblemSeed }).success
+    expect(createCrewSchema.safeParse({ ...base, name: "Lot" }).success).toBe(true)
+    expect(ok("0123456789abcdef")).toBe(true)
+    expect(createCrewSchema.parse({ ...base, name: "Lot", emblemSeed: "0123456789abcdef" }).emblemSeed).toBe("0123456789abcdef")
+    for (const bad of ["0123456789ABCDEF", "0123456789abcde", "0123456789abcdef0", "0123456789abcdeg", " 0123456789abcde", "", 12, null]) {
+      expect(ok(bad)).toBe(false)
+    }
+  })
+
   it("joining needs the reveal consent, said in so many words", () => {
     expect(createCrewSchema.safeParse({ name: "Lot" }).success).toBe(false)
     expect(createCrewSchema.safeParse({ name: "Lot", revealConsent: false }).success).toBe(false)
