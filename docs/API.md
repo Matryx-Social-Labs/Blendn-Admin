@@ -448,6 +448,17 @@ an opaque, url-safe string. Field names and shapes did not change.
   picked) for somebody you may see (SCRUM-858), `interests: []` (the key stays)
   when you may not (SCRUM-827), and `stats.savedCount` on your own profile: how
   many events your default (upcoming) saved list holds (SCRUM-825).
+- `GET /users/:userId/shared-events` (SCRUM-1042) is "You've both been to": ended
+  events (not venue days) you were both checked in to, newest first,
+  `{ events: [{ id, title, startTime, timezone, venueName, coverImageUrl }],
+  pagination: { limit, hasMore, nextCursor, totalCount } }`, `?limit=` (default
+  20, at most 100) and `?cursor=`. Only events where they were **not a
+  pseudonym to you**: they revealed there, they revealed to you in the
+  conversation that event's mutual like opened, or they let friends recognise
+  them in rooms and you are friends. Never an event your organisation ran or
+  whose venue it owns. The ref is gated as `GET /users/:userId` gates the name:
+  one that does not name them to you (or only by their pending request) answers
+  an empty list, so a list never names a pseudonym. A block either way is a 404.
 - **Echoes stay handles.** `GET /users/:userId`, `GET /profiles/:userId` (`id`
   and `profile.id`) and `POST /message-requests` (`recipientId`, `recipient.id`)
   return the ref you sent — a handle in, the same handle out — except for your
