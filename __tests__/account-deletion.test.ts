@@ -37,6 +37,8 @@ const mockDb = {
   friend_invites: { deleteMany: jest.fn() },
   // Blendn+ (step 11): who brought whom, and their entitlements (D-17).
   referrals: { deleteMany: jest.fn() },
+  event_waves: { deleteMany: jest.fn() },
+  event_likes: { deleteMany: jest.fn() },
   entitlements: { deleteMany: jest.fn() },
   // Their crews: locked and left INSIDE the transaction (raw SQL, below), settled after.
   crew_invites: { deleteMany: jest.fn() },
