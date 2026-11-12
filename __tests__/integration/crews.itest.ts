@@ -260,6 +260,43 @@ describe("the database holds the shape", () => {
   })
 })
 
+describe("the emblem's look: chosen with Shuffle at Make, then fixed (SCRUM-1053)", () => {
+  const stored = async (crewId: string) => (await db.crews.findUniqueOrThrow({ where: { id: crewId }, select: { emblem_seed: true } })).emblem_seed
+
+  it("stores the seed the app shuffled to, and draws a random one when none is sent", async () => {
+    const owner = await person("seed-owner")
+    const chosen = await api.create(owner, { name: "Shuffled Lot", emblemSeed: "00ff00ff00ff00ff" })
+    expect(chosen.status).toBe(201)
+    expect(await stored(chosen.body.data.crewId)).toBe("00ff00ff00ff00ff")
+    expect((await api.detail(owner, chosen.body.data.crewId)).body.data.emblemSeed).toBe("00ff00ff00ff00ff")
+
+    const drawn = await api.create(owner, { name: "Drawn Lot" })
+    expect(drawn.status).toBe(201)
+    expect(await stored(drawn.body.data.crewId)).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it("refuses a seed that is not 16 lowercase hex characters, and writes nothing", async () => {
+    const owner = await person("seed-bad")
+    for (const emblemSeed of ["00FF00FF00FF00FF", "00ff", "00ff00ff00ff00ff00", "../../etc/passwd", 7]) {
+      expect((await api.create(owner, { name: "Bad seed", emblemSeed })).status).toBe(400)
+    }
+    expect(await db.crews.count({ where: { created_by: owner.id } })).toBe(0)
+  })
+
+  it("never changes after Make: an edit carrying a seed leaves the stored one alone", async () => {
+    const owner = await person("seed-fixed")
+    const { body } = await api.create(owner, { name: "Fixed Lot", emblemSeed: "1234567890abcdef" })
+    const crewId = body.data.crewId
+    const edit = await call(crewRoute.PATCH, `/api/mobile/crews/${crewId}`, owner, {
+      method: "PATCH",
+      body: { bio: "Edited", emblemSeed: "fedcba0987654321" },
+      params: { crewId },
+    })
+    expect(edit.status).toBe(200)
+    expect(await stored(crewId)).toBe("1234567890abcdef")
+  })
+})
+
 describe("made from friends, 2–12, consent on joining (CR-I03, CR-U01/U02)", () => {
   it("refuses a non-friend invitee — the same 404 whoever they are — and writes nothing", async () => {
     const owner = await person("nf-owner")
