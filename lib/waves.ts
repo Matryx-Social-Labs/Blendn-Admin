@@ -4,9 +4,9 @@ import { chatWindowState } from "@/lib/chat-window"
 import { firstName } from "@/lib/conversation-identity"
 import { closedPairKeys } from "@/lib/conversations"
 import { db } from "@/lib/db"
-import { logger } from "@/lib/logger"
 import { createdBefore, decodeKeyset, keysetPage, NEWEST_FIRST } from "@/lib/pagination"
 import { pseudonymsForEvent } from "@/lib/anonymous-names"
+import { logCapHit } from "@/lib/rate-limit"
 import { hit } from "@/lib/rate-limit-store"
 import { roomHandle } from "@/lib/room-handle"
 import { notHostBannedFrom } from "@/lib/room-kind"
@@ -104,11 +104,11 @@ export async function waveCapFor(fromId: string, eventId: string, now: Date = ne
   return room === null ? null : { cap: "room_hour", retryAfter: room }
 }
 
-/** `abuse.cap_hit`, once per user per day (anti-spam § What operators see). Never fails the refusal. */
+/** `abuse.cap_hit` (`logCapHit`), once per user per day: the cap is a DB count, so the once is a store key. Never fails the refusal. */
 async function logDailyCapHit(userId: string, cap: number): Promise<void> {
   try {
     const { count } = await hit(`abuse-log:wave:${userId}`, DAY_MS)
-    if (count === 1) logger.warn("abuse.cap_hit", { userId, gesture: "wave", cap })
+    if (count === 1) logCapHit(userId, "wave", cap)
   } catch {
     // A log line is not worth a failed request.
   }
