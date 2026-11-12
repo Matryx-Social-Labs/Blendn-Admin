@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authUser) return unauthorizedResponse("Authentication required")
     const limited =
       (await rateLimit(request, userLimit("safety", "report-room-member", authUser.userId))) ??
-      (await rateLimit(request, userLimit("reportDay", "report-room-member-day", authUser.userId)))
+      (await rateLimit(request, userLimit("reportDay", "report-day", authUser.userId)))
     if (limited) return limited
 
     const parsed = reportRoomMemberSchema.safeParse(await readJson(request))

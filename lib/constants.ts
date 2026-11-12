@@ -152,6 +152,20 @@ export const SPONSORSHIP = {
  * want to argue with, and a number buried in a route is a number nobody
  * revisits.
  */
+/** Message requests: the caps on the one channel a stranger never opted into (SCRUM-1050). */
+export const MESSAGE_REQUEST = {
+  /** An account younger than this is new, and gets `newAccountRequestDay` (3 a day). */
+  NEW_ACCOUNT_MS: 24 * 60 * 60 * 1000,
+  /**
+   * Unanswered requests one person may have out at once. "Unanswered" is as the
+   * sender sees it: a decline and a block are never told, so they hold a slot
+   * as a pending request does; only an accept, or age, frees one.
+   */
+  MAX_UNANSWERED: 10,
+  /** How long an unanswered request holds its slot. A week unanswered is ignored. */
+  UNANSWERED_WINDOW_MS: 7 * 24 * 60 * 60 * 1000,
+} as const
+
 export const BOARD = {
   /**
    * Unanswered requests one person may have out at once.

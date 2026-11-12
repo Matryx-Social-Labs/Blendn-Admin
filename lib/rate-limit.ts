@@ -6,11 +6,25 @@ import {
 } from "@/lib/constants"
 import { ErrorCode } from "@/lib/api-response"
 import { hit } from "@/lib/rate-limit-store"
+import { logger } from "@/lib/logger"
 
 interface RateLimitConfig {
   windowMs: number
   maxRequests: number
   keyGenerator?: (req: NextRequest) => string
+  /** Set by `userLimit` on a daily policy: the first refusal of a window is logged (`logCapHit`). */
+  capHit?: { userId: string; gesture: string }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * One structured line when somebody reaches a person-to-person cap (SCRUM-1050),
+ * for operators searching Railway logs and Sentry. The user id, the gesture and
+ * the cap: never the content, never the other person.
+ */
+export function logCapHit(userId: string, gesture: string, cap: number) {
+  logger.warn("abuse.cap_hit", { userId, gesture, cap })
 }
 
 const DEFAULT_KEY_GENERATOR = (req: NextRequest): string => {
@@ -34,7 +48,16 @@ export async function rateLimit(
 
   const { count, resetAt } = await hit(key, windowMs)
   if (count <= maxRequests) return null
+  // Once a window, not on every refused retry.
+  if (config.capHit && count === maxRequests + 1) logCapHit(config.capHit.userId, config.capHit.gesture, maxRequests)
+  return rateLimitedResponse(maxRequests, resetAt)
+}
 
+/**
+ * The 429 every limit answers with, for a cap counted somewhere other than
+ * `hit` (a database count): same body, same headers.
+ */
+export function rateLimitedResponse(maxRequests: number, resetAt: number): NextResponse {
   const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
   return NextResponse.json(
     /*
@@ -208,6 +231,10 @@ const USER_POLICIES = {
    * minute limit stops a burst; twenty a day is more than anyone asks to meet.
    */
   requestDay: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 20 },
+  /** Message requests from an account under a day old (SCRUM-1050): new accounts are the spam risk. */
+  newAccountRequestDay: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 3 },
+  /** Crew likes, per day (SCRUM-1050). One per pair per occurrence holds; this bounds the spray. */
+  crewLikeDay: { windowMs: 24 * 60 * 60 * 1000, maxRequests: 30 },
   /**
    * Reads a watcher could poll for a change: the venue page's live count. A
    * phone refreshes it every half minute; sixty a minute is a script.
@@ -235,6 +262,7 @@ export function userLimit(
   return {
     ...USER_POLICIES[policy],
     keyGenerator: () => `${scope}:${userId}`,
+    ...(USER_POLICIES[policy].windowMs >= DAY_MS && { capHit: { userId, gesture: scope } }),
   }
 }
 
@@ -260,5 +288,6 @@ export async function overUserLimit(
 ): Promise<boolean> {
   const { windowMs, maxRequests } = USER_POLICIES[policy]
   const { count } = await hit(`rl:${scope}:${userId}`, windowMs)
+  if (windowMs >= DAY_MS && count === maxRequests + 1) logCapHit(userId, scope, maxRequests)
   return count > maxRequests
 }

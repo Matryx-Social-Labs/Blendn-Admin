@@ -34,7 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const limited =
       (await rateLimit(request, userLimit("safety", "report-board", user.userId))) ??
-      (await rateLimit(request, userLimit("reportDay", "report-board-day", user.userId)))
+      (await rateLimit(request, userLimit("reportDay", "report-day", user.userId)))
     if (limited) return limited
 
     const { requestId } = await params

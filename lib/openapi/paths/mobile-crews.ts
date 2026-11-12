@@ -354,7 +354,8 @@ registry.registerPath({
     "or a guardrail about the other side is the same 404. If they liked you back, `blend` is the one Mix room it made — two likes at the " +
     "same instant still make one; a Mix between you that has closed answers `blend: null`. Liking twice is liking once. Nothing anywhere " +
     "says who liked first. The Mix's room is the people checked in on either side at that moment (and the person): somebody who arrives " +
-    "later is not in it.",
+    "later is not in it. 30 crew likes a day per person, this door and a like of a person with `asCrewId` together: 429 " +
+    "`RATE_LIMITED` with `retryAfter`, before anything is looked at.",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid(), crewId: z.string().uuid() }),
