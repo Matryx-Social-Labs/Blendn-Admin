@@ -1143,7 +1143,15 @@ one per open room with an unanswered wave, `latest` shaped as above. Never a roo
 you run or host or were banned from. At most 20 rooms.
 
 Deck cards (`GET .../matches`) carry `youWaved` and `wavedAtYou` (waves only,
-never a like) for Wave / Wave back / ✓ Waved.
+never a like) for Wave / Wave back / ✓ Waved, and `conversationId` for Say hi:
+the conversation your mutual here opened, so the card reaches it after a
+restart. The person card (`GET /users/:handle`, an event room handle) carries the
+same as `wave: { conversationId }`, absent when there is none. Only when a wave
+went either way (a match from likes alone is no "You both waved"), only the match
+conversation that came from this room and is still open (never a message
+request's, a friend's, a Lobby ask's or another room's, which would say which
+card the pair already know), and never to anyone who runs or hosts the event. A
+conversation id, never a person's.
 
 `PUT .../preferences` takes `{ intent?: ("dating"|"networking"|"friendship"|"just_here")[],
 revealed?: boolean, remember?: boolean }`. Per event, because both change —

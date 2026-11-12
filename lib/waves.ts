@@ -123,6 +123,54 @@ export async function hasWaved(eventId: string, fromId: string, toId: string): P
   return row !== null
 }
 
+export interface WaveStanding {
+  youWaved: boolean
+  wavedAtYou: boolean
+  /**
+   * The conversation a mutual here opened, so Say hi reaches it after a restart. Its id only (the same one the
+   * mutual's response and `room:match` carried), never a person's. Null without a wave either way: a match from
+   * likes alone is no "You both waved". Never a conversation from elsewhere (a message request, a friend, a board
+   * ask, another room), which would say which card the pair already know; never a closed one.
+   */
+  conversationId: string | null
+}
+
+/**
+ * Where `viewerId` stands by wave with each of `otherIds` in this room: the deck's cards and the person card. Two
+ * set-based reads at once, whatever the page. The caller keeps hosts out (they never wave or get waved at).
+ */
+export async function waveStandings(eventId: string, viewerId: string, otherIds: readonly string[]): Promise<Map<string, WaveStanding>> {
+  const standings = new Map<string, WaveStanding>()
+  if (otherIds.length === 0) return standings
+  const ids = [...otherIds]
+  const [waves, conversations] = await Promise.all([
+    db.event_waves.findMany({
+      where: { event_id: eventId, OR: [{ from_id: viewerId, to_id: { in: ids } }, { to_id: viewerId, from_id: { in: ids } }] },
+      select: { from_id: true, to_id: true },
+    }),
+    // A match opened here, and only that: `openIfMutual` is the one writer with this event and no board ask.
+    db.private_conversations.findMany({
+      where: {
+        origin_event_id: eventId,
+        origin_board_request_id: null,
+        origin_friendship: false,
+        closed_at: null,
+        OR: [{ user1_id: viewerId, user2_id: { in: ids } }, { user2_id: viewerId, user1_id: { in: ids } }],
+      },
+      select: { id: true, user1_id: true, user2_id: true },
+    }),
+  ])
+  const youWaved = new Set(waves.filter((w) => w.from_id === viewerId).map((w) => w.to_id))
+  const wavedAtYou = new Set(waves.filter((w) => w.to_id === viewerId).map((w) => w.from_id))
+  const conversationWith = new Map(conversations.map((c) => [c.user1_id === viewerId ? c.user2_id : c.user1_id, c.id]))
+  for (const id of ids) {
+    const standing = { youWaved: youWaved.has(id), wavedAtYou: wavedAtYou.has(id) }
+    const waved = standing.youWaved || standing.wavedAtYou
+    standings.set(id, { ...standing, conversationId: waved ? (conversationWith.get(id) ?? null) : null })
+  }
+  return standings
+}
+
 export type RecordOutcome = { recorded: true } | { recorded: false; capped: WaveCap | null }
 
 /**

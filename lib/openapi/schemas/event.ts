@@ -649,6 +649,11 @@ export const MatchListResponseSchema = z
         youLiked: z.boolean(),
         youWaved: z.boolean().describe("You waved at them here (✓ Waved). One wave per person per room, never again."),
         wavedAtYou: z.boolean().describe("They waved at you here (Wave back). Waves only: a like is never read for this."),
+        conversationId: z
+          .string()
+          .uuid()
+          .nullable()
+          .describe("The conversation your mutual here opened (Say hi), after a restart too. Null without a wave either way (a match from likes alone), for a conversation from anywhere else or one that was closed, and on every card when you run or host the event."),
         sharedEvents: z.number().int().describe("Nights you were both at before this one. 0 below the eight-person floor."),
         sharedPlans: z.number().int().describe("Future events you are both going to. 0 below the floor."),
         overlaps: z
