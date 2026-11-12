@@ -53,6 +53,8 @@ const mockCap = jest.fn()
 const mockRoomOpen = jest.fn()
 jest.mock("@/lib/waves", () => ({
   hasWaved: async (e: string, f: string, t: string) => waves.has(`${e}|${f}|${t}`),
+  // The viewer's list rule is the integration suite's; here a stored wave is a visible one.
+  hasVisibleWaveFrom: async (viewer: string, e: string, from: string) => waves.has(`${e}|${from}|${viewer}`),
   recordWave: async (e: string, f: string, t: string) => {
     const k = `${e}|${f}|${t}`
     if (waves.has(k)) return { recorded: false, capped: null }
@@ -406,11 +408,15 @@ describe("a wave back may be sent until the room closes, even if either has left
     expect((await res.json()).errorCode).toBe("NOT_CHECKED_IN")
   })
 
-  it("a block still beats it, as 'not here'", async () => {
+  it("a block still beats it, answered to a sender who left exactly as 'no wave to answer'", async () => {
     attendance([], [ME, THEM])
     mockBlocked.mockResolvedValue(true)
-    const res = await wave()
-    expect((await res.json()).errorCode).toBe("RECIPIENT_NOT_HERE")
+    const blocked = await wave()
+    waves.clear()
+    mockBlocked.mockResolvedValue(false)
+    const nothingToAnswer = await wave()
+    expect(blocked.status).toBe(403)
+    expect(await blocked.json()).toEqual(await nothingToAnswer.json())
   })
 })
 

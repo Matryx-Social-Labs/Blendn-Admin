@@ -25,7 +25,7 @@ import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
 import { openIfMutual } from "@/lib/matches"
 import { announceRoomMatch } from "@/lib/room-match"
 import { operatesEvent } from "@/lib/tonight"
-import { hasWaved, receivedWaves, recordWave, roomIsOpen, waveCapFor, type WaveCap } from "@/lib/waves"
+import { hasVisibleWaveFrom, hasWaved, receivedWaves, recordWave, roomIsOpen, waveCapFor, type WaveCap } from "@/lib/waves"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { visibleInRoom } from "@/lib/identity"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -64,6 +64,8 @@ const waveable = { kind: "attendee" as const, user: { suspended_at: null, ...LIS
  * - **Not here, blocked either way, banned, unmatched, a friend, a host** all
  *   read the same 403 `RECIPIENT_NOT_HERE`: a distinct answer is a way to
  *   learn who blocked you, and one for a closed pair is a rejection notice.
+ *   For a sender who has left, all of those AND "nobody waved at you" read as
+ *   the one 403 `NOT_CHECKED_IN`.
  *
  * The socket ping (`room:wave`) is the live half; the received list
  * (`GET` here, `GET /waves` for Banter) is the half that survives the
@@ -120,13 +122,21 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const capped = await waveCapFor(fromUserId, eventId)
     if (capped) return capResponse(capped)
 
+    /*
+     * Inside now, a refused recipient is "not here". Left, EVERY refusal from
+     * here on is the one "check in" answer, byte for byte -- never waved at
+     * you, hidden, blocked either way, banned, a friend, a host -- so leaving
+     * and waving cannot ask who waved at you (security review, MEDIUM).
+     */
     const notHere = () =>
-      errorResponse("They’re not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
+      insideNow
+        ? errorResponse("They’re not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
+        : notCheckedIn()
     if (!toUserId) return notHere()
 
-    // A wave back: they waved at you here. You saw it on your list, so this reads nothing you were not shown.
-    const answering = await hasWaved(eventId, toUserId, fromUserId)
-    if (!answering && !insideNow) return notCheckedIn()
+    // A wave back: a wave from them that YOUR list shows (`hasVisibleWaveFrom`), so it reads nothing you were not shown.
+    const answering = await hasVisibleWaveFrom(fromUserId, eventId, toUserId)
+    if (!answering && !insideNow) return notHere()
 
     const theirs = await db.event_check_ins.findFirst({
       where: answering

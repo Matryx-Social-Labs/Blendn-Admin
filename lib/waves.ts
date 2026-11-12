@@ -194,6 +194,23 @@ function visibleWhere(viewerId: string, eventId: string, hidden: string[]): Pris
   }
 }
 
+/**
+ * Did `fromId` wave at `viewerId` here, as the viewer's own list would show it
+ * (`visibleWhere`)? This, never `hasWaved`, decides whether a wave is a wave
+ * back: a wave from somebody hidden, blocked either way, banned or a friend is
+ * not one the viewer was shown, so it must open nothing either -- otherwise
+ * "may I answer?" becomes a way to ask whether a hidden person waved.
+ */
+export async function hasVisibleWaveFrom(viewerId: string, eventId: string, fromId: string): Promise<boolean> {
+  const hidden = await hiddenFrom(viewerId)
+  if (hidden.includes(fromId)) return false
+  const row = await db.event_waves.findFirst({
+    where: { AND: [visibleWhere(viewerId, eventId, hidden), { from_id: fromId }] },
+    select: { id: true },
+  })
+  return row !== null
+}
+
 export interface ReceivedWave {
   /** Their handle in this room (`rh_…`), never the account id: Wave back, Block and Report take it. */
   userId: string

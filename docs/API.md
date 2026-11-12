@@ -1121,7 +1121,11 @@ anonymous conversation.
 - **One answer for every recipient refusal:** not here, hidden from the roster,
   suspended, banned from the room, blocked either way, a pair that left each
   other, a friend, or a host — `403 RECIPIENT_NOT_HERE`. Your side: not checked
-  in, staff, a host, or the room closed — `403 NOT_CHECKED_IN`. A new wave at the
+  in, staff, a host, or the room closed — `403 NOT_CHECKED_IN`. **A sender who
+  has left** gets that same `403 NOT_CHECKED_IN` for every refusal, including
+  "nobody you can see waved at you": a wave back counts only a wave your own
+  list shows, so leaving and waving cannot ask whether a hidden or blocked
+  person waved at you. A new wave at the
   same person within 10 minutes in another room is `429 WAVE_TOO_SOON` (a wave
   back is never held by it).
 

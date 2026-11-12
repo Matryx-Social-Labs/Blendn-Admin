@@ -271,6 +271,35 @@ describe("a received wave can be answered until the room closes, even after leav
   })
 })
 
+describe("a sender who left learns nothing about who waved at them (security review, MEDIUM)", () => {
+  it("answers one refusal, byte for byte, whether they never waved, are hidden, blocked either way, banned or a friend; control: a visible wave is answered", async () => {
+    const ana = await person("rw-o-a")
+    const [never, hiddenSender, iBlocked, blockedMe, banned, visible] = [
+      await person("rw-o-n"),
+      await person("rw-o-h"),
+      await person("rw-o-ib"),
+      await person("rw-o-bm"),
+      await person("rw-o-ba"),
+      await person("rw-o-v"),
+    ]
+    for (const p of [hiddenSender, iBlocked, blockedMe, banned, visible]) expect((await wave(p, ana)).status).toBe(200)
+    await db.profiles.update({ where: { id: hiddenSender.id }, data: { show_online: false } })
+    await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: iBlocked.id } })
+    await db.blocked_users.create({ data: { blocker_id: blockedMe.id, blocked_id: ana.id } })
+    await db.chat_group_members.updateMany({ where: { chat_group_id: groupId, user_id: banned.id }, data: { status: "banned", banned_by: users[0] } })
+    await leave(ana)
+
+    const refusal = await wave(ana, never)
+    expect(refusal.status).toBe(403)
+    for (const p of [hiddenSender, iBlocked, blockedMe, banned]) expect(await wave(ana, p)).toEqual(refusal)
+    for (const p of [hiddenSender, iBlocked, blockedMe, banned]) expect(await rowsBetween(ana, p)).toBe(0)
+
+    const answered = await wave(ana, visible)
+    expect(answered.status).toBe(200)
+    expect(await rowsBetween(ana, visible)).toBe(1)
+  })
+})
+
 describe("who the received list hides", () => {
   it("a block either way hides the wave from the recipient's list, and Banter's", async () => {
     const ana = await person("rw-b-a")
