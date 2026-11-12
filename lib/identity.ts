@@ -320,7 +320,7 @@ export async function userIdFromRefIfIdentified(viewerId: string, ref: string): 
  * since; and any membership, a suspended organisation's included.
  * `roomIdentity` asks the same of a room's viewers in one read.
  */
-function hostSideOf(userId: string): Prisma.eventsWhereInput {
+export function hostSideOf(userId: string): Prisma.eventsWhereInput {
   const member = { members: { some: { user_id: userId } } }
   return { OR: [{ organizer_org: { is: member } }, { venue: { is: { owner_org: { is: member } } } }] }
 }
