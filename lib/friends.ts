@@ -474,6 +474,8 @@ async function befriendIn(tx: Prisma.TransactionClient, a: string, b: string): P
     const [user1_id, user2_id] = conversationPair(a, b)
     await tx.ended_friendships.deleteMany({ where: { user1_id, user2_id } })
     await tx.event_likes.deleteMany({ where: { OR: [{ liker_id: a, liked_id: b }, { liker_id: b, liked_id: a }] } })
+    // Waves too (SCRUM-1042): a friend never sits on your "waved at you" list, and an unfriend resurrects nothing.
+    await tx.event_waves.deleteMany({ where: { OR: [{ from_id: a, to_id: b }, { from_id: b, to_id: a }] } })
   }
   return connectable
 }
@@ -583,6 +585,7 @@ export async function releaseHeldRequests(userIds: readonly string[]): Promise<v
       await tx.friendships.createMany({ data: mutual.map(([user1_id, user2_id]) => ({ user1_id, user2_id })), skipDuplicates: true })
       // Likes between friends are inert for good (see `befriendIn`).
       await tx.event_likes.deleteMany({ where: { OR: mutual.flatMap(([a, b]) => [{ liker_id: a, liked_id: b }, { liker_id: b, liked_id: a }]) } })
+      await tx.event_waves.deleteMany({ where: { OR: mutual.flatMap(([a, b]) => [{ from_id: a, to_id: b }, { from_id: b, to_id: a }]) } })
       await tx.friend_requests.deleteMany({ where: { OR: mutual.map(([a, b]) => eitherWay(a, b)) } })
     }
     const mutualKeys = new Set(mutual.map((p) => p.join("|")))

@@ -1084,6 +1084,63 @@ own `userId` — and returns
 like opens the conversation directly: a message request exists to establish that
 both people agreed to talk, and two likes are exactly that.
 
+**Likes are kept for installed builds, and stay hidden (SCRUM-1042).** Wave
+replaces Like for people (owner ruling 2026-11-12). Until the client that has no
+Like ships, `POST .../likes` keeps working exactly as it did: it writes a hidden
+`event_likes` row, never a visible wave, because the build that sent it promised
+the like was secret. A like and a wave answer each other: a like at somebody who
+waved at you, or a wave at somebody who liked you, opens the conversation as two
+likes do. A like is never listed, never sets `wavedAtYou`, and never lets anyone
+answer after leaving. Cards keep `youLiked` for those builds.
+
+### Waves (recorded, SCRUM-1042)
+
+One person-to-person gesture: **Wave**. Recorded, one per person per room, and
+visible to the person waved at. Two waves (or a wave and an old like) open the
+anonymous conversation.
+
+`POST /events/:eventId/waves` takes `{ "toUserId": "<this event's room handle>" }`.
+- **Answers** `{ sent: true, mutual: false }`, or on a mutual
+  `{ sent: true, mutual: true, conversationId, pseudonyms: { you, them } }`.
+  A second tap at the same person is the same `{ sent: true, mutual: false }`
+  and stores and emits nothing: **no "Wave again"**, ever, in that room.
+- **A new wave** needs both of you checked in now. **A wave back** (they waved at
+  you here) may be sent until the room closes (`chatWindowState`: the event's end
+  plus its window, or a venue day's reset), even if either of you has left.
+- **One-way** sends `room:wave` to them. **Mutual** sends `room:match` to both
+  instead, and the match push to the earlier waver only. **No push for a single
+  wave.**
+- **Limits, read before anything about the recipient** (so a 429 says nothing
+  about them): 20 per room per hour, 60 a day; an account under 24 h old 5 per
+  room per hour and 15 a day; once 20 of your waves in the last 24 h are
+  unanswered, 5 per room per hour until some are answered or age out. Counted
+  from stored waves, in the database, so they hold across instances and through
+  a Redis outage, and a refused wave never counts. `429 RATE_LIMITED` with
+  `retryAfter`. Reaching the daily limit logs `abuse.cap_hit {userId, gesture,
+  cap}` once per user per day.
+- **One answer for every recipient refusal:** not here, hidden from the roster,
+  suspended, banned from the room, blocked either way, a pair that left each
+  other, a friend, or a host — `403 RECIPIENT_NOT_HERE`. Your side: not checked
+  in, staff, a host, or the room closed — `403 NOT_CHECKED_IN`. A new wave at the
+  same person within 10 minutes in another room is `429 WAVE_TOO_SOON` (a wave
+  back is never held by it).
+
+`GET /events/:eventId/waves?cursor=` — who waved at you here, newest first, 20 a
+page: `{ open, total, waves: [{ userId, displayName, wavedAt, wavedBack }], nextCursor }`.
+`userId` is their room handle (Wave back, Block and Report take it) and
+`displayName` the roster's name; no id, no photo. Hidden: blocked either way, a
+pair that left each other, friends, anybody you reported, suspended, hidden from
+the roster, banned from the room. `wavedBack` is true once you answered (a wave
+back, or a like of yours from before). After the room closes: `open: false`, an
+empty list. A host or staff: `403 NOT_CHECKED_IN`.
+
+`GET /waves` — Banter's pinned rows: `{ rooms: [{ eventId, waiting, latest }] }`,
+one per open room with an unanswered wave, `latest` shaped as above. Never a room
+you run or host or were banned from. At most 20 rooms.
+
+Deck cards (`GET .../matches`) carry `youWaved` and `wavedAtYou` (waves only,
+never a like) for Wave / Wave back / ✓ Waved.
+
 `PUT .../preferences` takes `{ intent?: ("dating"|"networking"|"friendship"|"just_here")[],
 revealed?: boolean, remember?: boolean }`. Per event, because both change —
 someone open to dating on a Friday is often only there for the talk on Tuesday.
@@ -2585,11 +2642,13 @@ with `{ userId }`.
 
 ### Notifications from a match
 
-Three, and **none of them carries a name — not even a pseudonym.**
+Three. **None carries a name.** The match push carries the room pseudonym and
+nothing else (owner, approval 7 P-A, 2026-11-12); the two reveal pushes carry
+not even that.
 
 | Moment | Body |
 |---|---|
-| Mutual like | "Someone you liked has liked you back." |
+| Mutual wave (or like) | Title "You both waved", body "You and {pseudonym} both waved" — the pseudonym the conversation snapshotted, never a real name, even for somebody who revealed |
 | Reveal requested | "Someone you matched with wants to see who you are." |
 | They revealed | "Someone you matched with showed you who they are." |
 
@@ -2599,8 +2658,8 @@ carried a name would also have to branch on reveal state to stay correct, and
 the branch that leaks is the one that ships. Each carries `conversationId` in
 `data` so the app can deep-link; identity lives in the app, behind auth.
 
-The match notification goes to the **earlier** liker only. The person who just
-tapped Like is holding the phone and gets the mutual in the response.
+The match notification goes to the **earlier** waver (or liker) only. The person
+who just tapped is holding the phone and gets the mutual in the response.
 
 ### Blocking
 

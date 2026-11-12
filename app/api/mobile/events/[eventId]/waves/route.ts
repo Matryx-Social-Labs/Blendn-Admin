@@ -21,7 +21,11 @@ import { rateLimit, userLimit } from "@/lib/rate-limit"
 import { hit } from "@/lib/rate-limit-store"
 import { emitRoomWave } from "@/lib/socket-server"
 import { roomMemberFromRef } from "@/lib/room-handle"
-import { knownToEachOther } from "@/lib/room-people"
+import { knownToEachOther, LISTED_IN_ROSTER } from "@/lib/room-people"
+import { openIfMutual } from "@/lib/matches"
+import { announceRoomMatch } from "@/lib/room-match"
+import { operatesEvent } from "@/lib/tonight"
+import { hasWaved, receivedWaves, recordWave, roomIsOpen, waveCapFor, type WaveCap } from "@/lib/waves"
 import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { visibleInRoom } from "@/lib/identity"
 import { readJson, isUuid } from "@/lib/api-input"
@@ -34,23 +38,36 @@ interface RouteParams {
 // the roster sends room handles (`rh_…`, SCRUM-371), which are neither.
 const waveSchema = z.object({ toUserId: z.string().min(1) })
 
-/** One wave per sender → recipient, per this long. */
+/** The live ping across rooms (W2): one per pair per this long, whichever room. A wave back is never held by it. */
 const WAVE_WINDOW_MS = 10 * 60 * 1000
 
+/** The roster's visibility rule for the person waved at: listed, not suspended, a guest and not staff (SCRUM-891). */
+const waveable = { kind: "attendee" as const, user: { suspended_at: null, ...LISTED_IN_ROSTER } }
+
 /**
- * Wave at somebody in the room.
+ * Wave at somebody in the room. Recorded (SCRUM-1042, owner ruling 2026-11-12:
+ * Wave replaces Like for people).
  *
- * The lightest thing the Room offers: lighter than a like (which is recorded
- * and can open a conversation) and nothing like a message (which is stored,
- * moderated and pushed). A wave is a live socket event and nothing else — no
- * row, no push, no history — so if the recipient does not have the app open,
- * it simply did not happen, and that is the right failure for a gesture that
- * means "I see you, right now".
+ * - **One per pair per room**, never re-sent (W1). A second tap is answered as
+ *   the first was, `sent: true`, with no row and no ping.
+ * - **A new wave needs both of you inside now** (`checked_in`): "now" is what
+ *   a wave means. **A wave back** answers a wave you were sent, and may be
+ *   sent until the room closes even if either of you has left (approval 10).
+ *   A like is not a wave you were sent: it never opens that door, so leaving
+ *   and waving cannot test for one.
+ * - **Mutual**: two waves (or a wave and an old like, approval 11) open the
+ *   anonymous conversation through the like-match path (`openIfMutual`), and
+ *   only the earlier one gets a push.
+ * - **The sender caps** (W3-W6) are read BEFORE anything about the recipient
+ *   (W8), so a 429 says nothing about who they are, whether they are here or
+ *   whether they blocked you.
+ * - **Not here, blocked either way, banned, unmatched, a friend, a host** all
+ *   read the same 403 `RECIPIENT_NOT_HERE`: a distinct answer is a way to
+ *   learn who blocked you, and one for a closed pair is a rejection notice.
  *
- * Both of you have to be inside NOW (`status: checked_in`), not merely to have
- * attended, because "now" is the whole meaning. Somebody hidden from the roster
- * — "show online status" off, or suspended — is not a person you can see in the
- * room, so they are answered exactly as if they were not here.
+ * The socket ping (`room:wave`) is the live half; the received list
+ * (`GET` here, `GET /waves` for Banter) is the half that survives the
+ * recipient not looking. There is no push for a single wave (P-A).
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -60,8 +77,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const authUser = await getAuthenticatedUser(request)
     if (!authUser) return unauthorizedResponse("Invalid or expired token")
 
-    // The per-account ceiling across every recipient; the per-pair window is
-    // below, once we know the wave is one that could be delivered.
+    // The burst ceiling across every recipient; the stored caps are below.
     const limited = await rateLimit(request, userLimit("write", "event-wave", authUser.userId))
     if (limited) return limited
 
@@ -71,8 +87,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
      * Only a handle this room showed you — or your own id, refused just below.
      * A raw id, another room's handle or a forged one is nobody here, and is
      * answered exactly as somebody not in the room (`roomMemberFromRef`).
-     * Resolved to the real id, so the pair window below is keyed on people:
-     * a new room is a new handle, not a new window.
      */
     // A host's ban closes the room's people as it closes its chat (`roomBanRefusal`).
     const banned = await roomBanRefusal(eventId, authUser.userId)
@@ -84,89 +98,147 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("You cannot wave at yourself", 400, ErrorCode.VALIDATION_FAILED)
     }
 
-    const [mine, theirs] = await Promise.all([
+    // Everything about the sender first: in this room as a guest, and not somebody who runs it.
+    const notCheckedIn = () => errorResponse("Check in to wave at people here", 403, ErrorCode.NOT_CHECKED_IN)
+    const [attended, insideNow, open, hosts] = await Promise.all([
+      db.event_check_ins.findFirst({
+        where: { event_id: eventId, user_id: fromUserId, check_in_time: { not: null } },
+        orderBy: { check_in_time: "desc" },
+        select: { kind: true },
+      }),
       db.event_check_ins.findFirst({
         // At a venue day, a window still open (`inRoomWhere`), not the sweeper's lag.
-        // As a guest: staff are out of matching (SCRUM-891).
         where: { event_id: eventId, user_id: fromUserId, kind: "attendee", status: "checked_in", ...inRoomWhere(fromUserId) },
         select: { id: true },
       }),
-      toUserId && db.event_check_ins.findFirst({
-        where: {
-          event_id: eventId,
-          user_id: toUserId,
-          status: "checked_in",
-          ...inRoomWhere(),
-          // Staff are working: nobody waves at them either (SCRUM-891).
-          kind: "attendee",
-          // The roster's visibility rule, so you can only wave at someone the
-          // roster would show you. `is: null` as there: a missing profile row
-          // must not read as "show online" off.
-          user: {
-            suspended_at: null,
-            OR: [{ profile: { is: null } }, { profile: { show_online: true } }],
-          },
-        },
-        select: { id: true },
-      }),
+      roomIsOpen(eventId),
+      operatesEvent(fromUserId, eventId),
     ])
+    // Your latest row decides: staff are working (SCRUM-891). Hosts never wave.
+    if (!attended || attended.kind === "staff" || !open || hosts) return notCheckedIn()
 
-    if (!mine) {
-      return errorResponse("Check in to wave at people here", 403, ErrorCode.NOT_CHECKED_IN)
-    }
+    const capped = await waveCapFor(fromUserId, eventId)
+    if (capped) return capResponse(capped)
 
-    /*
-     * Not here, blocked either way, and unmatched all read the same.
-     *
-     * The likes route makes the same choice for the same reason: a distinct
-     * answer for a block is a way to discover who blocked you, and one for a
-     * closed pair is a rejection notice by another name. Unmatching is
-     * permanent (`lib/conversations.ts`), and a wave from somebody who left the
-     * conversation is exactly the contact leaving was meant to end.
-     */
     const notHere = () =>
       errorResponse("They’re not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
-    if (!theirs || !toUserId) return notHere()
+    if (!toUserId) return notHere()
+
+    // A wave back: they waved at you here. You saw it on your list, so this reads nothing you were not shown.
+    const answering = await hasWaved(eventId, toUserId, fromUserId)
+    if (!answering && !insideNow) return notCheckedIn()
+
+    const theirs = await db.event_check_ins.findFirst({
+      where: answering
+        ? // Answering lasts until the room closes, so attendance, not presence.
+          { event_id: eventId, user_id: toUserId, check_in_time: { not: null }, ...waveable }
+        : { event_id: eventId, user_id: toUserId, status: "checked_in", ...inRoomWhere(), ...waveable },
+      select: { id: true },
+    })
+    if (!theirs) return notHere()
     // Banned from the room is not in it: the same answer, never which.
     if (await eventRoomBan(eventId, toUserId)) return notHere()
     if (await blockedEitherWay(fromUserId, toUserId)) return notHere()
     if (await pairIsClosed(fromUserId, toUserId)) return notHere()
-    // A friend is never a stranger to wave at: answered as somebody with "Show
-    // online status" off is, byte for byte (lib/room-people.ts).
+    // A friend is never a stranger to wave at (lib/room-people.ts).
     if (await knownToEachOther(fromUserId, toUserId)) return notHere()
+    // Nobody waves at a host either.
+    if (await operatesEvent(toUserId, eventId)) return notHere()
+
+    // Already waved here: the same answer as the first time, and nothing else (W1).
+    if (await hasWaved(eventId, fromUserId, toUserId)) return successResponse({ sent: true, mutual: false })
 
     /*
-     * One wave per pair per ten minutes, in the shared rate-limit store (Redis
-     * when configured, so it holds across instances).
-     *
-     * Counted only now, after every refusal above, so a wave that could not
-     * have been delivered does not start the clock. Keyed on the pair and not
-     * the event: moving to another room is not a reason to wave again at the
-     * same person a minute later.
+     * The live ping's pair window (W2), counted only now, after every refusal,
+     * so a wave that could not have been delivered does not start the clock.
+     * Keyed on the people, not the room. Not for a wave back: an answer is
+     * never held because you waved at them in another room a minute ago.
      */
-    const { count, resetAt } = await hit(`rl:wave:${fromUserId}:${toUserId}`, WAVE_WINDOW_MS)
-    if (count > 1) {
-      const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
-      return NextResponse.json(
-        {
-          success: false,
-          error: "You waved at them a moment ago",
-          errorCode: ErrorCode.WAVE_TOO_SOON,
-          retryAfter,
-        },
-        { status: 429, headers: { "Retry-After": retryAfter.toString() } }
-      )
+    if (!answering) {
+      const { count, resetAt } = await hit(`rl:wave:${fromUserId}:${toUserId}`, WAVE_WINDOW_MS)
+      if (count > 1) {
+        const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000))
+        return NextResponse.json(
+          { success: false, error: "You waved at them a moment ago", errorCode: ErrorCode.WAVE_TOO_SOON, retryAfter },
+          { status: 429, headers: { "Retry-After": retryAfter.toString() } }
+        )
+      }
     }
 
-    emitRoomWave(toUserId, { eventId, fromUserId, fromName: await roomNameOf(eventId, fromUserId, toUserId) })
+    const stored = await recordWave(eventId, fromUserId, toUserId)
+    if (!stored.recorded) {
+      // Two taps at once: the other one stored it. Capped only in that same race.
+      return stored.capped ? capResponse(stored.capped) : successResponse({ sent: true, mutual: false })
+    }
 
-    return successResponse({ sent: true })
+    const outcome = await openIfMutual(eventId, fromUserId, toUserId)
+    if (outcome.mutual && outcome.conversationId) {
+      // `room:match` to both, in place of the ping: the moment is "You both waved". Never rejects.
+      await announceRoomMatch(eventId, outcome.conversationId)
+    } else {
+      emitRoomWave(toUserId, { eventId, fromUserId, fromName: await roomNameOf(eventId, fromUserId, toUserId) })
+    }
+
+    return successResponse({ sent: true, ...outcome })
   } catch (error) {
     logger.error("Wave error", {
       error: error instanceof Error ? error.message : String(error),
     })
     return serverErrorResponse("Failed to wave")
   }
+}
+
+/**
+ * Who waved at you in this room (S-A, "See all"): newest first, paged 20,
+ * by room handle and the roster's name, never an id. Readable while the room
+ * is open, by a guest who was in it. A host reads nothing here.
+ */
+export async function GET(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { eventId } = await params
+    if (!isUuid(eventId)) return errorResponse("Invalid event ID format", 400)
+
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) return unauthorizedResponse("Invalid or expired token")
+
+    const limited = await rateLimit(request, userLimit("read", "event-waves-read", authUser.userId))
+    if (limited) return limited
+
+    const banned = await roomBanRefusal(eventId, authUser.userId)
+    if (banned) return banned
+
+    const viewerId = authUser.userId
+    const [attended, hosts, open] = await Promise.all([
+      db.event_check_ins.findFirst({
+        where: { event_id: eventId, user_id: viewerId, check_in_time: { not: null } },
+        orderBy: { check_in_time: "desc" },
+        select: { kind: true },
+      }),
+      operatesEvent(viewerId, eventId),
+      roomIsOpen(eventId),
+    ])
+    if (!attended || attended.kind === "staff" || hosts) {
+      return errorResponse("Check in to see who waved", 403, ErrorCode.NOT_CHECKED_IN)
+    }
+    // The room closed: nothing left to answer.
+    if (!open) return successResponse({ open: false, total: 0, waves: [], nextCursor: null })
+
+    const page = await receivedWaves(viewerId, eventId, { cursor: request.nextUrl.searchParams.get("cursor") })
+    if ("refused" in page) return errorResponse("Invalid cursor", 400, ErrorCode.VALIDATION_FAILED)
+    return successResponse({ open: true, ...page })
+  } catch (error) {
+    logger.error("Wave list error", { error: error instanceof Error ? error.message : String(error) })
+    return serverErrorResponse("Failed to load waves")
+  }
+}
+
+/** A sender cap (W3-W6): about the sender only, never the person they waved at. */
+function capResponse(cap: WaveCap): NextResponse {
+  const error = cap.cap === "day" ? "You’ve waved a lot today. Try again later." : "You’ve waved a lot in this room. Try again in a bit."
+  return NextResponse.json(
+    { success: false, error, errorCode: ErrorCode.RATE_LIMITED, retryAfter: cap.retryAfter },
+    { status: 429, headers: { "Retry-After": cap.retryAfter.toString() } }
+  )
 }
 
 /**

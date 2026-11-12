@@ -162,8 +162,8 @@ already know each other's ids.
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `room:friends` | `{ eventId }` | Your **Friends here** changed: refetch `GET /events/:id/friends-here`. Content-free, to `user:{id}` rooms only (never the room): sent to a person's friends who are checked in at the same event when an opted-in friend checks in or out, flips "Friends can see I'm here" or "Show online status", or when a friendship is made or ended. A hidden friend's movements fire nothing. |
-| `room:match` | `{ eventId, otherUserId, conversationId, name }` | A like became mutual. `otherUserId` is the other person's handle in `eventId` — the same string the roster and deck show. |
-| `room:wave` | `{ eventId, fromUserId, fromName }` | Somebody in the room waved. `fromUserId` is their handle in `eventId`. |
+| `room:match` | `{ eventId, otherUserId, conversationId, name }` | Two waves (or a wave and a like) became mutual: "You both waved". `otherUserId` is the other person's handle in `eventId` — the same string the roster and deck show. |
+| `room:wave` | `{ eventId, fromUserId, fromName }` | Somebody waved at you (recorded, SCRUM-1042). `fromUserId` is their handle in `eventId`; `fromName` the roster's name. Also sent for a wave back after either of you left the room. Not sent on a mutual: `room:match` is. The wave stays on `GET /events/:eventId/waves`, so a missed ping is not a missed wave. Folding a burst into one toast (L-B) is the client's. |
 
 ### Private Message Events
 

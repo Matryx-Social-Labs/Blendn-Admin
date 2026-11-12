@@ -17,10 +17,12 @@ exports[`the match deck names a page of cards, and the cards are what they were 
     "sharedWorkField": false,
     "sign": null,
     "tonightAnswer": null,
+    "wavedAtYou": false,
     "who": "plain-1",
     "workField": null,
     "workIntent": null,
     "youLiked": false,
+    "youWaved": false,
   },
   {
     "age": 27,
@@ -37,10 +39,12 @@ exports[`the match deck names a page of cards, and the cards are what they were 
     "sharedWorkField": false,
     "sign": null,
     "tonightAnswer": null,
+    "wavedAtYou": false,
     "who": "revealed-1",
     "workField": null,
     "workIntent": null,
     "youLiked": false,
+    "youWaved": false,
   },
   {
     "age": 27,
@@ -57,10 +61,12 @@ exports[`the match deck names a page of cards, and the cards are what they were 
     "sharedWorkField": false,
     "sign": null,
     "tonightAnswer": null,
+    "wavedAtYou": false,
     "who": "plain-2",
     "workField": null,
     "workIntent": null,
     "youLiked": false,
+    "youWaved": false,
   },
 ]
 `;

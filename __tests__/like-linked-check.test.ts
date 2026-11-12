@@ -9,8 +9,10 @@ jest.mock("jose", () => ({ jwtVerify: jest.fn(), createRemoteJWKSet: jest.fn() }
 const log: string[] = []
 const record = <T,>(name: string, result: T): jest.Mock => jest.fn(async () => (log.push(name), result))
 
-const mockDb: Record<string, unknown> & { $transaction: jest.Mock; event_likes: Record<string, jest.Mock>; friendships: Record<string, jest.Mock>; private_conversations: Record<string, jest.Mock>; friend_requests: Record<string, jest.Mock> } = {
+const mockDb: Record<string, unknown> & { $transaction: jest.Mock; event_likes: Record<string, jest.Mock>; event_waves: Record<string, jest.Mock>; friendships: Record<string, jest.Mock>; private_conversations: Record<string, jest.Mock>; friend_requests: Record<string, jest.Mock> } = {
   event_likes: { upsert: record("event_likes.upsert", {}), findUnique: record<unknown>("event_likes.findUnique", null) },
+  // A wave back answers a like as a like does (SCRUM-1042): looked up beside it, always.
+  event_waves: { findUnique: record<unknown>("event_waves.findUnique", null) },
   friendships: { findUnique: record<unknown>("friendships.findUnique", null) },
   ended_friendships: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null) },
   private_conversations: { findUnique: record<unknown>("private_conversations.findUnique", null) },
@@ -33,6 +35,7 @@ const sequence = async (setup: () => void) => {
   jest.clearAllMocks()
   log.length = 0
   mockDb.event_likes.findUnique.mockImplementation(async () => (log.push("event_likes.findUnique"), null))
+  mockDb.event_waves.findUnique.mockImplementation(async () => (log.push("event_waves.findUnique"), null))
   mockDb.friendships.findUnique.mockImplementation(async () => (log.push("friendships.findUnique"), null))
   mockDb.private_conversations.findUnique.mockImplementation(async () => (log.push("private_conversations.findUnique"), null))
   mockDb.friend_requests.findFirst.mockImplementation(async () => (log.push("friend_requests.findFirst"), null))
@@ -42,6 +45,7 @@ const sequence = async (setup: () => void) => {
 }
 
 const BACK = () => mockDb.event_likes.findUnique.mockImplementation(async () => (log.push("event_likes.findUnique"), { id: "x" }))
+const WAVED_BACK = () => mockDb.event_waves.findUnique.mockImplementation(async () => (log.push("event_waves.findUnique"), { id: "w" }))
 const LINKED = () => mockDb.friendships.findUnique.mockImplementation(async () => (log.push("friendships.findUnique"), { id: "f" }))
 
 describe("likeAtEvent does the same work whether or not the other person liked back", () => {
@@ -67,5 +71,18 @@ describe("likeAtEvent does the same work whether or not the other person liked b
     const open = await sequence(() => BACK())
     expect(open).toContain("chat_group_members.findMany")
     expect(open.indexOf("event_likes.findUnique")).toBeGreaterThan(open.indexOf("friend_requests.findFirst"))
+  })
+})
+
+describe("a wave back is a like back (SCRUM-1042: an old like is a hidden wave)", () => {
+  it("opens the conversation for a like answered by their earlier wave, with the same work as a like back", async () => {
+    const byLike = await sequence(() => BACK())
+    const byWave = await sequence(() => WAVED_BACK())
+    expect(byWave).toContain("chat_group_members.findMany")
+    expect(byWave).toEqual(byLike)
+  })
+
+  it("control: neither back, nothing opens", async () => {
+    expect(await sequence(() => undefined)).not.toContain("chat_group_members.findMany")
   })
 })
