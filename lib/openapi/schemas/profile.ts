@@ -398,6 +398,10 @@ export const UserPublicProfileSchema = z
       })
       .optional()
       .describe("Tonight's question and their answer (null: none yet), and at a work-lens event why they are here. Only through an event room handle, only to somebody checked in to that room now, never to anyone who runs or hosts the event, and only when the room asks a question; absent otherwise. The same whether or not `identityVisible`."),
+    wave: z
+      .object({ conversationId: z.string().uuid() })
+      .optional()
+      .describe("The conversation a mutual wave in that room opened between you (SCRUM-1042): Say hi opens it, after a restart too. Only through an event room handle, only when a wave went either way and the match conversation came from that room and is still open; never a conversation from anywhere else, never to anyone who runs or hosts the event; absent otherwise. The same whether or not `identityVisible`."),
     identityVisible: z
       .boolean()
       .describe(

@@ -10,7 +10,8 @@ import { roomPseudonymOf } from "@/lib/anonymous-names"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { profileBadges } from "@/lib/profile-badges"
 import { identityForRef, nonEventRoomCard } from "@/lib/identity"
-import { tonightFor } from "@/lib/tonight"
+import { operatesEvent, tonightFor } from "@/lib/tonight"
+import { waveStandings } from "@/lib/waves"
 import { savedCount } from "@/lib/saved-events"
 import { ageFrom } from "@/lib/age"
 import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
@@ -139,6 +140,7 @@ export async function GET(
      * the pseudonym already, so naming them adds nothing to it.
      */
     const tonight = room && authUser.userId !== userId ? await tonightFor(authUser.userId, room, userId) : null
+    const wave = room && authUser.userId !== userId ? await mutualWaveIn(room, authUser.userId, userId) : null
 
     // Format the response
     // Build photos array: prefer profile gallery, fall back to single user image
@@ -190,6 +192,7 @@ export async function GET(
         isOwnProfile: false,
         identityVisible: false,
         ...(tonight && { tonight }),
+        ...(wave && { wave }),
       })
     }
 
@@ -260,6 +263,7 @@ export async function GET(
       isOwnProfile,
       identityVisible: identified,
       ...(tonight && { tonight }),
+      ...(wave && { wave }),
       // The interests you have in common, by name, for the outlined chips (SCRUM-858).
       ...(identified && !isOwnProfile && { sharedInterests: await sharedInterestNames(authUser.userId, user.user_interests) }),
       /*
@@ -288,6 +292,17 @@ export async function GET(
     logger.error("Get public profile error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to get user profile")
   }
+}
+
+/**
+ * The conversation a mutual wave in this event's room opened between the two (`waveStandings`), for a card opened by
+ * that room's handle: Say hi after a restart. Null without one, and always to somebody who operates the room (hosts
+ * never wave or get waved at).
+ */
+async function mutualWaveIn(eventId: string, viewerId: string, otherId: string): Promise<{ conversationId: string } | null> {
+  const standing = (await waveStandings(eventId, viewerId, [otherId])).get(otherId)
+  if (!standing?.conversationId || (await operatesEvent(viewerId, eventId))) return null
+  return { conversationId: standing.conversationId }
 }
 
 /**
