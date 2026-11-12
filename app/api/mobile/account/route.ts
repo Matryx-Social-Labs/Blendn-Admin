@@ -311,6 +311,15 @@ export async function DELETE(request: NextRequest) {
       // Who brought whom, either way: their place in somebody's referral count goes too.
       db.referrals.deleteMany({ where: { OR: [{ invitee_id: authUser.userId }, { inviter_id: authUser.userId }] } }),
       /*
+       * Waves and likes, either way (SCRUM-1042). Nothing cascades here either:
+       * a wave from them stayed on somebody's "waved at you" list and Banter
+       * row (staging read-back, 2026-11-12), and a like of theirs is a hidden
+       * wave that could still complete a mutual. A conversation already opened
+       * is the DM's own rule, unchanged.
+       */
+      db.event_waves.deleteMany({ where: { OR: [{ from_id: authUser.userId }, { to_id: authUser.userId }] } }),
+      db.event_likes.deleteMany({ where: { OR: [{ liker_id: authUser.userId }, { liked_id: authUser.userId }] } }),
+      /*
        * Their Blendn+ (test plan D-17). A store subscription still running is
        * the store's to stop — the app tells them to cancel there first — and a
        * later renewal for this account grants nothing: the webhook knows only
