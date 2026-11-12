@@ -5,6 +5,7 @@ exports[`the match deck names a page of cards, and the cards are what they were 
   {
     "age": 27,
     "badges": [],
+    "checkInTime": "string",
     "displayName": "Pseudo plain-1",
     "insideNow": true,
     "overlaps": [],
@@ -24,6 +25,7 @@ exports[`the match deck names a page of cards, and the cards are what they were 
   {
     "age": 27,
     "badges": [],
+    "checkInTime": "string",
     "displayName": "Name",
     "insideNow": true,
     "overlaps": [],
@@ -43,6 +45,7 @@ exports[`the match deck names a page of cards, and the cards are what they were 
   {
     "age": 27,
     "badges": [],
+    "checkInTime": "string",
     "displayName": "Pseudo plain-2",
     "insideNow": true,
     "overlaps": [],
