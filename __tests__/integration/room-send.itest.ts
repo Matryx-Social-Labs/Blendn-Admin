@@ -199,3 +199,48 @@ describe("a retried send (SCRUM-410)", () => {
   })
 })
 
+
+describe("a resend of a message that already landed, after a full burst (SCRUM-1050)", () => {
+  /*
+   * The event route ran `checkSpam` before its retry lookup, so a resend of a
+   * message that was already in the room counted toward the 5-in-10-seconds
+   * burst and could be refused SPAM_BURST ("Slow down a moment") although it
+   * had landed. The group route answers the retry first. Both now go through
+   * `replayRoomRetry` before the spam check.
+   */
+  const freshClientId = () =>
+    "7b0d1c3e-4a5f-4b6c-8d7e-9f0a1b2c3d4e".replace(/^.{8}/, Math.random().toString(16).slice(2, 10).padEnd(8, "0"))
+
+  it.each([
+    ["group route", "group"],
+    ["event route", "event"],
+  ])("is answered with the first write on the %s, and the burst still refuses a new message", async (_label, which) => {
+    const r = await liveRoom()
+    const send = async (content: string, clientId: string) => {
+      const res = which === "group"
+        ? await groupRoute.POST(post(`http://localhost/api/mobile/chat/groups/${r.groupId}/messages`, r.token, { content, type: "text", clientId }), { params: Promise.resolve({ chatGroupId: r.groupId }) })
+        : await eventRoute.POST(post(`http://localhost/api/mobile/events/${r.eventId}/chat`, r.token, { content, type: "text", clientId }), { params: Promise.resolve({ eventId: r.eventId }) })
+      const body = (await res.json()) as { errorCode?: string; reasonCode?: string; data?: { id?: string; message?: { id?: string } } }
+      return { status: res.status, body, id: body.data?.message?.id ?? body.data?.id }
+    }
+    const words = ["anyone at the bar", "the band starts at nine", "who wants a coffee", "great crowd tonight", "see you by the stage"]
+    const ids = words.map(() => freshClientId())
+
+    // Five sends in the window: the burst allowance, used up.
+    const first = await send(words[0], ids[0])
+    expect(first.status).toBe(201)
+    for (let i = 1; i < words.length; i++) expect((await send(words[i], ids[i])).status).toBe(201)
+
+    // The resend of the first: its own write, not a refusal.
+    const resend = await send(words[0], ids[0])
+    expect(resend.status).toBe(200)
+    expect(resend.id).toBe(first.id)
+
+    // Control: the burst is full, so a genuinely new message is refused.
+    const sixth = await send("one more thing", freshClientId())
+    expect(sixth.status).toBe(429)
+    expect(JSON.stringify(sixth.body)).toContain("SPAM_BURST")
+
+    expect(await db.chat_messages.count({ where: { chat_group_id: r.groupId } })).toBe(5)
+  })
+})

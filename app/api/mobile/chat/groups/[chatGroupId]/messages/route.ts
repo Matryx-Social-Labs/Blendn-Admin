@@ -26,7 +26,7 @@ import {
   spamBlockedResponse,
 } from "@/lib/api-response"
 import { broadcastAuthorSelect, roomSenderName } from "@/lib/broadcast-author"
-import { answerRoomRetry, findRoomSend } from "@/lib/room-retry"
+import { answerRoomRetry, findRoomSend, replayRoomRetry } from "@/lib/room-retry"
 import { chatClosedMessage, LEFT_ROOM_MESSAGE, NOT_LIVE_MESSAGE } from "@/lib/chat-window"
 import { withOwnerDoor, mayWriteToRoomFor, roomOwnerDenial, roomReadDenialFor, roomScope } from "@/lib/room-kind"
 import { replyCounts } from "@/lib/reply-counts"
@@ -370,10 +370,8 @@ export async function POST(
      * A retry of a send that already landed: answered with the first write. Its
      * full copy reached the room by socket; the app matches the retry by id.
      */
-    if (clientId) {
-      const existing = await findRoomSend(user.userId, clientId)
-      if (existing) return answerRoomRetry(existing, chatGroupId)
-    }
+    const replay = await replayRoomRetry(user.userId, clientId, chatGroupId)
+    if (replay) return replay
 
     // Check if chat group exists and user is a member
     // The owner's door, for this room's kind alone (`withOwnerDoor`).
