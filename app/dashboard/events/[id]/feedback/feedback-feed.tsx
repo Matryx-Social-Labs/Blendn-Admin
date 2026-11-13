@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils"
 
 import { correctFeedbackLabel } from "./actions"
 // Type-only: the digest's module reads the database, and nothing of it reaches the bundle.
-import { QUOTES_PER_PAGE, type FeedbackMessage } from "@/lib/feedback-digest"
+import type { FeedbackMessage } from "@/lib/feedback-digest"
 import { refusalMessage } from "@/lib/refusal"
 
 const SENTIMENTS: feedback_sentiment[] = ["positive", "neutral", "negative"]
@@ -50,12 +50,15 @@ export function FeedbackFeed({
   messages,
   messagesTotal,
   page,
+  pageSize,
   timezone,
 }: {
   total: number | null
   messages: FeedbackMessage[]
   messagesTotal: number
   page: number
+  /** `QUOTES_PER_PAGE`, from the server page: a value import would pull the digest's database client into this bundle. */
+  pageSize: number
   timezone: string
 }) {
   const clock = eventClock(timezone)
@@ -143,7 +146,7 @@ export function FeedbackFeed({
         ))}
       </ul>
 
-      <QuotePager page={page} total={messagesTotal} />
+      <QuotePager page={page} total={messagesTotal} pageSize={pageSize} />
 
       <p className="max-w-[70ch] border-t border-border pt-3 text-[0.75rem] text-faint-foreground">
         No names, not even pseudonyms, and the hour only, enforced server-side. Small
@@ -154,10 +157,10 @@ export function FeedbackFeed({
 }
 
 /** "21–40 of 90", with the pages either side. Plain links: the page is server-rendered per `?quotes=`. */
-function QuotePager({ page, total }: { page: number; total: number }) {
-  if (total <= QUOTES_PER_PAGE) return null
-  const first = (page - 1) * QUOTES_PER_PAGE + 1
-  const last = Math.min(page * QUOTES_PER_PAGE, total)
+function QuotePager({ page, total, pageSize }: { page: number; total: number; pageSize: number }) {
+  if (total <= pageSize) return null
+  const first = (page - 1) * pageSize + 1
+  const last = Math.min(page * pageSize, total)
   const link = "rounded-sm text-foreground underline-offset-2 hover:underline"
   return (
     <nav aria-label="Quote pages" className="flex items-center justify-between gap-3 text-[0.75rem] text-muted-foreground">

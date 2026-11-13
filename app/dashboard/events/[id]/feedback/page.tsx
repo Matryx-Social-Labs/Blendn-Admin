@@ -5,7 +5,7 @@ import { EventHeader } from "@/components/dashboard/event-header"
 import { Panel } from "@/components/dashboard/kit"
 import { RATING_BATCH } from "@/lib/disclosure"
 import { loadEventPage } from "@/lib/event-page"
-import { buildFeedbackDigest } from "@/lib/feedback-digest"
+import { buildFeedbackDigest, QUOTES_PER_PAGE } from "@/lib/feedback-digest"
 
 import { eventTabsFor } from "../event-tabs"
 
@@ -221,6 +221,7 @@ export default async function FeedbackPage({
                   messages={digest.messages}
                   messagesTotal={digest.messagesTotal}
                   page={digest.messagesPage}
+                  pageSize={QUOTES_PER_PAGE}
                   timezone={digest.timezone}
                 />
               </Panel>
