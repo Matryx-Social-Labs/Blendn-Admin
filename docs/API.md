@@ -991,6 +991,11 @@ in. One-sided waves and likes are never counted or exposed; a wave nobody
 returned is private to whoever sent it. The block carries counts only, never a
 pair or a person.
 
+**Frozen before the purges.** Before the 30-day or 180-day purge reaches an event
+(which deletes the Lobby asks behind some connections), its counts are frozen
+into `event_insight_tallies`, and this block reads the frozen counts from then
+on, through the same floors.
+
 `reachedOutPct` (approval 2, not rendered yet) is the share of attendees who
 made at least one first move here: a wave or an old like, a Lobby ask, a message
 request sent from this room, answered or not. It is never a count of waves and

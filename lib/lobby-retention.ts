@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client"
 import { CHAT_WINDOW_HOURS } from "./chat-window"
 import { db } from "./db"
 import { tallyFeedback } from "./feedback-digest"
+import { freezeInsightTallies } from "./insight-tallies"
 import { logger } from "./logger"
 import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
 
@@ -26,6 +27,12 @@ import { deleteFile, isConfigured, sealedChatKey } from "./tigris"
  * Feedback tab reads the same after the purge as before it, with no id, no
  * words and no pseudonym left. A dismissed report's `excerpt`, and the
  * reporter's own `description`, go 180 days after the dismissal.
+ *
+ * **What the event added up to stays** (SCRUM-1051). Before this purge or
+ * the 30-day one below reaches an event, its insight counts are frozen
+ * (`event_insight_tallies`, `lib/insight-tallies.ts`: connections, Lobby posts
+ * and asks, Tonight answered, the work-intent mix), and both purges wait for
+ * that row, so its post-event insights read the same afterwards.
  *
  * **Who was in the room stays; what they were called goes** (owner,
  * 2026-11-06). `chat_group_members` rows are kept (the room's size, a person's
@@ -112,7 +119,9 @@ async function messagesPastTheirTime(since: Date) {
   `
 }
 
-async function postsPastTheirTime(since: Date) {
+/** `frozenOnly`: in delete mode, only posts whose event's insight counts are frozen (lib/insight-tallies.ts). */
+async function postsPastTheirTime(since: Date, frozenOnly: boolean) {
+  const frozen = frozenOnly ? Prisma.sql`AND EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = p.event_id)` : Prisma.empty
   return db.$queryRaw<{ id: string; photo_url: string | null }[]>`
     SELECT p.id, p.photo_url
       FROM board_posts p
@@ -127,6 +136,8 @@ async function postsPastTheirTime(since: Date) {
                          JOIN message_reports r ON r.message_type = 'board_request' AND r.message_id = q.id
                         WHERE q.post_id = p.id AND ${holdingReport(since)})
        AND NOT EXISTS (SELECT 1 FROM chat_groups g JOIN chat_messages m ON m.chat_group_id = g.id WHERE g.board_post_id = p.id)
+       -- Its event's counts are frozen first: an accepted ask is a connection.
+       ${frozen}
      LIMIT ${POST_BATCH}
   `
 }
@@ -183,9 +194,12 @@ export async function purgeClosedLobbies(now: Date = new Date(), mode: PurgeMode
   const pass: PurgePass = { mode, messages: 0, posts: 0, photos: 0, hostPosts: 0, alertPreferences: 0, feedback: 0, pseudonyms: 0, excerpts: 0, kept: 0, hasMore: false }
   if (mode === "off") return pass
   const since = new Date(now.getTime() - RETENTION_DAYS * DAY_MS)
+  // Before anything goes: in delete mode the posts' select waits for this row. A dry run counts as if
+  // frozen, since delete mode freezes first.
+  if (mode === "delete") await freezeInsightTallies(since, { everyNight: false })
 
   const messages = await messagesPastTheirTime(since)
-  const posts = await postsPastTheirTime(since)
+  const posts = await postsPastTheirTime(since, mode === "delete")
   pass.hasMore = messages.length === MESSAGE_BATCH || posts.length === POST_BATCH
 
   if (mode === "log") {
@@ -291,6 +305,8 @@ const ANSWER_BATCH = 5_000
 
 export async function purgeTonightAnswers(now: Date = new Date()): Promise<{ answers: number; hasMore: boolean }> {
   const since = new Date(now.getTime() - TONIGHT_ANSWER_DAYS * DAY_MS)
+  // The counts first (lib/insight-tallies.ts); the update below waits for them.
+  await freezeInsightTallies(since)
   // any-kind: an answer on any event goes at 30 days (a venue night asks no question, so it holds none to begin with).
   const answers = await db.$executeRaw`
     UPDATE event_match_preferences SET tonight_answer = NULL, work_intent = NULL, updated_at = now()
@@ -302,6 +318,7 @@ export async function purgeTonightAnswers(now: Date = new Date()): Promise<{ ans
           AND e.end_time < ${since}
           -- A run still going: any night that ended inside the window keeps the answers.
           AND NOT EXISTS (SELECT 1 FROM event_occurrences o WHERE o.event_id = e.id AND o.end_time >= ${since})
+          AND EXISTS (SELECT 1 FROM event_insight_tallies t WHERE t.event_id = e.id)
         LIMIT ${ANSWER_BATCH})`
   return { answers, hasMore: answers === ANSWER_BATCH }
 }

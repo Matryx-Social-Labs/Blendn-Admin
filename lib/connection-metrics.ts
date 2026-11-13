@@ -1,5 +1,8 @@
-import { db } from "@/lib/db"
-import { discloseFigure, heldPart } from "@/lib/disclosure"
+// Relative, not "@/lib/*": the purge freezes these counts (lib/insight-tallies.ts), and the
+// lifecycle sweeper that runs it is reachable from server.ts (server-import-boundary.test.ts).
+import { db } from "./db"
+import { discloseFigure, heldPart } from "./disclosure"
+import type { InsightCounts } from "./insight-tallies"
 
 /**
  * Did anyone actually meet anyone?
@@ -82,7 +85,15 @@ export interface ConnectionMetrics {
   suppressed: boolean
 }
 
-export async function getConnectionMetrics(eventId: string): Promise<ConnectionMetrics> {
+/** The raw counts behind `ConnectionMetrics`, before any floor. Never leaves the server as is. */
+export interface ConnectionCounts {
+  attendees: number
+  connections: number
+  connected: number
+  reachedOut: number
+}
+
+export async function connectionCounts(eventId: string): Promise<ConnectionCounts> {
   /*
    * One statement over the union of pairs (approval 1, 2026-11-12). A pair of
    * attendees is connected when, at this event, they:
@@ -134,7 +145,19 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
            (SELECT count(*) FROM (SELECT lo FROM kept UNION SELECT hi FROM kept) c)::int AS connected,
            (SELECT count(*) FROM movers WHERE a IN (SELECT user_id FROM att))::int AS reached_out`
 
-  const { attendees, connections, connected, reached_out } = row
+  return { attendees: row.attendees, connections: row.connections, connected: row.connected, reachedOut: row.reached_out }
+}
+
+export async function getConnectionMetrics(eventId: string): Promise<ConnectionMetrics> {
+  /*
+   * Frozen before the 180-day purge deletes the Lobby asks behind them
+   * (`event_insight_tallies`), so an old event reads the same as it did.
+   * The floors below apply to frozen counts exactly as to live ones.
+   */
+  const frozen = await db.event_insight_tallies.findUnique({ where: { event_id: eventId }, select: { counts: true } })
+  const { attendees, connections, connected, reachedOut } = frozen
+    ? (frozen.counts as unknown as InsightCounts).connections
+    : await connectionCounts(eventId)
 
   /*
    * The same rule the digest uses, with this figure's own floor.
@@ -174,7 +197,7 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
     // decimals would imply a precision a room of forty cannot support.
     perAttendee: Math.round(((2 * connections) / attendees) * 10) / 10,
     connectedPct: Math.round((connected / attendees) * 100),
-    reachedOutPct: pctOf(heldPart(reached_out, attendees), attendees),
+    reachedOutPct: pctOf(heldPart(reachedOut, attendees), attendees),
     suppressed: false,
   }
 }

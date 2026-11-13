@@ -678,6 +678,7 @@ model events {
   rsvps                   event_rsvps[]
   feedback                event_feedback[]
   feedback_tally          event_feedback_tallies?
+  insight_tally           event_insight_tallies?
   entitlements            entitlements[]
   message_requests        message_requests[]
   billing_checkouts       billing_checkouts[]
@@ -2659,6 +2660,20 @@ model event_feedback_tallies {
   /// `{ [category]: distinct people }`.
   contributors Json
   frozen_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
+}
+
+/// An event's insight counts, frozen before the 30-day purge (Tonight's answers,
+/// work intent) or the 180-day purge (Lobby posts and their asks) reaches it, so
+/// its post-event insights read the same afterwards (`lib/insight-tallies.ts`).
+/// Raw counts: the readers apply the disclosure floors, as they do to live ones.
+/// Never an id, never words.
+model event_insight_tallies {
+  event_id  String   @id @db.Uuid
+  /// `InsightCounts` in `lib/insight-tallies.ts`.
+  counts    Json
+  frozen_at DateTime @default(now()) @db.Timestamptz(6)
 
   event events @relation(fields: [event_id], references: [id], onDelete: Cascade)
 }
