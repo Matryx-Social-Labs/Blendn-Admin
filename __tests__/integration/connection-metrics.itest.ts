@@ -181,8 +181,57 @@ describe("a connection is any way two people met here, once per pair (approval 1
     await wave(eventId, guests[1], guests[0])
 
     const m = await getConnectionMetrics(eventId)
-    expect(Object.keys(m).sort()).toEqual(["attendees", "connected", "connectedPct", "connections", "perAttendee", "suppressed"])
+    expect(Object.keys(m).sort()).toEqual(["attendees", "connected", "connectedPct", "connections", "perAttendee", "reachedOutPct", "suppressed"])
     for (const v of Object.values(m)) expect(typeof v === "number" || typeof v === "boolean" || v === null).toBe(true)
+  })
+})
+
+describe("reached out: the share who sent at least one wave, ask or request (approval 2)", () => {
+  it("counts each kind of first move, and each person once across kinds", async () => {
+    const { eventId, guests } = await room(10)
+    const { eventId: elsewhere } = await room(0)
+    await wave(eventId, guests[0], guests[9]) // nobody waved back: still a move by guests[0]
+    await like(eventId, guests[1], guests[9]) // an old like is a hidden wave
+    await ask(eventId, guests[2], guests[9], "declined")
+    await request(guests[3], guests[9], eventId, "pending")
+    // One person, every kind: one person.
+    await wave(eventId, guests[4], guests[8])
+    await ask(eventId, guests[4], guests[8], "pending")
+    await request(guests[4], guests[7], eventId, "pending")
+    // The controls: a request from another room is not a move here.
+    await request(guests[5], guests[6], elsewhere, "pending")
+
+    // 5 of 10 (guests 0-4), and the 5 who did not reach the floor too.
+    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBe(50)
+  })
+
+  it("holds the share back when fewer than 5 reached out", async () => {
+    const { eventId, guests } = await room(10)
+    for (const g of guests.slice(0, 4)) await wave(eventId, g, guests[9])
+    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBeNull()
+  })
+
+  it("holds the share back when fewer than 5 did not (the complement)", async () => {
+    // "6 of 10" names the 4 who sat it out to anyone who saw the room.
+    const { eventId, guests } = await room(10)
+    for (const g of guests.slice(0, 6)) await wave(eventId, g, guests[9])
+    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBeNull()
+  })
+
+  it("does not count a move by somebody who never checked in", async () => {
+    const { eventId, guests } = await room(10)
+    for (const g of guests.slice(0, 5)) await wave(eventId, g, guests[9])
+    const noshow = await makeUser("cm-noshow-move")
+    users.push(noshow)
+    await ask(eventId, noshow, guests[9], "pending")
+    // Counted, it would be 6 of 10, and the complement would hold it back.
+    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBe(50)
+  })
+
+  it("is held back with everything else in a room under the pairs floor", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES - 1)
+    for (const g of guests.slice(0, 5)) await wave(eventId, g, guests[6])
+    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBeNull()
   })
 })
 
