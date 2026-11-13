@@ -66,7 +66,7 @@ const pushesTo = (userId: string) =>
 const strip = async (p: Person, eventId: string, crewId: string) => {
   const res = await api.atEvent(p, eventId)
   expect(res.status).toBe(200)
-  return (res.body.data.myCrews as { crewId: string; here: { userId: string; name: string; you: boolean }[] }[]).find((c) => c.crewId === crewId)
+  return (res.body.data.myCrews as { crewId: string; here: { userId: string; name: string; photo: string | null; you: boolean }[] }[]).find((c) => c.crewId === crewId)
 }
 
 describe("With {crew} at the hold (S1)", () => {
@@ -189,6 +189,43 @@ describe("The crew's strip names who is in with it (S2)", () => {
     expect((await pushesTo(arjun.id)).map((p) => p.body).join(" ")).not.toContain("Rhea")
     // Control: Priya's pushes name both.
     expect((await pushesTo(priya.id)).map((p) => p.body)).toEqual(["Arjun is in.", "Arjun and Rhea are in."])
+  })
+
+  it("shows each crewmate as the crew room does: an anonymous member without a photo, an erased one not at all", async () => {
+    const host = await person("anon-host")
+    const eventId = await fencedEvent(host)
+    const priya = await person("anon-priya", "Priya Raman")
+    const anon = await person("anon-anika", "Anika Hidden Sharma")
+    const open = await person("anon-omar", "Omar Open Qureshi")
+    const gone = await person("anon-gone", "Gita Erased Pillai")
+    const { crewId } = await crewOf(priya, [anon, open, gone], "Nebula")
+    const ANON_PHOTO = "https://img.invalid/anika-face.jpg"
+    const OPEN_PHOTO = "https://img.invalid/omar-face.jpg"
+    for (const [p, photo] of [[anon, ANON_PHOTO], [open, OPEN_PHOTO]] as const) {
+      await db.user.update({ where: { id: p.id }, data: { image: photo } })
+      await db.profiles.update({ where: { id: p.id }, data: { photos: [photo] } })
+    }
+    expect((await api.settings(anon, crewId, true)).status).toBe(200)
+
+    for (const p of [anon, open, gone]) await hold(eventId, p, crewId)
+    await db.user.update({ where: { id: gone.id }, data: { deletedAt: new Date() } })
+    await hold(eventId, priya, crewId)
+
+    const mine = await strip(priya, eventId, crewId)
+    const byName = Object.fromEntries(mine!.here.map((h) => [h.name, h]))
+    // Control: a member who is not anonymous shows with their photo.
+    expect(byName.Omar.photo).toBe(OPEN_PHOTO)
+    // Anonymous: the first name the crew chat already calls them, never their face or full name.
+    expect(byName.Anika.photo).toBeNull()
+    // Erased: not on the strip at all.
+    expect(Object.keys(byName).sort()).toEqual(["Anika", "Omar", "Priya"])
+    const body = JSON.stringify(mine)
+    for (const leak of [ANON_PHOTO, "Sharma", "Hidden", "Gita", "Pillai"]) expect(body).not.toContain(leak)
+    // The push takes its names from the same place: no full name, nobody erased.
+    const said = (await pushesTo(open.id)).map((p) => p.body).join(" ")
+    expect(said).toContain("Anika")
+    for (const leak of ["Sharma", "Hidden", "Pillai"]) expect(said).not.toContain(leak)
+    expect((await pushesTo(open.id)).at(-1)!.body).toBe("Anika and Priya are in.")
   })
 
   it("a stranger in the room sees the crew as a card with counts, never who", async () => {

@@ -3073,7 +3073,11 @@ tapping it off sends no `withCrewId`, and you are not on the crew's strip.
 **The strip** (crews S2): each of `myCrews` carries `here`, the members
 checked in now **who told the crew** (by the chip or "We're here"), first in
 first, as `{ userId, name, photo, you }` — `userId` is their handle in the
-crew's room (yours is your own id), `name` a first name. Somebody who came in
+crew's room (yours is your own id); `name` and `photo` are the crew room's own
+(`namesInRoom` / `crewMemberImages`, as its chat shows them): a first name, and
+a photo only for a member who did not choose "keep me anonymous" (null
+otherwise). An erased or suspended member is never on it. The push takes its
+names from the same place. Somebody who came in
 on their own is not on it, nor anybody kept apart from you. `presentCount`
 still counts every member checked in, for installed builds. `here` is never on
 a crew card: strangers get counts only.

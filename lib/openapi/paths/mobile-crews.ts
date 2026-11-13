@@ -344,7 +344,7 @@ registry.registerPath({
                     z.object({
                       userId: z.string().describe("Their handle in the crew's room; yours is your own id"),
                       name: z.string().describe("First name"),
-                      photo: z.string().nullable(),
+                      photo: z.string().nullable().describe("The crew room's photo for them: null for a member who keeps themselves anonymous"),
                       you: z.boolean(),
                     })
                   )

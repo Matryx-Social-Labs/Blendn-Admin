@@ -56,6 +56,8 @@ const SECRET_BLUR = "https://cdn.itest.invalid/benedict-quixotewright.blur.jpg"
 const TONIGHT_ANSWER = "Restoring a 1962 Vespa in my garage"
 /** The other's crew: a stranger in the room may see its card, a host never sees it at all. */
 const CREW_NAME = "Quixote Crew"
+/** The other's crewmate: reads the strip (crews S2). */
+let mate: Person
 /** Why the other is here (the work lens): the same readers as the answer, and a host gets it nowhere. As it appears in a body. */
 const WORK_INTENT = `"workIntent":"build"`
 
@@ -215,13 +217,15 @@ beforeAll(async () => {
 
   // The other came in with their crew, and so did its other member (crews S1–S2): the viewer, a
   // stranger open to crews, may see its card — counts, never who — and its strip is the members' only.
-  const mate = await person("uis-mate", "Mabel Crewmate", "https://cdn.itest.invalid/mabel.jpg", "https://cdn.itest.invalid/mabel.blur.jpg")
+  mate = await person("uis-mate", "Mabel Crewmate", "https://cdn.itest.invalid/mabel.jpg", "https://cdn.itest.invalid/mabel.blur.jpg")
   const [user1_id, user2_id] = [other.id, mate.id].sort()
   await db.friendships.create({ data: { user1_id, user2_id } })
   const made = await ok(call(route("crews").POST, "/api/mobile/crews", other, { method: "POST", body: { name: CREW_NAME, inviteUserIds: [mate.id], revealConsent: true } }), "crew")
   const crewId = made.data.crewId as string
   await ok(call(route("crews/[crewId]/join").POST, `/api/mobile/crews/${crewId}/join`, mate, { method: "POST", body: { revealConsent: true }, params: { crewId } }), "crew join")
   await db.crews.update({ where: { id: crewId }, data: { open_to_solo: true } })
+  // And keeps themselves anonymous in it: their crewmate's strip gets their first name, never their face.
+  await ok(call(route("crews/[crewId]/members/[userId]").PATCH, `/api/mobile/crews/${crewId}/members/${other.id}`, other, { method: "PATCH", body: { keepMeAnonymous: true }, params: { crewId, userId: other.id } }), "keep me anonymous")
   await putInRoom({ eventId, occurrenceId, userId: mate.id })
   for (const p of [other, mate]) {
     await ok(call(route("crews/[crewId]/here").POST, `/api/mobile/crews/${crewId}/here`, p, { method: "POST", body: { eventId }, params: { crewId } }), "crew here")
@@ -356,6 +360,15 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     const seen = await call(route("events/[eventId]/crews").GET, `/api/mobile/events/${eventId}/crews`, viewer, { params: { eventId } })
     expect(seen.body.data.crews.map((c: { name: string; presentCount: number }) => [c.name, c.presentCount])).toEqual([[CREW_NAME, 2]])
     expect(seen.text).not.toContain('"here"')
+  })
+
+  it("shows an anonymous crewmate on the strip by first name only — no photo, no full name, no account id (crews S2)", async () => {
+    const seen = await call(route("events/[eventId]/crews").GET, `/api/mobile/events/${eventId}/crews`, mate, { params: { eventId } })
+    const here = seen.body.data.myCrews[0].here as { name: string; photo: string | null; you: boolean }[]
+    // Control: the strip reached the crewmate, with the other on it.
+    expect(here.map((h) => h.name).sort()).toEqual(["Benedict", "Mabel"])
+    expect(here.find((h) => h.name === "Benedict")!.photo).toBeNull()
+    for (const leak of [SECRET_PHOTO, SECRET_BLUR, "Quixotewright", other.id]) expect(seen.text).not.toContain(leak)
   })
 
   it("reached the viewer with the other's recorded wave, on the room's list, Banter's row and the deck, by handle beside no identity (SCRUM-1042)", async () => {

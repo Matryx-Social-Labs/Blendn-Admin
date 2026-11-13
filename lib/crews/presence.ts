@@ -3,13 +3,13 @@ import { blockCounterparties } from "../conversations"
 import { CREW } from "../constants"
 import { db } from "../db"
 import { inRoomWhere } from "../event-kind"
-import { namesInRoom } from "../identity"
+import { crewMemberImages, namesInRoom } from "../identity"
 import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { isRoomMuted } from "../room-mute"
 import { blocksBetween, blocksExclude } from "./blocks"
-import { firstName, UNNAMED } from "../conversation-identity"
+import { UNNAMED } from "../conversation-identity"
 import { idForViewer } from "../room-handle"
 import { strangersApartBetween } from "../room-people"
 import { CREW_TAGS, CREWS_OFF, NO_CREW, NO_EVENT, type CrewRefusal, type CrewTag } from "./crews"
@@ -357,15 +357,6 @@ async function toldIn(roomIds: readonly string[], occurrenceId: string): Promise
   return byRoom
 }
 
-/** First names and first photos, by user id. */
-async function namesOf(ids: readonly string[]): Promise<Map<string, { name: string; photo: string | null }>> {
-  if (ids.length === 0) return new Map()
-  const rows = await db.user.findMany({
-    where: { id: { in: [...ids] } },
-    select: { id: true, name: true, profile: { select: { name: true, photos: true } } },
-  })
-  return new Map(rows.map((u) => [u.id, { name: firstName(u.profile?.name || u.name || UNNAMED), photo: u.profile?.photos?.[0] ?? null }]))
-}
 
 /** In with the crew: present now and told, first in first. */
 function inWithCrew(present: readonly string[], told: readonly string[]): string[] {
@@ -381,21 +372,27 @@ async function myCrewsHere(
 ): Promise<MyCrewHere[]> {
   const told = await toldIn(mine.flatMap((c) => (c.room ? [c.room.id] : [])), occurrenceId)
   const inOf = new Map(mine.map((c) => [c.id, c.room ? inWithCrew(present.get(c.id) ?? [], told.get(c.room.id) ?? []) : []]))
-  const everyone = [...new Set([...inOf.values()].flat())]
-  const [apart, names] = await Promise.all([blocksBetween([viewerId], everyone), namesOf(everyone)])
-  return mine.map((c) => ({
-    crewId: c.id,
-    name: c.name,
-    presentCount: present.get(c.id)?.length ?? 0,
-    here: (inOf.get(c.id) ?? [])
-      .filter((id) => !apart.has(`${viewerId}|${id}`))
-      .map((id) => ({
-        userId: c.room ? idForViewer(viewerId, { kind: "crew", groupId: c.room.id }, id) : id,
-        name: names.get(id)?.name ?? UNNAMED,
-        photo: names.get(id)?.photo ?? null,
-        you: id === viewerId,
-      })),
-  }))
+  const apart = await blocksBetween([viewerId], [...new Set([...inOf.values()].flat())])
+  return Promise.all(
+    mine.map(async (c) => {
+      const ids = (inOf.get(c.id) ?? []).filter((id) => !apart.has(`${viewerId}|${id}`))
+      const room = c.room ? { id: c.room.id, kind: "crew" as const } : null
+      // The crew room's own identity, as its chat shows it: first names, and a photo only for
+      // a member who did not choose "keep me anonymous" (and is not erased) — one read each per room.
+      const [names, photos] = room && ids.length ? await Promise.all([namesInRoom(room, ids), crewMemberImages(room, ids)]) : [new Map<string, string>(), new Map<string, string>()]
+      return {
+        crewId: c.id,
+        name: c.name,
+        presentCount: present.get(c.id)?.length ?? 0,
+        here: ids.map((id) => ({
+          userId: room ? idForViewer(viewerId, { kind: "crew", groupId: room.id }, id) : id,
+          name: names.get(id) ?? UNNAMED,
+          photo: photos.get(id) ?? null,
+          you: id === viewerId,
+        })),
+      }
+    })
+  )
 }
 
 /** The longest list of names a push spells out before "and N others". */
@@ -547,9 +544,10 @@ async function crewInBodies(
   const [present, told] = await Promise.all([presentMembersAt(occurrenceId, [crewId]), toldIn([roomId], occurrenceId)])
   const presentIds = present.get(crewId) ?? []
   const inIds = inWithCrew(presentIds, told.get(roomId) ?? [])
-  const [apart, names] = await Promise.all([blocksBetween(recipients, inIds), namesOf(inIds)])
+  // The crew room's names, as its chat prints them (`namesInRoom`): the same identity on every crew surface.
+  const [apart, names] = await Promise.all([blocksBetween(recipients, inIds), namesInRoom({ id: roomId, kind: "crew" }, inIds)])
   for (const r of recipients) {
-    const shown = inIds.filter((id) => id !== r && !apart.has(`${r}|${id}`)).map((id) => names.get(id)?.name ?? UNNAMED)
+    const shown = inIds.filter((id) => id !== r && !apart.has(`${r}|${id}`)).map((id) => names.get(id) ?? UNNAMED)
     if (shown.length === 0) continue
     const body = crewInBody(shown, presentIds.includes(r))
     out.set(body, [...(out.get(body) ?? []), r])
