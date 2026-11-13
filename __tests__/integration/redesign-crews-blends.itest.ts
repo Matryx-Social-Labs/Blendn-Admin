@@ -78,6 +78,8 @@ describe("a crew and its invites", () => {
     const listed = () => call(routes.crews.GET, "/api/mobile/crews", guest)
     const invite = (await listed()).body.data.invites[0]
     expect(invite).toMatchObject({ invitedBy: "Zara", invitedByPhoto: "https://img.invalid/first.jpg" })
+    // When it lapses (3A "Open for N more days"): 14 days after it was sent.
+    expect(new Date(invite.expiresAt).getTime() - new Date(invite.invitedAt).getTime()).toBe(14 * 24 * 60 * 60 * 1000)
     // No photo: null, not a missing key.
     await db.profiles.update({ where: { id: owner.id }, data: { photos: [] } })
     expect((await listed()).body.data.invites[0].invitedByPhoto).toBeNull()

@@ -2936,6 +2936,7 @@ at an event. `lib/crews/`.
 | POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous?, emblemSeed? }` → 201 `{ crewId, chatGroupId, invited }`. `emblemSeed` is the emblem's look as the app's Shuffle left it, 16 lowercase hex characters (`^[0-9a-f]{16}$`, else 400); omitted, the server draws one. It never changes after: PATCH has no such field |
 | GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
 | PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
+| DELETE | `/crews/:crewId` | The owner ends the crew for everyone → `{ ended: true }` (below) |
 | POST | `/crews/:crewId/invites` | Any member invites their own friends `{ userIds }` → `{ invited }` |
 | POST | `/crews/:crewId/join` | Accept my invite `{ revealConsent: true, keepMeAnonymous? }` → `{ chatGroupId }` |
 | DELETE | `/crews/:crewId/join` | Decline my invite — told to nobody |
@@ -2993,6 +2994,15 @@ sender, and the crew is past 14 days old (or had a second member, now
 suspended), the next pass dissolves it. A departure is not a
 wait: a crew somebody leaves down to one dissolves at once.
 
+**End the crew** (crews 5A): `DELETE /crews/:crewId`, the owner only, ends the
+crew whatever its size, exactly as D-15: dissolved for good (it cannot be
+undone), every member and invite row gone (an open invite is void), its chat
+given one last line — `"{crew} has ended"`, type `system`, metadata `{ kind:
+"crew_ended" }` — then archived and closed (404 from then on) with every socket
+taken out, and its open Mixes closed. Its "Out together often" badge goes with
+its members. Friendships stay. Nobody is pushed. A member, a stranger, a crew
+that does not exist and a second call all get the same 404. `write` limiter.
+
 **Joining is consent.** Creating or joining requires `revealConsent: true`. The
 app shows, beside it: *"Anyone in this crew can reveal the crew — your name and
 photos — to people you match with."* `keepMeAnonymous` is the personal override
@@ -3018,7 +3028,9 @@ intent enum.
 it) and `apart` (somebody in the crew is missing from `members` because **you**
 blocked them — never because they blocked you or a conversation closed, which
 would say a crewmate hides from you). An invite carries `invitedByPhoto`, the
-sender's first photo, shown to exactly who is shown their name. A crew name or
+sender's first photo, shown to exactly who is shown their name, and
+`expiresAt`, when it lapses (14 days after `invitedAt`, the accept's own
+limit) for the card's "Open for N more days". A crew name or
 bio refused for its words answers 400 with `field: "name" | "bio"` (and the same
 in `errors`).
 
