@@ -644,7 +644,9 @@ export const MatchListResponseSchema = z
           .describe(
             "Whole years, derived server-side from the birth date. Never a birth date. Already public via `publicProfileFields` on /profiles/{userId}, so this carries no new exposure — and unlike `workField` it is NOT suppressed in a small room, since withholding it would only make the roster disagree with the profile one tap away."
           ),
-        insideNow: z.boolean(),
+        insideNow: z
+          .boolean()
+          .describe("Checked in now. Every `true` card sorts before every `false` one, whatever the score (SCRUM-1055)."),
         /** Whether you liked them. Never whether they liked you. */
         youLiked: z.boolean(),
         youWaved: z.boolean().describe("You waved at them here (✓ Waved). One wave per person per room, never again."),
