@@ -24,7 +24,7 @@ describe("the event page", () => {
     const load = page.indexOf("eventRefusals(event.id)")
     expect(load).toBeGreaterThan(-1)
     // Alongside attendance, not in the curated branch.
-    const batch = page.lastIndexOf("const [attendance, connections, turnedAway]", load)
+    const batch = page.lastIndexOf("const [attendance, insights, mood, turnedAway]", load)
     expect(batch).toBeGreaterThan(-1)
     expect(page.slice(batch, load)).toContain("getEventAttendance(event.id)")
     expect(page.slice(batch, load)).not.toMatch(/curated_open/)
@@ -49,7 +49,7 @@ describe("the Overview", () => {
   it("places Turned away between Attendance and Connections, hidden at zero", () => {
     const attendance = overview.indexOf("<AttendancePanel")
     const turned = overview.indexOf("<TurnedAwayPanel")
-    const connections = overview.indexOf("<ConnectionsPanel")
+    const connections = overview.indexOf("<DidPeopleMeetPanel")
     expect(attendance).toBeGreaterThan(-1)
     expect(turned).toBeGreaterThan(attendance)
     expect(connections).toBeGreaterThan(turned)

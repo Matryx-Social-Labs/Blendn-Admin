@@ -1,7 +1,7 @@
 // Relative imports: run by the lifecycle sweeper, which server.ts reaches.
 import { Prisma, type work_intent } from "@prisma/client"
 
-import { connectionCounts, type ConnectionCounts } from "./connection-metrics"
+import { connectionCounts, openedInRoom, type ConnectionCounts } from "./connection-metrics"
 import { db } from "./db"
 import { logger } from "./logger"
 
@@ -22,6 +22,14 @@ export interface InsightCounts {
   lobby: { offer: number; seeking: number; chat: number; asks: number; accepted: number }
   /** Tonight's question answered, and the work-intent mix (`work_intent`). */
   tonight: { answered: number; workIntent: Record<work_intent, number> }
+  /** Private chats opened from this room (Post A). Absent from tallies frozen before it. */
+  conversations: number
+  /**
+   * Crews that came: two or more members checked in, and the people in them
+   * (Post A). Who was in a crew is read when frozen, so it is frozen. Absent
+   * from tallies frozen before Post A.
+   */
+  crews: { came: number; people: number }
 }
 
 /** Events frozen per pass. A pass is every 15 minutes, and a purge waits for the events it has not reached. */
@@ -30,7 +38,7 @@ export const FREEZE_BATCH = 200
 const n = (v: bigint | number | null | undefined) => Number(v ?? 0)
 
 export async function insightCountsOf(eventId: string): Promise<InsightCounts> {
-  const [connections, [lobby], [tonight]] = await Promise.all([
+  const [connections, [lobby], [tonight], [rest]] = await Promise.all([
     connectionCounts(eventId),
     // board-visibility: counts only, and a silenced ask (`silenced_at`) is left out, as it is for its author.
     db.$queryRaw<{ offer: bigint; seeking: bigint; chat: bigint; asks: bigint; accepted: bigint }[]>`
@@ -46,6 +54,21 @@ export async function insightCountsOf(eventId: string): Promise<InsightCounts> {
              count(*) FILTER (WHERE work_intent = 'build') AS build,
              count(*) FILTER (WHERE work_intent = 'learn') AS learn
         FROM event_match_preferences WHERE event_id = ${eventId}::uuid`,
+    // A crew came when two or more of its members did, as a crew is "here" live (lib/crews/here.ts); a person once.
+    db.$queryRaw<{ conversations: bigint; came: bigint; people: bigint }[]>`
+      WITH att AS (
+        SELECT DISTINCT user_id FROM event_check_ins
+         WHERE event_id = ${eventId}::uuid AND check_in_time IS NOT NULL AND kind = 'attendee'
+      ),
+      came AS (
+        SELECT m.crew_id, m.user_id FROM crew_members m JOIN crews k ON k.id = m.crew_id
+         WHERE k.dissolved_at IS NULL AND k.hidden_at IS NULL AND m.user_id IN (SELECT user_id FROM att)
+           AND m.crew_id IN (SELECT crew_id FROM crew_members WHERE user_id IN (SELECT user_id FROM att)
+                              GROUP BY crew_id HAVING count(*) >= 2)
+      )
+      SELECT (SELECT count(*) FROM private_conversations c WHERE ${openedInRoom(eventId)}) AS conversations,
+             (SELECT count(DISTINCT crew_id) FROM came) AS came,
+             (SELECT count(DISTINCT user_id) FROM came) AS people`,
   ])
   return {
     connections,
@@ -54,6 +77,8 @@ export async function insightCountsOf(eventId: string): Promise<InsightCounts> {
       answered: n(tonight?.answered),
       workIntent: { hire: n(tonight?.hire), find_work: n(tonight?.find_work), build: n(tonight?.build), learn: n(tonight?.learn) },
     },
+    conversations: n(rest?.conversations),
+    crews: { came: n(rest?.came), people: n(rest?.people) },
   }
 }
 

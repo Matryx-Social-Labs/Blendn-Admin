@@ -78,7 +78,8 @@ export interface FeedbackDigest {
 export async function buildFeedbackDigest(
   event: { id: string; title: string; end_time: Date; timezone: string },
   view: "host" | "venue",
-  page = 1
+  /** Null: no quotes at all (the Overview's mood panel reads the split and the categories only). */
+  page: number | null = 1
 ): Promise<FeedbackDigest> {
   const eventId = event.id
   const [ratingGroups, raters] = await Promise.all([
@@ -176,7 +177,7 @@ export async function buildFeedbackDigest(
      * row. The venue reads what was said where it was said: the Room chat it
      * moderates.
      */
-    ...(venue ? { messages: [], messagesTotal: 0, messagesPage: 1 } : await quotePage(eventId, event.timezone, quotable, page)),
+    ...(venue || page === null ? { messages: [], messagesTotal: 0, messagesPage: 1 } : await quotePage(eventId, event.timezone, quotable, page)),
   }
 }
 

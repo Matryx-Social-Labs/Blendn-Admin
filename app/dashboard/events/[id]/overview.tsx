@@ -2,7 +2,13 @@ import Link from "next/link"
 import { IconAlertTriangle, IconEdit, IconMessage2, IconUsers } from "@tabler/icons-react"
 
 import { AttendancePanel } from "@/components/dashboard/attendance-panel"
-import { ConnectionsPanel } from "@/components/dashboard/connections-panel"
+import {
+  AggregatesNote,
+  DidPeopleMeetPanel,
+  LobbyCountsPanel,
+  NightMoodPanel,
+  TonightCountsPanel,
+} from "@/components/dashboard/event-insights-panels"
 import { TurnedAwayPanel } from "@/components/dashboard/turned-away-panel"
 import { IssueLog } from "@/components/dashboard/issue-log"
 import { Panel } from "@/components/dashboard/kit"
@@ -10,7 +16,8 @@ import { HeroMetric } from "@/components/dashboard/primitives"
 import { Button } from "@/components/ui/button"
 import type { EventAttendance } from "@/lib/attendance"
 import type { EventRefusals } from "@/lib/check-in-refusals"
-import type { ConnectionMetrics } from "@/lib/connection-metrics"
+import type { EventInsights } from "@/lib/event-insights"
+import type { FeedbackDigest } from "@/lib/feedback-digest"
 import type { EventOverview } from "@/lib/event-overview"
 import type { IssueRow } from "@/lib/event-issues"
 import { cn } from "@/lib/utils"
@@ -34,7 +41,8 @@ export function Overview({
   canEdit,
   venueName,
   attendance,
-  connections,
+  insights,
+  mood,
   turnedAway,
   alertHistory,
   timezone,
@@ -45,7 +53,10 @@ export function Overview({
   venueName: string | null
   /** Null before the event has run — there is nothing to count yet. */
   attendance: EventAttendance | null
-  connections: ConnectionMetrics | null
+  /** Post A: the organiser's, once the event has run; never a venue's. */
+  insights: (EventInsights & { pinnedSince: string | null }) | null
+  /** The night's mood so far, from the Feedback digest (no quotes); with `insights`. */
+  mood: FeedbackDigest | null
   /** Null only for a draft: an upcoming event can already have turned people away (SCRUM-494). */
   turnedAway: EventRefusals | null
   /**
@@ -140,11 +151,17 @@ export function Overview({
 
       {/* Below attendance, deliberately. Who came is the question an organiser
           asks first; whether they met anyone is the one that decides whether to
-          run it again. */}
-      {connections ? (
-        <Panel>
-          <ConnectionsPanel metrics={connections} />
-        </Panel>
+          run it again. Then how it felt, the Lobby and Tonight's question (Post A). */}
+      {insights ? (
+        <>
+          <DidPeopleMeetPanel insights={insights} />
+          <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @4xl/main:grid-cols-3">
+            {mood ? <NightMoodPanel mood={mood} live={state === "live"} eventId={eventId} /> : null}
+            <LobbyCountsPanel lobby={insights.lobby} pinnedSince={insights.pinnedSince} timezone={timezone} />
+            <TonightCountsPanel tonight={insights.tonight} crews={insights.crews} attendees={insights.attendees} />
+          </div>
+          <AggregatesNote />
+        </>
       ) : null}
 
       {/* After who met, because "did anything go wrong" comes once "was it good"

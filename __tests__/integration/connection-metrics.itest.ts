@@ -1,4 +1,5 @@
-import { connectionCounts, getConnectionMetrics, MIN_ATTENDEES } from "@/lib/connection-metrics"
+import { connectionCounts, MIN_ATTENDEES } from "@/lib/connection-metrics"
+import { eventInsights } from "@/lib/event-insights"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpers"
 
@@ -9,6 +10,9 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpe
  * twice reads as a good event and is the easy mistake. Reporting at all on a
  * room of four names the people involved to anyone who was there.
  */
+
+/** The funnel as the organiser's Overview gets it (Post A's reader), with every floor applied. */
+const funnelOf = async (eventId: string) => (await eventInsights(eventId)).funnel
 
 const users: string[] = []
 const events: string[] = []
@@ -67,7 +71,7 @@ describe("a connection is mutual", () => {
     const { eventId, guests } = await room(MIN_ATTENDEES)
     await like(eventId, guests[0], guests[1])
 
-    const m = await getConnectionMetrics(eventId)
+    const m = await connectionCounts(eventId)
     expect(m.connections).toBe(0)
     expect(m.connected).toBe(0)
   })
@@ -79,7 +83,7 @@ describe("a connection is mutual", () => {
     await like(eventId, guests[0], guests[1])
     await like(eventId, guests[1], guests[0])
 
-    const m = await getConnectionMetrics(eventId)
+    const m = await connectionCounts(eventId)
     expect(m.connections).toBe(1)
     expect(m.connected).toBe(2)
   })
@@ -91,7 +95,7 @@ describe("a connection is mutual", () => {
       await like(eventId, other, guests[0])
     }
 
-    const m = await getConnectionMetrics(eventId)
+    const m = await connectionCounts(eventId)
     expect(m.connections).toBe(2)
     expect(m.connected).toBe(3)
   })
@@ -105,7 +109,7 @@ describe("a connection is any way two people met here, once per pair (approval 1
     // The control: a one-sided wave is as private as a one-sided like.
     await wave(eventId, guests[2], guests[3])
 
-    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+    expect(await connectionCounts(eventId)).toMatchObject({ connections: 1, connected: 2 })
   })
 
   it("counts a like answered by a wave, as the app opens a match for it", async () => {
@@ -114,7 +118,7 @@ describe("a connection is any way two people met here, once per pair (approval 1
     await like(eventId, guests[0], guests[1])
     await wave(eventId, guests[1], guests[0])
 
-    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+    expect(await connectionCounts(eventId)).toMatchObject({ connections: 1, connected: 2 })
   })
 
   it("counts an accepted Lobby ask, and not one still pending or declined", async () => {
@@ -123,7 +127,7 @@ describe("a connection is any way two people met here, once per pair (approval 1
     await ask(eventId, guests[2], guests[3], "pending")
     await ask(eventId, guests[4], guests[5], "declined")
 
-    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+    expect(await connectionCounts(eventId)).toMatchObject({ connections: 1, connected: 2 })
   })
 
   it("counts an accepted message request met at this event, and not one met elsewhere or still pending", async () => {
@@ -134,7 +138,7 @@ describe("a connection is any way two people met here, once per pair (approval 1
     await request(guests[4], guests[5], null)
     await request(guests[6], guests[7], eventId, "pending")
 
-    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+    expect(await connectionCounts(eventId)).toMatchObject({ connections: 1, connected: 2 })
   })
 
   it("counts a pair once however many ways they met", async () => {
@@ -150,9 +154,7 @@ describe("a connection is any way two people met here, once per pair (approval 1
     // The control: a different pair, one way only, still counts.
     await ask(eventId, guests[2], guests[3])
 
-    const m = await getConnectionMetrics(eventId)
-    expect(m).toMatchObject({ connections: 2, connected: 4 })
-    expect(m.perAttendee).toBe(0.5)
+    expect(await connectionCounts(eventId)).toMatchObject({ connections: 2, connected: 4 })
   })
 
   it("still counts mutual likes on an event from before the Wave build", async () => {
@@ -161,7 +163,7 @@ describe("a connection is any way two people met here, once per pair (approval 1
     await like(eventId, guests[0], guests[1])
     await like(eventId, guests[1], guests[0])
 
-    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+    expect(await connectionCounts(eventId)).toMatchObject({ connections: 1, connected: 2 })
   })
 
   it("counts only pairs of people who attended", async () => {
@@ -172,7 +174,7 @@ describe("a connection is any way two people met here, once per pair (approval 1
     users.push(noshow)
     await ask(eventId, noshow, guests[0])
 
-    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 0, connected: 0 })
+    expect(await connectionCounts(eventId)).toMatchObject({ connections: 0, connected: 0 })
   })
 
   it("returns counts only: hosts never see a pair or a person", async () => {
@@ -180,9 +182,11 @@ describe("a connection is any way two people met here, once per pair (approval 1
     await wave(eventId, guests[0], guests[1])
     await wave(eventId, guests[1], guests[0])
 
-    const m = await getConnectionMetrics(eventId)
-    expect(Object.keys(m).sort()).toEqual(["attendees", "connected", "connectedPct", "connections", "perAttendee", "reachedOutPct", "suppressed"])
-    for (const v of Object.values(m)) expect(typeof v === "number" || typeof v === "boolean" || v === null).toBe(true)
+    const leaves = (v: unknown): unknown[] => (v !== null && typeof v === "object" ? Object.values(v).flatMap(leaves) : [v])
+    for (const v of leaves(await eventInsights(eventId))) {
+      if (typeof v === "string") expect(["few", "nearly_all", "not_recorded"]).toContain(v)
+      else expect(typeof v === "number" || typeof v === "boolean" || v === null).toBe(true)
+    }
   })
 })
 
@@ -248,20 +252,20 @@ describe("reached out: the share who sent at least one wave, ask or request (app
     await request(guests[5], guests[6], elsewhere, "pending")
 
     // 5 of 10 (guests 0-4), and the 5 who did not reach the floor too.
-    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBe(50)
+    expect(await funnelOf(eventId)).toMatchObject({ reachedOut: { pct: 50 } })
   })
 
   it("holds the share back when fewer than 5 reached out", async () => {
     const { eventId, guests } = await room(10)
     for (const g of guests.slice(0, 4)) await wave(eventId, g, guests[9])
-    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBeNull()
+    expect(await funnelOf(eventId)).toMatchObject({ held: false, reachedOut: null })
   })
 
   it("holds the share back when fewer than 5 did not (the complement)", async () => {
     // "6 of 10" names the 4 who sat it out to anyone who saw the room.
     const { eventId, guests } = await room(10)
     for (const g of guests.slice(0, 6)) await wave(eventId, g, guests[9])
-    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBeNull()
+    expect(await funnelOf(eventId)).toMatchObject({ held: false, reachedOut: null })
   })
 
   it("does not count a move by somebody who never checked in", async () => {
@@ -271,13 +275,13 @@ describe("reached out: the share who sent at least one wave, ask or request (app
     users.push(noshow)
     await ask(eventId, noshow, guests[9], "pending")
     // Counted, it would be 6 of 10, and the complement would hold it back.
-    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBe(50)
+    expect(await funnelOf(eventId)).toMatchObject({ reachedOut: { pct: 50 } })
   })
 
   it("is held back with everything else in a room under the pairs floor", async () => {
     const { eventId, guests } = await room(MIN_ATTENDEES - 1)
     for (const g of guests.slice(0, 5)) await wave(eventId, g, guests[6])
-    expect((await getConnectionMetrics(eventId)).reachedOutPct).toBeNull()
+    expect(await funnelOf(eventId)).not.toHaveProperty("reachedOut.pct")
   })
 })
 
@@ -293,10 +297,11 @@ describe("the benchmark figures", () => {
     await like(eventId, guests[2], guests[3])
     await like(eventId, guests[3], guests[2])
 
-    const m = await getConnectionMetrics(eventId)
-    expect(m).toMatchObject({ attendees: 10, connections: 2, connected: 4 })
-    expect(m.perAttendee).toBe(0.4)
-    expect(m.connectedPct).toBe(40)
+    expect(await connectionCounts(eventId)).toMatchObject({ attendees: 10, connections: 2, connected: 4 })
+    // Two pairs, both by one way: the way is a few, so the total is a floor and
+    // the per-person figure, which would give it back, is not shown (the
+    // arithmetic, 2 x pairs / attendees, is pinned in event-insights.test.ts).
+    expect(await funnelOf(eventId)).toMatchObject({ met: { count: 4, pct: 40 }, connections: { atLeast: 1 }, perAttendee: null })
   })
 
   it("counts per person from each person's own connections, not from the pair count", async () => {
@@ -311,18 +316,13 @@ describe("the benchmark figures", () => {
       await like(eventId, other, guests[0])
     }
 
-    const m = await getConnectionMetrics(eventId)
-    expect(m).toMatchObject({ attendees: 10, connections: 3, connected: 4 })
-    expect(m.perAttendee).toBe(0.6)
+    expect(await connectionCounts(eventId)).toMatchObject({ attendees: 10, connections: 3, connected: 4 })
   })
 
   it("reports a real zero for a room where nobody connected", async () => {
     // Distinct from suppression: this is a finding, not a withheld number.
     const { eventId } = await room(MIN_ATTENDEES)
-    const m = await getConnectionMetrics(eventId)
-    expect(m.suppressed).toBe(false)
-    expect(m.connections).toBe(0)
-    expect(m.connectedPct).toBe(0)
+    expect(await funnelOf(eventId)).toMatchObject({ held: false, connections: 0, met: { count: 0, pct: 0 }, perAttendee: 0 })
   })
 })
 
@@ -333,22 +333,18 @@ describe("small rooms are suppressed", () => {
     await like(eventId, guests[0], guests[1])
     await like(eventId, guests[1], guests[0])
 
-    const m = await getConnectionMetrics(eventId)
-    expect(m.suppressed).toBe(true)
-    expect(m.perAttendee).toBeNull()
-    expect(m.connectedPct).toBeNull()
-    expect(m.connections).toBe(0)
+    expect(await funnelOf(eventId)).toEqual({ held: true, floor: MIN_ATTENDEES })
   })
 
   it("still reports how many attended", async () => {
     // Attendance is already on the page; withholding it here would be theatre.
     const { eventId } = await room(3)
-    expect(await getConnectionMetrics(eventId)).toMatchObject({ attendees: 3, suppressed: true })
+    expect(await eventInsights(eventId)).toMatchObject({ attendees: 3, funnel: { held: true } })
   })
 
   it("reports at exactly the floor", async () => {
     const { eventId } = await room(MIN_ATTENDEES)
-    expect((await getConnectionMetrics(eventId)).suppressed).toBe(false)
+    expect(await funnelOf(eventId)).toMatchObject({ held: false })
   })
 })
 
@@ -382,6 +378,55 @@ describe("who counts as an attendee", () => {
       },
     })
 
-    expect((await getConnectionMetrics(eventId)).attendees).toBe(MIN_ATTENDEES)
+    expect((await connectionCounts(eventId)).attendees).toBe(MIN_ATTENDEES)
+  })
+})
+
+describe("kept talking: people in a connection whose chat from this room has a message from each side (Post A)", () => {
+  /** A chat opened from this room (or from `origin`), with a message from each of `senders`. */
+  async function chat(a: string, b: string, senders: string[], origin: { origin_event_id: string } | { origin_board_request_id: string } | null) {
+    const c = await db.private_conversations.create({ data: { user1_id: a, user2_id: b, ...(origin ?? {}) } })
+    for (const s of senders) await db.private_messages.create({ data: { conversation_id: c.id, sender_id: s, message_text: "hi" } })
+    return c.id
+  }
+
+  it("counts both people of a connection once each side wrote, and nobody whose chat is one-sided", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES + 2)
+    // Waved, both wrote: kept talking.
+    await wave(eventId, guests[0], guests[1])
+    await wave(eventId, guests[1], guests[0])
+    await chat(guests[0], guests[1], [guests[0], guests[1], guests[0]], { origin_event_id: eventId })
+    // Request accepted, only one wrote: met, did not keep talking (the control).
+    await request(guests[2], guests[3], eventId)
+    await chat(guests[2], guests[3], [guests[2], guests[2]], { origin_event_id: eventId })
+    // A Lobby ask, its chat opened from the ask, both wrote: kept talking.
+    await ask(eventId, guests[4], guests[5])
+    const askId = (await db.board_requests.findFirstOrThrow({ where: { event_id: eventId, from_user_id: guests[4] } })).id
+    await chat(guests[5], guests[4], [guests[4], guests[5]], { origin_board_request_id: askId })
+
+    const counts = await connectionCounts(eventId)
+    expect(counts.connections).toBe(3)
+    expect(counts.keptTalking).toBe(4)
+  })
+
+  it("does not count a chat between people who never connected, or one opened somewhere else", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    // A chat from this room between two people who are not a connection here.
+    await chat(guests[0], guests[1], [guests[0], guests[1]], { origin_event_id: eventId })
+    // A connection whose chat was opened at another event.
+    await wave(eventId, guests[2], guests[3])
+    await wave(eventId, guests[3], guests[2])
+    await chat(guests[2], guests[3], [guests[2], guests[3]], null)
+    expect((await connectionCounts(eventId)).keptTalking).toBe(0)
+  })
+
+  it("counts a person once across several kept-talking connections", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    for (const other of [guests[1], guests[2]]) {
+      await wave(eventId, guests[0], other)
+      await wave(eventId, other, guests[0])
+      await chat(guests[0], other, [guests[0], other], { origin_event_id: eventId })
+    }
+    expect((await connectionCounts(eventId)).keptTalking).toBe(3)
   })
 })

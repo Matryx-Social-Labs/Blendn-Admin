@@ -201,7 +201,8 @@ describe("W18 — the organiser roster", () => {
 
 describe("one suppression rule, not three", () => {
   it("routes connection metrics through the module", () => {
-    const src = code("lib/connection-metrics.ts")
+    // The Overview's reader of the pairs since Post A (getConnectionMetrics went with the Connections panel).
+    const src = code("lib/event-insights.ts")
     expect(src).toMatch(/discloseFigure\(\{/)
     expect(src).toMatch(/floor: MIN_ATTENDEES/)
   })
