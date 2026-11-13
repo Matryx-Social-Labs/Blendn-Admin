@@ -982,8 +982,14 @@ is one connection for each of the two people in it, so it is 2 × `connections` 
 `attendees` (until 2026-11 it was pairs ÷ attendees, half that). And `connectedPct` is the
 shape the mean hides: formats are generally considered to be working above 50%.
 
-**A connection is mutual.** One-sided likes are never counted or exposed; a like
-nobody returned is private to whoever sent it.
+**A connection is a pair of attendees who met here, counted once** however many
+ways they met (owner approval 1, 2026-11-12): they waved at each other (an old
+like counts as a hidden wave, so events from before the Wave build still count
+their mutual likes), one accepted the other's Lobby ask, or one accepted a
+message request sent from this room (`met_in_event_id`). Both must have checked
+in. One-sided waves and likes are never counted or exposed; a wave nobody
+returned is private to whoever sent it. The block carries counts only, never a
+pair or a person.
 
 **Suppressed below 8 attendees.** `perAttendee` and `connectedPct` come back
 null and the counts as zero, because "one connection among three attendees"

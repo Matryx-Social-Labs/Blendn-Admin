@@ -42,6 +42,19 @@ async function room(attendeeCount: number) {
 const like = (eventId: string, liker: string, liked: string) =>
   db.event_likes.create({ data: { event_id: eventId, liker_id: liker, liked_id: liked } })
 
+const wave = (eventId: string, from: string, to: string) =>
+  db.event_waves.create({ data: { event_id: eventId, from_id: from, to_id: to } })
+
+/** A Lobby ask from `from` on a post by `to`, in the given state. */
+async function ask(eventId: string, from: string, to: string, status: "pending" | "accepted" | "declined" = "accepted") {
+  const post = await db.board_posts.create({ data: { event_id: eventId, author_id: to, kind: "offer", body: "Two seats in the car", spaces_left: 2 } })
+  await db.board_requests.create({ data: { event_id: eventId, post_id: post.id, from_user_id: from, to_user_id: to, status, decided_at: status === "pending" ? null : new Date() } })
+}
+
+/** A message request between two people, met at `metIn` (or nowhere). */
+const request = (sender: string, recipient: string, metIn: string | null, status: "pending" | "accepted" = "accepted") =>
+  db.message_requests.create({ data: { sender_id: sender, recipient_id: recipient, met_in_event_id: metIn, status } })
+
 afterAll(async () => {
   await cleanup(users, events)
   await closeDb()
@@ -81,6 +94,95 @@ describe("a connection is mutual", () => {
     const m = await getConnectionMetrics(eventId)
     expect(m.connections).toBe(2)
     expect(m.connected).toBe(3)
+  })
+})
+
+describe("a connection is any way two people met here, once per pair (approval 1)", () => {
+  it("counts mutual waves, and not a wave nobody returned", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    await wave(eventId, guests[0], guests[1])
+    await wave(eventId, guests[1], guests[0])
+    // The control: a one-sided wave is as private as a one-sided like.
+    await wave(eventId, guests[2], guests[3])
+
+    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+  })
+
+  it("counts a like answered by a wave, as the app opens a match for it", async () => {
+    // An old like is a hidden wave (approval 11, `openIfMutual`): either answers the other.
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    await like(eventId, guests[0], guests[1])
+    await wave(eventId, guests[1], guests[0])
+
+    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+  })
+
+  it("counts an accepted Lobby ask, and not one still pending or declined", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    await ask(eventId, guests[0], guests[1], "accepted")
+    await ask(eventId, guests[2], guests[3], "pending")
+    await ask(eventId, guests[4], guests[5], "declined")
+
+    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+  })
+
+  it("counts an accepted message request met at this event, and not one met elsewhere or still pending", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    const { eventId: elsewhere } = await room(0)
+    await request(guests[0], guests[1], eventId)
+    await request(guests[2], guests[3], elsewhere)
+    await request(guests[4], guests[5], null)
+    await request(guests[6], guests[7], eventId, "pending")
+
+    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+  })
+
+  it("counts a pair once however many ways they met", async () => {
+    // The easy mistake across kinds: a pair who waved, shared a ride and then
+    // accepted a request reads as three connections.
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    await wave(eventId, guests[0], guests[1])
+    await wave(eventId, guests[1], guests[0])
+    await like(eventId, guests[0], guests[1])
+    await like(eventId, guests[1], guests[0])
+    await ask(eventId, guests[1], guests[0])
+    await request(guests[0], guests[1], eventId)
+    // The control: a different pair, one way only, still counts.
+    await ask(eventId, guests[2], guests[3])
+
+    const m = await getConnectionMetrics(eventId)
+    expect(m).toMatchObject({ connections: 2, connected: 4 })
+    expect(m.perAttendee).toBe(0.5)
+  })
+
+  it("still counts mutual likes on an event from before the Wave build", async () => {
+    // Pre-Wave events hold likes only (approval 11: no like is migrated).
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    await like(eventId, guests[0], guests[1])
+    await like(eventId, guests[1], guests[0])
+
+    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 1, connected: 2 })
+  })
+
+  it("counts only pairs of people who attended", async () => {
+    // The denominator is attendees, so "met someone" cannot pass 100% or count
+    // a ride share with somebody who never came.
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    const noshow = await makeUser("cm-noshow-ask")
+    users.push(noshow)
+    await ask(eventId, noshow, guests[0])
+
+    expect(await getConnectionMetrics(eventId)).toMatchObject({ connections: 0, connected: 0 })
+  })
+
+  it("returns counts only: hosts never see a pair or a person", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    await wave(eventId, guests[0], guests[1])
+    await wave(eventId, guests[1], guests[0])
+
+    const m = await getConnectionMetrics(eventId)
+    expect(Object.keys(m).sort()).toEqual(["attendees", "connected", "connectedPct", "connections", "perAttendee", "suppressed"])
+    for (const v of Object.values(m)) expect(typeof v === "number" || typeof v === "boolean" || v === null).toBe(true)
   })
 })
 
