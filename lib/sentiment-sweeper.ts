@@ -35,9 +35,9 @@ import { BATCH_SIZE, classifyMessages } from "./sentiment/classify"
  * ## Cost
  *
  * `classifyMessages` runs the free lexicon tier first and only escalates what it
- * cannot settle, so the LLM sees a fraction of traffic. Work is bounded per pass
- * rather than per event, so one busy room cannot starve the others of a slot —
- * it just takes a few more passes.
+ * cannot settle, so the LLM sees a fraction of traffic. Work is bounded per pass,
+ * and shared between rooms in turns, so one busy room cannot starve the others
+ * of a slot — it just takes a few more passes itself.
  */
 
 export const SWEEP_INTERVAL_MS = 60 * 1000
@@ -85,19 +85,39 @@ export async function sweepSentiment(): Promise<SentimentSweepResult> {
    * unclassified after hours is not worth a place in the queue; a room stays
    * open to end + 24 h, but its mood is a live figure.
    */
+  /*
+   * A fair share per room (G7). Each open event room offers its oldest
+   * waiting messages (a pass's worth at most, through its own
+   * (chat_group_id, created_at) index), and the pass takes them in turns:
+   * every room's oldest, then every room's second, and so on. Oldest-first
+   * across rooms let one concert room's backlog take every slot, so every
+   * other room's mood was a pass late for as long as the backlog lasted. A
+   * room alone still gets the whole pass. Which messages are classified, and
+   * how, is unchanged; only the order the pass reaches them in.
+   */
   const messages = await db.$queryRaw<ToClassify[]>`
-    SELECT m.id, m.content, m.user_id, m.chat_group_id, g.event_id
-      FROM chat_messages m
-      JOIN chat_groups g ON g.id = m.chat_group_id
-     WHERE g.status = 'active'
-       AND g.kind = 'event'
-       AND m.type = 'text'
-       AND m.created_at > ${new Date(Date.now() - SCAN_WINDOW_MS)}
-       AND m.deleted_at IS NULL
-       AND (m.moderation_status IS NULL OR m.moderation_status <> 'hidden')
-       AND m.metadata ->> 'sponsored_message_id' IS NULL
-       AND NOT EXISTS (SELECT 1 FROM event_feedback f WHERE f.message_id = m.id)
-     ORDER BY m.created_at ASC
+    SELECT id, content, user_id, chat_group_id, event_id
+      FROM (
+        SELECT m.id, m.content, m.user_id, m.chat_group_id, g.event_id, m.created_at,
+               row_number() OVER (PARTITION BY m.chat_group_id ORDER BY m.created_at) AS turn
+          FROM chat_groups g
+          CROSS JOIN LATERAL (
+            SELECT m.id, m.content, m.user_id, m.chat_group_id, m.created_at
+              FROM chat_messages m
+             WHERE m.chat_group_id = g.id
+               AND m.type = 'text'
+               AND m.created_at > ${new Date(Date.now() - SCAN_WINDOW_MS)}
+               AND m.deleted_at IS NULL
+               AND (m.moderation_status IS NULL OR m.moderation_status <> 'hidden')
+               AND m.metadata ->> 'sponsored_message_id' IS NULL
+               AND NOT EXISTS (SELECT 1 FROM event_feedback f WHERE f.message_id = m.id)
+             ORDER BY m.created_at ASC
+             LIMIT ${MAX_MESSAGES_PER_SWEEP + 1}
+          ) m
+         WHERE g.status = 'active'
+           AND g.kind = 'event'
+      ) q
+     ORDER BY turn, created_at
      LIMIT ${MAX_MESSAGES_PER_SWEEP + 1}
   `
 

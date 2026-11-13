@@ -973,18 +973,38 @@ product exists for happened.
 
 ```json
 { "attendees": 40, "connections": 26, "connected": 31,
-  "perAttendee": 0.7, "connectedPct": 78, "suppressed": false }
+  "perAttendee": 1.3, "connectedPct": 78, "reachedOutPct": 85, "suppressed": false }
 ```
 
 `perAttendee` is the industry benchmark — two connections at a 200-person event
-means the format failed, twelve means it worked — and `connectedPct` is the
+means the format failed, twelve means it worked. It is counted per person: a pair
+is one connection for each of the two people in it, so it is 2 × `connections` ÷
+`attendees` (until 2026-11 it was pairs ÷ attendees, half that). And `connectedPct` is the
 shape the mean hides: formats are generally considered to be working above 50%.
 
-**A connection is mutual.** One-sided likes are never counted or exposed; a like
-nobody returned is private to whoever sent it.
+**A connection is a pair of attendees who met here, counted once** however many
+ways they met (owner approval 1, 2026-11-12): they waved at each other (an old
+like counts as a hidden wave, so events from before the Wave build still count
+their mutual likes), one accepted the other's Lobby ask, or one accepted a
+message request sent from this room (`met_in_event_id`). Both must have checked
+in. One-sided waves and likes are never counted or exposed; a wave nobody
+returned is private to whoever sent it. The block carries counts only, never a
+pair or a person.
 
-**Suppressed below 8 attendees.** `perAttendee` and `connectedPct` come back
-null and the counts as zero, because "one connection among three attendees"
+**Frozen before the purges.** Before the 30-day or 180-day purge reaches an event
+(which deletes the Lobby asks behind some connections), its counts are frozen
+into `event_insight_tallies`, and this block reads the frozen counts from then
+on, through the same floors.
+
+`reachedOutPct` (approval 2, not rendered yet) is the share of attendees who
+made at least one first move here: a wave or an old like, a Lobby ask, a message
+request sent from this room, answered or not. It is never a count of waves and
+never how many went unanswered. It is null when the people who reached out, or
+the people who did not, are fewer than 5 (`heldPart`), because "6 of 10" names
+the 4 who sat it out.
+
+**Suppressed below 8 attendees.** `perAttendee`, `connectedPct` and `reachedOutPct`
+come back null and the counts as zero, because "one connection among three attendees"
 names both of them to anyone who was there. `attendees` still reports.
 
 ---
