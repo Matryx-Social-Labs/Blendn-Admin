@@ -287,6 +287,8 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
       // while the sender is still your friend and in the crew (`acceptable`).
       invitedByPhoto: i.inviter.profile?.photos?.[0] ?? null,
       invitedAt: i.created_at,
+      // "Open for 13 more days" (crews 3A): when it lapses, by the TTL the accept enforces.
+      expiresAt: new Date(i.created_at.getTime() + CREW.INVITE_TTL_MS),
     })),
   }
 }

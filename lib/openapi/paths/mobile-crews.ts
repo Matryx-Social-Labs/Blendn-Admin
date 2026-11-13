@@ -69,6 +69,7 @@ const CrewInviteSchema = z
     invitedBy: z.string().describe("The friend who invited you, by first name"),
     invitedByPhoto: z.string().nullable().describe("Their first photo, shown to exactly who is shown their name (the invite is listed only while they are still your friend and in the crew); null without one"),
     invitedAt: z.string(),
+    expiresAt: z.string().describe("When the invite lapses (14 days after it was sent): the invite card's \"Open for N more days\""),
   })
   .openapi("CrewInvite")
 
@@ -208,6 +209,22 @@ registry.registerPath({
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ ...CrewFields, name: CrewFields.name.optional() })) },
   responses: { 200: { description: "Crew", ...json(wrap(CrewSchema)) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}",
+  tags,
+  summary: "End the crew for everyone (its owner)",
+  description:
+    CREW_404 +
+    "The owner ends the crew (crews 5A), whatever its size, exactly as a moderator's dissolve: the crew is dissolved for good, every " +
+    "member and invite row goes (an open invite is void), its chat gets one last line (\"{crew} has ended\", metadata `{ kind: \"crew_ended\" }`) " +
+    "and is archived with every socket taken out, and its open Mixes close. Friendships stay. No push. A member, a stranger, or a second " +
+    "call: the same 404.",
+  security: bearerAuth,
+  request: { params: crewParams },
+  responses: { 200: { description: "Ended", ...json(wrap(z.object({ ended: z.literal(true) }))) }, ...standardErrors },
 })
 
 registry.registerPath({
