@@ -129,6 +129,47 @@ describe("who appears in it", () => {
     expect(matches![0].insideNow).toBe(false)
   })
 
+  it("fills a short page with people inside now before people who left (SCRUM-1055)", async () => {
+    // Staging: 570 check-ins, 3 inside, and Meet next empty, because the 50
+    // were all leavers with more in common. A page of one stands in for 50.
+    const eventId = await room()
+    const [me, goneA, goneB, here, hidden, blocked] = await Promise.all([
+      makeUser("mx-p"),
+      makeUser("mx-gone-a"),
+      makeUser("mx-gone-b"),
+      makeUser("mx-here"),
+      makeUser("mx-hidden"),
+      makeUser("mx-pblocked"),
+    ])
+    users.push(me, goneA, goneB, here, hidden, blocked)
+    await attend(me, eventId)
+    for (const u of [goneA, goneB]) await attend(u, eventId, { status: "checked_out" })
+    for (const u of [here, hidden, blocked]) await attend(u, eventId)
+    // Ten more who left with nothing in common: a room big enough that a shared
+    // interest is rare, so the two leavers who share two outscore the one inside.
+    const fillers = await Promise.all(Array.from({ length: 10 }, (_, i) => makeUser(`mx-left-${i}`)))
+    users.push(...fillers)
+    for (const u of fillers) await attend(u, eventId, { status: "checked_out" })
+    for (const name of ["Techno", "Modular"]) {
+      const category = await makeCategory(name)
+      for (const u of [me, goneA, goneB]) await interest(u, category)
+    }
+    // Inside now, and still never listed: the partition is an order, not a door.
+    await db.profiles.create({ data: { id: hidden, name: "Hidden", show_online: false } })
+    await db.blocked_users.create({ data: { blocker_id: blocked, blocked_id: me } })
+
+    const page = await matchesForEvent(eventId, me, 1)
+    expect(page!.map((m) => resolveUserRef(m.userId)?.userId)).toEqual([here])
+
+    // Control: the full deck still carries the leavers, after, and nobody hidden.
+    const all = (await matchesForEvent(eventId, me))!.map((m) => resolveUserRef(m.userId)?.userId)
+    expect(all[0]).toBe(here)
+    expect(new Set(all.slice(1, 3))).toEqual(new Set([goneA, goneB]))
+    expect(all).toHaveLength(13)
+    expect(all).not.toContain(hidden)
+    expect(all).not.toContain(blocked)
+  })
+
   it("hides people blocked in either direction", async () => {
     const eventId = await room()
     const [me, blocked, blocker] = await Promise.all([

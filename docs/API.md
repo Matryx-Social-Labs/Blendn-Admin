@@ -1032,7 +1032,10 @@ to be revealed at this event. **There is no score** — the ordering is not
 exposed, because a number implies a precision the data cannot support.
 
 Staff are excluded. People who have checked out are not: they were in the room
-with you, and rank lower rather than disappearing.
+with you, and rank lower rather than disappearing. Everyone with
+`insideNow: true` comes before everyone who left, whatever the score, so the
+page (50) always starts with the people you can walk up to — Meet next keeps
+only those (SCRUM-1055).
 
 `youLiked` says whether *you* liked them. **Nothing anywhere says whether they
 liked you** — a mutual like is the only thing that reveals it, and there is no
