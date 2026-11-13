@@ -122,15 +122,16 @@ describe("W41 — the feedback digest stops naming whoever raised a concern", ()
      * consumer and not the producer.
      */
     const src = code("lib/feedback-digest.ts")
-    expect(src).toMatch(
-      /if \(!row\.message \|\| !mayQuote\(\{\s*contributors: categoryContributors\.get\(row\.category\) \?\? 0,\s*population,?\s*\}\)\) return \[\]/
-    )
+    // Since the quotes are paged (SCRUM-1051): the quotable categories come from the rule, and only
+    // their rows are read.
+    expect(src).toMatch(/const quotable = \[\.\.\.categoryContributors\]\s*\.filter\(\(\[, contributors\]\) => mayQuote\(\{ contributors, population \}\)\)/)
+    expect(src).toMatch(/category: \{ in: quotable \}, message_id: \{ not: null \}/)
   })
 
   it("drops the whole row with the text: its mood in feed order still points somewhere (SCRUM-890)", () => {
     const src = code("lib/feedback-digest.ts")
     expect(src).not.toMatch(/suppressed: !quotable/)
-    expect(src).toMatch(/feedback\.flatMap/)
+    expect(src).toMatch(/rows\.flatMap/)
   })
 
   it("suppresses the category count without hiding the category", () => {

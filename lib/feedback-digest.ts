@@ -15,11 +15,18 @@ import { escalates } from "./sentiment/taxonomy"
  * permission check.
  */
 
+/** Quotes per page of "What people said" (G8: the list was unbounded). */
+export const QUOTES_PER_PAGE = 20
+
 export interface FeedbackMessage {
   id: string
-  /** Pseudonym only: the real name never leaves the server for a host. */
-  pseudonym: string
-  at: string
+  /**
+   * The start of the hour it was said in, in the event's own zone (owner
+   * approval 7, 2026-11-12). No pseudonym and no minute: a room-stable name
+   * and the exact time beside a sentence was the one place a host read
+   * individual words against a person.
+   */
+  hour: string
   text: string
   sentiment: feedback_sentiment
   category: issue_category
@@ -57,58 +64,42 @@ export interface FeedbackDigest {
    * a host. Null under the floor and for a venue, whose count stays at the published figure.
    */
   ratingsTowardNextUpdate: number | null
-  /** Only what can be quoted: a row held back would still say its mood and category, in feed order (SCRUM-890). */
+  /**
+   * Only what can be quoted: a row held back would still say its mood and
+   * category, in feed order (SCRUM-890). One page, earliest first.
+   */
   messages: FeedbackMessage[]
+  /** Quotable rows on every page together (0 for a venue). */
+  messagesTotal: number
+  /** The page `messages` is, clamped to the ones that exist. */
+  messagesPage: number
 }
 
 export async function buildFeedbackDigest(
   event: { id: string; title: string; end_time: Date; timezone: string },
-  view: "host" | "venue"
+  view: "host" | "venue",
+  page = 1
 ): Promise<FeedbackDigest> {
   const eventId = event.id
   const [ratingGroups, raters] = await Promise.all([
     publishedRatingGroups({ id: eventId }),
     db.event_ratings.count({ where: { event_id: eventId } }),
   ])
+  // What the tally needs, and nothing it does not: the words are read below, one page of them.
   const feedback = await db.event_feedback.findMany({
     where: { event_id: eventId },
-    orderBy: { created_at: "asc" },
-    select: {
-      id: true,
-      sentiment: true,
-      category: true,
-      confidence: true,
-      corrected_at: true,
-      message: {
-        select: {
-          content: true,
-          created_at: true,
-          user_id: true,
-        },
-      },
-    },
+    select: { sentiment: true, category: true, message: { select: { user_id: true } } },
   })
 
   /*
-   * Pseudonyms are resolved server-side and the real user id never reaches the
-   * response. Sending the id and letting the client render a name would be the
-   * same mistake as the chat route made — the UI looked anonymous while the
-   * payload was not.
-   *
-   * The event's room, asked by the event (one room per event): after the
-   * 180-day purge a feedback row has no message to reach it through.
+   * The room's size, asked by the event (one room per event): after the
+   * 180-day purge a feedback row has no message to reach it through. No
+   * pseudonym is read at all: a quote carries none (approval 7).
    */
-  const [room, frozen] = await Promise.all([
-    db.chat_groups.findUnique({ where: { event_id: eventId }, select: { id: true } }),
+  const [members, frozen] = await Promise.all([
+    db.chat_group_members.count({ where: { chat_group: { event_id: eventId } } }),
     db.event_feedback_tallies.findUnique({ where: { event_id: eventId }, select: { population: true, contributors: true } }),
   ])
-  const members = room
-    ? await db.chat_group_members.findMany({
-        where: { chat_group_id: room.id },
-        select: { user_id: true, anonymous_name: true },
-      })
-    : []
-  const pseudonyms = new Map(members.map((m) => [m.user_id, m.anonymous_name]))
 
   const tally = tallyFeedback(feedback.map((row) => ({ sentiment: row.sentiment, category: row.category, userId: row.message?.user_id ?? null })))
   const { counts, categoryCounts } = tally
@@ -119,8 +110,13 @@ export async function buildFeedbackDigest(
    * every author is still known), they are read from there, so the figures
    * after the purge are the figures before it.
    */
-  const population = frozen?.population ?? members.length
+  const population = frozen?.population ?? members
   const categoryContributors = frozen ? new Map(Object.entries(frozen.contributors as Record<string, number>)) : tally.contributors
+
+  // The categories a quote may come from: the same rule, per category, as before.
+  const quotable = [...categoryContributors]
+    .filter(([, contributors]) => mayQuote({ contributors, population }))
+    .map(([category]) => category as issue_category)
 
   const ratings: StarSpread = spreadsByEventId(ratingGroups).get(eventId) ?? [0, 0, 0, 0, 0]
 
@@ -180,24 +176,7 @@ export async function buildFeedbackDigest(
      * row. The venue reads what was said where it was said: the Room chat it
      * moderates.
      */
-    messages: venue
-      ? []
-      : feedback.flatMap((row) => {
-          // A purged row has no words to quote, and no author.
-          if (!row.message || !mayQuote({ contributors: categoryContributors.get(row.category) ?? 0, population })) return []
-          return [
-            {
-              id: row.id,
-              pseudonym: pseudonyms.get(row.message.user_id) ?? "Attendee",
-              at: row.message.created_at.toISOString(),
-              text: row.message.content,
-              sentiment: row.sentiment,
-              category: row.category,
-              confidence: row.confidence,
-              corrected: row.corrected_at !== null,
-            },
-          ]
-        }),
+    ...(venue ? { messages: [], messagesTotal: 0, messagesPage: 1 } : await quotePage(eventId, event.timezone, quotable, page)),
   }
 }
 
@@ -232,4 +211,50 @@ export function tallyFeedback(rows: readonly TallyRow[]) {
   }
   const contributors = new Map([...people].map(([category, who]) => [category, who.size]))
   return { counts, categoryCounts, contributors }
+}
+
+/**
+ * One page of quotes, earliest first, from the categories that may be quoted.
+ * A purged row has no words and no author, so it is never a quote. Bounded:
+ * at most `QUOTES_PER_PAGE` rows of text are ever read.
+ */
+async function quotePage(eventId: string, timezone: string, quotable: issue_category[], page: number) {
+  const where = { event_id: eventId, category: { in: quotable }, message_id: { not: null } }
+  const messagesTotal = quotable.length ? await db.event_feedback.count({ where }) : 0
+  const last = Math.max(1, Math.ceil(messagesTotal / QUOTES_PER_PAGE))
+  const messagesPage = Number.isFinite(page) ? Math.min(Math.max(1, Math.floor(page)), last) : 1
+  if (messagesTotal === 0) return { messages: [], messagesTotal, messagesPage }
+  const rows = await db.event_feedback.findMany({
+    where,
+    orderBy: [{ created_at: "asc" }, { id: "asc" }],
+    skip: (messagesPage - 1) * QUOTES_PER_PAGE,
+    take: QUOTES_PER_PAGE,
+    select: { id: true, sentiment: true, category: true, confidence: true, corrected_at: true, message: { select: { content: true, created_at: true } } },
+  })
+  const messages: FeedbackMessage[] = rows.flatMap((row) =>
+    row.message
+      ? [{
+          id: row.id,
+          hour: hourOf(row.message.created_at, timezone).toISOString(),
+          text: row.message.content,
+          sentiment: row.sentiment,
+          category: row.category,
+          confidence: row.confidence,
+          corrected: row.corrected_at !== null,
+        }]
+      : []
+  )
+  return { messages, messagesTotal, messagesPage }
+}
+
+/** The start of the hour `at` falls in, on the clock of `timeZone` (whose offset may be a half or quarter hour). */
+export function hourOf(at: Date, timeZone: string): Date {
+  let parts: Intl.DateTimeFormatPart[]
+  try {
+    parts = new Intl.DateTimeFormat("en-GB", { timeZone, minute: "numeric", second: "numeric" }).formatToParts(at)
+  } catch {
+    parts = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", minute: "numeric", second: "numeric" }).formatToParts(at)
+  }
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0)
+  return new Date(at.getTime() - (part("minute") * 60 + part("second")) * 1000 - at.getMilliseconds())
 }

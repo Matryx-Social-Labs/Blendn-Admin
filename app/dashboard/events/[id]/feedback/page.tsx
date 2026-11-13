@@ -5,7 +5,7 @@ import { EventHeader } from "@/components/dashboard/event-header"
 import { Panel } from "@/components/dashboard/kit"
 import { RATING_BATCH } from "@/lib/disclosure"
 import { loadEventPage } from "@/lib/event-page"
-import { buildFeedbackDigest } from "@/lib/feedback-digest"
+import { buildFeedbackDigest, QUOTES_PER_PAGE } from "@/lib/feedback-digest"
 
 import { eventTabsFor } from "../event-tabs"
 
@@ -39,10 +39,15 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function FeedbackPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams?: Promise<{ quotes?: string | string[] }>
 }) {
   const { id } = await params
+  // Which page of quotes; the builder clamps whatever this says to the pages there are.
+  const quotes = (await searchParams)?.quotes
+  const quotesPage = Number.parseInt(Array.isArray(quotes) ? quotes[0] : (quotes ?? "1"), 10)
   /*
    * The same door as every route under an event: a missing event is a 404, an
    * event this person may not operate sends them to the events list
@@ -63,7 +68,7 @@ export default async function FeedbackPage({
   if (!offered) redirect(`/dashboard/events/${event.id}`)
   // Built from the event the loader read: one read, not two. A venue sees
   // every count of people held back under the floor.
-  const digest = await buildFeedbackDigest(event, permissions.canEdit ? "host" : "venue")
+  const digest = await buildFeedbackDigest(event, permissions.canEdit ? "host" : "venue", quotesPage)
 
   const total = digest.total
   const share = (n: number | null) => (!total || n === null ? 0 : (n / total) * 100)
@@ -211,7 +216,14 @@ export default async function FeedbackPage({
               </Panel>
             ) : (
               <Panel title="What people said" hint="tap a label to correct it — the classifier misses sarcasm">
-                <FeedbackFeed total={total} messages={digest.messages} timezone={digest.timezone} />
+                <FeedbackFeed
+                  total={total}
+                  messages={digest.messages}
+                  messagesTotal={digest.messagesTotal}
+                  page={digest.messagesPage}
+                  pageSize={QUOTES_PER_PAGE}
+                  timezone={digest.timezone}
+                />
               </Panel>
             )}
 

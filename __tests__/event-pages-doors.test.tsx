@@ -223,11 +223,19 @@ describe("the Feedback tab's page", () => {
     build.mockResolvedValue(emptyDigest())
     mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
     await door(feedback())
-    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ id: "e1" }), "host")
+    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ id: "e1" }), "host", 1)
     mockSession.user.role = "venue_owner"
     mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-b" }
     await door(feedback())
-    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ id: "e1" }), "venue")
+    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ id: "e1" }), "venue", 1)
+  })
+
+  it("asks for the page of quotes the URL names (SCRUM-1051)", async () => {
+    const build = jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest as jest.Mock
+    build.mockResolvedValue(emptyDigest())
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-a" }
+    await door(FeedbackPage({ params: Promise.resolve({ id: "e1" }), searchParams: Promise.resolve({ quotes: "3" }) }))
+    expect(build).toHaveBeenLastCalledWith(expect.objectContaining({ id: "e1" }), "host", 3)
   })
 })
 
@@ -266,5 +274,7 @@ function emptyDigest() {
     averageRating: null,
     ratingCount: 0,
     messages: [],
+    messagesTotal: 0,
+    messagesPage: 1,
   }
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
@@ -44,7 +45,22 @@ function toneClass(sentiment: feedback_sentiment) {
  * minutes" is a routine case rather than an edge one. Friction here means
  * hosts stop correcting and the digest quietly drifts from the truth.
  */
-export function FeedbackFeed({ total, messages, timezone }: { total: number | null; messages: FeedbackMessage[]; timezone: string }) {
+export function FeedbackFeed({
+  total,
+  messages,
+  messagesTotal,
+  page,
+  pageSize,
+  timezone,
+}: {
+  total: number | null
+  messages: FeedbackMessage[]
+  messagesTotal: number
+  page: number
+  /** `QUOTES_PER_PAGE`, from the server page: a value import would pull the digest's database client into this bundle. */
+  pageSize: number
+  timezone: string
+}) {
   const clock = eventClock(timezone)
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -83,12 +99,7 @@ export function FeedbackFeed({ total, messages, timezone }: { total: number | nu
         {messages.map((m) => (
           <li key={m.id} className="flex flex-col gap-1 py-3 first:pt-0">
             <span className="flex flex-wrap items-center gap-2 text-[0.75rem] text-muted-foreground">
-              <b className="font-medium text-foreground">
-                {m.pseudonym}
-              </b>
-              <span>
-                {clock.time(new Date(m.at))}
-              </span>
+              <span>{clock.time(new Date(m.hour))}</span>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -135,10 +146,39 @@ export function FeedbackFeed({ total, messages, timezone }: { total: number | nu
         ))}
       </ul>
 
+      <QuotePager page={page} total={messagesTotal} pageSize={pageSize} />
+
       <p className="max-w-[70ch] border-t border-border pt-3 text-[0.75rem] text-faint-foreground">
-        Names are pseudonyms, enforced server-side. Small categories are held back
-        entirely — a stable pseudonym in a small room is a name.
+        No names, not even pseudonyms, and the hour only, enforced server-side. Small
+        categories are held back entirely.
       </p>
     </div>
+  )
+}
+
+/** "21–40 of 90", with the pages either side. Plain links: the page is server-rendered per `?quotes=`. */
+function QuotePager({ page, total, pageSize }: { page: number; total: number; pageSize: number }) {
+  if (total <= pageSize) return null
+  const first = (page - 1) * pageSize + 1
+  const last = Math.min(page * pageSize, total)
+  const link = "rounded-sm text-foreground underline-offset-2 hover:underline"
+  return (
+    <nav aria-label="Quote pages" className="flex items-center justify-between gap-3 text-[0.75rem] text-muted-foreground">
+      <span className="tabular-nums">
+        {first}–{last} of {total}
+      </span>
+      <span className="flex gap-4">
+        {page > 1 ? (
+          <Link href={`?quotes=${page - 1}`} scroll={false} className={link}>
+            Earlier
+          </Link>
+        ) : null}
+        {last < total ? (
+          <Link href={`?quotes=${page + 1}`} scroll={false} className={link}>
+            Later
+          </Link>
+        ) : null}
+      </span>
+    </nav>
   )
 }
