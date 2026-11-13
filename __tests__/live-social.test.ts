@@ -11,7 +11,7 @@ import { discloseGroup, MIN_CELL } from "@/lib/disclosure"
 
 function counts(over: Partial<LiveSocialCounts> = {}): LiveSocialCounts {
   return {
-    connections: { attendees: 44, connections: 15, connected: 23, reachedOut: 30, byWay: { waves: 9, lobby: 4, requests: 2 } },
+    connections: { attendees: 44, connections: 15, connected: 23, reachedOut: 30, byWay: { waves: 9, lobby: 4, requests: 2 }, keptTalking: 0 },
     conversations: 12,
     lobby: { offer: 6, seeking: 3, chat: 0 },
     tonight: { asked: true, answered: 31 },
@@ -27,12 +27,12 @@ describe("discloseSocial", () => {
     // Two ways under five: the total is no longer exact, or 15 - 9 gives their sum back.
     expect(s.met).toEqual({ held: false, pct: 52, connected: 23, connections: { atLeast: 11 }, byWay: { waves: 9, lobby: "few", requests: "few" } })
     // The control: every way at five or more, so all of it is exact.
-    const all = discloseSocial(counts({ connections: { attendees: 44, connections: 20, connected: 30, reachedOut: 30, byWay: { waves: 10, lobby: 5, requests: 5 } } }))
+    const all = discloseSocial(counts({ connections: { attendees: 44, connections: 20, connected: 30, reachedOut: 30, byWay: { waves: 10, lobby: 5, requests: 5 }, keptTalking: 0 } }))
     expect(all.met).toMatchObject({ connections: 20, byWay: { waves: 10, lobby: 5, requests: 5 } })
   })
 
   it("holds every connection figure back under the pairs floor, and still shows the rest", () => {
-    const s = discloseSocial(counts({ connections: { attendees: 7, connections: 2, connected: 4, reachedOut: 5, byWay: { waves: 2, lobby: 0, requests: 0 } } }))
+    const s = discloseSocial(counts({ connections: { attendees: 7, connections: 2, connected: 4, reachedOut: 5, byWay: { waves: 2, lobby: 0, requests: 0 }, keptTalking: 0 } }))
     expect(s.met).toEqual({ held: true, floor: 8 })
     expect(s.conversations).toBe(12)
   })

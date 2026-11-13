@@ -11,7 +11,8 @@ import { eventTitleFor } from "@/lib/dashboard-record-titles"
 import { issuesFor } from "@/lib/event-issues"
 import { alertsForVenue } from "@/lib/live-metrics"
 import { getEventAttendance } from "@/lib/attendance"
-import { getConnectionMetrics } from "@/lib/connection-metrics"
+import { eventInsights } from "@/lib/event-insights"
+import { buildFeedbackDigest } from "@/lib/feedback-digest"
 import { canBroadcast } from "@/lib/rbac"
 import { resolveSponsorGrant } from "@/lib/org-membership"
 import { getEventOverview } from "@/lib/event-overview"
@@ -228,12 +229,14 @@ export default async function EventDetailPage({
    * the future.
    */
   const hasRun = overview.state === "live" || overview.state === "over"
-  const [attendance, connections, turnedAway] = await Promise.all([
+  const [attendance, insights, mood, turnedAway] = await Promise.all([
     // Day by day, newcomers and returning: cells of a few people. Not a venue's.
     hasRun && !venueView ? getEventAttendance(event.id) : null,
     // Not the venue's either: its suppressed state names the attendee count
     // ("With 3, ..."), and its figures are about who met whom.
-    hasRun && !venueView ? getConnectionMetrics(event.id) : null,
+    hasRun && !venueView ? eventInsights(event.id) : null,
+    // The night's mood for the same panel row: the split and the categories, no quotes (those stay on Feedback).
+    hasRun && !venueView ? buildFeedbackDigest(event, "host", null) : null,
     /*
      * The organiser's half of the door (SCRUM-196). `refusalSummary` below is
      * the curation queue's diagnosis and stays gated on curated events; this
@@ -301,7 +304,8 @@ export default async function EventDetailPage({
         canEdit={permissions.canEdit}
         venueName={venueName}
         attendance={attendance}
-        connections={connections}
+        insights={insights}
+        mood={mood}
         turnedAway={turnedAway && venueMaySee(turnedAway.people) ? turnedAway : null}
         alertHistory={alertHistory}
         timezone={event.timezone}
