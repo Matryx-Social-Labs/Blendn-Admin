@@ -973,7 +973,7 @@ product exists for happened.
 
 ```json
 { "attendees": 40, "connections": 26, "connected": 31,
-  "perAttendee": 1.3, "connectedPct": 78, "suppressed": false }
+  "perAttendee": 1.3, "connectedPct": 78, "reachedOutPct": 85, "suppressed": false }
 ```
 
 `perAttendee` is the industry benchmark — two connections at a 200-person event
@@ -991,8 +991,15 @@ in. One-sided waves and likes are never counted or exposed; a wave nobody
 returned is private to whoever sent it. The block carries counts only, never a
 pair or a person.
 
-**Suppressed below 8 attendees.** `perAttendee` and `connectedPct` come back
-null and the counts as zero, because "one connection among three attendees"
+`reachedOutPct` (approval 2, not rendered yet) is the share of attendees who
+made at least one first move here: a wave or an old like, a Lobby ask, a message
+request sent from this room, answered or not. It is never a count of waves and
+never how many went unanswered. It is null when the people who reached out, or
+the people who did not, are fewer than 5 (`heldPart`), because "6 of 10" names
+the 4 who sat it out.
+
+**Suppressed below 8 attendees.** `perAttendee`, `connectedPct` and `reachedOutPct`
+come back null and the counts as zero, because "one connection among three attendees"
 names both of them to anyone who was there. `attendees` still reports.
 
 ---

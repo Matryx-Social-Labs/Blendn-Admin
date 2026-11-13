@@ -1,5 +1,5 @@
 import { db } from "@/lib/db"
-import { discloseFigure } from "@/lib/disclosure"
+import { discloseFigure, heldPart } from "@/lib/disclosure"
 
 /**
  * Did anyone actually meet anyone?
@@ -67,6 +67,15 @@ export interface ConnectionMetrics {
   /** Share who made at least one connection. Null when suppressed. */
   connectedPct: number | null
   /**
+   * Share of attendees who made at least one first move here: a wave (or an
+   * old like), a Lobby ask, a message request from this room, answered or not
+   * (approval 2). Never a count of waves and never how many went unanswered.
+   * Null under the pairs floor, and when the movers or the rest are fewer than
+   * `MIN_CELL` (`heldPart`): "6 of 10" names the 4 who sat it out. Not
+   * rendered yet; the "Did people meet" funnel reads it.
+   */
+  reachedOutPct: number | null
+  /**
    * Too few attendees for these to be aggregates rather than facts about named
    * people. Everything derived is null; `attendees` still shows.
    */
@@ -92,7 +101,7 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
    * (G3). Nothing but the three counts leaves the database.
    */
   // board-visibility: accepted asks only, and a silenced ask is stored `declined`; a count, to nobody's side.
-  const [row] = await db.$queryRaw<{ attendees: number; connections: number; connected: number }[]>`
+  const [row] = await db.$queryRaw<{ attendees: number; connections: number; connected: number; reached_out: number }[]>`
     WITH att AS (
       SELECT DISTINCT user_id FROM event_check_ins
        WHERE event_id = ${eventId}::uuid AND check_in_time IS NOT NULL AND kind = 'attendee'
@@ -111,15 +120,21 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
       SELECT LEAST(sender_id, recipient_id), GREATEST(sender_id, recipient_id)
         FROM message_requests WHERE met_in_event_id = ${eventId}::uuid AND status = 'accepted'
     ),
+    movers AS (
+      SELECT a FROM gestures
+      UNION SELECT from_user_id FROM board_requests WHERE event_id = ${eventId}::uuid
+      UNION SELECT sender_id FROM message_requests WHERE met_in_event_id = ${eventId}::uuid
+    ),
     kept AS (
       SELECT lo, hi FROM pairs
        WHERE lo IN (SELECT user_id FROM att) AND hi IN (SELECT user_id FROM att)
     )
     SELECT (SELECT count(*) FROM att)::int AS attendees,
            (SELECT count(*) FROM kept)::int AS connections,
-           (SELECT count(*) FROM (SELECT lo FROM kept UNION SELECT hi FROM kept) c)::int AS connected`
+           (SELECT count(*) FROM (SELECT lo FROM kept UNION SELECT hi FROM kept) c)::int AS connected,
+           (SELECT count(*) FROM movers WHERE a IN (SELECT user_id FROM att))::int AS reached_out`
 
-  const { attendees, connections, connected } = row
+  const { attendees, connections, connected, reached_out } = row
 
   /*
    * The same rule the digest uses, with this figure's own floor.
@@ -144,6 +159,7 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
       connected: 0,
       perAttendee: null,
       connectedPct: null,
+      reachedOutPct: null,
       suppressed: true,
     }
   }
@@ -158,6 +174,9 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
     // decimals would imply a precision a room of forty cannot support.
     perAttendee: Math.round(((2 * connections) / attendees) * 10) / 10,
     connectedPct: Math.round((connected / attendees) * 100),
+    reachedOutPct: pctOf(heldPart(reached_out, attendees), attendees),
     suppressed: false,
   }
 }
+
+const pctOf = (part: number | null, whole: number) => (part === null ? null : Math.round((part / whole) * 100))
