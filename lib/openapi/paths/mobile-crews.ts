@@ -55,6 +55,10 @@ const CrewSchema = z
     apart: z.boolean().describe("Somebody in the crew is left out of `members` because YOU blocked them. Never set by them blocking you or by a closed conversation: that would say a crewmate is hiding from you"),
     you: z.object({ role: z.enum(["owner", "member"]), keepMeAnonymous: z.boolean() }).nullable(),
     members: z.array(CrewMemberSchema),
+    plans: z
+      .array(z.object({ eventId: z.string().uuid(), title: z.string(), occurrenceId: z.string().uuid(), startsAt: z.string() }))
+      .optional()
+      .describe("\"Going together\" (crews S4): the crew's planned nights not yet over, soonest first, at most 10, leaving out any event YOU cannot open (private, age line, closed city). On `GET /crews/{crewId}` (and PATCH), not the list."),
   })
   .openapi("Crew")
 
@@ -225,6 +229,39 @@ registry.registerPath({
   security: bearerAuth,
   request: { params: crewParams },
   responses: { 200: { description: "Ended", ...json(wrap(z.object({ ended: z.literal(true) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/plans",
+  tags,
+  summary: "\"Going together\": the crew marks a night",
+  description:
+    CREW_404 +
+    "Any active member marks the event's next night not yet over (`{ eventId }`). Once per crew per night: one crew-chat line (type `system`, " +
+    "metadata `{ kind: \"crew_plan\", eventId, occurrenceId }`) and one push (kind `crew_here`, \"{first name} wants to go together. Open the crew " +
+    "to see the night.\" — never the place) to every other member who has not muted the crew chat or blocked the planner. A second mark: " +
+    "`repeated: true`, nobody told. 404 for an event you may not take part in (the RSVP door: private and not let in, under its age " +
+    "line, a closed city), a draft or a venue day; 403 crews off; 400 no night left; 429 after " +
+    "3 nights told by the crew in 24 hours (counted on the crew-chat lines: taking a plan back refunds nothing, and a night planned " +
+    "again is stored without a second line or push).",
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
+  responses: {
+    200: { description: "Planned", ...json(wrap(z.object({ planned: z.literal(true), repeated: z.boolean(), occurrenceId: z.string().uuid() }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}/plans",
+  tags,
+  summary: "Take a crew's plan back",
+  description: CREW_404 + "The member who marked it, or the owner; anybody else's call changes nothing. Nobody is told. `{ eventId }`.",
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
+  responses: { 200: { description: "Not planned", ...json(wrap(z.object({ planned: z.literal(false) }))) }, ...standardErrors },
 })
 
 registry.registerPath({

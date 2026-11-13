@@ -39,6 +39,7 @@ import {
 } from "@/lib/api-response"
 import { readJson, isUuid } from "@/lib/api-input"
 import { eventTicketing } from "@/lib/ticket-views"
+import { myCrewPlansAt } from "@/lib/crews/plans"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -162,7 +163,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
 
-    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp, ticketing] =
+    const [found, inside, attendedCounts, hereNow, tallies, userFavorite, userRating, userCheckIn, userRsvp, ticketing, myCrewPlans] =
       await Promise.all([
         eventRead,
         // Counted from check-in rows rather than a stored column. Just the
@@ -213,6 +214,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }),
         // Null while TICKETING is off or the event sells nothing (contract §1).
         eventTicketing(eventId, authUser.userId),
+        // "Going together" (crews 4-A1): your own crews that planned a night of this. Members only.
+        myCrewPlansAt(authUser.userId, eventId),
       ])
 
     if (!found) {
@@ -381,6 +384,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         checkInStatus: userCheckIn?.status || null,
         userRating: userRating?.rating || null,
         rsvpStatus: userRsvp?.status || null,
+        myCrewPlans,
       },
       distance,
       ticketing,

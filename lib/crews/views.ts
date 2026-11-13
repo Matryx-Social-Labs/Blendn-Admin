@@ -7,6 +7,7 @@ import { keysetPage, NEWEST_FIRST, type Keyset, type ListPagination } from "../p
 import { CREW } from "../constants"
 import { blocksBetween } from "./blocks"
 import { CREW_TAGS, openInviteWhere, type CrewTag } from "./crews"
+import { crewPlansOf } from "./plans"
 import { crewBadges, nightsTogether } from "./signals"
 
 /**
@@ -306,11 +307,13 @@ export async function crewDetail(userId: string, crewId: string) {
     select: crewSelect,
   })
   if (!crew) return null
-  const [apart, friends, blockedByMe, extras] = await Promise.all([
+  const [apart, friends, blockedByMe, extras, plans] = await Promise.all([
     blocksBetween([userId], crew.members.map((m) => m.user_id)),
     friendIdsOf(userId).then((ids) => new Set(ids)),
     blockedByViewer(userId, [crew]),
     crewExtras([crew]),
+    crewPlansOf(crew.id, userId),
   ])
-  return crewView(userId, crew, apart, friends, blockedByMe, extras)
+  // "Going together" on the crew page (4-A1): its nights not yet over. Detail only, never the list.
+  return { ...crewView(userId, crew, apart, friends, blockedByMe, extras), plans }
 }

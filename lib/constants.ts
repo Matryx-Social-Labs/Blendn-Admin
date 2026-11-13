@@ -233,6 +233,9 @@ export const CREW = {
   INVITE_PUSH_WINDOW_MS: 24 * 60 * 60 * 1000,
   /** An invite nobody answered lapses: it stops showing and can be sent again. */
   INVITE_TTL_MS: 14 * 24 * 60 * 60 * 1000,
+  /** "Going together": nights one crew may mark in `PLANS_WINDOW_MS` (NOTES S4) — each is a push to the crew. */
+  MAX_PLANS_PER_WINDOW: 3,
+  PLANS_WINDOW_MS: 24 * 60 * 60 * 1000,
   /**
    * A declined invite is not re-sent — nor its push — for this long; after it,
    * asking again is a new ask.

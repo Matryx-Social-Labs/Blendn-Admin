@@ -231,6 +231,9 @@ beforeAll(async () => {
     await ok(call(route("crews/[crewId]/here").POST, `/api/mobile/crews/${crewId}/here`, p, { method: "POST", body: { eventId }, params: { crewId } }), "crew here")
   }
   await ok(call(prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, viewer, { method: "PUT", body: { openToCrews: true }, params: { eventId } }), "open to crews")
+  // Their crew planned the night (crews S4): its members see it on the event; the viewer and a host never.
+  await ok(call(route("crews/[crewId]/plans").POST, `/api/mobile/crews/${crewId}/plans`, mate, { method: "POST", body: { eventId }, params: { crewId } }), "crew plan")
+  await db.event_rsvps.create({ data: { event_id: eventId, user_id: mate.id, status: "going" } })
 
   // What the viewer was handed for the other in the DM.
   const inbox = await ok(call(route("conversations").GET, "/api/mobile/conversations", viewer), "inbox")
@@ -371,6 +374,17 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     for (const leak of [SECRET_PHOTO, SECRET_BLUR, "Quixotewright", other.id]) expect(seen.text).not.toContain(leak)
   })
 
+  it("shows the crew's plan to its members on the event, with the anonymous other by first name only — the viewer sees none (crews S4)", async () => {
+    const theirs = await call(route("events/[eventId]").GET, `/api/mobile/events/${eventId}`, mate, { params: { eventId } })
+    const plans = theirs.body.data.userStatus.myCrewPlans as { name: string; going: { name: string; photo: string | null }[] }[]
+    // Control: the plan reached the crewmate, the other on it as going.
+    expect(plans.map((p) => p.name)).toEqual([CREW_NAME])
+    expect(plans[0].going.find((g) => g.name === "Benedict")!.photo).toBeNull()
+    for (const leak of [SECRET_PHOTO, SECRET_BLUR, "Quixotewright", other.id]) expect(theirs.text).not.toContain(leak)
+    const mine = await call(route("events/[eventId]").GET, `/api/mobile/events/${eventId}`, viewer, { params: { eventId } })
+    expect(mine.body.data.userStatus.myCrewPlans).toEqual([])
+  })
+
   it("reached the viewer with the other's recorded wave, on the room's list, Banter's row and the deck, by handle beside no identity (SCRUM-1042)", async () => {
     const list = await call(route("events/[eventId]/waves").GET, `/api/mobile/events/${eventId}/waves`, viewer, { params: { eventId } })
     expect(list.body.data.waves.map((w: { userId: string }) => w.userId)).toEqual([refs.room[0]])
@@ -399,7 +413,7 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       // Nor any wave, wave count or wave-derived field (SCRUM-1042: hosts never wave or get waved at).
       const waveDerived = ['"wavedAt"', '"waiting"', '"wavedAtYou":true', '"youWaved":true'].some((t) => r.text.includes(t))
       // Nor any crew: hosts get counts in their insights, never a crew's name or who is in it (crews 6A).
-      const crewDerived = r.text.includes(CREW_NAME) || r.text.includes('"here":[{')
+      const crewDerived = r.text.includes(CREW_NAME) || r.text.includes('"here":[{') || r.text.includes('"myCrewPlans":[{')
       if (r.text.includes(TONIGHT_ANSWER) || r.text.includes(WORK_INTENT) || waveDerived || crewDerived) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
     }
     // The deck and the person sheet answered the host: withheld there, not merely refused.
