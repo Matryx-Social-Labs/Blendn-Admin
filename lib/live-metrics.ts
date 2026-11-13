@@ -53,9 +53,47 @@ export interface LiveFigures {
   categories: Array<{ category: string; count: number }>
 }
 
+/**
+ * A count a host is shown in "Meeting tonight": exact from `MIN_CELL`, `"few"`
+ * from one to four, and zero as itself (an empty Lobby names nobody).
+ */
+export type FewCount = number | "few"
+
+/**
+ * How the room is meeting (Live A, SCRUM-1051), as the host is shown it.
+ * Read once a minute, not every tick. Counts and words only: never a pair, a
+ * person, an answer or who waved at whom. Never sent to a venue (`forVenue`).
+ */
+export interface LiveSocial {
+  /** Guests who checked in: the denominator, as on the Overview. */
+  attendees: number
+  /** Held below the pairs floor (`MIN_ATTENDEES`), as the Overview's Connections. */
+  met:
+    | { held: true; floor: number }
+    | {
+        held: false
+        /** Share of guests in at least one connection. */
+        pct: number
+        connected: number
+        /** Pairs, once each; `byWay` splits them by the first way they met. */
+        connections: number
+        byWay: { waves: FewCount; lobby: FewCount; requests: FewCount }
+      }
+  /** Private chats opened from this room (a wave, a match, a Lobby ask). */
+  conversations: FewCount
+  /** Live Lobby posts: Offering, Looking for, Just saying. */
+  lobby: { posts: FewCount; offer: FewCount; seeking: FewCount; chat: FewCount }
+  /** Guests who answered Tonight's question; `"nearly_all"` when the rest are a few. Null: the room asks none. */
+  tonight: { answered: FewCount | "nearly_all" } | null
+  /** Crews with two or more members here now, and the people in them. Null: no day resolves. */
+  crews: { here: number; people: FewCount } | null
+}
+
 /** What whoever runs the event (or an admin) is sent: the figures, and their alerts. */
 export interface LiveSnapshot extends Omit<LiveFigures, "categories"> {
   view: "host"
+  /** "Meeting tonight". Null where the snapshot was read for something else (the issue sweep). */
+  social: LiveSocial | null
   /**
    * Floored like the digest's (SCRUM-890): a complaint going 0 to 1 lands in the same 5-second tick as one pseudonym's
    * message. The exact counts stay in `LiveFigures`, for the alerts, and never leave the server.

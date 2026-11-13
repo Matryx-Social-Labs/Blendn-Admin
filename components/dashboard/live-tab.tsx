@@ -24,6 +24,7 @@ import {
 import type { IssueRow } from "@/lib/event-issues"
 import { earlierIssues } from "@/lib/issue-timestamp"
 import { IssueLog } from "@/components/dashboard/issue-log"
+import { MeetingTonightPanel } from "@/components/dashboard/meeting-tonight-panel"
 import { useOpsSnapshot } from "@/lib/use-ops-snapshot"
 import { formatNumber, formatPct } from "@/lib/dashboard-format"
 import { liveCountLabel } from "@/lib/disclosure"
@@ -241,6 +242,9 @@ export function LiveTab({
             )}
           </div>
 
+          {/* How the room is meeting, under Alerts (Live A). The host's copy only: how people met stays the host's. */}
+          {snapshot.view === "host" && snapshot.social ? <MeetingTonightPanel social={snapshot.social} /> : null}
+
           {/*
             The same rules, recorded. Everything above is derived from the live
             snapshot and disappears with the tab; this is what a server sweep
@@ -277,9 +281,10 @@ export function LiveTab({
       </div>
 
       <p className="flex items-center gap-1.5 text-[0.75rem] text-faint-foreground">
-        <IconLock className="size-3.5" />
-        This channel carries aggregates only — no attendee rows cross it, so pseudonymity holds
-        even on the wire.
+        <IconLock className="size-3.5 shrink-0" />
+        {snapshot.view === "host"
+          ? "Aggregates only. Counts under 5 people are held back; connections wait for 8 people. No names, no ids, no answers."
+          : "This channel carries aggregates only — no attendee rows cross it, so pseudonymity holds even on the wire."}
       </p>
     </div>
   )

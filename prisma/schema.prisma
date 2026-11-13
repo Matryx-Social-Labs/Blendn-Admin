@@ -1573,6 +1573,9 @@ model private_conversations {
   messages private_messages[]
 
   @@unique([user1_id, user2_id])
+  // "Meeting tonight" and "Did people meet" count the chats a room opened (SCRUM-1051).
+  @@index([origin_event_id])
+  @@index([origin_board_request_id])
   @@index([user1_id])
   @@index([user2_id])
   @@index([last_message_at])

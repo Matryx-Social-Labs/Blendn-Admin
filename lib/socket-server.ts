@@ -12,7 +12,7 @@ import { blockCounterpartiesMany, keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUseConversation } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
-import { buildLiveSnapshot, type HeldEvent } from "./live-snapshot"
+import { buildLiveSnapshot, type Held } from "./live-snapshot"
 import { hereCountCoalesced } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
@@ -388,8 +388,8 @@ export function startOpsBroadcast(eventId: string): void {
    */
   let stopped = false
   const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
-  // The event and its days, read once a minute rather than every pass (`HeldEvent`).
-  const held: { current?: HeldEvent } = {}
+  // The event and its days, and "Meeting tonight", read once a minute rather than every pass (`Held`).
+  const held: Held = {}
 
   const tick = async (): Promise<void> => {
     try {

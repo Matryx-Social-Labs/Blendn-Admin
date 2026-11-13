@@ -151,6 +151,12 @@ already know each other's ids.
 | `event:checkout` | `{ eventId, userId?, checkOutTime, hereCount? }` | Someone checked out. `userId` is absent on the copies `event:checkin`'s is (a friend's, or a leaver with "Show online status" off); the count still moves. |
 | `event:interestUpdate` | `{ eventId, userId, interested, interestCount }` | Interest toggled |
 
+### Dashboard Ops Events (rooms: `event:{eventId}:ops`, `event:{eventId}:ops:venue`; dashboard sessions only)
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `ops:snapshot` | `LiveSnapshot` (host) or `VenueLiveSnapshot` (venue), `lib/live-metrics.ts` | The Live tab, every 5 s while somebody watches. Aggregates only. Whoever may edit the event gets the exact figures; a venue gets every count of people as a range and the alerts without numbers (SCRUM-516). The host's copy carries `social` ("Meeting tonight", SCRUM-1051): the share who met someone and the pairs by the first way they met (waves, Lobby, requests, held under 8 guests), conversations opened, Lobby posts by kind, Tonight's question answered, crews here. Counts under 5 are `"few"`, never a number; it is read once a minute, so it moves by the minute. A venue's copy has no `social`. |
+
 ### Roster Events (room: `event:room:{eventId}`, checked-in attendees only)
 
 | Event | Payload | Description |
