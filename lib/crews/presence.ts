@@ -8,12 +8,14 @@ import { logger } from "../logger"
 import { sendBulkPushNotifications } from "../push-notifications"
 import { deliverToRoom } from "../room-delivery"
 import { isRoomMuted } from "../room-mute"
-import { blocksExclude } from "./blocks"
+import { blocksBetween, blocksExclude } from "./blocks"
+import { firstName, UNNAMED } from "../conversation-identity"
+import { idForViewer } from "../room-handle"
 import { strangersApartBetween } from "../room-people"
 import { CREW_TAGS, CREWS_OFF, NO_CREW, NO_EVENT, type CrewRefusal, type CrewTag } from "./crews"
 import { crewBadges, nightsTogether, rankCrewsFor, type RankedCrew } from "./signals"
 import type { Badge, Overlap } from "../overlaps"
-import { notHostBannedFrom } from "../room-kind"
+import { eventRoomBan, notHostBannedFrom } from "../room-kind"
 
 /**
  * A crew at an event: presence, the crew cards, "We're here" (plan v2 §6).
@@ -165,13 +167,36 @@ export interface CardPage {
   offset: number
 }
 
+/** A crewmate on your crew's strip: in now, and came in with the crew. */
+export interface CrewmateIn {
+  /** Their handle in the crew's room (yours real), as `GET /crews/:id` lists them. */
+  userId: string
+  name: string
+  photo: string | null
+  you: boolean
+}
+
+export interface MyCrewHere {
+  crewId: string
+  name: string
+  /** Every member checked in now. Installed builds' "N of M here". */
+  presentCount: number
+  /**
+   * Who is in with the crew, first in first (S2): checked in now AND told the
+   * crew — by "With {crew}" at the hold or by "We're here". Somebody who came
+   * in on their own is not on it, and nobody kept apart from you is. Members
+   * only: a crew card (`crews[]`) never carries a person (C4).
+   */
+  here: CrewmateIn[]
+}
+
 export type CrewsAtEvent =
   | { crewsEnabled: false; crews: []; myCrews: []; total: 0; hasMore: false }
   | {
       crewsEnabled: true
       crews: CrewCard[]
       /** The caller's own crews that are here now: what a like is sent "as". */
-      myCrews: { crewId: string; name: string; presentCount: number }[]
+      myCrews: MyCrewHere[]
       /** Every crew the caller may see here now, across pages. */
       total: number
       hasMore: boolean
@@ -214,7 +239,7 @@ export async function crewsAtEvent(
   const crews = await db.crews.findMany({
     // Standing and not hidden already: `presentMembersAt` reads only those.
     where: { id: { in: [...present.keys()] } },
-    select: { id: true, name: true, bio: true, emblem_seed: true, tags: true, intent: true, open_to_solo: true },
+    select: { id: true, name: true, bio: true, emblem_seed: true, tags: true, intent: true, open_to_solo: true, room: { select: { id: true } } },
   })
   const members = await membersOf(crews.map((c) => c.id))
   const mine = crews.filter((c) => present.get(c.id)?.includes(viewerId))
@@ -306,10 +331,88 @@ export async function crewsAtEvent(
       overlaps: ranked.get(c.id)?.overlaps ?? [],
       badges: crewBadges(nights.get(c.id) ?? 0),
     })),
-    myCrews: mine.map((c) => ({ crewId: c.id, name: c.name, presentCount: presentCount(c.id) })),
+    myCrews: await myCrewsHere(viewerId, occurrenceId, mine, present),
     total: visible.length,
     hasMore: page.offset + shown.length < visible.length,
   }
+}
+
+/**
+ * Who told each room they are here at this occurrence, first in first: the
+ * "We're here" lines (written by the tap, or by "With {crew}" at the hold).
+ */
+async function toldIn(roomIds: readonly string[], occurrenceId: string): Promise<Map<string, string[]>> {
+  if (roomIds.length === 0) return new Map()
+  const lines = await db.chat_messages.findMany({
+    where: {
+      chat_group_id: { in: [...roomIds] },
+      type: "system",
+      AND: [{ metadata: { path: ["kind"], equals: "crew_here" } }, { metadata: { path: ["occurrenceId"], equals: occurrenceId } }],
+    },
+    select: { chat_group_id: true, user_id: true },
+    orderBy: { created_at: "asc" },
+  })
+  const byRoom = new Map<string, string[]>()
+  for (const l of lines) if (l.user_id) byRoom.set(l.chat_group_id, [...(byRoom.get(l.chat_group_id) ?? []), l.user_id])
+  return byRoom
+}
+
+/** First names and first photos, by user id. */
+async function namesOf(ids: readonly string[]): Promise<Map<string, { name: string; photo: string | null }>> {
+  if (ids.length === 0) return new Map()
+  const rows = await db.user.findMany({
+    where: { id: { in: [...ids] } },
+    select: { id: true, name: true, profile: { select: { name: true, photos: true } } },
+  })
+  return new Map(rows.map((u) => [u.id, { name: firstName(u.profile?.name || u.name || UNNAMED), photo: u.profile?.photos?.[0] ?? null }]))
+}
+
+/** In with the crew: present now and told, first in first. */
+function inWithCrew(present: readonly string[], told: readonly string[]): string[] {
+  const here = new Set(present)
+  return [...new Set(told)].filter((id) => here.has(id))
+}
+
+async function myCrewsHere(
+  viewerId: string,
+  occurrenceId: string,
+  mine: readonly { id: string; name: string; room: { id: string } | null }[],
+  present: ReadonlyMap<string, string[]>
+): Promise<MyCrewHere[]> {
+  const told = await toldIn(mine.flatMap((c) => (c.room ? [c.room.id] : [])), occurrenceId)
+  const inOf = new Map(mine.map((c) => [c.id, c.room ? inWithCrew(present.get(c.id) ?? [], told.get(c.room.id) ?? []) : []]))
+  const everyone = [...new Set([...inOf.values()].flat())]
+  const [apart, names] = await Promise.all([blocksBetween([viewerId], everyone), namesOf(everyone)])
+  return mine.map((c) => ({
+    crewId: c.id,
+    name: c.name,
+    presentCount: present.get(c.id)?.length ?? 0,
+    here: (inOf.get(c.id) ?? [])
+      .filter((id) => !apart.has(`${viewerId}|${id}`))
+      .map((id) => ({
+        userId: c.room ? idForViewer(viewerId, { kind: "crew", groupId: c.room.id }, id) : id,
+        name: names.get(id)?.name ?? UNNAMED,
+        photo: names.get(id)?.photo ?? null,
+        you: id === viewerId,
+      })),
+  }))
+}
+
+/** The longest list of names a push spells out before "and N others". */
+const PUSH_NAMES_MAX = 3
+
+/**
+ * The crew push's words (S3, owner 1a): who is in, never who is not, never
+ * where. "Priya is in." / "Priya and Arjun are in." / "Priya, Arjun and Meera
+ * are in." / "Priya, Arjun and 2 others are in." — then, for a crewmate not in
+ * yet, "Hold to Blend’n when you get there." Pure.
+ */
+export function crewInBody(names: readonly string[], recipientIsIn: boolean): string {
+  const shown =
+    names.length <= PUSH_NAMES_MAX ? [...names] : [...names.slice(0, PUSH_NAMES_MAX - 1), `${names.length - (PUSH_NAMES_MAX - 1)} others`]
+  const list = shown.length === 1 ? shown[0] : `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`
+  const said = `${list} ${names.length === 1 ? "is" : "are"} in.`
+  return recipientIsIn ? said : `${said} Hold to Blend’n when you get there.`
 }
 
 /* -------------------------------------------------------------------------- */
@@ -336,9 +439,11 @@ const NOT_IN: CrewRefusal = { refusal: "Check in first — \"We’re here\" is f
  * The tapper must be checked in here now, by their own GPS. Nobody else is
  * checked in by it: each member checks in at their own door (CR-I04).
  *
- * The push carries no place: a lock screen is read by whoever holds the
- * phone. The line in the crew chat carries the event in its metadata, for
- * the members it was meant for.
+ * The push names who is in with the crew, never who is not, and carries no
+ * place (owner 1a): a lock screen is read by whoever holds the phone. The line
+ * in the crew chat carries the event in its metadata, for the members it was
+ * meant for. "With {crew}" at the hold runs this same write
+ * (`tellCrewAtTheHold`), so the hold is the crew check-in with no second tap.
  */
 export async function crewHere(
   userId: string,
@@ -411,13 +516,65 @@ export async function crewHere(
   const recipients = others
     .filter((m) => !blocked.includes(m.user_id) && !isRoomMuted(m.notification_preferences))
     .map((m) => m.user_id)
-  if (recipients.length > 0) {
+  const bodies = await crewInBodies(crew.id, room.id, occurrenceId, recipients)
+  for (const [body, userIds] of bodies) {
     await sendBulkPushNotifications({
-      userIds: recipients,
+      userIds,
       title: crew.name,
-      body: "Someone from your crew is here 👋",
+      body,
       data: { type: "crew_here", crewId: crew.id, chatGroupId: room.id },
     }).catch((error: unknown) => logger.warn("Push notification failed", { context: "crew here", error: String(error) }))
   }
-  return { notified: recipients.length, repeated: false }
+  const notified = [...bodies.values()].reduce((n, ids) => n + ids.length, 0)
+  return { notified, repeated: false }
+}
+
+/**
+ * Each recipient's push, grouped by its words: the crewmates in with the crew
+ * now (the tapper among them), by first name, minus the recipient and anybody
+ * kept apart from them — a crewmate's view of the crew never shows someone
+ * they blocked or were blocked by (C5). A recipient already in gets the
+ * names without "Hold to Blend’n". At most 12 people: a crew's ceiling.
+ */
+async function crewInBodies(
+  crewId: string,
+  roomId: string,
+  occurrenceId: string,
+  recipients: readonly string[]
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>()
+  if (recipients.length === 0) return out
+  const [present, told] = await Promise.all([presentMembersAt(occurrenceId, [crewId]), toldIn([roomId], occurrenceId)])
+  const presentIds = present.get(crewId) ?? []
+  const inIds = inWithCrew(presentIds, told.get(roomId) ?? [])
+  const [apart, names] = await Promise.all([blocksBetween(recipients, inIds), namesOf(inIds)])
+  for (const r of recipients) {
+    const shown = inIds.filter((id) => id !== r && !apart.has(`${r}|${id}`)).map((id) => names.get(id)?.name ?? UNNAMED)
+    if (shown.length === 0) continue
+    const body = crewInBody(shown, presentIds.includes(r))
+    out.set(body, [...(out.get(body) ?? []), r])
+  }
+  return out
+}
+
+/**
+ * "With {crew}" at the hold (S1, owner 1A): a successful check-in that names
+ * one of your crews runs "We're here" for it — the same line, the same
+ * once-per-person-per-crew-per-occurrence lock, the same push — so there is
+ * no second tap. Your own check-in is the only one: nobody else is checked in
+ * by it (CR-I04).
+ *
+ * Silent either way, and never a reason to refuse the check-in: a crew you are
+ * not in, a dissolved one, crews off at this event, a room ban — all answer
+ * `false` and tell nobody. `true` when the crew knows (now, or already).
+ */
+export async function tellCrewAtTheHold(userId: string, crewId: string, eventId: string): Promise<boolean> {
+  try {
+    if (await eventRoomBan(eventId, userId)) return false
+    const told = await crewHere(userId, crewId, eventId)
+    return !("refusal" in told)
+  } catch (error) {
+    logger.warn("Crew at the hold failed", { error: error instanceof Error ? error.message : String(error) })
+    return false
+  }
 }

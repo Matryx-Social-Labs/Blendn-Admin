@@ -906,7 +906,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
 | GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
-| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch") |
+| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`) |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
@@ -3051,9 +3051,32 @@ chat or blocked the tapper — **once per person per crew per occurrence**; a
 second tap answers `repeated: true` and tells nobody. The line itself is the
 record (read and written in one transaction under a lock), so it holds across
 restarts and replicas; the next occurrence is a new night. A member who turned
-notifications off (`push_enabled`) gets the bell line, not a push. The push
-names nobody and no place: *"Someone from your crew is here 👋"*, titled with
-the crew's name. A crew invite sends `crew_invite` (`crewId`), naming nobody.
+notifications off (`push_enabled`) gets the bell line, not a push. The push,
+titled with the crew's name, names **who is in with the crew** by first name
+and never who is not, never a place (owner 1a, a lock screen is read by whoever
+holds the phone): *"Priya and Arjun are in. Hold to Blend’n when you get
+there."* — up to three names, then "and N others"; a member already in gets the
+names without the second sentence; each recipient's list leaves out anybody
+kept apart from them (a block or closed conversation, either way). A crew
+invite sends `crew_invite` (`crewId`), naming nobody.
+
+**"With {crew}" at the hold** (crews S1): `POST /events/:eventId/checkin`
+takes an optional `withCrewId`. On a successful check-in it runs the same
+"We're here" write for that crew — no second tap — and answers `crewTold:
+true` (also when the crew was already told tonight; the field is there only
+when `withCrewId` was sent). It never checks anybody
+else in. A crew that is not yours, crews off at the event, or a room ban is
+ignored silently: the check-in is unchanged and `crewTold: false`. The client
+shows the chip on by default only when the crew planned the night (owner 1b);
+tapping it off sends no `withCrewId`, and you are not on the crew's strip.
+
+**The strip** (crews S2): each of `myCrews` carries `here`, the members
+checked in now **who told the crew** (by the chip or "We're here"), first in
+first, as `{ userId, name, photo, you }` — `userId` is their handle in the
+crew's room (yours is your own id), `name` a first name. Somebody who came in
+on their own is not on it, nor anybody kept apart from you. `presentCount`
+still counts every member checked in, for installed builds. `here` is never on
+a crew card: strangers get counts only.
 
 **Presence is derived, never stored.** A crew is *here* when two or more of its
 active members are checked in at the same occurrence now (`checked_in`, no
@@ -4540,7 +4563,7 @@ them any more. Rows written before that are hidden, and retention removes them.
 | An organizer announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, Lobby, message request | The person it is about, immediately | One each |
 | A crew invite | The friend invited (`crew_invite`, `crewId`), naming nobody | One each |
-| "We're here" | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`), once per person per night; no name, no place | One each |
+| "We're here" / "With {crew}" at the hold | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`), once per person per night; "Priya and Arjun are in. Hold to Blend’n when you get there." — who is in by first name, never who is not, no place | One each |
 | A Mix | Everyone the Mix room lets in, but the person whose like made it (`blend`, `blendId`, `chatGroupId`); no name, nothing about who liked first | One each |
 | An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
 

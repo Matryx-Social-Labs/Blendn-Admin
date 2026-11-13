@@ -296,7 +296,9 @@ registry.registerPath({
     "Writes a line in the crew chat (type `system`, metadata `{ kind: \"crew_here\", eventId, occurrenceId }`) and pushes every other " +
     "member who has not muted the crew chat or blocked you — once per person per crew per occurrence (`repeated: true` after that; the " +
     "line itself is the record, so it holds across restarts). Somebody who turned notifications off gets the bell line, not a push. " +
-    "The push names nobody and no place. 403 when the host turned crews off.",
+    "The push names who is in with the crew by first name (\"Priya and Arjun are in. Hold to Blend’n when you get there.\"; a member " +
+    "already in gets the names only), never who is not, never a place, and never anybody kept apart from that recipient. " +
+    "`POST /events/{eventId}/checkin` with `withCrewId` runs this same write. 403 when the host turned crews off.",
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
   responses: {
@@ -332,7 +334,26 @@ registry.registerPath({
           z.object({
             crewsEnabled: z.boolean(),
             crews: z.array(CrewCardSchema),
-            myCrews: z.array(z.object({ crewId: z.string().uuid(), name: z.string(), presentCount: z.number().int() })),
+            myCrews: z.array(
+              z.object({
+                crewId: z.string().uuid(),
+                name: z.string(),
+                presentCount: z.number().int().describe("Every member checked in now (installed builds' count)"),
+                here: z
+                  .array(
+                    z.object({
+                      userId: z.string().describe("Their handle in the crew's room; yours is your own id"),
+                      name: z.string().describe("First name"),
+                      photo: z.string().nullable(),
+                      you: z.boolean(),
+                    })
+                  )
+                  .describe(
+                    "The strip (crews S2): members checked in now who told the crew (\"With {crew}\" or \"We're here\"), first in first. " +
+                      "Not somebody who came in on their own, not anybody kept apart from you. Members only: never on a card."
+                  ),
+              })
+            ),
             total: z.number().int().describe("Every crew you may see here now, across pages"),
             hasMore: z.boolean(),
           })

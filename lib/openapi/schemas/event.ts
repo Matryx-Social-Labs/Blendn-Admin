@@ -81,6 +81,15 @@ export const CheckinRequestSchema = z
     deviceInfo: DeviceInfoSchema.extend({
       gpsAccuracy: z.number().optional(),
     }).optional(),
+    withCrewId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe(
+        "\"With {crew}\" (crews S1): one of your crews to tell at this check-in — the same line, push and once-per-night lock as " +
+          "`POST /crews/{crewId}/here`, so no second tap. Never checks anyone else in. A crew that is not yours, crews off, or a room " +
+          "ban: ignored silently, the check-in unchanged, `crewTold: false`."
+      ),
   })
   .openapi("CheckinRequest")
 
@@ -505,6 +514,7 @@ export const CheckinResponseSchema = z
      * here?" and a tap applies it.
      */
     revealSuggestion: z.boolean(),
+    crewTold: z.boolean().optional().describe("Only when `withCrewId` was sent: whether that crew knows you are in (now or already tonight)."),
     /**
      * Ask "why do you go out?" now, and save the answer as the default.
      *
