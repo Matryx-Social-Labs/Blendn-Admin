@@ -12,7 +12,8 @@ import {
   type FewCount,
   type StarSpread,
 } from "@/lib/disclosure"
-import { hostsEvent } from "@/lib/event-visibility"
+import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
+import { redeemedByNight } from "@/lib/offers/venue"
 import type { InsightCounts } from "@/lib/insight-tallies"
 import { publishedRatingGroups } from "@/lib/rating-batches"
 import { venueDayBounds } from "@/lib/venue-day"
@@ -125,15 +126,21 @@ const MET_READS_AT_ONCE = 4
 
 type Actor = { id: string; orgIds: readonly string[] } | null
 
+export interface NightsVenue {
+  id: string
+  owner_org_id: string | null
+  claimed_at: Date | null
+  timezone: string
+  day_reset_hour: number
+}
+
 /**
- * The venue's nights in `startTime` (its claim window, or an admin's range).
- * `actor` null is an admin: every night reads as the venue's own.
+ * The venue's nights in `range`, cut at its claim for an owner (SCRUM-500:
+ * nothing before it, and nothing at all without one). `actor` null is an
+ * admin: the whole range, every night read as the venue's own.
  */
-export async function venueNights(
-  venue: { id: string; owner_org_id: string | null; timezone: string; day_reset_hour: number },
-  startTime: { gte: Date; lt?: Date } | null,
-  actor: Actor
-): Promise<VenueNightRow[]> {
+export async function venueNights(venue: NightsVenue, range: { from: Date; to: Date }, actor: Actor): Promise<VenueNightRow[]> {
+  const startTime = actor ? claimedWindow(venue, range) : { gte: range.from, lt: range.to }
   if (startTime === null) return []
   const events = await db.events.findMany({
     /*
@@ -215,14 +222,4 @@ async function metByNight(ids: string[]): Promise<Map<string, { connected: numbe
     batch.forEach((id, j) => out.set(id, { connected: counts[j].connected, attendees: counts[j].attendees }))
   }
   return out
-}
-
-/** Offers redeemed per venue night (its local date), the current owner's offers only (a transfer starts afresh). */
-async function redeemedByNight(venueId: string, ownerOrgId: string): Promise<Map<string, number>> {
-  const rows = await db.venue_offer_sends.groupBy({
-    by: ["redeemed_night"],
-    where: { venue_id: venueId, redeemed_night: { not: null }, offer: { org_id: ownerOrgId } },
-    _count: { _all: true },
-  })
-  return new Map(rows.flatMap((r) => (r.redeemed_night ? [[r.redeemed_night.toISOString().slice(0, 10), r._count._all] as const] : [])))
 }

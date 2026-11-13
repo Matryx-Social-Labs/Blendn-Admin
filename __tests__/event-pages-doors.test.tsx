@@ -143,9 +143,11 @@ describe("the Feedback tab's page", () => {
     expect(await door(feedback())).toBe("redirect /dashboard/events/e1")
   })
 
-  it("sends a venue day back to its overview, over or not", async () => {
+  it("opens a venue day's Feedback once the day is over, and not before (Venue C, G12)", async () => {
     mockSession.user.role = "venue_owner"
     mockEvent = { status: "published", kind: "venue_day", ...over, organizer_org_id: "org-sys" }
+    expect(await door(feedback())).toBe("rendered")
+    mockEvent = { status: "published", kind: "venue_day", ...ahead, organizer_org_id: "org-sys" }
     expect(await door(feedback())).toBe("redirect /dashboard/events/e1")
   })
 

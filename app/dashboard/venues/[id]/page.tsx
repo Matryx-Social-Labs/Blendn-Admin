@@ -186,11 +186,11 @@ export default async function VenueDetailPage({
   const actor = isAdmin ? null : await actorFor(session.user)
 
   // Venue C (SCRUM-1051): the room running now, and every night here with what the venue may know of it.
-  const nightsVenue = { id, owner_org_id: venue.owner_org?.id ?? null, timezone: venue.timezone, day_reset_hour: venue.day_reset_hour }
+  const nightsVenue = { id, owner_org_id: venue.owner_org?.id ?? null, claimed_at: venue.claimed_at, timezone: venue.timezone, day_reset_hour: venue.day_reset_hour }
   const [building, tonight, nights] = await Promise.all([
     getBuildingOccupancy(id, { asOwner: actor }),
-    venueTonight(nightsVenue, since, actor),
-    venueNights(nightsVenue, inRange ?? null, actor),
+    venueTonight(nightsVenue, actor),
+    venueNights(nightsVenue, range, actor),
   ])
 
   /*

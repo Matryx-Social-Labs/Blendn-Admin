@@ -18,7 +18,7 @@ import { DAY, VenueClaimWorld } from "./venue-claim-world"
 
 const w = new VenueClaimWorld()
 const venueDays: string[] = []
-let venue = { id: "", owner_org_id: null as string | null, timezone: "Asia/Kolkata", day_reset_hour: 6 }
+let venue = { id: "", owner_org_id: null as string | null, claimed_at: null as Date | null, timezone: "Asia/Kolkata", day_reset_hour: 6 }
 let hostNight = ""
 let today = ""
 let frozen = ""
@@ -69,7 +69,7 @@ beforeAll(async () => {
     select: { id: true },
   })
   w.venues.push(v.id)
-  venue = { ...venue, id: v.id, owner_org_id: w.venueOrg }
+  venue = { ...venue, id: v.id, owner_org_id: w.venueOrg, claimed_at: claim }
 
   // Another host's night yesterday: 9 came, 3 pairs met (6 of 9), 6 positive and 5 negative.
   hostNight = await makeEvent(host)
@@ -123,11 +123,13 @@ afterAll(async () => {
   await closeDb()
 }, 120_000)
 
+/** The window the page passes: twenty days either side, so only the claim cuts it. */
+const wide = () => ({ from: new Date(Date.now() - 20 * DAY), to: new Date(Date.now() + 20 * DAY) })
 const ownerActor = () => ({ id: w.owner, orgIds: [w.venueOrg] })
 
 describe("Nights here, as the venue's owner reads it", () => {
   it("gives its own venue day as ranges, met someone included, and offers redeemed as under 5", async () => {
-    const rows = await venueNights(venue, { gte: claim }, ownerActor())
+    const rows = await venueNights(venue, wide(), ownerActor())
     expect(rows.find((r) => r.id === today)).toMatchObject({
       venueDay: true,
       host: "Your room",
@@ -139,38 +141,43 @@ describe("Nights here, as the venue's owner reads it", () => {
   })
 
   it("says host's for how people met on another host's night, and still shows who came as a band", async () => {
-    const rows = await venueNights(venue, { gte: claim }, ownerActor())
+    const rows = await venueNights(venue, wide(), ownerActor())
     expect(rows.find((r) => r.id === hostNight)).toMatchObject({ venueDay: false, came: "5–9", met: "hosts", offers: null, mood: { parts: [6, 0, 5], word: "mixed" } })
   })
 
   it("is the asker, not the night: the host reading its own night gets the range (control)", async () => {
-    const rows = await venueNights(venue, { gte: claim }, { id: w.host, orgIds: [w.hostOrg] })
+    const rows = await venueNights(venue, wide(), { id: w.host, orgIds: [w.hostOrg] })
     expect(rows.find((r) => r.id === hostNight)?.met).toBe("most")
   })
 
   it("reads a frozen night from its tally, not from rows the purges have taken", async () => {
-    const rows = await venueNights(venue, { gte: claim }, ownerActor())
+    const rows = await venueNights(venue, wide(), ownerActor())
     // Counted now it would be held: no check-ins are left. The tally says 4 of 20.
     expect(rows.find((r) => r.id === frozen)).toMatchObject({ came: "Under 5", met: "under a quarter" })
   })
 
   it("carries no exact count of people anywhere in a row", async () => {
-    const rows = await venueNights(venue, { gte: claim }, ownerActor())
+    const rows = await venueNights(venue, wide(), ownerActor())
     for (const r of rows) {
       expect(Object.keys(r).sort()).toEqual(["came", "host", "id", "met", "mood", "night", "offers", "rating", "startAt", "status", "venueDay"])
       expect(r.came).toMatch(/^(Under 5|5–9|10–19|20\+)$/)
     }
   })
 
-  it("shows nothing before the claim, and nothing at all without one", async () => {
-    expect(await venueNights(venue, { gte: new Date() }, ownerActor())).toEqual([])
-    expect(await venueNights(venue, null, ownerActor())).toEqual([])
+  it("shows nothing before the claim, and nothing at all without one; an admin reads the whole range", async () => {
+    // Claimed a minute before today's venue day began: yesterday's host night and the frozen day are before it.
+    const { start_time } = await db.events.findUniqueOrThrow({ where: { id: today }, select: { start_time: true } })
+    const lateClaim = { ...venue, claimed_at: new Date(start_time.getTime() - 60_000) }
+    expect((await venueNights(lateClaim, wide(), ownerActor())).map((r) => r.id)).toEqual([today])
+    expect(await venueNights({ ...venue, claimed_at: null }, wide(), ownerActor())).toEqual([])
+    // The control: an admin, no claim cut.
+    expect((await venueNights({ ...venue, claimed_at: null }, wide(), null)).length).toBe(3)
   })
 })
 
 describe("Tonight at the venue", () => {
   it("shows the venue's own day live, every count a range", async () => {
-    const t = await venueTonight(venue, { gte: claim }, ownerActor())
+    const t = await venueTonight(venue, ownerActor())
     expect(t).toMatchObject({ eventId: today, venueDay: true, label: "venue day", inRoom: "10–19", met: "about half", mood: "mostly positive", offers: "under 5" })
   })
 
@@ -185,13 +192,13 @@ describe("Tonight at the venue", () => {
     await db.events.update({ where: { id: live }, data: { venue_id: second.id, organizer_org_id: w.hostOrg } })
     await mutualWaves(live, await guests(live, 9, { live: true, at: new Date(Date.now() - 10 * 60_000) }), 3)
     const at = { ...venue, id: second.id }
-    expect(await venueTonight(at, { gte: claim }, ownerActor())).toMatchObject({ eventId: live, venueDay: false, inRoom: "5–9", met: "hosts", crews: "hosts" })
+    expect(await venueTonight(at, ownerActor())).toMatchObject({ eventId: live, venueDay: false, inRoom: "5–9", met: "hosts", crews: "hosts" })
     // The control: its host reads the same room with met someone.
-    expect((await venueTonight(at, { gte: claim }, { id: w.host, orgIds: [w.hostOrg] }))?.met).toBe("most")
+    expect((await venueTonight(at, { id: w.host, orgIds: [w.hostOrg] }))?.met).toBe("most")
   })
 
   it("is nothing when no claim, and nothing when the room is not running", async () => {
-    expect(await venueTonight(venue, null, ownerActor())).toBeNull()
-    expect(await venueTonight(venue, { gte: claim }, ownerActor(), new Date(Date.now() + 3 * DAY))).toBeNull()
+    expect(await venueTonight({ ...venue, claimed_at: null }, ownerActor())).toBeNull()
+    expect(await venueTonight(venue, ownerActor(), new Date(Date.now() + 3 * DAY))).toBeNull()
   })
 })

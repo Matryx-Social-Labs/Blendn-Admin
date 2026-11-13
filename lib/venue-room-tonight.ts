@@ -1,9 +1,10 @@
 import { db } from "@/lib/db"
 import { liveCountBucket, liveCountLabel } from "@/lib/disclosure"
-import { hostsEvent } from "@/lib/event-visibility"
+import { claimedWindow, hostsEvent } from "@/lib/event-visibility"
 import { buildLiveSnapshot, type Held } from "@/lib/live-snapshot"
+import { redeemedByNight } from "@/lib/offers/venue"
 import { venueDayBounds } from "@/lib/venue-day"
-import { crewsCell, metRange, offersBand, venueMood, type MetRange, type MoodWord } from "@/lib/venue-nights"
+import { crewsCell, metRange, offersBand, venueMood, type MetRange, type MoodWord, type NightsVenue } from "@/lib/venue-nights"
 
 /**
  * "Tonight at <venue>" (Venue C, SCRUM-1051): the room running at the venue
@@ -46,15 +47,16 @@ function heldFor(eventId: string): Held {
 /**
  * The room to show, or null when nothing runs: the venue day first (it is the
  * venue's own), then a night the owner's organisation hosts, then another
- * host's. `since` is the claim window (null: no claim, no rooms); `actor` null
- * is an admin, who reads every room as the venue's own.
+ * host's. For an owner only rooms that opened after the claim (none without
+ * one, SCRUM-500); `actor` null is an admin, who reads every room as the
+ * venue's own.
  */
 export async function venueTonight(
-  venue: { id: string; owner_org_id: string | null; timezone: string; day_reset_hour: number },
-  since: { gte: Date } | null | undefined,
+  venue: NightsVenue,
   actor: { id: string; orgIds: readonly string[] } | null,
   now: Date = new Date()
 ): Promise<VenueTonight | null> {
+  const since = actor ? claimedWindow(venue) : undefined
   if (since === null) return null
   const live = await db.events.findMany({
     /*
@@ -86,15 +88,7 @@ export async function venueTonight(
 
   const [snapshot, redeemed] = await Promise.all([
     buildLiveSnapshot(room.id, heldFor(room.id), { social: own }),
-    venue.owner_org_id
-      ? db.venue_offer_sends.count({
-          where: {
-            venue_id: venue.id,
-            redeemed_night: new Date(`${venueDayBounds(venue.timezone, venue.day_reset_hour, now).localDate}T00:00:00Z`),
-            offer: { org_id: venue.owner_org_id },
-          },
-        })
-      : null,
+    venue.owner_org_id ? redeemedTonight(venue.id, venue.owner_org_id, venueDayBounds(venue.timezone, venue.day_reset_hour, now).localDate) : null,
   ])
   if (!snapshot) return null
   const social = own ? snapshot.social : null
@@ -109,4 +103,8 @@ export async function venueTonight(
     crews: !own ? "hosts" : social?.crews ? crewsCell(social.crews.here) : null,
     offers: redeemed === null ? null : offersBand(redeemed),
   }
+}
+
+async function redeemedTonight(venueId: string, ownerOrgId: string, night: string): Promise<number> {
+  return (await redeemedByNight(venueId, ownerOrgId, night)).get(night) ?? 0
 }
