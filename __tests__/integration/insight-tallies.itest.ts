@@ -8,8 +8,9 @@
  * and the readers prefer the frozen figure, so the event's insights read the
  * same after the purge as before it. Counts only: never an id, never words.
  */
-import { getConnectionMetrics, MIN_ATTENDEES } from "@/lib/connection-metrics"
+import { MIN_ATTENDEES } from "@/lib/connection-metrics"
 import { db as appDb } from "@/lib/db"
+import { eventInsights } from "@/lib/event-insights"
 import { freezeInsightTallies } from "@/lib/insight-tallies"
 import { purgeClosedLobbies, purgeTonightAnswers, RETENTION_DAYS, TONIGHT_ANSWER_DAYS } from "@/lib/lobby-retention"
 
@@ -18,8 +19,11 @@ import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpe
 const DAY = 86_400_000
 const users: string[] = []
 const events: string[] = []
+const crews: string[] = []
 
 afterAll(async () => {
+  await db.crew_members.deleteMany({ where: { crew_id: { in: crews } } })
+  await db.crews.deleteMany({ where: { id: { in: crews } } })
   await cleanup(users, events)
   await closeDb()
 })
@@ -97,14 +101,14 @@ describe("connections read the same after the 180-day purge", () => {
     const { eventId, guests } = await endedRoom(RETENTION_DAYS + 2)
     await acceptedAsk(eventId, guests[0], guests[1])
     await db.event_waves.createMany({ data: [{ event_id: eventId, from_id: guests[2], to_id: guests[3] }, { event_id: eventId, from_id: guests[3], to_id: guests[2] }] })
-    const before = await getConnectionMetrics(eventId)
-    expect(before).toMatchObject({ connections: 2, connected: 4 })
+    const before = await eventInsights(eventId)
+    expect(before.funnel).toMatchObject({ connections: { atLeast: 2 }, met: { count: 4 } })
 
     for (let i = 0; i < 10 && (await db.board_posts.count({ where: { event_id: eventId } })) > 0; i++) await purgeClosedLobbies(new Date(), "delete")
 
     // The control: the post and its ask are really gone, so the figure below is the tally's.
     expect(await db.board_requests.count({ where: { event_id: eventId } })).toBe(0)
-    expect(await getConnectionMetrics(eventId)).toEqual(before)
+    expect(await eventInsights(eventId)).toEqual(before)
     expect((await tallyOf(eventId))?.counts).toMatchObject({ lobby: { offer: 1, seeking: 0, chat: 0, asks: 1, accepted: 1 } })
   })
 
@@ -133,5 +137,72 @@ describe("a tally is counts only", () => {
     const all = leaves((await tallyOf(eventId))?.counts)
     expect(all.length).toBeGreaterThan(0)
     for (const v of all) expect(typeof v).toBe("number")
+  })
+})
+
+/** Two people who waved at each other and both wrote in the chat the room opened. */
+async function keptTalking(eventId: string, a: string, b: string) {
+  await db.event_waves.createMany({ data: [{ event_id: eventId, from_id: a, to_id: b }, { event_id: eventId, from_id: b, to_id: a }] })
+  const c = await db.private_conversations.create({ data: { user1_id: a, user2_id: b, origin_event_id: eventId } })
+  await db.private_messages.createMany({ data: [{ conversation_id: c.id, sender_id: a, message_text: "hi" }, { conversation_id: c.id, sender_id: b, message_text: "hey" }] })
+}
+
+/** A crew of `members`, all of whom must already exist. */
+async function crewOf(members: string[]) {
+  const crew = await db.crews.create({ data: { name: "Tally crew", emblem_seed: "s", created_by: members[0] } })
+  crews.push(crew.id)
+  await db.crew_members.createMany({ data: members.map((user_id, i) => ({ crew_id: crew.id, user_id, role: i === 0 ? "owner" : "member", consented_reveal_at: new Date() })) })
+}
+
+describe("Post A's counts are frozen too (conversations, kept talking, crews that came)", () => {
+  it("records them, and the reader reads the frozen figures once the rows are gone", async () => {
+    const { eventId, guests } = await endedRoom(TONIGHT_ANSWER_DAYS + 4, 20)
+    for (let i = 0; i < 10; i += 2) await keptTalking(eventId, guests[i], guests[i + 1])
+    // Met, and never wrote: six people who did not keep talking.
+    for (let i = 10; i < 16; i += 2) {
+      await db.event_waves.createMany({ data: [{ event_id: eventId, from_id: guests[i], to_id: guests[i + 1] }, { event_id: eventId, from_id: guests[i + 1], to_id: guests[i] }] })
+    }
+    await crewOf([guests[0], guests[1], guests[2]])
+    await crewOf([guests[3], guests[4]])
+    // The control: a crew with one member here did not come as a crew.
+    const stranger = await makeUser("it-crew-away")
+    users.push(stranger)
+    await crewOf([guests[5], stranger])
+
+    for (let i = 0; i < 10 && !(await tallyOf(eventId)); i++) await freezeInsightTallies(new Date(Date.now() - TONIGHT_ANSWER_DAYS * DAY))
+    expect((await tallyOf(eventId))?.counts).toMatchObject({
+      connections: { connections: 8, connected: 16, keptTalking: 10 },
+      conversations: 5,
+      crews: { came: 2, people: 5 },
+    })
+
+    const before = await eventInsights(eventId)
+    // The rows behind the figures go; the reader must be reading the tally.
+    await db.private_messages.deleteMany({ where: { sender_id: { in: guests } } })
+    await db.private_conversations.deleteMany({ where: { origin_event_id: eventId } })
+    await db.event_waves.deleteMany({ where: { event_id: eventId } })
+    expect(await eventInsights(eventId)).toEqual(before)
+    expect(before.funnel).toMatchObject({ held: false, keptTalking: { count: 10 } })
+    expect(before.conversations).toBe(5)
+    expect(before.crews).toEqual({ came: 2, people: 5 })
+  })
+
+  it("says 'not recorded', never 0, for a tally frozen before these were counted", async () => {
+    const { eventId } = await endedRoom(TONIGHT_ANSWER_DAYS + 5, 12)
+    // The shape #965 froze: no byWay, keptTalking, conversations or crews.
+    await db.event_insight_tallies.create({
+      data: {
+        event_id: eventId,
+        counts: {
+          connections: { attendees: 12, connections: 6, connected: 9, reachedOut: 10 },
+          lobby: { offer: 2, seeking: 0, chat: 0, asks: 3, accepted: 2 },
+          tonight: { answered: 0, workIntent: { hire: 0, find_work: 0, build: 0, learn: 0 } },
+        },
+      },
+    })
+    const insights = await eventInsights(eventId)
+    expect(insights.funnel).toMatchObject({ held: false, connections: 6, byWay: null, keptTalking: "not_recorded" })
+    expect(insights.conversations).toBe("not_recorded")
+    expect(insights.crews).toBe("not_recorded")
   })
 })

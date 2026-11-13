@@ -1,8 +1,8 @@
 // Relative, not "@/lib/*": the purge freezes these counts (lib/insight-tallies.ts), and the
 // lifecycle sweeper that runs it is reachable from server.ts (server-import-boundary.test.ts).
+import { Prisma } from "@prisma/client"
+
 import { db } from "./db"
-import { discloseFigure, heldPart } from "./disclosure"
-import type { InsightCounts } from "./insight-tallies"
 
 /**
  * Did anyone actually meet anyone?
@@ -44,48 +44,13 @@ import type { InsightCounts } from "./insight-tallies"
  * about which; at five it is 10, and a room that small remembers who was
  * talking to whom.
  *
- * Passed to `discloseFigure` as a parameter instead of being a second
- * suppression rule living in its own file — which is what it was, and why the
- * codebase had two floors that had never been reconciled.
+ * Declared once, here, and read by both readers of these counts (the Overview's
+ * `discloseInsights`, the Live tab's `discloseSocial`) rather than each keeping
+ * its own: two floors that were never reconciled is how this file began.
  */
 export const MIN_ATTENDEES = 8
 
-export interface ConnectionMetrics {
-  /** Distinct guests who checked in. The denominator. */
-  attendees: number
-  /**
-   * Pairs of attendees who met here, once per pair however many ways: mutual
-   * waves (or a like answered either way), an accepted Lobby ask, an accepted
-   * message request sent from this room. Never which pairs.
-   */
-  connections: number
-  /** People who made at least one. */
-  connected: number
-  /**
-   * The benchmark figure: connections per person, counted from each person's
-   * side, so a pair is one connection for each of the two (2 x pairs /
-   * attendees). Null when suppressed.
-   */
-  perAttendee: number | null
-  /** Share who made at least one connection. Null when suppressed. */
-  connectedPct: number | null
-  /**
-   * Share of attendees who made at least one first move here: a wave (or an
-   * old like), a Lobby ask, a message request from this room, answered or not
-   * (approval 2). Never a count of waves and never how many went unanswered.
-   * Null under the pairs floor, and when the movers or the rest are fewer than
-   * `MIN_CELL` (`heldPart`): "6 of 10" names the 4 who sat it out. Not
-   * rendered yet; the "Did people meet" funnel reads it.
-   */
-  reachedOutPct: number | null
-  /**
-   * Too few attendees for these to be aggregates rather than facts about named
-   * people. Everything derived is null; `attendees` still shows.
-   */
-  suppressed: boolean
-}
-
-/** The raw counts behind `ConnectionMetrics`, before any floor. Never leaves the server as is. */
+/** The raw counts, before any floor: `discloseInsights` (lib/event-insights.ts) and `discloseSocial` apply them. Never leaves the server as is. */
 export interface ConnectionCounts {
   attendees: number
   connections: number
@@ -98,6 +63,12 @@ export interface ConnectionCounts {
    * frozen before 2026-11-13.
    */
   byWay: ConnectionWays
+  /**
+   * People in a connection whose chat, opened from this room (`origin_event_id`
+   * or one of its Lobby asks), has a message from each side: the funnel stage
+   * taps cannot inflate (Post A). Absent from tallies frozen before Post A.
+   */
+  keptTalking: number
 }
 
 export interface ConnectionWays {
@@ -105,6 +76,10 @@ export interface ConnectionWays {
   lobby: number
   requests: number
 }
+
+/** A chat (`private_conversations c`) opened from this room: a wave or request here, or one of its Lobby asks. */
+export const openedInRoom = (eventId: string) => Prisma.sql`(c.origin_event_id = ${eventId}::uuid
+  OR c.origin_board_request_id IN (SELECT id FROM board_requests WHERE event_id = ${eventId}::uuid))`
 
 export async function connectionCounts(eventId: string): Promise<ConnectionCounts> {
   /*
@@ -126,7 +101,7 @@ export async function connectionCounts(eventId: string): Promise<ConnectionCount
    */
   // board-visibility: accepted asks only, and a silenced ask is stored `declined`; a count, to nobody's side.
   const [row] = await db.$queryRaw<
-    { attendees: number; connections: number; connected: number; reached_out: number; waves: number; lobby: number; requests: number }[]
+    { attendees: number; connections: number; connected: number; reached_out: number; waves: number; lobby: number; requests: number; kept_talking: number }[]
   >`
     WITH att AS (
       SELECT DISTINCT user_id FROM event_check_ins
@@ -162,6 +137,16 @@ export async function connectionCounts(eventId: string): Promise<ConnectionCount
     kept AS (
       SELECT lo, hi, way FROM pairs
        WHERE lo IN (SELECT user_id FROM att) AND hi IN (SELECT user_id FROM att)
+    ),
+    convs AS (
+      SELECT c.id, LEAST(c.user1_id, c.user2_id) AS lo, GREATEST(c.user1_id, c.user2_id) AS hi
+        FROM private_conversations c WHERE ${openedInRoom(eventId)}
+    ),
+    -- A connection that kept talking: its chat has a message from each side. Counts only, never words.
+    talking AS (
+      SELECT DISTINCT k.lo, k.hi FROM kept k JOIN convs c ON c.lo = k.lo AND c.hi = k.hi
+       WHERE EXISTS (SELECT 1 FROM private_messages m WHERE m.conversation_id = c.id AND m.sender_id = k.lo)
+         AND EXISTS (SELECT 1 FROM private_messages m WHERE m.conversation_id = c.id AND m.sender_id = k.hi)
     )
     SELECT (SELECT count(*) FROM att)::int AS attendees,
            (SELECT count(*) FROM kept)::int AS connections,
@@ -169,7 +154,8 @@ export async function connectionCounts(eventId: string): Promise<ConnectionCount
            (SELECT count(*) FROM movers WHERE a IN (SELECT user_id FROM att))::int AS reached_out,
            (SELECT count(*) FROM kept WHERE way = 'wave')::int AS waves,
            (SELECT count(*) FROM kept WHERE way = 'lobby')::int AS lobby,
-           (SELECT count(*) FROM kept WHERE way = 'request')::int AS requests`
+           (SELECT count(*) FROM kept WHERE way = 'request')::int AS requests,
+           (SELECT count(*) FROM (SELECT lo FROM talking UNION SELECT hi FROM talking) t)::int AS kept_talking`
 
   return {
     attendees: row.attendees,
@@ -177,61 +163,6 @@ export async function connectionCounts(eventId: string): Promise<ConnectionCount
     connected: row.connected,
     reachedOut: row.reached_out,
     byWay: { waves: row.waves, lobby: row.lobby, requests: row.requests },
+    keptTalking: row.kept_talking,
   }
 }
-
-export async function getConnectionMetrics(eventId: string): Promise<ConnectionMetrics> {
-  /*
-   * Frozen before the 180-day purge deletes the Lobby asks behind them
-   * (`event_insight_tallies`), so an old event reads the same as it did.
-   * The floors below apply to frozen counts exactly as to live ones.
-   */
-  const frozen = await db.event_insight_tallies.findUnique({ where: { event_id: eventId }, select: { counts: true } })
-  const { attendees, connections, connected, reachedOut } = frozen
-    ? (frozen.counts as unknown as InsightCounts).connections
-    : await connectionCounts(eventId)
-
-  /*
-   * The same rule the digest uses, with this figure's own floor.
-   *
-   * `population: attendees` and `contributors: attendees` because every
-   * attendee is a possible participant in a pair -- so only the minimum-cell
-   * part of the rule can fire here, which is the part this file always had.
-   * Routing through the module anyway is the point: a second implementation is
-   * how the two floors drifted apart in the first place.
-   */
-  const gate = discloseFigure({
-    count: attendees,
-    contributors: attendees,
-    population: attendees,
-    floor: MIN_ATTENDEES,
-  })
-
-  if (gate.suppressed && gate.reason === "min_cell") {
-    return {
-      attendees,
-      connections: 0,
-      connected: 0,
-      perAttendee: null,
-      connectedPct: null,
-      reachedOutPct: null,
-      suppressed: true,
-    }
-  }
-
-  return {
-    attendees,
-    connections,
-    connected,
-    // Each pair is a connection for both people in it. Dividing pairs by heads
-    // (F2) reported half the figure the benchmark it is compared against means.
-    // One decimal: "1.4 each" is a real distinction from "1 each", and two
-    // decimals would imply a precision a room of forty cannot support.
-    perAttendee: Math.round(((2 * connections) / attendees) * 10) / 10,
-    connectedPct: Math.round((connected / attendees) * 100),
-    reachedOutPct: pctOf(heldPart(reachedOut, attendees), attendees),
-    suppressed: false,
-  }
-}
-
-const pctOf = (part: number | null, whole: number) => (part === null ? null : Math.round((part / whole) * 100))

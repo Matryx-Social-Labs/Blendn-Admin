@@ -468,6 +468,23 @@ export function discloseGroup(parts: readonly number[]): { total: number | HeldT
   return { total: hidden === 0 ? visible : { atLeast: visible + hidden }, parts: shown }
 }
 
+/** A count a host is shown: exact from `MIN_CELL`, a few from one to four, zero as itself. */
+export const fewCount = (count: number): FewCount => (count > 0 && count < MIN_CELL ? "few" : count)
+
+/**
+ * Guests who answered Tonight's question, of `attendees`: a few under five, and
+ * "nearly all" when the guests who did not are a few, which would name them.
+ */
+export function discloseAnswered(answered: number, attendees: number): FewCount | "nearly_all" {
+  const shown = Math.min(answered, attendees)
+  return shown >= MIN_CELL && attendees - shown > 0 && attendees - shown < MIN_CELL ? "nearly_all" : fewCount(shown)
+}
+
+/** Crews and the people in them: both a few while the people are, since two crews already say four people. */
+export function discloseCrews(crews: number, people: number): { crews: FewCount; people: FewCount } {
+  return people > 0 && people < MIN_CELL ? { crews: "few", people: "few" } : { crews, people }
+}
+
 /**
  * What to render in place of a withheld number.
  *

@@ -206,11 +206,11 @@ describe("a venue owner's view of a three-person night", () => {
     expect(html).not.toMatch(/attendee-[0-9a-f]{12}/)
   })
 
-  it("tells the venue a count above the floor on both tabs alike, and still no Connections panel", async () => {
+  it("tells the venue a count above the floor on both tabs alike, and still no 'Did people meet' panel", async () => {
     const organiser = await render("organizer", host, walkInNight)
     expect(mentions(organiser, 9)).toBe(true)
     // The control for the panel: the organiser's render has it.
-    expect(organiser).toMatch(/Connections/)
+    expect(organiser).toMatch(/Did people meet/)
 
     const overview = await render("venue_owner", venueOwner, walkInNight)
     const attendees = await render("venue_owner", venueOwner, walkInNight, "attendees")
@@ -218,7 +218,7 @@ describe("a venue owner's view of a three-person night", () => {
     // neither tab may print less, or more.
     expect(mentions(overview, 9)).toBe(true)
     expect(mentions(attendees, 9)).toBe(true)
-    expect(overview).not.toMatch(/Connections/)
+    expect(overview).not.toMatch(/Did people meet|Kept talking/)
     expect(overview).not.toMatch(/fewer than 5|held back/)
   })
 })

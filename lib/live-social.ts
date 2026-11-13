@@ -1,8 +1,8 @@
 // Relative imports: the ops loop in lib/socket-server.ts reaches this from server.ts.
-import { connectionCounts, MIN_ATTENDEES, type ConnectionCounts } from "./connection-metrics"
+import { connectionCounts, MIN_ATTENDEES, openedInRoom, type ConnectionCounts } from "./connection-metrics"
 import { presentMembersAt } from "./crews/here"
 import { db } from "./db"
-import { discloseGroup, MIN_CELL } from "./disclosure"
+import { discloseAnswered, discloseCrews, discloseGroup, fewCount } from "./disclosure"
 import type { FewCount, LiveSocial } from "./live-metrics"
 import { lensForEvent } from "./tonight"
 
@@ -26,9 +26,7 @@ export async function liveSocialCounts(eventId: string, occurrenceId: string | n
     connectionCounts(eventId),
     // board-visibility: counts only, live posts, as `insightCountsOf` counts them.
     db.$queryRaw<{ conversations: bigint; offer: bigint; seeking: bigint; chat: bigint; answered: bigint }[]>`
-      SELECT (SELECT count(*) FROM private_conversations c
-               WHERE c.origin_event_id = ${eventId}::uuid
-                  OR c.origin_board_request_id IN (SELECT id FROM board_requests WHERE event_id = ${eventId}::uuid)) AS conversations,
+      SELECT (SELECT count(*) FROM private_conversations c WHERE ${openedInRoom(eventId)}) AS conversations,
              (SELECT count(*) FROM board_posts WHERE event_id = ${eventId}::uuid AND deleted_at IS NULL AND kind = 'offer') AS offer,
              (SELECT count(*) FROM board_posts WHERE event_id = ${eventId}::uuid AND deleted_at IS NULL AND kind = 'seeking') AS seeking,
              (SELECT count(*) FROM board_posts WHERE event_id = ${eventId}::uuid AND deleted_at IS NULL AND kind = 'chat') AS chat,
@@ -47,8 +45,6 @@ export async function liveSocialCounts(eventId: string, occurrenceId: string | n
   }
 }
 
-const few = (count: number): FewCount => (count > 0 && count < MIN_CELL ? "few" : count)
-
 /**
  * The counts as a host is shown them. Pairs keep the Overview's rule (nothing
  * under `MIN_ATTENDEES` guests). Every grouped figure (the pairs by way, the
@@ -58,10 +54,8 @@ const few = (count: number): FewCount => (count > 0 && count < MIN_CELL ? "few" 
  */
 export function discloseSocial(c: LiveSocialCounts): LiveSocial {
   const { attendees, connected, byWay } = c.connections
-  const answered = Math.min(c.tonight.answered, attendees)
   const ways = discloseGroup([byWay.waves, byWay.lobby, byWay.requests])
   const posts = discloseGroup([c.lobby.offer, c.lobby.seeking, c.lobby.chat])
-  const fewPeopleInCrews = c.crews !== null && c.crews.people > 0 && c.crews.people < MIN_CELL
   return {
     attendees,
     met:
@@ -74,11 +68,11 @@ export function discloseSocial(c: LiveSocialCounts): LiveSocial {
             connections: ways.total,
             byWay: { waves: ways.parts[0], lobby: ways.parts[1], requests: ways.parts[2] },
           },
-    conversations: few(c.conversations),
+    conversations: fewCount(c.conversations),
     lobby: { posts: posts.total, offer: posts.parts[0], seeking: posts.parts[1], chat: posts.parts[2] },
-    tonight: c.tonight.asked
-      ? { answered: answered >= MIN_CELL && attendees - answered > 0 && attendees - answered < MIN_CELL ? "nearly_all" : few(answered) }
-      : null,
-    crews: c.crews ? (fewPeopleInCrews ? { here: "few", people: "few" } : { here: c.crews.here, people: c.crews.people }) : null,
+    tonight: c.tonight.asked ? { answered: discloseAnswered(c.tonight.answered, attendees) } : null,
+    crews: c.crews ? crewsHere(discloseCrews(c.crews.here, c.crews.people)) : null,
   }
 }
+
+const crewsHere = ({ crews, people }: { crews: FewCount; people: FewCount }) => ({ here: crews, people })

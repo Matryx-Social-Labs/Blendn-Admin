@@ -70,7 +70,8 @@ function ChartFrame({
           </span>
         </div>
       ) : null}
-      <div className="relative">
+      {/* Tall enough for the message when empty: a list with no rows has no ghost to sit over (SCRUM-1051). */}
+      <div className={cn("relative", empty && "min-h-16")}>
         <div className={cn(empty && "opacity-30")}>{children}</div>
         {empty ? (
           <div className="absolute inset-0 flex items-center justify-center">
