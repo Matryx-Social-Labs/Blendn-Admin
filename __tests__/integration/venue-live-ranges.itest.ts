@@ -38,6 +38,7 @@ import { VenueEventsTable } from "@/app/dashboard/venues/[id]/venue-events-table
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
 import { LiveTab } from "@/components/dashboard/live-tab"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
+import * as liveSocial from "@/lib/live-social"
 import type { LiveSnapshot, VenueLiveSnapshot } from "@/lib/live-metrics"
 import { buildReport } from "@/lib/reports"
 import { initSocketServer, stopAllOpsBroadcasts } from "@/lib/socket-server"
@@ -261,9 +262,26 @@ describe("the ops socket", () => {
 
     const [venueView] = (await watch(venueOwner, three)).snapshots
     expect(venueView).toMatchObject({ view: "venue", overCapacity: true, capacity: 2 })
+    // "Meeting tonight" is the host's: on the wire, not only on the screen (SCRUM-1051).
+    expect(hostView).toHaveProperty("social")
+    expect(venueView).not.toHaveProperty("social")
     expect(venueView.alerts).toEqual([
       { kind: "over_capacity", severity: "critical", title: "Over stated capacity", body: "More guests than the event’s stated capacity." },
     ])
+  })
+
+  it("reads Meeting tonight once for a crowd of host dashboards opening at once, and each gets it (SCRUM-1051 review)", async () => {
+    // A join used to start a fresh read of its own: N dashboards, N unions of
+    // pairs. Joins now read through the loop's hold and share the read in flight.
+    const reads = jest.spyOn(liveSocial, "liveSocialCounts")
+    try {
+      const seen = await Promise.all(Array.from({ length: 6 }, () => watch(host, twelve)))
+      // The control: the panel still arrives with the first snapshot, on every one.
+      for (const { snapshots } of seen) expect((snapshots[0] as LiveSnapshot).social).toMatchObject({ attendees: 12 })
+      expect(reads.mock.calls.length).toBeLessThanOrEqual(1)
+    } finally {
+      reads.mockRestore()
+    }
   })
 
   it("keeps ticking for a venue watching alone", async () => {

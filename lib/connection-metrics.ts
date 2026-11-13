@@ -91,6 +91,19 @@ export interface ConnectionCounts {
   connections: number
   connected: number
   reachedOut: number
+  /**
+   * The connections by the first way each pair met (mutual waves, which take
+   * in an old like answered; an accepted Lobby ask; an accepted request from
+   * this room), so the three add up to `connections`. Absent from tallies
+   * frozen before 2026-11-13.
+   */
+  byWay: ConnectionWays
+}
+
+export interface ConnectionWays {
+  waves: number
+  lobby: number
+  requests: number
 }
 
 export async function connectionCounts(eventId: string): Promise<ConnectionCounts> {
@@ -104,32 +117,42 @@ export async function connectionCounts(eventId: string): Promise<ConnectionCount
    *   2. had a Lobby ask accepted, either way round;
    *   3. accepted a message request sent from this room (`met_in_event_id`).
    *
-   * `UNION` on the ordered pair (lo, hi) is what counts a pair once however
-   * many ways they met. Only pairs of two attendees count, so the share who
+   * `DISTINCT ON` the ordered pair (lo, hi) is what counts a pair once however
+   * many ways they met, under the first of them (the "how they met" split). Only pairs of two attendees count, so the share who
    * met someone is a share of the people who came.
    *
    * In SQL, not memory: recorded waves at a concert are attendance squared
    * (G3). Nothing but the three counts leaves the database.
    */
   // board-visibility: accepted asks only, and a silenced ask is stored `declined`; a count, to nobody's side.
-  const [row] = await db.$queryRaw<{ attendees: number; connections: number; connected: number; reached_out: number }[]>`
+  const [row] = await db.$queryRaw<
+    { attendees: number; connections: number; connected: number; reached_out: number; waves: number; lobby: number; requests: number }[]
+  >`
     WITH att AS (
       SELECT DISTINCT user_id FROM event_check_ins
        WHERE event_id = ${eventId}::uuid AND check_in_time IS NOT NULL AND kind = 'attendee'
     ),
     gestures AS (
-      SELECT liker_id AS a, liked_id AS b FROM event_likes WHERE event_id = ${eventId}::uuid
-      UNION
-      SELECT from_id, to_id FROM event_waves WHERE event_id = ${eventId}::uuid
+      SELECT a, b, min(at) AS at FROM (
+        SELECT liker_id AS a, liked_id AS b, created_at AS at FROM event_likes WHERE event_id = ${eventId}::uuid
+        UNION ALL
+        SELECT from_id, to_id, created_at FROM event_waves WHERE event_id = ${eventId}::uuid
+      ) g GROUP BY a, b
     ),
-    pairs AS (
-      SELECT g.a AS lo, g.b AS hi FROM gestures g JOIN gestures r ON r.a = g.b AND r.b = g.a WHERE g.a < g.b
-      UNION
-      SELECT LEAST(from_user_id, to_user_id), GREATEST(from_user_id, to_user_id)
+    -- Each way a pair met, and when: mutual from the later of the two gestures.
+    ways AS (
+      SELECT g.a AS lo, g.b AS hi, 'wave' AS way, GREATEST(g.at, r.at) AS at
+        FROM gestures g JOIN gestures r ON r.a = g.b AND r.b = g.a WHERE g.a < g.b
+      UNION ALL
+      SELECT LEAST(from_user_id, to_user_id), GREATEST(from_user_id, to_user_id), 'lobby', COALESCE(decided_at, created_at)
         FROM board_requests WHERE event_id = ${eventId}::uuid AND status = 'accepted'
-      UNION
-      SELECT LEAST(sender_id, recipient_id), GREATEST(sender_id, recipient_id)
+      UNION ALL
+      SELECT LEAST(sender_id, recipient_id), GREATEST(sender_id, recipient_id), 'request', COALESCE(responded_at, updated_at)
         FROM message_requests WHERE met_in_event_id = ${eventId}::uuid AND status = 'accepted'
+    ),
+    -- Once per pair however many ways, under the first.
+    pairs AS (
+      SELECT DISTINCT ON (lo, hi) lo, hi, way FROM ways ORDER BY lo, hi, at, way
     ),
     movers AS (
       SELECT a FROM gestures
@@ -137,15 +160,24 @@ export async function connectionCounts(eventId: string): Promise<ConnectionCount
       UNION SELECT sender_id FROM message_requests WHERE met_in_event_id = ${eventId}::uuid
     ),
     kept AS (
-      SELECT lo, hi FROM pairs
+      SELECT lo, hi, way FROM pairs
        WHERE lo IN (SELECT user_id FROM att) AND hi IN (SELECT user_id FROM att)
     )
     SELECT (SELECT count(*) FROM att)::int AS attendees,
            (SELECT count(*) FROM kept)::int AS connections,
            (SELECT count(*) FROM (SELECT lo FROM kept UNION SELECT hi FROM kept) c)::int AS connected,
-           (SELECT count(*) FROM movers WHERE a IN (SELECT user_id FROM att))::int AS reached_out`
+           (SELECT count(*) FROM movers WHERE a IN (SELECT user_id FROM att))::int AS reached_out,
+           (SELECT count(*) FROM kept WHERE way = 'wave')::int AS waves,
+           (SELECT count(*) FROM kept WHERE way = 'lobby')::int AS lobby,
+           (SELECT count(*) FROM kept WHERE way = 'request')::int AS requests`
 
-  return { attendees: row.attendees, connections: row.connections, connected: row.connected, reachedOut: row.reached_out }
+  return {
+    attendees: row.attendees,
+    connections: row.connections,
+    connected: row.connected,
+    reachedOut: row.reached_out,
+    byWay: { waves: row.waves, lobby: row.lobby, requests: row.requests },
+  }
 }
 
 export async function getConnectionMetrics(eventId: string): Promise<ConnectionMetrics> {

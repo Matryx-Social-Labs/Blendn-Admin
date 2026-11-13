@@ -4,13 +4,15 @@
 // MODULE_NOT_FOUND. Everything reachable from server.ts must use relative
 // paths.
 import { db } from "./db"
+import { logger } from "./logger"
 import { discloseCategories } from "./disclosure"
 import { occupancyFrom } from "./occupancy"
 import { headcount } from "./presence-sessions"
 import { tallyFeedback } from "./feedback-digest"
 import { pickOccurrence, resolveOccurrence, type OccurrenceSlot } from "./occurrences"
 
-import { deriveAlerts, type LiveFigures, type LiveSnapshot } from "./live-metrics"
+import { deriveAlerts, type LiveFigures, type LiveSnapshot, type LiveSocial } from "./live-metrics"
+import { discloseSocial, liveSocialCounts } from "./live-social"
 
 const MINUTE = 60 * 1000
 
@@ -55,6 +57,50 @@ export interface HeldEvent {
 
 export const HELD_EVENT_MS = 60_000
 
+/**
+ * "Meeting tonight", held by the loop between reads (Live A). Its figures move
+ * by the minute, and the union of pairs behind them is the heaviest read here,
+ * so the five-second tick re-sends the held block and reads it again once a
+ * minute ("updates every minute" on the panel).
+ */
+export interface HeldSocial {
+  readAt: number
+  social: LiveSocial
+}
+
+export const HELD_SOCIAL_MS = 60_000
+
+/**
+ * What a loop holds between ticks. `socialRead` is the read in flight, so the
+ * loop's tick and every dashboard joining at once share one (SCRUM-1051 review:
+ * a join used to start a fresh read of its own).
+ */
+export type Held = { current?: HeldEvent; social?: HeldSocial; socialRead?: Promise<LiveSocial | null> }
+
+/**
+ * The held block, or one fresh read shared by whoever asks meanwhile. A failed
+ * read is logged and leaves the panel out (or on its last minute's figures):
+ * the extras must never take the headcount and the alerts down with them.
+ */
+async function socialFor(eventId: string, occurrenceId: string | null, now: Date, held?: Held): Promise<LiveSocial | null> {
+  if (held?.social && now.getTime() - held.social.readAt < HELD_SOCIAL_MS) return held.social.social
+  if (held?.socialRead) return held.socialRead
+  const read = (async () => {
+    try {
+      const social = discloseSocial(await liveSocialCounts(eventId, occurrenceId))
+      if (held) held.social = { readAt: now.getTime(), social }
+      return social
+    } catch (error) {
+      logger.warn("Meeting tonight not read", { eventId, error: error instanceof Error ? error.message : String(error) })
+      return held?.social?.social ?? null
+    } finally {
+      if (held) held.socialRead = undefined
+    }
+  })()
+  if (held) held.socialRead = read
+  return read
+}
+
 /** The event and its days: from `held` while it is fresh, else read (and `held` refreshed). */
 async function eventAndSlots(eventId: string, now: Date, held?: { current?: HeldEvent }): Promise<{ event: EventRead; slots: OccurrenceSlot[] } | null> {
   if (held?.current && now.getTime() - held.current.readAt < HELD_EVENT_MS) return held.current
@@ -76,6 +122,7 @@ async function eventAndSlots(eventId: string, now: Date, held?: { current?: Held
   return { event, slots }
 }
 
+
 /**
  * Compute one snapshot.
  *
@@ -86,14 +133,18 @@ async function eventAndSlots(eventId: string, now: Date, held?: { current?: Held
  * `held` is the event and its days a loop keeps between ticks (`HeldEvent`);
  * leave it out for a snapshot that must read them fresh.
  */
-export async function buildLiveSnapshot(eventId: string, held?: { current?: HeldEvent }): Promise<LiveSnapshot | null> {
-  return (await readLiveSnapshot(eventId, held))?.snapshot ?? null
+export async function buildLiveSnapshot(eventId: string, held?: Held, { social = true }: { social?: boolean } = {}): Promise<LiveSnapshot | null> {
+  return (await readLiveSnapshot(eventId, held, { social }))?.snapshot ?? null
 }
 
-/** `buildLiveSnapshot`, and the event and day it read: the issue sweep needs both and must not read them twice. */
+/**
+ * `buildLiveSnapshot`, and the event and day it read: the issue sweep needs both and must not read them twice.
+ * `social` only for a screen: the sweep shows nobody "Meeting tonight", so it does not read it.
+ */
 export async function readLiveSnapshot(
   eventId: string,
-  held?: { current?: HeldEvent }
+  held?: Held,
+  { social: withSocial = false }: { social?: boolean } = {}
 ): Promise<{ snapshot: LiveSnapshot; figures: LiveFigures; event: { start_time: Date; end_time: Date }; occurrenceId: string | null } | null> {
   const now = new Date()
   const read = await eventAndSlots(eventId, now, held)
@@ -142,6 +193,7 @@ export async function readLiveSnapshot(
     openFlags,
     feedback,
     roomSize,
+    social,
   ] = await Promise.all([
     /*
      * One query where there were four.
@@ -211,6 +263,7 @@ export async function readLiveSnapshot(
     }),
     // Who a complaint could be from, as the digest counts them: everyone with a member row, any status.
     chatGroupId ? db.chat_group_members.count({ where: { chat_group_id: chatGroupId } }) : Promise.resolve(0),
+    withSocial ? socialFor(eventId, slot.occurrence?.id ?? null, now, held) : Promise.resolve(null),
   ])
 
   /*
@@ -333,6 +386,7 @@ export async function readLiveSnapshot(
       ...figures,
       categories: discloseCategories(categoryCounts, categoryContributors, roomSize),
       view: "host",
+      social,
       alerts: deriveAlerts(figures, { scheduledEnd: event.end_time, scheduledStart: event.start_time, now }),
     },
     // The exact counts behind `snapshot.categories`, for the alerts the issue sweep records. Never sent.

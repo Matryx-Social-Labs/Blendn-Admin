@@ -1,4 +1,4 @@
-import { buildLiveSnapshot, HELD_EVENT_MS, type HeldEvent } from "@/lib/live-snapshot"
+import { buildLiveSnapshot, HELD_EVENT_MS, readLiveSnapshot, type HeldEvent } from "@/lib/live-snapshot"
 import { recordIssuesFor } from "@/lib/event-issues"
 
 import { sqlCounter, waveCounter } from "./sql-count"
@@ -82,16 +82,18 @@ describe("a loop's ticks", () => {
   it("read the event and its days once a minute, not every pass", async () => {
     const eventId = await liveRoom()
     const held: { current?: HeldEvent } = {}
+    // Without "Meeting tonight", which a loop holds on its own minute (live-social.itest.ts).
+    const tick = async () => (await readLiveSnapshot(eventId, held))?.snapshot
     const counter = sqlCounter()
     try {
-      const first = await counter.during(() => buildLiveSnapshot(eventId, held))
-      const second = await counter.during(() => buildLiveSnapshot(eventId, held))
+      const first = await counter.during(tick)
+      const second = await counter.during(tick)
       console.info(`tick: first ${first.sql.length} statements, next ${second.sql.length}`)
       expect(second.sql.length).toBe(first.sql.length - 3)
       expect(second.result).toEqual({ ...first.result!, at: second.result!.at })
       // And a stale hold is read again.
       held.current = { ...held.current!, readAt: Date.now() - HELD_EVENT_MS - 1 }
-      expect((await counter.during(() => buildLiveSnapshot(eventId, held))).sql.length).toBe(first.sql.length)
+      expect((await counter.during(tick)).sql.length).toBe(first.sql.length)
     } finally {
       await counter.stop()
     }
