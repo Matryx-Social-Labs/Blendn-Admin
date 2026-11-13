@@ -488,10 +488,33 @@ describe("who the received list hides", () => {
     await wave(x, ana)
     await wave(y, ana)
     const rooms = (await call(waitingRoute.GET, "/api/mobile/waves", ana)).body.data.rooms
-    expect(rooms).toEqual([{ eventId, waiting: 2, latest: expect.objectContaining({ userId: roomHandle(eventId, y.id), displayName: y.pseudonym }) }])
+    expect(rooms).toEqual([
+      {
+        eventId,
+        waiting: 2,
+        latest: expect.objectContaining({ userId: roomHandle(eventId, y.id), displayName: y.pseudonym }),
+        latestFaces: [y, x].map((p) => ({ userId: roomHandle(eventId, p.id), displayName: p.pseudonym })),
+      },
+    ])
     // Answered ones stop waiting.
     await wave(ana, y)
     expect((await call(waitingRoute.GET, "/api/mobile/waves", ana)).body.data.rooms[0]).toMatchObject({ waiting: 1 })
+  })
+
+  it("Banter's pile: the latest three waiting faces, newest first, by handle and room name only", async () => {
+    const ana = await person("rw-lf-a")
+    const [w, x, y, z] = [await person("rw-lf-w"), await person("rw-lf-x"), await person("rw-lf-y"), await person("rw-lf-z")]
+    const t0 = Date.now() - 60_000
+    await seedWaves([w, x, y, z].map((p, i) => ({ from: p.id, to: ana.id, at: new Date(t0 + i * 1000) })))
+    const face = (p: Person) => ({ userId: roomHandle(eventId, p.id), displayName: p.pseudonym })
+    const pile = async () => (await call(waitingRoute.GET, "/api/mobile/waves", ana)).body.data.rooms[0]
+
+    // Exactly these two keys: no id, no time, no photo.
+    expect((await pile()).latestFaces).toEqual([face(z), face(y), face(x)])
+    // The same rules as the received list: an answered wave and a blocked sender leave the pile, and the next slides in.
+    await wave(ana, z)
+    await db.blocked_users.create({ data: { blocker_id: ana.id, blocked_id: y.id } })
+    expect(await pile()).toMatchObject({ waiting: 2, latestFaces: [face(x), face(w)] })
   })
 })
 
