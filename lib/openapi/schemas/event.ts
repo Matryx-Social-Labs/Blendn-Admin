@@ -251,6 +251,21 @@ const UserStatusSchema = z.object({
   checkInStatus: z.string().nullable(),
   userRating: z.number().nullable(),
   rsvpStatus: z.string().nullable(),
+  myCrewPlans: z
+    .array(
+      z.object({
+        crewId: z.string().uuid(),
+        name: z.string(),
+        emblemSeed: z.string(),
+        occurrenceId: z.string().uuid(),
+        startsAt: z.string().datetime(),
+        going: z
+          .array(z.object({ userId: z.string(), name: z.string(), photo: z.string().nullable(), you: z.boolean() }))
+          .describe("Crewmates whose own RSVP is going, as the crew room shows them (first name; photo null for a member who keeps themselves anonymous); never anyone kept apart from you"),
+      })
+    )
+    .optional()
+    .describe("\"Going together\" (crews S4): your own crews that planned a night of this event not yet over. Members only. The check-in's \"With {crew}\" chip is on by default only for a crew here (owner 1b)."),
 })
 
 /**

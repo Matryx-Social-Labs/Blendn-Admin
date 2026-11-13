@@ -142,6 +142,7 @@ model User {
 
   // Crews — see `crews`
   crews_created      crews[]         @relation("CrewCreator")
+  crew_plans_made    crew_plans[]    @relation("CrewPlanner")
   crew_memberships   crew_members[]
   crew_invites_got   crew_invites[]  @relation("CrewInvitee")
   crew_invites_sent  crew_invites[]  @relation("CrewInviter")
@@ -1257,6 +1258,7 @@ model event_occurrences {
   presence_sessions presence_sessions[]
   crew_likes        crew_likes[]
   blends            blends[]
+  crew_plans        crew_plans[]
 
   @@unique([event_id, occurs_on])
   @@index([event_id, start_time])
@@ -3749,7 +3751,28 @@ model crews {
   blends_as_b blends[]       @relation("BlendSideB")
   /// The crew chat (kind `crew`), made with the crew.
   room        chat_groups?
+  plans       crew_plans[]
 
+  @@index([created_by])
+}
+
+/// "Going together" (crews 4-A1): a crew marks a night. One per crew per
+/// occurrence. Members only: never on a card, never to a host.
+model crew_plans {
+  id            String   @id @default(uuid()) @db.Uuid
+  crew_id       String   @db.Uuid
+  occurrence_id String   @db.Uuid
+  /// Who marked it. Audit only; an erased planner leaves the plan standing.
+  created_by    String?
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  crew       crews             @relation(fields: [crew_id], references: [id], onDelete: Cascade)
+  occurrence event_occurrences @relation(fields: [occurrence_id], references: [id], onDelete: Cascade)
+  planner    User?             @relation("CrewPlanner", fields: [created_by], references: [id], onDelete: SetNull)
+
+  @@unique([crew_id, occurrence_id])
+  @@index([occurrence_id])
+  @@index([crew_id, created_at])
   @@index([created_by])
 }
 
