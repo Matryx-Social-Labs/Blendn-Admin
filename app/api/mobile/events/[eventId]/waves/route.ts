@@ -62,7 +62,8 @@ const waveable = { kind: "attendee" as const, user: { suspended_at: null, ...LIS
  *   (W8), so a 429 says nothing about who they are, whether they are here or
  *   whether they blocked you.
  * - **Not here, blocked either way, banned, unmatched, a friend, a host** all
- *   read the same 403 `RECIPIENT_NOT_HERE`: a distinct answer is a way to
+ *   read the same 403 `RECIPIENT_NOT_HERE`, and so does a sender with show
+ *   online off, who waves at nobody (SCRUM-1056): a distinct answer is a way to
  *   learn who blocked you, and one for a closed pair is a rejection notice.
  *   For a sender who has left, all of those AND "nobody waved at you" read as
  *   the one 403 `NOT_CHECKED_IN`.
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     // Everything about the sender first: in this room as a guest, and not somebody who runs it.
     const notCheckedIn = () => errorResponse("Check in to wave at people here", 403, ErrorCode.NOT_CHECKED_IN)
-    const [attended, insideNow, open, hosts] = await Promise.all([
+    const [attended, insideNow, open, hosts, listed] = await Promise.all([
       db.event_check_ins.findFirst({
         where: { event_id: eventId, user_id: fromUserId, check_in_time: { not: null } },
         orderBy: { check_in_time: "desc" },
@@ -115,6 +116,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       }),
       roomIsOpen(eventId),
       operatesEvent(fromUserId, eventId),
+      // On the roster yourself (SCRUM-1056): the roster's own rule, so no profile row is listed.
+      db.user.findFirst({ where: { id: fromUserId, ...LISTED_IN_ROSTER }, select: { id: true } }),
     ])
     // Your latest row decides: staff are working (SCRUM-891). Hosts never wave.
     if (!attended || attended.kind === "staff" || !open || hosts) return notCheckedIn()
@@ -132,7 +135,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       insideNow
         ? errorResponse("They’re not in the room right now", 403, ErrorCode.RECIPIENT_NOT_HERE)
         : notCheckedIn()
-    if (!toUserId) return notHere()
+    /*
+     * Show online off is listed nowhere (SCRUM-669), so it waves at nobody
+     * (SCRUM-1056): its wave was never listed and could never be answered, and
+     * the ping told the recipient a hidden person was in the room. Refused as
+     * "not here", byte for byte, before anything about the recipient is read,
+     * a wave back included.
+     */
+    if (!listed || !toUserId) return notHere()
 
     // A wave back: a wave from them that YOUR list shows (`hasVisibleWaveFrom`), so it reads nothing you were not shown.
     const answering = await hasVisibleWaveFrom(fromUserId, eventId, toUserId)

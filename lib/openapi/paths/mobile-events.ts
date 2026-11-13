@@ -686,7 +686,7 @@ registry.registerPath({
     "Otherwise `room:wave` goes to the recipient. No push for a single wave.\n\n" +
     "**Limits, read before anything about the recipient:** 20 per room per hour, 60 a day; 5 per room per hour and 15 a day for an account under 24 h; 5 per room per hour once 20 of your waves in the last 24 h are unanswered. Counted from stored waves, so a refused wave never counts.\n\n" +
     "`toUserId` must be the handle this event's roster gave you (SCRUM-371). A raw user id, another event's handle or a forged one is answered exactly as somebody not in the room (403 `RECIPIENT_NOT_HERE`). Your own id is 400.\n\n" +
-    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them), `WAVE_TOO_SOON` (429, a new wave at the same person within 10 minutes in another room, with `retryAfter`)",
+    "**Error codes:** `VALIDATION_FAILED` (400, waving at yourself), `NOT_CHECKED_IN` (403, you: not in the room, staff, a host, or the room closed), `RECIPIENT_NOT_HERE` (403 — not in the room, hidden, banned, a friend, a host, or a block either way; and also when YOU have Show online off, since a hidden person waves at nobody (SCRUM-1056); deliberately indistinguishable), `RATE_LIMITED` (429, a limit above, with `retryAfter`; says nothing about them), `WAVE_TOO_SOON` (429, a new wave at the same person within 10 minutes in another room, with `retryAfter`)",
   security: bearerAuth,
   request: {
     params: z.object({ eventId: z.string().uuid() }),
