@@ -52,7 +52,11 @@ export interface ConnectionMetrics {
   connections: number
   /** People who made at least one. */
   connected: number
-  /** The benchmark figure. Null when suppressed. */
+  /**
+   * The benchmark figure: connections per person, counted from each person's
+   * side, so a pair is one connection for each of the two (2 x pairs /
+   * attendees). Null when suppressed.
+   */
   perAttendee: number | null
   /** Share who made at least one connection. Null when suppressed. */
   connectedPct: number | null
@@ -133,7 +137,9 @@ export async function getConnectionMetrics(eventId: string): Promise<ConnectionM
     connected: connectedPeople.size,
     // One decimal: "1.4 each" is a real distinction from "1 each", and two
     // decimals would imply a precision a room of forty cannot support.
-    perAttendee: Math.round((connections / attendees) * 10) / 10,
+    // Each pair is a connection for both people in it. Dividing pairs by heads
+    // (F2) reported half the figure the benchmark it is compared against means.
+    perAttendee: Math.round(((2 * connections) / attendees) * 10) / 10,
     connectedPct: Math.round((connectedPeople.size / attendees) * 100),
     suppressed: false,
   }

@@ -87,7 +87,10 @@ describe("a connection is mutual", () => {
 describe("the benchmark figures", () => {
   it("reports connections per attendee and the share who met someone", async () => {
     const { eventId, guests } = await room(10)
-    // Two pairs among ten: 0.2 each, 40% met someone.
+    // Two pairs among ten: each pair is a connection for BOTH people in it, so
+    // four connections held among ten people is 0.4 each (F2: it read 0.2,
+    // pairs per head, half the benchmark it is compared against), and 40% met
+    // someone.
     await like(eventId, guests[0], guests[1])
     await like(eventId, guests[1], guests[0])
     await like(eventId, guests[2], guests[3])
@@ -95,8 +98,25 @@ describe("the benchmark figures", () => {
 
     const m = await getConnectionMetrics(eventId)
     expect(m).toMatchObject({ attendees: 10, connections: 2, connected: 4 })
-    expect(m.perAttendee).toBe(0.2)
+    expect(m.perAttendee).toBe(0.4)
     expect(m.connectedPct).toBe(40)
+  })
+
+  it("counts per person from each person's own connections, not from the pair count", async () => {
+    // The control for the line above: one person in three pairs. The pair
+    // count is 3; the connections people hold are 6 (3 for the hub, 1 each for
+    // the other three), so 6 / 10 = 0.6. Pairs per head would say 0.3, and
+    // "connected people / attendees" would say 0.4 — only the right formula
+    // gives 0.6.
+    const { eventId, guests } = await room(10)
+    for (const other of [guests[1], guests[2], guests[3]]) {
+      await like(eventId, guests[0], other)
+      await like(eventId, other, guests[0])
+    }
+
+    const m = await getConnectionMetrics(eventId)
+    expect(m).toMatchObject({ attendees: 10, connections: 3, connected: 4 })
+    expect(m.perAttendee).toBe(0.6)
   })
 
   it("reports a real zero for a room where nobody connected", async () => {
