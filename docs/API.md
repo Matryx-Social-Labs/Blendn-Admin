@@ -1168,8 +1168,11 @@ the roster, banned from the room. `wavedBack` is true once you answered (a wave
 back, or a like of yours from before). After the room closes: `open: false`, an
 empty list. A host or staff: `403 NOT_CHECKED_IN`.
 
-`GET /waves` — Banter's pinned rows: `{ rooms: [{ eventId, waiting, latest }] }`,
-one per open room with an unanswered wave, `latest` shaped as above. Never a room
+`GET /waves` — Banter's pinned rows: `{ rooms: [{ eventId, waiting, latest, latestFaces }] }`,
+one per open room with an unanswered wave, `latest` shaped as above.
+`latestFaces` is the newest three waiting, newest first, for the row's pile:
+`{ userId, displayName }` only (the room handle and the roster's name), under
+the list's rules. `latest` stays for installed builds. Never a room
 you run or host or were banned from. At most 20 rooms.
 
 Deck cards (`GET .../matches`) carry `youWaved` and `wavedAtYou` (waves only,

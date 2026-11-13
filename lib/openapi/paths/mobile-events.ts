@@ -724,7 +724,7 @@ registry.registerPath({
   tags: ["Mobile Events"],
   summary: "Rooms where a wave is waiting for you (Banter's pinned rows)",
   description:
-    "One entry per open room with an unanswered wave: how many, and the newest, as `GET /events/{eventId}/waves` names it. Never a room you run or host or were banned from, never a closed room. At most 20 rooms.",
+    "One entry per open room with an unanswered wave: how many, the newest, and the newest three for the row's pile (`latestFaces`: handle and name only), as `GET /events/{eventId}/waves` names them. Never a room you run or host or were banned from, never a closed room. At most 20 rooms.",
   security: bearerAuth,
   responses: {
     200: { description: "Waiting waves by room", content: { "application/json": { schema: wrap(WavesWaitingResponseSchema) } } },
