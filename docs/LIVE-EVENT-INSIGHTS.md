@@ -44,7 +44,9 @@ research's crowd-density and queue-bottleneck alerting.
 
 **Post-event feedback digest** with a disclosure floor (a category raised by
 fewer than five people is named but its messages are held back so nobody is
-identified) and tap-to-correct labels.
+identified) and tap-to-correct labels. Its quotes carry no pseudonym and the hour
+only, in the event's zone, and come 20 at a time (`?quotes=`; owner approval 7,
+SCRUM-1051).
 
 **The success number exists.** `lib/connection-metrics.ts` computes
 **connections per 100 attendees** and the met %, and `lib/attendance.ts`
