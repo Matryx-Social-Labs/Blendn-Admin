@@ -331,3 +331,27 @@ describe("a pass is a few statements, however many messages it classifies", () =
     expect(kept).toMatchObject({ source: "human", sentiment: "positive", category: "other" })
   })
 })
+describe("one busy room does not starve the rest (G7)", () => {
+  it("gives a quiet room its turn in the same pass as a backlog older than it", async () => {
+    // A concert room with more than a pass's worth waiting, all older than the
+    // quiet room's three. Oldest-first across rooms, the busy room took every
+    // slot and the quiet room's mood was a pass late for each pass it waited.
+    const { groupId: busy, eventId: busyEvent, author } = await roomWith([])
+    const early = new Date(Date.now() - 30 * 60_000)
+    await db.chat_messages.createMany({
+      data: Array.from({ length: MAX_MESSAGES_PER_SWEEP + 50 }, (_, i) => ({
+        chat_group_id: busy, user_id: author, content: `GOOD busy ${i}`, type: "text" as const, created_at: new Date(early.getTime() + i),
+      })),
+    })
+    const { eventId: quiet } = await roomWith(["BAD QUEUE one", "GOOD two", "neutral three"])
+
+    const pass = await sweepSentiment()
+
+    expect(await db.event_feedback.count({ where: { event_id: quiet } })).toBe(3)
+    // The control: the busy room still gets the rest of the pass, oldest first, and says more is waiting.
+    expect(pass.hasMore).toBe(true)
+    expect(await db.event_feedback.count({ where: { event_id: busyEvent } })).toBeGreaterThan(MAX_MESSAGES_PER_SWEEP / 2)
+    const busyRows = await db.event_feedback.findMany({ where: { event_id: busyEvent }, select: { message: { select: { content: true } } } })
+    expect(busyRows.map((r) => r.message?.content)).toContain("GOOD busy 0")
+  })
+})
