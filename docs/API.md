@@ -1128,7 +1128,14 @@ anonymous conversation.
   has left** gets that same `403 NOT_CHECKED_IN` for every refusal, including
   "nobody you can see waved at you": a wave back counts only a wave your own
   list shows, so leaving and waving cannot ask whether a hidden or blocked
-  person waved at you. A new wave at the
+  person waved at you. **A sender with Show online off** waves at nobody, a
+  wave back included (SCRUM-1056): their wave could never be listed or
+  answered, and the live ping would tell the recipient a hidden person is in
+  the room. Refused with that same not-here answer (`RECIPIENT_NOT_HERE`
+  inside, `NOT_CHECKED_IN` after leaving), before anything about the recipient
+  is read; nothing is stored and nobody is pinged. A client should offer
+  "Turn on Show online to wave" from its own setting rather than wait for this.
+  A new wave at the
   same person within 10 minutes in another room is `429 WAVE_TOO_SOON` (a wave
   back is never held by it).
 
