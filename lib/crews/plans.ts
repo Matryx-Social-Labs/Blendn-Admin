@@ -32,7 +32,9 @@ import { CREWS_OFF, NO_CREW, NO_EVENT, type CrewRefusal } from "./crews"
  * - **Members only.** Nothing here reaches a card, a stranger or a host. The
  *   check-in's "With {crew}" chip is on by default only for a crew that
  *   planned the night (owner 1b): the client reads `myCrewPlans`.
- * - Caps: `CREW.MAX_PLANS_PER_WINDOW` marks per crew a day (each is a push).
+ * - Caps: `CREW.MAX_PLANS_PER_WINDOW` nights told per crew a day (each is a
+ *   push), counted on the crew-chat lines, which taking a plan back never
+ *   deletes; a night planned again after being taken back is not told again.
  */
 
 const TOO_MANY: CrewRefusal = {
@@ -85,14 +87,27 @@ export async function planNight(
   const occurrenceId = found.occurrenceId
   const room = crew.room
 
+  /*
+   * The crew-chat lines are the log (security review, MEDIUM): taking a plan back deletes its row but
+   * never its line, so plan → take back → plan neither refunds the day's cap nor tells the crew again.
+   */
+  const planLines = { chat_group_id: room.id, type: "system", metadata: { path: ["kind"], equals: "crew_plan" } } as const
   const made = await db.$transaction(async (tx) => {
     // One crew's marks are serialised, so the daily cap is counted, not raced.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`crew-plan:${crew.id}`}, 0))`
     const existing = await tx.crew_plans.findUnique({ where: { crew_id_occurrence_id: { crew_id: crew.id, occurrence_id: occurrenceId } }, select: { id: true } })
     if (existing) return "repeated" as const
-    const recent = await tx.crew_plans.count({ where: { crew_id: crew.id, created_at: { gt: new Date(now.getTime() - CREW.PLANS_WINDOW_MS) } } })
-    if (recent >= CREW.MAX_PLANS_PER_WINDOW) return TOO_MANY
+    const toldBefore = await tx.chat_messages.findFirst({
+      where: { chat_group_id: room.id, type: "system", AND: [{ metadata: { path: ["kind"], equals: "crew_plan" } }, { metadata: { path: ["occurrenceId"], equals: occurrenceId } }] },
+      select: { id: true },
+    })
+    if (!toldBefore) {
+      const recent = await tx.chat_messages.count({ where: { ...planLines, created_at: { gt: new Date(now.getTime() - CREW.PLANS_WINDOW_MS) } } })
+      if (recent >= CREW.MAX_PLANS_PER_WINDOW) return TOO_MANY
+    }
     await tx.crew_plans.create({ data: { crew_id: crew.id, occurrence_id: occurrenceId, created_by: userId } })
+    // Planned again after being taken back: the crew already heard about this night.
+    if (toldBefore) return "quiet" as const
     const line = await tx.chat_messages.create({
       data: {
         chat_group_id: room.id,
@@ -105,6 +120,7 @@ export async function planNight(
     await tx.chat_groups.update({ where: { id: room.id }, data: { last_message_at: line.created_at } })
     return line
   })
+  if (made === "quiet") return { planned: true, repeated: false, occurrenceId }
   if (made === "repeated") return { planned: true, repeated: true, occurrenceId }
   if ("refusal" in made) return made
 

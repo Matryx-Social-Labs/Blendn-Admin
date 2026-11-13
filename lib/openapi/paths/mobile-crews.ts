@@ -243,7 +243,8 @@ registry.registerPath({
     "to see the night.\" — never the place) to every other member who has not muted the crew chat or blocked the planner. A second mark: " +
     "`repeated: true`, nobody told. 404 for an event you may not take part in (the RSVP door: private and not let in, under its age " +
     "line, a closed city), a draft or a venue day; 403 crews off; 400 no night left; 429 after " +
-    "3 marks by the crew in 24 hours.",
+    "3 nights told by the crew in 24 hours (counted on the crew-chat lines: taking a plan back refunds nothing, and a night planned " +
+    "again is stored without a second line or push).",
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
   responses: {

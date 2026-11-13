@@ -3095,8 +3095,10 @@ and sends one push — kind `crew_here` (it opens the crew chat; the "Your crew"
 category), titled with the crew's name, *"Priya wants to go together. Open the
 crew to see the night."*, never the place — to every other member who has not
 muted the crew chat or blocked the planner. A second mark answers `repeated:
-true` and tells nobody. 403 crews off, 400 no night left, 429 after 3 marks by
-the crew in 24 hours. `DELETE` with the same body takes it back: the member who
+true` and tells nobody. 403 crews off, 400 no night left, 429 after 3 nights
+told by the crew in 24 hours — counted on the crew-chat lines, which taking a
+plan back never deletes, so plan → take back → plan neither refunds the cap nor
+tells the crew twice (a night planned again is stored quietly). `DELETE` with the same body takes it back: the member who
 marked it or the owner; nobody is told. `GET /events/:eventId`
 `userStatus.myCrewPlans` lists **your own** crews with a plan for a night of it
 not yet over — `{ crewId, name, emblemSeed, occurrenceId, startsAt, going }`,

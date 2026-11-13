@@ -131,6 +131,33 @@ describe("Going together (S4)", () => {
     expect((await detail(young, gated.eventId)).status).not.toBe(200)
   })
 
+  it("plan, take back, plan again: one push and one line for the night, and the day's cap still counts", async () => {
+    const host = await person("gt5-host")
+    const events = await Promise.all([0, 1, 2, 3].map(() => liveEvent(host.id)))
+    const owner = await person("gt5-owner")
+    const mate = await person("gt5-mate")
+    const { crewId, roomId } = await crewOf(owner, [mate], "Looped")
+    const lines = () => db.chat_messages.count({ where: { chat_group_id: roomId, type: "system", metadata: { path: ["kind"], equals: "crew_plan" } } })
+
+    for (let i = 0; i < 3; i++) {
+      expect((await plan(owner, crewId, events[0].eventId)).status).toBe(200)
+      await unplan(owner, crewId, events[0].eventId)
+    }
+    expect((await plan(owner, crewId, events[0].eventId)).status).toBe(200)
+    // Control: the night is planned, and the crew was told once.
+    expect(await db.crew_plans.count({ where: { crew_id: crewId } })).toBe(1)
+    expect(await pushes(mate.id)).toHaveLength(1)
+    expect(await lines()).toBe(1)
+
+    // Taking plans back never refunds the day's cap: two more nights, then refused.
+    for (const e of events.slice(1, 3)) {
+      expect((await plan(owner, crewId, e.eventId)).status).toBe(200)
+      await unplan(owner, crewId, e.eventId)
+    }
+    expect((await plan(owner, crewId, events[3].eventId)).status).toBe(429)
+    expect(await pushes(mate.id)).toHaveLength(3)
+  })
+
   it("is members only, refuses crews off, caps at 3 nights a day, and is taken back only by its planner or the owner", async () => {
     const host = await person("gt3-host")
     const events = await Promise.all([0, 1, 2, 3].map(() => liveEvent(host.id)))
