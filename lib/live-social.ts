@@ -2,7 +2,7 @@
 import { connectionCounts, MIN_ATTENDEES, type ConnectionCounts } from "./connection-metrics"
 import { presentMembersAt } from "./crews/here"
 import { db } from "./db"
-import { MIN_CELL } from "./disclosure"
+import { discloseGroup, MIN_CELL } from "./disclosure"
 import type { FewCount, LiveSocial } from "./live-metrics"
 import { lensForEvent } from "./tonight"
 
@@ -50,19 +50,18 @@ export async function liveSocialCounts(eventId: string, occurrenceId: string | n
 const few = (count: number): FewCount => (count > 0 && count < MIN_CELL ? "few" : count)
 
 /**
- * The counts as a host is shown them. Pairs keep the Overview's rule (exact
- * from `MIN_ATTENDEES` guests, nothing under it). Every count of people is a
- * few under `MIN_CELL`; Tonight's answers are also held from the other side,
+ * The counts as a host is shown them. Pairs keep the Overview's rule (nothing
+ * under `MIN_ATTENDEES` guests). Every grouped figure (the pairs by way, the
+ * Lobby by kind) goes through `discloseGroup`, so a total never sits exact
+ * beside a part it hides. Tonight's answers are held from the other side too,
  * "nearly all", when the guests who did not answer are a few.
- *
- * ponytail: a way-of-meeting cell under five is "a few" while the pair total
- * stays exact, so two hidden cells' sum can be subtracted. Pairs, never who;
- * hold the total too if a split cell ever carries people rather than pairs.
  */
 export function discloseSocial(c: LiveSocialCounts): LiveSocial {
-  const { attendees, connections, connected, byWay } = c.connections
+  const { attendees, connected, byWay } = c.connections
   const answered = Math.min(c.tonight.answered, attendees)
-  const posts = c.lobby.offer + c.lobby.seeking + c.lobby.chat
+  const ways = discloseGroup([byWay.waves, byWay.lobby, byWay.requests])
+  const posts = discloseGroup([c.lobby.offer, c.lobby.seeking, c.lobby.chat])
+  const fewPeopleInCrews = c.crews !== null && c.crews.people > 0 && c.crews.people < MIN_CELL
   return {
     attendees,
     met:
@@ -72,14 +71,14 @@ export function discloseSocial(c: LiveSocialCounts): LiveSocial {
             held: false,
             pct: Math.round((connected / attendees) * 100),
             connected,
-            connections,
-            byWay: { waves: few(byWay.waves), lobby: few(byWay.lobby), requests: few(byWay.requests) },
+            connections: ways.total,
+            byWay: { waves: ways.parts[0], lobby: ways.parts[1], requests: ways.parts[2] },
           },
     conversations: few(c.conversations),
-    lobby: { posts: few(posts), offer: few(c.lobby.offer), seeking: few(c.lobby.seeking), chat: few(c.lobby.chat) },
+    lobby: { posts: posts.total, offer: posts.parts[0], seeking: posts.parts[1], chat: posts.parts[2] },
     tonight: c.tonight.asked
       ? { answered: answered >= MIN_CELL && attendees - answered > 0 && attendees - answered < MIN_CELL ? "nearly_all" : few(answered) }
       : null,
-    crews: c.crews ? { here: c.crews.here, people: few(c.crews.people) } : null,
+    crews: c.crews ? (fewPeopleInCrews ? { here: "few", people: "few" } : { here: c.crews.here, people: c.crews.people }) : null,
   }
 }

@@ -443,6 +443,32 @@ export const heldPart = (part: number, whole: number): number | null =>
   whole < MIN_CELL ? null : discloseBreakdown([part, whole - part]).cells[0]
 
 /**
+ * A count a host is shown on a live panel: exact from `MIN_CELL`, `"few"` from
+ * one to four, and zero as itself (an empty Lobby names nobody).
+ */
+export type FewCount = number | "few"
+
+/** A total that sits beside a hidden part: a floor, never the figure. */
+export type HeldTotal = { atLeast: number }
+
+/**
+ * A total and the parts it is made of, as one disclosure (SCRUM-1051 review).
+ *
+ * Each part under `MIN_CELL` is a few. The moment any part is, the total stops
+ * being exact: total minus the parts shown is the hidden part (or the hidden
+ * parts' sum). It becomes a floor instead, the parts shown plus one for each
+ * hidden part, which says nothing the labels do not. Every grouped figure goes
+ * through here, so a new panel cannot print a total that undoes its own floors
+ * (brute-forced in live-social.test.ts).
+ */
+export function discloseGroup(parts: readonly number[]): { total: number | HeldTotal; parts: FewCount[] } {
+  const shown = parts.map((n): FewCount => (n > 0 && n < MIN_CELL ? "few" : n))
+  const hidden = shown.filter((p) => p === "few").length
+  const visible = shown.reduce<number>((sum, p) => sum + (p === "few" ? 0 : p), 0)
+  return { total: hidden === 0 ? visible : { atLeast: visible + hidden }, parts: shown }
+}
+
+/**
  * What to render in place of a withheld number.
  *
  * Centralised so two surfaces cannot describe the same suppression differently,

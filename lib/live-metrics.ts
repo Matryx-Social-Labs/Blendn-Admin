@@ -8,7 +8,9 @@
  * server-only.
  */
 
-import { liveCountBucket, type DisclosedCategory, type LiveCountBucket } from "./disclosure"
+import { liveCountBucket, type DisclosedCategory, type FewCount, type HeldTotal, type LiveCountBucket } from "./disclosure"
+
+export type { FewCount, HeldTotal }
 
 /** The exact figures, and what the alert rules read. Never sent to a venue. */
 export interface LiveFigures {
@@ -54,12 +56,6 @@ export interface LiveFigures {
 }
 
 /**
- * A count a host is shown in "Meeting tonight": exact from `MIN_CELL`, `"few"`
- * from one to four, and zero as itself (an empty Lobby names nobody).
- */
-export type FewCount = number | "few"
-
-/**
  * How the room is meeting (Live A, SCRUM-1051), as the host is shown it.
  * Read once a minute, not every tick. Counts and words only: never a pair, a
  * person, an answer or who waved at whom. Never sent to a venue (`forVenue`).
@@ -75,18 +71,21 @@ export interface LiveSocial {
         /** Share of guests in at least one connection. */
         pct: number
         connected: number
-        /** Pairs, once each; `byWay` splits them by the first way they met. */
-        connections: number
+        /** Pairs, once each; `byWay` splits them by the first way they met. A floor when a way is a few (`discloseGroup`). */
+        connections: number | HeldTotal
         byWay: { waves: FewCount; lobby: FewCount; requests: FewCount }
       }
   /** Private chats opened from this room (a wave, a match, a Lobby ask). */
   conversations: FewCount
-  /** Live Lobby posts: Offering, Looking for, Just saying. */
-  lobby: { posts: FewCount; offer: FewCount; seeking: FewCount; chat: FewCount }
+  /** Live Lobby posts: Offering, Looking for, Just saying. `posts` a floor when a kind is a few (`discloseGroup`). */
+  lobby: { posts: number | HeldTotal; offer: FewCount; seeking: FewCount; chat: FewCount }
   /** Guests who answered Tonight's question; `"nearly_all"` when the rest are a few. Null: the room asks none. */
   tonight: { answered: FewCount | "nearly_all" } | null
-  /** Crews with two or more members here now, and the people in them. Null: no day resolves. */
-  crews: { here: number; people: FewCount } | null
+  /**
+   * Crews with two or more members here now, and the people in them; both a few
+   * while the people are (two crews already say four people). Null: no day resolves.
+   */
+  crews: { here: FewCount; people: FewCount } | null
 }
 
 /** What whoever runs the event (or an admin) is sent: the figures, and their alerts. */

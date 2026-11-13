@@ -155,7 +155,7 @@ already know each other's ids.
 
 | Event | Payload | Description |
 |-------|---------|-------------|
-| `ops:snapshot` | `LiveSnapshot` (host) or `VenueLiveSnapshot` (venue), `lib/live-metrics.ts` | The Live tab, every 5 s while somebody watches. Aggregates only. Whoever may edit the event gets the exact figures; a venue gets every count of people as a range and the alerts without numbers (SCRUM-516). The host's copy carries `social` ("Meeting tonight", SCRUM-1051): the share who met someone and the pairs by the first way they met (waves, Lobby, requests, held under 8 guests), conversations opened, Lobby posts by kind, Tonight's question answered, crews here. Counts under 5 are `"few"`, never a number; it is read once a minute, so it moves by the minute. A venue's copy has no `social`. |
+| `ops:snapshot` | `LiveSnapshot` (host) or `VenueLiveSnapshot` (venue), `lib/live-metrics.ts` | The Live tab, every 5 s while somebody watches. Aggregates only. Whoever may edit the event gets the exact figures; a venue gets every count of people as a range and the alerts without numbers (SCRUM-516). The host's copy carries `social` ("Meeting tonight", SCRUM-1051): the share who met someone and the pairs by the first way they met (waves, Lobby, requests, held under 8 guests), conversations opened, Lobby posts by kind, Tonight's question answered, crews here. Counts under 5 are `"few"`, never a number, and a total beside a hidden part is `{ atLeast }` (`discloseGroup`), never exact. It is read once a minute, one read shared by the loop and every join, so it moves by the minute; a room only a venue watches never reads it, and a venue's copy has no `social`. |
 
 ### Roster Events (room: `event:room:{eventId}`, checked-in attendees only)
 

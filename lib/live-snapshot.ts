@@ -70,24 +70,35 @@ export interface HeldSocial {
 
 export const HELD_SOCIAL_MS = 60_000
 
-/** What a loop holds between ticks. */
-export type Held = { current?: HeldEvent; social?: HeldSocial }
+/**
+ * What a loop holds between ticks. `socialRead` is the read in flight, so the
+ * loop's tick and every dashboard joining at once share one (SCRUM-1051 review:
+ * a join used to start a fresh read of its own).
+ */
+export type Held = { current?: HeldEvent; social?: HeldSocial; socialRead?: Promise<LiveSocial | null> }
 
 /**
- * The held block, or a fresh read. A failed read is logged and leaves the panel
- * out (or on its last minute's figures): the extras must never take the
- * headcount and the alerts down with them.
+ * The held block, or one fresh read shared by whoever asks meanwhile. A failed
+ * read is logged and leaves the panel out (or on its last minute's figures):
+ * the extras must never take the headcount and the alerts down with them.
  */
 async function socialFor(eventId: string, occurrenceId: string | null, now: Date, held?: Held): Promise<LiveSocial | null> {
   if (held?.social && now.getTime() - held.social.readAt < HELD_SOCIAL_MS) return held.social.social
-  try {
-    const social = discloseSocial(await liveSocialCounts(eventId, occurrenceId))
-    if (held) held.social = { readAt: now.getTime(), social }
-    return social
-  } catch (error) {
-    logger.warn("Meeting tonight not read", { eventId, error: error instanceof Error ? error.message : String(error) })
-    return held?.social?.social ?? null
-  }
+  if (held?.socialRead) return held.socialRead
+  const read = (async () => {
+    try {
+      const social = discloseSocial(await liveSocialCounts(eventId, occurrenceId))
+      if (held) held.social = { readAt: now.getTime(), social }
+      return social
+    } catch (error) {
+      logger.warn("Meeting tonight not read", { eventId, error: error instanceof Error ? error.message : String(error) })
+      return held?.social?.social ?? null
+    } finally {
+      if (held) held.socialRead = undefined
+    }
+  })()
+  if (held) held.socialRead = read
+  return read
 }
 
 /** The event and its days: from `held` while it is fresh, else read (and `held` refreshed). */
@@ -111,6 +122,7 @@ async function eventAndSlots(eventId: string, now: Date, held?: { current?: Held
   return { event, slots }
 }
 
+
 /**
  * Compute one snapshot.
  *
@@ -121,8 +133,8 @@ async function eventAndSlots(eventId: string, now: Date, held?: { current?: Held
  * `held` is the event and its days a loop keeps between ticks (`HeldEvent`);
  * leave it out for a snapshot that must read them fresh.
  */
-export async function buildLiveSnapshot(eventId: string, held?: Held): Promise<LiveSnapshot | null> {
-  return (await readLiveSnapshot(eventId, held, { social: true }))?.snapshot ?? null
+export async function buildLiveSnapshot(eventId: string, held?: Held, { social = true }: { social?: boolean } = {}): Promise<LiveSnapshot | null> {
+  return (await readLiveSnapshot(eventId, held, { social }))?.snapshot ?? null
 }
 
 /**

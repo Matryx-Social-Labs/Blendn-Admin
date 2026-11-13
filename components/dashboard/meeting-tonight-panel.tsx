@@ -1,10 +1,10 @@
 import { Panel } from "@/components/dashboard/kit"
 import { MetricTile } from "@/components/dashboard/primitives"
 import { formatNumber } from "@/lib/dashboard-format"
-import type { FewCount, LiveSocial } from "@/lib/live-metrics"
+import type { FewCount, HeldTotal, LiveSocial } from "@/lib/live-metrics"
 
-/** A count as the panel prints it: a few is words, never the number (`discloseSocial`). */
-const count = (c: FewCount) => (c === "few" ? "a few" : formatNumber(c))
+/** A count as the panel prints it: a few is words, a held total its floor (`discloseGroup`), never the number. */
+const count = (c: FewCount | HeldTotal) => (c === "few" ? "a few" : typeof c === "number" ? formatNumber(c) : `${formatNumber(c.atLeast)}+`)
 
 /** The three ways two people meet here, in the bar's order and colours (approval 1). */
 const WAYS = [
@@ -42,13 +42,13 @@ export function MeetingTonightPanel({ social }: { social: LiveSocial }) {
               have met someone · {formatNumber(met.connected)} of {formatNumber(attendees)} guests
             </span>
           </p>
-          <WaysBar connections={met.connections} byWay={met.byWay} />
+          <WaysBar byWay={met.byWay} />
           <p className="text-[0.78rem] leading-relaxed text-muted-foreground">
             {met.connections === 0 ? (
               "No connections yet: a pair counts once both say yes."
             ) : (
               <>
-                {formatNumber(met.connections)} connection{met.connections === 1 ? "" : "s"}:{" "}
+                {count(met.connections)} connection{met.connections === 1 ? "" : "s"}:{" "}
                 {WAYS.filter((w) => met.byWay[w.key] !== 0).map((w, i) => (
                   <span key={w.key}>
                     {i > 0 ? " · " : null}
@@ -83,7 +83,7 @@ export function MeetingTonightPanel({ social }: { social: LiveSocial }) {
         <MetricTile
           className="min-w-0 px-0 py-1.5"
           label="Crews here"
-          value={crews ? formatNumber(crews.here) : null}
+          value={crews ? count(crews.here) : null}
           hint={crews ? (crews.here === 0 ? "none here yet" : `${count(crews.people)} people`) : "between days"}
         />
       </div>
@@ -91,20 +91,27 @@ export function MeetingTonightPanel({ social }: { social: LiveSocial }) {
   )
 }
 
-/** The connections split by way. A way under five is drawn as one grey "a few" part, never at its width. */
-function WaysBar({ connections, byWay }: { connections: number; byWay: Record<(typeof WAYS)[number]["key"], FewCount> }) {
-  if (connections === 0) return <div className="h-2 rounded-full bg-surface-raised" aria-hidden />
-  const shown = WAYS.flatMap((w) => (typeof byWay[w.key] === "number" && byWay[w.key] !== 0 ? [{ ...w, n: byWay[w.key] as number }] : []))
-  const fewPart = connections - shown.reduce((sum, w) => sum + w.n, 0)
+/**
+ * The connections split by way, drawn from what was disclosed only: a way under
+ * five has no number on the wire, so it is one grey "a few" step, never its width.
+ */
+function WaysBar({ byWay }: { byWay: Record<(typeof WAYS)[number]["key"], FewCount> }) {
+  const parts = WAYS.flatMap((w) =>
+    byWay[w.key] === 0 ? [] : [{ key: w.key, n: byWay[w.key] === "few" ? FEW_WIDTH : (byWay[w.key] as number), color: byWay[w.key] === "few" ? undefined : w.color }]
+  )
+  const total = parts.reduce((sum, p) => sum + p.n, 0)
+  if (total === 0) return <div className="h-2 rounded-full bg-surface-raised" aria-hidden />
   return (
     <div className="flex h-2 overflow-hidden rounded-full bg-surface-raised" aria-hidden>
-      {shown.map((w) => (
-        <div key={w.key} style={{ width: `${(w.n / connections) * 100}%`, background: w.color }} />
+      {parts.map((p) => (
+        <div key={p.key} className={p.color ? undefined : "bg-border-strong"} style={{ width: `${(p.n / total) * 100}%`, background: p.color }} />
       ))}
-      {fewPart > 0 ? <div className="bg-border-strong" style={{ width: `${(fewPart / connections) * 100}%` }} /> : null}
     </div>
   )
 }
+
+/** The width a "few" way is drawn at: a nominal step, not its count (the count is not sent). */
+const FEW_WIDTH = 2
 
 /** The Lobby's posts in the app's words: Offering, Looking for, Just saying. */
 function lobbyHint(lobby: LiveSocial["lobby"]): string {

@@ -106,7 +106,7 @@ describe("the snapshot", () => {
     const { eventId, guests } = await room(8)
     await db.event_waves.createMany({ data: [{ event_id: eventId, from_id: guests[0], to_id: guests[1] }, { event_id: eventId, from_id: guests[1], to_id: guests[0] }] })
     const snapshot = await buildLiveSnapshot(eventId)
-    expect(snapshot!.social).toMatchObject({ attendees: 8, met: { held: false, pct: 25, connected: 2, connections: 1, byWay: { waves: "few", lobby: 0, requests: 0 } } })
+    expect(snapshot!.social).toMatchObject({ attendees: 8, met: { held: false, pct: 25, connected: 2, connections: { atLeast: 1 }, byWay: { waves: "few", lobby: 0, requests: 0 } } })
   })
 
   it("is read once a minute by a loop, not on every five-second tick", async () => {
@@ -156,6 +156,23 @@ describe("the snapshot", () => {
       expect(failing).toHaveBeenCalledTimes(2)
     } finally {
       failing.mockRestore()
+    }
+  })
+
+  it("shares one read between everybody asking at once, and the panel reaches each (the joins' path)", async () => {
+    const { eventId } = await room(8)
+    const held: { current?: HeldEvent; social?: HeldSocial } = {}
+    const reads = jest.spyOn(liveSocial, "liveSocialCounts")
+    try {
+      const snapshots = await Promise.all(Array.from({ length: 5 }, () => buildLiveSnapshot(eventId, held)))
+      expect(reads).toHaveBeenCalledTimes(1)
+      for (const s of snapshots) expect(s!.social).toMatchObject({ attendees: 8 })
+      // And a copy for a venue alone does not read it at all.
+      held.social = undefined
+      expect((await buildLiveSnapshot(eventId, held, { social: false }))!.social).toBeNull()
+      expect(reads).toHaveBeenCalledTimes(1)
+    } finally {
+      reads.mockRestore()
     }
   })
 })
