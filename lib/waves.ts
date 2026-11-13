@@ -53,6 +53,8 @@ export const WAVE_LIMITS = {
 export const WAVES_PAGE = 20
 /** At most this many rooms in the Banter summary: rooms close within a day of ending, so a person has a handful. */
 const SUMMARY_ROOMS = 20
+/** B-A: the Banter row draws the newest three faces (board 03). */
+const PILE_FACES = 3
 
 export interface WaveCap {
   cap: "room_hour" | "day"
@@ -341,6 +343,8 @@ export interface WaitingRoom {
   /** How many waves here you have not answered. */
   waiting: number
   latest: ReceivedWave
+  /** The newest three waiting, newest first, for the row's pile: the handle and the room name only. */
+  latestFaces: Pick<ReceivedWave, "userId" | "displayName">[]
 }
 
 /**
@@ -363,9 +367,10 @@ export async function wavesWaiting(
   const out: WaitingRoom[] = []
   for (const { event_id } of rooms) {
     if (!(await roomIsOpen(event_id, now)) || (await shut(event_id))) continue
-    const page = await receivedWaves(viewerId, event_id, { limit: 1, waitingOnly: true })
+    const page = await receivedWaves(viewerId, event_id, { limit: PILE_FACES, waitingOnly: true })
     if ("refused" in page || page.total === 0) continue
-    out.push({ eventId: event_id, waiting: page.total, latest: page.waves[0] })
+    const latestFaces = page.waves.map(({ userId, displayName }) => ({ userId, displayName }))
+    out.push({ eventId: event_id, waiting: page.total, latest: page.waves[0], latestFaces })
   }
   return out
 }

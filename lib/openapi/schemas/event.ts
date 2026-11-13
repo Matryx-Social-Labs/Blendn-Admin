@@ -759,6 +759,10 @@ export const WavesWaitingResponseSchema = z
         eventId: z.string().uuid(),
         waiting: z.number().int().describe("Waves here you have not answered."),
         latest: ReceivedWaveSchema,
+        latestFaces: z
+          .array(ReceivedWaveSchema.pick({ userId: true, displayName: true }).openapi("WaveFace"))
+          .max(3)
+          .describe("The newest three waiting, newest first, for the row's pile: the room handle and the room name only, as the list shows them."),
       })
     ),
   })
