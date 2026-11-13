@@ -583,6 +583,14 @@ export function rankMatches(
     })
     .sort(
       (a, b) =>
+        /*
+         * Everyone inside now before anyone who left, then the score (SCRUM-1055).
+         * The page is cut at `limit` and Meet next keeps only the inside-now
+         * cards, so a room of hundreds who went home outscored the three still
+         * standing in it and Meet next was empty. People who left still follow,
+         * never removed.
+         */
+        Number(b.candidate.insideNow) - Number(a.candidate.insideNow) ||
         b.score - a.score ||
         // Most recent arrival first: they are the people someone has not met yet.
         b.candidate.checkedInAt.getTime() - a.candidate.checkedInAt.getTime() ||

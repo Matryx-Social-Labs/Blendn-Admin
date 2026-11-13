@@ -20,7 +20,8 @@ const mockDb = {
   event_check_ins: { findFirst: jest.fn(), findMany: jest.fn() },
   chat_group_members: { findFirst: jest.fn() },
   event_match_preferences: { findMany: jest.fn() },
-  user: { findUnique: jest.fn() },
+  // `findFirst`: the sender listed on the roster (SCRUM-1056); null is hidden.
+  user: { findUnique: jest.fn(), findFirst: jest.fn() },
   // The rest of the room identity rule (`visibleInRoom`): blocks, closed pairs
   // and friends. Empty unless a case sets them.
   blocked_users: { findMany: jest.fn() },
@@ -77,6 +78,7 @@ import { NextRequest } from "next/server"
 import { POST } from "@/app/api/mobile/events/[eventId]/waves/route"
 import { resetMemoryStore } from "@/lib/rate-limit-store"
 import { roomHandle } from "@/lib/room-handle"
+import { LISTED_IN_ROSTER } from "@/lib/room-people"
 
 const EVENT = "22222222-2222-2222-2222-222222222222"
 const ME = "me"
@@ -134,6 +136,7 @@ beforeEach(() => {
   )
   mockDb.event_match_preferences.findMany.mockResolvedValue([])
   mockDb.user.findUnique.mockResolvedValue({ name: "Arjun Rao" })
+  mockDb.user.findFirst.mockResolvedValue({ id: ME })
   mockDb.blocked_users.findMany.mockResolvedValue([])
   mockDb.private_conversations.findMany.mockResolvedValue([])
   mockDb.friendships.findMany.mockResolvedValue([])
@@ -160,6 +163,24 @@ it("uses the real name only for a sender who revealed in this room", async () =>
     expect.objectContaining({ where: expect.objectContaining({ event_id: EVENT, revealed: true }) })
   )
   expect(mockEmitWave).toHaveBeenCalledWith(THEM, expect.objectContaining({ fromName: "Arjun" }))
+})
+
+it("refuses a sender hidden from the roster as 'not here', before reading the recipient, with no row and no ping (SCRUM-1056)", async () => {
+  mockDb.user.findFirst.mockResolvedValue(null)
+  const res = await wave()
+  expect(res.status).toBe(403)
+  expect((await res.json()).errorCode).toBe("RECIPIENT_NOT_HERE")
+  // The roster's own rule for the sender, so no profile row still reads as listed.
+  expect(mockDb.user.findFirst).toHaveBeenCalledWith(
+    expect.objectContaining({ where: { id: ME, ...LISTED_IN_ROSTER } })
+  )
+  expect(mockBlocked).not.toHaveBeenCalled()
+  expect(waves.size).toBe(0)
+  expect(mockEmitWave).not.toHaveBeenCalled()
+  // Control: listed, the same wave goes.
+  mockDb.user.findFirst.mockResolvedValue({ id: ME })
+  expect((await wave()).status).toBe(200)
+  expect(mockEmitWave).toHaveBeenCalledTimes(1)
 })
 
 it("requires both to be inside NOW for a new wave, not merely to have attended", async () => {

@@ -384,6 +384,62 @@ describe("a sender who left learns nothing about who waved at them (security rev
   })
 })
 
+/*
+ * SCRUM-1056. A sender with "show online" off could wave: the wave was stored,
+ * `room:wave` pinged the recipient with the sender's room name, and then the
+ * received list hid it and a wave back was refused. The ping told the
+ * recipient a hidden person was in the room, about somebody they could never
+ * see or answer. Show online off is listed nowhere (SCRUM-669), so it waves at
+ * nobody, and is refused exactly as somebody not here is.
+ */
+describe("a sender hidden from the roster waves at nobody (SCRUM-1056)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const socket = require("@/lib/socket-server") as typeof import("@/lib/socket-server")
+  let pings: jest.SpyInstance
+  beforeEach(() => {
+    pings = jest.spyOn(socket, "emitRoomWave").mockImplementation(() => undefined)
+  })
+  afterEach(() => pings.mockRestore())
+  const hide = (p: Person, hidden: boolean) =>
+    db.profiles.update({ where: { id: p.id }, data: { show_online: !hidden } })
+
+  it("is the not-here refusal byte for byte, stores nothing, pings nobody, lists nothing", async () => {
+    const [hidden, ana, gone] = [await person("rw-hs-h"), await person("rw-hs-a"), await person("rw-hs-g")]
+    await leave(gone)
+    await hide(hidden, true)
+
+    const notHere = await wave(hidden, gone)
+    expect(notHere.body.errorCode).toBe("RECIPIENT_NOT_HERE")
+    expect(await wave(hidden, ana)).toEqual(notHere)
+    expect(await rowsBetween(hidden, ana)).toBe(0)
+    expect(pings).not.toHaveBeenCalled()
+    expect((await received(ana)).body.data.total).toBe(0)
+  })
+
+  it("cannot answer a wave either: no row, no conversation, no ping", async () => {
+    const [hidden, ana] = [await person("rw-hs-h2"), await person("rw-hs-a2")]
+    expect((await wave(ana, hidden)).status).toBe(200)
+    pings.mockClear()
+    await hide(hidden, true)
+
+    expect((await wave(hidden, ana)).body.errorCode).toBe("RECIPIENT_NOT_HERE")
+    expect(await rowsBetween(hidden, ana)).toBe(0)
+    expect(pings).not.toHaveBeenCalled()
+    expect(await db.private_conversations.count({ where: { user1_id: { in: [hidden.id, ana.id] }, user2_id: { in: [hidden.id, ana.id] } } })).toBe(0)
+  })
+
+  it("control: the same person with show online on waves, is stored, and pings once", async () => {
+    const [shown, ana] = [await person("rw-hs-s"), await person("rw-hs-a3")]
+    await hide(shown, true)
+    await hide(shown, false)
+
+    expect((await wave(shown, ana)).status).toBe(200)
+    expect(await rowsBetween(shown, ana)).toBe(1)
+    expect(pings).toHaveBeenCalledTimes(1)
+    expect(pings.mock.calls[0][0]).toBe(ana.id)
+  })
+})
+
 describe("who the received list hides", () => {
   it("a block either way hides the wave from the recipient's list, and Banter's", async () => {
     const ana = await person("rw-b-a")

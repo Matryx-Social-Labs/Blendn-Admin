@@ -160,6 +160,34 @@ describe("presence", () => {
     const ranked = rank([candidate({ userId: "gone", insideNow: false })])
     expect(ranked).toHaveLength(1)
   })
+
+  /*
+   * SCRUM-1055. Presence used to be an additive 1.5, before the just-here
+   * damping and the exposure damping, so a person inside now who said nothing
+   * and had been shown around scored below someone who left hours ago with two
+   * rare interests. The page is cut at `limit` and the client's Meet next keeps
+   * only `insideNow` cards, so a big room of leavers left Meet next empty while
+   * people stood in it. Reproduced on staging: 570 check-ins, 3 inside.
+   */
+  const bigRoom = [
+    candidate({ userId: "gone-strong", interestIds: ["modular", "techno"], intents: ["networking"], insideNow: false }),
+    candidate({ userId: "gone-weak", interestIds: ["music"], insideNow: false }),
+    candidate({ userId: "here-quiet", insideNow: true, exposures: 40 }),
+    candidate({ userId: "here-matched", interestIds: ["boardgames"], intents: ["networking"], insideNow: true }),
+  ]
+
+  it("puts everyone inside now ahead of everyone who left, whatever the score", () => {
+    const ranked = rankMatches(viewer, bigRoom, { interestHolders: HOLDERS, population: POPULATION, limit: 2 })
+    expect(ranked.map((m) => m.userId)).toEqual(["here-matched", "here-quiet"])
+    expect(rank(bigRoom).map((m) => m.userId)).toEqual(["here-matched", "here-quiet", "gone-strong", "gone-weak"])
+  })
+
+  it("still orders each side by score (control)", () => {
+    // Passes with and without the partition: within a side, nothing moved.
+    expect(rank(bigRoom.filter((c) => c.insideNow)).map((m) => m.userId)).toEqual(["here-matched", "here-quiet"])
+    // Nobody inside: the page is the leavers by score, exactly as before.
+    expect(rank(bigRoom.filter((c) => !c.insideNow)).map((m) => m.userId)).toEqual(["gone-strong", "gone-weak"])
+  })
 })
 
 describe("anonymity is enforced in the ranking, not by the caller", () => {

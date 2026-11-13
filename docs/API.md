@@ -1032,7 +1032,10 @@ to be revealed at this event. **There is no score** — the ordering is not
 exposed, because a number implies a precision the data cannot support.
 
 Staff are excluded. People who have checked out are not: they were in the room
-with you, and rank lower rather than disappearing.
+with you, and rank lower rather than disappearing. Everyone with
+`insideNow: true` comes before everyone who left, whatever the score, so the
+page (50) always starts with the people you can walk up to — Meet next keeps
+only those (SCRUM-1055).
 
 `youLiked` says whether *you* liked them. **Nothing anywhere says whether they
 liked you** — a mutual like is the only thing that reveals it, and there is no
@@ -1125,7 +1128,14 @@ anonymous conversation.
   has left** gets that same `403 NOT_CHECKED_IN` for every refusal, including
   "nobody you can see waved at you": a wave back counts only a wave your own
   list shows, so leaving and waving cannot ask whether a hidden or blocked
-  person waved at you. A new wave at the
+  person waved at you. **A sender with Show online off** waves at nobody, a
+  wave back included (SCRUM-1056): their wave could never be listed or
+  answered, and the live ping would tell the recipient a hidden person is in
+  the room. Refused with that same not-here answer (`RECIPIENT_NOT_HERE`
+  inside, `NOT_CHECKED_IN` after leaving), before anything about the recipient
+  is read; nothing is stored and nobody is pinged. A client should offer
+  "Turn on Show online to wave" from its own setting rather than wait for this.
+  A new wave at the
   same person within 10 minutes in another room is `429 WAVE_TOO_SOON` (a wave
   back is never held by it).
 
