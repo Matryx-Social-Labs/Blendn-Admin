@@ -906,7 +906,7 @@ and `/event/<id>` and their link-preview cards. No auth, no CORS; `lib/share-pub
 |--------|----------|-------------|
 | GET | `/events` | List events (paginated, filterable) |
 | GET | `/events/:eventId` | Get event details. Also carries `area` (the confirmed venue's area, else the city; null when neither is known), `doorPolicy`, `details` (or null) and `amenities`, none of which the list has. `chatGroup` is `{ id, name, status, member_count }` — snake_case — or null; `member_count` is `stats.hereCount`, in the room now (the column of that name only ever went up, and is not read). `categories[]` are the leaves as stored, `{ id, name, slug, description, icon }`, with no `parent`. `distance` is kilometres from `lat`/`lon`, and `null` (never absent) without them. `organizer.id` is null when the host is the platform. Also `changedAt`, `changedFields`, `changedFrom`, `days`, `dayCount` and `dayNumber` ([Flow 3](#the-event-what-changed-the-days-and-why-a-link-is-refused-flow-3)) |
-| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch") |
+| POST | `/events/:eventId/checkin` | Check in to event. 404 for a venue day's id: a venue's room is entered by going live (`POST /venues/:venueId/live`). On a native ticketed event (`TICKETING` on), 403 `tickets_required` unless the caller holds a ticket whose order is paid or is the event's staff (SCRUM-1014). `left` names the rooms it took you out of (see "One room at a time, and the switch"). Optional `withCrewId` tells that crew you're in ("With {crew}", answered by `crewTold`) |
 | GET | `/events/:eventId/people` | People from a night you attended, for the Recap — see below |
 | POST | `/events/:eventId/checkout` | Check out of event |
 | POST | `/events/:eventId/favorite` | Toggle favorite/interest |
@@ -2936,12 +2936,15 @@ at an event. `lib/crews/`.
 | POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous?, emblemSeed? }` → 201 `{ crewId, chatGroupId, invited }`. `emblemSeed` is the emblem's look as the app's Shuffle left it, 16 lowercase hex characters (`^[0-9a-f]{16}$`, else 400); omitted, the server draws one. It never changes after: PATCH has no such field |
 | GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
 | PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
+| DELETE | `/crews/:crewId` | The owner ends the crew for everyone → `{ ended: true }` (below) |
 | POST | `/crews/:crewId/invites` | Any member invites their own friends `{ userIds }` → `{ invited }` |
 | POST | `/crews/:crewId/join` | Accept my invite `{ revealConsent: true, keepMeAnonymous? }` → `{ chatGroupId }` |
 | DELETE | `/crews/:crewId/join` | Decline my invite — told to nobody |
 | PATCH | `/crews/:crewId/members/:userId` | My own settings (`userId` = my id): `{ keepMeAnonymous }` |
 | DELETE | `/crews/:crewId/members/:userId` | Leave (my id), or the owner removes a member (their handle) → `{ dissolved }` |
 | POST | `/crews/:crewId/here` | "We're here" `{ eventId }` → `{ notified, repeated }` |
+| POST | `/crews/:crewId/plans` | "Going together": mark the event's next night `{ eventId }` → `{ planned, repeated, occurrenceId }` |
+| DELETE | `/crews/:crewId/plans` | Take the plan back (its planner or the owner) `{ eventId }` → `{ planned: false }` |
 | POST | `/crews/:crewId/report` | Report a crew's card `{ reason, description? }` → 201 `{ reported: true }` |
 | POST | `/chat/groups/:chatGroupId/members/:userId/report` | Report a person in a crew's or Mix's room by the handle that room showed you, `{ reason, description? }` → 201 `{ reported: true }`. Members of that room only; 404 for any other room, a foreign or forged handle, or somebody not in it; 400 for yourself. Same admin queue as `POST /users/:id/report` |
 | GET | `/events/:eventId/crews` | The crews here now, as cards, a page at a time (`?limit=&offset=`) → `{ crewsEnabled, crews, myCrews, total, hasMore }` |
@@ -2993,6 +2996,15 @@ sender, and the crew is past 14 days old (or had a second member, now
 suspended), the next pass dissolves it. A departure is not a
 wait: a crew somebody leaves down to one dissolves at once.
 
+**End the crew** (crews 5A): `DELETE /crews/:crewId`, the owner only, ends the
+crew whatever its size, exactly as D-15: dissolved for good (it cannot be
+undone), every member and invite row gone (an open invite is void), its chat
+given one last line — `"{crew} has ended"`, type `system`, metadata `{ kind:
+"crew_ended" }` — then archived and closed (404 from then on) with every socket
+taken out, and its open Mixes closed. Its "Out together often" badge goes with
+its members. Friendships stay. Nobody is pushed. A member, a stranger, a crew
+that does not exist and a second call all get the same 404. `write` limiter.
+
 **Joining is consent.** Creating or joining requires `revealConsent: true`. The
 app shows, beside it: *"Anyone in this crew can reveal the crew — your name and
 photos — to people you match with."* `keepMeAnonymous` is the personal override
@@ -3018,7 +3030,9 @@ intent enum.
 it) and `apart` (somebody in the crew is missing from `members` because **you**
 blocked them — never because they blocked you or a conversation closed, which
 would say a crewmate hides from you). An invite carries `invitedByPhoto`, the
-sender's first photo, shown to exactly who is shown their name. A crew name or
+sender's first photo, shown to exactly who is shown their name, and
+`expiresAt`, when it lapses (14 days after `invitedAt`, the accept's own
+limit) for the card's "Open for N more days". A crew name or
 bio refused for its words answers 400 with `field: "name" | "bio"` (and the same
 in `errors`).
 
@@ -3051,9 +3065,64 @@ chat or blocked the tapper — **once per person per crew per occurrence**; a
 second tap answers `repeated: true` and tells nobody. The line itself is the
 record (read and written in one transaction under a lock), so it holds across
 restarts and replicas; the next occurrence is a new night. A member who turned
-notifications off (`push_enabled`) gets the bell line, not a push. The push
-names nobody and no place: *"Someone from your crew is here 👋"*, titled with
-the crew's name. A crew invite sends `crew_invite` (`crewId`), naming nobody.
+notifications off (`push_enabled`) gets the bell line, not a push. The push,
+titled with the crew's name, names **who is in with the crew** by first name
+and never who is not, never a place (owner 1a, a lock screen is read by whoever
+holds the phone): *"Priya and Arjun are in. Hold to Blend’n when you get
+there."* — up to three names, then "and N others"; a member already in gets the
+names without the second sentence; each recipient's list leaves out anybody
+kept apart from them (a block or closed conversation, either way). A crew
+invite sends `crew_invite` (`crewId`), naming nobody.
+
+**"With {crew}" at the hold** (crews S1): `POST /events/:eventId/checkin`
+takes an optional `withCrewId`. On a successful check-in it runs the same
+"We're here" write for that crew — no second tap — and answers `crewTold:
+true` (also when the crew was already told tonight; the field is there only
+when `withCrewId` was sent). It never checks anybody
+else in. A crew that is not yours, crews off at the event, or a room ban is
+ignored silently: the check-in is unchanged and `crewTold: false`. The client
+shows the chip on by default only when the crew planned the night (owner 1b);
+tapping it off sends no `withCrewId`, and you are not on the crew's strip.
+
+**Going together** (crews S4, 4-A1): `POST /crews/:crewId/plans { eventId }`
+— any active member marks the event's next night not yet over: a published
+event, not a venue day, that they may take part in by the RSVP's own door
+(`attendeeEventAccess` "participate" — a private event they were not let into,
+an age line they are under or a closed city is 404, nothing written). One plan per crew per night
+(`crew_plans`, unique): the first mark writes a crew-chat line (type `system`,
+`"Going together 🗓"`, metadata `{ kind: "crew_plan", eventId, occurrenceId }`)
+and sends one push — kind `crew_here` (it opens the crew chat; the "Your crew"
+category), titled with the crew's name, *"Priya wants to go together. Open the
+crew to see the night."*, never the place — to every other member who has not
+muted the crew chat or blocked the planner. A second mark answers `repeated:
+true` and tells nobody. 403 crews off, 400 no night left, 429 after 3 nights
+told by the crew in 24 hours — counted on the crew-chat lines, which taking a
+plan back never deletes, so plan → take back → plan neither refunds the cap nor
+tells the crew twice (a night planned again is stored quietly). `DELETE` with the same body takes it back: the member who
+marked it or the owner; nobody is told. `GET /events/:eventId`
+`userStatus.myCrewPlans` lists **your own** crews with a plan for a night of it
+not yet over — `{ crewId, name, emblemSeed, occurrenceId, startsAt, going }`,
+`going` being crewmates whose own RSVP is `going`, shown as the crew room shows
+them (handle, first name, photo unless they keep themselves anonymous), never
+anybody kept apart from you. `GET /crews/:crewId` carries `plans` (`{ eventId,
+title, occurrenceId, startsAt }`, soonest first, at most 10) **as the viewer
+may see them**: a plan for an event the viewer cannot open (private, under its
+age line, closed city) is left out, title and all. The chat line carries only
+the event's id, which the event door answers for each reader. Members only:
+nothing of a plan reaches a stranger, a card or a host. The check-in's "With
+{crew}" chip is on by default only for a crew with a plan for tonight (owner 1b).
+
+**The strip** (crews S2): each of `myCrews` carries `here`, the members
+checked in now **who told the crew** (by the chip or "We're here"), first in
+first, as `{ userId, name, photo, you }` — `userId` is their handle in the
+crew's room (yours is your own id); `name` and `photo` are the crew room's own
+(`namesInRoom` / `crewMemberImages`, as its chat shows them): a first name, and
+a photo only for a member who did not choose "keep me anonymous" (null
+otherwise). An erased or suspended member is never on it. The push takes its
+names from the same place. Somebody who came in
+on their own is not on it, nor anybody kept apart from you. `presentCount`
+still counts every member checked in, for installed builds. `here` is never on
+a crew card: strangers get counts only.
 
 **Presence is derived, never stored.** A crew is *here* when two or more of its
 active members are checked in at the same occurrence now (`checked_in`, no
@@ -4540,7 +4609,8 @@ them any more. Rows written before that are hidden, and retention removes them.
 | An organizer announcement | Everyone in the room | Stacked with its event, never replaced |
 | Friend request / accepted, match, reveal, Lobby, message request | The person it is about, immediately | One each |
 | A crew invite | The friend invited (`crew_invite`, `crewId`), naming nobody | One each |
-| "We're here" | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`), once per person per night; no name, no place | One each |
+| "Going together" | Every other crew member who has not muted the crew chat or blocked the planner (`crew_here`, `crewId`, `chatGroupId`), once per crew per night; "Priya wants to go together. Open the crew to see the night." — no place | One each |
+| "We're here" / "With {crew}" at the hold | Every other crew member who has not muted the crew chat or blocked the tapper (`crew_here`, `crewId`, `chatGroupId`), once per person per night; "Priya and Arjun are in. Hold to Blend’n when you get there." — who is in by first name, never who is not, no place | One each |
 | A Mix | Everyone the Mix room lets in, but the person whose like made it (`blend`, `blendId`, `chatGroupId`); no name, nothing about who liked first | One each |
 | An event you checked in to ends | Everyone with a check-in row, once per event, within ~5 minutes of the end (only events that ended in the last 6 hours). `data: { type: "rating_request", eventId }` → the app opens `/rate/[eventId]`. People with a mutual like to rate (blocks excluded) get "rate the people you met"; the rest "rate the night"; somebody who already rated and has nobody to rate is skipped | `rate:{eventId}` on `events`, replaced in place |
 

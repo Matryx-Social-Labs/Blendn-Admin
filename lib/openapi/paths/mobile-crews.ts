@@ -55,6 +55,10 @@ const CrewSchema = z
     apart: z.boolean().describe("Somebody in the crew is left out of `members` because YOU blocked them. Never set by them blocking you or by a closed conversation: that would say a crewmate is hiding from you"),
     you: z.object({ role: z.enum(["owner", "member"]), keepMeAnonymous: z.boolean() }).nullable(),
     members: z.array(CrewMemberSchema),
+    plans: z
+      .array(z.object({ eventId: z.string().uuid(), title: z.string(), occurrenceId: z.string().uuid(), startsAt: z.string() }))
+      .optional()
+      .describe("\"Going together\" (crews S4): the crew's planned nights not yet over, soonest first, at most 10, leaving out any event YOU cannot open (private, age line, closed city). On `GET /crews/{crewId}` (and PATCH), not the list."),
   })
   .openapi("Crew")
 
@@ -69,6 +73,7 @@ const CrewInviteSchema = z
     invitedBy: z.string().describe("The friend who invited you, by first name"),
     invitedByPhoto: z.string().nullable().describe("Their first photo, shown to exactly who is shown their name (the invite is listed only while they are still your friend and in the crew); null without one"),
     invitedAt: z.string(),
+    expiresAt: z.string().describe("When the invite lapses (14 days after it was sent): the invite card's \"Open for N more days\""),
   })
   .openapi("CrewInvite")
 
@@ -211,6 +216,55 @@ registry.registerPath({
 })
 
 registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}",
+  tags,
+  summary: "End the crew for everyone (its owner)",
+  description:
+    CREW_404 +
+    "The owner ends the crew (crews 5A), whatever its size, exactly as a moderator's dissolve: the crew is dissolved for good, every " +
+    "member and invite row goes (an open invite is void), its chat gets one last line (\"{crew} has ended\", metadata `{ kind: \"crew_ended\" }`) " +
+    "and is archived with every socket taken out, and its open Mixes close. Friendships stay. No push. A member, a stranger, or a second " +
+    "call: the same 404.",
+  security: bearerAuth,
+  request: { params: crewParams },
+  responses: { 200: { description: "Ended", ...json(wrap(z.object({ ended: z.literal(true) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
+  method: "post",
+  path: "/api/mobile/crews/{crewId}/plans",
+  tags,
+  summary: "\"Going together\": the crew marks a night",
+  description:
+    CREW_404 +
+    "Any active member marks the event's next night not yet over (`{ eventId }`). Once per crew per night: one crew-chat line (type `system`, " +
+    "metadata `{ kind: \"crew_plan\", eventId, occurrenceId }`) and one push (kind `crew_here`, \"{first name} wants to go together. Open the crew " +
+    "to see the night.\" — never the place) to every other member who has not muted the crew chat or blocked the planner. A second mark: " +
+    "`repeated: true`, nobody told. 404 for an event you may not take part in (the RSVP door: private and not let in, under its age " +
+    "line, a closed city), a draft or a venue day; 403 crews off; 400 no night left; 429 after " +
+    "3 nights told by the crew in 24 hours (counted on the crew-chat lines: taking a plan back refunds nothing, and a night planned " +
+    "again is stored without a second line or push).",
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
+  responses: {
+    200: { description: "Planned", ...json(wrap(z.object({ planned: z.literal(true), repeated: z.boolean(), occurrenceId: z.string().uuid() }))) },
+    ...standardErrors,
+  },
+})
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/mobile/crews/{crewId}/plans",
+  tags,
+  summary: "Take a crew's plan back",
+  description: CREW_404 + "The member who marked it, or the owner; anybody else's call changes nothing. Nobody is told. `{ eventId }`.",
+  security: bearerAuth,
+  request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
+  responses: { 200: { description: "Not planned", ...json(wrap(z.object({ planned: z.literal(false) }))) }, ...standardErrors },
+})
+
+registry.registerPath({
   method: "post",
   path: "/api/mobile/crews/{crewId}/invites",
   tags,
@@ -296,7 +350,9 @@ registry.registerPath({
     "Writes a line in the crew chat (type `system`, metadata `{ kind: \"crew_here\", eventId, occurrenceId }`) and pushes every other " +
     "member who has not muted the crew chat or blocked you — once per person per crew per occurrence (`repeated: true` after that; the " +
     "line itself is the record, so it holds across restarts). Somebody who turned notifications off gets the bell line, not a push. " +
-    "The push names nobody and no place. 403 when the host turned crews off.",
+    "The push names who is in with the crew by first name (\"Priya and Arjun are in. Hold to Blend’n when you get there.\"; a member " +
+    "already in gets the names only), never who is not, never a place, and never anybody kept apart from that recipient. " +
+    "`POST /events/{eventId}/checkin` with `withCrewId` runs this same write. 403 when the host turned crews off.",
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ eventId: z.string().uuid() })) },
   responses: {
@@ -332,7 +388,26 @@ registry.registerPath({
           z.object({
             crewsEnabled: z.boolean(),
             crews: z.array(CrewCardSchema),
-            myCrews: z.array(z.object({ crewId: z.string().uuid(), name: z.string(), presentCount: z.number().int() })),
+            myCrews: z.array(
+              z.object({
+                crewId: z.string().uuid(),
+                name: z.string(),
+                presentCount: z.number().int().describe("Every member checked in now (installed builds' count)"),
+                here: z
+                  .array(
+                    z.object({
+                      userId: z.string().describe("Their handle in the crew's room; yours is your own id"),
+                      name: z.string().describe("First name"),
+                      photo: z.string().nullable().describe("The crew room's photo for them: null for a member who keeps themselves anonymous"),
+                      you: z.boolean(),
+                    })
+                  )
+                  .describe(
+                    "The strip (crews S2): members checked in now who told the crew (\"With {crew}\" or \"We're here\"), first in first. " +
+                      "Not somebody who came in on their own, not anybody kept apart from you. Members only: never on a card."
+                  ),
+              })
+            ),
             total: z.number().int().describe("Every crew you may see here now, across pages"),
             hasMore: z.boolean(),
           })

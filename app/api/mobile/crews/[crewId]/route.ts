@@ -8,7 +8,7 @@ import {
   unauthorizedResponse,
   validationErrorResponse,
 } from "@/lib/api-response"
-import { isRefusal, refusalResponse, updateCrew, updateCrewSchema } from "@/lib/crews/crews"
+import { endCrew, isRefusal, refusalResponse, updateCrew, updateCrewSchema } from "@/lib/crews/crews"
 import { crewDetail } from "@/lib/crews/views"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -61,5 +61,29 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   } catch (error) {
     logger.error("Edit crew error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to edit the crew")
+  }
+}
+
+/**
+ * DELETE /api/mobile/crews/:crewId — "End the crew for everyone" (crews 5A):
+ * the owner ends it — members, invites, the crew chat (one last line, then
+ * closed) and its open Mixes. No push. Anybody but the owner: the same 404
+ * as a crew that does not exist.
+ */
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  try {
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) return unauthorizedResponse("Invalid or expired token")
+    const limited = await rateLimit(request, userLimit("write", "crew-end", authUser.userId))
+    if (limited) return limited
+
+    const { crewId } = await params
+    if (!isUuid(crewId)) return notFoundResponse("Crew not found")
+    const ended = await endCrew(authUser.userId, crewId)
+    if (isRefusal(ended)) return refusalResponse(ended)
+    return successResponse(ended)
+  } catch (error) {
+    logger.error("End crew error", { error: error instanceof Error ? error.message : String(error) })
+    return serverErrorResponse("Failed to end the crew")
   }
 }

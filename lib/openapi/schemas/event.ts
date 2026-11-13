@@ -81,6 +81,15 @@ export const CheckinRequestSchema = z
     deviceInfo: DeviceInfoSchema.extend({
       gpsAccuracy: z.number().optional(),
     }).optional(),
+    withCrewId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe(
+        "\"With {crew}\" (crews S1): one of your crews to tell at this check-in — the same line, push and once-per-night lock as " +
+          "`POST /crews/{crewId}/here`, so no second tap. Never checks anyone else in. A crew that is not yours, crews off, or a room " +
+          "ban: ignored silently, the check-in unchanged, `crewTold: false`."
+      ),
   })
   .openapi("CheckinRequest")
 
@@ -242,6 +251,21 @@ const UserStatusSchema = z.object({
   checkInStatus: z.string().nullable(),
   userRating: z.number().nullable(),
   rsvpStatus: z.string().nullable(),
+  myCrewPlans: z
+    .array(
+      z.object({
+        crewId: z.string().uuid(),
+        name: z.string(),
+        emblemSeed: z.string(),
+        occurrenceId: z.string().uuid(),
+        startsAt: z.string().datetime(),
+        going: z
+          .array(z.object({ userId: z.string(), name: z.string(), photo: z.string().nullable(), you: z.boolean() }))
+          .describe("Crewmates whose own RSVP is going, as the crew room shows them (first name; photo null for a member who keeps themselves anonymous); never anyone kept apart from you"),
+      })
+    )
+    .optional()
+    .describe("\"Going together\" (crews S4): your own crews that planned a night of this event not yet over. Members only. The check-in's \"With {crew}\" chip is on by default only for a crew here (owner 1b)."),
 })
 
 /**
@@ -505,6 +529,7 @@ export const CheckinResponseSchema = z
      * here?" and a tap applies it.
      */
     revealSuggestion: z.boolean(),
+    crewTold: z.boolean().optional().describe("Only when `withCrewId` was sent: whether that crew knows you are in (now or already tonight)."),
     /**
      * Ask "why do you go out?" now, and save the answer as the default.
      *

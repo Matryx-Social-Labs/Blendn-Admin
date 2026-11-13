@@ -22,7 +22,7 @@ import { characters } from "../utils"
 import { sendPushNotification } from "../push-notifications"
 import { closeRoomSockets, leaveRoomSockets } from "../room-close"
 import { blocksBetween } from "./blocks"
-import { activeMemberWhere, lockCrew, settleLocked } from "./sweep"
+import { activeMemberWhere, dissolveLocked, lockCrew, settleLocked } from "./sweep"
 
 /**
  * Crews: friends who go out together (plan v2 §6).
@@ -598,6 +598,51 @@ export async function removeFromCrew(
   for (const id of result.closed) closeRoomSockets(id)
   for (const id of result.left) leaveRoomSockets(id, memberId)
   return { dissolved: result.dissolved }
+}
+
+/* -------------------------------------------------------------------------- */
+/* End the crew                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * "End the crew for everyone" (crews 5A, S6): the owner ends it, whatever its
+ * size, exactly as a moderator's dissolve does (`dissolveLocked`, D-15):
+ *
+ * - the crew is `dissolved_at` — off every surface, for good; it cannot be undone;
+ * - every member row goes, and every invite with them (an open invite is void:
+ *   accepting it finds no crew);
+ * - its room gets one last line, "{crew} has ended", and is archived with
+ *   everyone in it released — the room-close writer (`closeRoomSockets`) takes
+ *   every socket out after commit;
+ * - its open Mixes (Blends) close, their rooms archived the same way;
+ * - its history goes with it: the "Out together often" badge is counted from
+ *   its members, and there are none. Friendships are untouched.
+ *
+ * No push, to anybody. Not the owner: the same 404 as a crew that does not
+ * exist, so a member cannot tell an ended crew from one they were never in.
+ */
+export async function endCrew(ownerId: string, crewId: string): Promise<{ ended: true } | CrewRefusal> {
+  const result = await db.$transaction(async (tx) => {
+    const crew = await lockCrew(tx, crewId)
+    if (!crew) return NO_CREW
+    const me = await tx.crew_members.findUnique({
+      where: { crew_id_user_id: { crew_id: crew.id, user_id: ownerId } },
+      select: { role: true, user: { select: { suspended_at: true, deletedAt: true } } },
+    })
+    if (me?.role !== "owner" || me.user.suspended_at || me.user.deletedAt) return NO_CREW
+    const room = await tx.chat_groups.findUnique({ where: { crew_id: crew.id }, select: { id: true } })
+    if (room) {
+      const line = await tx.chat_messages.create({
+        data: { chat_group_id: room.id, user_id: ownerId, type: "system", content: `${crew.name} has ended`, metadata: { kind: "crew_ended" } },
+      })
+      await tx.chat_groups.update({ where: { id: room.id }, data: { last_message_at: line.created_at } })
+    }
+    return { roomIds: await dissolveLocked(tx, crew.id) }
+  })
+  if (isRefusal(result)) return result
+  for (const id of result.roomIds) closeRoomSockets(id)
+  logger.info("Crew ended by its owner", { crewId })
+  return { ended: true }
 }
 
 /* -------------------------------------------------------------------------- */
