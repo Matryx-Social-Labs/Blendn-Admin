@@ -54,6 +54,10 @@ const SECRET_PHOTO = "https://cdn.itest.invalid/benedict-quixotewright.jpg"
 const SECRET_BLUR = "https://cdn.itest.invalid/benedict-quixotewright.blur.jpg"
 /** The other's answer to tonight's question: room words, readable by the room, never by its host. */
 const TONIGHT_ANSWER = "Restoring a 1962 Vespa in my garage"
+/** The other's crew: a stranger in the room may see its card, a host never sees it at all. */
+const CREW_NAME = "Quixote Crew"
+/** The other's crewmate: reads the strip (crews S2). */
+let mate: Person
 /** Why the other is here (the work lens): the same readers as the answer, and a host gets it nowhere. As it appears in a body. */
 const WORK_INTENT = `"workIntent":"build"`
 
@@ -211,6 +215,23 @@ beforeAll(async () => {
   refs.postId = [post.id]
   await ok(call(route("events/[eventId]/waves").POST, `/api/mobile/events/${eventId}/waves`, other, { method: "POST", body: { toUserId: viewerHandle }, params: { eventId } }), "wave")
 
+  // The other came in with their crew, and so did its other member (crews S1–S2): the viewer, a
+  // stranger open to crews, may see its card — counts, never who — and its strip is the members' only.
+  mate = await person("uis-mate", "Mabel Crewmate", "https://cdn.itest.invalid/mabel.jpg", "https://cdn.itest.invalid/mabel.blur.jpg")
+  const [user1_id, user2_id] = [other.id, mate.id].sort()
+  await db.friendships.create({ data: { user1_id, user2_id } })
+  const made = await ok(call(route("crews").POST, "/api/mobile/crews", other, { method: "POST", body: { name: CREW_NAME, inviteUserIds: [mate.id], revealConsent: true } }), "crew")
+  const crewId = made.data.crewId as string
+  await ok(call(route("crews/[crewId]/join").POST, `/api/mobile/crews/${crewId}/join`, mate, { method: "POST", body: { revealConsent: true }, params: { crewId } }), "crew join")
+  await db.crews.update({ where: { id: crewId }, data: { open_to_solo: true } })
+  // And keeps themselves anonymous in it: their crewmate's strip gets their first name, never their face.
+  await ok(call(route("crews/[crewId]/members/[userId]").PATCH, `/api/mobile/crews/${crewId}/members/${other.id}`, other, { method: "PATCH", body: { keepMeAnonymous: true }, params: { crewId, userId: other.id } }), "keep me anonymous")
+  await putInRoom({ eventId, occurrenceId, userId: mate.id })
+  for (const p of [other, mate]) {
+    await ok(call(route("crews/[crewId]/here").POST, `/api/mobile/crews/${crewId}/here`, p, { method: "POST", body: { eventId }, params: { crewId } }), "crew here")
+  }
+  await ok(call(prefs.PUT, `/api/mobile/events/${eventId}/matches/preferences`, viewer, { method: "PUT", body: { openToCrews: true }, params: { eventId } }), "open to crews")
+
   // What the viewer was handed for the other in the DM.
   const inbox = await ok(call(route("conversations").GET, "/api/mobile/conversations", viewer), "inbox")
   const row = (inbox.data?.conversations ?? inbox.data ?? []).find?.((c: { id: string }) => c.id === conversationId)
@@ -244,6 +265,15 @@ afterAll(async () => {
   await db.private_messages.deleteMany({ where: { conversation: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } } })
   await db.private_conversations.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await db.board_posts.deleteMany({ where: { event_id: { in: events } } }).catch(() => undefined)
+  const crews = { crew: { created_by: { in: users } } }
+  await db.chat_messages.deleteMany({ where: { chat_group: crews } })
+  await db.chat_group_members.deleteMany({ where: { chat_group: crews } })
+  await db.chat_groups.deleteMany({ where: crews })
+  await db.crew_invites.deleteMany({ where: crews })
+  await db.crew_members.deleteMany({ where: crews })
+  await db.crews.deleteMany({ where: { created_by: { in: users } } })
+  await db.notifications.deleteMany({ where: { user_id: { in: users } } })
+  await db.friendships.deleteMany({ where: { OR: [{ user1_id: { in: users } }, { user2_id: { in: users } }] } })
   await cleanup(users, events)
   await db.category_lenses.deleteMany({ where: { category_slug: { in: lensSlugs } } })
   await db.categories.deleteMany({ where: { id: { in: categoryIds } } })
@@ -326,6 +356,21 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     expect(leaksIn(sheet.text)).toEqual([])
   })
 
+  it("reached the viewer with the other's crew as a card — counts, never who (crews S2)", async () => {
+    const seen = await call(route("events/[eventId]/crews").GET, `/api/mobile/events/${eventId}/crews`, viewer, { params: { eventId } })
+    expect(seen.body.data.crews.map((c: { name: string; presentCount: number }) => [c.name, c.presentCount])).toEqual([[CREW_NAME, 2]])
+    expect(seen.text).not.toContain('"here"')
+  })
+
+  it("shows an anonymous crewmate on the strip by first name only — no photo, no full name, no account id (crews S2)", async () => {
+    const seen = await call(route("events/[eventId]/crews").GET, `/api/mobile/events/${eventId}/crews`, mate, { params: { eventId } })
+    const here = seen.body.data.myCrews[0].here as { name: string; photo: string | null; you: boolean }[]
+    // Control: the strip reached the crewmate, with the other on it.
+    expect(here.map((h) => h.name).sort()).toEqual(["Benedict", "Mabel"])
+    expect(here.find((h) => h.name === "Benedict")!.photo).toBeNull()
+    for (const leak of [SECRET_PHOTO, SECRET_BLUR, "Quixotewright", other.id]) expect(seen.text).not.toContain(leak)
+  })
+
   it("reached the viewer with the other's recorded wave, on the room's list, Banter's row and the deck, by handle beside no identity (SCRUM-1042)", async () => {
     const list = await call(route("events/[eventId]/waves").GET, `/api/mobile/events/${eventId}/waves`, viewer, { params: { eventId } })
     expect(list.body.data.waves.map((w: { userId: string }) => w.userId)).toEqual([refs.room[0]])
@@ -353,7 +398,9 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       if (r.status < 300) answered.add(rel)
       // Nor any wave, wave count or wave-derived field (SCRUM-1042: hosts never wave or get waved at).
       const waveDerived = ['"wavedAt"', '"waiting"', '"wavedAtYou":true', '"youWaved":true'].some((t) => r.text.includes(t))
-      if (r.text.includes(TONIGHT_ANSWER) || r.text.includes(WORK_INTENT) || waveDerived) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
+      // Nor any crew: hosts get counts in their insights, never a crew's name or who is in it (crews 6A).
+      const crewDerived = r.text.includes(CREW_NAME) || r.text.includes('"here":[{')
+      if (r.text.includes(TONIGHT_ANSWER) || r.text.includes(WORK_INTENT) || waveDerived || crewDerived) found.push(`${rel} ${JSON.stringify(params)} -> ${r.status}`)
     }
     // The deck and the person sheet answered the host: withheld there, not merely refused.
     expect([...answered]).toEqual(expect.arrayContaining(["events/[eventId]/matches", "users/[userId]"]))

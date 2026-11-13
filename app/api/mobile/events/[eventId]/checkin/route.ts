@@ -24,6 +24,7 @@ import { readJson, isUuid } from "@/lib/api-input"
 import { fenceRefusal, personAtTheDoor, seatAtTheDoor, vagueFixRefusal } from "@/lib/check-in-core"
 import { isReviewAccount, recordReviewBypass } from "@/lib/review-accounts"
 import { missingTicketAtCheckIn, NO_TICKET_SENTENCE } from "@/lib/ticket-views"
+import { tellCrewAtTheHold } from "@/lib/crews/presence"
 
 interface RouteParams {
   params: Promise<{ eventId: string }>
@@ -198,6 +199,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       now,
     })
     const { checkIn } = seat
+    // "With {crew}": the hold is the crew check-in — theirs only, told after the seat is taken (S1).
+    const withCrew = parsed.data.withCrewId
 
     return successResponse({
       checkIn: {
@@ -211,6 +214,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       intentNeeded: seat.intentNeeded,
       // The rooms this took them out of, for "You left {A}." (SCRUM-635).
       left: seat.left,
+      // Only when asked: whether the crew named by `withCrewId` knows you're in (false for one that is not yours).
+      ...(withCrew && { crewTold: await tellCrewAtTheHold(authUser.userId, withCrew, eventId) }),
       message: "Successfully checked in",
     })
   } catch (error) {

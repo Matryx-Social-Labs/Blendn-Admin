@@ -112,6 +112,8 @@ export const checkinSchema = z.object({
       gpsAccuracy: z.number().min(0).optional(), // accuracy radius in metres; a negative one (iOS "no fix") would pass the vague-fix gate as a perfect fix
     })
     .optional(),
+  /** "With {crew}": one of your crews to tell at this check-in (S1). Silently ignored if it is not yours. */
+  withCrewId: z.string().uuid().optional(),
 })
 
 // Maximum acceptable GPS accuracy (metres). Submissions worse than this are rejected.

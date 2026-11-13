@@ -503,8 +503,9 @@ describe("\"We’re here\" and presence at an event (CR-I04, CR-I05)", () => {
     expect(first.body.data).toEqual({ notified: 1, repeated: false })
     const told = await db.notifications.findMany({ where: { kind: "crew_here", user_id: { in: [owner.id, a.id, muted.id] } }, select: { user_id: true, body: true } })
     expect(told.map((t) => t.user_id)).toEqual([a.id])
-    // The push names nobody and no place.
-    expect(told[0].body).not.toMatch(/here-owner|Asha|Test/)
+    // The push names who is in by first name only, and no place (S3, owner 1a).
+    expect(told[0].body).toBe("Asha is in. Hold to Blend’n when you get there.")
+    expect(told[0].body).not.toMatch(/here-owner|Rao|Test/)
     // Nobody else was checked in by it.
     expect(await db.event_check_ins.count({ where: { user_id: { in: [a.id, muted.id] } } })).toBe(checkInsBefore)
     // The line in the crew chat, by the tapper, with the event for the crew.
@@ -539,7 +540,8 @@ describe("\"We’re here\" and presence at an event (CR-I04, CR-I05)", () => {
     let seen = await api.atEvent(v1, eventId)
     expect(seen.status).toBe(200)
     expect(seen.body.data.crews.map((c: { crewId: string }) => c.crewId)).not.toContain(them.crewId)
-    expect(seen.body.data.myCrews).toEqual([{ crewId: mine.crewId, name: "Viewers", presentCount: 2 }])
+    // Checked in, nobody told the crew: present, and nobody on the strip (S2).
+    expect(seen.body.data.myCrews).toEqual([{ crewId: mine.crewId, name: "Viewers", presentCount: 2, here: [] }])
 
     const stamp = await db.crews.findUniqueOrThrow({ where: { id: them.crewId }, select: { updated_at: true } })
     const rowsBefore = await Promise.all([db.crew_members.count(), db.crew_invites.count(), db.chat_group_members.count({ where: { chat_group: { crew_id: them.crewId } } })])
