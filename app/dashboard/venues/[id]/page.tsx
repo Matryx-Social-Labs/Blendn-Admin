@@ -24,7 +24,11 @@ import { RatingBars } from "@/components/dashboard/primitives"
 import { organisationOptions } from "@/lib/onboarding-actions"
 import { OpenOnBlendn } from "./open-on-blendn"
 import { VenueManage } from "./venue-manage"
-import { VenueEventsTable, type VenueEventRow } from "./venue-events-table"
+import { VenueNightsTable } from "./venue-nights-table"
+import { VenueTonightPanel } from "@/components/dashboard/venue-tonight-panel"
+import { AggregatesNote } from "@/components/dashboard/event-insights-panels"
+import { venueNights } from "@/lib/venue-nights"
+import { venueTonight } from "@/lib/venue-room-tonight"
 import { getAuth } from "@/lib/auth"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
 import { db } from "@/lib/db"
@@ -95,6 +99,8 @@ export default async function VenueDetailPage({
       status: true,
       claimed_at: true,
       deleted_at: true,
+      timezone: true,
+      day_reset_hour: true,
       latitude: true,
       longitude: true,
       venue_type: true,
@@ -179,7 +185,13 @@ export default async function VenueDetailPage({
     : claimedWindow(venue, { from: range.from, to: range.to })
   const actor = isAdmin ? null : await actorFor(session.user)
 
-  const building = await getBuildingOccupancy(id, { asOwner: actor })
+  // Venue C (SCRUM-1051): the room running now, and every night here with what the venue may know of it.
+  const nightsVenue = { id, owner_org_id: venue.owner_org?.id ?? null, timezone: venue.timezone, day_reset_hour: venue.day_reset_hour }
+  const [building, tonight, nights] = await Promise.all([
+    getBuildingOccupancy(id, { asOwner: actor }),
+    venueTonight(nightsVenue, since, actor),
+    venueNights(nightsVenue, inRange ?? null, actor),
+  ])
 
   /*
    * Only fetched when it can be used: an admin, looking at a venue nobody owns.
@@ -238,7 +250,8 @@ export default async function VenueDetailPage({
    */
   const [attended, going] = await Promise.all([distinctAttendeeCounts(events.map((e) => e.id)), rsvpCounts(events.map((e) => e.id))])
 
-  const rows: VenueEventRow[] = events.map((e) => {
+  // The tiles' rows: hosts' nights only, exact for the venue's own, held back on another host's (SCRUM-501).
+  const rows = events.map((e) => {
     const exact = {
       going: going.get(e.id) ?? 0,
       attended: attended.get(e.id) ?? 0,
@@ -266,7 +279,7 @@ export default async function VenueDetailPage({
    * cells — so a night with a blank cell is out of both sides of turn-up.
    */
   const shown = rows.filter(
-    (r): r is VenueEventRow & { going: number; attended: number } => r.going !== null && r.attended !== null
+    (r): r is (typeof rows)[number] & { going: number; attended: number } => r.going !== null && r.attended !== null
   )
   const heldBack = shown.length < rows.length
   // Every night held back: no figure to add up, and "0" would say nobody came.
@@ -308,6 +321,7 @@ export default async function VenueDetailPage({
 
       {/* Above the window metrics, deliberately: everything below is about a
           date range someone chose, and this is about right now. */}
+      <VenueTonightPanel tonight={tonight} venueName={venue.name} />
       <BuildingOccupancyPanel occupancy={building} />
 
       <KpiStrip
@@ -331,20 +345,23 @@ export default async function VenueDetailPage({
         ]}
       />
 
-      <div className="grid gap-5 @3xl/main:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] @3xl/main:items-start">
-        <Panel title="Events here" hint={rows.length ? `${rows.length} in window` : undefined} bodyClassName="px-4 pb-4 pt-3">
-          <VenueEventsTable rows={rows} />
-        </Panel>
-        <Panel title="Ratings" hint={averageRating === null ? "all-time" : `avg ${averageRating} · all-time`}>
-          {ratingTotal === 0 ? (
-            <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
-          ) : averageRating === null ? (
-            <p className="text-[0.8125rem] text-muted-foreground">Not enough ratings yet.</p>
-          ) : (
-            <RatingBars counts={ratings} />
-          )}
-        </Panel>
-      </div>
+      <Panel title="Nights here" hint={isAdmin ? "in this window" : "in this window · since your claim"} bodyClassName="px-4 pb-4 pt-3">
+        <VenueNightsTable rows={nights} />
+        <p className="text-[0.75rem] text-faint-foreground">
+          Bands, as on every venue surface. &ldquo;held&rdquo;: too few people for the figure to be about the room. On
+          another host&rsquo;s night, how people met is the host&rsquo;s.
+        </p>
+      </Panel>
+
+      <Panel title="Ratings" hint={averageRating === null ? "all-time" : `avg ${averageRating} · all-time`}>
+        {ratingTotal === 0 ? (
+          <p className="text-[0.8125rem] text-muted-foreground">Nobody has rated an event here yet.</p>
+        ) : averageRating === null ? (
+          <p className="text-[0.8125rem] text-muted-foreground">Not enough ratings yet.</p>
+        ) : (
+          <RatingBars counts={ratings} />
+        )}
+      </Panel>
 
       {insights ? (
         <VenueInsights
@@ -356,6 +373,8 @@ export default async function VenueDetailPage({
           mayCompose={!!ownerMember && maySendVenueOffers(session.user.role, ownerMember.role)}
         />
       ) : null}
+
+      <AggregatesNote />
 
       {isAdmin && venue.owner_org && proRows ? (
         <Panel title="Venue Pro" hint="founding grant: 3 months per claimed Bengaluru venue">

@@ -55,7 +55,7 @@ export default async function FeedbackPage({
    */
   const data = await loadEventPage(id)
   const { event, permissions } = data
-  // A tab only once the event is over, and never on a venue day; the URL is
+  // A tab only once the event is over (a venue day too, in the venue view); the URL is
   // not a way round that.
   const offered = eventTabsFor(event.start_time.toISOString(), event.end_time.toISOString(), {
     canOperate: permissions.canOperate,

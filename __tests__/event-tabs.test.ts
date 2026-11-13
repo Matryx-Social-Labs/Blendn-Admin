@@ -137,11 +137,13 @@ describe("the QR & link tab (step 15)", () => {
     }
   })
 
-  it("is not offered on a venue day, and neither is Feedback", () => {
+  it("is not offered on a venue day; Feedback is, once the day is over (Venue C, G12)", () => {
     jest.useFakeTimers().setSystemTime(at("2026-08-06T02:00:00.000Z"))
     const tabs = keys(START, END, { canOperate: true, canEdit: true, kind: "venue_day" })
     expect(tabs).not.toContain("share")
-    expect(tabs).not.toContain("feedback")
+    expect(tabs).toContain("feedback")
+    // The venue's owner operates its day without editing it, and reads the digest's venue view there.
+    expect(keys(START, END, { canOperate: true, canEdit: false, kind: "venue_day" })).toContain("feedback")
     jest.useRealTimers()
   })
 })
