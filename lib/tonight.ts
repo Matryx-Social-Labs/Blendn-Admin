@@ -1,10 +1,11 @@
+// Relative imports: the Live tab's "Meeting tonight" (lib/live-social.ts) reaches this from server.ts.
 import type { work_intent } from "@prisma/client"
 
-import { db } from "@/lib/db"
-import { inRoomWhere } from "@/lib/event-kind"
-import { actorFor } from "@/lib/org-membership"
-import { eventPermissionSelect, eventPermissions } from "@/lib/rbac"
-import { eventRoomBan } from "@/lib/room-kind"
+import { db } from "./db"
+import { inRoomWhere } from "./event-kind"
+import { actorFor } from "./org-membership"
+import { eventPermissionSelect, eventPermissions } from "./rbac"
+import { eventRoomBan } from "./room-kind"
 
 /**
  * Tonight's question (Flow 5 · P-A, SCRUM-1042).

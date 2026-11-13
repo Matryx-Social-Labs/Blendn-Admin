@@ -12,7 +12,7 @@ import { blockCounterpartiesMany, keptApartIn } from "./conversations"
 import { canJoinChat, canJoinConversation, canJoinEvent, canJoinEventRoom, mayUseConversation } from "./socket-auth"
 import { liveInVenueDay } from "./chat-window"
 import { authenticateDashboardSocket, eventOpsView, opsRoom, type OpsView } from "./socket-ops-auth"
-import { buildLiveSnapshot, type HeldEvent } from "./live-snapshot"
+import { buildLiveSnapshot, type Held } from "./live-snapshot"
 import { hereCountCoalesced } from "./attendee-counts"
 import { roomHandle, type RoomScope } from "./room-handle"
 import { ownerAdmits, roomOwnerDenial, roomScope, withOwnerDoor } from "./room-kind"
@@ -344,6 +344,8 @@ export type AuthenticatedSocket = Socket<
  */
 interface OpsLoop {
   timer: NodeJS.Timeout | undefined
+  /** The event, its days and "Meeting tonight", held between ticks and shared with every join (`Held`). */
+  held: Held
   /** Marks the loop stopped so an in-flight pass does not schedule a successor. */
   stop: () => void
 }
@@ -387,9 +389,9 @@ export function startOpsBroadcast(eventId: string): void {
    * successor after the timer was cleared.
    */
   let stopped = false
-  const state = { timer: undefined as NodeJS.Timeout | undefined, stop: () => { stopped = true } }
-  // The event and its days, read once a minute rather than every pass (`HeldEvent`).
-  const held: { current?: HeldEvent } = {}
+  // The event and its days, and "Meeting tonight", read once a minute rather than every pass (`Held`).
+  const held: Held = {}
+  const state: OpsLoop = { timer: undefined, held, stop: () => { stopped = true } }
 
   const tick = async (): Promise<void> => {
     try {
@@ -404,7 +406,8 @@ export function startOpsBroadcast(eventId: string): void {
         stopOpsBroadcast(eventId)
         return
       }
-      const snapshot = await buildLiveSnapshot(eventId, held)
+      // "Meeting tonight" is the host's alone: a room only a venue watches never reads it.
+      const snapshot = await buildLiveSnapshot(eventId, held, { social: rooms.some((r) => r.view === "host") })
       if (snapshot) for (const { view, room } of rooms) io.to(room).emit("ops:snapshot", asSeenBy(view, snapshot))
     } catch (error) {
       // A failed pass must not kill the loop or the process — the next one may
@@ -1117,11 +1120,12 @@ export function initSocketServer(httpServer: HttpServer): Server {
         return
       }
       authSocket.join(opsRoom(eventId, view))
-      // One snapshot now, so the screen is populated on open rather than blank
-      // until the first tick.
-      const snapshot = await buildLiveSnapshot(eventId).catch(() => null)
-      if (snapshot) authSocket.emit("ops:snapshot", asSeenBy(view, snapshot))
       startOpsBroadcast(eventId)
+      // One snapshot now, so the screen is populated on open rather than blank
+      // until the first tick -- read through the loop's hold, so a crowd of
+      // dashboards opening at once costs one read of "Meeting tonight", not one each.
+      const snapshot = await buildLiveSnapshot(eventId, opsTimers.get(eventId)?.held, { social: view === "host" }).catch(() => null)
+      if (snapshot) authSocket.emit("ops:snapshot", asSeenBy(view, snapshot))
     })
 
     authSocket.on("leave:eventOps", (eventId) => {

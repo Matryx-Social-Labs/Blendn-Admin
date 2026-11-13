@@ -1,4 +1,4 @@
-import { getConnectionMetrics, MIN_ATTENDEES } from "@/lib/connection-metrics"
+import { connectionCounts, getConnectionMetrics, MIN_ATTENDEES } from "@/lib/connection-metrics"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf } from "./helpers"
 
@@ -42,18 +42,18 @@ async function room(attendeeCount: number) {
 const like = (eventId: string, liker: string, liked: string) =>
   db.event_likes.create({ data: { event_id: eventId, liker_id: liker, liked_id: liked } })
 
-const wave = (eventId: string, from: string, to: string) =>
-  db.event_waves.create({ data: { event_id: eventId, from_id: from, to_id: to } })
+const wave = (eventId: string, from: string, to: string, at?: Date) =>
+  db.event_waves.create({ data: { event_id: eventId, from_id: from, to_id: to, ...(at && { created_at: at }) } })
 
 /** A Lobby ask from `from` on a post by `to`, in the given state. */
-async function ask(eventId: string, from: string, to: string, status: "pending" | "accepted" | "declined" = "accepted") {
+async function ask(eventId: string, from: string, to: string, status: "pending" | "accepted" | "declined" = "accepted", at = new Date()) {
   const post = await db.board_posts.create({ data: { event_id: eventId, author_id: to, kind: "offer", body: "Two seats in the car", spaces_left: 2 } })
-  await db.board_requests.create({ data: { event_id: eventId, post_id: post.id, from_user_id: from, to_user_id: to, status, decided_at: status === "pending" ? null : new Date() } })
+  await db.board_requests.create({ data: { event_id: eventId, post_id: post.id, from_user_id: from, to_user_id: to, status, decided_at: status === "pending" ? null : at } })
 }
 
 /** A message request between two people, met at `metIn` (or nowhere). */
-const request = (sender: string, recipient: string, metIn: string | null, status: "pending" | "accepted" = "accepted") =>
-  db.message_requests.create({ data: { sender_id: sender, recipient_id: recipient, met_in_event_id: metIn, status } })
+const request = (sender: string, recipient: string, metIn: string | null, status: "pending" | "accepted" = "accepted", at?: Date) =>
+  db.message_requests.create({ data: { sender_id: sender, recipient_id: recipient, met_in_event_id: metIn, status, ...(at && { responded_at: at }) } })
 
 afterAll(async () => {
   await cleanup(users, events)
@@ -183,6 +183,52 @@ describe("a connection is any way two people met here, once per pair (approval 1
     const m = await getConnectionMetrics(eventId)
     expect(Object.keys(m).sort()).toEqual(["attendees", "connected", "connectedPct", "connections", "perAttendee", "reachedOutPct", "suppressed"])
     for (const v of Object.values(m)) expect(typeof v === "number" || typeof v === "boolean" || v === null).toBe(true)
+  })
+})
+
+describe("how they met: each pair under the first way it met (the Live panel's split)", () => {
+  const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000)
+
+  it("splits pairs by way, and a pair met several ways counts once, under the earliest", async () => {
+    const { eventId, guests } = await room(10)
+    // Waved first, then shared a ride: a wave pair. Mutual at the second wave (20 min ago).
+    await wave(eventId, guests[0], guests[1], minutesAgo(40))
+    await wave(eventId, guests[1], guests[0], minutesAgo(20))
+    await ask(eventId, guests[1], guests[0], "accepted", minutesAgo(10))
+    // Shared a ride before the waves became mutual: a Lobby pair, though they also waved.
+    await wave(eventId, guests[2], guests[3], minutesAgo(50))
+    await ask(eventId, guests[3], guests[2], "accepted", minutesAgo(30))
+    await wave(eventId, guests[3], guests[2], minutesAgo(5))
+    // A request only.
+    await request(guests[4], guests[5], eventId, "accepted", minutesAgo(15))
+    // The controls: a wave nobody returned, a pending ask, a request from no room.
+    await wave(eventId, guests[6], guests[7])
+    await ask(eventId, guests[8], guests[9], "pending")
+    await request(guests[7], guests[8], null)
+
+    const counts = await connectionCounts(eventId)
+    expect(counts.connections).toBe(3)
+    expect(counts.byWay).toEqual({ waves: 1, lobby: 1, requests: 1 })
+  })
+
+  it("counts an old like answered either way as a wave pair", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    await like(eventId, guests[0], guests[1])
+    await wave(eventId, guests[1], guests[0])
+    await like(eventId, guests[2], guests[3])
+    await like(eventId, guests[3], guests[2])
+    expect((await connectionCounts(eventId)).byWay).toEqual({ waves: 2, lobby: 0, requests: 0 })
+  })
+
+  it("adds up to the connections, and leaves out pairs with somebody who never came", async () => {
+    const { eventId, guests } = await room(MIN_ATTENDEES)
+    const noshow = await makeUser("cm-way-noshow")
+    users.push(noshow)
+    await ask(eventId, noshow, guests[0])
+    await request(guests[1], guests[2], eventId)
+    const counts = await connectionCounts(eventId)
+    expect(counts.byWay.waves + counts.byWay.lobby + counts.byWay.requests).toBe(counts.connections)
+    expect(counts.byWay).toEqual({ waves: 0, lobby: 0, requests: 1 })
   })
 })
 
