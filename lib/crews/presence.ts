@@ -503,7 +503,8 @@ export async function crewHere(
  * now (the tapper among them), by first name, minus the recipient and anybody
  * kept apart from them — a crewmate's view of the crew never shows someone
  * they blocked or were blocked by (C5). A recipient already in gets the
- * names without "Hold to Blend’n". At most 12 people: a crew's ceiling.
+ * names without "Hold to Blend’n". At most `CREW.MAX_MEMBERS` people (25): a
+ * crew's ceiling, so a push per distinct body is at most 24 bulk sends.
  */
 async function crewInBodies(
   crewId: string,

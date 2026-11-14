@@ -6,7 +6,7 @@ jest.mock("@/lib/moderation/openai-moderation", () => ({
 
 import { findProfileContactInfo, findContactInfo } from "@/lib/moderation/contact-info"
 import { foldText, hasInvisibleChars } from "@/lib/moderation/fold"
-import { createCrewSchema, crewTextRefusal } from "@/lib/crews/crews"
+import { createCrewSchema, crewTextRefusal, inviteSchema } from "@/lib/crews/crews"
 import { characters } from "@/lib/utils"
 import { CREW } from "@/lib/constants"
 
@@ -118,11 +118,19 @@ describe("a crew’s shape (CR-U01)", () => {
     expect(createCrewSchema.safeParse({ name: "Lot", revealConsent: false }).success).toBe(false)
   })
 
-  it("at most 11 invitees with the creator: a crew of 12", () => {
+  it("at most 24 invitees with the creator: a crew of 25 (owner 2026-11-14), and the old 12 still fits", () => {
     const ids = (n: number) => Array.from({ length: n }, (_, i) => `u${i}`)
-    expect(CREW.MAX_MEMBERS).toBe(12)
+    expect(CREW.MAX_MEMBERS).toBe(25)
+    expect(createCrewSchema.safeParse({ ...base, name: "Lot", inviteUserIds: ids(24) }).success).toBe(true)
+    expect(createCrewSchema.safeParse({ ...base, name: "Lot", inviteUserIds: ids(25) }).success).toBe(false)
+    expect(inviteSchema.safeParse({ userIds: ids(24) }).success).toBe(true)
+    expect(inviteSchema.safeParse({ userIds: ids(25) }).success).toBe(false)
+    // Control: a crew of 12, the old ceiling, is still a crew.
     expect(createCrewSchema.safeParse({ ...base, name: "Lot", inviteUserIds: ids(11) }).success).toBe(true)
-    expect(createCrewSchema.safeParse({ ...base, name: "Lot", inviteUserIds: ids(12) }).success).toBe(false)
+  })
+
+  it("keeps the solo guard at 6: a crew of 7 or more never matches one person (safety, not size)", () => {
+    expect(CREW.MAX_SOLO_MATCH).toBe(6)
   })
 })
 
