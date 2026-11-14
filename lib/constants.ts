@@ -199,11 +199,14 @@ export const BOARD = {
  */
 export const CREW = {
   /**
-   * Room for a birthday or an office table, small enough that a crew card is
-   * not a mob in a room of 80. Counted under a lock on the crew row, so two
-   * accepts at once cannot both take the last seat (lib/crews/crews.ts).
+   * Room for a bigger group — a run club, a whole office floor (owner
+   * 2026-11-14: "let them have like 25 at least"; it was 12). Members plus open
+   * invites, counted under a lock on the crew row, so two accepts at once cannot
+   * both take the last seat (lib/crews/crews.ts). Size never limits crew ↔ crew:
+   * two full crews Mix into one room of up to 50. Crew ↔ person is
+   * `MAX_SOLO_MATCH`, which this does not move.
    */
-  MAX_MEMBERS: 12,
+  MAX_MEMBERS: 25,
   /** Below this a crew dissolves (D-15): one person is not a crew. */
   MIN_MEMBERS: 2,
   /**

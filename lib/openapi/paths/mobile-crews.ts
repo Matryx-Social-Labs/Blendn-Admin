@@ -1,10 +1,11 @@
 import { z } from "zod"
+import { CREW } from "@/lib/constants"
 import { registry } from "@/lib/openapi/registry"
 import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE, bearerAuth } from "@/lib/openapi/schemas/common"
 
 /*
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
- * friend graph, 2–12 people, a crew chat (a room of kind `crew`), "We're here",
+ * friend graph, 2–25 people, a crew chat (a room of kind `crew`), "We're here",
  * and crew cards at an event. Inside a crew people are named (first name and
  * photo); outside it a crew is an emblem, a name and counts — never a person.
  */
@@ -151,7 +152,7 @@ registry.registerPath({
     body: json(
       z.object({
         ...CrewFields,
-        inviteUserIds: z.array(z.string()).max(11).optional(),
+        inviteUserIds: z.array(z.string()).max(CREW.MAX_MEMBERS - 1).optional(),
         revealConsent: Consent,
         keepMeAnonymous: z.boolean().optional().describe("\"Keep me anonymous even when my crew reveals\""),
         emblemSeed: z
@@ -275,9 +276,9 @@ registry.registerPath({
     "without a word: already in, or invited and the invite still open; declined in the last 30 days; removed by the owner (only an owner's " +
     "invite brings them back); kept apart from anybody in the crew (a block or a closed conversation). `invited` is how many you asked for " +
     "either way, so it says nothing about anybody. An invite lapses after 14 days and can be sent again. One push per inviter and invitee a day. " +
-    "409 when members plus open invites would pass 12.",
+    `409 when members plus open invites would pass ${CREW.MAX_MEMBERS}.`,
   security: bearerAuth,
-  request: { params: crewParams, body: json(z.object({ userIds: z.array(z.string()).min(1).max(11) })) },
+  request: { params: crewParams, body: json(z.object({ userIds: z.array(z.string()).min(1).max(CREW.MAX_MEMBERS - 1) })) },
   responses: { 200: { description: "Invited", ...json(wrap(z.object({ invited: z.number().int() }))) }, ...standardErrors },
 })
 
@@ -289,7 +290,8 @@ registry.registerPath({
   description:
     ADULTS +
     "404 without an open invite — and the same 404 when whoever invited you has left the crew or is no longer your friend, or you are kept " +
-    "apart (a block or a closed conversation, either way) from anybody in it. 409 when the crew already has 12 — counted under a lock, so " +
+    "apart (a block or a closed conversation, either way) from anybody in it. " +
+    `409 when the crew already has ${CREW.MAX_MEMBERS} — counted under a lock, so ` +
     "two accepts at once cannot both take the last seat — or when you are already in 10 crews. " +
     "Joining is the reveal consent; `keepMeAnonymous` is the personal override.",
   security: bearerAuth,
