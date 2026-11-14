@@ -141,7 +141,7 @@ export const ErrorCode = {
   SPAM_BURST: "SPAM_BURST",
   /** `reasonCode` beside `SPAM_BLOCKED`: more links in one message than the limit. */
   SPAM_LINKS: "SPAM_LINKS",
-  /** 503: a big room's message could not be checked (OpenAI is down). Carries `retryAfter`; nothing was written. */
+  /** 503: text that could not be checked (OpenAI is down): a big room's message (carries `retryAfter`), a crew's name, bio or tags. Nothing was written. */
   MODERATION_UNAVAILABLE: "MODERATION_UNAVAILABLE",
 } as const
 

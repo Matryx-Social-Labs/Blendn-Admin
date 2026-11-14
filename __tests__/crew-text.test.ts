@@ -81,17 +81,17 @@ describe("ordinary crews pass", () => {
 
 describe("the refusal a writer is given", () => {
   it("names the contact detail, so the fix is theirs to make", async () => {
-    expect((await crewTextRefusal("bio", "dm us @thelot"))?.refusal).toMatch(/social media handle.*contact details can’t go on it/)
-    expect((await crewTextRefusal("name", "Lot 98450 12345"))?.refusal).toMatch(/phone number/)
+    expect((await crewTextRefusal({ bio: "dm us @thelot" }))?.refusal).toMatch(/social media handle.*contact details can’t go on it/)
+    expect((await crewTextRefusal({ name: "Lot 98450 12345" }))?.refusal).toMatch(/phone number/)
   })
 
   it("says nothing about the filter for a banned word", async () => {
-    expect((await crewTextRefusal("name", "retard squad"))?.refusal).toBe("This can’t be a crew’s name.")
+    expect((await crewTextRefusal({ name: "retard squad" }))?.refusal).toBe("This can’t be a crew’s name.")
   })
 
   it("lets an ordinary name through, and a duplicate one — names are not unique", async () => {
-    expect(await crewTextRefusal("name", "Saturday Lot")).toBeNull()
-    expect(await crewTextRefusal("name", "Saturday Lot")).toBeNull()
+    expect(await crewTextRefusal({ name: "Saturday Lot" })).toBeNull()
+    expect(await crewTextRefusal({ name: "Saturday Lot" })).toBeNull()
   })
 })
 
@@ -254,42 +254,112 @@ describe("a crew’s own hashtags (owner pick A, 2026-11-14)", () => {
 
   it("moderates each tag on its own, so a bad one among clean ones is not diluted (client #544 drive)", async () => {
     // The control: the mock hides `fuckoff` only when it is read alone, as OpenAI did.
-    expect((await crewTextRefusal("tags", ["fuckoff"]))?.refusal).toBe("This can’t be a crew’s tag.")
+    expect((await crewTextRefusal({ tags: ["fuckoff"] }))?.refusal).toBe("This can’t be a crew’s tag.")
     for (const tags of [["sundayrunclub", "fuckoff"], ["fuckoff", "sundayrunclub"], ["a1", "b2", "fuckoff", "c3", "d4"]]) {
-      expect(await crewTextRefusal("tags", tags)).toMatchObject({ refusal: "This can’t be a crew’s tag.", tag: "fuckoff" })
+      expect(await crewTextRefusal({ tags })).toMatchObject({ refusal: "This can’t be a crew’s tag.", tag: "fuckoff" })
     }
     // A slur in any position, by the keyword list.
     for (const tags of [["retard", "fun"], ["fun", "retard"], ["a", "retard", "b"]]) {
-      expect(await crewTextRefusal("tags", tags)).toMatchObject({ refusal: "This can’t be a crew’s tag.", tag: "retard" })
+      expect(await crewTextRefusal({ tags })).toMatchObject({ refusal: "This can’t be a crew’s tag.", tag: "retard" })
     }
   })
 
   it("asks OpenAI once for all the tags, each on its own and all together", async () => {
     const asked = checkTextContents as jest.Mock
     asked.mockClear()
-    await crewTextRefusal("tags", ["sundayrunclub", "dosaafter", "chai"])
+    await crewTextRefusal({ tags: ["sundayrunclub", "dosaafter", "chai"] })
     expect(asked).toHaveBeenCalledTimes(1)
     expect(asked).toHaveBeenCalledWith(["sundayrunclub", "dosaafter", "chai", "sundayrunclub dosaafter chai"])
   })
 
   it("reads tags against the crew-name keyword list: `bc` is British Columbia (owner 2026-11-14)", async () => {
-    expect(await crewTextRefusal("tags", ["bc"])).toBeNull()
-    expect(await crewTextRefusal("tags", ["vancouver", "bc"])).toBeNull()
-    expect(await crewTextRefusal("name", "bc squad")).toBeNull()
+    expect(await crewTextRefusal({ tags: ["bc"] })).toBeNull()
+    expect(await crewTextRefusal({ tags: ["vancouver", "bc"] })).toBeNull()
+    expect(await crewTextRefusal({ name: "bc squad" })).toBeNull()
   })
 
   it("refuses contact details in one tag, and split across tags", async () => {
-    expect((await crewTextRefusal("tags", ["call", "9845012345"]))?.refusal).toMatch(/phone number.*contact details can’t go on it/)
-    expect((await crewTextRefusal("tags", ["98450", "12345"]))?.refusal).toMatch(/phone number/)
+    expect((await crewTextRefusal({ tags: ["call", "9845012345"] }))?.refusal).toMatch(/phone number.*contact details can’t go on it/)
+    expect((await crewTextRefusal({ tags: ["98450", "12345"] }))?.refusal).toMatch(/phone number/)
     // Split across tags, no one tag is to blame.
-    expect((await crewTextRefusal("tags", ["98450", "12345"]))?.tag).toBeUndefined()
+    expect((await crewTextRefusal({ tags: ["98450", "12345"] }))?.tag).toBeUndefined()
     // Keycap digits are allowed in a tag, and still read as a number.
     const keycaps = (d: string) => [...d].map((c) => `${c}\uFE0F\u20E3`).join("")
-    expect((await crewTextRefusal("tags", [keycaps("98450"), keycaps("12345")]))?.refusal).toMatch(/phone number/)
+    expect((await crewTextRefusal({ tags: [keycaps("98450"), keycaps("12345")] }))?.refusal).toMatch(/phone number/)
   })
 
   it("lets ordinary tags through (the control)", async () => {
-    expect(await crewTextRefusal("tags", ["sundayrunclub", "dosaafter", "कैफ़ेहॉपिंग", "chai🍵", "quiz-team"])).toBeNull()
-    expect(await crewTextRefusal("tags", ["sundayrunclub"])).toBeNull()
+    expect(await crewTextRefusal({ tags: ["sundayrunclub", "dosaafter", "कैफ़ेहॉपिंग", "chai🍵", "quiz-team"] })).toBeNull()
+    expect(await crewTextRefusal({ tags: ["sundayrunclub"] })).toBeNull()
+  })
+})
+
+/*
+ * One OpenAI request for everything a write carries, and a write nobody could
+ * check is refused, not saved (SCRUM-1052, owner A + D, 2026-11-14). On
+ * staging a create whose OpenAI call timed out saved `#fuckoff`: tags read
+ * the lenient name list, so OpenAI is the only check on English profanity.
+ */
+describe("crew text moderation fails closed, in one request", () => {
+  const asked = checkTextContents as jest.Mock
+  const UNAVAILABLE = "Couldn’t check that just now. Try again in a moment."
+  const looked = (texts: string[], hide?: string) =>
+    texts.map((t) => ({ checked: true, result: t === hide ? { action: "hide", source: "openai_text", categories: {}, confidence: 0.9 } : null }))
+  beforeEach(() => asked.mockClear())
+
+  it("asks OpenAI once for the name, the bio, each tag and the tags together", async () => {
+    expect(await crewTextRefusal({ name: "Saturday Lot", bio: "Quiz nights.", tags: ["sundayrunclub", "chai"] })).toBeNull()
+    expect(asked).toHaveBeenCalledTimes(1)
+    expect(asked).toHaveBeenCalledWith(["Saturday Lot", "Quiz nights.", "sundayrunclub", "chai", "sundayrunclub chai"])
+  })
+
+  it("maps a flag back to its field and its tag", async () => {
+    asked.mockImplementationOnce(async (texts: string[]) => looked(texts, "Quiz nights."))
+    expect(await crewTextRefusal({ name: "Saturday Lot", bio: "Quiz nights.", tags: ["chai"] })).toMatchObject({
+      field: "bio",
+      refusal: "This can’t be a crew’s bio.",
+    })
+    asked.mockImplementationOnce(async (texts: string[]) => looked(texts, "chai"))
+    expect(await crewTextRefusal({ name: "Saturday Lot", tags: ["sundayrunclub", "chai"] })).toMatchObject({
+      field: "tags",
+      tag: "chai",
+      refusal: "This can’t be a crew’s tag.",
+    })
+  })
+
+  it.each(["timeout", "error"])("refuses as unavailable when OpenAI answers %s", async (reason) => {
+    asked.mockImplementationOnce(async (texts: string[]) => texts.map(() => ({ checked: false, reason })))
+    expect(await crewTextRefusal({ name: "Saturday Lot", tags: ["sundayrunclub", "fuckoff"] })).toEqual({ refusal: UNAVAILABLE, unavailable: true })
+    // One text field written: the refusal stands under it.
+    asked.mockImplementationOnce(async (texts: string[]) => texts.map(() => ({ checked: false, reason })))
+    expect(await crewTextRefusal({ tags: ["sundayrunclub"] })).toEqual({ field: "tags", refusal: UNAVAILABLE, unavailable: true })
+  })
+
+  it("refuses as unavailable when OpenAI does not answer within the bound", async () => {
+    jest.useFakeTimers()
+    try {
+      asked.mockImplementationOnce(() => new Promise(() => {}))
+      const verdict = crewTextRefusal({ name: "Saturday Lot" })
+      await jest.advanceTimersByTimeAsync(2500)
+      expect(await verdict).toEqual({ field: "name", refusal: UNAVAILABLE, unavailable: true })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("a flag outranks an unanswered text: the writer is told what to fix", async () => {
+    asked.mockImplementationOnce(async (texts: string[]) => [{ checked: false, reason: "timeout" }, ...looked(texts.slice(1), "chai")])
+    expect(await crewTextRefusal({ name: "Saturday Lot", tags: ["chai"] })).toMatchObject({ field: "tags", tag: "chai" })
+  })
+
+  it("lets a write through when no key is configured (a local or test server, not an outage)", async () => {
+    asked.mockImplementationOnce(async (texts: string[]) => texts.map(() => ({ checked: false, reason: "no_key" })))
+    expect(await crewTextRefusal({ name: "Saturday Lot", tags: ["chai"] })).toBeNull()
+  })
+
+  it("does not ask OpenAI when the deterministic checks refuse, or when there is no text", async () => {
+    expect((await crewTextRefusal({ name: "Saturday Lot", tags: ["98450", "12345"] }))?.field).toBe("tags")
+    expect(await crewTextRefusal({ bio: null, tags: [] })).toBeNull()
+    expect(asked).not.toHaveBeenCalled()
   })
 })

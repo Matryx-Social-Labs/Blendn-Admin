@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { CREW } from "@/lib/constants"
 import { registry } from "@/lib/openapi/registry"
-import { BadgeSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE, bearerAuth } from "@/lib/openapi/schemas/common"
+import { BadgeSchema, ErrorResponseSchema, ListPaginationSchema, ListQuerySchema, OverlapSchema, standardErrors, UserRefParamSchema, wrap, ROOM_BAN_GATE, bearerAuth } from "@/lib/openapi/schemas/common"
 
 /*
  * Crews (plan v2 §6; lib/crews). Friends who go out together: made from the
@@ -22,7 +22,15 @@ const TEXT_CHECKS =
   "digits to 0–9, look-alike Cyrillic and Greek letters to Latin — and stored folded; a name with an invisible character in it " +
   "(zero-width, bidi override; an emoji's own joiner aside) is 400, a bio has them stripped. Then the moderation pipeline and a strict contact-detail " +
   "check — phone numbers, handles, emails and web addresses, written out or spelled (\"nine eight…\", \"at gmail dot com\"). " +
-  "A refusal is 400 with a sentence saying which, and nothing is written. "
+  "A refusal is 400 with a sentence saying which, and nothing is written. " +
+  "Name, bio and every tag go to OpenAI in one request (bounded at 2.5 s); if it times out or errors, nothing is written and the answer is " +
+  "503 `MODERATION_UNAVAILABLE` (\"Couldn’t check that just now. Try again in a moment.\", `field` only when one text field was written): send it again. "
+
+/** The 503 a crew write gets when OpenAI could not look at its text (SCRUM-1052): nothing written, try again. */
+const CREW_TEXT_UNCHECKED = {
+  description: "MODERATION_UNAVAILABLE: OpenAI could not check the name, bio or tags in time; nothing was written",
+  ...json(ErrorResponseSchema),
+}
 
 const Intent = z.enum(["dating", "networking", "friendship", "just_here"])
 const Tag = z
@@ -117,8 +125,8 @@ const CrewFields = {
     .describe(
       `The crew's own hashtags, up to ${CREW.MAX_TAGS}. Each is folded, trimmed, its leading # stripped and its spaces closed up, then must be ` +
         `1–${CREW.TAG_MAX} characters (an emoji is one) of letters or digits in any script, _ or emoji — no links, @ or contact details (400). ` +
-        "Deduped case-folded, the first spelling kept. Moderated together, as chat is (keyword list + OpenAI) plus the contact-detail check: " +
-        "a refusal is 400 with `field: \"tags\"` (and `reasonCode: TEXT_NOT_ALLOWED` when the text itself was objectionable). " +
+        "Deduped case-folded, the first spelling kept. Moderated each on its own and all together (the crew-name keyword list, the contact-detail " +
+        "check, OpenAI): a refusal is 400 with `field: \"tags\"`, `tag` when one tag is to blame, and `reasonCode: TEXT_NOT_ALLOWED` when the text itself was objectionable. " +
         "The ten old slugs (quiz-team, run-club, …) are still taken as they are."
     ),
   openToSolo: z.boolean().optional(),
@@ -191,6 +199,7 @@ registry.registerPath({
       ...json(wrap(z.object({ crewId: z.string().uuid(), chatGroupId: z.string().uuid(), invited: z.number().int() }))),
     },
     ...standardErrors,
+    503: CREW_TEXT_UNCHECKED,
   },
 })
 
@@ -235,7 +244,7 @@ registry.registerPath({
   description: CREW_404 + TEXT_CHECKS,
   security: bearerAuth,
   request: { params: crewParams, body: json(z.object({ ...CrewFields, name: CrewFields.name.optional() })) },
-  responses: { 200: { description: "Crew", ...json(wrap(CrewSchema)) }, ...standardErrors },
+  responses: { 200: { description: "Crew", ...json(wrap(CrewSchema)) }, ...standardErrors, 503: CREW_TEXT_UNCHECKED },
 })
 
 registry.registerPath({
