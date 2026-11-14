@@ -34,6 +34,7 @@ import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import { canJoinChat } from "@/lib/socket-auth"
 import { conversationPair } from "@/lib/conversations"
 import { CREW } from "@/lib/constants"
+import { CREW_TAG_IDEAS } from "@/lib/crews/crews"
 import { crewsToRepair, repairCrews, settleCrew } from "@/lib/crews/sweep"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 import { resolveReport } from "@/app/dashboard/moderation/reports/actions"
@@ -253,11 +254,74 @@ describe("the database holds the shape", () => {
     await expect(make({ name: "A" })).rejects.toThrow(/crews_name_length/)
     await expect(make({ name: "x".repeat(33) })).rejects.toThrow(/crews_name_length/)
     await expect(make({ name: "Lot", bio: "x".repeat(141) })).rejects.toThrow(/crews_bio_length/)
-    await expect(make({ name: "Lot", tags: ["a", "b", "c", "d"] })).rejects.toThrow(/crews_tags_max/)
+    await expect(make({ name: "Lot", tags: ["a", "b", "c", "d", "e", "f"] })).rejects.toThrow(/crews_tags_max/)
+    // Five is the limit now (owner 2026-11-14), free text included: the control.
+    await make({ name: "Five", tags: ["a", "b", "c", "d", "#कैफ़े"] })
     // Names are not unique.
     await make({ name: "Twice" })
     await make({ name: "Twice" })
     expect(await db.crews.count({ where: { created_by: owner.id, name: "Twice" } })).toBe(2)
+  })
+})
+
+describe("a crew’s own hashtags, through the routes (owner pick A, 2026-11-14)", () => {
+  const tagsOf = (crewId: string) => db.crews.findUniqueOrThrow({ where: { id: crewId }, select: { tags: true } }).then((c) => c.tags)
+  const edit = (as: Person, crewId: string, body: Record<string, unknown>) =>
+    call(crewRoute.PATCH, `/api/mobile/crews/${crewId}`, as, { method: "PATCH", body, params: { crewId } })
+
+  it("stores them normalised and deduped, reads them back as typed, and keeps the old slugs by their label", async () => {
+    const owner = await person("tags-owner")
+    const made = await api.create(owner, { name: "Tagged", tags: ["#SundayRunClub", "sundayrunclub", " # dosa after ", "#कैफ़ेहॉपिंग", "quiz-team"] })
+    expect(made.status).toBe(201)
+    const crewId = made.body.data.crewId as string
+    const hindi = "कैफ़ेहॉपिंग".normalize("NFKC")
+    expect(await tagsOf(crewId)).toEqual(["SundayRunClub", "dosaafter", hindi, "quiz-team"])
+    expect((await api.detail(owner, crewId)).body.data.tags).toEqual([
+      { slug: "sundayrunclub", label: "SundayRunClub" },
+      { slug: "dosaafter", label: "dosaafter" },
+      { slug: hindi, label: hindi },
+      { slug: "quiz-team", label: "Quiz team" },
+    ])
+    // An edit replaces them, emoji and all.
+    expect((await edit(owner, crewId, { tags: ["chai🍵", "👯‍♀️"] })).status).toBe(200)
+    expect(await tagsOf(crewId)).toEqual(["chai🍵", "👯‍♀️"])
+  })
+
+  it("refuses six, a link, a handle and contact details split across tags — and stores nothing", async () => {
+    const owner = await person("tags-refused")
+    const made = await api.create(owner, { name: "Kept", tags: ["before"] })
+    const crewId = made.body.data.crewId as string
+    for (const tags of [["a", "b", "c", "d", "e", "f"], ["thelot.in"], ["@thelot"], ["x".repeat(25)]]) {
+      const res = await edit(owner, crewId, { tags })
+      expect(res.status).toBe(400)
+    }
+    const split = await edit(owner, crewId, { tags: ["call", "98450", "12345"] })
+    expect(split.status).toBe(400)
+    expect(split.body).toMatchObject({ field: "tags", errors: [{ field: "tags" }] })
+    expect(split.body.error).toMatch(/phone number/)
+    expect(await tagsOf(crewId)).toEqual(["before"])
+    // A refused create makes no crew.
+    expect((await api.create(owner, { name: "Never", tags: ["@thelot"] })).status).toBe(400)
+    expect(await db.crews.count({ where: { created_by: owner.id, name: "Never" } })).toBe(0)
+  })
+
+  it("refuses an objectionable tag in the words every refused crew text gets, and records it", async () => {
+    const owner = await person("tags-moderated")
+    const made = await api.create(owner, { name: "Clean", tags: ["before"] })
+    const crewId = made.body.data.crewId as string
+    const res = await edit(owner, crewId, { tags: ["fun", "retard"] })
+    expect(res.status).toBe(400)
+    expect(res.body).toMatchObject({ error: "This can’t be a crew’s tag.", field: "tags", reasonCode: "TEXT_NOT_ALLOWED" })
+    expect(await tagsOf(crewId)).toEqual(["before"])
+    const created = await api.create(owner, { name: "Dirty", tags: ["retard"] })
+    expect(created.status).toBe(400)
+    expect(await db.crews.count({ where: { created_by: owner.id, name: "Dirty" } })).toBe(0)
+  })
+
+  it("offers the ideas with my crews", async () => {
+    const me = await person("tags-ideas")
+    const res = await call(crewsRoute.GET, "/api/mobile/crews", me)
+    expect(res.body.data.tagIdeas).toEqual(CREW_TAG_IDEAS)
   })
 })
 

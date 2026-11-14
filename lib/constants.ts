@@ -217,7 +217,13 @@ export const CREW = {
   NAME_MIN: 2,
   NAME_MAX: 32,
   BIO_MAX: 140,
-  MAX_TAGS: 3,
+  /**
+   * A crew's own hashtags (owner 2026-11-14, pick A): up to 5 — a card line
+   * holds about three, a page wraps five, more reads as spam — each up to 24
+   * characters after the #, an emoji one (`crews_tags_max` holds the count in SQL).
+   */
+  MAX_TAGS: 5,
+  TAG_MAX: 24,
   /** Crew cards per page at an event (`GET /events/:id/crews`), and the most one page may ask for. */
   CARDS_DEFAULT: 30,
   CARDS_MAX: 50,

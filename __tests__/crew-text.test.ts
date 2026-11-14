@@ -6,7 +6,7 @@ jest.mock("@/lib/moderation/openai-moderation", () => ({
 
 import { findProfileContactInfo, findContactInfo } from "@/lib/moderation/contact-info"
 import { foldText, hasInvisibleChars } from "@/lib/moderation/fold"
-import { createCrewSchema, crewTextRefusal, inviteSchema } from "@/lib/crews/crews"
+import { CREW_TAG_IDEAS, createCrewSchema, crewTextRefusal, inviteSchema, tagView, updateCrewSchema } from "@/lib/crews/crews"
 import { characters } from "@/lib/utils"
 import { CREW } from "@/lib/constants"
 
@@ -96,11 +96,9 @@ describe("a crew’s shape (CR-U01)", () => {
     expect(createCrewSchema.safeParse({ ...base, name: "🔥🔥" }).success).toBe(true)
   })
 
-  it("a bio is at most 140, tags are curated and at most 3", () => {
+  it("a bio is at most 140", () => {
+    expect(createCrewSchema.safeParse({ ...base, name: "Lot", bio: "x".repeat(140) }).success).toBe(true)
     expect(createCrewSchema.safeParse({ ...base, name: "Lot", bio: "x".repeat(141) }).success).toBe(false)
-    expect(createCrewSchema.safeParse({ ...base, name: "Lot", tags: ["quiz-team", "run-club", "foodies"] }).success).toBe(true)
-    expect(createCrewSchema.safeParse({ ...base, name: "Lot", tags: ["quiz-team", "run-club", "foodies", "book-club"] }).success).toBe(false)
-    expect(createCrewSchema.safeParse({ ...base, name: "Lot", tags: ["anything we like"] }).success).toBe(false)
   })
 
   it("an emblem seed is optional, and when sent is exactly 16 lowercase hex characters (Shuffle at Make)", () => {
@@ -174,5 +172,91 @@ describe("folded before any check reads it, and stored folded (C12)", () => {
   it("strips invisible characters from a bio rather than refusing it", () => {
     const parsed = createCrewSchema.parse({ ...base, name: "Lot", bio: "quiz​ nights ९" })
     expect(parsed.bio).toBe("quiz nights 9")
+  })
+})
+
+describe("a crew’s own hashtags (owner pick A, 2026-11-14)", () => {
+  const base = { revealConsent: true as const, inviteUserIds: [], name: "Lot" }
+  const tags = (t: unknown) => {
+    const r = createCrewSchema.safeParse({ ...base, tags: t })
+    return r.success ? r.data.tags : null
+  }
+
+  it("strips the #, trims, closes up spaces, and keeps the case as typed", () => {
+    expect(tags(["#RunClub", "  # late  night ", "##Chai", "dosaAfter"])).toEqual(["RunClub", "latenight", "Chai", "dosaAfter"])
+  })
+
+  it("dedupes case-folded, keeping the first one’s case", () => {
+    expect(tags(["#RunClub", "runclub", "RUNCLUB", "#Chai"])).toEqual(["RunClub", "Chai"])
+  })
+
+  it("takes up to 5, each up to 24 characters (an emoji is one)", () => {
+    expect(CREW.MAX_TAGS).toBe(5)
+    expect(CREW.TAG_MAX).toBe(24)
+    expect(tags(["a1", "b2", "c3", "d4", "e5"])).toHaveLength(5)
+    expect(tags(["a1", "b2", "c3", "d4", "e5", "f6"])).toBeNull()
+    expect(tags(["x".repeat(24)])).toEqual(["x".repeat(24)])
+    expect(tags(["#" + "x".repeat(24)])).toEqual(["x".repeat(24)])
+    expect(tags(["x".repeat(25)])).toBeNull()
+    expect(tags(["🔥".repeat(24)])).toEqual(["🔥".repeat(24)])
+    expect(tags(["🔥".repeat(25)])).toBeNull()
+  })
+
+  it("refuses an empty tag", () => {
+    for (const bad of ["", "#", "  # ", "##"]) expect(tags([bad])).toBeNull()
+  })
+
+  it("accepts any script’s letters and digits, _ and emoji", () => {
+    const hindi = foldText("कैफ़ेहॉपिंग")
+    expect(tags(["#कैफ़ेहॉपिंग"])).toEqual([hindi])
+    expect(tags(["chai🍵", "👯‍♀️", "🇮🇳", "late_night", "東京"])).toEqual(["chai🍵", "👯‍♀️", "🇮🇳", "late_night", "東京"])
+    // Folded as a name is: look-alike Cyrillic reads as Latin, as the checks and the screen see it.
+    expect(tags(["Москва", "café", "24x7", "1️⃣"])).toEqual([foldText("Москва"), "café", "24x7", "1️⃣"])
+  })
+
+  it("refuses links, @handles and e-mails by their characters", () => {
+    for (const bad of ["@thelot", "thelot.in", "instagram.com/thelot", "a@b.co", "http://x", "run-club-now", "dm:me", "+919845012345"]) {
+      expect(tags([bad])).toBeNull()
+    }
+  })
+
+  it("still takes the ten old slugs as they are, and shows them by their label", () => {
+    expect(tags(["quiz-team", "run-club", "foodies"])).toEqual(["quiz-team", "run-club", "foodies"])
+    expect(tagView(["quiz-team", "RunClub", "कैफ़े"])).toEqual([
+      { slug: "quiz-team", label: "Quiz team" },
+      { slug: "runclub", label: "RunClub" },
+      { slug: "कैफ़े", label: "कैफ़े" },
+    ])
+  })
+
+  it("offers the old slugs as ideas, each one a tag the schema takes as it is", () => {
+    expect(CREW_TAG_IDEAS).toEqual([
+      "quizteam", "runclub", "technoheads", "officegang", "birthdaycrew", "foodies", "boardgamers", "giggoers", "bookclub", "dancefloor",
+    ])
+    for (const idea of CREW_TAG_IDEAS) expect(tags([idea])).toEqual([idea])
+  })
+
+  it("an edit takes the same tags", () => {
+    expect(updateCrewSchema.parse({ tags: ["#RunClub", "runclub"] }).tags).toEqual(["RunClub"])
+    expect(updateCrewSchema.safeParse({ tags: ["@thelot"] }).success).toBe(false)
+  })
+
+  it("moderates the tags together, with the chat’s keyword list, and says nothing about the filter", async () => {
+    expect((await crewTextRefusal("tags", "RunClub retard"))?.refusal).toBe("This can’t be a crew’s tag.")
+    // The chat's list, stricter than a name's: `bc` is hidden in chat, only flagged in a name.
+    expect((await crewTextRefusal("tags", "bc"))?.refusal).toBe("This can’t be a crew’s tag.")
+    expect(await crewTextRefusal("name", "bc squad")).toBeNull()
+  })
+
+  it("refuses contact details, even split across tags", async () => {
+    expect((await crewTextRefusal("tags", "call 9845012345"))?.refusal).toMatch(/phone number.*contact details can’t go on it/)
+    expect((await crewTextRefusal("tags", "98450 12345"))?.refusal).toMatch(/phone number/)
+    // Keycap digits are allowed in a tag, and still read as a number.
+    const keycaps = (d: string) => [...d].map((c) => `${c}\uFE0F\u20E3`).join("")
+    expect((await crewTextRefusal("tags", `${keycaps("98450")} ${keycaps("12345")}`))?.refusal).toMatch(/phone number/)
+  })
+
+  it("lets ordinary tags through (the control)", async () => {
+    expect(await crewTextRefusal("tags", "sundayrunclub dosaafter कैफ़ेहॉपिंग chai🍵 quiz-team")).toBeNull()
   })
 })
