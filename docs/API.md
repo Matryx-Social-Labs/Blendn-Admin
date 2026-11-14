@@ -3030,12 +3030,14 @@ up (`" # late night "` is `latenight`), then must be 1–24 characters (an emoji
 is one) of letters or digits in any script, `_` or emoji: no `.`, `/`, `:`,
 `@`, `+` or `-`, so no link, e-mail, handle or phone number (400 otherwise).
 Deduped case-folded — `#RunClub` and `runclub` are one tag — with the first
-spelling kept and shown as typed. The tags are then moderated **together**, so
-a number split across tags is still a number: the chat's keyword list (stricter
-than a name's), the contact-detail check, and OpenAI moderation (bounded at 1 s,
-as for a name). A refusal is 400 with `field: "tags"`, and `reasonCode:
-TEXT_NOT_ALLOWED` when the text itself was objectionable ("This can't be a
-crew's tag."). The ten old slugs (`quiz-team`, `run-club`, …) are still taken
+spelling kept and shown as typed. The tags are then moderated **each on its
+own and all together** — one clean tag cannot dilute a bad one, and a number
+split across tags is still a number: the crew-name keyword list (so `bc`, British
+Columbia, is a tag), the contact-detail check, and OpenAI moderation (one
+request for all of them, bounded at 1 s, as for a name). A refusal is 400 with
+`field: "tags"`, `tag` (the one refused, when one tag is to blame — absent for
+a number split across several), and `reasonCode: TEXT_NOT_ALLOWED` when the
+text itself was objectionable ("This can't be a crew's tag."). The ten old slugs (`quiz-team`, `run-club`, …) are still taken
 as they are and read back by their label. Every read answers tags as
 `[{ slug, label }]`: an old slug by its label (`{ slug: "quiz-team", label:
 "Quiz team" }`), a crew's own as typed (`{ slug: "sundayrunclub", label:

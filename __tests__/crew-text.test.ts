@@ -1,6 +1,16 @@
 jest.mock("@/lib/db", () => ({ db: {} }))
+/*
+ * OpenAI as it behaved on staging (client #544 drive): `fuckoff` alone is
+ * hidden; inside a longer text its score is diluted and it passes. Everything
+ * else is looked at and clean.
+ */
 jest.mock("@/lib/moderation/openai-moderation", () => ({
-  checkTextContent: jest.fn(async () => ({ checked: false, reason: "no_key" })),
+  checkTextContents: jest.fn(async (texts: string[]) =>
+    texts.map((t) => ({
+      checked: true,
+      result: t === "fuckoff" ? { action: "hide", source: "openai_text", categories: { harassment: 0.9 }, confidence: 0.9 } : null,
+    }))
+  ),
   notChecked: (reason: string) => ({ checked: false, reason }),
 }))
 
@@ -9,6 +19,7 @@ import { foldText, hasInvisibleChars } from "@/lib/moderation/fold"
 import { CREW_TAG_IDEAS, createCrewSchema, crewTextRefusal, inviteSchema, tagView, updateCrewSchema } from "@/lib/crews/crews"
 import { characters } from "@/lib/utils"
 import { CREW } from "@/lib/constants"
+import { checkTextContents } from "@/lib/moderation/openai-moderation"
 
 /**
  * A crew's name and bio (CR-U01, CR-U02).
@@ -241,22 +252,44 @@ describe("a crew’s own hashtags (owner pick A, 2026-11-14)", () => {
     expect(updateCrewSchema.safeParse({ tags: ["@thelot"] }).success).toBe(false)
   })
 
-  it("moderates the tags together, with the chat’s keyword list, and says nothing about the filter", async () => {
-    expect((await crewTextRefusal("tags", "RunClub retard"))?.refusal).toBe("This can’t be a crew’s tag.")
-    // The chat's list, stricter than a name's: `bc` is hidden in chat, only flagged in a name.
-    expect((await crewTextRefusal("tags", "bc"))?.refusal).toBe("This can’t be a crew’s tag.")
+  it("moderates each tag on its own, so a bad one among clean ones is not diluted (client #544 drive)", async () => {
+    // The control: the mock hides `fuckoff` only when it is read alone, as OpenAI did.
+    expect((await crewTextRefusal("tags", ["fuckoff"]))?.refusal).toBe("This can’t be a crew’s tag.")
+    for (const tags of [["sundayrunclub", "fuckoff"], ["fuckoff", "sundayrunclub"], ["a1", "b2", "fuckoff", "c3", "d4"]]) {
+      expect(await crewTextRefusal("tags", tags)).toMatchObject({ refusal: "This can’t be a crew’s tag.", tag: "fuckoff" })
+    }
+    // A slur in any position, by the keyword list.
+    for (const tags of [["retard", "fun"], ["fun", "retard"], ["a", "retard", "b"]]) {
+      expect(await crewTextRefusal("tags", tags)).toMatchObject({ refusal: "This can’t be a crew’s tag.", tag: "retard" })
+    }
+  })
+
+  it("asks OpenAI once for all the tags, each on its own and all together", async () => {
+    const asked = checkTextContents as jest.Mock
+    asked.mockClear()
+    await crewTextRefusal("tags", ["sundayrunclub", "dosaafter", "chai"])
+    expect(asked).toHaveBeenCalledTimes(1)
+    expect(asked).toHaveBeenCalledWith(["sundayrunclub", "dosaafter", "chai", "sundayrunclub dosaafter chai"])
+  })
+
+  it("reads tags against the crew-name keyword list: `bc` is British Columbia (owner 2026-11-14)", async () => {
+    expect(await crewTextRefusal("tags", ["bc"])).toBeNull()
+    expect(await crewTextRefusal("tags", ["vancouver", "bc"])).toBeNull()
     expect(await crewTextRefusal("name", "bc squad")).toBeNull()
   })
 
-  it("refuses contact details, even split across tags", async () => {
-    expect((await crewTextRefusal("tags", "call 9845012345"))?.refusal).toMatch(/phone number.*contact details can’t go on it/)
-    expect((await crewTextRefusal("tags", "98450 12345"))?.refusal).toMatch(/phone number/)
+  it("refuses contact details in one tag, and split across tags", async () => {
+    expect((await crewTextRefusal("tags", ["call", "9845012345"]))?.refusal).toMatch(/phone number.*contact details can’t go on it/)
+    expect((await crewTextRefusal("tags", ["98450", "12345"]))?.refusal).toMatch(/phone number/)
+    // Split across tags, no one tag is to blame.
+    expect((await crewTextRefusal("tags", ["98450", "12345"]))?.tag).toBeUndefined()
     // Keycap digits are allowed in a tag, and still read as a number.
     const keycaps = (d: string) => [...d].map((c) => `${c}\uFE0F\u20E3`).join("")
-    expect((await crewTextRefusal("tags", `${keycaps("98450")} ${keycaps("12345")}`))?.refusal).toMatch(/phone number/)
+    expect((await crewTextRefusal("tags", [keycaps("98450"), keycaps("12345")]))?.refusal).toMatch(/phone number/)
   })
 
   it("lets ordinary tags through (the control)", async () => {
-    expect(await crewTextRefusal("tags", "sundayrunclub dosaafter कैफ़ेहॉपिंग chai🍵 quiz-team")).toBeNull()
+    expect(await crewTextRefusal("tags", ["sundayrunclub", "dosaafter", "कैफ़ेहॉपिंग", "chai🍵", "quiz-team"])).toBeNull()
+    expect(await crewTextRefusal("tags", ["sundayrunclub"])).toBeNull()
   })
 })
