@@ -12,7 +12,7 @@ import { blocksBetween, blocksExclude } from "./blocks"
 import { UNNAMED } from "../conversation-identity"
 import { idForViewer } from "../room-handle"
 import { strangersApartBetween } from "../room-people"
-import { CREW_TAGS, CREWS_OFF, NO_CREW, NO_EVENT, type CrewRefusal, type CrewTag } from "./crews"
+import { CREWS_OFF, NO_CREW, NO_EVENT, tagView, type CrewRefusal } from "./crews"
 import { crewBadges, nightsTogether, rankCrewsFor, type RankedCrew } from "./signals"
 import type { Badge, Overlap } from "../overlaps"
 import { eventRoomBan } from "../room-kind"
@@ -297,7 +297,7 @@ export async function crewsAtEvent(
       emblemSeed: c.emblem_seed,
       size: members.get(c.id)?.length ?? 0,
       presentCount: presentCount(c.id),
-      tags: c.tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] })),
+      tags: tagView(c.tags),
       intent: c.intent,
       youLiked: liked.has(c.id),
       overlaps: ranked.get(c.id)?.overlaps ?? [],

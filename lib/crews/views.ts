@@ -6,7 +6,7 @@ import { friendIdsOf } from "../friends"
 import { keysetPage, NEWEST_FIRST, type Keyset, type ListPagination } from "../pagination"
 import { CREW } from "../constants"
 import { blocksBetween } from "./blocks"
-import { CREW_TAGS, openInviteWhere, type CrewTag } from "./crews"
+import { CREW_TAG_IDEAS, openInviteWhere, tagView } from "./crews"
 import { crewPlansOf } from "./plans"
 import { crewBadges, nightsTogether } from "./signals"
 
@@ -76,9 +76,6 @@ type CrewRow = {
   }[]
 }
 
-const tagsOf = (tags: string[]) =>
-  tags.filter((t): t is CrewTag => t in CREW_TAGS).map((t) => ({ slug: t, label: CREW_TAGS[t] }))
-
 /** The members of these crews that `viewerId` has blocked themselves: their own act, so theirs to be told of. */
 async function blockedByViewer(viewerId: string, crews: readonly CrewRow[]): Promise<ReadonlySet<string>> {
   const ids = [...new Set(crews.flatMap((c) => c.members.map((m) => m.user_id)))]
@@ -129,7 +126,7 @@ function crewView(
     name: crew.name,
     bio: crew.bio,
     intent: crew.intent,
-    tags: tagsOf(crew.tags),
+    tags: tagView(crew.tags),
     emblemSeed: crew.emblem_seed,
     openToSolo: crew.open_to_solo,
     createdAt: crew.created_at,
@@ -269,6 +266,8 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
   const page = keysetPage(rest.slice(0, limit + 1), limit, (i) => ({ at: i.created_at, id: i.id }))
   return {
     crews: crews.map((c) => crewView(userId, c, apart, friends, blockedByMe, extras)),
+    /** Hashtag ideas for "Add your own" (owner pick A): tapped, each is a tag like any typed one. */
+    tagIdeas: CREW_TAG_IDEAS,
     invitesPagination: {
       limit,
       hasMore: page.hasMore,
@@ -280,7 +279,7 @@ export async function crewsOf(userId: string, invitesQuery: { limit: number; aft
       name: i.crew.name,
       bio: i.crew.bio,
       emblemSeed: i.crew.emblem_seed,
-      tags: tagsOf(i.crew.tags),
+      tags: tagView(i.crew.tags),
       size: i.crew.members.length,
       // A friend asked them in: their first name, the friend-surface rule.
       invitedBy: firstName(i.inviter.profile?.name || i.inviter.name || UNNAMED),

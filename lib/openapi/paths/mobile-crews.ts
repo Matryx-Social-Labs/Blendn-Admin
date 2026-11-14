@@ -25,7 +25,12 @@ const TEXT_CHECKS =
   "A refusal is 400 with a sentence saying which, and nothing is written. "
 
 const Intent = z.enum(["dating", "networking", "friendship", "just_here"])
-const Tag = z.object({ slug: z.string(), label: z.string() }).openapi("CrewTag")
+const Tag = z
+  .object({
+    slug: z.string().describe("An old curated slug as stored (`quiz-team`), or a crew's own tag case-folded (`sundayrunclub`): the dedupe key"),
+    label: z.string().describe("What to show after the #: the old slug's label (`Quiz team`), or the tag as the crew typed it (`SundayRunClub`)"),
+  })
+  .openapi("CrewTag")
 
 const CrewMemberSchema = z
   .object({
@@ -105,7 +110,17 @@ const CrewFields = {
   name: z.string().min(2).max(32),
   bio: z.string().max(140).nullable().optional(),
   intent: z.array(Intent).optional(),
-  tags: z.array(z.string()).max(3).optional().describe("Curated slugs only: quiz-team, run-club, techno-heads, office-gang, birthday-crew, foodies, board-gamers, gig-goers, book-club, dance-floor"),
+  tags: z
+    .array(z.string())
+    .max(CREW.MAX_TAGS)
+    .optional()
+    .describe(
+      `The crew's own hashtags, up to ${CREW.MAX_TAGS}. Each is folded, trimmed, its leading # stripped and its spaces closed up, then must be ` +
+        `1–${CREW.TAG_MAX} characters (an emoji is one) of letters or digits in any script, _ or emoji — no links, @ or contact details (400). ` +
+        "Deduped case-folded, the first spelling kept. Moderated together, as chat is (keyword list + OpenAI) plus the contact-detail check: " +
+        "a refusal is 400 with `field: \"tags\"` (and `reasonCode: TEXT_NOT_ALLOWED` when the text itself was objectionable). " +
+        "The ten old slugs (quiz-team, run-club, …) are still taken as they are."
+    ),
   openToSolo: z.boolean().optional(),
 }
 const Consent = z
@@ -128,7 +143,14 @@ registry.registerPath({
     200: {
       description: "Crews",
       ...json(
-        wrap(z.object({ crews: z.array(CrewSchema), invites: z.array(CrewInviteSchema), invitesPagination: ListPaginationSchema }))
+        wrap(
+          z.object({
+            crews: z.array(CrewSchema),
+            tagIdeas: z.array(z.string()).describe("Hashtag ideas for \"Add your own\", without the #: tapped, each is sent as a tag like a typed one"),
+            invites: z.array(CrewInviteSchema),
+            invitesPagination: ListPaginationSchema,
+          })
+        )
       ),
     },
     ...standardErrors,

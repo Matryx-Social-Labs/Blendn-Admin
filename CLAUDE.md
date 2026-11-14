@@ -176,7 +176,7 @@ and therefore in every deployed environment:
 | `chat_groups_one_owner` | a room has exactly the one owner its `kind` names: `event` → `event_id` only, `board_post` → `board_post_id` only, `crew` → `crew_id` only, `blend` → `blend_id` only. Who may enter is `lib/room-kind.ts` |
 | `crews_name_length` | a crew name is 2–32 characters (`char_length`, so an emoji is one) |
 | `crews_bio_length` | a crew bio is at most 140 characters |
-| `crews_tags_max` | at most 3 crew tags (the slugs themselves are `CREW_TAGS`) |
+| `crews_tags_max` | at most 5 crew tags (3 until 2026-11-14). The text — a crew's own hashtags, 1–24 characters, moderated — is the app's check (`crewTags` in `lib/crews/crews.ts`) |
 | `crew_invites_not_self` | nobody invites themselves into a crew |
 | `crew_likes_one_from` / `crew_likes_one_to` | a crew like is from a crew or one person, to a crew or one person |
 | `crew_likes_has_a_crew` | a crew on at least one side — person to person is `event_likes` |
