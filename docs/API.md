@@ -3033,8 +3033,7 @@ Deduped case-folded — `#RunClub` and `runclub` are one tag — with the first
 spelling kept and shown as typed. The tags are then moderated **each on its
 own and all together** — one clean tag cannot dilute a bad one, and a number
 split across tags is still a number: the crew-name keyword list (so `bc`, British
-Columbia, is a tag), the contact-detail check, and OpenAI moderation (one
-request for all of them, bounded at 1 s, as for a name). A refusal is 400 with
+Columbia, is a tag), the contact-detail check, and OpenAI moderation. A refusal is 400 with
 `field: "tags"`, `tag` (the one refused, when one tag is to blame — absent for
 a number split across several), and `reasonCode: TEXT_NOT_ALLOWED` when the
 text itself was objectionable ("This can't be a crew's tag."). The ten old slugs (`quiz-team`, `run-club`, …) are still taken
@@ -3043,6 +3042,18 @@ as they are and read back by their label. Every read answers tags as
 "Quiz team" }`), a crew's own as typed (`{ slug: "sundayrunclub", label:
 "SundayRunClub" }`). `GET /crews` carries `tagIdeas` — the old ten as hashtags
 (`quizteam`, `runclub`, …), without the `#` — for the "Add your own" ideas.
+
+**One OpenAI request, and it fails closed** (SCRUM-1052, owner 2026-11-14).
+After the keyword and contact-detail checks, a create or an edit asks OpenAI
+**once** for every text it carries — the name, the bio, each tag and the tags
+together — bounded at 2.5 s, and maps a flag back to its field and tag. If
+OpenAI times out or errors (its circuit breaker open included), nothing is
+written and the answer is **503** `errorCode: MODERATION_UNAVAILABLE`, `error:
+"Couldn't check that just now. Try again in a moment."`, with `field` (and
+`errors[]`) only when the request wrote one text field; no `retryAfter`. Send
+the same request again. A crew card is read by strangers, so unlike chat (which
+delivers and re-checks) an unchecked crew text is never saved. A server with no
+OpenAI key configured (local, CI) is not an outage and lets the text through.
 
 **Card fields.** `GET /crews` and `GET /crews/:id` carry `hidden` (a moderator hid
 it) and `apart` (somebody in the crew is missing from `members` because **you**

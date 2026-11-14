@@ -190,13 +190,15 @@ export const inviteSchema = z.object({
 /** A refusal a route answers as-is: the status and the sentence. */
 export interface CrewRefusal {
   refusal: string
-  status: 400 | 403 | 404 | 409 | 429
+  status: 400 | 403 | 404 | 409 | 429 | 503
   /** Which text was refused (a name, a bio or the tags), when a refusal is about one of them. */
   field?: CrewTextField
   /** `TEXT_NOT_ALLOWED` when the text itself was objectionable (not contact details). */
   reasonCode?: string
   /** The one tag refused, when one tag is to blame (not a number split across several). */
   tag?: string
+  /** The code, when it is not the status's own: `MODERATION_UNAVAILABLE` on the 503 a text nobody could check gets. */
+  errorCode?: string
 }
 
 export const isRefusal = (value: unknown): value is CrewRefusal =>
@@ -228,8 +230,16 @@ export type CrewTextField = "name" | "bio" | "tags"
 
 const WHAT: Record<CrewTextField, string> = { name: "a crew’s name", bio: "a crew’s bio", tags: "a crew’s tag" }
 
-/** How long the OpenAI half may hold a write. The deterministic checks have already run. */
-const OPENAI_BOUND_MS = 1000
+/**
+ * How long the OpenAI call may hold a write. One call carries every text, so
+ * this is the whole wait: a cold vendor call measured ~1 s on staging and a
+ * 1 s bound let one through (SCRUM-1052); 2.5 s leaves headroom and stays far
+ * inside the app's 15 s request timeout.
+ */
+const OPENAI_BOUND_MS = 2500
+
+/** The writer's sentence when OpenAI could not look: nothing was wrong with the text, so it says to try again. */
+const UNAVAILABLE = "Couldn’t check that just now. Try again in a moment."
 
 /** OpenAI on every text in one request, within the bound; a timeout is "did not look" for each. */
 async function boundedOpenAI(texts: string[]): Promise<ModerationCheck[]> {
@@ -242,83 +252,118 @@ async function boundedOpenAI(texts: string[]): Promise<ModerationCheck[]> {
   ]).finally(() => clearTimeout(timeout))
 }
 
-/**
- * Why this crew name, bio or set of tags may not be written (`refusal`, the
- * sentence for the writer, and `tag` when one tag is to blame), or null.
- *
- * The identity keyword list (`checkIdentityKeywords`) — a crew called "Bal
- * Krishna's Lot" is a name, not abuse (PR #755 review, H1), and tags read the
- * same list since the owner's 2026-11-14 ruling: `#bc` is British Columbia.
- * Then contact details in the strict reading a card gets
- * (`findProfileContactInfo`: phone numbers, handles, emails, web addresses,
- * spelled out or not), then OpenAI within a bound. Contact details say which
- * — the fix is the writer's. Anything else gets one sentence that teaches
- * nothing about the filter.
- *
- * Tags are read **each on its own** and, when there are several, all together
- * — one OpenAI request for all of it. Joined only, `["sundayrunclub",
- * "fuckoff"]` was saved: the clean tag diluted the bad one (client #544
- * drive). Together, a number split across tags is still a number.
- *
- * ponytail: a timeout passes, as the room's and the board's do. The two
- * deterministic checks have run by then; a second, unbounded look (the
- * board's `hideBoardPostIfFlagged`) is the upgrade if a crew name is ever
- * caught that way.
- */
-export async function crewTextRefusal(
-  field: CrewTextField,
-  text: string | readonly string[]
-): Promise<{
+/** The text fields a crew write carries; an absent or empty one is not read. */
+export interface CrewTexts {
+  name?: string
+  bio?: string | null
+  tags?: readonly string[]
+}
+
+/** Why the texts may not be written: the sentence, and which field (and tag) when that is known. */
+export interface CrewTextVerdict {
   refusal: string
+  field?: CrewTextField
   /** Set when the text itself was objectionable, not contact details. */
   objectionable?: ModerationResult
   tag?: string
-} | null> {
-  const what = WHAT[field]
-  const parts = typeof text === "string" ? [text] : [...text]
-  const texts = parts.length > 1 ? [...parts, parts.join(" ")] : parts
-  const blame = (i: number) => (field === "tags" && i < parts.length ? { tag: parts[i] } : {})
-  for (const [i, t] of texts.entries()) {
-    const keyword = checkIdentityKeywords(t)
-    if (keyword?.action === "hide") return { refusal: `This can’t be ${what}.`, objectionable: keyword, ...blame(i) }
-  }
-  for (const [i, t] of texts.entries()) {
-    const contact = findProfileContactInfo(t)
-    if (contact.length === 0) continue
-    const hints = [...new Set(contact.map((c) => c.hint))].join(" ")
-    return { refusal: `${hints} A crew card is shown to people you haven’t met, so contact details can’t go on it.`, ...blame(i) }
-  }
-  const checks = await boundedOpenAI(texts)
-  const i = checks.findIndex((c) => c.checked && c.result?.action === "hide")
-  const hit = checks[i]
-  return hit?.checked && hit.result ? { refusal: `This can’t be ${what}.`, objectionable: hit.result, ...blame(i) } : null
+  /** OpenAI could not look (a timeout or an error): refused so it can be tried again, the text is not at fault. */
+  unavailable?: true
+}
+
+/** One field as it is read: its parts (a tag each), and the texts looked at — tags each on their own and joined. */
+function readingsOf(fields: CrewTexts) {
+  return (["name", "bio", "tags"] as const).flatMap((field) => {
+    const text = fields[field]
+    if (!text || text.length === 0) return []
+    const parts = typeof text === "string" ? [text] : [...text]
+    return [{ field, parts, texts: parts.length > 1 ? [...parts, parts.join(" ")] : parts }]
+  })
 }
 
 /**
- * The first refusal among the text fields being written, or null. An
- * objectionable one is recorded (`moderation.text_refused`) and carries
- * `TEXT_NOT_ALLOWED`; contact details are the writer's to fix and are neither.
+ * Why this crew name, bio and set of tags may not be written, or null.
+ *
+ * Field by field (name, bio, tags), the identity keyword list
+ * (`checkIdentityKeywords`) — a crew called "Bal Krishna's Lot" is a name, not
+ * abuse (PR #755 review, H1), and tags read the same list since the owner's
+ * 2026-11-14 ruling: `#bc` is British Columbia — then contact details in the
+ * strict reading a card gets (`findProfileContactInfo`: phone numbers,
+ * handles, emails, web addresses, spelled out or not). Contact details say
+ * which — the fix is the writer's. Then OpenAI, **one request** for every
+ * text of every field (SCRUM-1052 D: a create made two in a row), mapped back
+ * to its field and tag. Anything objectionable gets one sentence that teaches
+ * nothing about the filter.
+ *
+ * Tags are read **each on its own** and, when there are several, all together.
+ * Joined only, `["sundayrunclub", "fuckoff"]` was saved: the clean tag diluted
+ * the bad one (client #544 drive). Together, a number split across tags is
+ * still a number.
+ *
+ * **It fails closed** (SCRUM-1052 A, owner 2026-11-14): when OpenAI times out
+ * or errors (its breaker open included), the write is refused with "try
+ * again" (`unavailable`), because a crew card is read by strangers and tags
+ * read the lenient name list, so OpenAI is the only check on English
+ * profanity in one. A staging create saved `#fuckoff` that way. Chat is not
+ * this: it delivers and re-checks (lib/moderation/degraded-room.ts). No key
+ * configured (a local or test server) is not an outage and passes.
  */
-async function textRefusal(
-  userId: string,
-  fields: { name?: string; bio?: string | null; tags?: readonly string[] }
-): Promise<CrewRefusal | null> {
-  for (const field of ["name", "bio", "tags"] as const) {
-    const text = fields[field]
-    if (!text || text.length === 0) continue
-    const verdict = await crewTextRefusal(field, text)
-    if (!verdict) {
-      // Let through; an ambiguous word (a name, a faith) is flagged for a human.
-      const suspicion = checkIdentityKeywords(typeof text === "string" ? text : text.join(" "))
-      if (suspicion) recordScreenedText(userId, "crew", field, { action: "flag", result: suspicion })
-      continue
+export async function crewTextRefusal(fields: CrewTexts): Promise<CrewTextVerdict | null> {
+  const readings = readingsOf(fields)
+  for (const { field, parts, texts } of readings) {
+    const blame = (i: number) => (field === "tags" && i < parts.length ? { tag: parts[i] } : {})
+    for (const [i, t] of texts.entries()) {
+      const keyword = checkIdentityKeywords(t)
+      if (keyword?.action === "hide") return { refusal: `This can’t be ${WHAT[field]}.`, field, objectionable: keyword, ...blame(i) }
     }
-    const { refusal, objectionable, tag } = verdict
-    if (!objectionable) return { refusal, status: 400, field, tag }
-    recordScreenedText(userId, "crew", field, { action: "refuse", result: objectionable })
-    return { refusal, status: 400, field, reasonCode: TEXT_NOT_ALLOWED, tag }
+    for (const [i, t] of texts.entries()) {
+      const contact = findProfileContactInfo(t)
+      if (contact.length === 0) continue
+      const hints = [...new Set(contact.map((c) => c.hint))].join(" ")
+      return { refusal: `${hints} A crew card is shown to people you haven’t met, so contact details can’t go on it.`, field, ...blame(i) }
+    }
+  }
+
+  const looked = readings.flatMap(({ field, parts, texts }) =>
+    texts.map((text, i) => ({ field, text, tag: field === "tags" && i < parts.length ? parts[i] : undefined }))
+  )
+  if (looked.length === 0) return null
+  const checks = await boundedOpenAI(looked.map((l) => l.text))
+  const i = checks.findIndex((c) => c.checked && c.result?.action === "hide")
+  const hit = checks[i]
+  if (hit?.checked && hit.result) {
+    const { field, tag } = looked[i]
+    return { refusal: `This can’t be ${WHAT[field]}.`, field, objectionable: hit.result, ...(tag !== undefined && { tag }) }
+  }
+  if (checks.some((c) => !c.checked && c.reason !== "no_key")) {
+    return { refusal: UNAVAILABLE, ...(readings.length === 1 && { field: readings[0].field }), unavailable: true }
   }
   return null
+}
+
+/**
+ * The refusal of a crew write's text, or null. An objectionable text is
+ * recorded (`moderation.text_refused`) and carries `TEXT_NOT_ALLOWED`; contact
+ * details are the writer's to fix and are neither; a text OpenAI could not
+ * look at is a 503 `MODERATION_UNAVAILABLE` to try again.
+ */
+async function textRefusal(userId: string, fields: CrewTexts): Promise<CrewRefusal | null> {
+  const verdict = await crewTextRefusal(fields)
+  if (!verdict) {
+    // Let through; an ambiguous word (a name, a faith) is flagged for a human.
+    for (const { field, texts } of readingsOf(fields)) {
+      const suspicion = checkIdentityKeywords(texts[texts.length - 1])
+      if (suspicion) recordScreenedText(userId, "crew", field, { action: "flag", result: suspicion })
+    }
+    return null
+  }
+  const { refusal, field, objectionable, tag, unavailable } = verdict
+  if (unavailable) {
+    logger.warn("Crew text refused: moderation unavailable", { userId, field })
+    return { refusal, status: 503, field, errorCode: ErrorCode.MODERATION_UNAVAILABLE }
+  }
+  if (!objectionable) return { refusal, status: 400, field, tag }
+  if (field) recordScreenedText(userId, "crew", field, { action: "refuse", result: objectionable })
+  return { refusal, status: 400, field, reasonCode: TEXT_NOT_ALLOWED, tag }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -857,13 +902,13 @@ function notifyCrewInvite(recipientId: string, crewId: string): void {
 
 /** A refusal, answered the way every mobile route answers (`lib/api-response`). */
 export function refusalResponse(r: CrewRefusal) {
-  if (!r.field) return errorResponse(r.refusal, r.status)
+  if (!r.field) return errorResponse(r.refusal, r.status, r.errorCode)
   // The field twice: `field` for the form, and `errors` as every validation answer carries it.
   return NextResponse.json(
     {
       success: false,
       error: r.refusal,
-      errorCode: ErrorCode.VALIDATION_FAILED,
+      errorCode: r.errorCode ?? ErrorCode.VALIDATION_FAILED,
       ...(r.reasonCode && { reasonCode: r.reasonCode }),
       field: r.field,
       ...(r.tag !== undefined && { tag: r.tag }),
