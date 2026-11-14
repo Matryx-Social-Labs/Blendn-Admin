@@ -326,7 +326,8 @@
     "data": [
       "crews",
       "invites",
-      "invitesPagination"
+      "invitesPagination",
+      "tagIdeas"
     ]
   },
   "/api/mobile/blends": {

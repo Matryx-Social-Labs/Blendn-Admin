@@ -152,16 +152,16 @@ describe("a crew's room shows its members' photos, and no other kind does (SCRUM
 })
 
 describe("crew views: the tier badge and seatsLeft (SCRUM-830, 836)", () => {
-  it("counts members and open invites against the cap of twelve", async () => {
+  it("counts members and open invites against the cap of 25", async () => {
     const owner = await person("fs-o")
     const [m1, m2, f1] = [await person("fs-1"), await person("fs-2"), await person("fs-3")]
     const c = await crewOf(owner, [m1, m2])
-    expect((await api.detail(owner, c.crewId)).body.data).toMatchObject({ seatsLeft: 9, badges: [] })
+    expect((await api.detail(owner, c.crewId)).body.data).toMatchObject({ seatsLeft: 22, badges: [] })
     await befriend(owner, f1)
     expect((await api.invite(owner, c.crewId, [f1.id])).status).toBeLessThan(300)
     const after = (await api.detail(owner, c.crewId)).body.data
-    expect(after.seatsLeft).toBe(8)
-    expect((await call(crewsRoute.GET, "/api/mobile/crews", owner)).body.data.crews[0]).toMatchObject({ seatsLeft: 8 })
+    expect(after.seatsLeft).toBe(21)
+    expect((await call(crewsRoute.GET, "/api/mobile/crews", owner)).body.data.crews[0]).toMatchObject({ seatsLeft: 21 })
   })
 })
 

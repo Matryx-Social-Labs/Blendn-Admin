@@ -1,10 +1,7 @@
 import { Panel } from "@/components/dashboard/kit"
 import { MetricTile } from "@/components/dashboard/primitives"
-import { formatNumber } from "@/lib/dashboard-format"
-import type { FewCount, HeldTotal, LiveSocial } from "@/lib/live-metrics"
-
-/** A count as the panel prints it: a few is words, a held total its floor (`discloseGroup`), never the number. */
-const count = (c: FewCount | HeldTotal) => (c === "few" ? "a few" : typeof c === "number" ? formatNumber(c) : `${formatNumber(c.atLeast)}+`)
+import { countLabel as count, formatNumber } from "@/lib/dashboard-format"
+import type { FewCount, LiveSocial } from "@/lib/live-metrics"
 
 /** The three ways two people meet here, in the bar's order and colours (approval 1). */
 const WAYS = [

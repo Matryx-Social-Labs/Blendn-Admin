@@ -297,3 +297,24 @@ export async function venueOffersView(
           : known.map((k) => ({ firstName: null, nights: k.nights })),
   }
 }
+
+/**
+ * Offers redeemed per venue night (its local date, `YYYY-MM-DD`), for "Nights
+ * here" and "Tonight" (Venue C, SCRUM-1051). Counts only, the current owner's
+ * offers only (a transfer starts afresh). Unlike opened, these are not held to
+ * the weekly totals: each redemption is the venue's own door taking a pass, so
+ * a night's count tells the venue nothing its staff did not do. The callers
+ * band it ("under 5").
+ */
+export async function redeemedByNight(venueId: string, ownerOrgId: string, night?: string): Promise<Map<string, number>> {
+  const rows = await db.venue_offer_sends.groupBy({
+    by: ["redeemed_night"],
+    where: {
+      venue_id: venueId,
+      redeemed_night: night ? new Date(`${night}T00:00:00Z`) : { not: null },
+      offer: { org_id: ownerOrgId },
+    },
+    _count: { _all: true },
+  })
+  return new Map(rows.flatMap((r) => (r.redeemed_night ? [[r.redeemed_night.toISOString().slice(0, 10), r._count._all] as const] : [])))
+}

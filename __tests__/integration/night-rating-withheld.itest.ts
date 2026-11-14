@@ -8,6 +8,7 @@
  */
 import { buildFeedbackDigest } from "@/lib/feedback-digest"
 import { buildReport, canRunReport, reportsFor } from "@/lib/reports"
+import { venueMood } from "@/lib/venue-nights"
 import { cleanup, closeDb, db, makeEvent, makeUser, testId } from "./helpers"
 
 const users: string[] = []
@@ -83,10 +84,11 @@ describe("the feedback digest, as a venue reads another host's night (step 15)",
     return eventId
   }
 
-  it("holds back the split, the total, the issue count and the labelled list under five", async () => {
+  it("says a few for each mood under five, a floor for the total, and holds back the issue count and the labelled list", async () => {
     const eventId = await night(["negative", "negative", "positive"])
     const venue = await digest(eventId, "venue")
-    expect(venue).toMatchObject({ view: "venue", total: null, counts: { positive: null, neutral: null, negative: null } })
+    // The Nights row's rule (`discloseGroup`), so the two pages agree; zero names nobody and stays itself.
+    expect(venue).toMatchObject({ view: "venue", total: { atLeast: 2 }, counts: { positive: "few", neutral: 0, negative: "few" } })
     expect(venue.categories.every((c) => c.count === null && c.suppressed)).toBe(true)
     expect(venue.messages).toEqual([])
     // The organiser reads the same night's counts exactly. No rows: three people cannot be quoted (SCRUM-890).
@@ -95,17 +97,21 @@ describe("the feedback digest, as a venue reads another host's night (step 15)",
     expect(host.messages).toEqual([])
   })
 
-  it("never lets the total give a held-back mood back: 19 neutral and 1 positive show no total and no lone 19", async () => {
-    // The staging drive's night: total minus the shown moods was the positive one.
+  it("never lets the total give a held-back mood back: 19 neutral and 1 positive read 20+, never 20", async () => {
+    // The staging drive's night: an exact total minus the shown moods was the positive one. A floor cannot be subtracted.
     const venue = await digest(await night([...Array(19).fill("neutral"), "positive"]), "venue")
-    expect(venue.total).toBeNull()
-    expect(venue.counts).toEqual({ positive: null, neutral: null, negative: null })
+    expect(venue.counts).toEqual({ positive: "few", neutral: 19, negative: 0 })
+    expect(venue.total).toEqual({ atLeast: 20 })
+    // The control: a night with no few has an exact total.
+    const full = await digest(await night([...Array(5).fill("positive"), ...Array(6).fill("neutral")]), "venue")
+    expect(full.counts).toEqual({ positive: 5, neutral: 6, negative: 0 })
+    expect(full.total).toBe(11)
   })
 
-  it("shows a venue two moods at five and over, and still no total once a third is held back", async () => {
-    const venue = await digest(await night([...Array(5).fill("positive"), ...Array(6).fill("neutral")]), "venue")
-    expect(venue.counts).toEqual({ positive: 5, neutral: 6, negative: null })
-    expect(venue.total).toBeNull()
+  it("matches the venue's Nights row for the same night", async () => {
+    const venue = await digest(await night([...Array(8).fill("positive"), "neutral", "neutral", "negative"]), "venue")
+    expect([venue.counts.positive, venue.counts.neutral, venue.counts.negative]).toEqual(venueMood({ positive: 8, neutral: 2, negative: 1 })?.parts)
+    expect(venue.total).toEqual({ atLeast: 10 })
   })
 })
 

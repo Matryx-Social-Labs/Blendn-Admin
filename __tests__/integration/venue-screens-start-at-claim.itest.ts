@@ -7,7 +7,7 @@ jest.mock("@/app/dashboard/venues/[id]/venue-manage", () => ({ VenueManage: () =
 
 import { isValidElement, type ReactElement, type ReactNode } from "react"
 import VenueDetailPage from "@/app/dashboard/venues/[id]/page"
-import { VenueEventsTable } from "@/app/dashboard/venues/[id]/venue-events-table"
+import { VenueNightsTable } from "@/app/dashboard/venues/[id]/venue-nights-table"
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
 import { KpiStrip } from "@/components/dashboard/kit"
 import { RatingBars } from "@/components/dashboard/primitives"
@@ -74,14 +74,14 @@ describe("the venue page shows the venue from its claim on", () => {
 
   it("lists no night from before the claim, and the admin sees all of them", async () => {
     as(w.owner, "venue_owner")
-    const [owner] = find<{ rows: Row[] }>(await venuePage(), VenueEventsTable)
+    const [owner] = find<{ rows: Row[] }>(await venuePage(), VenueNightsTable)
     const ids = owner.rows.map((r) => r.id)
     expect(ids).toEqual(expect.arrayContaining([n.after.id, n.small.id, n.liveAfter.id]))
     expect(ids).not.toContain(n.before.id)
     expect(ids).not.toContain(n.liveBefore.id)
 
     as(await w.user("vss-admin", "organizer"), "app_admin")
-    const [admin] = find<{ rows: Row[] }>(await venuePage(), VenueEventsTable)
+    const [admin] = find<{ rows: Row[] }>(await venuePage(), VenueNightsTable)
     expect(admin.rows.map((r) => r.id)).toEqual(expect.arrayContaining([n.before.id, n.liveBefore.id]))
   })
 
@@ -89,7 +89,7 @@ describe("the venue page shows the venue from its claim on", () => {
     as(w.owner, "venue_owner")
     const from = new Date(w.c1.getTime() - 10 * DAY).toISOString().slice(0, 10)
     const to = new Date().toISOString().slice(0, 10)
-    const [table] = find<{ rows: Row[] }>(await venuePage({ range: "custom", from, to }), VenueEventsTable)
+    const [table] = find<{ rows: Row[] }>(await venuePage({ range: "custom", from, to }), VenueNightsTable)
     expect(table.rows.map((r) => r.id)).not.toContain(n.before.id)
     expect(table.rows.map((r) => r.id)).toContain(n.after.id)
   })
@@ -97,17 +97,19 @@ describe("the venue page shows the venue from its claim on", () => {
   it("holds back another host's small night, and the tiles add up only what is shown", async () => {
     as(w.owner, "venue_owner")
     const tree = await venuePage()
-    const [table] = find<{ rows: Row[] }>(tree, VenueEventsTable)
+    // "Nights here" (Venue C) prints who came as a band on every night, and carries no exact count at all.
+    const [table] = find<{ rows: (Row & { came: string })[] }>(tree, VenueNightsTable)
     const small = table.rows.find((r) => r.id === n.small.id)
-    expect(small).toMatchObject({ going: 10, attended: null })
-    expect(table.rows.find((r) => r.id === n.after.id)).toMatchObject({ attended: 6 })
+    expect(small?.came).toBe("Under 5")
+    expect(table.rows.find((r) => r.id === n.after.id)?.came).toBe("5–9")
+    for (const r of table.rows) expect(r).not.toHaveProperty("attended")
 
-    // The tiles are the KpiStrip's items (step 17: the kit's strip).
+    // The tiles are the KpiStrip's items (step 17: the kit's strip): the after night's 6, the small one held back
+    // and the live one still arriving left out of both sides.
     const attendedTile = find<{ items: { label: string; value: string; hint: string }[] }>(tree, KpiStrip)
       .flatMap((p) => p.items)
       .find((t) => t.label === "Attended")
-    const shownTotal = table.rows.reduce((sum, r) => sum + (r.attended !== null && r.going !== null ? r.attended : 0), 0)
-    expect(attendedTile?.value).toBe(String(shownTotal))
+    expect(attendedTile?.value).toBe("6")
     expect(attendedTile?.hint).toMatch(/held-back nights left out/)
   })
 

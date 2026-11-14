@@ -14,7 +14,7 @@ import { friendIdsOf } from "../friends"
 import { logger } from "../logger"
 import { findProfileContactInfo } from "../moderation/contact-info"
 import { foldText, hasInvisibleChars } from "../moderation/fold"
-import { checkIdentityKeywords } from "../moderation/keyword-filter"
+import { checkIdentityKeywords, checkKeywords } from "../moderation/keyword-filter"
 import { checkTextContent, notChecked, type ModerationCheck } from "../moderation/openai-moderation"
 import type { ModerationResult } from "../moderation/types"
 import { recordScreenedText, TEXT_NOT_ALLOWED } from "../moderation/user-text"
@@ -36,11 +36,11 @@ import { activeMemberWhere, dissolveLocked, lockCrew, settleLocked } from "./swe
  *   `consented_reveal_at` — "anyone in this crew can reveal the crew, your name
  *   and photos, to people you match with" — and the route refuses without it.
  *   `keep_me_anonymous` is each member's override (owner decision (a)).
- * - **2–12.** At most `CREW.MAX_MEMBERS`, counted under a lock on the crew row
+ * - **2–25.** At most `CREW.MAX_MEMBERS`, counted under a lock on the crew row
  *   so two accepts at once cannot both take the last seat. Below
  *   `CREW.MIN_MEMBERS` the crew dissolves (D-15): its room archives and its
  *   last member is let go.
- * - **The name and bio are a card strangers see**, so they are folded
+ * - **The name, bio and tags are a card strangers see**, so they are folded
  *   (lib/moderation/fold.ts), go through the moderation pipeline and the
  *   strict contact-detail reading (`findProfileContactInfo`), and are refused
  *   on write, never stored. A card can be reported (`reportCrew`); a moderator
@@ -58,7 +58,11 @@ import { activeMemberWhere, dissolveLocked, lockCrew, settleLocked } from "./swe
  * member row alone.
  */
 
-/** Curated crew tags. Never free text (§6). Slug → label. */
+/**
+ * The ten curated tags crews had before free hashtags (owner 2026-11-14).
+ * Stored rows and installed builds still send these slugs, so they stay
+ * valid as they are and read back by their label. Slug → label.
+ */
 export const CREW_TAGS = {
   "quiz-team": "Quiz team",
   "run-club": "Run club",
@@ -72,9 +76,49 @@ export const CREW_TAGS = {
   "dance-floor": "Dance floor",
 } as const
 
-export type CrewTag = keyof typeof CREW_TAGS
+type CrewTag = keyof typeof CREW_TAGS
 
-const TAG_SLUGS = Object.keys(CREW_TAGS) as [CrewTag, ...CrewTag[]]
+const isLegacyTag = (t: string): t is CrewTag => Object.hasOwn(CREW_TAGS, t)
+
+/** The ideas the app offers under "Add your own": the old tags, as hashtags. */
+export const CREW_TAG_IDEAS: readonly string[] = Object.values(CREW_TAGS).map((l) => l.replace(/\s+/g, "").toLowerCase())
+
+/** A tag as it is deduped: case-folded. The display keeps the case as typed. */
+const tagKey = (t: string) => t.toLowerCase()
+
+/**
+ * What a tag may be made of: letters and digits in any script (with their
+ * marks — Devanagari needs them), `_`, and emoji (with their skin tones,
+ * presentation selectors, joiners, keycaps and flag pairs). Nothing else: no
+ * `.` `/` `:` or `@`, so no link, e-mail or handle, and no `+` or `-` for a
+ * phone number. The digits a number could still be spelled with are read by
+ * `crewTextRefusal`, all tags at once.
+ */
+const TAG_CHARS = /^[\p{L}\p{M}\p{N}_\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\uFE0F\u200D\u20E3]+$/u
+
+/**
+ * A crew's own hashtag, as typed: folded like a bio (lib/moderation/fold.ts —
+ * invisible characters dropped, look-alike letters and digits to ASCII), then
+ * trimmed, the leading #s stripped and spaces closed up (a space ends a tag in
+ * the app, so "late night" is #latenight). One of the old slugs passes as it is.
+ */
+const crewTag = z
+  .string()
+  .max(CREW.TAG_MAX * 4)
+  .transform((s) => foldText(s).trim().replace(/^#+/, "").replace(/\s+/g, ""))
+  .refine((t) => isLegacyTag(t) || (characters(t) >= 1 && characters(t) <= CREW.TAG_MAX && TAG_CHARS.test(t)), {
+    message: `A tag is 1–${CREW.TAG_MAX} letters, numbers, _ or emoji — no links, @ or contact details`,
+  })
+
+/** Up to `CREW.MAX_TAGS`, deduped case-folded; the first spelling of each is the one kept. */
+const crewTags = z
+  .array(crewTag)
+  .max(CREW.MAX_TAGS)
+  .transform((tags) => tags.filter((t, i) => tags.findIndex((u) => tagKey(u) === tagKey(t)) === i))
+
+/** Tags as every crew read answers them: an old slug by its label, a crew's own as typed. */
+export const tagView = (tags: readonly string[]) =>
+  tags.map((t) => (isLegacyTag(t) ? { slug: t, label: CREW_TAGS[t] } : { slug: tagKey(t), label: t }))
 
 /*
  * Folded before anything reads them (lib/moderation/fold.ts): the keyword
@@ -101,7 +145,7 @@ const crewFields = {
   name: crewName,
   bio: crewBio.nullable().optional(),
   intent: z.array(z.enum(["dating", "networking", "friendship", "just_here"])).max(4).optional(),
-  tags: z.array(z.enum(TAG_SLUGS)).max(CREW.MAX_TAGS).optional(),
+  tags: crewTags.optional(),
   openToSolo: z.boolean().optional(),
 }
 
@@ -147,8 +191,8 @@ export const inviteSchema = z.object({
 export interface CrewRefusal {
   refusal: string
   status: 400 | 403 | 404 | 409 | 429
-  /** Which text was refused (a name or a bio), when a refusal is about one of them. */
-  field?: "name" | "bio"
+  /** Which text was refused (a name, a bio or the tags), when a refusal is about one of them. */
+  field?: CrewTextField
   /** `TEXT_NOT_ALLOWED` when the text itself was objectionable (not contact details). */
   reasonCode?: string
 }
@@ -178,6 +222,17 @@ const HIDDEN: CrewRefusal = { refusal: "A moderator has hidden this crew, so it 
 /* Name and bio                                                               */
 /* -------------------------------------------------------------------------- */
 
+export type CrewTextField = "name" | "bio" | "tags"
+
+const WHAT: Record<CrewTextField, string> = { name: "a crew’s name", bio: "a crew’s bio", tags: "a crew’s tag" }
+
+/**
+ * A name and a bio read against the identity list: a crew called "Bal
+ * Krishna's Lot" is a name, not abuse (PR #755 review, H1). Tags are not
+ * anybody's name, so they get the chat's list, as strict as a message.
+ */
+const keywordsFor = (field: CrewTextField) => (field === "tags" ? checkKeywords : checkIdentityKeywords)
+
 /** How long the OpenAI half may hold a write. The deterministic checks have already run. */
 const OPENAI_BOUND_MS = 1000
 
@@ -197,12 +252,11 @@ const OPENAI_BOUND_MS = 1000
  * caught that way.
  */
 export async function crewTextRefusal(
-  field: "name" | "bio",
+  field: CrewTextField,
   text: string
 ): Promise<{ refusal: string; /** Set when the text itself was objectionable, not contact details. */ objectionable?: ModerationResult } | null> {
-  const what = field === "name" ? "a crew’s name" : "a crew’s bio"
-  // The identity list: a crew called "Bal Krishna's Lot" is a name, not abuse (PR #755 review, H1).
-  const keyword = checkIdentityKeywords(text)
+  const what = WHAT[field]
+  const keyword = keywordsFor(field)(text)
   if (keyword?.action === "hide") return { refusal: `This can’t be ${what}.`, objectionable: keyword }
   const contact = findProfileContactInfo(text)
   if (contact.length > 0) {
@@ -224,14 +278,19 @@ export async function crewTextRefusal(
  * objectionable one is recorded (`moderation.text_refused`) and carries
  * `TEXT_NOT_ALLOWED`; contact details are the writer's to fix and are neither.
  */
-async function textRefusal(userId: string, fields: { name?: string; bio?: string | null }): Promise<CrewRefusal | null> {
-  for (const field of ["name", "bio"] as const) {
-    const text = fields[field]
+async function textRefusal(
+  userId: string,
+  fields: { name?: string; bio?: string | null; tags?: readonly string[] }
+): Promise<CrewRefusal | null> {
+  // The tags read as one text, so a number split across them is still a number.
+  const texts = { name: fields.name, bio: fields.bio, tags: fields.tags?.join(" ") }
+  for (const field of ["name", "bio", "tags"] as const) {
+    const text = texts[field]
     if (!text) continue
     const verdict = await crewTextRefusal(field, text)
     if (!verdict) {
       // Let through; an ambiguous word (a name, a faith) is flagged for a human.
-      const suspicion = checkIdentityKeywords(text)
+      const suspicion = keywordsFor(field)(text)
       if (suspicion) recordScreenedText(userId, "crew", field, { action: "flag", result: suspicion })
       continue
     }
@@ -320,7 +379,7 @@ export async function createCrew(
   if (!(await mayJoinCrews(creatorId))) return ADULTS
   const wanted = [...new Set(input.inviteUserIds)].filter((id) => id !== creatorId)
   if ((await strangersTo(creatorId, wanted)).length > 0) return NOT_FRIENDS
-  const text = await textRefusal(creatorId, { name: input.name, bio: input.bio })
+  const text = await textRefusal(creatorId, { name: input.name, bio: input.bio, tags: input.tags })
   if (text) return text
   const apart = await blocksBetween([creatorId], wanted)
   const invitees = wanted.filter((id) => !apart.has(`${creatorId}|${id}`))
@@ -372,7 +431,7 @@ export async function createCrew(
 /**
  * Invite friends into a crew you are in. Refused whole if any of them is not
  * the inviter's friend (one 404, whoever they are), or if the crew would pass
- * 12 with the invites still open. Otherwise each is invited — or skipped
+ * `CREW.MAX_MEMBERS` with the invites still open. Otherwise each is invited — or skipped
  * without a word, and the answer is the same either way (`invited` is how
  * many were asked for, C8), so the inviter learns nothing about anybody:
  *
@@ -660,7 +719,7 @@ export async function updateCrew(
     select: { user_id: true },
   })
   if (!owner) return NO_CREW
-  const text = await textRefusal(ownerId, { name: input.name, bio: input.bio })
+  const text = await textRefusal(ownerId, { name: input.name, bio: input.bio, tags: input.tags })
   if (text) return text
   await db.$transaction([
     db.crews.update({

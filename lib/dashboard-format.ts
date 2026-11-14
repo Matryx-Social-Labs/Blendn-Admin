@@ -3,6 +3,7 @@
  * tested without rendering.
  */
 
+import type { FewCount, HeldTotal } from "./disclosure"
 import { eventClock } from "./event-phase"
 
 const numberFormat = new Intl.NumberFormat("en-US")
@@ -25,6 +26,24 @@ const dayFormat = new Intl.DateTimeFormat("en-US", {
 
 export function formatNumber(value: number | null) {
   return value === null ? "—" : numberFormat.format(value)
+}
+
+/** A disclosed count as every surface prints it: a few is words, a held total its floor ("12+"), never the figure (`discloseGroup`). */
+export const countLabel = (c: FewCount | HeldTotal) => (c === "few" ? "a few" : typeof c === "number" ? formatNumber(c) : `${formatNumber(c.atLeast)}+`)
+
+/** The width a few is drawn at in a split bar: a nominal step, not its count (the count is not sent). */
+const FEW_WIDTH = 2
+
+/**
+ * Each part's share of a split bar, in percent, a few at `FEW_WIDTH`. Null
+ * when no part is shown exactly: nominal widths side by side would draw a
+ * split nobody measured.
+ */
+export function splitShares(parts: readonly FewCount[]): number[] | null {
+  const widths = parts.map((p) => (p === "few" ? FEW_WIDTH : p))
+  if (!parts.some((p) => p !== "few" && p > 0)) return null
+  const sum = widths.reduce((a, b) => a + b, 0)
+  return widths.map((w) => (w / sum) * 100)
 }
 
 export function formatCompact(value: number | null) {

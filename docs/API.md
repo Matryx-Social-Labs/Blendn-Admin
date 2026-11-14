@@ -2926,13 +2926,13 @@ hides.
 
 ## Crews
 
-Friends who go out together (plan v2 §6). 2–12 people, made from the friend
+Friends who go out together (plan v2 §6). 2–25 people, made from the friend
 graph, with a crew chat (a room of kind `crew`), "We're here", and crew cards
 at an event. `lib/crews/`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/crews` | My crews `{ crews, invites, invitesPagination }` — open invites waiting for me that an accept would take, by the inviting friend's first name, a page at a time (`?limit=`, `?cursor=`; see *Lists are paged*) |
+| GET | `/crews` | My crews `{ crews, tagIdeas, invites, invitesPagination }` — open invites waiting for me that an accept would take, by the inviting friend's first name, a page at a time (`?limit=`, `?cursor=`; see *Lists are paged*) |
 | POST | `/crews` | Make one: `{ name, bio?, intent?, tags?, openToSolo?, inviteUserIds?, revealConsent: true, keepMeAnonymous?, emblemSeed? }` → 201 `{ crewId, chatGroupId, invited }`. `emblemSeed` is the emblem's look as the app's Shuffle left it, 16 lowercase hex characters (`^[0-9a-f]{16}$`, else 400); omitted, the server draws one. It never changes after: PATCH has no such field |
 | GET | `/crews/:crewId` | One of my crews: members by first name and photo, each by their handle in the crew's room |
 | PATCH | `/crews/:crewId` | The owner edits `name`, `bio`, `intent`, `tags`, `openToSolo` |
@@ -2977,8 +2977,8 @@ not on the screen, so a 404 after a listed invite never says a block is there.
 **Caps.** You can own 3 standing crews and be in 10 (409 past either), and make
 3 new crews in 24 hours (429).
 
-**2–12.** `CREW.MAX_MEMBERS` is 12. An invite that would take members plus open
-invites past 12 is 409, and an accept counts the members under a row lock on
+**2–25.** `CREW.MAX_MEMBERS` is 25 (12 until 2026-11-14). An invite that would take members plus open
+invites past 25 is 409 ("A crew has at most 25 people."), and an accept counts the members under a row lock on
 the crew, so two accepts at once can never both take the last seat. A crew left
 with fewer than two **active** members — suspended and erased people do not
 count — **dissolves** (D-15): its chat archives and closes (404 from then on),
@@ -3021,10 +3021,26 @@ character (zero-width space, bidi override; an emoji's own joiner aside) is
 contact-detail check (`findProfileContactInfo`): phone numbers, any @handle,
 emails and web addresses, written out or spelled ("nine eight four…", "at
 gmail dot com", "dot in"). A refusal is 400 with a sentence naming what was
-found, and nothing is stored. Tags are curated slugs (`quiz-team`, `run-club`,
-`techno-heads`, `office-gang`, `birthday-crew`, `foodies`, `board-gamers`,
-`gig-goers`, `book-club`, `dance-floor`), at most 3. Intent is the person
-intent enum.
+found, and nothing is stored. Intent is the person intent enum.
+
+**Tags are the crew's own hashtags** (owner 2026-11-14; until then ten curated
+slugs, at most 3). Up to 5 (`crews_tags_max` holds the count in SQL). Each tag
+is folded like a bio, trimmed, its leading `#` stripped and its spaces closed
+up (`" # late night "` is `latenight`), then must be 1–24 characters (an emoji
+is one) of letters or digits in any script, `_` or emoji: no `.`, `/`, `:`,
+`@`, `+` or `-`, so no link, e-mail, handle or phone number (400 otherwise).
+Deduped case-folded — `#RunClub` and `runclub` are one tag — with the first
+spelling kept and shown as typed. The tags are then moderated **together**, so
+a number split across tags is still a number: the chat's keyword list (stricter
+than a name's), the contact-detail check, and OpenAI moderation (bounded at 1 s,
+as for a name). A refusal is 400 with `field: "tags"`, and `reasonCode:
+TEXT_NOT_ALLOWED` when the text itself was objectionable ("This can't be a
+crew's tag."). The ten old slugs (`quiz-team`, `run-club`, …) are still taken
+as they are and read back by their label. Every read answers tags as
+`[{ slug, label }]`: an old slug by its label (`{ slug: "quiz-team", label:
+"Quiz team" }`), a crew's own as typed (`{ slug: "sundayrunclub", label:
+"SundayRunClub" }`). `GET /crews` carries `tagIdeas` — the old ten as hashtags
+(`quizteam`, `runclub`, …), without the `#` — for the "Add your own" ideas.
 
 **Card fields.** `GET /crews` and `GET /crews/:id` carry `hidden` (a moderator hid
 it) and `apart` (somebody in the crew is missing from `members` because **you**
@@ -3183,6 +3199,11 @@ like that stood would tell the crew what the answer hides. Nobody else is told: 
 host turned crews off, every crew like is 403. **30 crew likes a day** per person
 (both doors: a crew, and a person with `asCrewId`), counted before anything is
 looked at, as a `429` rate limit (SCRUM-1050).
+
+**Crew ↔ crew has no size guard** (owner 2026-11-14): two crews of any size
+Mix, and the Mix room is the members of both sides here when it matched — up to
+50 for two crews of 25. The 6-member ceiling below is crew ↔ person only, and
+stays: one stranger facing a big group is a safety concern, not a size choice.
 
 **Crew ↔ person** has guardrails (§8.3): the person turned on `openToCrews` —
 which lasts until the end of the occurrence they said it at, and `false` clears
