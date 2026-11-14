@@ -2926,7 +2926,7 @@ hides.
 
 ## Crews
 
-Friends who go out together (plan v2 §6). 2–12 people, made from the friend
+Friends who go out together (plan v2 §6). 2–25 people, made from the friend
 graph, with a crew chat (a room of kind `crew`), "We're here", and crew cards
 at an event. `lib/crews/`.
 
@@ -2977,8 +2977,8 @@ not on the screen, so a 404 after a listed invite never says a block is there.
 **Caps.** You can own 3 standing crews and be in 10 (409 past either), and make
 3 new crews in 24 hours (429).
 
-**2–12.** `CREW.MAX_MEMBERS` is 12. An invite that would take members plus open
-invites past 12 is 409, and an accept counts the members under a row lock on
+**2–25.** `CREW.MAX_MEMBERS` is 25 (12 until 2026-11-14). An invite that would take members plus open
+invites past 25 is 409 ("A crew has at most 25 people."), and an accept counts the members under a row lock on
 the crew, so two accepts at once can never both take the last seat. A crew left
 with fewer than two **active** members — suspended and erased people do not
 count — **dissolves** (D-15): its chat archives and closes (404 from then on),
@@ -3183,6 +3183,11 @@ like that stood would tell the crew what the answer hides. Nobody else is told: 
 host turned crews off, every crew like is 403. **30 crew likes a day** per person
 (both doors: a crew, and a person with `asCrewId`), counted before anything is
 looked at, as a `429` rate limit (SCRUM-1050).
+
+**Crew ↔ crew has no size guard** (owner 2026-11-14): two crews of any size
+Mix, and the Mix room is the members of both sides here when it matched — up to
+50 for two crews of 25. The 6-member ceiling below is crew ↔ person only, and
+stays: one stranger facing a big group is a safety concern, not a size choice.
 
 **Crew ↔ person** has guardrails (§8.3): the person turned on `openToCrews` —
 which lasts until the end of the occurrence they said it at, and `false` clears

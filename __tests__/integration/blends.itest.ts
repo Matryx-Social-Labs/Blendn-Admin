@@ -15,6 +15,7 @@ process.env.MOBILE_JWT_SECRET ??= "itest-mobile-secret-0123456789abcdefghij"
 
 import { resolveReport } from "@/app/dashboard/moderation/reports/actions"
 import { sweepExpiredChats } from "@/lib/chat-lifecycle"
+import { CREW } from "@/lib/constants"
 import { conversationPair } from "@/lib/conversations"
 import { purgeLapsedCrewLikes } from "@/lib/crews/sweep"
 import { canJoinChat } from "@/lib/socket-auth"
@@ -170,6 +171,26 @@ describe("crew ↔ crew: any present member likes for the crew; mutual is one Bl
       expect(new Set(pointed)).toEqual(new Set([rows[0].room?.id]))
       expect(await db.chat_groups.count({ where: { blend_id: rows[0].id } })).toBe(1)
     }
+  })
+
+  it("two full crews of 25 Mix: no size guard crew to crew, one room of all 50, everyone but the liker told (owner 2026-11-14)", async () => {
+    const host = await person("mix50-host")
+    const { eventId, occurrenceId } = await liveEvent(host.id)
+    const side = (s: string) => Promise.all(Array.from({ length: CREW.MAX_MEMBERS }, (_, i) => person(`mix50-${s}${i}`)))
+    const [a, b] = await Promise.all([side("a"), side("b")])
+    const A = await crewOf(a[0], a.slice(1), "Big A")
+    const B = await crewOf(b[0], b.slice(1), "Big B")
+    for (const p of [...a, ...b]) await arrive(eventId, occurrenceId, p)
+
+    expect((await api.likeCrew(a[5], eventId, B.crewId, A.crewId)).body.data).toEqual({ liked: true, blend: null })
+    const back = await api.likeCrew(b[7], eventId, A.crewId, B.crewId)
+    expect(back.status).toBe(200)
+    const roomId = back.body.data.blend.chatGroupId as string
+    expect(await db.chat_group_members.count({ where: { chat_group_id: roomId } })).toBe(2 * CREW.MAX_MEMBERS)
+    expect((await api.roster(a[0], roomId)).body.data.participants).toHaveLength(2 * CREW.MAX_MEMBERS)
+    expect((await api.send(b[24], roomId)).status).toBe(201)
+    const told = await db.notifications.count({ where: { kind: "blend", user_id: { in: [...a, ...b].map((p) => p.id) } } })
+    expect(told).toBe(2 * CREW.MAX_MEMBERS - 1)
   })
 
   it("refuses a like from a crew that is not here, on a crew that is not here, and across a block (CR-I09)", async () => {

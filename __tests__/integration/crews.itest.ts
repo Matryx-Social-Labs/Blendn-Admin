@@ -33,6 +33,7 @@ import { initSocketServer } from "@/lib/socket-server"
 import { stopSponsoredScheduler } from "@/lib/sponsored-scheduler"
 import { canJoinChat } from "@/lib/socket-auth"
 import { conversationPair } from "@/lib/conversations"
+import { CREW } from "@/lib/constants"
 import { crewsToRepair, repairCrews, settleCrew } from "@/lib/crews/sweep"
 import { applySuspension, liftSuspension } from "@/lib/suspension"
 import { resolveReport } from "@/app/dashboard/moderation/reports/actions"
@@ -350,16 +351,20 @@ describe("made from friends, 2–12, consent on joining (CR-I03, CR-U01/U02)", (
     expect(row.keep_me_anonymous).toBe(true)
   })
 
-  it("invites up to 12 and refuses the 13th; leaving down to one dissolves the crew and archives its chat", async () => {
+  it("invites up to 25 and refuses the 26th; leaving down to one dissolves the crew and archives its chat", async () => {
+    expect(CREW.MAX_MEMBERS).toBe(25)
     const owner = await person("cap-owner")
-    const friends = await Promise.all(Array.from({ length: 12 }, (_, i) => person(`cap-${i}`)))
+    const friends = await Promise.all(Array.from({ length: CREW.MAX_MEMBERS }, (_, i) => person(`cap-${i}`)))
     await befriend(owner, ...friends)
     const { crewId, roomId } = await crewOf(owner, [friends[0]])
+    // Control: the old ceiling (2 members + 10 open invites = 12) is no longer full.
     expect((await api.invite(owner, crewId, friends.slice(1, 11).map((f) => f.id))).status).toBe(200)
-    // 2 members + 10 open invites = 12: one more is the 13th.
-    const thirteenth = await api.invite(owner, crewId, [friends[11].id])
-    expect(thirteenth.status).toBe(409)
-    expect(await db.crew_invites.count({ where: { crew_id: crewId, invited_user_id: friends[11].id } })).toBe(0)
+    expect((await api.invite(owner, crewId, friends.slice(11, 24).map((f) => f.id))).status).toBe(200)
+    // 2 members + 23 open invites = 25: one more is the 26th.
+    const twentySixth = await api.invite(owner, crewId, [friends[24].id])
+    expect(twentySixth.status).toBe(409)
+    expect(twentySixth.body.error).toMatch(/at most 25 people/)
+    expect(await db.crew_invites.count({ where: { crew_id: crewId, invited_user_id: friends[24].id } })).toBe(0)
 
     // Down to one: the owner leaves, then the last but one.
     const solo = await api.remove(friends[0], crewId, friends[0].id)
@@ -375,20 +380,20 @@ describe("made from friends, 2–12, consent on joining (CR-I03, CR-U01/U02)", (
     expect((await api.join(friends[1], crewId)).status).toBe(404)
   })
 
-  it("never seats a 13th, however many accept at once (race)", async () => {
+  it("never seats a 26th, however many accept at once (race)", async () => {
     const owner = await person("race-owner")
-    const friends = await Promise.all(Array.from({ length: 13 }, (_, i) => person(`race-${i}`)))
+    const friends = await Promise.all(Array.from({ length: CREW.MAX_MEMBERS + 1 }, (_, i) => person(`race-${i}`)))
     await befriend(owner, ...friends)
     const made = await api.create(owner, { name: "Race" })
     const crewId = made.body.data.crewId as string
-    // Thirteen open invites, written past the invite cap on purpose: the
+    // Twenty-six open invites, written past the invite cap on purpose: the
     // accept's own count under the crew lock is what must hold.
     await db.crew_invites.createMany({ data: friends.map((f) => ({ crew_id: crewId, invited_user_id: f.id, invited_by: owner.id })) })
     const answers = await Promise.all(friends.map((f) => api.join(f, crewId)))
     const statuses = answers.map((a) => a.status).sort()
-    expect(statuses.filter((s) => s === 200)).toHaveLength(11)
+    expect(statuses.filter((s) => s === 200)).toHaveLength(CREW.MAX_MEMBERS - 1)
     expect(statuses.filter((s) => s === 409)).toHaveLength(2)
-    expect(await db.crew_members.count({ where: { crew_id: crewId } })).toBe(12)
+    expect(await db.crew_members.count({ where: { crew_id: crewId } })).toBe(CREW.MAX_MEMBERS)
   })
 })
 
@@ -1197,8 +1202,8 @@ describe("nothing a crew does tells anybody about a friend (step 8 follow-up)", 
     const owner = await person("fu-full-owner")
     const mate = await person("fu-full-mate")
     const { crewId } = await crewOf(owner, [mate])
-    // Eight more members (fixture rows) and one open invite: 10 + 1 = 11 seats.
-    const fillers = await Promise.all(Array.from({ length: 8 }, (_, i) => person(`fu-full-${i}`)))
+    // More members (fixture rows) and one open invite: one seat short of full.
+    const fillers = await Promise.all(Array.from({ length: CREW.MAX_MEMBERS - 4 }, (_, i) => person(`fu-full-${i}`)))
     await db.crew_members.createMany({ data: fillers.map((f) => ({ crew_id: crewId, user_id: f.id, consented_reveal_at: new Date() })) })
     const pending = await person("fu-full-pending")
     await db.crew_invites.create({ data: { crew_id: crewId, invited_user_id: pending.id, invited_by: owner.id } })
@@ -1208,7 +1213,7 @@ describe("nothing a crew does tells anybody about a friend (step 8 follow-up)", 
     await befriend(owner, apart, fine)
     const [user1_id, user2_id] = conversationPair(mate.id, apart.id)
     await db.private_conversations.create({ data: { user1_id, user2_id, closed_at: new Date(), closed_by: mate.id, closed_reason: "unmatch" } })
-    // 11 + 2 asked > 12: 409 — whether or not one of them would have been skipped.
+    // (MAX − 1) + 2 asked > MAX: 409 — whether or not one of them would have been skipped.
     expect((await api.invite(owner, crewId, [apart.id, fine.id])).status).toBe(409)
     expect(await db.crew_invites.count({ where: { crew_id: crewId, invited_user_id: { in: [apart.id, fine.id] } } })).toBe(0)
     // One seat asked for: 200 either way, and only the one not kept apart is written.

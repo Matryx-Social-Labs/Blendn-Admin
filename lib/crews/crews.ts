@@ -36,7 +36,7 @@ import { activeMemberWhere, dissolveLocked, lockCrew, settleLocked } from "./swe
  *   `consented_reveal_at` — "anyone in this crew can reveal the crew, your name
  *   and photos, to people you match with" — and the route refuses without it.
  *   `keep_me_anonymous` is each member's override (owner decision (a)).
- * - **2–12.** At most `CREW.MAX_MEMBERS`, counted under a lock on the crew row
+ * - **2–25.** At most `CREW.MAX_MEMBERS`, counted under a lock on the crew row
  *   so two accepts at once cannot both take the last seat. Below
  *   `CREW.MIN_MEMBERS` the crew dissolves (D-15): its room archives and its
  *   last member is let go.
@@ -372,7 +372,7 @@ export async function createCrew(
 /**
  * Invite friends into a crew you are in. Refused whole if any of them is not
  * the inviter's friend (one 404, whoever they are), or if the crew would pass
- * 12 with the invites still open. Otherwise each is invited — or skipped
+ * `CREW.MAX_MEMBERS` with the invites still open. Otherwise each is invited — or skipped
  * without a word, and the answer is the same either way (`invited` is how
  * many were asked for, C8), so the inviter learns nothing about anybody:
  *
