@@ -298,6 +298,7 @@ describe("a crew’s own hashtags, through the routes (owner pick A, 2026-11-14)
     const split = await edit(owner, crewId, { tags: ["call", "98450", "12345"] })
     expect(split.status).toBe(400)
     expect(split.body).toMatchObject({ field: "tags", errors: [{ field: "tags" }] })
+    expect(split.body).not.toHaveProperty("tag")
     expect(split.body.error).toMatch(/phone number/)
     expect(await tagsOf(crewId)).toEqual(["before"])
     // A refused create makes no crew.
@@ -309,10 +310,16 @@ describe("a crew’s own hashtags, through the routes (owner pick A, 2026-11-14)
     const owner = await person("tags-moderated")
     const made = await api.create(owner, { name: "Clean", tags: ["before"] })
     const crewId = made.body.data.crewId as string
-    const res = await edit(owner, crewId, { tags: ["fun", "retard"] })
-    expect(res.status).toBe(400)
-    expect(res.body).toMatchObject({ error: "This can’t be a crew’s tag.", field: "tags", reasonCode: "TEXT_NOT_ALLOWED" })
+    // Each tag on its own, in any position, and the one to blame named (client #544 drive).
+    for (const tags of [["fun", "retard"], ["retard", "fun"], ["a", "retard", "b"]]) {
+      const res = await edit(owner, crewId, { tags })
+      expect(res.status).toBe(400)
+      expect(res.body).toMatchObject({ error: "This can’t be a crew’s tag.", field: "tags", reasonCode: "TEXT_NOT_ALLOWED", tag: "retard" })
+    }
     expect(await tagsOf(crewId)).toEqual(["before"])
+    // The crew-name list, not the chat's: `bc` is British Columbia (owner 2026-11-14).
+    expect((await edit(owner, crewId, { tags: ["vancouver", "bc"] })).status).toBe(200)
+    expect(await tagsOf(crewId)).toEqual(["vancouver", "bc"])
     const created = await api.create(owner, { name: "Dirty", tags: ["retard"] })
     expect(created.status).toBe(400)
     expect(await db.crews.count({ where: { created_by: owner.id, name: "Dirty" } })).toBe(0)
