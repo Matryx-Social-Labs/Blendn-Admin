@@ -24,7 +24,7 @@ export function eventTabsFor(
     canOperate: boolean
     canEdit: boolean
     canViewAttendees: boolean
-    /** `venue_day` is a venue's hidden daily room: no feedback digest, no public link. */
+    /** `venue_day` is a venue's hidden daily room: no public link, no tickets. */
     kind: string
     status: string
     /** How the event may sell tickets (`loadEventPage`'s `ticketing`): null while `TICKETING` is off or its market sells none. */
@@ -50,7 +50,8 @@ export function eventTabsFor(
     // Speaking into the room and placing sponsors is whoever runs the event;
     // a venue owner announcing into a night they do not run is K3.12 (R37).
     if (opts.canEdit) tabs.push({ key: "announcements", label: "Announcements & sponsors" })
-    if (phase === "post" && opts.kind !== "venue_day") tabs.push({ key: "feedback", label: "Feedback" })
+    // A venue day too (Venue C, G12): its owner reads the night's mood in the digest's venue view, never a quote.
+    if (phase === "post") tabs.push({ key: "feedback", label: "Feedback" })
     if (sharesLink(opts)) tabs.push({ key: "share", label: "QR & link" })
   }
   return tabs

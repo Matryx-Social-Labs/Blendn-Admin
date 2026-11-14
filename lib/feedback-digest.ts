@@ -3,7 +3,7 @@ import type { feedback_sentiment, issue_category } from "@prisma/client"
 
 import { chatClosesAt } from "./chat-window"
 import { db } from "./db"
-import { discloseBreakdown, discloseCategories, discloseHeadcount, discloseStars, mayQuote, publishedRaters, spreadsByEventId, type DisclosedCategory, type StarSpread } from "./disclosure"
+import { discloseCategories, discloseGroup, discloseHeadcount, discloseStars, mayQuote, publishedRaters, spreadsByEventId, type DisclosedCategory, type FewCount, type HeldTotal, type StarSpread } from "./disclosure"
 import { publishedRatingGroups } from "./rating-batches"
 import { escalates } from "./sentiment/taxonomy"
 
@@ -49,10 +49,10 @@ export interface FeedbackDigest {
   ended: boolean
   windowClosesAt: string
   windowOpen: boolean
-  /** Null where held back for a venue: the breakdown rule (`discloseBreakdown`). */
-  counts: { positive: number | null; neutral: number | null; negative: number | null }
-  /** Messages classified, or null for a venue once any mood is held back. */
-  total: number | null
+  /** Exact for a host; for a venue, a few under five (`moodSplit`). */
+  counts: { positive: FewCount; neutral: FewCount; negative: FewCount }
+  /** Messages classified; for a venue, a floor once any mood is a few. */
+  total: number | HeldTotal
   categories: DisclosedCategory[]
   /** All zero, and the average null, until `MIN_CELL` people have rated. */
   ratings: [number, number, number, number, number]
@@ -124,15 +124,6 @@ export async function buildFeedbackDigest(
   const closesAt = chatClosesAt({ end_time: event.end_time })
 
   const venue = view === "venue"
-  /*
-   * A venue's split is a breakdown with a shared total, so it goes through the
-   * breakdown rule: every mood under five held back, a lone survivor held back
-   * with them, and no total once anything is. Flooring each mood alone was not
-   * enough — the total minus the shown moods gave the held-back one back, which
-   * the staging drive of step 15 read off the page ("20 messages", "19
-   * neutral", "0 negative": one positive).
-   */
-  const split = venue ? discloseBreakdown([counts.positive, counts.neutral, counts.negative]) : null
   const stars = discloseStars(ratings)
 
   return {
@@ -143,8 +134,7 @@ export async function buildFeedbackDigest(
     windowClosesAt: closesAt.toISOString(),
     windowOpen: Date.now() < closesAt.getTime(),
     ended: Date.now() >= event.end_time.getTime(),
-    counts: split ? { positive: split.cells[0], neutral: split.cells[1], negative: split.cells[2] } : counts,
-    total: split ? split.total : counts.positive + counts.neutral + counts.negative,
+    ...moodSplit(counts, view),
     /*
      * Counts, suppressed below the disclosure floor.
      *
@@ -179,6 +169,27 @@ export async function buildFeedbackDigest(
      */
     ...(venue || page === null ? { messages: [], messagesTotal: 0, messagesPage: 1 } : await quotePage(eventId, event.timezone, quotable, page)),
   }
+}
+
+/**
+ * The mood split as `view` reads it. A host's is exact (owner, 2026-11-13). A
+ * venue's goes through `discloseGroup`, the rule its "Nights here" row uses,
+ * so the two pages never disagree about one night (owner, 2026-11-14): each
+ * mood under five is a few, and once any is, the total is a floor.
+ *
+ * The floor is what keeps the leak shut. Flooring each mood alone was not
+ * enough: the total minus the shown moods gave the held-back one back, which
+ * the staging drive of step 15 read off the page ("20 messages", "19
+ * neutral", "0 negative": one positive). Now that night reads "20+", and the
+ * positive is any of one to four (brute-forced in feedback-mood-split.test.ts).
+ */
+export function moodSplit(
+  counts: { positive: number; neutral: number; negative: number },
+  view: FeedbackDigest["view"]
+): Pick<FeedbackDigest, "counts" | "total"> {
+  if (view === "host") return { counts, total: counts.positive + counts.neutral + counts.negative }
+  const { parts, total } = discloseGroup([counts.positive, counts.neutral, counts.negative])
+  return { counts: { positive: parts[0], neutral: parts[1], negative: parts[2] }, total }
 }
 
 /** A feedback row as the tally reads it: `userId` is null once the purge has detached its message. */

@@ -173,7 +173,7 @@ test.describe("the organisation that added an unclaimed venue corrects it — th
 
     await page.goto(`/dashboard/venues/${mine.id}`, { waitUntil: "networkidle" })
     await expect(page.getByText("unclaimed — added by your organisation")).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText("Events here", { exact: true })).toHaveCount(0)
+    await expect(page.getByText("Nights here", { exact: true })).toHaveCount(0)
     await expect(page.getByText("Ratings", { exact: true })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Retire" })).toHaveCount(0)
 

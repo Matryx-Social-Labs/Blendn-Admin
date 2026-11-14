@@ -230,7 +230,11 @@ from a 1–5 star and needs a real 0–10 question.
 2. **My venues** — utilisation, ratings, returning organizers
 3. **Building occupancy** — everyone inside across concurrent events, against the
    venue's own licensed capacity
-4. **Events here** — read-only operational access to events at their venue
+4. **Tonight** — the room running at the venue now, in ranges; how people met
+   only on the venue's own venue day
+5. **Nights here** — every night at the venue (its venue days included) with who
+   came as a band, met someone (own nights only), mood, rating and offers
+   redeemed; each row opens the event, and a venue day's Feedback once it is over
 
 **Gaps:** availability/booking calendar — utilisation is reported after the fact,
 never what is bookable.

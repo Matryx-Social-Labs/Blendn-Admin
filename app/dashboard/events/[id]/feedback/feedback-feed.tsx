@@ -5,6 +5,8 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
+import { countLabel } from "@/lib/dashboard-format"
+import type { HeldTotal } from "@/lib/disclosure"
 import { eventClock } from "@/lib/event-phase"
 import type { feedback_sentiment, issue_category } from "@prisma/client"
 
@@ -53,7 +55,8 @@ export function FeedbackFeed({
   pageSize,
   timezone,
 }: {
-  total: number | null
+  /** A host's: exact. Typed as the digest's, which a venue's may floor (`moodSplit`). */
+  total: number | HeldTotal
   messages: FeedbackMessage[]
   messagesTotal: number
   page: number
@@ -88,7 +91,7 @@ export function FeedbackFeed({
   if (messages.length === 0) {
     return (
       <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
-        Nothing to quote yet. The {total} message{total === 1 ? " is" : "s are"} counted above; none can be shown without pointing at someone.
+        Nothing to quote yet. The {countLabel(total)} message{total === 1 ? " is" : "s are"} counted above; none can be shown without pointing at someone.
       </p>
     )
   }

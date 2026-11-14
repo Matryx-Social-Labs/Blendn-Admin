@@ -34,7 +34,7 @@ import { EventAttendeesCount } from "@/app/dashboard/events/[id]/attendees-table
 import { Overview } from "@/app/dashboard/events/[id]/overview"
 import EventDetailPage from "@/app/dashboard/events/[id]/page"
 import VenueDetailPage from "@/app/dashboard/venues/[id]/page"
-import { VenueEventsTable } from "@/app/dashboard/venues/[id]/venue-events-table"
+import { VenueNightsTable } from "@/app/dashboard/venues/[id]/venue-nights-table"
 import { BuildingOccupancyPanel } from "@/components/dashboard/building-occupancy-panel"
 import { LiveTab } from "@/components/dashboard/live-tab"
 import { getBuildingOccupancy } from "@/lib/building-occupancy"
@@ -511,16 +511,17 @@ describe("the venue’s lists", () => {
   })
 
   it("holds back who came at a night still running, on the Events list, the venue page and both exports", async () => {
-    type Row = { id: string; arrivals?: unknown; attended?: unknown }
-    const running = (rows: Row[], key: "arrivals" | "attended") =>
+    type Row = { id: string; arrivals?: unknown; attended?: unknown; came?: unknown }
+    const running = (rows: Row[], key: "arrivals" | "attended" | "came") =>
       Object.fromEntries(rows.filter((r) => r.id === three || r.id === twelve).map((r) => [r.id, r[key]]))
 
     as(venueOwner, "venue_owner")
     const [list] = find<{ rows: Row[] }>(await EventsPage(), EventsTable)
     expect(running(list.rows, "arrivals")).toEqual({ [three]: null, [twelve]: null })
     const venuePage = await VenueDetailPage({ params: Promise.resolve({ id: venues[0] }), searchParams: Promise.resolve({}) })
-    const [table] = find<{ rows: Row[] }>(venuePage, VenueEventsTable)
-    expect(running(table.rows, "attended")).toEqual({ [three]: null, [twelve]: null })
+    // "Nights here" (Venue C): who came is a band on every night, never the count, so reloading watches nothing move by one.
+    const [table] = find<{ rows: Row[] }>(venuePage, VenueNightsTable)
+    expect(running(table.rows, "came")).toEqual({ [three]: "Under 5", [twelve]: "10–19" })
 
     const range = { key: "custom" as const, from: new Date(Date.now() - DAY), to: new Date(Date.now() + DAY) }
     const cell = (csv: string, id: string, column: string) => {
