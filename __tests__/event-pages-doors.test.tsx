@@ -195,21 +195,43 @@ describe("the Feedback tab's page", () => {
     expect(html).not.toContain("No messages were classified")
   })
 
-  it("keeps a venue's held-back stars in the split view (total held back, not zero)", async () => {
+  it("keeps a venue's held-back stars in the split view (a floor for the total, not zero)", async () => {
     mockSession.user.role = "venue_owner"
     mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-b" }
     jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({
       ...emptyDigest(),
       view: "venue",
-      counts: { positive: null, neutral: null, negative: null },
-      total: null,
+      counts: { positive: "few", neutral: "few", negative: 0 },
+      total: { atLeast: 2 },
       ratingCount: null,
       averageRating: null,
     })
     const html = renderToStaticMarkup(await feedback())
-    expect(html).toContain("counts held back")
+    expect(html).toContain("· 2+ messages")
+    expect(html).toContain("a few</b> positive")
+    // Every mood a few: no bar, as the Nights row draws none (`splitShares`).
+    expect(html).not.toContain("bg-success")
     expect(html).toContain("fewer than five ratings")
     expect(html.match(/>Stars</g)).toHaveLength(1)
+  })
+
+  it("prints a venue's split in the Nights row's words: 8 positive, a few, a few, 10+ messages", async () => {
+    mockSession.user.role = "venue_owner"
+    mockEvent = { status: "published", kind: "event", ...over, organizer_org_id: "org-b" }
+    jest.requireMock("@/lib/feedback-digest").buildFeedbackDigest.mockResolvedValue({
+      ...emptyDigest(),
+      view: "venue",
+      counts: { positive: 8, neutral: "few", negative: "few" },
+      total: { atLeast: 10 },
+    })
+    const html = renderToStaticMarkup(await feedback())
+    expect(html).toContain("· 10+ messages")
+    expect(html).toMatch(/>8<\/b> positive/)
+    expect(html).toMatch(/>a few<\/b> neutral/)
+    expect(html).toMatch(/>a few<\/b>\s*negative/)
+    expect(html).toContain("Fewer than five messages were negative")
+    expect(html).toContain("bg-success")
+    expect(html).not.toContain("held back</b>")
   })
 
   it("shows no stars panel when nobody rated and nothing was classified", async () => {

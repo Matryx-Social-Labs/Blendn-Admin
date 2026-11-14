@@ -2,8 +2,7 @@ import Link from "next/link"
 import { IconLock } from "@tabler/icons-react"
 
 import { Panel } from "@/components/dashboard/kit"
-import { formatNumber } from "@/lib/dashboard-format"
-import type { FewCount, HeldTotal } from "@/lib/disclosure"
+import { countLabel as count, formatNumber, splitShares } from "@/lib/dashboard-format"
 import { eventClock } from "@/lib/event-phase"
 import type { EventInsights, Stage } from "@/lib/event-insights"
 import type { FeedbackDigest } from "@/lib/feedback-digest"
@@ -16,8 +15,6 @@ import { cn } from "@/lib/utils"
  * file only prints it, and never a number the server did not send.
  */
 
-/** A count as printed: a few is words, a held total its floor (`discloseGroup`). */
-const count = (c: FewCount | HeldTotal) => (c === "few" ? "a few" : typeof c === "number" ? formatNumber(c) : `${formatNumber(c.atLeast)}+`)
 
 const WAYS = [
   { key: "waves", one: "mutual wave", many: "mutual waves" },
@@ -98,26 +95,28 @@ function FunnelRow({ label, stage, whole }: { label: string; stage: Stage | null
 /** The night's mood, from the Feedback digest; the quotes stay on Feedback. */
 export function NightMoodPanel({ mood, live, eventId }: { mood: Pick<FeedbackDigest, "counts" | "total" | "categories">; live: boolean; eventId: string }) {
   const { positive, neutral, negative } = mood.counts
-  const total = mood.total ?? 0
+  const total = mood.total
   const top = mood.categories[0]
-  const width = (n: number | null) => `${total === 0 ? 0 : ((n ?? 0) / total) * 100}%`
+  const shares = splitShares([positive, neutral, negative])
   return (
     <Panel
       title={live ? "Mood — so far" : "Mood — whole night"}
-      action={<span className="shrink-0 text-[0.75rem] tabular-nums text-faint-foreground">{formatNumber(total)} classified msg{total === 1 ? "" : "s"}</span>}
+      action={<span className="shrink-0 text-[0.75rem] tabular-nums text-faint-foreground">{count(total)} classified msg{total === 1 ? "" : "s"}</span>}
       bodyClassName="gap-2.5 pt-3"
     >
       {total === 0 ? (
         <p className="text-[0.78rem] text-muted-foreground">Nothing in the room chat was classified.</p>
       ) : (
         <>
-          <div className="flex h-2 overflow-hidden rounded-full bg-surface-raised" aria-hidden>
-            <div className="bg-success" style={{ width: width(positive) }} />
-            <div className="bg-border-strong" style={{ width: width(neutral) }} />
-            <div className="bg-destructive" style={{ width: width(negative) }} />
-          </div>
+          {shares ? (
+            <div className="flex h-2 overflow-hidden rounded-full bg-surface-raised" aria-hidden>
+              <div className="bg-success" style={{ width: `${shares[0]}%` }} />
+              <div className="bg-border-strong" style={{ width: `${shares[1]}%` }} />
+              <div className="bg-destructive" style={{ width: `${shares[2]}%` }} />
+            </div>
+          ) : null}
           <p className="text-[0.78rem] tabular-nums text-muted-foreground">
-            {formatNumber(positive)} positive · {formatNumber(neutral)} neutral · {formatNumber(negative)} negative
+            {count(positive)} positive · {count(neutral)} neutral · {count(negative)} negative
           </p>
         </>
       )}

@@ -4,7 +4,7 @@ import { IconCalendar } from "@tabler/icons-react"
 
 import { DataTable, type Column } from "@/components/dashboard/data-table"
 import { EmptyState } from "@/components/dashboard/primitives"
-import type { FewCount } from "@/lib/disclosure"
+import { countLabel, splitShares } from "@/lib/dashboard-format"
 import type { VenueMood, VenueNightRow } from "@/lib/venue-nights"
 
 /**
@@ -55,25 +55,19 @@ const MOODS = [
   { word: "negative", className: "bg-destructive" },
 ] as const
 
-/** The width a "few" mood is drawn at: a nominal step, not its count (the count is not sent), as the host's ways bar. */
-const FEW_WIDTH = 2
-
-const few = (p: FewCount) => (p === "few" ? "a few" : String(p))
-
 /** The night's mood: the bar from the disclosed parts, and the same in words for a screen reader and on hover. */
 function MoodBar({ mood }: { mood: VenueMood | null }) {
   if (!mood) return <span className="text-faint-foreground">—</span>
-  // Every mood a few: nominal widths side by side would draw a split nobody measured.
-  if (mood.word === "a few messages") return <span className="text-muted-foreground">a few messages</span>
-  const widths = mood.parts.map((p) => (p === "few" ? FEW_WIDTH : p))
-  const total = widths.reduce((a, b) => a + b, 0)
-  const words = `${mood.word}: ${MOODS.map((m, i) => `${few(mood.parts[i])} ${m.word}`).join(", ")}`
+  // Every mood a few: nominal widths side by side would draw a split nobody measured (`splitShares`).
+  const shares = splitShares(mood.parts)
+  if (!shares) return <span className="text-muted-foreground">a few messages</span>
+  const words = `${mood.word}: ${MOODS.map((m, i) => `${countLabel(mood.parts[i])} ${m.word}`).join(", ")}`
   return (
     <span className="inline-flex" title={words}>
       <span className="sr-only">{words}</span>
       <span className="flex h-2 w-[110px] overflow-hidden rounded-full bg-surface-raised" aria-hidden>
         {MOODS.map((m, i) => (
-          <span key={m.word} className={m.className} style={{ width: `${(widths[i] / total) * 100}%` }} />
+          <span key={m.word} className={m.className} style={{ width: `${shares[i]}%` }} />
         ))}
       </span>
     </span>

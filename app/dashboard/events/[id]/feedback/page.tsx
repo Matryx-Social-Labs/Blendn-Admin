@@ -9,9 +9,8 @@ import { buildFeedbackDigest, QUOTES_PER_PAGE } from "@/lib/feedback-digest"
 
 import { eventTabsFor } from "../event-tabs"
 
-/** What a venue reads where a count is held back: not "under 5", which a lone survivor may not be. */
-const HELD_BACK = "held back"
 import { eventTitleFor } from "@/lib/dashboard-record-titles"
+import { countLabel, splitShares } from "@/lib/dashboard-format"
 
 import { CategoryBars } from "@/components/dashboard/charts"
 import { EmptyState, RatingBars } from "@/components/dashboard/primitives"
@@ -70,9 +69,10 @@ export default async function FeedbackPage({
   // every count of people held back under the floor.
   const digest = await buildFeedbackDigest(event, permissions.canEdit ? "host" : "venue", quotesPage)
 
+  // A venue's split is the "Nights here" row's (`moodSplit`): a few in words, a held total as its floor.
   const total = digest.total
-  const share = (n: number | null) => (!total || n === null ? 0 : (n / total) * 100)
-  const figure = (n: number | null) => (n === null ? HELD_BACK : n)
+  const { positive, neutral, negative } = digest.counts
+  const shares = splitShares([positive, neutral, negative])
   const topIssue = digest.categories[0]
 
   const ended = eventClock(digest.timezone).format(new Date(digest.endedAt), {
@@ -122,7 +122,7 @@ export default async function FeedbackPage({
       <EventHeader data={data} active="feedback" />
       <p className="text-[0.8125rem] text-muted-foreground">
         {`${digest.ended ? "Ended" : "Ends"} ${ended} · ${window}${
-          total === null ? " · counts held back" : total > 0 ? ` · ${total} message${total === 1 ? "" : "s"}` : ""
+          total === 0 ? "" : ` · ${countLabel(total)} message${total === 1 ? "" : "s"}`
         }`}
       </p>
 
@@ -153,31 +153,31 @@ export default async function FeedbackPage({
             question, and this answers it before a single word is read.
           */}
           <Panel bodyClassName="gap-2.5">
-            {total === null ? null : (
-            <div className="flex h-3 overflow-hidden rounded-full bg-surface-raised">
-              <div className="bg-success" style={{ width: `${share(digest.counts.positive)}%` }} />
-              <div className="bg-border-strong" style={{ width: `${share(digest.counts.neutral)}%` }} />
-              <div className="bg-destructive" style={{ width: `${share(digest.counts.negative)}%` }} />
-            </div>
-            )}
+            {shares ? (
+              <div className="flex h-3 overflow-hidden rounded-full bg-surface-raised">
+                <div className="bg-success" style={{ width: `${shares[0]}%` }} />
+                <div className="bg-border-strong" style={{ width: `${shares[1]}%` }} />
+                <div className="bg-destructive" style={{ width: `${shares[2]}%` }} />
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-muted-foreground">
               <span>
-                <b className="font-bold tabular-nums text-success">{figure(digest.counts.positive)}</b> positive
+                <b className="font-bold tabular-nums text-success">{countLabel(positive)}</b> positive
               </span>
               <span>
-                <b className="font-bold tabular-nums text-foreground">{figure(digest.counts.neutral)}</b> neutral
+                <b className="font-bold tabular-nums text-foreground">{countLabel(neutral)}</b> neutral
               </span>
               <span>
-                <b className="font-bold tabular-nums text-destructive">{figure(digest.counts.negative)}</b>{" "}
+                <b className="font-bold tabular-nums text-destructive">{countLabel(negative)}</b>{" "}
                 negative
               </span>
             </div>
             {/* The takeaway, stated rather than left to be inferred from a
                 chart — the point of classifying by category at all. */}
             <p className="max-w-[60ch] text-[0.8125rem] leading-relaxed text-muted-foreground">
-              {digest.counts.negative === null ? (
-                "The split is held back: in a room this size it could point at somebody."
-              ) : digest.counts.negative === 0 ? (
+              {negative === "few" ? (
+                "Fewer than five messages were negative, so how many is held back: in a room this size it could point at somebody."
+              ) : negative === 0 ? (
                 "Nothing negative was classified. Read the messages anyway — the classifier is cautious, not omniscient."
               ) : topIssue?.suppressed ? (
                 /* Below the disclosure floor the count is null and the quotes
@@ -194,7 +194,7 @@ export default async function FeedbackPage({
                 <>
                   The negatives are the takeaway, and{" "}
                   <b className="font-medium text-foreground">
-                    {topIssue.count} of {digest.counts.negative}
+                    {topIssue.count} of {countLabel(negative)}
                   </b>{" "}
                   are about{" "}
                   <b className="font-medium text-foreground">{topIssue.category.replace(/_/g, " ")}</b>.
