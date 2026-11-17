@@ -117,7 +117,7 @@ form says so.
 
 | | |
 |---|---|
-| Poster underneath, always | A buffering clip shows a photograph, never a black rectangle. It is also the floor a failed load falls back to |
+| Poster underneath until the first frame | A buffering clip shows its own still, never a black rectangle. The hero unmounts it once the clip draws (it is `contain`, so a poster left under a letterboxed clip shows in the bars: SCRUM-1066) |
 | One player at a time | A *paused* player still holds a decoder. The feed mounts only the active card; the lightbox only the visible page |
 | The hero preloads one page either side | Mounting on arrival meant open, buffer and first-frame all began after the swipe landed. Bounded to one extra decoder — a hero has one playlist, unlike a feed |
 | Posters carry `recyclingKey` | Without it `expo-image` can hand a page a recycled view still holding the previous picture |
@@ -132,11 +132,12 @@ the card sits on its poster for an extra round trip on every scroll past.
 manifest, the segmenter and the multiple renditions all cost more than they save
 at this length. Revisit if long-form video ever ships.
 
-**A poster is required.** `event_media.thumbnail_url` must be set for a video
-row. `lib/feedMedia.ts` refuses to play a clip it cannot poster, because the
-still is what the card shows while the first frame decodes — without one, the
-card is a black rectangle for the length of a round trip on a card that would
-have looked finished as a photograph. Extract frame 0 at upload time.
+**A poster is expected, and is never the cover.** `event_media.thumbnail_url`
+should be set for a video row: it is what shows while the first frame decodes.
+`lib/feedMedia.ts` uses it and nothing else — the event's cover is another
+picture at another ratio, and it showed around a letterboxed clip (SCRUM-1066).
+A clip with no poster shows the frame's dark surface until it plays. Extract
+frame 0 at upload time.
 
 **Muted, looping, one at a time.** The feed never plays sound; only the card the
 viewport has settled on mounts a player. See `FeedVideo` in the app repo for why
@@ -165,11 +166,10 @@ which is the exact failure mode a spec nothing checks against is prone to.
 
 Two things the frames should assume, because the code now enforces them:
 
-**A clip without a poster may not be shown at all.** `feedClip` resolves
-`thumbnail_url` → the event's `cover_image_url` → *nothing*, and "nothing" means
-no clip rather than a card that flashes black. So any frame showing video on a
-card is also, implicitly, a frame requiring a still behind it. The organizer
-form asks for the poster and says so.
+**A clip without a poster shows a dark frame until it plays.** `feedPlaylist`
+takes the clip's own `thumbnail_url` and never the event's cover (SCRUM-1066),
+so any frame showing video is also, implicitly, a frame requiring its own still
+behind it. The organizer form asks for the poster and says so.
 
 **Square masters, always.** Every slot crops from one square — the widest is
 2.6× the aspect of the narrowest, which is why there is no single rectangle that

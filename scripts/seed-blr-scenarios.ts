@@ -1588,8 +1588,10 @@ async function seedCity(city: SeedCity, clock: Clock, events: EventSpec[], venue
     await db.event_media.deleteMany({ where: { event_id: event.id } })
     await db.event_media.createMany({
       data: [
+        // No poster: only the clip's own first frame is right (docs/MEDIA.md), and the cover is another picture at
+        // another ratio that showed around the letterboxed clip in the app's hero (SCRUM-1066).
         ...(media.clip
-          ? [{ event_id: event.id, type: "video" as const, url: media.clip.url, thumbnail_url: media.cover.url, title: media.clip.alt, description: "Last week's set", order: 0 }]
+          ? [{ event_id: event.id, type: "video" as const, url: media.clip.url, thumbnail_url: null, title: media.clip.alt, description: "Last week's set", order: 0 }]
           : []),
         ...media.gallery.map((g, i) => ({
           event_id: event.id,
