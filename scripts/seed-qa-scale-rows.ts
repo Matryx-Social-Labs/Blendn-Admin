@@ -249,7 +249,12 @@ interface EventSpec {
   end: Date
   kind: "event" | "venue_day"
   status: "published" | "completed"
+  /** Listed by Blendn and unclaimed (`curated_at` set, `claimed_at` null): the claim card's case. */
+  curated?: boolean
 }
+
+/** How many of the upcoming nights are claimable. */
+const CLAIMABLE_UPCOMING = 3
 
 /** 18:30 IST start, 3 hours: past nights, then the coming ones; 06:00 IST to 06:00 for each visit's venue day. */
 export function eventSpecs(now: Date): EventSpec[] {
@@ -268,6 +273,8 @@ export function eventSpecs(now: Date): EventSpec[] {
     ...night(i + 1),
     kind: "event",
     status: "published",
+    // The first few are listed by Blendn and unclaimed, so the app's claim card is drivable here too (client SCRUM-1074).
+    curated: i < CLAIMABLE_UPCOMING,
   }))
   const visits = Array.from({ length: p.visits }, (_, i): EventSpec => ({
     slug: visitSlug(i + 1),
@@ -303,6 +310,7 @@ export function eventRows(now: Date, hostId: string, systemUserId: string) {
     visibility: s.kind === "venue_day" ? "unlisted" : "public",
     kind: s.kind,
     organizer_id: s.kind === "venue_day" ? systemUserId : hostId,
+    curated_at: s.curated ? ago(now, 21 * DAY) : null,
     created_at: ago(now, 90 * DAY),
   }))
   const occurrences: Prisma.event_occurrencesCreateManyInput[] = specs.map((s) => ({
