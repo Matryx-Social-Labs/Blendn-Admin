@@ -2643,6 +2643,12 @@
       "mutation": "lib/lobby-retention.ts: (C1) the blanking UPDATE not run; (C2) the no-message-left NOT EXISTS made always true; (C3) UPDATE replaced by DELETE of the member rows; (C4) `description: null` dropped from the report update; (C5) the `reviewed_at < since` bound dropped; (C6) the predicate back to excerpt-only; (C7) the room's closesAt bound dropped from membersToBlank.",
       "observed": "C1 2 of 19 failing; C2 1 (the held author's name went); C3 3 (member rows and the regular's rooms); C4 1; C5 1 (the 10-day dismissal lost its words); C6 1 (a description-only report kept it); C7 1 (the recent room's name went). Restored; 19/19.",
       "date": "2026-11-06"
+    },
+    "seed-clip-poster.test.ts": {
+      "guards": "SCRUM-1066: the staging seeds (seed-blr-scenarios.ts, seed-qa.ts) never write the event's cover as a clip's thumbnail_url; in the app's contain hero the cover showed around the letterboxed clip.",
+      "mutation": "(C1) seed-blr-scenarios.ts video row back to `thumbnail_url: media.cover.url`; (C2) seed-qa.ts refresh update back to `thumbnail_url: coverUrl`.",
+      "observed": "C1: 2 of 4 failing (blr's 'never writes the cover', and its control, which then finds no null); C2: 1 of 4 failing (qa 'never writes the cover'). Both seeds at origin/dev: 4 of 4. Restored; 4/4.",
+      "date": "2026-11-17"
     }
   },
   "grandfathered": [
