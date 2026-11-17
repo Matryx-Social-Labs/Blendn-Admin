@@ -2647,7 +2647,7 @@
     "seed-clip-poster.test.ts": {
       "guards": "SCRUM-1066: the staging seeds (seed-blr-scenarios.ts, seed-qa.ts) never write the event's cover as a clip's thumbnail_url; in the app's contain hero the cover showed around the letterboxed clip.",
       "mutation": "(C1) seed-blr-scenarios.ts video row back to `thumbnail_url: media.cover.url`; (C2) seed-qa.ts refresh update back to `thumbnail_url: coverUrl`.",
-      "observed": "C1: 1 of 4 failing (blr 'never writes the cover'); C2: 1 of 4 failing (qa 'never writes the cover'). Both seeds at origin/dev: 4 of 4. Restored; 4/4.",
+      "observed": "C1: 2 of 4 failing (blr's 'never writes the cover', and its control, which then finds no null); C2: 1 of 4 failing (qa 'never writes the cover'). Both seeds at origin/dev: 4 of 4. Restored; 4/4.",
       "date": "2026-11-17"
     }
   },
