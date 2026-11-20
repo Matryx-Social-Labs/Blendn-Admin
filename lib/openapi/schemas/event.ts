@@ -699,6 +699,11 @@ export const MatchListResponseSchema = z
         youLiked: z.boolean(),
         youWaved: z.boolean().describe("You waved at them here (✓ Waved). One wave per person per room, never again."),
         wavedAtYou: z.boolean().describe("They waved at you here (Wave back). Waves only: a like is never read for this."),
+        wavedAtYouAt: z
+          .string()
+          .datetime()
+          .nullable()
+          .describe("When they waved at you here, so the card says it after a restart. Null when they have not, and to a host. Additive."),
         conversationId: z
           .string()
           .uuid()

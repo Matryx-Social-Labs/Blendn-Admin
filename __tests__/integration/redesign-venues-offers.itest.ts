@@ -449,12 +449,12 @@ describe("an offer names its venue's type, for the pass's tile", () => {
       await db.venue_offer_sends.create({ data: { offer_id: offer.id, venue_id: venueId, user_id: p.id } })
       return offer.id
     }
-    const bar = await sendAt(await venue("Typed bar", { venue_type: "pub_bar" }), "A free pint")
+    const bar = await sendAt(await venue("Typed bar", { venue_type: "pub_bar", timezone: "America/Toronto" }), "A free pint")
     const untyped = await sendAt(await venue("Untyped"), "A free coffee")
 
     const opened = await body(await get(offerOpen, `/api/mobile/offers/${bar}`, p, { offerId: bar }))
     expect(opened.status).toBe(200)
-    expect(opened.data.offer.venue).toEqual({ id: expect.any(String), name: expect.stringContaining("Typed bar"), venueType: "pub_bar" })
+    expect(opened.data.offer.venue).toEqual({ id: expect.any(String), name: expect.stringContaining("Typed bar"), venueType: "pub_bar", timezone: "America/Toronto" })
 
     // Control: a venue with no type says so, rather than the field being dropped or defaulted.
     const bare = await body(await get(offerOpen, `/api/mobile/offers/${untyped}`, p, { offerId: untyped }))
@@ -463,5 +463,8 @@ describe("an offer names its venue's type, for the pass's tile", () => {
     const listed = await body(await get(offersList, "/api/mobile/offers", p))
     const types = Object.fromEntries(listed.data.offers.map((o: { id: string; venue: { venueType: unknown } }) => [o.id, o.venue.venueType]))
     expect(types).toEqual({ [bar]: "pub_bar", [untyped]: null })
+    // The venue's zone, for the pass's day and clock (Flow 4 #535): not the phone's.
+    const zones = Object.fromEntries(listed.data.offers.map((o: { id: string; venue: { timezone: unknown } }) => [o.id, o.venue.timezone]))
+    expect(zones).toEqual({ [bar]: "America/Toronto", [untyped]: "UTC" })
   })
 })

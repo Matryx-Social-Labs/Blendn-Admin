@@ -105,11 +105,16 @@ export async function placeRsvp(
 export async function promoteFromWaitlist(eventId: string): Promise<string[]> {
   const event = await db.events.findUnique({
     where: { id: eventId },
-    select: { max_capacity: true, title: true, status: true },
+    select: { max_capacity: true, title: true, status: true, start_time: true, end_time: true },
   })
   if (!event?.max_capacity) return []
   // A night that was called off has no seat to give: promoting would push "a place opened up" for it (SCRUM-892).
   if (event.status === "cancelled") return []
+  // Over: nobody is promoted into a night that has ended (SCRUM-1074 (1)).
+  const now = new Date()
+  if (event.end_time <= now) return []
+  // Started: the door already takes waitlisted people, so the seat is theirs without a push.
+  const started = event.start_time <= now
 
   const goingCount = await db.event_rsvps.count({
     where: { event_id: eventId, status: "going" },
@@ -135,7 +140,7 @@ export async function promoteFromWaitlist(eventId: string): Promise<string[]> {
     if (count > 0) promoted.push(row.user_id)
   }
 
-  for (const userId of promoted) {
+  for (const userId of started ? [] : promoted) {
     // Fire and forget: a push that fails must not roll back a seat someone now
     // holds. They will see it in the app either way.
     void sendPushNotification({

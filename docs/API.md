@@ -1016,7 +1016,13 @@ names both of them to anyone who was there. `attendees` still reports.
 When the event has a `max_capacity` and is already full, a `going` request comes
 back as **`waitlisted`** rather than being refused. Releasing a seat — cancelling,
 or moving to `maybe`/`not_going` — promotes whoever has waited longest, and they
-get a push.
+get a push. Once the event has started they are promoted with no push (the door
+already takes waitlisted people); after its end nobody is promoted.
+
+**Checked in, an RSVP is not withdrawn.** `DELETE /events/:eventId/rsvp` and a
+`not_going` answer **409** `errorCode: CONFLICT` with `reasonCode:
+ALREADY_CHECKED_IN` ("You’re checked in here. Check out first.") while the caller
+is checked in to the event; nothing changes. Check out first.
 
 An event with no stated capacity is unbounded, exactly as before.
 
@@ -1173,14 +1179,18 @@ back, or a like of yours from before). After the room closes: `open: false`, an
 empty list. A host or staff: `403 NOT_CHECKED_IN`.
 
 `GET /waves` — Banter's pinned rows: `{ rooms: [{ eventId, waiting, latest, latestFaces }] }`,
-one per open room with an unanswered wave, `latest` shaped as above.
+one per open room with an unanswered wave, `latest` shaped as above. Open counts
+from the run's last held day: a festival whose last day was called off closes
+with the day before, whatever its `end_time` says.
 `latestFaces` is the newest three waiting, newest first, for the row's pile:
 `{ userId, displayName }` only (the room handle and the roster's name), under
 the list's rules. `latest` stays for installed builds. Never a room
 you run or host or were banned from. At most 20 rooms.
 
 Deck cards (`GET .../matches`) carry `youWaved` and `wavedAtYou` (waves only,
-never a like) for Wave / Wave back / ✓ Waved, and `conversationId` for Say hi:
+never a like) for Wave / Wave back / ✓ Waved, `wavedAtYouAt` (when they waved,
+ISO, so "Waved at you · 9:40 PM" survives a restart; null without one and to a
+host), and `conversationId` for Say hi:
 the conversation your mutual here opened, so the card reaches it after a
 restart. The person card (`GET /users/:handle`, an event room handle) carries the
 same as `wave: { conversationId }`, absent when there is none. Only when a wave
@@ -1237,7 +1247,7 @@ nothing. When nothing maps, `lens` is `null` and the app draws the plain card.
 
 A ban closes the room's people, not only its chat. To a member a host banned
 from an event's room, every one of these answers as the chat does — 403
-`USER_BANNED`, "The organizer has removed you from this room." — and opens
+`USER_BANNED`, "The host has removed you from this room." — and opens
 again when the ban is lifted:
 
 `GET /events/:eventId/checkins`, `/matches`, `/people`, `/crews`,
@@ -2371,7 +2381,7 @@ turned up, or who left an hour ago, has a room whose event is mid-flight.
 
 **The shape is the stored row, snake_case** — `created_at`, `is_edited`, `edited_at`, `parent_id`, `client_id`, `deleted_at`, `deleted_by`, `moderation_status`, plus `moderation_hidden`, `user`, `reactions` (tallies), `parent_message` (`{ id, type, metadata, content, user: { id, name } }` or null) and `_count.replies`. It is not the camelCase message of `GET /events/:eventId/chat`; `pagination` is `{ hasMore, nextCursor }`. The response also carries `status` (the room's state) and `write: { allowed, reason, reasonCode, message }` — whether you may send now, for every kind of room (event, crew, Mix, Lobby post), the answer `POST` gives (`reason` is `locked`, `archived`, `window_closed`, `not_open_yet`, `hidden`, `not_live`, `muted`, `banned`, `left` or `not_member`; `reasonCode` equals it; `message` is a sentence for a closed room and null for a mute, ban or leave). `GET /events/:eventId/chat`'s `write` carries `reasonCode` too. In a **crew's** room `user.image` (and the participants' `avatar`, and `userImage` on the socket's `chat:message`) is the member's photo, except for a member who chose to keep themselves anonymous; no other kind of room sends one.
 
-**Who may read (SCRUM-205):** an `active`, `muted` or `left` member. A `banned` member gets `403 USER_BANNED` — "The organizer has removed you from this room." when a person pressed Ban. A ban nobody pressed is the one a suspension leaves behind, and only a restored account can reach this point, so it reads "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it." Checking in lifts that ban (SCRUM-291). A draft or deleted event's room (or a closed room of any other kind) answers `404 NOT_FOUND`; when the caller has a membership row it also carries `reasonCode: "ROOM_CLOSED"`, `roomKind` and `roomName`, so the app can say what closed. A caller with no membership row gets the bare 404, so a guessed id never learns a name. The same rule (`roomReadDenial`, `lib/chat-window.ts`) governs `GET …/participants`, `GET /events/:eventId/chat` and the socket's `join:chat`; before it, the three GETs served the room to anybody with a membership row, banned included.
+**Who may read (SCRUM-205):** an `active`, `muted` or `left` member. A `banned` member gets `403 USER_BANNED` — "The host has removed you from this room." when a person pressed Ban. A ban nobody pressed is the one a suspension leaves behind, and only a restored account can reach this point, so it reads "Your account was restored, but you are not back in this room yet. Check in at the event to rejoin it." Checking in lifts that ban (SCRUM-291). A draft or deleted event's room (or a closed room of any other kind) answers `404 NOT_FOUND`; when the caller has a membership row it also carries `reasonCode: "ROOM_CLOSED"`, `roomKind` and `roomName`, so the app can say what closed. A caller with no membership row gets the bare 404, so a guessed id never learns a name. The same rule (`roomReadDenial`, `lib/chat-window.ts`) governs `GET …/participants`, `GET /events/:eventId/chat` and the socket's `join:chat`; before it, the three GETs served the room to anybody with a membership row, banned included.
 
 ### POST /chat/groups/:chatGroupId/messages
 ```json
@@ -4062,7 +4072,7 @@ Chat is unaffected: posting a message is its own choice to be seen.
 |--------|----------|-------------|
 | GET | `/users/:userId` | Get user profile. `:userId` may be a room handle, echoed back as `id`, and is then answered in that room's terms — see Room handles. When `identityVisible` is true it also carries `connection: { conversationId, request: "sent" \| "received" \| null, youRevealed, theyRevealed }` — your open conversation, any pending message request between you, and who has revealed in it as `GET /conversations/:id` says (both false with no open conversation; additive, for the one-sided copy); absent otherwise, so the side that has not been revealed to learns nothing |
 | POST | `/users/:userId/block` | Block/unblock user (`DELETE` to unblock) |
-| GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their Lobby post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow. Each row also carries `seen_as` (the pseudonym you were shown for them when you blocked — a room's, the Lobby's or a match's, never a real name; null when none was shown or the block predates 2026-11-20 outside a match), `seen_in` (where you blocked from: the event's title, a venue day's venue, or a crew's, Mix's or post's room name; null when not recorded) and `account_deleted`. `?q=` (1–100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym and a real name **only where this list would show it** — a hidden name finds nobody — with `pagination.totalCount` the number of matches. 60 a minute |
+| GET | `/users/blocked` | The people you blocked. `blocked_id` is an **opaque ref to the block** (`bk_…`), not their account id — somebody blocked by their Lobby post or room handle was never shown one, and this list must not be where it arrives. Send it back to `DELETE /users/:userId/block` to unblock; only a block you made is removed. A raw id still unblocks, for older clients, on your own block only. Name and photo appear only where the identity rules allow. Each row also carries `seen_as` (the pseudonym you were shown for them when you blocked — a room's, the Lobby's or a match's, never a real name; null when none was shown or the block predates 2026-11-20 outside a match), `seen_in` (where you blocked from: the event's title, a venue day's venue, or a crew's, Mix's or post's room name — a message request sent from a Lobby room keeps that room's name; null when not recorded) and `account_deleted`. `?q=` (1–100 characters, trimmed; longer is 400) searches on the server, case-insensitively, over `seen_as`, `seen_in`, a match's pseudonym and a real name **only where this list would show it** — a hidden name finds nobody — with `pagination.totalCount` the number of matches. 60 a minute |
 | GET | `/users/:userId/favorites` | Get your saved events, each with `visibility` — your own id only (403 otherwise); drafts are dropped, cancelled ones stay with `status` set (SCRUM-176); also `changedAt`/`changedFields`, as on `GET /me/rsvps` |
 | GET | `/profiles/:userId` | Get a profile. Your own carries `email` and the whole `profile` row except `date_of_birth` (`age` derived) — `name`, `gender`, `interested_in`, `intent_default`, `reveal_by_default`, `blur_photo`, `interests`, `created_at`, `updated_at` included, and `expertise` as slugs. Anybody else's `profile` is `id, age, onboarded, location, interests, work_field, expertise` (labels), plus `bio, occupation, education, photos` if you can see who they are, else `blurPhoto`; no `email`, and `image` only if you can see who they are |
 | PUT | `/profiles/:userId` | Update profile |
@@ -4912,7 +4922,7 @@ a yes given in the app. Without it the offer still arrives — the bell line and
 
 ```json
 { "success": true, "data": { "offers": [ {
-  "id": "…", "venue": { "id": "…", "name": "Toit", "venueType": "brewery" },
+  "id": "…", "venue": { "id": "…", "name": "Toit", "venueType": "brewery", "timezone": "Asia/Kolkata" },
   "text": "First drink on the house, Thu–Sun before 10",
   "sentAt": "2026-10-11T12:00:00.000Z", "redeemedAt": null, "endsAt": "2026-10-18T12:00:00.000Z",
   "state": "live"
@@ -4923,8 +4933,9 @@ Newest first, at most 50. `state`: `live` (the pass can be shown), `redeemed`,
 `ended` (past its end, ended by an admin, or the venue was retired or changed
 hands). Reading the list opens nothing. `venue.venueType` is the venue's type
 (a `venue_type` value, as on `GET /venues/:venueId`), so the pass can draw its
-tile; null when the venue has none. The same `venue` comes on
-`GET /offers/:offerId`.
+tile; null when the venue has none. `venue.timezone` is the venue's IANA zone,
+so the pass's day and clock ("Valid today, till 11 PM") are the venue's, never
+the phone's. The same `venue` comes on `GET /offers/:offerId`.
 
 ### GET /offers/:offerId — the offer and its offer code
 
