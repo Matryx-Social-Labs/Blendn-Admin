@@ -3692,6 +3692,9 @@ model friend_requests {
   /// both reveal, which is also when the push goes out. Null for every request
   /// that was never held.
   held_at      DateTime? @db.Timestamptz(6)
+  /// Where the latest ask came from: `link` (an invite link) or `match` (a match both revealed in). Null for a
+  /// request from before it was recorded (migration 20261120170000). CHECK `friend_requests_via_known` (migration SQL).
+  via          String?
   created_at   DateTime  @default(now()) @db.Timestamptz(6)
 
   sender    User @relation("FriendRequestSender", fields: [sender_id], references: [id], onDelete: Cascade)

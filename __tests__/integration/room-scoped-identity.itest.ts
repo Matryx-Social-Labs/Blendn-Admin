@@ -222,6 +222,8 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect(res.body.data).toEqual({
       id: hC,
       name: pseudonymAtC,
+      // The same name as a contract (SCRUM-1046): it IS her room pseudonym.
+      pseudonym: pseudonymAtC,
       age: 22,
       location: expect.any(String),
       isOwnProfile: false,
@@ -237,6 +239,7 @@ describe("revealed at A and B, anonymous at C, the viewer at all three", () => {
     expect(res.body.data).toEqual({
       id: hC,
       name: pseudonymAtC,
+      pseudonym: pseudonymAtC,
       profile: { id: hC, age: 22, onboarded: true, location: expect.any(String) },
     })
     const wire = JSON.stringify(res.body)

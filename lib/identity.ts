@@ -581,7 +581,10 @@ async function isFriendUnblocked(viewerId: string, otherId: string): Promise<boo
  * door), which the caller answers as it always has. The card is a room card,
  * not an identity: no photos, bio or interests, and a block still beats it.
  */
-export async function nonEventRoomCard(viewerId: string, ref: string): Promise<{ userId: string; name: string } | null> {
+export async function nonEventRoomCard(
+  viewerId: string,
+  ref: string
+): Promise<{ userId: string; name: string; pseudonym: boolean } | null> {
   const opened = openRoomHandle(ref)
   if (!opened || typeof opened.scope === "string" || opened.scope.kind === "dm") return null
   const { kind, groupId } = opened.scope
@@ -599,7 +602,8 @@ export async function nonEventRoomCard(viewerId: string, ref: string): Promise<{
   })
   if (seated < 2) return null
   const name = (await namesInRoom({ id: groupId, kind }, [opened.userId])).get(opened.userId)
-  return name ? { userId: opened.userId, name } : null
+  // A crew's room names people by first name; every other kind here by a pseudonym.
+  return name ? { userId: opened.userId, name, pseudonym: kind !== "crew" } : null
 }
 
 /**

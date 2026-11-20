@@ -204,6 +204,12 @@ export const ProfileResponseSchema = z
       .string()
       .nullable()
       .describe("`Attendee` when you cannot see who they are; their pseudonym there through a room handle that keeps them anonymous."),
+    pseudonym: z
+      .string()
+      .optional()
+      .describe(
+        "SCRUM-1046: the same name as `name`, present exactly when it IS a room pseudonym (a room handle that keeps them anonymous, a Mix's or a Lobby post's card). Never a real name; absent for a raw id, a named card, a crew's card and anybody with no pseudonym in that room."
+      ),
     image: z.string().nullable().optional().describe("Absent when you cannot see who they are."),
     createdAt: z
       .string()
@@ -335,6 +341,12 @@ export const UserPublicProfileSchema = z
         "The `userId` path segment as sent — a room handle in, the same handle out — so the real id behind a handle is never echoed. Your own profile answers with your own id.",
     }),
     name: z.string(),
+    pseudonym: z
+      .string()
+      .optional()
+      .describe(
+        "SCRUM-1046: the same name as `name`, present exactly when it IS a room pseudonym (a room handle that keeps them anonymous, a Mix's or a Lobby post's card). Never a real name; absent for a raw id, a named card, a crew's card and anybody with no pseudonym in that room (whose `name` is then \"Attendee\")."
+      ),
     friend: FriendOfferSchema.optional().describe(
       "Only on somebody else you may see (`identityVisible`), under the same rule as `GET /profiles/{userId}`; never your own or a card a room keeps anonymous."
     ),

@@ -415,8 +415,8 @@ async function retried<T>(run: () => Promise<T>, attempts = 6): Promise<T> {
 /** 835: every host befriends the driver and makes three crews that invite them, through `createCrew`; a re-run renews through `inviteToCrew`. */
 async function crewInvites(driverId: string, hostIds: string[]) {
   for (const [h, hostId] of hostIds.entries()) {
-    await retried(() => requestFriend(hostId, driverId))
-    if ((await retried(() => requestFriend(driverId, hostId))) !== "friends") throw new Error(`${EMAIL(HOSTS[h].n)} and the driver did not become friends`)
+    await retried(() => requestFriend(hostId, driverId, "link"))
+    if ((await retried(() => requestFriend(driverId, hostId, "link"))) !== "friends") throw new Error(`${EMAIL(HOSTS[h].n)} and the driver did not become friends`)
     for (let k = 0; k < CREWS_PER_HOST; k++) {
       const name = CREW_NAME(h, k)
       const crew = await db.crews.findFirst({ where: { created_by: hostId, name, dissolved_at: null }, select: { id: true } })

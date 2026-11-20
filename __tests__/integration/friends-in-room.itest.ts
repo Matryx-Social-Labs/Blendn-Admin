@@ -272,8 +272,8 @@ describe("what a friend's handle answers, byte for byte as an unlisted stranger 
     expect((await like(eventId, a, roomHandle(eventId, b.id))).body.data).toEqual({ mutual: false })
     expect(await db.event_likes.count({ where: { liker_id: a.id, liked_id: b.id } })).toBe(1)
 
-    expect(await requestFriend(a.id, b.id)).toBe("requested")
-    expect(await requestFriend(b.id, a.id)).toBe("friends")
+    expect(await requestFriend(a.id, b.id, "link")).toBe("requested")
+    expect(await requestFriend(b.id, a.id, "link")).toBe("friends")
     expect(await db.event_likes.count({ where: { OR: [{ liker_id: a.id }, { liker_id: b.id }] } })).toBe(0)
 
     await unfriend(a.id, b.id)
@@ -469,8 +469,8 @@ describe("an ended friendship keeps the pair apart for 24 hours (B4, D17)", () =
     // Re-friending deletes the row; blocking writes none.
     await unfriend(viewer.id, ex.id) // no friendship now: writes nothing new
     expect(await db.ended_friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } } })).not.toBeNull() // the old one, untouched
-    expect(await requestFriend(viewer.id, ex.id)).toBe("requested")
-    expect(await requestFriend(ex.id, viewer.id)).toBe("friends")
+    expect(await requestFriend(viewer.id, ex.id, "link")).toBe("requested")
+    expect(await requestFriend(ex.id, viewer.id, "link")).toBe("friends")
     expect(await db.ended_friendships.findUnique({ where: { user1_id_user2_id: { user1_id, user2_id } } })).toBeNull()
   })
 
