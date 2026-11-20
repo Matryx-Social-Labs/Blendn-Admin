@@ -1,4 +1,6 @@
-import { byName, letterOf, parseFrom, sortByName } from "@/lib/friends-by-name"
+import { byName, letterOf, parseFrom } from "@/lib/friends-by-name"
+
+const sortByName = <T extends { userId: string; name: string }>(rows: T[]): T[] => (byName(rows, { limit: 1000 }) as { items: T[] }).items
 
 const row = (name: string, userId = name) => ({ userId, name })
 

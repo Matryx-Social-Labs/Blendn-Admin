@@ -41,8 +41,21 @@ const InviteSchema = z
   .openapi("FriendInvite")
 
 const RequestItemSchema = z
-  .object({ id: z.string().uuid(), person: PersonSchema, createdAt: z.string() })
+  .object({
+    id: z.string().uuid(),
+    person: PersonSchema,
+    createdAt: z.string(),
+    via: z
+      .enum(["link", "match"])
+      .nullable()
+      .optional()
+      .describe(
+        "Incoming rows only: `link` (they opened your invite link), `match` (a match you both revealed in), null for a request made before the source was recorded. A withdrawn request asked again takes the new ask's source."
+      ),
+  })
   .openapi("FriendRequestItem")
+
+const LetterCountSchema = z.object({ letter: z.string(), count: z.number().int() }).openapi("FriendLetterCount")
 
 registry.registerPath({
   method: "get",
@@ -54,9 +67,19 @@ registry.registerPath({
     "`count` and `pagination.totalCount` are then the filtered total, and it combines with `limit` and `cursor`. A longer `q` is 400. " +
     "Newest first, a page at a time (`?limit=`, `?cursor=`: without `limit` or `cursor` up to 200, otherwise default 100, 1-100), with the count the Me tab shows: " +
     "`count` and `pagination.totalCount` are the whole list, not the page. Real names and photos: both people said yes. " +
-    "A blocked person is left out of the query, so a page is full.",
+    "A blocked person is left out of the query, so a page is full. " +
+    "`?order=name` (Flow 7 1-A): A–Z under the app's letter rule — Latin A–Z with accents folded, then each other script's first letter in its own order, then `#` for a name starting with no letter; " +
+    "inside a letter by name (accent- and case-blind), then id — with `letters`: every head and its count over the whole list (after `q`), whatever the page. " +
+    "Page by its own `nextCursor`, or start at `?from=<letter>` (one letter or `#`): the first friend under that letter or the next one that has any. " +
+    "`cursor` with `from`, an unknown `order` or a `from` that is not one letter is 400.",
   security: bearerAuth,
-  request: { query: ListQuerySchema.extend({ q: z.string().max(40).optional().describe("A word-prefix search of the friends' names. 1-40 characters.") }) },
+  request: {
+    query: ListQuerySchema.extend({
+      q: z.string().max(40).optional().describe("A word-prefix search of the friends' names. 1-40 characters."),
+      order: z.enum(["newest", "name"]).optional().describe("`newest` (default) or `name` (A–Z with `letters`)."),
+      from: z.string().optional().describe("`order=name` only: one letter (case and accents folded) or `#`. Not with `cursor`."),
+    }),
+  },
   responses: {
     200: {
       description: "Friends",
@@ -66,6 +89,7 @@ registry.registerPath({
             z.object({
               friends: z.array(PersonSchema.extend({ since: z.string() })),
               count: z.number().int(),
+              letters: z.array(LetterCountSchema).optional().describe("`order=name` only: every letter head in display order, with its count."),
               pagination: ListPaginationSchema,
             })
           ),

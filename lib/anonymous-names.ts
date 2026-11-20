@@ -229,11 +229,16 @@ export async function pseudonymsForEvent(eventId: string, userIds: readonly stri
  * the same reason.
  */
 export async function roomPseudonymOf(eventId: string, userId: string): Promise<string> {
+  return (await roomPseudonymOrNull(eventId, userId)) || "Attendee"
+}
+
+/** `roomPseudonymOf` without the fallback: null when they hold no pseudonym in that room. */
+export async function roomPseudonymOrNull(eventId: string, userId: string): Promise<string | null> {
   const member = await db.chat_group_members.findFirst({
     where: { chat_group: { event_id: eventId }, user_id: userId },
     select: { anonymous_name: true },
   })
-  return member?.anonymous_name || "Attendee"
+  return member?.anonymous_name || null
 }
 
 /**

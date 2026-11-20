@@ -41,13 +41,6 @@ function compare(a: Keyed, b: Keyed): number {
   return compareHeads(a.head, b.head) || names.compare(a.name, b.name) || (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0)
 }
 
-export function sortByName<T extends { userId: string; name: string }>(rows: readonly T[]): T[] {
-  return rows
-    .map((row) => ({ row, key: { head: letterOf(row.name), name: row.name, userId: row.userId } }))
-    .sort((a, b) => compare(a.key, b.key))
-    .map(({ row }) => row)
-}
-
 /** `?from=`: one letter (folded as a name's first letter is) or "#". Anything else is refused. */
 export function parseFrom(raw: string | null): string | undefined | "bad_from" {
   if (raw === null) return undefined

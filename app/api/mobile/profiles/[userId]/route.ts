@@ -21,7 +21,7 @@ import { expertiseLabels, pruneExpertise } from "@/lib/expertise"
 import { blockedEitherWay } from "@/lib/conversations"
 import { friendOfferFor } from "@/lib/friend-offer"
 import { identityForRef, nonEventRoomCard } from "@/lib/identity"
-import { roomPseudonymOf } from "@/lib/anonymous-names"
+import { roomPseudonymOrNull } from "@/lib/anonymous-names"
 import { citySlugFor, cityCatalogue } from "@/lib/cities"
 import { profileForSelfResponse } from "@/lib/self-profile"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -139,9 +139,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
      * `blurPhoto` is one stored URL for every room they are in.
      */
     if (card || (room && !identified)) {
+      // `pseudonym` only when the name IS a room pseudonym (SCRUM-1046): never for a crew's first name, never "Attendee".
+      const pseudonym = card ? (card.pseudonym ? card.name : null) : await roomPseudonymOrNull(room!, userId)
       return successResponse({
         id: ref,
-        name: card ? card.name : await roomPseudonymOf(room!, userId),
+        name: card ? card.name : (pseudonym ?? "Attendee"),
+        ...(pseudonym !== null && { pseudonym }),
         profile: p
           ? { id: ref, age: profileAge, onboarded: p.onboarded, location: normalizedLocation }
           : null,

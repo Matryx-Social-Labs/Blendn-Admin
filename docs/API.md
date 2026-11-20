@@ -421,11 +421,14 @@ an opaque, url-safe string. Field names and shapes did not change.
   on `friends_see_me_in_rooms`. A reveal at another event, a mutual like or an
   open conversation does not name them through this room's handle — a raw id
   still answers as before. For somebody the room keeps anonymous,
-  `GET /users/:userId` returns only `{ id, name, age, location, isOwnProfile,
-  identityVisible: false }` with `name` their pseudonym in that room;
-  `GET /profiles/:userId` returns only `{ id, name, profile: { id, age,
+  `GET /users/:userId` returns only `{ id, name, pseudonym, age, location,
+  isOwnProfile, identityVisible: false }` with `name` their pseudonym in that room;
+  `GET /profiles/:userId` returns only `{ id, name, pseudonym, profile: { id, age,
   onboarded, location } }`; and `GET /profiles/:userId/interests` returns an
-  empty list. The same rule decides the 409-or-201 answer of
+  empty list. `pseudonym` (SCRUM-1046, 2026-11-20) is that same name as a
+  contract: present exactly when `name` IS a room pseudonym, so it is never a
+  real name, never on a raw id's answer or a named card, and absent (with
+  `name: "Attendee"`) for somebody holding no pseudonym in that room. The same rule decides the 409-or-201 answer of
   `POST /message-requests` and whether `POST /friends/requests` is refused.
   Otherwise `GET /users/:userId` also sends `work_field`, and, when
   `identityVisible` is false, `blurPhoto` (the stored derivative) in place of
@@ -443,7 +446,8 @@ an opaque, url-safe string. Field names and shapes did not change.
   identityVisible: false }` and `GET /profiles/:userId` the `{ id, name,
   profile: { id, age, onboarded, location } }` subset, with `name` the room's own
   name for them: a crew's first name only, a Mix's or a Lobby post's pseudonym.
-  No photos, bio or interests. A block either way is a 404.
+  `pseudonym` repeats the name for a Mix's or a Lobby post's card, never for a
+  crew's (a first name). No photos, bio or interests. A block either way is a 404.
 - `GET /users/:userId` also sends `sharedInterests: string[]` (the names you both
   picked) for somebody you may see (SCRUM-858), `interests: []` (the key stays)
   when you may not (SCRUM-827), and `stats.savedCount` on your own profile: how
@@ -465,6 +469,33 @@ an opaque, url-safe string. Field names and shapes did not change.
   own profile, which answers with your id.
 - Handles are keyed to the server secret: rotating `NEXTAUTH_SECRET` retires
   every handle a client holds. Re-fetch the room rather than caching them.
+
+---
+
+### GET /me/preview
+
+"See as others do" on Me (SCRUM-1076, 2026-11-20): your own card as somebody in
+an event's room reads it from `GET /users/:handle`, in both states, built by the
+same code (`lib/public-profile.ts`) so the preview cannot show a field the room
+withholds. No id in the path: it is only ever yours.
+
+```json
+{ "pseudonym": "Velvet Otter",
+  "anonymous": { "id": "<you>", "name": "Velvet Otter", "pseudonym": "Velvet Otter", "age": 27, "location": "Toronto", "isOwnProfile": false, "identityVisible": false },
+  "named": { "id": "<you>", "name": "Priya", "work_field": null, "image": "…", "photos": ["…"], "bio": "…", "occupation": null, "education": null,
+             "languages": [], "homeState": null, "sign": null, "age": 27, "location": "Toronto", "interests": [], "memberSince": "…",
+             "stats": { "eventsAttended": 3, "eventsFavorited": 1, "eventsOrganized": 0 }, "isOwnProfile": false, "identityVisible": true, "badges": [] } }
+```
+
+- `anonymous` — before you reveal: your pseudonym, age and city, nothing else.
+- `named` — to somebody who may see who you are in a room: first name, photos and
+  the rest; `badges` only while "Show my badges" is on.
+- `pseudonym` is the one you carry in the event room you joined last; `null`
+  before your first room, and `anonymous.name` is then `"Attendee"` (no
+  `pseudonym` key), as the room's own fallback reads.
+- Nothing that depends on a viewer (`tonight`, `wave`, `connection`, `friend`,
+  `sharedInterests`), and nothing that is the owner's alone (`email`,
+  `stats.savedCount`).
 
 ---
 
@@ -2903,7 +2934,7 @@ already is: counted in the headcount, listed nowhere.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`, `?q=` (a word-prefix search of their names; `count` is then the filtered total); see *Lists are paged* |
+| GET | `/friends` | My friends, newest first, a page at a time, and `count` (the whole list). `?limit=` (100), `?cursor=`, `?q=` (a word-prefix search of their names; `count` is then the filtered total); see *Lists are paged*. `?order=name`: A–Z with `letters` (below) |
 | GET | `/friends/:userId` | A friend's profile (404 for anyone else). Carries the about line as `GET /users/:userId` sends it to somebody who may see who this is: `work_field`, `expertise`, `languages`, `homeState`, `sign` (labels), and `badges` unless they turned `show_badges` off (additive, 2026-10-24) |
 | DELETE | `/friends/:userId` | Unfriend — silent, leaves any DM alone |
 | POST | `/friends/:userId/conversation` | Open (or find) a DM with a friend → `{ conversationId }` |
@@ -2911,10 +2942,38 @@ already is: counted in the headcount, listed nowhere.
 | POST | `/friends/invite` | Reset it — the old link stops working |
 | GET | `/friends/invite/:token` | Who sent this link → `{ person, state }` |
 | GET | `/friends/invite/:token/preview` | **No auth.** Signed-out invite screen → `{ name, photoUrl }` — first name only. Per-IP limit (20/min). Same 404 |
-| GET | `/friends/requests` | `{ incoming, outgoing, pagination }` — 50 of each; `?list=incoming\|outgoing&cursor=` pages one alone |
+| GET | `/friends/requests` | `{ incoming, outgoing, pagination }` — 50 of each; `?list=incoming\|outgoing&cursor=` pages one alone. Each incoming row carries `via`: `"link"`, `"match"`, or `null` (below) |
 | POST | `/friends/requests` | Ask: `{ token }`, or `{ userId }` for a revealed match → `{ state: "requested" \| "friends" }`. 404, plus `reasonCode` `NOT_A_REVEALED_MATCH` for a match not yet revealed on both sides |
 | POST | `/friends/requests/:id` | `{ action: "accept" \| "dismiss" }` — recipient only |
 | DELETE | `/friends/requests/:id` | Withdraw — sender only. Kept as withdrawn: asking again later neither re-notifies nor undoes a "Not now" |
+
+**A–Z (`GET /friends?order=name`, Flow 7 1-A, 2026-11-20).** The friends in the
+app's letter order (`lib/friends-by-name.ts`, the client's `letterOf` byte for
+byte): Latin A–Z with accents folded (Ábhi under A), then each other script's
+first letter in its own order (प्रियंका under प, not "#"), then `#` for a name
+that starts with no letter; inside a letter by name, accent- and case-blind,
+then id. The answer adds `letters`, every head and its count over the whole list
+(after `q`), whatever the page:
+
+```json
+{ "friends": [{ "userId": "…", "name": "Aarav", "photo": null, "since": "2026-11-02T18:00:00.000Z" }],
+  "count": 8,
+  "letters": [{ "letter": "A", "count": 2 }, { "letter": "E", "count": 1 }, { "letter": "प", "count": 1 }, { "letter": "#", "count": 1 }],
+  "pagination": { "limit": 100, "hasMore": false, "nextCursor": null, "totalCount": 8 } }
+```
+
+Page with its own `nextCursor`, or jump with `?from=<letter>` (one letter, case
+and accents folded, or `#`): the page starts at the first friend under that
+letter, or under the next letter that has any (a scrubber letter with no names,
+as iOS Contacts does). `cursor` and `from` together are a 400, as is an
+unknown `order` or a `from` that is not one letter. `?order=newest` is the
+default and unchanged.
+
+**Where a request came from.** Each `incoming` row of `GET /friends/requests`
+carries `via`: `"link"` (they opened your invite link) or `"match"` (a match
+you both revealed in), and `null` for a request made before the source was
+recorded (`friend_requests.via`, CHECK `friend_requests_via_known`). A withdrawn
+request asked again takes the new ask's source. Outgoing rows carry none.
 
 **Nobody can be looked up.** There is no search. A request reaches someone only
 through their invite link (`https://www.blendn.app/f/<token>`, 128 random bits,

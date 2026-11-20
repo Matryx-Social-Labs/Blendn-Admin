@@ -424,7 +424,7 @@ export async function requestFriend(
         await tx.friend_requests.update({
           where: { id: mine.id },
           // A withdrawn request asked again is a new ask: it says where this one came from.
-          data: { withdrawn_at: null, ...(mine.withdrawn_at && { via }), ...(hold && { held_at: new Date() }) },
+          data: { withdrawn_at: null, ...(mine.withdrawn_at && { via: via }), ...(hold && { held_at: new Date() }) },
         })
       }
       // Held once, and the reveal that releases it is what delivers it
@@ -433,7 +433,7 @@ export async function requestFriend(
     }
 
     const created = await tx.friend_requests.create({
-      data: { sender_id: senderId, recipient_id: recipientId, via, ...(holding && { held_at: new Date() }) },
+      data: { sender_id: senderId, recipient_id: recipientId, via: via, ...(holding && { held_at: new Date() }) },
       select: { id: true },
     })
     return holding ? { state: "requested" as const } : { state: "requested" as const, requestId: created.id }
