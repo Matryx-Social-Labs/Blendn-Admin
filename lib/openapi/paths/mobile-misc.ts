@@ -683,6 +683,7 @@ registry.registerPath({
   description: ROOM_BAN_GATE +
     PARTICIPATION_GATE +
     "Both of you must have attended the same event, or it is the same 404 as an id nobody has (it was 400). " +
+    "A Lobby room's handle (`board_post`) is taken back only while that room seats you both (its author or an accepted asker, the post standing, the room not over); then the room stands in for the shared event, and the recipient's list says `metIn.kind: \"board_post\"`. Otherwise it is the same 404. " +
     "429 `RATE_LIMITED` with `retryAfter`: 20 a day, 3 a day for an account under 24 hours old, and at most 10 unanswered at once " +
     "(not accepted, from the last 7 days; a decline, a block and a silent 201 below each hold a slot), all checked before the recipient is read. " +
     "409 if a request is pending or accepted in either direction, if you already sent one that was declined — a rejection is not an invitation to try again — or if you already have a conversation; the person who declined may ask you. **Those 409s are said only when `identityVisible` would be true for the recipient** (SCRUM-371): to anyone else they answer 201 with this same shape and a fresh id, write nothing and notify nobody, so a room handle cannot be probed for a friend DM or an earlier request. `recipientId` may be a room handle and is echoed as sent. The response names the recipient by that ref only: their name and photo are what accepting discloses, not asking.",

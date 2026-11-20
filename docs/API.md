@@ -2150,7 +2150,7 @@ same facts from `GET /users/:userId`'s `connection`.
 
 ### GET /message-requests: where you met (`metIn`)
 
-Each request carries `metIn: { kind: "event" | "venue_day", name } | null`, for
+Each request carries `metIn: { kind: "event" | "venue_day", name } | { kind: "board_post", name, subKind, yours } | null`, for
 the Requests row's "Met in the room at …" (Flow 5 · B-A). A request records the
 room of the handle it was sent by (`message_requests.met_in_event_id`), and only when
 the two shared that room by `haveSharedAnEvent`'s rule for that one room (a
@@ -2166,6 +2166,22 @@ allowed by another room they shared, records nothing.
   deleted (`ON DELETE SET NULL`), soft-deleted or hidden (`draft`).
 - Recipient only. The create response does not echo it, and no host or
   dashboard surface reads it.
+
+**From a Lobby room (Flow 5 C5, "Met in the Lobby · Your ride").** A Lobby
+(board post) room's handle names nobody outside its room, except here: `POST
+/message-requests` takes one back while that room seats **both** the sender and
+the person named — the post's author or an accepted asker, a member not banned
+or gone, the post standing, the room not over (its event's room closes a day
+after the end). Then the shared room stands in for a shared check-in, and the
+request records the room (`met_in_room_id`). Otherwise the handle is answered
+as nobody (404 "User not found"), as a forged one is. The list then says
+`metIn: { kind: "board_post", name, subKind, yours }`: `name` the night's name
+as above, `subKind` what the post is about (`ride`, `spots`, `ticket`, `buddy`
+or null), `yours` whether the reader wrote the post ("Your ride"). Never the
+room's or the post's id, a handle or a pseudonym. `null` once the post is
+withdrawn or taken down or its event is gone or hidden; erased with the
+sender's account, like `met_in_event_id`. An app that knows only `event` and
+`venue_day` shows no line for it.
 
 ### Lists are paged (SCRUM-760)
 

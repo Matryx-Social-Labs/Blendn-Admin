@@ -467,7 +467,17 @@ export const MessageRequestSchema = z
     status: z.string(),
     createdAt: z.string().datetime(),
     metIn: z
-      .object({ kind: z.enum(["event", "venue_day"]), name: z.string() })
+      .union([
+        z.object({ kind: z.enum(["event", "venue_day"]), name: z.string() }),
+        z
+          .object({
+            kind: z.literal("board_post"),
+            name: z.string(),
+            subKind: z.enum(["ride", "spots", "ticket", "buddy"]).nullable(),
+            yours: z.boolean().describe("The reader wrote the post: \"Your ride\"."),
+          })
+          .describe("Sent from a Lobby room's handle while it seated both (Flow 5 C5): \"Met in the Lobby · Your ride\". `name` is the night's."),
+      ])
       .nullable()
       .optional()
       .describe(
