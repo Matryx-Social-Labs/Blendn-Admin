@@ -39,7 +39,7 @@ import {
   ErrorCode,
 } from "@/lib/api-response"
 import { signPairRefusal, updateProfileSchema } from "@/lib/validations/profile"
-import { homeStateLabel, languageLabels, signLabel, westernSignFor } from "@/lib/about-you"
+import { homeStateLabel, isHomeStateIn, languageLabels, listCountry, profileListsFor, signLabel, westernSignFor } from "@/lib/about-you"
 import { normalizeLocationToCity } from "@/lib/location"
 import { readJson } from "@/lib/api-input"
 import { notifyFriendsHere } from "@/lib/room-friends"
@@ -343,6 +343,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     const homeCity = homeCitySlug ? catalogue.cities.find((c) => c.slug === homeCitySlug && c.launchState !== "hidden") : null
     if (homeCitySlug && !homeCity) return errorResponse("That city isn’t available.", 400, "VALIDATION_ERROR")
     const homeCityData = homeCitySlug !== undefined ? { home_city_id: homeCity?.id ?? null } : {}
+
+    /*
+     * A home region from the account's own country (SCRUM-711): the home city
+     * sent with this save, else the one on file. An account with no home city
+     * keeps the schema's rule (any region we list), so installed builds, which
+     * show India's states to everybody, still save.
+     */
+    if (typeof home_state === "string") {
+      const cityId = homeCitySlug !== undefined ? (homeCity?.id ?? null) : (await db.profiles.findUnique({ where: { id: userId }, select: { home_city_id: true } }))?.home_city_id
+      const country = listCountry(catalogue.cities.find((c) => c.id === cityId)?.country)
+      if (country && !isHomeStateIn(country, home_state)) {
+        return errorResponse(`Not a ${profileListsFor(country).regionWord} we list for your home city`, 400, "VALIDATION_ERROR")
+      }
+    }
 
     // What strangers read on the card is screened before anything is written (App Store 1.2).
     // `location` too: the free text the room card shows.

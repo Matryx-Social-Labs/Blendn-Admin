@@ -383,8 +383,8 @@ const CLIPS: Record<string, string> = {
  * `--refresh-times`. Half the world serves its media from our bucket, half
  * from someone else's — see `TIGRIS_HOSTED`. Both paths exist in the product
  * and they fail differently, so a world seeded entirely one way tests half of
- * it. The clip's poster is the event's own cover: a Tigris-hosted clip with a
- * hotlinked poster would be a mixed case nobody asked for.
+ * it. The clip has no poster: only its own first frame is right, and the
+ * cover around a letterboxed clip was SCRUM-1066.
  */
 async function seededMedia(spec: (typeof EVENTS)[number]) {
   if (!spec.media) return { coverUrl: null, clipUrl: null, hotlinked: [] as string[] }
@@ -447,7 +447,7 @@ async function refreshTimes() {
     if (clipUrl) {
       await db.event_media.updateMany({
         where: { event_id: result.eventId, type: "video" },
-        data: { url: clipUrl, thumbnail_url: coverUrl },
+        data: { url: clipUrl, thumbnail_url: null },
       })
     }
     if (start <= now && end > now) live.push(spec.slug)
@@ -723,9 +723,10 @@ async function main() {
      * five — so video needed no schema change. The app reads the first `video`
      * row via `lib/feedMedia.ts`.
      *
-     * `thumbnail_url` is the event's own cover, and it is **not optional**:
-     * `feedClip` refuses to play a clip it cannot poster, so a video row seeded
-     * without one would simply never appear and look like a broken player.
+     * `thumbnail_url` is null: a poster must be the clip's own first frame
+     * (docs/MEDIA.md), and the event's cover is another picture that showed
+     * around the letterboxed clip in the app's hero (SCRUM-1066). The app
+     * shows a posterless clip on its dark surface until the first frame.
      */
     if (clipUrl) {
       const existing = await db.event_media.findFirst({
@@ -735,7 +736,7 @@ async function main() {
         event_id: event.id,
         type: "video" as const,
         url: clipUrl,
-        thumbnail_url: coverUrl,
+        thumbnail_url: null,
         order: 0,
       }
       if (existing) await db.event_media.update({ where: { id: existing.id }, data })

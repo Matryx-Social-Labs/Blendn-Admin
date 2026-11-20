@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client"
 import { closeConversation } from "@/lib/conversations"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 import { blockPairIn } from "@/lib/block-pair"
+import { conversationSeen } from "@/lib/block-seen"
 import { eitherWay, lockPair } from "@/lib/friends"
 
 /**
@@ -37,7 +38,7 @@ export async function leaveConversationIn(
   // A block is the shared helper's: the block row, requests, the friendship,
   // and the conversation (already closed above, so it finds nothing to close).
   if (action === "block") {
-    await blockPairIn(tx, userId, otherId)
+    await blockPairIn(tx, userId, otherId, await conversationSeen(tx, conversationId, otherId))
     return
   }
   // Leaving is permanent either way, so a crew invite between them goes too

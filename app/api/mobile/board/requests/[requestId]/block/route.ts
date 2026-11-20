@@ -8,6 +8,7 @@ import {
   unauthorizedResponse,
 } from "@/lib/api-response"
 import { boardRequestCounterpart } from "@/lib/board-access"
+import { roomHandle } from "@/lib/room-handle"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -32,10 +33,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { requestId } = await params
     if (!isUuid(requestId)) return errorResponse("Invalid request ID format", 400)
 
-    const otherId = await boardRequestCounterpart(user.userId, requestId)
-    if (!otherId) return notFoundResponse("Request not found")
+    const other = await boardRequestCounterpart(user.userId, requestId)
+    if (!other) return notFoundResponse("Request not found")
 
-    return blockUser(request, { params: Promise.resolve({ userId: otherId }) })
+    // By the event's handle, as the post's block does: the block keeps the board's pseudonym and the event.
+    return blockUser(request, { params: Promise.resolve({ userId: roomHandle(other.eventId, other.userId) }) })
   } catch (error) {
     logger.error("Board request block error", {
       error: error instanceof Error ? error.message : String(error),

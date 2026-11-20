@@ -44,7 +44,7 @@ async function person(label: string) {
 type Who = Awaited<ReturnType<typeof person>>
 let tick = 0
 /** One delivery about `who`'s subscription, each later than the last. */
-async function deliver(who: Who, type: string, o: { expires?: number; cancelReason?: string; grace?: number; store?: string } = {}) {
+async function deliver(who: Who, type: string, o: { expires?: number; cancelReason?: string; grace?: number; store?: string; product?: string; newProduct?: string } = {}) {
   const at = T0 + ++tick * MIN
   const body = {
     api_version: "1.0",
@@ -53,7 +53,8 @@ async function deliver(who: Who, type: string, o: { expires?: number; cancelReas
       type,
       event_timestamp_ms: at,
       app_user_id: who.id,
-      product_id: "blendn_plus_monthly",
+      product_id: o.product ?? "blendn_plus_monthly",
+      ...(o.newProduct ? { new_product_id: o.newProduct } : {}),
       entitlement_ids: ["plus"],
       period_type: "NORMAL",
       purchased_at_ms: T0,
@@ -175,6 +176,56 @@ it("a store row the webhook did not write has no state to report", async () => {
   const body = await read(p)
   expect(body).toMatchObject({ active: true, source: "apple" })
   expect(body).not.toHaveProperty("state")
+})
+
+describe("plan (the store plan the Manage card names)", () => {
+  it("names the plan the purchase is for, on either store", async () => {
+    const apple = await person("mps-plan-y")
+    await deliver(apple, "INITIAL_PURCHASE", { product: "blendn_plus_yearly" })
+    expect(await read(apple)).toMatchObject({ active: true, plan: "yearly" })
+
+    const google = await person("mps-plan-g")
+    await deliver(google, "INITIAL_PURCHASE", { store: "PLAY_STORE", product: "blendn_plus:quarterly" })
+    expect(await read(google)).toMatchObject({ active: true, source: "google", plan: "quarterly" })
+  })
+
+  it("a product change says nothing until the renewal that carries it", async () => {
+    const p = await person("mps-plan-chg")
+    await deliver(p, "INITIAL_PURCHASE", { product: "blendn_plus_monthly" })
+    await deliver(p, "PRODUCT_CHANGE", { product: "blendn_plus_monthly", newProduct: "blendn_plus_yearly" })
+    expect(await read(p)).toMatchObject({ plan: "monthly" })
+    await deliver(p, "RENEWAL", { product: "blendn_plus_yearly" })
+    expect(await read(p)).toMatchObject({ plan: "yearly" })
+  })
+
+  it("keeps naming the plan of a cancelled subscription, and of one that has expired", async () => {
+    const p = await person("mps-plan-exp")
+    await deliver(p, "INITIAL_PURCHASE", { product: "blendn_plus_yearly" })
+    await deliver(p, "CANCELLATION", { cancelReason: "UNSUBSCRIBE", product: "blendn_plus_yearly" })
+    expect(await read(p)).toMatchObject({ state: "cancelled", plan: "yearly" })
+    await deliver(p, "EXPIRATION", { expires: Date.now() - MIN, product: "blendn_plus_yearly" })
+    expect(await read(p)).toMatchObject({ active: false, state: "expired", plan: "yearly" })
+  })
+
+  it("is null, never guessed: no purchase, a grant, an unknown product, a store row with no delivery", async () => {
+    expect(await read(await person("mps-plan-none"))).toMatchObject({ plan: null })
+
+    const grant = await person("mps-plan-grant")
+    await db.entitlements.create({
+      data: { subject_kind: "user", subject_id: grant.id, product: "plus", source: "grant", external_ref: trialRef(grant.id), starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 5 * DAY) },
+    })
+    expect(await read(grant)).toMatchObject({ active: true, plan: null })
+
+    const odd = await person("mps-plan-odd")
+    await deliver(odd, "INITIAL_PURCHASE", { product: "blendn_plus_weekly" })
+    expect(await read(odd)).toMatchObject({ active: true, plan: null })
+
+    const orphan = await person("mps-plan-orphan")
+    await db.entitlements.create({
+      data: { subject_kind: "user", subject_id: orphan.id, product: "plus", source: "apple", external_ref: `itest_mps_txn_${randomUUID().slice(0, 8)}`, starts_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + DAY) },
+    })
+    expect(await read(orphan)).toMatchObject({ active: true, plan: null })
+  })
 })
 
 describe("changedAt (the stacked-pass signal)", () => {

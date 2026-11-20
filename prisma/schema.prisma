@@ -3569,6 +3569,14 @@ model blocked_users {
   blocker_id String
   blocked_id String
   created_at DateTime @default(now()) @db.Timestamptz(6)
+  /// The pseudonym the blocker was shown for them when they blocked (a room's,
+  /// a board's or a match's), never a real name. Null: none was shown, or the
+  /// block predates the column. A snapshot: the room's members are swept.
+  seen_as    String?
+  /// Where they blocked from: the event's title, a venue day's venue, or the
+  /// room's name. Null: blocked from somewhere with no place (a profile, the
+  /// friends list), or before the column.
+  seen_in    String?
 
   blocker User @relation("BlockedByUser", fields: [blocker_id], references: [id], onDelete: Cascade)
   blocked User @relation("BlockedUser", fields: [blocked_id], references: [id], onDelete: Cascade)

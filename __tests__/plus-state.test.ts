@@ -1,4 +1,4 @@
-import { plusGrantFrom, plusStateFrom, type StoreDelivery } from "@/lib/plus-state"
+import { plusGrantFrom, plusPlanFrom, plusStateFrom, type StoreDelivery } from "@/lib/plus-state"
 
 const now = new Date("2026-10-22T12:00:00Z")
 const d = (type: string, extra: Partial<StoreDelivery> = {}): StoreDelivery => ({ type, cancelReason: null, graceExpiresAtMs: null, ...extra })
@@ -46,5 +46,26 @@ describe("plusGrantFrom", () => {
     expect(plusGrantFrom("plus-referral:u1:a+b+c")).toBe("referral")
     expect(plusGrantFrom("1000000123456")).toBeNull()
     expect(plusGrantFrom(null)).toBeNull()
+  })
+})
+
+describe("plusPlanFrom: the store plan, only from a product id we sell", () => {
+  it.each([
+    ["blendn_plus_monthly", "monthly"],
+    ["blendn_plus_quarterly", "quarterly"],
+    ["blendn_plus_yearly", "yearly"],
+    ["blendn_plus:monthly", "monthly"],
+    ["blendn_plus:quarterly", "quarterly"],
+    ["blendn_plus:yearly", "yearly"],
+  ])("%s is %s (Apple's product, Google's subscription:base plan)", (productId, plan) => {
+    expect(plusPlanFrom(productId)).toBe(plan)
+  })
+  it("says nothing for the Night Pass, an unknown product, a near miss or none", () => {
+    expect(plusPlanFrom("blendn_night_pass")).toBeNull()
+    expect(plusPlanFrom("blendn_plus_weekly")).toBeNull()
+    expect(plusPlanFrom("BLENDN_PLUS_YEARLY")).toBeNull()
+    expect(plusPlanFrom("blendn_plus:yearly:extra")).toBeNull()
+    expect(plusPlanFrom("")).toBeNull()
+    expect(plusPlanFrom(null)).toBeNull()
   })
 })

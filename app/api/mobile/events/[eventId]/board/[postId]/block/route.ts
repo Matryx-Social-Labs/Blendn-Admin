@@ -8,6 +8,7 @@ import {
   unauthorizedResponse,
 } from "@/lib/api-response"
 import { boardPostAuthorFor } from "@/lib/board-access"
+import { roomHandle } from "@/lib/room-handle"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -47,7 +48,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (!authorId) return notFoundResponse("Post not found")
     if (authorId === user.userId) return errorResponse("Cannot block yourself", 400)
 
-    return blockUser(request, { params: Promise.resolve({ userId: authorId }) })
+    // By the event's handle, not the id: the block then keeps the board's pseudonym and the event (lib/block-seen.ts).
+    return blockUser(request, { params: Promise.resolve({ userId: roomHandle(eventId, authorId) }) })
   } catch (error) {
     logger.error("Board post block error", {
       error: error instanceof Error ? error.message : String(error),

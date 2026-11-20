@@ -79,9 +79,9 @@ describe("the form's media advice matches docs/MEDIA.md", () => {
     expect(gallery).toMatch(/15 seconds|15 s\b/i)
   })
 
-  it("offers a poster field for video, since the app drops posterless clips", () => {
-    // `feedClip` in the app falls back thumbnail_url -> cover_image_url ->
-    // drop. Without this input the first link of that chain is unreachable.
+  it("offers a poster field for video, since the app shows a posterless clip on a dark frame", () => {
+    // `feedPlaylist` in the app takes thumbnail_url only, never the cover
+    // (SCRUM-1066). Without this input a clip has no still until it plays.
     expect(gallery).toContain("thumbnail_url")
     expect(gallery).toMatch(/Poster image/)
   })
