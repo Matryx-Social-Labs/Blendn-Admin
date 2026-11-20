@@ -380,8 +380,8 @@ describe("room:friends (the signal) and who it reaches", () => {
     await here(eventId, occurrence, b)
     install()
     const { requestFriend } = await import("@/lib/friends")
-    await requestFriend(a.id, b.id)
-    await requestFriend(b.id, a.id)
+    await requestFriend(a.id, b.id, "link")
+    await requestFriend(b.id, a.id, "link")
     await settle()
     const rooms = signals().flatMap((s) => s.rooms)
     expect(rooms).toEqual(expect.arrayContaining([`user:${a.id}`, `user:${b.id}`]))
@@ -411,15 +411,15 @@ describe("the second look (final review): who a friendship change is told to, an
     for (const p of [viewer, hidden, listed]) await here(eventId, occurrence, p)
 
     // Two hidden people: nothing, either way round.
-    expect(await requestFriend(viewer.id, hidden.id)).toBe("requested")
-    expect(await requestFriend(hidden.id, viewer.id)).toBe("friends")
+    expect(await requestFriend(viewer.id, hidden.id, "link")).toBe("requested")
+    expect(await requestFriend(hidden.id, viewer.id, "link")).toBe("friends")
     await unfriend(viewer.id, hidden.id)
     await settle()
     expect(emitted.filter((e) => e.event === "room:friends")).toEqual([])
 
     // A listable friend: the one who can see them is told; the listable one is not (the viewer is hidden from them).
-    await requestFriend(viewer.id, listed.id)
-    await requestFriend(listed.id, viewer.id)
+    await requestFriend(viewer.id, listed.id, "link")
+    await requestFriend(listed.id, viewer.id, "link")
     await settle()
     expect(signalsTo(viewer)).toBe(1)
     expect(signalsTo(listed)).toBe(0)

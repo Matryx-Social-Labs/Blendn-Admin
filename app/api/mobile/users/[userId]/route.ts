@@ -1,22 +1,17 @@
 import { logger } from "@/lib/logger"
 import { sharedInterestNames } from "@/lib/shared-interests"
 import { refRoomBanRefusal } from "@/lib/room-ban"
-import { distinctEventsAttended } from "@/lib/attendee-counts"
 import { NextRequest } from "next/server"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { blockedEitherWay, conversationPair } from "@/lib/conversations"
-import { mayShowRealName, nameForRef } from "@/lib/conversation-identity"
-import { roomPseudonymOf } from "@/lib/anonymous-names"
+import { mayShowRealName } from "@/lib/conversation-identity"
+import { roomPseudonymOrNull } from "@/lib/anonymous-names"
+import { anonymousCard, personCardBody, publicUserSelect } from "@/lib/public-profile"
 import { friendOfferFor } from "@/lib/friend-offer"
-import { profileBadges } from "@/lib/profile-badges"
 import { identityForRef, nonEventRoomCard } from "@/lib/identity"
 import { operatesEvent, tonightFor } from "@/lib/tonight"
 import { waveStandings } from "@/lib/waves"
-import { savedCount } from "@/lib/saved-events"
-import { ageFrom } from "@/lib/age"
-import { homeStateLabel, languageLabels, signLabel } from "@/lib/about-you"
 import { db } from "@/lib/db"
-import { normalizeLocationToCity } from "@/lib/location"
 import {
   successResponse,
   unauthorizedResponse,
@@ -68,52 +63,7 @@ export async function GET(
       // row served as a profile — `identityVisible: true`, a member-since
       // date, an attendance count — to anyone who kept the id.
       where: { id: userId, deletedAt: null },
-      select: {
-        id: true,
-        name: true,
-        image: true,
-        createdAt: true,
-        profile: {
-          select: {
-            name: true,
-            age: true,
-            date_of_birth: true,
-            location: true,
-            bio: true,
-            occupation: true,
-            education: true,
-            interests: true,
-            photos: true,
-            work_field: true,
-            blur_photo: true,
-            languages: true,
-            home_state: true,
-            sun_sign: true,
-            sign_system: true,
-            show_badges: true,
-            shows_up_badge: true,
-          },
-        },
-        user_interests: {
-          select: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                slug: true,
-                icon: true,
-              },
-            },
-          },
-        },
-        // Include some stats
-        _count: {
-          select: {
-            event_favorites: true,
-            organized_events: true,
-          },
-        },
-      },
+      select: publicUserSelect,
     })
 
     if (!user) {
@@ -142,14 +92,6 @@ export async function GET(
     const tonight = room && authUser.userId !== userId ? await tonightFor(authUser.userId, room, userId) : null
     const wave = room && authUser.userId !== userId ? await mutualWaveIn(room, authUser.userId, userId) : null
 
-    // Format the response
-    // Build photos array: prefer profile gallery, fall back to single user image
-    const photos: string[] = (user.profile?.photos && user.profile.photos.length > 0)
-      ? user.profile.photos
-      : user.image
-        ? [user.image]
-        : []
-
     /*
      * The room is pseudonymous, and this endpoint was how that came undone.
      *
@@ -170,98 +112,19 @@ export async function GET(
      */
     const isOwnProfile = authUser.userId === userId
 
-    /*
-     * A room card, for somebody that room keeps anonymous: exactly what the
-     * roster already shows beside their pseudonym, and nothing else.
-     *
-     * Their pseudonym in that room rather than "Attendee" — the card that
-     * opened this already shows it, so it discloses nothing, and a second
-     * name for one person in one room is how surfaces start to disagree.
-     * Age and city stay, as they do on the roster (owner decision, #485).
-     * Everything that is the same in every room goes: the interest list,
-     * the join date and the attendance counts are a fingerprint, and a
-     * viewer who has seen this person named elsewhere could match them to
-     * the pseudonym field by field.
-     */
+    // A room card, for somebody that room keeps anonymous (`anonymousCard`, lib/public-profile.ts).
     if (card || (room && !identified)) {
+      const pseudonym = card ? (card.pseudonym ? card.name : null) : await roomPseudonymOrNull(room!, userId)
+      const name = card ? card.name : (pseudonym ?? "Attendee")
       return successResponse({
-        id: ref,
-        name: card ? card.name : await roomPseudonymOf(room!, userId),
-        age: ageFrom(user.profile),
-        location: await normalizeLocationToCity(user.profile?.location),
-        isOwnProfile: false,
-        identityVisible: false,
+        ...(await anonymousCard(user, ref, { name, pseudonym: pseudonym !== null })),
         ...(tonight && { tonight }),
         ...(wave && { wave }),
       })
     }
 
     const publicProfile = {
-      // The ref as given — a handle in, the same handle out — except for your
-      // own profile, whose real id is yours to have.
-      id: isOwnProfile ? user.id : ref,
-      /*
-       * Pseudonyms are per event and this route has no event context, so there
-       * is no pseudonym to return -- the client already holds the room's one
-       * from the roster. A flat label is honest; inventing a second name here
-       * would let two surfaces disagree about who someone is.
-       *
-       * Withheld fields are **absent**, not null, so a client reading `image`
-       * gets undefined rather than a convincing blank. `occupation` and
-       * `education` go with the name: "Principal @ Arclight Labs" identifies
-       * about as well as a photograph does.
-       */
-      // A room handle names its person by first name only (SCRUM-493); a raw id, which a match or a conversation reached, the full name.
-      name: identified ? nameForRef(room, user.profile?.name || user.name) : "Attendee",
-      /*
-       * Outside the gate, as on `/profiles/:id`: "works in design" is an
-       * attribute, not an address. The app reads it for the card's subtitle
-       * and this route never sent it (SCRUM-458).
-       */
-      work_field: user.profile?.work_field ?? null,
-      ...(identified
-        ? {
-            image: user.image,
-            photos,
-            // Not to somebody only their pending request names: bio and orientation wait for the accept (A-32).
-            ...(!askedOnly && { bio: user.profile?.bio || null }),
-            occupation: user.profile?.occupation || null,
-            education: user.profile?.education || null,
-            // Tier B (plan v2 §8.5): the whole set only once they are known to you.
-            languages: languageLabels(user.profile?.languages),
-            homeState: homeStateLabel(user.profile?.home_state),
-            sign: signLabel(user.profile?.sun_sign, user.profile?.sign_system),
-          }
-        : {
-            /*
-             * The blurred photo for someone who may not see the real one: a
-             * stored derivative, never the real URL (see `/profiles/:id`). The
-             * app drew no photo at all here, since this route never sent it.
-             */
-            blurPhoto: user.profile?.blur_photo ?? null,
-          }),
-      // Derived — see `ageFrom` in lib/age.ts. The date itself is read here and
-      // never returned; this response is an explicit field list, not a spread.
-      age: ageFrom(user.profile),
-      location: await normalizeLocationToCity(user.profile?.location),
-      /*
-       * The whole list only to somebody who may see who this is: it is the same
-       * in every room, so a card that withholds the name withholds it too. The
-       * key stays, empty, for clients that read it (SCRUM-827).
-       */
-      interests: identified ? user.user_interests.map((ui) => ui.category) : [],
-      memberSince: user.createdAt,
-      stats: {
-        // Your own count includes the places you went live at, as your list
-        // does; anybody else's view of you counts events only.
-        eventsAttended: await distinctEventsAttended(user.id, { places: isOwnProfile }),
-        eventsFavorited: user._count.event_favorites,
-        eventsOrganized: user._count.organized_events,
-        // What your own saved list holds (its filter, not every row ever saved); yours alone.
-        ...(isOwnProfile && { savedCount: await savedCount(user.id) }),
-      },
-      isOwnProfile,
-      identityVisible: identified,
+      ...(await personCardBody(user, { id: isOwnProfile ? user.id : ref, identified, askedOnly, firstNameOnly: !!room, isOwnProfile })),
       ...(tonight && { tonight }),
       ...(wave && { wave }),
       // The interests you have in common, by name, for the outlined chips (SCRUM-858).
@@ -279,12 +142,6 @@ export async function GET(
       // The same offer, under the same rule, as `GET /profiles/:id`: only for
       // somebody else you may see, so the app needs no second read.
       ...(identified && !isOwnProfile && { friend: await friendOfferFor(authUser.userId, userId) }),
-      // Badges, under the rule `GET /profiles/:id` applies: the person shows them
-      // (`show_badges`, on unless turned off) and the viewer may see who they are.
-      // Earned from check-ins and derived here, never stored (lib/profile-badges.ts).
-      ...(identified && user.profile && user.profile.show_badges !== false
-        ? { badges: await profileBadges(userId, user.profile.shows_up_badge) }
-        : {}),
     }
 
     return successResponse(publicProfile)

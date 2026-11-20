@@ -31,6 +31,10 @@ import { createdBefore, keysetPage, LEGACY_PAGE, LIST_PAGE, NEWEST_FIRST, parseL
  * 100), with `pagination.incoming` and `pagination.outgoing` (`hasMore`,
  * `nextCursor`, `totalCount`). To page one of them, ask for it alone:
  * `?list=incoming&cursor=…` answers only that array.
+ *
+ * Each incoming row says where the ask came from: `via` is `"link"` (your invite
+ * link) or `"match"` (a match you both revealed in), and null for a request made
+ * before that was recorded. Outgoing rows carry none: you know how you asked.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -64,7 +68,7 @@ export async function GET(request: NextRequest) {
             db.friend_requests.count({ where: incomingWhere }),
             db.friend_requests.findMany({
               where: { ...incomingWhere, ...cursorFor("incoming") },
-              select: { id: true, created_at: true, sender: { select: personSelect } },
+              select: { id: true, created_at: true, via: true, sender: { select: personSelect } },
               orderBy: NEWEST_FIRST,
               take: limit + 1,
             }),
@@ -91,7 +95,8 @@ export async function GET(request: NextRequest) {
     const out = paged(outgoing)
 
     return successResponse({
-      ...(inc && { incoming: inc.items.map((r) => ({ id: r.id, person: personCard(r.sender), createdAt: r.created_at })) }),
+      // `via`: "link" or "match", null for a request from before the source was recorded (Flow 7 2-A, 4-A).
+      ...(inc && { incoming: inc.items.map((r) => ({ id: r.id, person: personCard(r.sender), createdAt: r.created_at, via: viaOf(r.via) })) }),
       ...(out && { outgoing: out.items.map((r) => ({ id: r.id, person: personCard(r.recipient), createdAt: r.created_at })) }),
       pagination: { ...(inc && { incoming: inc.pagination }), ...(out && { outgoing: out.pagination }) },
     })
@@ -100,6 +105,8 @@ export async function GET(request: NextRequest) {
     return serverErrorResponse("Failed to load friend requests")
   }
 }
+
+const viaOf = (via: string | null): "link" | "match" | null => (via === "link" || via === "match" ? via : null)
 
 /*
  * Exactly one way in. A token is somebody's invite link; a user id is only
@@ -179,7 +186,7 @@ export async function POST(request: NextRequest) {
     if (notYetRevealed) return errorResponse("Not found", 404, ErrorCode.NOT_FOUND, "NOT_A_REVEALED_MATCH")
     if (!connectable) return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)
 
-    const state = await requestFriend(me, recipientId, "token" in parsed.data ? undefined : "match")
+    const state = await requestFriend(me, recipientId, "token" in parsed.data ? "link" : "match")
     // An unmatch or a block landed between the check above and the pair's lock.
     if (state === "refused") return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)
     // Their invite link brought me: the first link a person uses is the one

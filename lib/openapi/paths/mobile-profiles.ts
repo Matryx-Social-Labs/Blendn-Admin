@@ -2,6 +2,7 @@ import { z } from "zod"
 import { registry } from "@/lib/openapi/registry"
 import { standardErrors, PageOrCursorQuerySchema, PagedPaginationSchema, UserRefParamSchema, wrap, bearerAuth, ROOM_BAN_GATE } from "@/lib/openapi/schemas/common"
 import {
+  UserPublicProfileSchema,
   UpdateProfileRequestSchema,
   InterestCategoryIdsSchema,
   ProfileResponseSchema,
@@ -105,6 +106,38 @@ registry.registerPath({
   },
   responses: {
     200: { description: "Updated interests", content: { "application/json": { schema: wrap(InterestsResponseSchema) } } },
+    ...standardErrors,
+  },
+})
+
+/*
+ * GET /api/mobile/me/preview — "See as others do" (SCRUM-1076). Built by the same code as `GET /users/{userId}`.
+ */
+registry.registerPath({
+  method: "get",
+  path: "/api/mobile/me/preview",
+  tags: ["Mobile Profiles"],
+  summary: "Your own card as a room member sees it, in both states",
+  description:
+    "`anonymous` is what an event room shows before you reveal (your pseudonym, age and city); `named` is what somebody who may see who you are reads there (first name, photos and the rest). " +
+    "Built by the same functions as `GET /users/{userId}`, so neither can show a field the room withholds. Nothing that depends on a viewer (`tonight`, `wave`, `connection`, `friend`, `sharedInterests`) and nothing that is yours alone (`email`, `stats.savedCount`). " +
+    "`pseudonym` is the one you carry in the event room you joined last; null before your first room, when `anonymous.name` is \"Attendee\" with no `pseudonym` key. No id in the path: only ever yours.",
+  security: bearerAuth,
+  responses: {
+    200: {
+      description: "The two cards",
+      content: {
+        "application/json": {
+          schema: wrap(
+            z.object({
+              pseudonym: z.string().nullable(),
+              anonymous: UserPublicProfileSchema,
+              named: UserPublicProfileSchema,
+            })
+          ),
+        },
+      },
+    },
     ...standardErrors,
   },
 })
