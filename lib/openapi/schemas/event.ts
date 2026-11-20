@@ -39,6 +39,7 @@ export const EventQuerySchema = z
         description:
           "Hard-limit results to this many km from lat/lon. **No default** — sending coordinates alone sorts and labels by distance without excluding anything. Only pass this for a genuinely bounded search.",
       }),
+    bbox: z.string().optional().openapi({ description: "The map's view: `minLon,minLat,maxLon,maxLat` (GeoJSON order, as a map reports its visible bounds). Only rows inside it; `pagination.totalCount` is how many are, so a capped page can say \"+N more · zoom in\". Never with `radius` (400); a box across the antimeridian (west > east) is a 400. A box is not a fix: `distance` stays null unless `lat`/`lon` are sent too. Not cached server-side." }),
     categoryId: z.string().uuid().optional(),
     categorySlug: z.string().optional(),
     startDate: z.string().datetime().optional(),
@@ -63,12 +64,12 @@ export const EventQuerySchema = z
       .default(false)
       .openapi({
         description:
-          "Only the featured events: published, public, within your age, not ended, in `city`, in the day's rotation (`featured.rank`; a hash of the UTC day and the city, so one order for everyone in a city all day), **at most 5** however large `limit` is. `sortBy` is ignored, and the answer is always page 1: `page=2` returns the same five. Today's only source is the admin-set `isFeatured`, so every one is `featured.kind: \"editorial\"`.",
+          "Only the featured events: published, public, within your age, not ended, in `city`, in the day's rotation (`featured.rank`; a hash of the UTC day and the city, so one order for everyone in a city all day), **at most 5** however large `limit` is. `sortBy` is ignored, and the answer is always page 1: `page=2` returns the same five. With `lat`/`lon` they come nearest first from that fix, each with its `distance`, the rotation breaking ties (`featured.rank` keeps the rotation). Today's only source is the admin-set `isFeatured`, so every one is `featured.kind: \"editorial\"`.",
       }),
     status: z.enum(["draft", "published", "cancelled", "completed"]).optional(),
     sortBy: z.enum(["start_time", "created_at", "distance"]).default("start_time"),
     sortOrder: z.enum(["asc", "desc"]).default("asc"),
-    include: z.string().optional().openapi({ description: "Comma-separated: checkins,activeCheckins,profile" }),
+    include: z.string().optional().openapi({ description: "Comma-separated: checkins,activeCheckins,profile,near. `near` (with `lat`/`lon`) adds the response's `near`: the nothing-near-you signal." }),
     /** @deprecated Accepted and ignored — `interestedPreview` was removed. */
     interestedPreviewLimit: z.number().int().min(1).max(6).optional(),
   })
@@ -476,7 +477,7 @@ export const EventDetailSchema = z
     stats: EventStatsSchema,
     userStatus: UserStatusSchema,
     distance: z.number().nullable().openapi({
-      description: "Kilometres from `lat`/`lon`. Null unless both are sent and the event has a pin.",
+      description: "Kilometres from `lat`/`lon` (the person's fix). Null unless both are sent and the event has a pin: never from a map view (`bbox`), a city or a last guess.",
     }),
     ticketing: EventTicketingSchema,
     interestedUsers: z.array(z.unknown()).max(0).optional().openapi({
@@ -496,6 +497,23 @@ export const EventListResponseSchema = z
     pagination: PaginationMetaSchema,
     activeCheckins: z.array(z.unknown()).optional(),
     profile: z.unknown().optional(),
+    near: z
+      .object({
+        reachKm: z.number().openapi({ description: "The reach asked about: 25 (\"Nothing within 25 km yet\")." }),
+        empty: z.boolean().openapi({ description: "Nothing you could go to (published, public, not ended, your age, a city you may open; no filters) is within `reachKm` of the fix." }),
+        nearestCity: z
+          .object({
+            slug: z.string(),
+            name: z.string(),
+            country: z.string().openapi({ description: "The market code (`IN`, `CA`, …)." }),
+            distanceKm: z.number().openapi({ description: "Great-circle km from the fix to the city's catalogue center, one decimal." }),
+            centre: z.object({ latitude: z.number(), longitude: z.number() }),
+          })
+          .nullable()
+          .openapi({ description: "Only when `empty`: the nearest city you may open that has something on (\"Nothing near you yet · showing {name}\"). Null when nothing is near is false, or no open city has anything." }),
+      })
+      .optional()
+      .openapi({ description: "Only with `include=near` and `lat`/`lon`. Absent otherwise, and if the signal could not be read (logged; the list still answers)." }),
   })
   .openapi("EventListResponse")
 

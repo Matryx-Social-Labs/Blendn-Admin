@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 
 import { cityKey } from "@/lib/address"
+import { haversineDistance } from "@/lib/geo"
 
 /**
  * What "featured" means on an event card, as the app reads it.
@@ -77,4 +78,13 @@ export function featuredOf(
   return new Map(
     featured.map((e, i) => [e.id, { kind: featuredKind(e)!, rank: i + 1, by: EDITORIAL_BY }])
   )
+}
+
+/**
+ * Nearest first from a fix (the lap, pulse-map Option 3, owner 2026-11-17). Stable, so the given order (the day's
+ * rotation) breaks ties and orders the events with no coordinates, which go last.
+ */
+export function nearestFirst<T extends { latitude: number | null; longitude: number | null }>(events: readonly T[], lat: number, lon: number): T[] {
+  const far = (e: T) => (e.latitude !== null && e.longitude !== null ? haversineDistance(lat, lon, e.latitude, e.longitude) : Number.POSITIVE_INFINITY)
+  return [...events].sort((a, b) => far(a) - far(b))
 }

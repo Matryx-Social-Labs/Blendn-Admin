@@ -28,7 +28,9 @@ import { buildEventsCacheKey } from "@/lib/events-cache-key"
 import { cityRuleWhere, viewerCityRule } from "@/lib/browse-scope"
 import { realEventsWhere } from "@/lib/event-kind"
 import { paginationMeta } from "@/lib/pagination"
-import { FEATURED_MAX, featuredSeed, rotated } from "@/lib/featured"
+import { FEATURED_MAX, featuredSeed, nearestFirst, rotated } from "@/lib/featured"
+import { bboxWhere } from "@/lib/map-bbox"
+import { nearSignal } from "@/lib/near-signal"
 
 /**
  * The most events a distance sort will pull into memory at once.
@@ -116,6 +118,7 @@ export async function GET(request: NextRequest) {
       lat,
       lon,
       radius,
+      bbox,
       categoryId,
       categorySlug,
       startDate,
@@ -193,6 +196,20 @@ export async function GET(request: NextRequest) {
     }
 
     /*
+     * `include=near` with a fix (backend round 3): is anything this viewer could go to within the reach, and if not,
+     * the nearest city they may open (lib/near-signal.ts). Asked of discovery's own rules as they stand here, before any
+     * city, search, category or date narrows them, and in parallel with the page. Its failure is logged and the list
+     * still answers: the signal is a line on the map, the list is the screen.
+     */
+    const nearPromise =
+      includeSet.has("near") && lat !== undefined && lon !== undefined
+        ? nearSignal(authUser.userId, { ...where, end_time: { gte: new Date() } } as Prisma.eventsWhereInput, lat, lon).catch((error) => {
+            logger.error("Near signal failed; the list answers without it", { error: String(error) })
+            return null
+          })
+        : Promise.resolve(null)
+
+    /*
      * Discovery excludes events that have already finished.
      *
      * There was no time filter at all, so every event ever published stayed in
@@ -251,10 +268,12 @@ export async function GET(request: NextRequest) {
      * second radius filter further down, applied after the distance sort.
      */
     if (lat !== undefined && lon !== undefined && radius !== undefined) {
-      const bbox = getBoundingBox(lat, lon, radius)
-      where.latitude = { gte: bbox.minLat, lte: bbox.maxLat }
-      where.longitude = { gte: bbox.minLon, lte: bbox.maxLon }
+      const box = getBoundingBox(lat, lon, radius)
+      where.latitude = { gte: box.minLat, lte: box.maxLat }
+      where.longitude = { gte: box.minLon, lte: box.maxLon }
     }
+    // The map's view (lib/map-bbox.ts): never beside `radius` (the schema refuses both), so nothing is overwritten.
+    if (bbox) Object.assign(where, bboxWhere(bbox))
 
     /*
      * Category filter, parent-inclusive.
@@ -295,7 +314,7 @@ export async function GET(request: NextRequest) {
       where.end_time = { ...(where.end_time as object ?? {}), lte: new Date(endDate) }
     }
 
-    // The featured section is in the day's rotation, not by distance.
+    // The featured section is picked in the day's rotation, never by distance: a fix only orders the five (below).
     const shouldSortByDistance =
       !featured && sortBy === "distance" && lat !== undefined && lon !== undefined
     // A search the caller did not ask to order otherwise is ordered by how well each event answers it (S-6). One
@@ -333,7 +352,11 @@ export async function GET(request: NextRequest) {
       sortOrder,
     })
 
-    const cached = eventsCache.get(cacheKey)
+    /*
+     * A map view is not cached: every pan is a new box, so its entries would never be hit and would evict the feed's
+     * that are (the churn `buildEventsCacheKey` drops jittering coordinates to avoid). The map's reads are fresh anyway.
+     */
+    const cached = bbox ? undefined : eventsCache.get(cacheKey)
     let events: EventListItem[]
     let totalCount: number
     if (cached && cached.expiresAt > Date.now()) {
@@ -468,11 +491,19 @@ export async function GET(request: NextRequest) {
         ;[events, totalCount] = await datePage()
       }
 
-      setCache(cacheKey, {
-        expiresAt: Date.now() + EVENTS_CACHE_TTL_MS,
-        events,
-        totalCount,
-      })
+      if (!bbox) {
+        setCache(cacheKey, {
+          expiresAt: Date.now() + EVENTS_CACHE_TTL_MS,
+          events,
+          totalCount,
+        })
+      }
+    }
+
+    // Featured with a fix: nearest first, the day's rotation breaking ties (the lap, pulse-map Option 3). After the
+    // cache, whose key leaves coordinates out here: one caller's order is never served to another.
+    if (featured && lat !== undefined && lon !== undefined) {
+      events = nearestFirst(events, lat, lon)
     }
 
     const eventIds = events.map((e) => e.id)
@@ -545,13 +576,14 @@ export async function GET(request: NextRequest) {
     // The counts are per request, never cached with the list. Beside the
     // viewer's own reads: run after them they were one more full round trip on
     // every cache hit.
-    const [userFavorites, rsvpStatuses, userCheckins, activeCheckins, profile, counts] = await Promise.all([
+    const [userFavorites, rsvpStatuses, userCheckins, activeCheckins, profile, counts, near] = await Promise.all([
       userFavoritesPromise,
       rsvpStatusesPromise,
       userCheckinsPromise,
       activeCheckinsPromise,
       profilePromise,
       listCounts(events),
+      nearPromise,
     ])
 
     const favoriteEventIds = new Set(userFavorites.map((f) => f.event_id))
@@ -592,6 +624,7 @@ export async function GET(request: NextRequest) {
     return successResponse({
       events: transformedEvents,
       pagination: paginationMeta(page, pageSize, totalCount),
+      ...(near && { near }),
       ...(includeSet.has("activeCheckins") && {
         activeCheckins: await Promise.all(
           activeCheckins.map(async (c) => ({

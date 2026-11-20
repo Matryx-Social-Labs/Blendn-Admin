@@ -1,4 +1,6 @@
 import { z } from "zod"
+
+import { BBOX_WITH_RADIUS, bboxParam, notBboxAndRadius } from "@/lib/map-bbox"
 import { httpsUrl } from "@/lib/https-url"
 
 export const eventQuerySchema = z.object({
@@ -46,6 +48,11 @@ export const eventQuerySchema = z.object({
    * for callers that genuinely want a bounded search and must ask for it.
    */
   radius: z.coerce.number().min(0.1).max(100).optional(), // km
+  /**
+   * The map's view (`lib/map-bbox.ts`): `minLon,minLat,maxLon,maxLat`. Only rows inside it, and
+   * `pagination.totalCount` is how many are, so a capped page can say "+N more". Never with `radius`.
+   */
+  bbox: bboxParam.optional(),
 
   // Category filter
   categoryId: z.string().uuid().optional(),
@@ -71,7 +78,8 @@ export const eventQuerySchema = z.object({
    * Only the featured events: published, public, age-gated and not ended (the
    * same `where` as ever), `is_featured`, ordered by start time, at most
    * `FEATURED_MAX` (5) however large `limit` is. `sortBy` is ignored: the order
-   * is the rank (`featured.rank`).
+   * is the rank (`featured.rank`), or with `lat`/`lon` nearest first, the rank
+   * breaking ties (backend round 3).
    */
   featured: z
     .union([z.boolean(), z.enum(["true", "false"])])
@@ -86,7 +94,7 @@ export const eventQuerySchema = z.object({
   sortBy: z.enum(["start_time", "created_at", "distance"]).default("start_time"),
   sortOrder: z.enum(["asc", "desc"]).default("asc"),
 
-  // Optional includes (comma-separated list)
+  // Optional includes (comma-separated list). `near`, with `lat`/`lon`: the "nothing near you" signal (lib/near-signal.ts).
   include: z.string().optional(),
 
   /*
@@ -99,7 +107,7 @@ export const eventQuerySchema = z.object({
    * screen. Remove once no build sends it.
    */
   interestedPreviewLimit: z.coerce.number().int().min(1).max(6).optional(),
-})
+}).refine(notBboxAndRadius, { message: BBOX_WITH_RADIUS, path: ["bbox"] })
 
 export const checkinSchema = z.object({
   latitude: z.number().min(-90).max(90),
