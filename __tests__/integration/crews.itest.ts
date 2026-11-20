@@ -978,13 +978,15 @@ describe("invites over time, and the owner’s word (C8, C10)", () => {
     expect((await api.join(removed, crewId)).status).toBe(200)
   })
 
-  it("pushes one invite per inviter and invitee a day, whatever the crew — the invite itself still lands", async () => {
+  it("each invite from one inviter waits in the bell, whatever the crew — the invite itself lands too", async () => {
     const owner = await person("dup-owner")
     const friend = await person("dup-friend")
     await befriend(owner, friend)
     const one = (await api.create(owner, { name: "One", inviteUserIds: [friend.id] })).body.data.crewId as string
     const two = (await api.create(owner, { name: "Two", inviteUserIds: [friend.id] })).body.data.crewId as string
-    expect(await crewInvitePushes(friend.id)).toBe(1)
+    // Both rows (SCRUM-1091: the second was missing from "Waiting on you"); only the second's push is spared, one per
+    // inviter and invitee a day, which `notifications-round4.itest.ts` counts at the push transport.
+    expect(await crewInvitePushes(friend.id)).toBe(2)
     expect((await api.mine(friend)).body.data.invites.map((i: { crewId: string }) => i.crewId).sort()).toEqual([one, two].sort())
   })
 

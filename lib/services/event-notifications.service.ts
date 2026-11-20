@@ -10,7 +10,7 @@
 // point of that test.
 import { logger } from "../logger"
 import { db } from "../db"
-import { notifyEventChanged, notifyEventUpdate, reasonOf, sendBulkPushNotifications } from "../push-notifications"
+import { notifyEventChanged, notifyEventUpdate, reasonOf, sendBulkPushNotifications, type EventMove } from "../push-notifications"
 import type { rsvp_status } from "@prisma/client"
 import { realEventsWhere } from "../event-kind"
 import { ENDED_FRIENDSHIP_HOURS } from "../room-people"
@@ -74,13 +74,14 @@ async function tellInterested(
   message: string,
   changed: string,
   /** Already told another way (`cancelEventCheckIns`' `inside`): left out, so nobody hears it twice. */
-  skip: ReadonlySet<string> = new Set()
+  skip: ReadonlySet<string> = new Set(),
+  move?: EventMove
 ): Promise<number> {
   const audience = await interestedAudience(eventId)
   const going = audience.going.filter((id) => !skip.has(id))
   const others = audience.others.filter((id) => !skip.has(id))
   await Promise.all([
-    going.length > 0 ? notifyEventChanged(going, eventTitle, message, eventId, changed) : null,
+    going.length > 0 ? notifyEventChanged(going, eventTitle, message, eventId, changed, move) : null,
     others.length > 0 ? notifyEventUpdate(others, eventTitle, message, eventId, reasonOf(changed.split(",")), changed) : null,
   ])
   return going.length + others.length
@@ -105,7 +106,8 @@ export function changedFieldsFromLabels(changes: readonly string[]): string[] {
 export async function notifyEventDetailsChanged(
   eventId: string,
   eventTitle: string,
-  changes: string[]
+  changes: string[],
+  move?: EventMove
 ): Promise<void> {
   try {
     if (changes.length === 0) return
@@ -117,7 +119,9 @@ export async function notifyEventDetailsChanged(
       eventId,
       eventTitle,
       message,
-      changedFieldsFromLabels(changes).join(",")
+      changedFieldsFromLabels(changes).join(","),
+      new Set(),
+      move
     )
     if (recipientCount > 0) logger.info("Event update notification sent", { eventId, recipientCount })
   } catch (error) {
@@ -155,6 +159,20 @@ export function materialEventChanges(
   if ((before.venue_name ?? "") !== (after.venue_name ?? "")) changes.push("venue")
   if ((before.address ?? "") !== (after.address ?? "")) changes.push("address")
   return changes
+}
+
+/** What the row spells out for a change (`EventMove`): the start time if it moved, else the venue's name, else nothing. */
+export function eventMoveOf(
+  before: { start_time: Date; venue_name: string | null },
+  after: { start_time: Date; venue_name: string | null; timezone: string }
+): EventMove | undefined {
+  if (before.start_time.getTime() !== after.start_time.getTime()) {
+    return { field: "time", from: before.start_time.toISOString(), to: after.start_time.toISOString(), timeZone: after.timezone }
+  }
+  const from = before.venue_name?.trim()
+  const to = after.venue_name?.trim()
+  if (to && from !== to) return { field: "venue", ...(from && { from }), to }
+  return undefined
 }
 
 /**

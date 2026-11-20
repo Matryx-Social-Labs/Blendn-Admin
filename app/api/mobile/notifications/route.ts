@@ -6,12 +6,11 @@ import {
   successResponse,
   unauthorizedResponse,
 } from "@/lib/api-response"
-import { UNREAD_CAP } from "@/lib/badge-count"
+import { iconBadge, inboxCountsFor } from "@/lib/badge-count"
 import { db } from "@/lib/db"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { bellRowFor, declaredChannelSet, NOT_IN_THE_BELL } from "@/lib/push-notifications"
-import { VISIBLE_DM } from "@/lib/dm-moderation"
 import { decorateNotifications, REQUEST_KINDS, type RowDecoration } from "@/lib/notification-display"
 import { cursorPaginationMeta, parseCursorPagination } from "@/lib/pagination"
 import { rateLimit, userLimit } from "@/lib/rate-limit"
@@ -85,31 +84,12 @@ export async function GET(request: NextRequest) {
     const { items, meta } = cursorPaginationMeta(rows, limit)
 
     /*
-     * The unread count ships with the feed.
-     *
-     * The bell needs it on every screen, and returning it here saves the app a
-     * second request on the one call it already makes when the sheet opens.
-     * `@@index([user_id, read_at])` exists for this count.
+     * The counts ship with the feed (`lib/badge-count.ts`, the push's own): the bell's `unreadCount` (talk-asks left
+     * out, requests placement A), the talk-asks waiting, and the icon's `badgeCount`, the bell plus the Banter dot.
+     * The bell needs them on every screen, and returning them here saves the app a request on the one call it makes.
      */
-    const [unreadCount, unreadConversations, decorations] = await Promise.all([
-      db.notifications.count({
-        where: { user_id: user.userId, read_at: null, kind: { notIn: NOT_IN_THE_BELL } },
-        // Capped: the app says "999+" past this, and a count of a backlog is not free (`lib/badge-count.ts`).
-        take: UNREAD_CAP,
-      }),
-      /*
-       * The app-icon badge's other half: live conversations with something
-       * unread from the other person. A thread, not a message — the same unit
-       * the Banter list marks — and a hidden message is never delivered, so it
-       * is never counted (`VISIBLE_DM`).
-       */
-      db.private_conversations.count({
-        where: {
-          closed_at: null,
-          OR: [{ user1_id: user.userId }, { user2_id: user.userId }],
-          messages: { some: { is_read: false, sender_id: { not: user.userId }, ...VISIBLE_DM } },
-        },
-      }),
+    const [counts, decorations] = await Promise.all([
+      inboxCountsFor([user.userId]).then((m) => m.get(user.userId)!),
       /*
        * Decoration is a bonus on a row, never a reason for the bell to fail: it
        * reads six other tables, and a failure in any of them (or in a row's odd
@@ -140,9 +120,12 @@ export async function GET(request: NextRequest) {
         // What the row can say for the reader beyond the push's nameless words (lib/notification-display.ts).
         ...decorations.get(n.id),
       })),
-      unreadCount,
-      // The app icon's number: unseen bell rows plus conversations with something unread.
-      badgeCount: unreadCount + unreadConversations,
+      // Unseen rows the bell answers: never a talk-ask, which is a plain line here and waits in Banter.
+      unreadCount: counts.bell,
+      // The Banter dot's asks: message requests and Lobby asks waiting on you.
+      talkAsks: { messageRequests: counts.messageRequests, lobbyAsks: counts.lobbyAsks },
+      // The app icon's number: the bell plus the Banter dot (conversations with something unread, and the asks).
+      badgeCount: iconBadge(counts),
       pagination: meta,
       // `DELETE /notifications` leaves the requests waiting on you in place (SCRUM-860).
       clearKeepsRequests: true,

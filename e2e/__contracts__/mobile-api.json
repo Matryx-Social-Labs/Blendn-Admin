@@ -258,6 +258,7 @@
       "clearKeepsRequests",
       "notifications",
       "pagination",
+      "talkAsks",
       "unreadCount"
     ]
   },
