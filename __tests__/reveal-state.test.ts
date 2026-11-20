@@ -48,9 +48,14 @@ describe("going public in the room does not name you in the DMs from it", () => 
 })
 
 describe("a Lobby accept opens already swapped, and only a Lobby accept", () => {
-  it("passes both sides as revealed into the board conversation", () => {
+  it("passes both sides as revealed only when the asker and the accepter both saw the copy", () => {
     const src = read("app/api/mobile/board/requests/[requestId]/route.ts")
-    expect(src).toMatch(/boardRequestId: requestId,\s*revealed: \[boardRequest\.from_user_id, boardRequest\.to_user_id\]/)
+    expect(src).toMatch(/const swapOnAccept = boardRequest\.names_on_accept && namesOnAccept === true/)
+    expect(src).toMatch(/\.\.\.\(swapOnAccept && \{ revealed: \[boardRequest\.from_user_id, boardRequest\.to_user_id\] \}\)/)
+    // The ask records the asker's consent only when its client sent it.
+    const ask = read("app/api/mobile/events/[eventId]/board/[postId]/requests/route.ts")
+    expect(ask).toMatch(/namesOnAccept: z\.literal\(true\)\.optional\(\)/)
+    expect(ask).toMatch(/\.\.\.\(namesOnAccept && \{ names_on_accept: true \}\)/)
   })
 
   it("the message-request, friend and direct openers seed no reveal", () => {
@@ -88,7 +93,8 @@ describe("the swap endpoint", () => {
   })
 
   it("has no separate ask: the tap is the ask, and the body takes nothing", () => {
-    expect(src).not.toMatch(/reveal_requested/)
+    // `*_reveal_requested` is only the one-way "already pushed" marker on the asked side: never cleared.
+    expect(src).not.toMatch(/reveal_requested: false/)
     expect(src).toMatch(/const revealSchema = z\.object\(\{\}\)\.strict\(\)/)
   })
 

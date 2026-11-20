@@ -2687,11 +2687,16 @@ once you may see their name (both tapped, or never pseudonymous), and
 one-way reveal from before the swap is a pending tap now: it names nobody until
 the other side taps. Nobody starts swapped in a match — not even somebody named
 in the room (a room reveal no longer carries into its DMs). **An accepted Lobby
-ask opens already swapped** (both see first name + photo at once; the ask sheet
-says so before it is sent); asks accepted before this shipped stay a swap.
+ask opens already swapped** (both see first name + photo at once) — only when
+both apps showed the copy first: the ask sent `namesOnAccept: true` (`POST
+/events/:id/board/:postId/requests`, stored on the ask) and so did the accept
+(`PATCH /board/requests/:id { action: "accept", namesOnAccept: true }`). An ask
+or accept from an older app opens unswapped; asks accepted before this shipped
+stay a swap.
 
 Pushes (no names on the lock screen): a first tap sends `reveal_request` "A
-match wants to swap names"; the swap completing sends `reveal` "Names swapped"
+match wants to swap names" — once per conversation, whatever taps and cancels
+follow; the swap completing sends `reveal` "Names swapped"
 to the one who tapped first. Taking a tap back sends nothing.
 
 A swap never opens the profile (SCRUM-752, and now past the swap too): `GET

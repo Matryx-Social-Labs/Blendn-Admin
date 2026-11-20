@@ -1519,9 +1519,9 @@ model private_conversations {
   user1_pseudonym String?
   user2_pseudonym String?
 
-  /// UNUSED since the swap (2026-11-20): the other side's tap is the ask now
-  /// (`theyAskedToSwap`). Kept because migrations here are additive; nothing
-  /// reads or writes them. Drop in a later contract migration.
+  /// Since the swap (2026-11-20): this side has been pushed "a match wants to
+  /// swap names" once. One way: a cancel never clears it, so tap → cancel → tap
+  /// cannot push again (no nag loop). What the app shows is `theyAskedToSwap`.
   user1_reveal_requested Boolean @default(false)
   user2_reveal_requested Boolean @default(false)
 
@@ -4280,6 +4280,11 @@ model board_requests {
   /// What they said when asking. Optional — "can I join?" needs no essay, and
   /// requiring one would make the ask heavier than the thing being asked for.
   message String?
+  /// The asker's app showed "If they say yes, you'll both see each other's first
+  /// name and photo" before sending (`namesOnAccept: true`). With the accepter's
+  /// own `namesOnAccept`, the accept opens the chat already swapped; otherwise
+  /// it opens unswapped. False for every ask from an older app.
+  names_on_accept Boolean @default(false)
 
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
   decided_at         DateTime? @db.Timestamptz(6)

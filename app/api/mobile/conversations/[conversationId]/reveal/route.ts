@@ -38,9 +38,10 @@ interface RouteParams {
  * ## The tap is the ask
  *
  * There is no separate "ask them": my tap is what the other side sees as "they
- * want to swap" (`revealRequested`, `theyAskedToSwap`). It cannot nag -- a
- * second tap writes the same `true` and pushes nothing -- and there is no
- * decline: someone who does not want to swap simply does not.
+ * want to swap" (`revealRequested`, `theyAskedToSwap`). It cannot nag: the ask
+ * is pushed once per conversation, whatever taps and cancels follow (the
+ * one-way `*_reveal_requested` marker). There is no decline: someone who does
+ * not want to swap simply does not.
  *
  * ## Taking it back
  *
@@ -138,8 +139,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
     if (count === 1) {
-      // First tap: they are asked. Second: the names are swapped, and they are told.
-      ;(swapped ? notifyReveal : notifyRevealRequest)(themId, conversationId).catch(() => {})
+      if (swapped) {
+        // The tap that completes the swap: they tapped first, and are told.
+        notifyReveal(themId, conversationId).catch(() => {})
+      } else {
+        /*
+         * They are asked -- once per conversation. `*_reveal_requested` on their
+         * side is a one-way marker a cancel never clears, so tap → cancel → tap
+         * cannot push them again (security review of #1001: no nag loop).
+         */
+        const asked = isUser1 ? "user2_reveal_requested" : "user1_reveal_requested"
+        const first = await db.private_conversations.updateMany({
+          where: { id: conversationId, [asked]: false },
+          data: { [asked]: true },
+        })
+        if (first.count === 1) notifyRevealRequest(themId, conversationId).catch(() => {})
+      }
       // Their open DM re-reads now rather than on the next push they may never get.
       // Once both have tapped the same event goes to both: names, and the friend offer.
       emitPrivateRevealed(conversationId, swapped ? [authUser.userId, themId] : [themId])

@@ -86,6 +86,25 @@ it("pushes once when two taps race", async () => {
   expect(notifyRevealRequest).toHaveBeenCalledTimes(1)
 })
 
+it("pushes the ask once per conversation, even across a cancel and a re-tap (no nag loop)", async () => {
+  const { a, id } = await pair()
+  const cancel = () =>
+    revealRoute
+      .DELETE(
+        new NextRequest(`http://localhost/api/mobile/conversations/${id}/reveal`, {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${a.token}` },
+        }),
+        { params: Promise.resolve({ conversationId: id }) }
+      )
+      .then((r) => r.status)
+  for (let i = 0; i < 3; i++) {
+    expect(await call(a, id)).toBe(200)
+    expect(await cancel()).toBe(200)
+  }
+  expect(notifyRevealRequest).toHaveBeenCalledTimes(1)
+})
+
 it("refuses the removed ask body", async () => {
   const { a, id } = await pair()
   expect(await call(a, id, { ask: true })).toBe(400)

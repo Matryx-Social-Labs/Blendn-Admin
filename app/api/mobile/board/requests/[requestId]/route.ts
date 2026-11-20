@@ -85,6 +85,12 @@ class AcceptRefused extends Error {}
 
 const decisionSchema = z.object({
   action: z.enum(["accept", "decline", "withdraw"]),
+  /**
+   * On an accept: the accepter's app showed that both will see each other's
+   * first name and photo. With the asker's own (`board_requests.names_on_accept`)
+   * the chat opens already swapped; without either, it opens unswapped.
+   */
+  namesOnAccept: z.literal(true).optional(),
 })
 
 // PATCH /api/mobile/board/requests/[requestId]
@@ -101,7 +107,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     const validation = decisionSchema.safeParse(await readJson(request))
     if (!validation.success) return validationErrorResponse(validation.error)
-    const { action } = validation.data
+    const { action, namesOnAccept } = validation.data
 
     const boardRequest = await db.board_requests.findUnique({
       where: { id: requestId },
@@ -113,6 +119,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         from_user_id: true,
         to_user_id: true,
         silenced_at: true,
+        names_on_accept: true,
         event: { select: { end_time: true } },
         post: { select: { deleted_at: true, spaces_left: true, body: true } },
       },
@@ -213,11 +220,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
      *
      * And swapped from the start (identity model, owner 2026-11-11): these two
      * are about to meet in person, so the chat shows each one's first name and
-     * photo at once. The ask sheet said so before it was sent, and accepting
-     * is the consent. The pseudonyms stay underneath, so it is still first
-     * name only and still this chat only. Not backfilled: asks accepted before
-     * that copy shipped stay a mutual swap (advisor Q3, 2026-11-20).
+     * photo at once -- but only when BOTH apps said so first: the asker's sheet
+     * (`names_on_accept`, recorded on the ask) and the accepter's
+     * (`namesOnAccept` on this call). An ask or an accept from an older app
+     * never showed that copy, so it opens unswapped and either may swap
+     * (security review of #1001; advisor Q3: no backfill). The pseudonyms stay
+     * underneath: first name only, this chat only.
      */
+    const swapOnAccept = boardRequest.names_on_accept && namesOnAccept === true
     const pseudonyms = Object.fromEntries(
       await boardPseudonyms(boardRequest.event_id, [
         boardRequest.from_user_id,
@@ -298,7 +308,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
             eventId: boardRequest.event_id,
             pseudonyms,
             boardRequestId: requestId,
-            revealed: [boardRequest.from_user_id, boardRequest.to_user_id],
+            ...(swapOnAccept && { revealed: [boardRequest.from_user_id, boardRequest.to_user_id] }),
           },
           tx
         )

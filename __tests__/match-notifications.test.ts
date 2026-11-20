@@ -120,17 +120,19 @@ describe("the swap notifications go to the other side", () => {
   const post = src.slice(src.indexOf("export async function POST"), src.indexOf("export async function DELETE"))
 
   it("notifies them, never the person who acted: asked on a first tap, told on the swap", () => {
-    expect(post).toMatch(/\(swapped \? notifyReveal : notifyRevealRequest\)\(themId, conversationId\)/)
+    expect(post).toMatch(/notifyReveal\(themId, conversationId\)\.catch\(/)
+    expect(post).toMatch(/notifyRevealRequest\(themId, conversationId\)\.catch\(/)
     expect(post).toMatch(/const themId = isUser1 \? conversation\.user2_id : conversation\.user1_id/)
   })
 
-  it("is fire-and-forget, and only on the call whose UPDATE flipped the row", () => {
-    expect(post).toMatch(/if \(count === 1\) \{[\s\S]{0,200}\(themId, conversationId\)\.catch\(/)
+  it("pushes only from the call whose UPDATE flipped the row, and the ask only once per conversation", () => {
+    expect(post).toMatch(/if \(count === 1\) \{/)
+    expect(post).toMatch(/where: \{ id: conversationId, \[asked\]: false \}[\s\S]{0,120}if \(first\.count === 1\) notifyRevealRequest/)
   })
 
   it("does not fire when the tap was refused for a missing photo", () => {
     expect(post.indexOf("reveal_incomplete")).toBeGreaterThan(-1)
-    expect(post.indexOf("reveal_incomplete")).toBeLessThan(post.indexOf("notifyRevealRequest)("))
+    expect(post.indexOf("reveal_incomplete")).toBeLessThan(post.indexOf("notifyRevealRequest("))
   })
 
   it("taking a tap back pushes nothing", () => {
