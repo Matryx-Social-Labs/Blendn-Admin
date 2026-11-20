@@ -289,7 +289,7 @@ function mapSource(
  */
 export function mutedRefusal(membership: { muted_by: string | null }): string {
   return membership.muted_by
-    ? "The organizer has muted you in this room."
+    ? "The host has muted you in this room."
     : "You are muted in this room. Your messages have been flagged for policy violations."
 }
 

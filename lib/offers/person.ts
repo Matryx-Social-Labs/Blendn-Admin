@@ -24,8 +24,11 @@ export type OfferState = "live" | "redeemed" | "used_tonight" | "ended"
 export interface PersonOffer {
   /** The offer's id: the same for everyone it went to, and answered only for them. */
   id: string
-  /** `venueType`: the venue's kind (`venues.venue_type`), so the pass can draw its tile; null when it has none. */
-  venue: { id: string; name: string; venueType: venue_type | null }
+  /**
+   * `venueType`: the venue's kind (`venues.venue_type`), so the pass can draw its tile; null when it has none.
+   * `timezone`: the venue's IANA zone, so the pass's day and clock are the venue's, never the phone's.
+   */
+  venue: { id: string; name: string; venueType: venue_type | null; timezone: string }
   text: string
   sentAt: string
   /** When the pass was redeemed at the door; null until it was. */
@@ -64,7 +67,7 @@ type SendRow = {
     text: string
     ends_at: Date
     org_id: string
-    venue: { id: string; name: string; venue_type: venue_type | null; owner_org_id: string | null; deleted_at: Date | null }
+    venue: { id: string; name: string; venue_type: venue_type | null; owner_org_id: string | null; deleted_at: Date | null; timezone: string }
   }
 }
 
@@ -82,7 +85,7 @@ function baseState(send: SendRow, now: Date): OfferState {
 function shape(send: SendRow, state: OfferState): PersonOffer {
   return {
     id: send.offer.id,
-    venue: { id: send.offer.venue.id, name: send.offer.venue.name, venueType: send.offer.venue.venue_type },
+    venue: { id: send.offer.venue.id, name: send.offer.venue.name, venueType: send.offer.venue.venue_type, timezone: send.offer.venue.timezone },
     text: send.offer.text,
     sentAt: send.sent_at.toISOString(),
     redeemedAt: send.redeemed_at?.toISOString() ?? null,

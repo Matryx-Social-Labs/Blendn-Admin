@@ -37,9 +37,17 @@ export async function conversationSeen(client: Client, conversationId: string, o
   return { seenAs: (c.user1_id === otherId ? c.user1_pseudonym : c.user2_pseudonym) ?? null, seenIn: await placeOf(client, c.origin_event_id) }
 }
 
-/** A message request's: where the two met. A request shows its sender's name, so there is no pseudonym to keep. */
-export async function requestSeen(metInEventId: string | null): Promise<BlockSeen> {
-  return { seenAs: null, seenIn: await placeOf(db, metInEventId) }
+/**
+ * A message request's: where the two met — the event, or the Lobby room it was sent from (its name, as
+ * `blockSeenFromRef` keeps for a block made inside that room). A request shows its sender's name, so there is no
+ * pseudonym to keep.
+ */
+export async function requestSeen(met: { met_in_event_id: string | null; met_in_room_id: string | null }): Promise<BlockSeen> {
+  if (met.met_in_room_id) {
+    const room = await db.chat_groups.findUnique({ where: { id: met.met_in_room_id }, select: { name: true } })
+    return { seenAs: null, seenIn: room?.name ?? null }
+  }
+  return { seenAs: null, seenIn: await placeOf(db, met.met_in_event_id) }
 }
 
 /**

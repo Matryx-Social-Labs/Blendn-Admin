@@ -18,6 +18,15 @@ import { ticketsRequired } from "@/lib/ticket-views"
 /** A native ticketed event: going is having a ticket. */
 const TICKETS_REQUIRED_SENTENCE = "This event is ticketed: get a ticket to go."
 
+/** Withdrawing while in the room: Going's ⋯ can lag a check-in made on another phone by a poll (99 s). */
+const CHECKED_IN_SENTENCE = "You’re checked in here. Check out first."
+
+/** A live check-in here refuses a withdrawal: the RSVP is what the room is, and Check out is the way out. */
+async function checkedInRefusal(eventId: string, userId: string) {
+  const live = await db.event_check_ins.findFirst({ where: { event_id: eventId, user_id: userId, status: "checked_in" }, select: { id: true } })
+  return live ? errorResponse(CHECKED_IN_SENTENCE, 409, undefined, ErrorCode.ALREADY_CHECKED_IN) : null
+}
+
 /** What the person is told when they try to join a night that was called off. */
 const EVENT_CANCELLED_SENTENCE = "This event has been cancelled, so it isn’t taking RSVPs any more."
 
@@ -49,6 +58,10 @@ export async function POST(
 
     if (!["going", "maybe", "not_going"].includes(status)) {
       return errorResponse("Invalid RSVP status", 400)
+    }
+    if (status === "not_going") {
+      const refused = await checkedInRefusal(eventId, user.userId)
+      if (refused) return refused
     }
 
     // A night that was called off takes no new "going" or "maybe". Saying not_going stays open (and so does
@@ -95,6 +108,8 @@ export async function DELETE(
     if (denied?.kind === "not_found") return eventAccessResponse(denied)
     // The ticket wrote it and a refund removes it; withdrawing it by hand would cut a ticket holder out of the room.
     if (await ticketsRequired(eventId)) return errorResponse(TICKETS_REQUIRED_SENTENCE, 409, "tickets_required")
+    const refused = await checkedInRefusal(eventId, user.userId)
+    if (refused) return refused
 
     await db.event_rsvps.deleteMany({
       where: { event_id: eventId, user_id: user.userId },
