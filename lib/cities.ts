@@ -39,6 +39,7 @@ export interface CityRow {
   min_lon: number
   max_lat: number
   max_lon: number
+  whatsapp_channel_url?: string | null
   sort: number
 }
 
@@ -55,6 +56,8 @@ export interface CatalogueCity {
   bounds: { minLat: number; minLon: number; maxLat: number; maxLon: number }
   /** Every `cityKey` that means this city, sorted; always includes its display name. */
   matchKeys: string[]
+  /** The city's WhatsApp Channel, for Notification settings' "Your city" row; null is no row. */
+  whatsappChannelUrl: string | null
 }
 
 export interface CatalogueMarket {
@@ -94,6 +97,7 @@ export function buildCatalogue(marketRows: readonly MarketRow[], cityRows: reado
         centre: { latitude: c.centre_lat, longitude: c.centre_lon },
         bounds: { minLat: c.min_lat, minLon: c.min_lon, maxLat: c.max_lat, maxLon: c.max_lon },
         matchKeys: [...new Set([c.name, ...c.match_names].map(cityKey).filter(Boolean))].sort(),
+        whatsappChannelUrl: c.whatsapp_channel_url ?? null,
       })
     )
 

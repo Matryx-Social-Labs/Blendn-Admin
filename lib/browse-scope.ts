@@ -107,11 +107,13 @@ export interface PickerCity extends BrowseCity {
   bounds: CatalogueCity["bounds"] | null
   isDefault: boolean
   access: "full" | "comingSoon"
+  /** The city's WhatsApp Channel (Notification settings' "Your city" row), null for none or an uncatalogued city. */
+  whatsappChannelUrl: string | null
 }
 
 function pickerRow(row: BrowseCity, city: CatalogueCity | null, access: CityAccess): PickerCity {
   if (!city) {
-    return { ...row, slug: null, country: null, launchState: null, timezone: null, bounds: null, isDefault: false, access: "full" }
+    return { ...row, slug: null, country: null, launchState: null, timezone: null, bounds: null, isDefault: false, access: "full", whatsappChannelUrl: null }
   }
   return {
     ...row,
@@ -123,6 +125,7 @@ function pickerRow(row: BrowseCity, city: CatalogueCity | null, access: CityAcce
     bounds: city.bounds,
     isDefault: city.isDefault,
     access: access === "comingSoon" ? "comingSoon" : "full",
+    whatsappChannelUrl: city.whatsappChannelUrl,
   }
 }
 

@@ -647,7 +647,13 @@ has no writer yet): `days[].cancelled` reads it when something does.
 `notification_kind`), `data: { type: "event_changed", eventId, changed }` where
 `changed` is the same words comma-joined (`"time,venue"`, `"cancelled"`), and
 `reason` is the one that matters most (`cancelled`, `time`, `venue`), the same
-`data.reason` an `event_update` carries (see Flow 9). Going
+`data.reason` an `event_update` carries (see Flow 9). Since SCRUM-1091 a change made
+from the dashboard also spells out the one that matters most, so the row can say
+"New time: 9:30 PM, was 8:00 PM": `field: "time"` with `from` and `to` the start
+time before and after (ISO instants) and `timeZone` the event's IANA zone (write
+them in it, with no zone label); else `field: "venue"` with `to` the new venue name
+and `from` the old one (absent when there was none). Absent when neither moved (an
+end time or an address alone). Going
 means `rsvp_status = going`. Maybe, waitlisted and saved keep `event_update`, as
 before. A build that does not know the kind is sent `event_update` in its push
 (see the channel set below), and reads the bell row as `event_update` too: the
@@ -734,9 +740,17 @@ event's change and a report's outcome have no switch here. Stored as
 
 - **`display`** `{ title?, context?, visual? }`, only where the reader may already
   see the person or thing, resolved in one query per kind for the page:
-  - `friend_request` while it waits: `title` "{first name} wants to be friends",
-    `visual` `{ type: "photo", uri }`, the asker exactly as `GET /friends/requests`
-    shows them to the same person.
+  - `friend_request` while it waits: `title` "{full name} wants to be friends"
+    (SCRUM-1091; it was the first name), `visual` `{ type: "photo", uri }`, or
+    `{ type: "initial", name }` for an asker with no photo (draw their initial on
+    their hue, as `personFace`), the asker exactly as `GET /friends/requests` shows
+    them to the same person.
+  - `message_request` while it waits: `title` "{full name} wants to message you",
+    `visual` the sender's photo, else `initial`, the sender as `GET /message-requests`
+    shows them to the same person. Answered or gone: no `display`.
+  - `crew_invite`: `title` "Crew invite: {crew}" whenever `context` names the crew.
+  - `crew_here`: `title` "Someone from {crew} is here" (the stored title is the bare
+    crew name) for a member of a crew neither dissolved nor hidden.
   - `match`: `visual` `{ type: "creature", pseudonym }`, the other side's room
     pseudonym, and `context` the same pseudonym. Never a name or a photo.
   - `crew_invite`, `crew_here`: `visual` `{ type: "emblem", seed }`, the crew's
@@ -795,6 +809,24 @@ database).
 The feed response gains **`badgeCount`**: `unreadCount` plus live conversations
 with something unread from the other person (a thread, not a message; a hidden
 message is never counted), the app icon's number.
+
+**The badge split (requests placement A, SCRUM-1091).** A talk-ask opens a chat, so
+it is answered in Banter and is a plain history line in Notifications:
+- `unreadCount` (the bell, and `POST /notifications/read`'s answer) no longer counts
+  `message_request`, `board_request` or `reveal_request` rows. The rows stay in the feed.
+- **`talkAsks`** `{ messageRequests, lobbyAsks }`: the message requests waiting on you
+  (as `GET /message-requests?status=pending` counts them) and the live Lobby asks
+  (as `GET /board/requests` lists its live incoming ones: pending, not silenced, the
+  post standing, the night not over, nobody blocked either way).
+- `badgeCount` = `unreadCount` + unread conversations + `talkAsks.messageRequests` +
+  `talkAsks.lobbyAsks`: the bell plus the Banter dot, so the Banter dot is
+  `badgeCount - unreadCount`. Every push's `badge` is the same number
+  (`lib/badge-count.ts` serves both, four statements however many recipients).
+- A crew arrival (`crew_here`) is one updating push per crew (`crew-here:{crewId}`,
+  replaced in place on a Flow 9 build) and one bell row per crew a night: the next
+  arrival replaces the last row (`data.occurrenceId`).
+- A second crew invite from the same inviter within 24 h is spared its push only;
+  its bell row is written, so it waits in Notifications like the first.
 
 **`clearKeepsRequests` is not sent.** `DELETE /notifications` clears every row,
 waiting requests included, so the client's default (it clears them too) is right.
@@ -1483,10 +1515,12 @@ place count.
   "cities": [
     { "city": "Bengaluru", "eventCount": 12, "placeCount": 1505, "centre": { "latitude": 12.9716, "longitude": 77.5946 },
       "slug": "bengaluru", "country": "IN", "launchState": "live", "timezone": "Asia/Kolkata",
-      "bounds": { "minLat": 12.83, "minLon": 77.45, "maxLat": 13.14, "maxLon": 77.78 }, "isDefault": true, "access": "full" },
+      "bounds": { "minLat": 12.83, "minLon": 77.45, "maxLat": 13.14, "maxLon": 77.78 }, "isDefault": true, "access": "full",
+      "whatsappChannelUrl": "https://whatsapp.com/channel/0029VaBlendnBLR01" },
     { "city": "Toronto", "eventCount": 0, "placeCount": 0, "centre": { "latitude": 43.6532, "longitude": -79.3832 },
       "slug": "toronto", "country": "CA", "launchState": "preview", "timezone": "America/Toronto",
-      "bounds": { "minLat": 43.58, "minLon": -79.64, "maxLat": 43.86, "maxLon": -79.11 }, "isDefault": true, "access": "comingSoon" }
+      "bounds": { "minLat": 43.58, "minLon": -79.64, "maxLat": 43.86, "maxLon": -79.11 }, "isDefault": true, "access": "comingSoon",
+      "whatsappChannelUrl": null }
   ],
   "countries": [
     { "code": "IN", "name": "India", "launchState": "live", "defaultCitySlug": "bengaluru" },
@@ -1496,6 +1530,12 @@ place count.
   "device": { "country": "DE", "access": "none", "citySlug": null }
 } }
 ```
+
+**`whatsappChannelUrl`** (SCRUM-1091, Flow 9 A, ruling 7): the city's WhatsApp
+Channel, for Notification settings' "Your city" row; `null` for a city without one
+or an uncatalogued city, and then there is no row. City data
+(`cities.whatsapp_channel_url`, set by ops; India's cities only today), CHECKed to an
+https `whatsapp.com/channel/` link (`cities_whatsapp_channel_url_shape`).
 
 **The catalogue.** Cities and countries are rows (`cities`, `markets`), so a new
 country needs no code. A city's state is the lower of its own and its country's.

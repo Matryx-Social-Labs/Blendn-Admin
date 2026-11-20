@@ -24,6 +24,7 @@ import {
   notifyEventCancelled,
   notifyEventDetailsChanged,
   materialEventChanges,
+  eventMoveOf,
 } from "@/lib/services/event-notifications.service"
 import { isUuid, readJson } from "@/lib/api-input"
 
@@ -576,7 +577,7 @@ export async function PATCH(req: Request, { params }: RouteContext) {
     if (isCancelling) {
       await notifyEventCancelled(updatedEvent.id, updatedEvent.title, toldInside)
     } else {
-      await notifyEventDetailsChanged(updatedEvent.id, updatedEvent.title, changes)
+      await notifyEventDetailsChanged(updatedEvent.id, updatedEvent.title, changes, eventMoveOf(event, updatedEvent))
     }
 
     return NextResponse.json(updatedEvent)
