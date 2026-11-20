@@ -2056,7 +2056,7 @@ Lists every **event** room the caller is still a member of: `active` and **`mute
 
 **`rooms`: crews' and Mixes' rooms (step 9).** Beside the paged `groups`, the
 response carries `rooms` — the caller's crews' chats and their Mixes' rooms,
-each `{ id, kind: "crew" | "blend", name, crewId, blendId, closesAt,
+each `{ id, kind: "crew" | "blend" | "board_post", name, crewId, blendId, closesAt,
 unreadCount, mute, lastMessageAt, lastMessage, membership, status }`, newest
 message first, not paged (at most ten crews and a night's few Mixes) — sent
 with the first page, and `[]` on later pages. Each is
@@ -2072,6 +2072,21 @@ than more `groups` rows because an installed app reads `event` off every
 `groups` row, and these rooms have none. A hidden crew's chat stays listed to
 its members — hiding takes a crew off every surface outside it, not its own
 chat (C12) — while a Mix with a hidden side is gone for everyone.
+
+**Lobby rooms in `rooms` (Flow 5 C5 · B-A, "Your ride").** A Lobby post's room
+(`kind: "board_post"`) is listed to the people it seats — the post's author and
+its accepted askers — while the post stands, the caller is not in a block with
+its author, and the room is open: it closes with its event's room, a day after
+the end (`closesAt`), and an archived room is gone. Banned and left members are
+not listed. The row carries `name` (the post's words, clipped), `boardPost:
+{ id, eventId, kind, subKind, yours }` (`subKind: "ride"` on an `offer` is "Your
+ride" to its author) and `others: { names, count }`: up to three room
+pseudonyms of the others seated, the author first, and how many there are in
+all ("With Lunar Fox and 2 others"). Never the caller, never somebody in a
+block with them, never an asker whose ask no longer stands; no account id, real
+name or photo. `lastMessage.user.name` is the sender's pseudonym in that room.
+The others are read in one statement for every room on the list. The ride's
+place and time are not separate fields: the post's words carry them, as `name`.
 
 **Nothing in a row comes from somebody in a block with you.** On every row,
 `groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
