@@ -347,6 +347,7 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     expect(JSON.stringify(friendsCopy)).not.toContain(roomHandle(eventId, arriver.id))
 
     expect(to(stranger, "event:room:checkin")).toHaveLength(1)
+    expect(to(stranger, "event:room:checkin")[0].payload.revealed).toBe(false)
     expect(to(stranger, "event:checkin")[0].payload.userId).toBe(roomHandle(eventId, arriver.id))
     expect(to(arriver, "event:checkin")[0].payload.userId).toBe(arriver.id)
   })
@@ -366,6 +367,8 @@ describe("arrivals and departures: a friend hears the count, never the arriver (
     const copy = emitted.filter((e) => e.to === watcher.id && e.event === "event:room:checkin")
     expect(copy).toHaveLength(1)
     expect(copy[0].payload.userName).toBe("Asha")
+    // The deck's `revealed`, so the arrival draws the same face the next refetch will (SCRUM-1067).
+    expect(copy[0].payload.revealed).toBe(true)
     expect(JSON.stringify(copy)).not.toContain("Rao")
   })
 

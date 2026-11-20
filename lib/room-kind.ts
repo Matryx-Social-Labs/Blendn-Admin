@@ -199,6 +199,11 @@ export function blendDoor(viewerId: string) {
   return blendSelect([viewerId])
 }
 
+/** The board post behind a room, as its door reads it for one caller. */
+export function boardPostDoor(viewerId: string) {
+  return boardPostSelect([viewerId])
+}
+
 interface Blocks {
   blocked_users: { blocked_id: string }[]
   blocked_by: { blocker_id: string }[]

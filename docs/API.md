@@ -1042,13 +1042,17 @@ ticket.
 Each card names what the two of you share rather than who the other person is:
 
 ```json
-{ "userId": "...", "displayName": "Cosmic Panda", "photo": null,
+{ "userId": "...", "displayName": "Cosmic Panda", "revealed": false, "photo": null,
   "sharedInterests": ["Techno", "Board games"],
   "sharedIntents": ["networking"], "insideNow": true, "youLiked": false }
 ```
 
 `displayName` is the room pseudonym and `photo` is null unless that person chose
-to be revealed at this event. **There is no score** — the ordering is not
+to be revealed at this event. `revealed` says which (SCRUM-1067): true exactly when
+`displayName` is their name, so a client draws their photo or, with none, their
+initial, and a creature only when it is false. A revealed person with no name on
+the account stays their pseudonym and `revealed: false`. A host is never told
+anyone is revealed. **There is no score** — the ordering is not
 exposed, because a number implies a precision the data cannot support.
 
 Staff are excluded. People who have checked out are not: they were in the room
@@ -2052,7 +2056,7 @@ Lists every **event** room the caller is still a member of: `active` and **`mute
 
 **`rooms`: crews' and Mixes' rooms (step 9).** Beside the paged `groups`, the
 response carries `rooms` — the caller's crews' chats and their Mixes' rooms,
-each `{ id, kind: "crew" | "blend", name, crewId, blendId, closesAt,
+each `{ id, kind: "crew" | "blend" | "board_post", name, crewId, blendId, closesAt,
 unreadCount, mute, lastMessageAt, lastMessage, membership, status }`, newest
 message first, not paged (at most ten crews and a night's few Mixes) — sent
 with the first page, and `[]` on later pages. Each is
@@ -2068,6 +2072,21 @@ than more `groups` rows because an installed app reads `event` off every
 `groups` row, and these rooms have none. A hidden crew's chat stays listed to
 its members — hiding takes a crew off every surface outside it, not its own
 chat (C12) — while a Mix with a hidden side is gone for everyone.
+
+**Lobby rooms in `rooms` (Flow 5 C5 · B-A, "Your ride").** A Lobby post's room
+(`kind: "board_post"`) is listed to the people it seats — the post's author and
+its accepted askers — while the post stands, the caller is not in a block with
+its author, and the room is open: it closes with its event's room, a day after
+the end (`closesAt`), and an archived room is gone. Banned and left members are
+not listed. The row carries `name` (the post's words, clipped), `boardPost:
+{ id, eventId, kind, subKind, yours }` (`subKind: "ride"` on an `offer` is "Your
+ride" to its author) and `others: { names, count }`: up to three room
+pseudonyms of the others seated, the author first, and how many there are in
+all ("With Lunar Fox and 2 others"). Never the caller, never somebody in a
+block with them, never an asker whose ask no longer stands; no account id, real
+name or photo. `lastMessage.user.name` is the sender's pseudonym in that room.
+The others are read in one statement for every room on the list. The ride's
+place and time are not separate fields: the post's words carry them, as `name`.
 
 **Nothing in a row comes from somebody in a block with you.** On every row,
 `groups` and `rooms` alike, `lastMessage` and `unreadCount` leave out messages
@@ -2131,7 +2150,7 @@ same facts from `GET /users/:userId`'s `connection`.
 
 ### GET /message-requests: where you met (`metIn`)
 
-Each request carries `metIn: { kind: "event" | "venue_day", name } | null`, for
+Each request carries `metIn: { kind: "event" | "venue_day", name } | { kind: "board_post", name, subKind, yours } | null`, for
 the Requests row's "Met in the room at …" (Flow 5 · B-A). A request records the
 room of the handle it was sent by (`message_requests.met_in_event_id`), and only when
 the two shared that room by `haveSharedAnEvent`'s rule for that one room (a
@@ -2147,6 +2166,22 @@ allowed by another room they shared, records nothing.
   deleted (`ON DELETE SET NULL`), soft-deleted or hidden (`draft`).
 - Recipient only. The create response does not echo it, and no host or
   dashboard surface reads it.
+
+**From a Lobby room (Flow 5 C5, "Met in the Lobby · Your ride").** A Lobby
+(board post) room's handle names nobody outside its room, except here: `POST
+/message-requests` takes one back while that room seats **both** the sender and
+the person named — the post's author or an accepted asker, a member not banned
+or gone, the post standing, the room not over (its event's room closes a day
+after the end). Then the shared room stands in for a shared check-in, and the
+request records the room (`met_in_room_id`). Otherwise the handle is answered
+as nobody (404 "User not found"), as a forged one is. The list then says
+`metIn: { kind: "board_post", name, subKind, yours }`: `name` the night's name
+as above, `subKind` what the post is about (`ride`, `spots`, `ticket`, `buddy`
+or null), `yours` whether the reader wrote the post ("Your ride"). Never the
+room's or the post's id, a handle or a pseudonym. `null` once the post is
+withdrawn or taken down or its event is gone or hidden; erased with the
+sender's account, like `met_in_event_id`. An app that knows only `event` and
+`venue_day` shows no line for it.
 
 ### Lists are paged (SCRUM-760)
 
