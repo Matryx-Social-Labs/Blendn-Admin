@@ -17,6 +17,12 @@ const SEARCH_MAX = 100
  * newest of them only; page the candidates if anybody ever blocks that many.
  */
 const NAME_CANDIDATES = 500
+/**
+ * The newest blocks whose real names a search reads. ponytail: older blocks
+ * than this are found by their pseudonym and place only; raise it, or a
+ * trigram index on "User".name, if anybody ever blocks more.
+ */
+const NAME_SCAN = 5000
 
 type Described = { blocked_id: string; blocked: { name: string | null } }
 
@@ -192,19 +198,22 @@ async function describe(viewerId: string, blocks: readonly Described[]): Promise
  */
 async function searchWhere(viewerId: string, q: string) {
   const like = { contains: likeLiteral(q), mode: "insensitive" as const }
-  const [named, matches] = await Promise.all([
-    db.blocked_users.findMany({
-      where: { blocker_id: viewerId, blocked: { name: like } },
-      orderBy: NEWEST_FIRST,
-      take: NAME_CANDIDATES,
-      select: { blocked_id: true, blocked: { select: { name: true } } },
-    }),
+  const [mine, matches] = await Promise.all([
+    db.blocked_users.findMany({ where: { blocker_id: viewerId }, orderBy: NEWEST_FIRST, take: NAME_SCAN, select: { blocked_id: true } }),
     db.private_conversations.findMany({
       where: { OR: [{ user1_id: viewerId, user2_pseudonym: like }, { user2_id: viewerId, user1_pseudonym: like }] },
+      orderBy: { created_at: "desc" },
       take: NAME_CANDIDATES,
       select: { user1_id: true, user2_id: true },
     }),
   ])
+  // By id, then the name: a join on the name seq-scanned every account for somebody with thousands of blocks.
+  const people = await db.user.findMany({
+    where: { id: { in: mine.map((b) => b.blocked_id) }, name: like },
+    take: NAME_CANDIDATES,
+    select: { id: true, name: true },
+  })
+  const named = people.map((p) => ({ blocked_id: p.id, blocked: { name: p.name } }))
   const shown = await describe(viewerId, named)
   const needle = q.toLocaleLowerCase()
   const ids = [

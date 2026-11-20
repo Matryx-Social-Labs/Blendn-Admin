@@ -76,6 +76,8 @@ it("the region is checked against the home city sent in the same save", async ()
   expect((await put(who, { homeCitySlug: "toronto", home_state: "ontario" })).status).toBe(200)
   expect(await stored(who.id)).toBe("ontario")
   expect((await put(who, { homeCitySlug: "mumbai", home_state: "ontario" })).status).toBe(400)
+  // Clearing the home city in the same save leaves no country to check against: today's rule.
+  expect((await put(who, { homeCitySlug: null, home_state: "kerala" })).status).toBe(200)
 })
 
 it("an account with no home city keeps today's rule: any region we list, never an unknown slug", async () => {

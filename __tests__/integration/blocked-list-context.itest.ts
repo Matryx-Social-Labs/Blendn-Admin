@@ -10,6 +10,7 @@ import { NextRequest } from "next/server"
 import { signAccessToken } from "@/lib/mobile-auth"
 import { roomHandle } from "@/lib/room-handle"
 import { leaveConversationIn } from "@/lib/leave-conversation"
+import { blockSeenFromRef } from "@/lib/block-seen"
 import { conversationPair } from "@/lib/conversations"
 import { cleanup, closeDb, db, makeEvent, makeUser, onboard, testId } from "./helpers"
 
@@ -39,7 +40,6 @@ interface ListBody {
 afterAll(async () => {
   await db.message_requests.deleteMany({ where: { OR: [{ sender_id: { in: users } }, { recipient_id: { in: users } }] } })
   await db.blocked_users.deleteMany({ where: { OR: [{ blocker_id: { in: users } }, { blocked_id: { in: users } }] } })
-  await db.board_posts.deleteMany({ where: { event_id: { in: events } } })
   await cleanup(users, events)
   await closeDb()
 })
@@ -178,6 +178,23 @@ describe("what each door records", () => {
     expect(row.seen_in).toMatch(/^Startup Breakfast /)
   })
 
+  it("a block from another room's handle keeps their name in that room and the room's name; a draft event's place is never kept", async () => {
+    const eventId = await event(`Lobby Host ${testId("t")}`)
+    const [author, them] = [await person("ctx-post-author"), await person("ctx-post-them")]
+    const post = await db.board_posts.create({ data: { event_id: eventId, author_id: author, kind: "offer", body: "Two seats", spaces_left: 2 }, select: { id: true } })
+    const room = await db.chat_groups.create({
+      data: { kind: "board_post", board_post_id: post.id, name: "Two seats from Indiranagar", members: { create: [{ user_id: them, anonymous_name: "Silver Crane" }] } },
+      select: { id: true },
+    })
+    expect(await blockSeenFromRef(roomHandle({ kind: "board_post", groupId: room.id }, them), them)).toEqual({ seenAs: "Silver Crane", seenIn: "Two seats from Indiranagar" })
+    // A handle that names somebody else than the resolved target says nothing.
+    expect(await blockSeenFromRef(roomHandle({ kind: "board_post", groupId: room.id }, them), author)).toEqual({ seenAs: null, seenIn: null })
+
+    const draft = await event(`Unpublished ${testId("t")}`)
+    await db.events.update({ where: { id: draft }, data: { status: "draft" } })
+    expect((await blockSeenFromRef(roomHandle(draft, them), them)).seenIn).toBeNull()
+  })
+
   it("an existing block keeps what it first recorded", async () => {
     const eventId = await event(`First Place ${testId("t")}`)
     const [me, them] = [await person("ctx-keep-me"), await person("ctx-keep-them")]
@@ -244,6 +261,21 @@ describe("?q= — a search on the server", () => {
     const res = await list(me, "?q=okafor")
     expect(res.body.users).toEqual([])
     expect(res.body.pagination.totalCount).toBe(0)
+  })
+
+  it("never finds a match by their real name, even with a conversation between them", async () => {
+    const matched = await person("ctx-q-matched", "Zanele Hidden")
+    const [user1_id, user2_id] = conversationPair(me, matched)
+    await db.private_conversations.create({
+      data: { user1_id, user2_id, user1_pseudonym: user1_id === matched ? "Amber Heron" : "Mine", user2_pseudonym: user2_id === matched ? "Amber Heron" : "Mine" },
+    })
+    await db.blocked_users.create({ data: { blocker_id: me, blocked_id: matched } })
+    try {
+      expect((await list(me, "?q=hidden")).body.users).toEqual([])
+      expect((await list(me, "?q=amber")).body.users.map((u) => u.blocked_user_name)).toEqual(["Amber Heron"])
+    } finally {
+      await db.blocked_users.deleteMany({ where: { blocker_id: me, blocked_id: matched } })
+    }
   })
 
   it("finds by a real name the list does show (an accepted request named them)", async () => {
