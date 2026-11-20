@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-response"
 import { db } from "@/lib/db"
 import { getBoundingBox, haversineDistance } from "@/lib/geo"
+import { bboxWhere } from "@/lib/map-bbox"
 import { logger } from "@/lib/logger"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
 import { venueQuerySchema } from "@/lib/validations/venue"
@@ -111,7 +112,7 @@ export async function GET(request: NextRequest) {
       return validationErrorResponse(parsed.error)
     }
 
-    const { page, limit, search, city, lat, lon, radius, venueType, venueTypes, area, order, sortBy, sortOrder } =
+    const { page, limit, search, city, lat, lon, radius, bbox, venueType, venueTypes, area, order, sortBy, sortOrder } =
       parsed.data
     // `venueType=a,b` and its spelling `venueTypes=a,b`, one set.
     const types = [...new Set([...(venueType ?? []), ...(venueTypes ?? [])])]
@@ -157,10 +158,12 @@ export async function GET(request: NextRequest) {
     // means "sort by distance"; it must never silently mean "and hide anything
     // further than N km", which is the bug that blanked the events feed.
     if (lat !== undefined && lon !== undefined && radius !== undefined) {
-      const bbox = getBoundingBox(lat, lon, radius)
-      where.latitude = { gte: bbox.minLat, lte: bbox.maxLat }
-      where.longitude = { gte: bbox.minLon, lte: bbox.maxLon }
+      const box = getBoundingBox(lat, lon, radius)
+      where.latitude = { gte: box.minLat, lte: box.maxLat }
+      where.longitude = { gte: box.minLon, lte: box.maxLon }
     }
+    // The map's view (lib/map-bbox.ts); the schema refuses it beside `radius`, so nothing is overwritten.
+    if (bbox) Object.assign(where, bboxWhere(bbox))
 
     // Last, so it is asked of exactly the venues the filters above chose.
     const taken = await venuesTakenOver(now, where, { viewerAge })
@@ -207,7 +210,7 @@ export async function GET(request: NextRequest) {
      * repeats or skips a venue. Disjoint by construction (tonight excludes live).
      */
     // What the open-tonight read depends on besides time: the query's own scope and the viewer's age rule.
-    const tonightScope = JSON.stringify({ search, city: cityRule, closedCities, types, area, lat, lon, radius, viewerAge, taken })
+    const tonightScope = JSON.stringify({ search, city: cityRule, closedCities, types, area, lat, lon, radius, bbox, viewerAge, taken })
     const liveTier = order === "live" && mayCountLive ? await liveVenueIds(where, authUser.userId, now) : new Set<string>()
     const tonightTier =
       order === "live" ? await openTonightVenueIds(where, upcomingEventFilter, now, liveTier, tonightScope) : new Set<string>()

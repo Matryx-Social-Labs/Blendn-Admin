@@ -142,6 +142,7 @@ registry.registerPath({
       lat: z.coerce.number().min(-90).max(90).optional(),
       lon: z.coerce.number().min(-180).max(180).optional(),
       radius: z.coerce.number().min(0.1).max(100).optional(),
+      bbox: z.string().optional().describe("The map's view, as on GET /api/mobile/events: `minLon,minLat,maxLon,maxLat`; only venues inside it, and `pagination.totalCount` is how many are. Never with `radius`."),
       venueType: z.string().optional().describe("One venue type, or a comma list (`pub_bar,brewery`): a venue of any of them. Each must be a known type; an unknown one is a 400."),
       venueTypes: z.string().optional().describe("The same filter as `venueType`; if both are sent, a venue of either matches."),
       area: z.string().min(1).max(100).optional().describe("A neighbourhood by `areaSlug`. A venue with no area is in none."),
