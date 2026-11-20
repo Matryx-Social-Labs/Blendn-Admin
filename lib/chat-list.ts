@@ -196,13 +196,14 @@ export async function lobbyOthersOf(chatGroupIds: string[], viewerId: string, bl
       SELECT cgm.chat_group_id, COALESCE(cgm.anonymous_name, 'Attendee') AS name,
         row_number() OVER (
           PARTITION BY cgm.chat_group_id
-          ORDER BY (cgm.user_id = bp.author_id) DESC, cgm.joined_at, cgm.anonymous_name
+          ORDER BY (cgm.user_id = bp.author_id) DESC, cgm.joined_at, cgm.anonymous_name, cgm.user_id
         ) AS rn,
         count(*) OVER (PARTITION BY cgm.chat_group_id) AS n
       FROM chat_group_members cgm
       JOIN chat_groups cg ON cg.id = cgm.chat_group_id
       JOIN board_posts bp ON bp.id = cg.board_post_id
       WHERE cgm.chat_group_id = ANY(${chatGroupIds}::uuid[])
+        -- Left (by choice or removed) and banned are out; left_at is only ever set beside status left.
         AND cgm.status IN ('active', 'muted')
         AND cgm.user_id <> ${viewerId}
         AND NOT (cgm.user_id = ANY(${blockedIds}::text[]))

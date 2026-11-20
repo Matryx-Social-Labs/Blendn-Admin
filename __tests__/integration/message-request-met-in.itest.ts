@@ -312,6 +312,20 @@ describe("Met in the Lobby: a request from a Lobby room's handle", () => {
     expect((await ask(seated, r.handle(author))).status).toBe(201)
   })
 
+  it("is refused to a member banned from the room, and across a block, as nobody", async () => {
+    const [author, banned, a, b] = await Promise.all([person("ml-ba"), person("ml-bb"), person("ml-bc"), person("ml-bd")])
+    const r = await ride("Bans and blocks", author, [banned, a, b])
+    await db.chat_group_members.update({ where: { chat_group_id_user_id: { chat_group_id: r.roomId, user_id: banned.id } }, data: { status: "banned" } })
+    expect((await ask(banned, r.handle(author))).status).toBe(404)
+    expect((await ask(a, r.handle(banned))).status).toBe(404)
+
+    await db.$transaction((tx) => blockPairIn(tx, b.id, a.id))
+    expect((await ask(a, r.handle(b))).status).toBe(404)
+    expect(await db.message_requests.count({ where: { OR: [{ sender_id: { in: [banned.id, a.id] } }, { recipient_id: banned.id }] } })).toBe(0)
+    // Control: the same room still carries a request between two people it seats.
+    expect((await ask(b, r.handle(author))).status).toBe(201)
+  })
+
   it("is refused once the room is over (its event's room closed), and a withdrawn post reads as no room", async () => {
     const [author, a, b] = await Promise.all([person("ml-oa"), person("ml-ob"), person("ml-oc")])
     const r = await ride("Over later", author, [a, b])

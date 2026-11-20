@@ -82,6 +82,16 @@ describe("Lobby rooms in the chat list", () => {
 
     // The author's own ride.
     expect((await lobbyRow(author, roomId))?.boardPost).toMatchObject({ yours: true })
+
+    // Muted: still listed, saying so (a mute silences, it does not banish); banned: gone.
+    await db.chat_group_members.update({
+      where: { chat_group_id_user_id: { chat_group_id: roomId, user_id: v.id } },
+      data: { status: "muted", notification_preferences: { muted: true, muted_until: null } },
+    })
+    expect(await lobbyRow(v, roomId)).toMatchObject({ membership: { status: "muted" }, mute: { muted: true } })
+    await db.chat_group_members.update({ where: { chat_group_id_user_id: { chat_group_id: roomId, user_id: a.id } }, data: { status: "banned" } })
+    expect((await lobbyRow(v, roomId))?.others).toEqual({ names: ["Amber Lynx"], count: 1 })
+    expect(await lobbyRow(a, roomId)).toBeUndefined()
   })
 
   it("names three others at most and counts them all, never a blocked one", async () => {
@@ -133,13 +143,12 @@ describe("Lobby rooms in the chat list", () => {
   it("reads the rooms' others in one statement, not one per room", async () => {
     const { eventId } = await liveEvent((await person("lrn-host")).id)
     const [author, v] = await Promise.all([person("lrn-author"), person("lrn-v")])
-    const one = await rideRoom(eventId, author, [[v, "Lunar Fox"]])
+    await rideRoom(eventId, author, [[v, "Lunar Fox"]])
     await api.chatGroups(v)
     const { sql: few } = await counter.during(() => api.chatGroups(v))
     for (let i = 0; i < 4; i++) await rideRoom(eventId, author, [[v, testId("Fox").slice(0, 20)]])
     const { result, sql: many } = await counter.during(() => api.chatGroups(v))
     expect(result.body.data.rooms.filter((r: Row) => r.kind === "board_post").length).toBe(5)
     expect(many.length).toBe(few.length)
-    void one
   })
 })

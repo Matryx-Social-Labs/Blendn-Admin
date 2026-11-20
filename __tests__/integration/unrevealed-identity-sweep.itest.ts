@@ -422,7 +422,7 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     expect([...answered]).toEqual(expect.arrayContaining(["events/[eventId]/matches", "users/[userId]"]))
     expect(found).toEqual([])
 
-    // Revealed to the room, still a pseudonym to its host (hosts-see-pseudonyms-only, SCRUM-1067); the viewer is the control.
+    // Revealed to the room, still a pseudonym to its host (`roomIdentity`'s host side, SCRUM-1067); the viewer is the control.
     const reveal = await db.event_match_preferences.upsert({
       where: { event_id_user_id: { event_id: eventId, user_id: other.id } },
       create: { event_id: eventId, user_id: other.id, revealed: true },
@@ -434,7 +434,7 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
       expect(asViewer.body.data.matches.some((m: { revealed: boolean }) => m.revealed)).toBe(true)
       const asHost = await call(route("events/[eventId]/matches").GET, path, host, { params: { eventId } })
       expect(asHost.body.data.matches.length).toBeGreaterThan(0)
-      expect(asHost.text).not.toContain('"revealed":true')
+      expect(asHost.body.data.matches.every((m: { revealed: unknown }) => m.revealed === false)).toBe(true)
       expect(asHost.text).not.toContain(SECRET_NAME.split(" ")[0])
     } finally {
       await db.event_match_preferences.update({ where: { id: reveal.id }, data: { revealed: false } })
