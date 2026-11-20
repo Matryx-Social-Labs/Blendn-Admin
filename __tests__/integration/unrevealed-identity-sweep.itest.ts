@@ -201,7 +201,7 @@ beforeAll(async () => {
   conversationId = liked.data?.conversationId
   if (!liked.data?.mutual || !conversationId) throw new Error(`expected a mutual like, got ${JSON.stringify(liked)}`)
 
-  // The viewer reveals to the other; the other does not reveal back.
+  // The viewer taps Swap names; the other does not tap back (a one-sided tap names nobody).
   await ok(call(route("conversations/[conversationId]/reveal").POST, `/api/mobile/conversations/${conversationId}/reveal`, viewer, { method: "POST", body: {}, params: { conversationId } }), "reveal")
 
   // The other talks: a DM, the room chat, a board post, a wave.
@@ -450,13 +450,25 @@ describe("an unrevealed match is nobody, on every mobile GET and every socket em
     }
   })
 
-  it("does find them once they reveal, so the sweep can see a leak at all", async () => {
-    await ok(call(route("conversations/[conversationId]/reveal").POST, `/api/mobile/conversations/${conversationId}/reveal`, other, { method: "POST", body: {}, params: { conversationId } }), "reveal back")
+  it("does find them once both swap names, so the sweep can see a leak at all — first name and photo, in the chat only", async () => {
+    await ok(call(route("conversations/[conversationId]/reveal").POST, `/api/mobile/conversations/${conversationId}/reveal`, other, { method: "POST", body: {}, params: { conversationId } }), "swap back")
     const r = await call(route("conversations").GET, "/api/mobile/conversations", viewer)
-    expect(leaksIn(r.text)).toEqual(expect.arrayContaining([other.id, SECRET_NAME]))
+    expect(leaksIn(r.text)).toEqual([SECRET_PHOTO])
+    // Still the chat's handle, never the account id: a swap is this chat only (review of #1001).
+    expect(r.text).not.toContain(other.id)
+    expect(r.text).toContain(`"name":"${SECRET_NAME.split(" ")[0]}"`)
+    // First name only: never the full name, never the surname (identity model).
+    expect(r.text).not.toContain(SECRET_NAME)
+    expect(r.text).not.toContain("Quixotewright")
+    // And the swap opens nothing outside the chat: their profile, even by a raw id found elsewhere, names nobody.
+    for (const rel of ["profiles/[userId]", "users/[userId]"]) {
+      const profile = await call(route(rel).GET, `/api/mobile/${rel.replace("[userId]", other.id)}`, viewer, { params: { userId: other.id } })
+      expect(profile.text).not.toContain(SECRET_NAME.split(" ")[0])
+      expect(profile.text).not.toContain(SECRET_PHOTO)
+    }
     // And once they had named themselves at last week's night, it is a night you have both been to.
     await db.event_match_preferences.create({ data: { event_id: pastId, user_id: other.id, revealed: true } })
-    // By the id the inbox hands over once they have revealed (asserted just above): the DM's handle stays its room's.
+    // By a raw id (the DM never hands one over): the DM's handle stays its room's.
     const ref = other.id
     const shared = await call(route("users/[userId]/shared-events").GET, `/api/mobile/users/${ref}/shared-events`, viewer, { params: { userId: ref } })
     expect(shared.body.data.events.map((e: { id: string }) => e.id)).toEqual([pastId])

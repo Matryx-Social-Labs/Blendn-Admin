@@ -5,7 +5,7 @@ import { verifyAccessToken, accountBlockReason } from "./mobile-auth"
 import { db } from "./db"
 import { socketOriginAllowed } from "./socket-origin"
 import { startSponsoredScheduler } from "./sponsored-scheduler"
-import { displayNameInConversation, firstName, mayShowRealName } from "./conversation-identity"
+import { displayNameInConversation, firstName, isPseudonymous } from "./conversation-identity"
 import { notStrangersTo, notStrangersToMany } from "./room-people"
 import { idInConversation } from "./conversation-handle"
 import { blockCounterpartiesMany, keptApartIn } from "./conversations"
@@ -652,10 +652,10 @@ export async function emitPrivateTyping(
       userName: displayNameInConversation(conversation, typer, profile?.name),
       isTyping,
     }
-    // Still a pseudonym to the other person: their copy names the typer by the
+    // A match or board chat: their copy names the typer by the
     // conversation's handle, and goes to them alone, so the typer's own other
     // devices never see a handle where they expect their id.
-    if (!mayShowRealName(conversation, typer)) {
+    if (isPseudonymous(conversation)) {
       socket.nsp.to(`user:${otherOf(conversation, typer)}`).emit("private:typing", payload)
       return
     }
@@ -739,7 +739,7 @@ export async function emitPrivateRead(
       return
     }
 
-    if (!mayShowRealName(sides, socket.data.userId)) {
+    if (isPseudonymous(sides)) {
       socket.nsp.to(`user:${otherOf(sides, socket.data.userId)}`).emit("private:read", {
         conversationId,
         messageIds: ids,
@@ -842,7 +842,7 @@ export function emitReads(readerId: string, reads: ReadonlyArray<readonly [strin
       for (const [conversationId, ids] of toSend) {
         const messageIds = ids.slice(0, READ_RECEIPT_BATCH)
         const c = sides.get(conversationId)
-        if (c && !mayShowRealName(c, readerId)) {
+        if (c && isPseudonymous(c)) {
           // A pseudonym to the other person: their copy names the reader by the
           // conversation's handle and goes to them alone (see `emitPrivateTyping`).
           io.to(`user:${otherOf(c, readerId)}`).emit("private:read", {

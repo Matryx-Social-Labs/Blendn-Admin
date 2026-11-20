@@ -4,6 +4,7 @@ import { z } from "zod"
 import { db } from "@/lib/db"
 import { participationRefusal, unfinishedResponse } from "@/lib/event-access"
 import { INVITE_TOKEN, matchStanding, mayConnect, personCard, personSelect, releaseHeldRequests, requestFriend } from "@/lib/friends"
+import { userIdFromDmRef } from "@/lib/conversation-ref"
 import { identityForRef } from "@/lib/identity"
 import { recordReferral } from "@/lib/plus"
 import { getAuthenticatedUser } from "@/lib/mobile-auth"
@@ -123,12 +124,10 @@ const createSchema = z.union([
  * POST /api/mobile/friends/requests — ask to be friends.
  *
  * `{ state: "requested" }`, or `{ state: "friends" }` when they had already
- * asked you. Every way a stranger could be refused answers with the same 404.
- * The one addition: a 404 carries `reasonCode` `NOT_A_REVEALED_MATCH` when you
- * are in an open match with that person, THEY have revealed to you, and you have
- * not revealed back: you already know who they are, so it tells you nothing. For
- * a person still a pseudonym to you (and for a room handle that keeps them
- * anonymous) the 404 is plain — the code would say who the pseudonym is.
+ * asked you. Every way a stranger could be refused answers with the same 404,
+ * a match not swapped on both sides included: until both swap, neither may name
+ * the other, so a reason would say who a pseudonym is (`NOT_A_REVEALED_MATCH`
+ * was deleted with the swap, 2026-11-20).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -150,7 +149,6 @@ export async function POST(request: NextRequest) {
     const gone = (reason: string) => errorResponse("Not found", 404, ErrorCode.NOT_FOUND, reason)
     let recipientId: string
     let connectable: boolean
-    let notYetRevealed = false
     if ("token" in parsed.data) {
       const invite = await db.friend_invites.findUnique({
         where: { token: parsed.data.token },
@@ -166,24 +164,21 @@ export async function POST(request: NextRequest) {
       // handle still resolves through `identityForRef`, and a handle the room
       // keeps anonymous is refused as unknown even for a revealed match: a
       // 200 there would say which pseudonym in that room is them.
-      // A conversation's handle (what the inbox gives for a match until they
-      // reveal) is not resolved here: it is only ever somebody the asker cannot
-      // name yet, so the answer would be the plain 404 anyway, and it is, as an
-      // id nobody has.
-      const target = await identityForRef(me, parsed.data.userId)
+      // A conversation's handle -- what a match's or a board post's chat gives
+      // for the other person, swapped or not -- names them to the other person
+      // in that chat (`userIdFromDmRef`), and the match rule below decides: a
+      // pair who have swapped may ask; anyone else gets the plain 404.
+      const viaDm = await userIdFromDmRef(me, parsed.data.userId)
+      const target = viaDm
+        ? { userId: viaDm, room: null, identified: true }
+        : await identityForRef(me, parsed.data.userId)
       recipientId = target.userId
-      const { standing, askerSeesThem } = await matchStanding(me, recipientId)
+      const { standing } = await matchStanding(me, recipientId)
       const nameable = !target.room || target.identified
       connectable = nameable && standing === "revealed"
-      // Only to somebody who can already name them, or the 404 says who a
-      // pseudonym is: "Otter" asked by a friend's id, or by a handle from a
-      // room where she is revealed, would come back "you matched her".
-      notYetRevealed = nameable && standing === "pending" && askerSeesThem
     }
 
     if (recipientId === me) return errorResponse("You can’t add yourself", 400, undefined, ErrorCode.CANNOT_ADD_SELF)
-    // The one 404 that says why: a match that is not revealed on both sides (`NOT_A_REVEALED_MATCH`).
-    if (notYetRevealed) return errorResponse("Not found", 404, ErrorCode.NOT_FOUND, "NOT_A_REVEALED_MATCH")
     if (!connectable) return gone("token" in parsed.data ? ErrorCode.INVITE_UNAVAILABLE : ErrorCode.PERSON_UNAVAILABLE)
 
     const state = await requestFriend(me, recipientId, "token" in parsed.data ? "link" : "match")

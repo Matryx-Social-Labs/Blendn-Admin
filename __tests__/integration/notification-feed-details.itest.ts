@@ -158,18 +158,25 @@ describe("reveal_request rows and Clear all (SCRUM-859, SCRUM-860)", () => {
     const them = await person(`${label}-them`)
     const [user1_id, user2_id] = conversationPair(me, them)
     const mine = user1_id === me ? "user1" : "user2"
+    const theirs = mine === "user1" ? "user2" : "user1"
+    // They tapped Swap names; I have not: that is what "asked" means since the swap.
     const conv = await db.private_conversations.create({
-      data: { user1_id, user2_id, user1_pseudonym: "Heron", user2_pseudonym: "Otter", [`${mine === "user1" ? "user1" : "user2"}_reveal_requested`]: false },
+      data: { user1_id, user2_id, user1_pseudonym: "Heron", user2_pseudonym: "Otter", [`${theirs}_revealed`]: true },
     })
     await sendPushNotification({ userId: me, title: "A match wants to know you", body: "b", data: { type: "reveal_request", conversationId: conv.id } })
     return { me, them, conv, mine }
   }
 
-  it("waits on you until you have revealed, then is closed; so is one whose conversation closed", async () => {
+  it("waits on you until you have swapped, then is closed; so is one they took back, and one whose conversation closed", async () => {
     const w = await askedToReveal("nf-rr")
     expect((await rowOf(w.me, "reveal_request")).open).toBe(true)
     await db.private_conversations.update({ where: { id: w.conv.id }, data: { [`${w.mine}_revealed`]: true } })
     expect((await rowOf(w.me, "reveal_request")).open).toBe(false)
+
+    const takenBack = await askedToReveal("nf-rrt")
+    const theirSide = takenBack.mine === "user1" ? "user2" : "user1"
+    await db.private_conversations.update({ where: { id: takenBack.conv.id }, data: { [`${theirSide}_revealed`]: false } })
+    expect((await rowOf(takenBack.me, "reveal_request")).open).toBe(false)
 
     const closed = await askedToReveal("nf-rrc")
     await db.private_conversations.update({ where: { id: closed.conv.id }, data: { closed_at: new Date() } })

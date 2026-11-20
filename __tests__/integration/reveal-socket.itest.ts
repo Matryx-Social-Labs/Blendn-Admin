@@ -5,12 +5,11 @@ process.env.MOBILE_JWT_SECRET =
 
 import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
-import { revealConversationsFrom } from "@/lib/matches"
 
-import { cleanup, closeDb, db, makeEvent, makeUser, onboard } from "./helpers"
+import { cleanup, closeDb, db, makeUser, onboard } from "./helpers"
 
 /**
- * A reveal reaches the other person's open DM over the socket (`private:revealed`).
+ * A Swap names tap reaches the other person's open DM over the socket (`private:revealed`).
  *
  * The push alone never lands on a simulator and says nothing to a screen that is
  * already open. The event is told to the OTHER participant's `user:{id}` room
@@ -155,50 +154,30 @@ describe("private:revealed from the DM reveal route", () => {
   })
 })
 
-describe("private:revealed from a reveal in the room carrying into DMs", () => {
-  async function room() {
-    const host = await makeUser("rs-host", "organizer")
-    users.push(host)
-    const eventId = await makeEvent(host)
-    events.push(eventId)
-    return eventId
-  }
+describe("private:revealed from taking a tap back", () => {
+  const unreveal = async (as: Person, id: string) =>
+    (
+      await (revealRoute.DELETE as Handler)(
+        new NextRequest(`http://localhost/api/mobile/conversations/${id}/reveal`, {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${as.token}` },
+        }),
+        { params: Promise.resolve({ conversationId: id }) as Promise<never> }
+      )
+    ).status
 
-  it("tells the other person of each DM the revealer's reveal moved, and no one else", async () => {
-    const [ana, ben, cat, dan] = [await person("rs-6a", "Ana"), await person("rs-6b", "Ben"), await person("rs-6c", "Cat"), await person("rs-6d", "Dan")]
-    const eventId = await room()
-    const withBen = await pair(ana, ben, { origin_event_id: eventId })
-    const withCat = await pair(ana, cat, { origin_event_id: eventId })
-    await pair(ben, dan, { origin_event_id: eventId }) // not Ana's
+  it("tells the other person, so 'they want to swap' goes away", async () => {
+    const [ana, ben] = [await person("rs-6a", "Ana"), await person("rs-6b", "Ben")]
+    const id = await pair(ana, ben, { revealed: { a: true } })
 
-    await revealConversationsFrom(eventId, [ana.id])
-
-    const byConversation = new Map(revealedEmits().map((e) => [(e.payload as { conversationId: string }).conversationId, e.rooms]))
-    expect(byConversation.size).toBe(2)
-    expect(byConversation.get(withBen)).toEqual([`user:${ben.id}`])
-    expect(byConversation.get(withCat)).toEqual([`user:${cat.id}`])
+    expect(await unreveal(ana, id)).toBe(200)
+    expect(revealedEmits()).toEqual([{ rooms: [`user:${ben.id}`], event: "private:revealed", payload: { conversationId: id } }])
   })
 
-  it("tells both when the carry makes the pair mutual", async () => {
+  it("says nothing when there was no tap to take back", async () => {
     const [ana, ben] = [await person("rs-7a", "Ana"), await person("rs-7b", "Ben")]
-    const eventId = await room()
-    const id = await pair(ana, ben, { origin_event_id: eventId, revealed: { b: true } })
-
-    await revealConversationsFrom(eventId, [ana.id])
-
-    expect(revealedEmits()).toHaveLength(1)
-    expect([...revealedEmits()[0].rooms].sort()).toEqual(roomsOf(ana, ben))
-    expect(revealedEmits()[0].payload).toEqual({ conversationId: id })
-  })
-
-  it("says nothing for a side already revealed or a closed pair", async () => {
-    const [ana, ben, cat] = [await person("rs-8a", "Ana"), await person("rs-8b", "Ben"), await person("rs-8c", "Cat")]
-    const eventId = await room()
-    await pair(ana, ben, { origin_event_id: eventId, revealed: { a: true } })
-    await pair(ana, cat, { origin_event_id: eventId, closed: true })
-
-    await revealConversationsFrom(eventId, [ana.id])
-
+    const id = await pair(ana, ben)
+    expect(await unreveal(ana, id)).toBe(200)
     expect(revealedEmits()).toEqual([])
   })
 })

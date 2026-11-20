@@ -142,17 +142,17 @@ describe("an unrevealed match is a stranger on the raw-id surfaces", () => {
     expect((await profileOf(viewer, heron.id)).body.data.name).toBe("Attendee")
   })
 
-  it("names them once they reveal, and gives the friend offer only then", async () => {
+  it("never names them on a profile, one-sided or swapped: a swap names them in the chat only (identity model)", async () => {
     const [viewer, heron] = [await person("umi-rv", "Vee"), await person("umi-rh", REAL)]
     await match(viewer, heron)
-    expect((await profileOf(viewer, heron.id)).body.data.name).toBe("Attendee")
-
     await revealTo(viewer, heron)
+    expect((await profileOf(viewer, heron.id)).body.data.name).toBe("Attendee")
+    await revealTo(heron, viewer)
     const after = (await profileOf(viewer, heron.id)).body.data
-    expect(after).toMatchObject({ name: REAL, image: PHOTO, profile: { bio: `bio of ${REAL}`, photos: [PHOTO] } })
-    // Only they have revealed: matched, not yet both.
-    expect(after.friend).toEqual({ state: "none", canAdd: false })
-    expect((await cardOf(viewer, heron.id)).body.data).toMatchObject({ identityVisible: true, name: REAL })
+    expect(after.name).toBe("Attendee")
+    expect(JSON.stringify(after)).not.toContain(PHOTO)
+    expect(after).not.toHaveProperty("friend")
+    expect((await cardOf(viewer, heron.id)).body.data).toMatchObject({ identityVisible: false })
   })
 
   it("keeps a pseudonym who is already your friend from showing a friend state", async () => {

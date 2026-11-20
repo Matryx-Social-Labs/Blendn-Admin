@@ -1,4 +1,4 @@
-import { mayShowRealName, type ConversationIdentity } from "./conversation-identity"
+import { isPseudonymous, type ConversationIdentity } from "./conversation-identity"
 import { roomHandle } from "./room-handle"
 
 // Relative imports and no database: the custom server (lib/socket-server.ts)
@@ -16,18 +16,21 @@ import { roomHandle } from "./room-handle"
  * id, to a room's handle for them, and to another conversation.
  *
  * - **You are always your real id**, as in every room: the app compares its own.
- * - **Somebody who has revealed to you, or a conversation that never was
- *   pseudonymous, is the real id** — the same rule that shows their name
- *   (`mayShowRealName`), so the id and the name never disagree.
- * - **Everybody else is the handle**, the SAME one on every surface of one
- *   conversation (inbox, detail, messages, socket), so the app can still match a
- *   sender to the other person.
+ * - **A conversation that never was pseudonymous** (an accepted message
+ *   request) **is the real id.**
+ * - **In a match's or a board post's chat the other person is the handle,
+ *   swapped or not** -- the SAME one on every surface of one conversation
+ *   (inbox, detail, messages, socket), so the app can still match a sender to
+ *   the other person. A swap shows a first name and photo in this chat only
+ *   (identity model); the real id would be a join key to every list that
+ *   carries it beside a full name (review of #1001). `POST /friends/requests`,
+ *   block and report take the handle.
  */
 export function idInConversation(
   conversation: ConversationIdentity & { id: string },
   viewerId: string,
   subjectId: string
 ): string {
-  if (subjectId === viewerId || mayShowRealName(conversation, subjectId)) return subjectId
+  if (subjectId === viewerId || !isPseudonymous(conversation)) return subjectId
   return roomHandle({ kind: "dm", groupId: conversation.id }, subjectId)
 }

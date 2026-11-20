@@ -145,9 +145,10 @@ describe("a friend who is also an unrevealed match is a handle in the DM", () =>
       expect(wire).not.toContain("blur")
     }
 
-    // And Ben, who Ana has revealed to, sees Ana's real id: she is a name to him.
+    // Ana's one-sided tap names her to nobody: Ben gets a handle too, until both swap.
     const bens = (await inbox(ben)).data.conversations.find((c: { id: string }) => c.id === id)
-    expect(bens.otherUser.id).toBe(ana.id)
+    expect(bens.otherUser.id).toMatch(/^rh_/)
+    expect(bens.revealRequested).toBe(true)
 
     // The handle opens nothing that names Ben.
     const friendsList = (await call(friendsRoute.GET as Handler, "/api/mobile/friends", ana)).body
@@ -194,20 +195,24 @@ describe("a friend who is also an unrevealed match is a handle in the DM", () =>
     expect(await ask(handle)).toEqual(await ask(nobody))
   })
 
-  it("is the raw id again once they reveal, on every surface at once", async () => {
+  it("stays the handle on every surface after one tap and after the swap: a swap is that chat only", async () => {
     const { ana, ben, id } = await friendsWhoMatched("dmh-4")
     await send(ben, id, "before")
-    expect((await detail(ana, id)).body.data.otherUser.id).toMatch(/^rh_/)
+    const handle = (await detail(ana, id)).body.data.otherUser.id as string
+    expect(handle).toMatch(/^rh_/)
 
-    const [user1_id] = conversationPair(ana.id, ben.id)
-    await db.private_conversations.update({ where: { id }, data: user1_id === ben.id ? { user1_revealed: true } : { user2_revealed: true } })
-
-    const row = (await inbox(ana)).data.conversations.find((c: { id: string }) => c.id === id)
-    expect(row.otherUser.id).toBe(ben.id)
-    expect((await detail(ana, id)).body.data.otherUser.id).toBe(ben.id)
-    const m = (await thread(ana, id)).body.data.messages[0]
-    expect([m.senderId, m.sender.id]).toEqual([ben.id, ben.id])
+    for (const data of [{ user1_revealed: true }, { user1_revealed: true, user2_revealed: true }]) {
+      await db.private_conversations.update({ where: { id }, data })
+      const row = (await inbox(ana)).data.conversations.find((c: { id: string }) => c.id === id)
+      expect(row.otherUser.id).toBe(handle)
+      expect((await detail(ana, id)).body.data.otherUser.id).toBe(handle)
+      const m = (await thread(ana, id)).body.data.messages[0]
+      expect([m.senderId, m.sender.id]).toEqual([handle, handle])
+    }
+    // Swapped: the first name, never the full one.
+    expect((await detail(ana, id)).body.data.otherUser.name).toBe("Benedict")
   })
+
 })
 
 describe("the DM socket events carry the handle too", () => {
@@ -230,7 +235,7 @@ describe("the DM socket events carry the handle too", () => {
     expect(toBen.rooms).not.toContain(`user:${ana.id}`)
   })
 
-  it("typing and read receipts: to the other person alone, by the handle, until they reveal", async () => {
+  it("typing and read receipts: to the other person alone, by the handle, swapped or not", async () => {
     const { ana, ben, id } = await friendsWhoMatched("dmh-6")
     const handleForAna = (await inbox(ana)).data.conversations.find((c: { id: string }) => c.id === id).otherUser.id as string
 
@@ -249,12 +254,14 @@ describe("the DM socket events carry the handle too", () => {
     expect(read.rooms).toEqual([`user:${ana.id}`])
     expect(read.payload.readBy).toBe(handleForAna)
 
-    // Ana is revealed to Ben, so for Ben she is a name: her typing keeps the old shape.
+    // Even once both have swapped, she stays the chat's handle to him: per recipient, never her account id.
+    await db.private_conversations.update({ where: { id }, data: { user1_revealed: true, user2_revealed: true } })
     const anaSocket = { data: { userId: ana.id }, to: (room: string) => ({ emit: (event: string, payload: unknown) => void emits.push({ rooms: [room], event, payload }) }), nsp: fakeIo() }
     emits = []
     await emitPrivateTyping(anaSocket as never, id, true)
     const anas = emits.find((e) => e.event === "private:typing")!
-    expect(anas.rooms).toEqual([`conversation:${id}`])
-    expect(anas.payload.userId).toBe(ana.id)
+    expect(anas.rooms).toEqual([`user:${ben.id}`])
+    expect(anas.payload.userId).toMatch(/^rh_/)
+    expect(anas.payload.userName).toBe("Ana")
   })
 })

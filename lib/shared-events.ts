@@ -14,13 +14,14 @@ import { keysetPage, type Keyset } from "./pagination"
  *
  * A row says "this person was at X". If they were anonymous at X, anyone who sat in that room saw them as a pseudonym,
  * and the row would tie the pseudonym, and every message under it, to who they are. So an event is listed only when
- * the room itself would have named them to the viewer there, or they named themselves to the viewer from it:
+ * the room itself would have named them to the viewer there:
  *
  * - **They revealed at X** (`event_match_preferences.revealed`): X's room names them to everyone in it.
  * - **They let friends recognise them in rooms**, and you are friends: their own standing consent, which X's roster
  *   applies too (`roomIdentity`).
- * - **They revealed to you in the conversation X's mutual like opened** (`origin_event_id`, their pseudonym set and
- *   their side revealed): you already know which pseudonym at X was them.
+ *
+ * Not a Swap names in the conversation X's mutual like opened: a swap names them in that chat only, never on a
+ * profile surface (identity model, owner 2026-11-11).
  *
  * And never:
  *
@@ -55,7 +56,7 @@ export async function sharedEventsWhere(viewerId: string, targetId: string, now:
     }),
     db.private_conversations.findUnique({
       where: { user1_id_user2_id: { user1_id, user2_id } },
-      select: { closed_at: true, origin_event_id: true, user1_pseudonym: true, user2_pseudonym: true, user1_revealed: true, user2_revealed: true },
+      select: { closed_at: true },
     }),
     db.friendships.findUnique({
       where: { user1_id_user2_id: { user1_id, user2_id } },
@@ -67,17 +68,7 @@ export async function sharedEventsWhere(viewerId: string, targetId: string, now:
   const targetIs1 = targetId === user1_id
   // Directed: the TARGET's switch, never the viewer's.
   const friendSees = !!(targetIs1 ? friendship?.user1 : friendship?.user2)?.profile?.friends_see_me_in_rooms
-  const dmEvent =
-    conversation?.origin_event_id &&
-    (targetIs1 ? conversation.user1_pseudonym : conversation.user2_pseudonym) !== null &&
-    (targetIs1 ? conversation.user1_revealed : conversation.user2_revealed)
-      ? conversation.origin_event_id
-      : null
-
-  const named: Prisma.eventsWhereInput[] = [
-    { match_preferences: { some: { user_id: targetId, revealed: true } } },
-    ...(dmEvent ? [{ id: dmEvent }] : []),
-  ]
+  const named: Prisma.eventsWhereInput[] = [{ match_preferences: { some: { user_id: targetId, revealed: true } } }]
   return {
     ...realEventsWhere,
     deleted_at: null,
