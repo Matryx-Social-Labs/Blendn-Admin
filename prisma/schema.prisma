@@ -5098,6 +5098,9 @@ model cities {
   max_lon                  Float
   /// 19 where a licensed venue's door is 19+. Read by the dashboard's event form later; null is no pre-fill.
   default_licensed_min_age Int?
+  /// The city's WhatsApp Channel (Flow 9 A, ruling 7), opened from Notification settings' "Your city" row; null is no
+  /// row. CHECK `cities_whatsapp_channel_url_shape` (migration SQL): an https whatsapp.com/channel/ link.
+  whatsapp_channel_url     String?
   sort                     Int          @default(0)
   created_at               DateTime     @default(now()) @db.Timestamptz(6)
   updated_at               DateTime     @default(now()) @updatedAt @db.Timestamptz(6)

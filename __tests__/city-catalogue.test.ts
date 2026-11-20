@@ -195,6 +195,7 @@ describe("the /events/cities answer", () => {
       bounds: { minLat: 0, minLon: 1, maxLat: 2, maxLon: 3 },
       isDefault: true,
       access: "full",
+      whatsappChannelUrl: null,
     })
     expect(row(answer(), "alfa")).toBeUndefined()
   })
@@ -217,6 +218,7 @@ describe("the /events/cities answer", () => {
       bounds: null,
       isDefault: false,
       access: "full",
+      whatsappChannelUrl: null,
     })
   })
 

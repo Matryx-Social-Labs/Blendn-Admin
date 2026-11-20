@@ -278,8 +278,12 @@ describe("messages live in their inbox, not the bell", () => {
     // not be what somebody sees when they open the bell.
     const feed = read("app", "api", "mobile", "notifications", "route.ts")
     const markRead = read("app", "api", "mobile", "notifications", "read", "route.ts")
-    expect(feed.match(/kind: \{ notIn: NOT_IN_THE_BELL \}/g)).toHaveLength(2)
-    expect(markRead.match(/kind: \{ notIn: NOT_IN_THE_BELL \}/g)).toHaveLength(1)
+    const counts = read("lib", "badge-count.ts")
+    // The page filters itself; every count (the feed's, mark-read's, a push's) goes through the one bell rule.
+    expect(feed.match(/kind: \{ notIn: NOT_IN_THE_BELL \}/g)).toHaveLength(1)
+    expect(feed).toMatch(/inboxCountsFor\(/)
+    expect(markRead).toMatch(/where: unreadBellWhere\(user\.userId\)/)
+    expect(counts).toMatch(/kind: \{ notIn: \[\.\.\.NOT_IN_THE_BELL, \.\.\.TALK_ASK_KINDS\]/)
   })
 })
 

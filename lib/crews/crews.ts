@@ -19,7 +19,7 @@ import { checkTextContents, notChecked, type ModerationCheck } from "../moderati
 import type { ModerationResult } from "../moderation/types"
 import { recordScreenedText, TEXT_NOT_ALLOWED } from "../moderation/user-text"
 import { characters } from "../utils"
-import { sendPushNotification } from "../push-notifications"
+import { recordBellRow, sendPushNotification } from "../push-notifications"
 import { closeRoomSockets, leaveRoomSockets } from "../room-close"
 import { blocksBetween } from "./blocks"
 import { activeMemberWhere, dissolveLocked, lockCrew, settleLocked } from "./sweep"
@@ -872,9 +872,10 @@ export async function reportCrew(
 /**
  * The invite push, to each invitee who has not had one from this inviter in
  * the last `CREW.INVITE_PUSH_WINDOW_MS` for another crew (C10) — read from the
- * invites themselves, so it holds across restarts and replicas. The invite is
- * written either way and shows in the app; only the push (and its bell line)
- * is spared. Never throws: the invites have committed.
+ * invites themselves, so it holds across restarts and replicas. The invite and
+ * its bell row are written either way: only the push is spared, so the second
+ * invite still waits on you in Notifications (it did not, 2026-11-15). Never
+ * throws: the invites have committed.
  */
 async function notifyCrewInvites(inviterId: string, crewId: string, inviteeIds: readonly string[]): Promise<void> {
   if (inviteeIds.length === 0) return
@@ -885,17 +886,23 @@ async function notifyCrewInvites(inviterId: string, crewId: string, inviteeIds: 
       select: { invited_user_id: true },
     })
     const pushed = new Set(recent.map((r) => r.invited_user_id))
-    for (const id of inviteeIds) if (!pushed.has(id)) notifyCrewInvite(id, crewId)
+    for (const id of inviteeIds) {
+      if (pushed.has(id)) await recordBellRow(id, CREW_INVITE_TITLE, CREW_INVITE_BODY, { type: "crew_invite", crewId })
+      else notifyCrewInvite(id, crewId)
+    }
   } catch (error) {
     logger.warn("Crew invite pushes failed", { error: error instanceof Error ? error.message : String(error) })
   }
 }
 
+const CREW_INVITE_TITLE = "You’re invited to a crew"
+const CREW_INVITE_BODY = "A friend wants you in their crew. Open Blend’n to see."
+
 function notifyCrewInvite(recipientId: string, crewId: string): void {
   sendPushNotification({
     userId: recipientId,
-    title: "You’re invited to a crew",
-    body: "A friend wants you in their crew. Open Blend’n to see.",
+    title: CREW_INVITE_TITLE,
+    body: CREW_INVITE_BODY,
     data: { type: "crew_invite", crewId },
   }).catch((err: unknown) => logger.warn("Push notification failed", { context: "crew invite", error: String(err) }))
 }
