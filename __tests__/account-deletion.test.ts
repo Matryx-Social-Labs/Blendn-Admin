@@ -509,7 +509,8 @@ describe("what survives a deletion, and what must not", () => {
     const call = mockDb.message_requests.updateMany.mock.calls[0][0]
     expect(call.where).toEqual(expect.objectContaining({ sender_id: expect.any(String) }))
     expect(call.where).not.toHaveProperty("recipient_id")
-    expect(call.data).toEqual({ message: null, met_in_event_id: null })
+    // Where they met goes with their words: an event's room or a Lobby room ("Met in the Lobby").
+    expect(call.data).toEqual({ message: null, met_in_event_id: null, met_in_room_id: null })
   })
 
   it("takes their name out of other people's notification centres", async () => {
