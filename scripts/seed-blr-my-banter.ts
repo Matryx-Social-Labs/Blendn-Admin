@@ -29,7 +29,8 @@ import { leaveOtherRooms } from "./seed-one-room"
  *   - Rooms with its own lines in them and some unread.
  *   - Matches from mutual likes, through `openConversation` — the same writer
  *     a real match uses — in every state the inbox draws: unread, you replied
- *     last, reveal requested, both revealed, an older thread from last week.
+ *     last (waiting for them to swap), they want to swap, swapped, an older
+ *     thread from last week.
  *   - People who liked it back-less (incoming) and one it liked (outgoing).
  *   - Two pending message requests.
  *
@@ -77,8 +78,8 @@ type Thread = {
   lines: [who: "me" | "them", text: string, minutesAgo: number][]
   /** Leave the last N incoming lines unread. */
   unread: number
+  /** Who has tapped Swap names: "them" alone is "they want to swap", "me" alone is waiting for them. */
   revealed: "none" | "me" | "them" | "both"
-  revealRequestedByThem?: boolean
 }
 
 const THREADS: Thread[] = [
@@ -93,7 +94,7 @@ const THREADS: Thread[] = [
   },
   {
     event: LIVE,
-    revealed: "them",
+    revealed: "me",
     unread: 0,
     lines: [
       ["them", "matched! I'm the one in the green jacket near the back", 38],
@@ -104,8 +105,7 @@ const THREADS: Thread[] = [
   },
   {
     event: LIVE,
-    revealed: "none",
-    revealRequestedByThem: true,
+    revealed: "them",
     unread: 1,
     lines: [
       ["me", "hi 👋 enjoying the meetup?", 55],
@@ -305,7 +305,6 @@ async function main() {
       pseudonyms: { [me.id]: handleOf.get(e.id) ?? "Attendee", [them]: theirHandle },
       revealed: thread.revealed === "both" ? [me.id, them] : thread.revealed === "me" ? [me.id] : thread.revealed === "them" ? [them] : [],
     })
-    const meIsUser1 = conversation.user1_id === me.id
     const incoming = thread.lines.filter(([who]) => who === "them").length
     let seenIncoming = 0
     for (const [who, text, minutesAgo] of thread.lines) {
@@ -328,7 +327,6 @@ async function main() {
       data: {
         created_at: firstAt,
         last_message_at: ago(thread.lines[thread.lines.length - 1][2]),
-        ...(thread.revealRequestedByThem && (meIsUser1 ? { user2_reveal_requested: true } : { user1_reveal_requested: true })),
       },
     })
   }

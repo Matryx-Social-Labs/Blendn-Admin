@@ -52,7 +52,7 @@ export const ErrorResponseSchema = z
           "`PROFILE_INCOMPLETE`, and on events and friends: `AGE_RESTRICTED` (a known age below the line), " +
           "`ORGANISER_SUSPENDED` (an event hidden by its organisation's suspension, on every route that refuses it), `INVITE_UNAVAILABLE`, `PERSON_UNAVAILABLE`, " +
           "`REQUEST_UNAVAILABLE` (one reason for every way something is out of reach), `CANNOT_ADD_SELF`. " +
-          "`NOT_A_REVEALED_MATCH` (404 on `POST /friends/requests`), `RATE_LIMITED` (429 on the friend routes, with `retryAfter`). " +
+          "`RATE_LIMITED` (429 on the friend routes, with `retryAfter`). " +
           "Read `reasonCode ?? errorCode`."
       ),
     retryAfter: z

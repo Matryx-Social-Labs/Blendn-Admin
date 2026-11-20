@@ -301,9 +301,8 @@ registry.registerPath({
     "a handle its room keeps anonymous is refused as unknown). Idempotent and cannot nag: asking again neither notifies again " +
     "nor un-dismisses. `friends` when they had already asked you. Between two people still pseudonyms to each other (an open match or Lobby DM not revealed on both sides) the request is HELD: still `requested`, but no push, not in the recipient's list, not acceptable, until both reveal, when it is released and delivered.  400 for yourself, `reasonCode` `CANNOT_ADD_SELF`. " +
     "A request made by `userId` notifies with `data.via` = `match`, never an event or room. " +
-    "One 404 differs: it carries `reasonCode` `NOT_A_REVEALED_MATCH` when you are in an open match with that person, " +
-    "they have already revealed to you, and you have not revealed back (you know who they are). While they are still a " +
-    "pseudonym to you, and for every other refusal, the 404 is byte-identical to an unknown id (`reasonCode` `PERSON_UNAVAILABLE`).",
+    "Every refusal, a match not swapped on both sides included, is a 404 byte-identical to an unknown id " +
+    "(`reasonCode` `PERSON_UNAVAILABLE`). `NOT_A_REVEALED_MATCH` is no longer sent (Swap names, 2026-11-20).",
   security: bearerAuth,
   request: {
     body: {

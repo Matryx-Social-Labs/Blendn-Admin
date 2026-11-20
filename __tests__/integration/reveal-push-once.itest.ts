@@ -59,24 +59,104 @@ async function pair() {
 
 beforeEach(() => jest.clearAllMocks())
 
-it("pushes an ask once, however many times it is repeated", async () => {
+it("pushes the first tap once, as the ask, however many times it is repeated", async () => {
   const { a, id } = await pair()
-  expect(await call(a, id, { ask: true })).toBe(200)
-  expect(await call(a, id, { ask: true })).toBe(200)
-  expect(await call(a, id, { ask: true })).toBe(200)
+  expect(await call(a, id)).toBe(200)
+  expect(await call(a, id)).toBe(200)
+  expect(await call(a, id)).toBe(200)
   expect(notifyRevealRequest).toHaveBeenCalledTimes(1)
+  expect(notifyReveal).not.toHaveBeenCalled()
 })
 
-it("pushes a reveal once, however many times it is repeated", async () => {
-  const { a, id } = await pair()
-  expect(await call(a, id)).toBe(200)
-  expect(await call(a, id)).toBe(200)
+it("pushes the swap once, to the one who tapped first", async () => {
+  const { a, b, id } = await pair()
+  await call(a, id)
+  jest.clearAllMocks()
+  expect(await call(b, id)).toBe(200)
+  expect(await call(b, id)).toBe(200)
   expect(notifyReveal).toHaveBeenCalledTimes(1)
+  expect(notifyReveal).toHaveBeenCalledWith(a.id, id)
+  expect(notifyRevealRequest).not.toHaveBeenCalled()
 })
 
-it("pushes once when two reveals race", async () => {
+it("pushes once when two taps race", async () => {
   const { a, id } = await pair()
   const statuses = await Promise.all([call(a, id), call(a, id), call(a, id)])
   expect(statuses).toEqual([200, 200, 200])
-  expect(notifyReveal).toHaveBeenCalledTimes(1)
+  expect(notifyRevealRequest).toHaveBeenCalledTimes(1)
+})
+
+it("pushes the ask once per conversation, even across a cancel and a re-tap (no nag loop)", async () => {
+  const { a, id } = await pair()
+  const cancel = () =>
+    revealRoute
+      .DELETE(
+        new NextRequest(`http://localhost/api/mobile/conversations/${id}/reveal`, {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${a.token}` },
+        }),
+        { params: Promise.resolve({ conversationId: id }) }
+      )
+      .then((r) => r.status)
+  for (let i = 0; i < 3; i++) {
+    expect(await call(a, id)).toBe(200)
+    expect(await cancel()).toBe(200)
+  }
+  expect(notifyRevealRequest).toHaveBeenCalledTimes(1)
+})
+
+const cancelAs = (as: { token: string }, conversationId: string) =>
+  revealRoute
+    .DELETE(
+      new NextRequest(`http://localhost/api/mobile/conversations/${conversationId}/reveal`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${as.token}` },
+      }),
+      { params: Promise.resolve({ conversationId }) }
+    )
+    .then((r) => r.status)
+const flags = (id: string) =>
+  db.private_conversations.findUniqueOrThrow({ where: { id }, select: { user1_revealed: true, user2_revealed: true } })
+
+it("a cancel after both have swapped is a 409 and changes nothing", async () => {
+  const { a, b, id } = await pair()
+  await call(a, id)
+  await call(b, id)
+  expect(await cancelAs(a, id)).toBe(409)
+  expect(await flags(id)).toEqual({ user1_revealed: true, user2_revealed: true })
+})
+
+it("two taps at the same moment push exactly one 'Names swapped'", async () => {
+  for (let i = 0; i < 5; i++) {
+    const { a, b, id } = await pair()
+    jest.clearAllMocks()
+    expect(await Promise.all([call(a, id), call(b, id)])).toEqual([200, 200])
+    expect(await flags(id)).toEqual({ user1_revealed: true, user2_revealed: true })
+    expect(notifyReveal).toHaveBeenCalledTimes(1)
+  }
+})
+
+it("a cancel racing the other side's tap never leaves a swap with a cancelled side or a cancel of a swap", async () => {
+  for (let i = 0; i < 5; i++) {
+    const { a, b, id } = await pair()
+    await call(a, id)
+    const [cancelled, tapped] = await Promise.all([cancelAs(a, id), call(b, id)])
+    expect(tapped).toBe(200)
+    const after = await flags(id)
+    const aIs1 = (await db.private_conversations.findUniqueOrThrow({ where: { id }, select: { user1_id: true } })).user1_id === a.id
+    const [aSide, bSide] = aIs1 ? [after.user1_revealed, after.user2_revealed] : [after.user2_revealed, after.user1_revealed]
+    expect(bSide).toBe(true)
+    // Either the cancel won (A off, B now asking) or the tap won (swapped, cancel refused).
+    if (cancelled === 409) expect(aSide).toBe(true)
+    else {
+      expect(cancelled).toBe(200)
+      expect(aSide).toBe(false)
+    }
+  }
+})
+
+it("refuses the removed ask body", async () => {
+  const { a, id } = await pair()
+  expect(await call(a, id, { ask: true })).toBe(400)
+  expect(notifyRevealRequest).not.toHaveBeenCalled()
 })

@@ -230,7 +230,7 @@ describe("a mutual like hands back what the moment needs to paint", () => {
     const code = codeOnly(src)
     const early = code.slice(
       code.indexOf("if (!back || linked) return"),
-      code.indexOf("const [pseudonymRows")
+      code.indexOf("const pseudonymRows")
     )
     expect(early).not.toContain("pseudonyms")
   })

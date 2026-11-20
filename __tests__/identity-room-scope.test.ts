@@ -20,7 +20,7 @@ const state = {
   checkIns: [] as { event_id: string; user_id: string }[],
   revealed: [] as { event_id: string; user_id: string }[],
   likes: [] as { event_id: string; liker_id: string; liked_id: string }[],
-  conversations: [] as { user1_id: string; user2_id: string; closed_at: Date | null; origin_friendship: boolean }[],
+  conversations: [] as { user1_id: string; user2_id: string; closed_at: Date | null; origin_friendship: boolean; user1_pseudonym?: string | null; user2_pseudonym?: string | null }[],
   blocks: [] as { blocker_id: string; blocked_id: string }[],
   friendships: [] as { user1_id: string; user2_id: string }[],
   /** Who turned on `friends_see_me_in_rooms`. */
@@ -169,7 +169,7 @@ describe("in a room's terms, only what that room shows", () => {
 
   it("an open conversation does not name her in a room either", async () => {
     state.revealed = []
-    state.conversations = [{ user1_id: TANVI, user2_id: VIEWER, closed_at: null, origin_friendship: false }]
+    state.conversations = [{ user1_id: TANVI, user2_id: VIEWER, closed_at: null, origin_friendship: false, user1_pseudonym: null, user2_pseudonym: null }]
     expect((await maySeeIdentityFor(VIEWER, [TANVI])).has(TANVI)).toBe(true)
     expect((await maySeeIdentityFor(VIEWER, [TANVI], { room: C })).has(TANVI)).toBe(false)
   })

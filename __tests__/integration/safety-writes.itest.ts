@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server"
+import { ratablePeers } from "@/lib/trust"
 
 /*
  * The two safety writes a phone makes with optional fields left out.
@@ -111,9 +112,11 @@ it("rates a connected peer with no note and writes the row", async () => {
   await db.private_conversations.create({
     data: { user1_id: c1, user2_id: c2, origin_event_id: eventId, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
   })
+  // The ref the rating list hands over: the chat's handle, swapped or not (identity model).
+  const [ref] = (await ratablePeers(eventId, me.id)).map((p) => p.ref)
 
   const res = await ratingRoute.POST(
-    post(`/api/mobile/events/${eventId}/peer-ratings`, me.token, { userId: them.id, rating: 4 }),
+    post(`/api/mobile/events/${eventId}/peer-ratings`, me.token, { userId: ref, rating: 4 }),
     { params: Promise.resolve({ eventId }) }
   )
   expect([200, 201]).toContain(res.status)
@@ -143,10 +146,12 @@ it("puts a harassment note in the report a moderator reads (SCRUM-980)", async (
   await db.private_conversations.create({
     data: { user1_id: c1, user2_id: c2, origin_event_id: eventId, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
   })
+  // The ref the rating list hands over: the chat's handle, swapped or not (identity model).
+  const [ref] = (await ratablePeers(eventId, me.id)).map((p) => p.ref)
 
   const res = await ratingRoute.POST(
     post(`/api/mobile/events/${eventId}/peer-ratings`, me.token, {
-      userId: them.id,
+      userId: ref,
       rating: 1,
       issue: "harassment",
       note: "  Followed me to the bar after I said no.  ",
@@ -182,10 +187,13 @@ it("refuses a rating across a block, as for someone never connected with (SCRUM-
   await db.private_conversations.create({
     data: { user1_id: c1, user2_id: c2, origin_event_id: eventId, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: true },
   })
+  // The handle the rating list gave them before the block: it must not rate across it either.
+  const [ref] = (await ratablePeers(eventId, blocked.id)).map((p) => p.ref)
+  expect(ref).toMatch(/^rh_/)
   await db.blocked_users.create({ data: { blocker_id: blocker.id, blocked_id: blocked.id } })
 
   const res = await ratingRoute.POST(
-    post(`/api/mobile/events/${eventId}/peer-ratings`, blocked.token, { userId: blocker.id, rating: 1, issue: "harassment" }),
+    post(`/api/mobile/events/${eventId}/peer-ratings`, blocked.token, { userId: ref, rating: 1, issue: "harassment" }),
     { params: Promise.resolve({ eventId }) }
   )
   expect(res.status).toBe(403)

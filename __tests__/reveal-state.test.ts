@@ -2,17 +2,16 @@ import { readFileSync } from "fs"
 import { join } from "path"
 
 /*
- * Identity arrives in one deliberate step, per side.
+ * Swap names: identity arrives when both sides tap (identity model, owner
+ * 2026-11-11), first name and photo, in that chat only.
  *
  * The rules being pinned, and why each would fail quietly:
  *
  * - Seeding. If `likeAtEvent` stops passing pseudonyms, every new conversation
  *   gets nulls, which `displayNameInConversation` reads as "never was
  *   pseudonymous" — so the DM shows real names and nothing errors.
- * - Propagation. Revealing in the room has to carry into DMs from that room, or
- *   two screens disagree about the same person.
- * - Monotonicity. Nothing may set a reveal back to false. A flag cannot unsee a
- *   face, and a control implying otherwise is a lie.
+ * - Nobody starts swapped but the two sides of an accepted Lobby ask.
+ * - A tap can be taken back only while the other has not tapped.
  * - No decline. A refusal path would put rejection back into the one product
  *   built to remove it.
  */
@@ -26,126 +25,100 @@ describe("a match snapshots what it needs at the moment it happens", () => {
   const src = read("lib/matches.ts")
 
   it("passes the room pseudonyms into the new conversation", () => {
-    /*
-     * Snapshotted, not looked up. A DM outlives its event, `origin_event_id`
-     * points at `events` rather than `chat_groups`, and the chat lifecycle
-     * sweeper deletes old groups — so a join would go null exactly when the
-     * history matters most.
-     */
+    // Snapshotted, not looked up: a DM outlives its event's chat group.
     expect(src).toContain("chat_group_members.findMany")
     expect(src).toMatch(/pseudonyms: Object\.fromEntries/)
     expect(src).toContain("eventId,")
   })
 
-  it("seeds reveal from who was already public in that room", () => {
-    // Somebody public in the room has nothing left to reveal to a person who
-    // saw their card. This is the asymmetric case made honest.
-    expect(src).toMatch(/event_match_preferences\.findMany[\s\S]{0,200}revealed: true/)
-    expect(src).toMatch(/revealed: revealedRows\.map/)
+  it("starts nobody swapped, not even somebody named in the room (advisor Q2)", () => {
+    const call = src.slice(src.indexOf("const conversation = await openConversation("), src.indexOf("return { conversation, pseudonymRows }"))
+    expect(call).not.toMatch(/revealed:/)
+    expect(src).not.toMatch(/event_match_preferences\.findMany[\s\S]{0,200}revealed: true/)
   })
 })
 
-describe("revealing in the room carries into DMs from that room", () => {
-  const src = read(PREFS)
-  // Shared with the crew reveal since step 8: `revealConversationsFrom` in lib/matches.ts.
-  const lib = read("lib/matches.ts")
-  const propagate = lib.slice(lib.indexOf("export async function revealConversationsFrom"))
+describe("going public in the room does not name you in the DMs from it", () => {
+  it("the room preference no longer writes conversations", () => {
+    const src = read(PREFS)
+    expect(src).not.toContain("revealConversationsFrom")
+    expect(src).not.toMatch(/private_conversations\.update/)
+    expect(read("lib/matches.ts")).not.toContain("export async function revealConversationsFrom")
+  })
+})
 
-  it("updates conversations from this event, on the matching side", () => {
-    expect(src).toMatch(/if \(revealed === true\) await revealConversationsFrom\(eventId, \[authUser\.userId\]\)/)
-    expect(propagate).toMatch(/origin_event_id: eventId[\s\S]{0,200}user1_revealed: false/)
-    expect(propagate).toMatch(/origin_event_id: eventId[\s\S]{0,200}user2_revealed: false/)
+describe("a Lobby accept opens already swapped, and only a Lobby accept", () => {
+  it("passes both sides as revealed only when the asker and the accepter both saw the copy", () => {
+    const src = read("app/api/mobile/board/requests/[requestId]/route.ts")
+    expect(src).toMatch(/const swapOnAccept = boardRequest\.names_on_accept && namesOnAccept === true/)
+    expect(src).toMatch(/\.\.\.\(swapOnAccept && \{ revealed: \[boardRequest\.from_user_id, boardRequest\.to_user_id\] \}\)/)
+    // The ask records the asker's consent only when its client sent it.
+    const ask = read("app/api/mobile/events/[eventId]/board/[postId]/requests/route.ts")
+    expect(ask).toMatch(/namesOnAccept: z\.literal\(true\)\.optional\(\)/)
+    expect(ask).toMatch(/\.\.\.\(namesOnAccept && \{ names_on_accept: true \}\)/)
   })
 
-  it("only ever propagates true, never false", () => {
-    /*
-     * Monotonic. Un-revealing in the room must not re-anonymise a conversation
-     * — the other person has already seen the name and face, and claiming
-     * otherwise would be the app lying about what it can do.
-     */
-    expect(src).toContain("if (revealed === true)")
-    for (const code of [src, propagate]) {
-      expect(code).not.toMatch(/data: \{ user1_revealed: false \}/)
-      expect(code).not.toMatch(/data: \{ user2_revealed: false \}/)
+  it("the message-request, friend and direct openers seed no reveal", () => {
+    for (const rel of [
+      "app/api/mobile/message-requests/[requestId]/respond/route.ts",
+      "app/api/mobile/conversations/route.ts",
+      "app/api/mobile/friends/[userId]/conversation/route.ts",
+    ]) {
+      const src = read(rel)
+      const call = src.slice(src.indexOf("openConversation("), src.indexOf("openConversation(") + 200)
+      expect(call).not.toMatch(/revealed:/)
     }
   })
-
-  it("skips closed conversations", () => {
-    // Nobody to reveal to. Also keeps a closed row from being rewritten by a
-    // later room action.
-    expect(propagate).toMatch(/origin_event_id: eventId[\s\S]{0,200}closed_at: null/)
-    // On the read that decides who is told, and on both sides' updates, not one.
-    expect(propagate.match(/closed_at: null/g)).toHaveLength(3)
-  })
 })
 
-describe("the reveal endpoint", () => {
+describe("the swap endpoint", () => {
   const src = read(REVEAL)
+  const post = src.slice(src.indexOf("export async function POST"), src.indexOf("export async function DELETE"))
+  const del = src.slice(src.indexOf("export async function DELETE"))
 
-  it("reveals only the caller's own side", () => {
-    // Per side, because revealing is a standing offer rather than a trade:
-    // going first must not expose the other person.
-    expect(src).toMatch(/isUser1 \? \{ user1_revealed: true \} : \{ user2_revealed: true \}/)
+  it("a tap writes only the caller's own side", () => {
+    expect(post).toMatch(/isUser1\s*\?\s*await db\.\$queryRaw<Flags\[\]>`UPDATE private_conversations SET user1_revealed = true WHERE id = \$\{conversationId\}::uuid AND user1_revealed = false AND closed_at IS NULL/)
+    expect(post).toMatch(/:\s*await db\.\$queryRaw<Flags\[\]>`UPDATE private_conversations SET user2_revealed = true WHERE id = \$\{conversationId\}::uuid AND user2_revealed = false AND closed_at IS NULL/)
+    expect(post).not.toMatch(/revealed = false,|revealed: false/)
   })
 
-  it("has no path back to false", () => {
-    expect(src).not.toMatch(/user1_revealed: false/)
-    expect(src).not.toMatch(/user2_revealed: false/)
+  it("answers mutual from the re-read after the write, not the read before it", () => {
+    expect(post).toMatch(/RETURNING user1_revealed AS u1, user2_revealed AS u2/)
+    expect(post).toMatch(/const swapped = after\.user1_revealed && after\.user2_revealed/)
+    expect(post).toMatch(/successResponse\(\{ revealed: true, mutual: swapped \}\)/)
   })
 
-  it("refuses to reveal without a name and a photo", () => {
-    /*
-     * Revealing shows exactly those two things. With neither, the switch turns
-     * on and the other person's screen is byte-for-byte what it was — so they
-     * conclude the feature is broken rather than that the profile is empty.
-     *
-     * A capability gate for one action, not a completeness meter.
-     */
+  it("refuses to tap without a name and a photo", () => {
     expect(src).toContain("reveal_incomplete")
     expect(src).toMatch(/Add \$\{missing\} to your profile first/)
     expect(src).toMatch(/"a name and a photo"/)
   })
 
-  it("marks the OTHER side when asking", () => {
-    // The flag lives on the person being asked, which is what makes the asker
-    // unambiguous without a second column.
-    expect(src).toMatch(
-      /isUser1 \? \{ user2_reveal_requested: true \} : \{ user1_reveal_requested: true \}/
-    )
-  })
-
-  it("refuses to ask someone who has already revealed", () => {
-    // Enforced at the endpoint, not merely hidden in the UI. Nothing left to
-    // ask for.
-    expect(src).toContain("They have already revealed")
+  it("has no separate ask: the tap is the ask, and the body takes nothing", () => {
+    // `*_reveal_requested` is only the one-way "already pushed" marker on the asked side: never cleared.
+    expect(src).not.toMatch(/reveal_requested: false/)
+    expect(src).toMatch(/const revealSchema = z\.object\(\{\}\)\.strict\(\)/)
   })
 
   it("has no decline path at all", () => {
-    /*
-     * Deliberately absent, not unimplemented. A decline delivers a rejection,
-     * and the whole thesis is "you never approach someone who hasn't already
-     * said yes". Someone who does not want to reveal simply does not, and the
-     * asker sees "requested" rather than "refused".
-     */
-    // Comments stripped: the doc block above the handler explains *why* there
-    // is no decline, and matching on prose would fail on its own reasoning.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")
-
     expect(code.toLowerCase()).not.toContain("decline")
-    expect(code).not.toMatch(/reveal_requested: false/)
-    // The request body accepts exactly one optional flag. A `decline` action
-    // would have to appear here first.
-    expect(src).toMatch(/z\.object\(\{\s*\/\*\*[\s\S]*?\*\/\s*ask: z\.boolean\(\)\.optional\(\),?\s*\}\)/)
   })
 
-  it("refuses on a closed conversation", () => {
-    expect(src).toMatch(/if \(conversation\.closed_at\) return notFoundResponse/)
+  it("a cancel clears only my own tap, and only while theirs is missing", () => {
+    expect(del).toMatch(/where: \{ id: conversationId, closed_at: null, \[mine\]: true, \[theirs\]: false \}/)
+    expect(del).toMatch(/data: \{ \[mine\]: false \}/)
+    expect(del).toContain('conflictResponse("You have already swapped names")')
   })
 
-  it("refuses on a conversation that was never pseudonymous", () => {
-    // An accepted message request already shows real names; "reveal" there
-    // would be a switch that does nothing.
-    expect(src).toContain("This conversation already shows real names")
+  it("refuses on a closed conversation, both ways", () => {
+    expect(post).toMatch(/if \(conversation\.closed_at\) return notFoundResponse/)
+    expect(del).toMatch(/if \(!conversation \|\| conversation\.closed_at\) return notFoundResponse/)
+  })
+
+  it("refuses on a conversation that was never pseudonymous, both ways", () => {
+    expect(post).toContain("This conversation already shows real names")
+    expect(del).toContain("This conversation already shows real names")
   })
 })
 

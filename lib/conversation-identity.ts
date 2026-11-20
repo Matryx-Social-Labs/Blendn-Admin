@@ -4,8 +4,8 @@
  * ## Why this has to be one function
  *
  * A DM that opens from a mutual like carries the **same pseudonym the match
- * card showed**, and the real name appears only when that person chooses to
- * reveal. That rule was about to be true of the message list and false
+ * card showed**, and a first name appears only when both people swap names.
+ * That rule was about to be true of the message list and false
  * everywhere else, because two paths reached for `profiles.name` directly and
  * neither knew anything about revealing:
  *
@@ -20,23 +20,23 @@
  *
  * Every surface that names a participant resolves through here.
  *
- * ## The three states, and why null is not "anonymous"
+ * ## The states, and why null is not "anonymous"
  *
- *   pseudonym  revealed   shown as        because
- *   ─────────  ────────   ────────        ───────
- *   null       either     real name       never was pseudonymous
- *   set        false      pseudonym       matched, has not revealed
- *   set        true       real name       matched, revealed
+ *   pseudonym  tapped Swap names  shown as     because
+ *   ─────────  ─────────────────  ────────     ───────
+ *   null       either             real name    never was pseudonymous
+ *   set        neither or one     pseudonym    not swapped (one tap is an offer)
+ *   set        both               FIRST name   swapped, in this chat only
+ *
+ * The swap is mutual (identity model, owner 2026-11-11): nothing shows until
+ * both sides have tapped, then both at once, and only the first name -- never
+ * the full one. `*_revealed` is each side's tap. A one-way reveal from before
+ * the swap is therefore a pending offer again, never a name (advisor Q1).
  *
  * A **null pseudonym means this conversation did not come from a match** — an
  * accepted message request, which has shown real names since it existed and
  * must keep doing so. Reading null as "anonymous" would retro-anonymise every
- * conversation in the database, which is both wrong and a worse bug than the
- * one this fixes.
- *
- * That is also what makes this shippable ahead of the reveal work: nothing
- * writes pseudonyms yet, so today every conversation takes the first row and
- * behaviour is unchanged.
+ * such conversation.
  */
 
 /** The columns this needs. A subset, so callers can select narrowly. */
@@ -87,33 +87,47 @@ export function displayNameInConversation(
   if (!isUser1 && !isUser2) return UNNAMED
 
   const pseudonym = isUser1 ? conversation.user1_pseudonym : conversation.user2_pseudonym
-  const revealed = isUser1 ? conversation.user1_revealed : conversation.user2_revealed
 
   // Never pseudonymous — a message-request conversation. Real names, as always.
   if (!pseudonym) return clean ?? UNNAMED
 
-  if (revealed) {
+  if (swapped(conversation)) {
     /*
-     * Revealed, but with nothing to reveal.
-     *
-     * Falling back to the pseudonym rather than to "Someone": the person they
-     * have been talking to for a week does not silently become a stranger
-     * because a name is missing.
+     * Swapped: the first name, never the full one. With no name to show,
+     * the pseudonym rather than "Someone" -- the person they have been
+     * talking to does not silently become a stranger.
      */
-    return clean ?? pseudonym
+    return clean ? firstName(clean) : pseudonym
   }
 
   return pseudonym
 }
 
+/** Both sides have tapped Swap names. */
+const swapped = (c: Pick<ConversationIdentity, "user1_revealed" | "user2_revealed">): boolean =>
+  c.user1_revealed && c.user2_revealed
+
 /**
- * Is `viewerId` allowed to see `subjectId`'s real name in this conversation?
+ * The other side has tapped Swap names and the viewer has not: "they want to
+ * swap" (`revealRequested` on the wire). Their tap IS the ask -- there is no
+ * separate request, and no decline. False when there is nothing to swap.
+ */
+export function theyAskedToSwap(conversation: ConversationIdentity, viewerId: string): boolean {
+  if (!isPseudonymous(conversation)) return false
+  const isUser1 = conversation.user1_id === viewerId
+  if (!isUser1 && conversation.user2_id !== viewerId) return false
+  const mine = isUser1 ? conversation.user1_revealed : conversation.user2_revealed
+  const theirs = isUser1 ? conversation.user2_revealed : conversation.user1_revealed
+  return theirs && !mine
+}
+
+/**
+ * May `subjectId`'s name and photo be shown in this conversation?
  *
  * The same rule as above, as a predicate, for callers deciding whether to send
- * a photo or a profile rather than a string. `viewerId` is unused today — the
- * rule is symmetric, since revealing is a standing offer shown to whoever is on
- * the other side — but it is in the signature because a future per-viewer rule
- * (a block, a report) belongs here rather than at ten call sites.
+ * a photo or the real id rather than a string: a conversation that never was
+ * pseudonymous, or one both sides have swapped in. It names them in THIS chat
+ * only -- it does not open their profile anywhere else (`lib/identity.ts`).
  */
 export function mayShowRealName(
   conversation: ConversationIdentity,
@@ -126,7 +140,7 @@ export function mayShowRealName(
   const pseudonym = isUser1 ? conversation.user1_pseudonym : conversation.user2_pseudonym
   if (!pseudonym) return true
 
-  return isUser1 ? conversation.user1_revealed : conversation.user2_revealed
+  return swapped(conversation)
 }
 
 /**
@@ -184,7 +198,8 @@ export function cameFromMatch(conversation: {
  *
  * A conversation from an accepted message request has real names from the
  * moment it exists — the request was the crossing — and a board conversation
- * or a match keeps pseudonyms until each side chooses. The app used to infer
+ * or a match keeps pseudonyms until both swap names (a Lobby ask accepted
+ * since the swap shipped opens already swapped). The app used to infer
  * this from whether the reveal fields were *absent*, and the routes always
  * sent them, so an accepted request rendered the match header: "You can see
  * their name. They can't see yours." — false, with a reveal button the server

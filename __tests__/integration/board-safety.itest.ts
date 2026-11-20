@@ -1085,3 +1085,43 @@ describe("a silenced ask changes nothing the author can see (security review)", 
     expect((await list(author)).incoming.map((r) => r.id)).toEqual([real])
   })
 })
+
+describe("a Lobby accept opens swapped only when both apps showed the copy (identity model, review of #1001)", () => {
+  const opened = async (asker: Person, author: Person, askBody: object, acceptBody: object) => {
+    const postId = await offer(author, 2)
+    const res = await requestRoute.POST(req("POST", `/api/mobile/events/${eventId}/board/${postId}/requests`, asker.token, askBody), {
+      params: Promise.resolve({ eventId, postId }),
+    })
+    expect(res.status).toBe(201)
+    const requestId = ((await res.json()) as { data: { id: string } }).data.id
+    const accepted = await decide.PATCH(req("PATCH", `/api/mobile/board/requests/${requestId}`, author.token, { action: "accept", ...acceptBody }), {
+      params: Promise.resolve({ requestId }),
+    })
+    expect(accepted.status).toBe(200)
+    return db.private_conversations.findFirstOrThrow({
+      where: { origin_board_request_id: requestId },
+      select: { user1_revealed: true, user2_revealed: true },
+    })
+  }
+
+  it("both said so: the chat opens with both sides swapped", async () => {
+    const c = await opened(await person("bsw-a1"), await person("bsw-p1"), { namesOnAccept: true }, { namesOnAccept: true })
+    expect(c).toEqual({ user1_revealed: true, user2_revealed: true })
+  })
+
+  it("an ask or an accept from an older app (no flag) opens unswapped", async () => {
+    for (const [i, askBody, acceptBody] of [[2, {}, { namesOnAccept: true }], [3, { namesOnAccept: true }, {}], [4, {}, {}]] as const) {
+      const c = await opened(await person(`bsw-a${i}`), await person(`bsw-p${i}`), askBody, acceptBody)
+      expect(c).toEqual({ user1_revealed: false, user2_revealed: false })
+    }
+  })
+
+  it("the flag accepts only true", async () => {
+    const author = await person("bsw-p5")
+    const postId = await offer(author, 2)
+    const res = await requestRoute.POST(req("POST", `/api/mobile/events/${eventId}/board/${postId}/requests`, (await person("bsw-a5")).token, { namesOnAccept: false }), {
+      params: Promise.resolve({ eventId, postId }),
+    })
+    expect(res.status).toBe(400)
+  })
+})

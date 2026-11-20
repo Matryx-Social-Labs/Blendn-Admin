@@ -242,6 +242,12 @@ describe("maySeeIdentity after leaving", () => {
               user1_id: A,
               user2_id: B,
               closed_at: rows.conversation === "closed" ? new Date() : null,
+              // An accepted message request: never pseudonymous, as a real row says with nulls.
+              origin_friendship: false,
+              user1_pseudonym: null,
+              user2_pseudonym: null,
+              user1_revealed: false,
+              user2_revealed: false,
             },
           ]
         : []
@@ -330,16 +336,15 @@ describe("maySeeIdentity after leaving", () => {
     expect(await maySeeIdentity(A, B)).toBe(true)
   })
 
-  it("keeps a matched pseudonym from identifying them until they reveal", async () => {
+  it("never opens a matched pseudonym's profile by id, not even after both swap names", async () => {
+    // A swap names them in that chat only (identity model, owner 2026-11-11).
     given({ conversation: "open" })
-    mockDb.private_conversations.findMany.mockResolvedValue([
-      { user1_id: A, user2_id: B, closed_at: null, origin_friendship: false, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: true, user2_revealed: false },
-    ])
-    expect(await maySeeIdentity(A, B)).toBe(false)
-    mockDb.private_conversations.findMany.mockResolvedValue([
-      { user1_id: A, user2_id: B, closed_at: null, origin_friendship: false, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: false, user2_revealed: true },
-    ])
-    expect(await maySeeIdentity(A, B)).toBe(true)
+    for (const [mine, theirs] of [[true, false], [false, true], [true, true]]) {
+      mockDb.private_conversations.findMany.mockResolvedValue([
+        { user1_id: A, user2_id: B, closed_at: null, origin_friendship: false, user1_pseudonym: "Otter", user2_pseudonym: "Heron", user1_revealed: mine, user2_revealed: theirs },
+      ])
+      expect(await maySeeIdentity(A, B)).toBe(false)
+    }
   })
 
   it("always lets you see yourself", async () => {

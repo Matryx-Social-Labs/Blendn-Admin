@@ -8,7 +8,7 @@ process.env.MOBILE_JWT_SECRET =
 import { signAccessToken } from "@/lib/mobile-auth"
 import { conversationPair } from "@/lib/conversations"
 import { friendState, lockPair, releaseHeldRequests } from "@/lib/friends"
-import { likeAtEvent, revealConversationsFrom } from "@/lib/matches"
+import { likeAtEvent } from "@/lib/matches"
 import { roomHandle } from "@/lib/room-handle"
 
 import { cleanup, closeDb, db, makeEvent, makeUser, occurrenceOf, onboard } from "./helpers"
@@ -81,6 +81,8 @@ const friendCard = (as: Person, userId: string) => call(friendRoute.GET as Handl
 const friendDmOpen = (as: Person, userId: string) => call(friendDm.POST as Handler, `/api/mobile/friends/${userId}/conversation`, as, { method: "POST", params: { userId } })
 const reveal = (as: Person, id: string) =>
   call(revealRoute.POST as Handler, `/api/mobile/conversations/${id}/reveal`, as, { method: "POST", params: { conversationId: id } })
+const unreveal = (as: Person, id: string) =>
+  call(revealRoute.DELETE as Handler, `/api/mobile/conversations/${id}/reveal`, as, { method: "DELETE", params: { conversationId: id } })
 const leave = (as: Person, id: string) =>
   call(leaveRoute.POST as Handler, `/api/mobile/conversations/${id}/leave`, as, { method: "POST", body: {}, params: { conversationId: id } })
 
@@ -173,19 +175,17 @@ describe("a friend request between people who are still pseudonyms", () => {
     expect(await db.friend_requests.count({ where: { OR: [{ sender_id: ana.id }, { sender_id: ben.id }] } })).toBe(0)
   })
 
-  it("a reveal in the room carries into the DM and releases it too", async () => {
+  it("a one-sided tap taken back holds it again; the swap releases it", async () => {
     const [ana, ben] = [await person("fh-4a", "Ana"), await person("fh-4b", "Ben")]
-    const host = await makeUser("fh-host", "organizer")
-    users.push(host)
-    const eventId = await makeEvent(host)
-    events.push(eventId)
-    await pseudonymousPair(ana, ben, { origin_event_id: eventId })
+    const id = await pseudonymousPair(ana, ben)
     await ask(ben, { token: await linkOf(ana) })
-    await revealConversationsFrom(eventId, [ana.id])
+    await reveal(ana, id)
     expect(await incoming(ana)).toEqual([])
-    await revealConversationsFrom(eventId, [ben.id])
+    expect((await unreveal(ana, id)).status).toBe(200)
+    await reveal(ben, id)
+    expect(await incoming(ana)).toEqual([])
+    await reveal(ana, id)
     expect((await incoming(ana)).length).toBe(1)
-    expect((await pushes(ana.id)).length).toBe(1)
   })
 
   it("never lands after an unmatch: the pair is closed as it always was", async () => {
@@ -359,13 +359,14 @@ describe("who you may rate (H2)", () => {
     expect((await list(ana, eventId)).body.data.userIds).toEqual([])
   })
 
-  it("is the raw id once they reveal, and a stale handle still resolves", async () => {
+  it("stays the chat's handle even once both swap names (a swap is that chat only), and the handle rates", async () => {
     const [ana, ben] = [await person("fh-r2-a", "Ana"), await person("fh-r2-b", "Ben")]
     const { eventId } = await ended(ana, ben)
     const id = await pseudonymousPair(ana, ben, { origin_event_id: eventId })
     const [handle] = (await list(ana, eventId)).body.data.userIds as string[]
     await reveal(ben, id)
-    expect((await list(ana, eventId)).body.data.userIds).toEqual([ben.id])
+    await reveal(ana, id)
+    expect((await list(ana, eventId)).body.data.userIds).toEqual([handle])
     expect((await rate(ana, eventId, handle)).status).toBe(200)
   })
 
@@ -446,19 +447,23 @@ describe("held requests, the second look (third review)", () => {
 describe("friend on GET /users/:id (same rule as /profiles/:id)", () => {
   const card = (as: Person, id: string) => call(userCard.GET as Handler, `/api/mobile/users/${id}`, as, { params: { userId: id } })
 
-  it("is there for somebody you may see, never for yourself or a stranger", async () => {
-    const [ana, ben, stranger] = [await person("fh-uc-a", "Ana"), await person("fh-uc-b", "Ben"), await person("fh-uc-s", "Sam")]
+  it("is there for somebody you may see, never for yourself, a stranger, or a swapped match (a swap opens no profile)", async () => {
+    const [ana, ben, cat, stranger] = [await person("fh-uc-a", "Ana"), await person("fh-uc-b", "Ben"), await person("fh-uc-c", "Cat"), await person("fh-uc-s", "Sam")]
     await pseudonymousPair(ana, ben, { revealed: { a: true, b: true } })
-    expect((await card(ana, ben.id)).body.data.friend).toEqual({ state: "none", canAdd: true })
-    await ask(ana, { userId: ben.id })
-    expect((await card(ana, ben.id)).body.data.friend).toEqual({ state: "requested", canAdd: false })
+    expect((await card(ana, ben.id)).body.data).not.toHaveProperty("friend")
+    // An accepted message request names them: the card carries the offer.
+    const [user1_id, user2_id] = conversationPair(ana.id, cat.id)
+    await db.private_conversations.create({ data: { user1_id, user2_id } })
+    expect((await card(ana, cat.id)).body.data).toHaveProperty("friend")
     expect((await card(ana, ana.id)).body.data).not.toHaveProperty("friend")
     expect((await card(ana, stranger.id)).body.data).not.toHaveProperty("friend")
   })
 
   it("carries badges under the profile's rule: present when they show them and you may see them, absent when they turned them off or you may not", async () => {
     const [ana, ben, stranger] = [await person("fh-ub-a", "Ana"), await person("fh-ub-b", "Ben"), await person("fh-ub-s", "Sam")]
-    await pseudonymousPair(ana, ben, { revealed: { a: true, b: true } })
+    // An accepted message request: ben is somebody ana may see.
+    const [user1_id, user2_id] = conversationPair(ana.id, ben.id)
+    await db.private_conversations.create({ data: { user1_id, user2_id } })
     expect((await card(ana, ben.id)).body.data.badges).toEqual([])
     await db.profiles.update({ where: { id: ben.id }, data: { show_badges: false } })
     expect((await card(ana, ben.id)).body.data).not.toHaveProperty("badges")

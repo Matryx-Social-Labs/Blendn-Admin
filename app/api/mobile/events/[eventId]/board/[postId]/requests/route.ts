@@ -47,6 +47,13 @@ const requestSchema = z.object({
    * ask heavier than the thing being asked for.
    */
   message: z.string().trim().max(BOARD.MAX_REQUEST_LENGTH).optional(),
+  /**
+   * The app showed "If they say yes, you'll both see each other's first name
+   * and photo" before this was sent. Only then may the accept open the chat
+   * already swapped (identity model): an older app sends nothing, and its asks
+   * open unswapped.
+   */
+  namesOnAccept: z.literal(true).optional(),
 })
 
 // POST /api/mobile/events/[eventId]/board/[postId]/requests
@@ -64,7 +71,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const validation = requestSchema.safeParse(await readOptionalJson(request))
     if (!validation.success) return validationErrorResponse(validation.error)
-    const { message } = validation.data
+    const { message, namesOnAccept } = validation.data
 
     /*
      * Asking ends at doors, with posting: the Lobby is read-only from then (SCRUM-1026).
@@ -185,6 +192,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
             from_user_id: user.userId,
             to_user_id: post.author_id,
             ...(message && { message }),
+            ...(namesOnAccept && { names_on_accept: true }),
             ...(silenced && { status: "declined" as const, decided_at: now, silenced_at: now }),
           },
           select: { id: true, status: true, decided_at: true, asker_withdrawn_at: true, created_at: true },

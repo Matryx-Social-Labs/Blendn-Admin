@@ -54,7 +54,7 @@ export async function openConversation(
     eventId?: string
     /** Room pseudonym per user id, snapshotted at creation. */
     pseudonyms?: Record<string, string | null>
-    /** User ids already revealed in the originating room. */
+    /** User ids that start swapped: both sides of an accepted Lobby ask (the ask sheet's consent). */
     revealed?: readonly string[]
     /**
      * The board request this came out of.
@@ -113,9 +113,7 @@ export async function openConversation(
       // pseudonym reads as "never was pseudonymous" and shows the real name.
       user1_pseudonym: ctx?.pseudonyms ? (ctx.pseudonyms[user1_id] ?? PSEUDONYM_FALLBACK) : null,
       user2_pseudonym: ctx?.pseudonyms ? (ctx.pseudonyms[user2_id] ?? PSEUDONYM_FALLBACK) : null,
-      // Someone already public in the room has nothing left to reveal to a
-      // person who saw their card. Seeding this true is what makes the
-      // asymmetric case honest rather than theatre.
+      // Only a Lobby accept starts swapped (both sides); a match starts with neither.
       user1_revealed: revealed.has(user1_id),
       user2_revealed: revealed.has(user2_id),
     },

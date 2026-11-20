@@ -169,32 +169,21 @@ describe("POST /friends/requests { userId }", () => {
     expect((await ask(ben, { userId: ana.id })).body.data).toEqual({ state: "friends" })
   })
 
-  it("says NOT_A_REVEALED_MATCH only to somebody the other person has revealed to", async () => {
+  it("answers every match not swapped on both sides exactly as an unknown id (NOT_A_REVEALED_MATCH is gone)", async () => {
     const unknown = (await ask(await person("far-u-x", "Xan"), { userId: "no-such-user" })).body
-    // `a` is the asker; `b` is the person asked about. Each flag is "has revealed to the other".
     for (const revealed of [{ a: true, b: true }, { a: false, b: true }, { a: true, b: false }, { a: false, b: false }]) {
       const [ana, ben] = [await person("far-in-a", "Ana"), await person("far-in-b", "Ben")]
       await converse(ana, ben, { revealed })
       const res = await ask(ana, { userId: ben.id })
-      const seesBen = revealed.b
       if (revealed.a && revealed.b) {
         expect(res.body.data).toEqual({ state: "requested" })
         continue
       }
       expect(res.status).toBe(404)
-      // Ben revealed to Ana, so she knows who he is; if he has not, the code would say who a pseudonym is.
-      if (seesBen) expect(res.body.reasonCode).toBe("NOT_A_REVEALED_MATCH")
-      // The 404 of an unknown id carries `PERSON_UNAVAILABLE` (Flow 15); this one swaps it for the match reason.
-      const { reasonCode: _reason, ...rest } = res.body
-      const { reasonCode: _unknownReason, ...unknownRest } = unknown
-      expect(rest).toEqual(unknownRest)
-      if (!seesBen) expect(res.body).toEqual(unknown)
-      expect(await db.friend_requests.count({ where: { sender_id: ana.id } })).toBe(0)
-      // The same from Ben's side: he sees Ana only if she revealed.
-      const back = await ask(ben, { userId: ana.id })
-      expect(back.body.reasonCode).toBe(revealed.a ? "NOT_A_REVEALED_MATCH" : "PERSON_UNAVAILABLE")
+      expect(res.body).toEqual(unknown)
     }
   })
+
 
   it("does not say who a pseudonym is: a pending match asked by a raw id or a room handle is an unknown person", async () => {
     // Tanvi is revealed at event A and matched Ana anonymously as "Otter"; neither has revealed in the DM.
@@ -315,13 +304,30 @@ describe("the friend offer on conversations and profiles", () => {
     expect((await detail(ana, hidden)).body.data.friend).toEqual({ state: "none", canAdd: false })
   })
 
-  it("rides on the profile of a revealed match, and on nobody else's", async () => {
+  it("takes the DM's handle: a swapped pair may ask by it, an unswapped one gets the plain 404", async () => {
+    const [ana, ben] = [await person("far-dh-a", "Ana"), await person("far-dh-b", "Ben")]
+    const id = await converse(ana, ben)
+    const handle = (await detail(ana, id)).body.data.otherUser.id as string
+    expect(handle).toMatch(/^rh_/)
+    expect((await ask(ana, { userId: handle })).body.data).toEqual({ state: "requested" })
+
+    const [cat, dan] = [await person("far-dh-c", "Cat"), await person("far-dh-d", "Dan")]
+    const unswapped = await converse(cat, dan, { revealed: { a: true, b: false } })
+    const h2 = (await detail(cat, unswapped)).body.data.otherUser.id as string
+    const unknown = (await ask(cat, { userId: "no-such-user" })).body
+    const res = await ask(cat, { userId: h2 })
+    expect(res.status).toBe(404)
+    expect(res.body).toEqual(unknown)
+  })
+
+  it("rides on the DM of a swapped match, never on their profile, which a swap does not open", async () => {
     const [ana, ben, stranger] = [await person("far-pr-a", "Ana"), await person("far-pr-b", "Ben"), await person("far-pr-s", "Sam")]
-    await converse(ana, ben)
-    expect((await profileOf(ana, ben.id)).body.data.friend).toEqual({ state: "none", canAdd: true })
+    const id = await converse(ana, ben)
+    expect((await detail(ana, id)).body.data.friend).toEqual({ state: "none", canAdd: true })
     await ask(ana, { userId: ben.id })
-    expect((await profileOf(ana, ben.id)).body.data.friend).toEqual({ state: "requested", canAdd: false })
-    expect((await profileOf(ben, ana.id)).body.data.friend).toEqual({ state: "incoming", canAdd: true })
+    expect((await detail(ana, id)).body.data.friend).toEqual({ state: "requested", canAdd: false })
+    expect((await detail(ben, id)).body.data.friend).toEqual({ state: "incoming", canAdd: true })
+    expect((await profileOf(ana, ben.id)).body.data).not.toHaveProperty("friend")
 
     // A stranger gets no `friend` key at all, and neither does the owner of the profile.
     expect(await profileOf(ana, stranger.id)).toMatchObject({ status: 200 })

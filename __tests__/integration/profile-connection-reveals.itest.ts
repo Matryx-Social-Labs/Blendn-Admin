@@ -39,7 +39,7 @@ async function card(viewer: string, subject: string) {
   return (await res.json()).data as { identityVisible: boolean; connection?: Record<string, unknown> }
 }
 
-it("one-sided: the side revealed to is told who revealed; the other side gets no connection; both revealed reads both", async () => {
+it("a match's profile names nobody and carries no connection, one-sided or swapped; an accepted request's reads both (identity model)", async () => {
   const ana = await person("pcr-ana")
   const ben = await person("pcr-ben")
   const [user1_id, user2_id] = conversationPair(ana, ben)
@@ -50,21 +50,23 @@ it("one-sided: the side revealed to is told who revealed; the other side gets no
       user2_id,
       user1_pseudonym: "Quiet Otter",
       user2_pseudonym: "Amber Fox",
-      // Ben has revealed; Ana has not.
+      // Ben has tapped Swap names; Ana has not.
       user1_revealed: !anaIs1,
       user2_revealed: anaIs1,
     },
   })
 
-  const anaSees = await card(ana, ben)
-  expect(anaSees.identityVisible).toBe(true)
-  expect(anaSees.connection).toEqual({ conversationId: convo.id, request: null, youRevealed: false, theyRevealed: true })
+  for (const [viewer, target] of [[ana, ben], [ben, ana]]) {
+    const seen = await card(viewer, target)
+    expect(seen.identityVisible).toBe(false)
+    expect(seen).not.toHaveProperty("connection")
+  }
 
-  // Ben may not see who Ana is: no connection, so no conversation id beside a pseudonym.
-  const benSees = await card(ben, ana)
-  expect(benSees.identityVisible).toBe(false)
-  expect(benSees).not.toHaveProperty("connection")
-
+  // Swapped: first name and photo in the chat, still nothing on the profile.
   await db.private_conversations.update({ where: { id: convo.id }, data: { user1_revealed: true, user2_revealed: true } })
-  expect((await card(ben, ana)).connection).toMatchObject({ youRevealed: true, theyRevealed: true })
+  expect((await card(ben, ana)).identityVisible).toBe(false)
+
+  // Control: the same pair with a conversation that never was pseudonymous.
+  await db.private_conversations.update({ where: { id: convo.id }, data: { user1_pseudonym: null, user2_pseudonym: null } })
+  expect((await card(ben, ana)).connection).toMatchObject({ conversationId: convo.id, youRevealed: true, theyRevealed: true })
 })

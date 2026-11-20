@@ -14,6 +14,7 @@ import {
   forbiddenResponse,
   errorResponse,
   notFoundResponse,
+  conflictResponse,
   serverErrorResponse,
 } from "@/lib/api-response"
 import { isUuid, readOptionalJson } from "@/lib/api-input"
@@ -23,46 +24,33 @@ interface RouteParams {
 }
 
 /**
- * Showing someone who you are, or asking them to.
+ * Swap names: a mutual reveal (identity model, owner 2026-11-11).
  *
  * ```
- *   POST /conversations/:id/reveal          → my side becomes visible to them
- *   POST /conversations/:id/reveal { ask }  → I ask them to show me
+ *   POST   /conversations/:id/reveal   → I tap Swap names
+ *   DELETE /conversations/:id/reveal   → I take my tap back, while they have not tapped
  * ```
  *
- * ## Per side, and one way
+ * `*_revealed` is each side's tap. Nothing shows until BOTH have tapped; then
+ * both see each other's first name and photo, in this chat only
+ * (`displayNameInConversation`, `mayShowRealName`). One tap alone names nobody.
  *
- * `user1_revealed` and `user2_revealed` move independently. Revealing is a
- * standing offer, not a trade: going first must not expose the other person,
- * and waiting must not be treated as a refusal.
+ * ## The tap is the ask
  *
- * It is also **not retractable**. Once a name and a face have been seen a flag
- * cannot unsee them, and a control implying otherwise would be worse than its
- * absence. The client says so before the tap; this route simply has no path
- * back to `false`.
+ * There is no separate "ask them": my tap is what the other side sees as "they
+ * want to swap" (`revealRequested`, `theyAskedToSwap`). It cannot nag: the ask
+ * is pushed once per conversation, whatever taps and cancels follow (the
+ * one-way `*_reveal_requested` marker). There is no decline: someone who does
+ * not want to swap simply does not.
  *
- * ## Asking, and the rejection that never arrives
+ * ## Taking it back
  *
- * A request is one boolean on the side being asked. Two properties fall out of
- * that shape, and both are wanted:
- *
- * - **It cannot nag.** Asking twice writes the same `true`. There is no counter
- *   to increment and no second notification to send.
- * - **There is no decline.** Not unimplemented — deliberately absent. A decline
- *   delivers a rejection, and this product exists to remove exactly that:
- *   *"you never approach someone who hasn't already said yes."* Someone who does
- *   not want to reveal simply does not, and the asker sees "reveal requested"
- *   rather than "reveal refused". Silence is the softest possible no.
- *
- * You cannot ask someone who is already revealed — there is nothing left to
- * ask for. That is the asymmetric case: if you were public in the room where you
- * matched, they already saw your card, so your side starts `true` and only
- * theirs is pending.
+ * Until they tap too, my tap is only an offer, so it can be withdrawn. Once
+ * both have tapped the names are seen, and no flag can unsee them: the cancel
+ * refuses (409). Both writes put the other side's state in their predicate, so
+ * a cancel racing their tap is decided by the row, never by a stale read.
  */
-const revealSchema = z.object({
-  /** Ask the other person to reveal, instead of revealing yourself. */
-  ask: z.boolean().optional(),
-})
+const revealSchema = z.object({}).strict()
 
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -78,9 +66,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     )
     if (limited) return limited
 
-    const parsed = revealSchema.safeParse(await readOptionalJson(request))
+    const parsed = revealSchema.safeParse((await readOptionalJson(request)) ?? {})
     if (!parsed.success) return validationErrorResponse(parsed.error)
-    const { ask } = parsed.data
 
     const conversation = await db.private_conversations.findUnique({
       where: { id: conversationId },
@@ -111,30 +98,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse("This conversation already shows real names", 400)
     }
 
-    if (ask) {
-      const theirSideRevealed = isUser1
-        ? conversation.user2_revealed
-        : conversation.user1_revealed
-      if (theirSideRevealed) {
-        // Nothing left to ask for. Refused at the endpoint rather than merely
-        // hidden in the UI, so the rule is enforced rather than rendered.
-        return errorResponse("They have already revealed", 400)
-      }
-
-      // Only the call that flips the flag notifies: a repeat is a no-op, not
-      // another push at someone who cannot decline (API M4).
-      const unasked = isUser1 ? "user2_reveal_requested" : "user1_reveal_requested"
-      const { count } = await db.private_conversations.updateMany({
-        where: { id: conversationId, [unasked]: false },
-        data: isUser1 ? { user2_reveal_requested: true } : { user1_reveal_requested: true },
-      })
-
-      const themId = isUser1 ? conversation.user2_id : conversation.user1_id
-      if (count === 1) notifyRevealRequest(themId, conversationId).catch(() => {})
-
-      return successResponse({ requested: true })
-    }
-
     /*
      * Revealing shows a name and a photo. With neither, the switch turns on and
      * the other person's screen is byte-for-byte what it was — so they conclude
@@ -161,48 +124,115 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return errorResponse(`Add ${missing} to your profile first`, 400, "reveal_incomplete")
     }
 
-    // The flip is the claim: only the call whose UPDATE changes the row tells
-    // anybody, so a repeat (or a parallel pair) pushes once (API M4).
-    const mine = isUser1 ? "user1_revealed" : "user2_revealed"
-    const { count } = await db.private_conversations.updateMany({
-      where: { id: conversationId, [mine]: false },
-      data: isUser1 ? { user1_revealed: true } : { user2_revealed: true },
-    })
-    const after = await db.private_conversations.findUniqueOrThrow({
-      where: { id: conversationId },
-      select: { user1_revealed: true, user2_revealed: true },
-    })
+    /*
+     * The flip is the claim: only the call whose UPDATE changes the row tells
+     * anybody, so a repeat (or a parallel pair) pushes once (API M4). Both
+     * flags come back from that same UPDATE (RETURNING), not from a re-read:
+     * when both sides tap at once, exactly one of the two writes sees the
+     * other's tap, so exactly one "Names swapped" goes out (review of #1001).
+     */
+    type Flags = { u1: boolean; u2: boolean }
+    const flipped = isUser1
+      ? await db.$queryRaw<Flags[]>`UPDATE private_conversations SET user1_revealed = true WHERE id = ${conversationId}::uuid AND user1_revealed = false AND closed_at IS NULL RETURNING user1_revealed AS u1, user2_revealed AS u2`
+      : await db.$queryRaw<Flags[]>`UPDATE private_conversations SET user2_revealed = true WHERE id = ${conversationId}::uuid AND user2_revealed = false AND closed_at IS NULL RETURNING user1_revealed AS u1, user2_revealed AS u2`
+    const count = flipped.length
+    const after = flipped[0]
+      ? { user1_revealed: flipped[0].u1, user2_revealed: flipped[0].u2 }
+      : await db.private_conversations.findUniqueOrThrow({
+          where: { id: conversationId },
+          select: { user1_revealed: true, user2_revealed: true, closed_at: true },
+        })
+    // Closed between the read above and the write: gone, as for a closed one.
+    if (count === 0 && "closed_at" in after && after.closed_at) return notFoundResponse("Conversation not found")
+    const swapped = after.user1_revealed && after.user2_revealed
 
     const themId = isUser1 ? conversation.user2_id : conversation.user1_id
     if (count === 1) {
-      notifyReveal(themId, conversationId).catch(() => {})
+      if (swapped) {
+        // The tap that completes the swap: they tapped first, and are told.
+        notifyReveal(themId, conversationId).catch(() => {})
+      } else {
+        /*
+         * They are asked -- once per conversation. `*_reveal_requested` on their
+         * side is a one-way marker a cancel never clears, so tap → cancel → tap
+         * cannot push them again (security review of #1001: no nag loop).
+         */
+        const asked = isUser1 ? "user2_reveal_requested" : "user1_reveal_requested"
+        const first = await db.private_conversations.updateMany({
+          where: { id: conversationId, [asked]: false },
+          data: { [asked]: true },
+        })
+        if (first.count === 1) notifyRevealRequest(themId, conversationId).catch(() => {})
+      }
       // Their open DM re-reads now rather than on the next push they may never get.
-      // Once both have revealed the same event goes to both: the friend offer is possible.
-      emitPrivateRevealed(
-        conversationId,
-        after.user1_revealed && after.user2_revealed ? [authUser.userId, themId] : [themId]
-      )
+      // Once both have tapped the same event goes to both: names, and the friend offer.
+      emitPrivateRevealed(conversationId, swapped ? [authUser.userId, themId] : [themId])
     }
-    // Both sides have shown themselves now: a friend request held for this pair is delivered.
+    // Both sides have swapped now: a friend request held for this pair is delivered.
     // Decided from the re-read after our UPDATE, not from the read before it:
-    // two reveals at once each read "the other has not", and only the second
+    // two taps at once each read "the other has not", and only the second
     // UPDATE sees both. (The release itself announces only what it clears.)
-    if (after.user1_revealed && after.user2_revealed) {
+    if (swapped) {
       await releaseHeldRequests([authUser.userId, themId]).catch((error) =>
         logger.warn("Releasing held friend requests failed", { error: error instanceof Error ? error.message : String(error) })
       )
     }
 
-    return successResponse({
-      revealed: true,
-      // Whether they have revealed too. Not a precondition for anything — each
-      // side stands alone — but the client needs it to render the header.
-      mutual: isUser1 ? conversation.user2_revealed : conversation.user1_revealed,
-    })
+    // `mutual`: both have tapped, so each sees the other's first name and photo now.
+    return successResponse({ revealed: true, mutual: swapped })
   } catch (error) {
     logger.error("Reveal error", {
       error: error instanceof Error ? error.message : String(error),
     })
+    return serverErrorResponse("Failed to update reveal state")
+  }
+}
+
+/** Take my Swap names tap back, while the other side has not tapped. */
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { conversationId } = await params
+    if (!isUuid(conversationId)) return errorResponse("Invalid conversation ID format", 400)
+
+    const authUser = await getAuthenticatedUser(request)
+    if (!authUser) return unauthorizedResponse("Invalid or expired token")
+
+    const limited = await rateLimit(request, userLimit("write", "conversation-reveal", authUser.userId))
+    if (limited) return limited
+
+    const conversation = await db.private_conversations.findUnique({
+      where: { id: conversationId },
+      select: { user1_id: true, user2_id: true, user1_pseudonym: true, user2_pseudonym: true, closed_at: true },
+    })
+    if (!conversation || conversation.closed_at) return notFoundResponse("Conversation not found")
+    const isUser1 = conversation.user1_id === authUser.userId
+    if (!isUser1 && conversation.user2_id !== authUser.userId) {
+      return forbiddenResponse("Not authorized for this conversation")
+    }
+    if (!conversation.user1_pseudonym && !conversation.user2_pseudonym) {
+      return errorResponse("This conversation already shows real names", 400)
+    }
+
+    // Only my own tap, and only while theirs is still missing: a swap both made is kept.
+    const [mine, theirs] = isUser1 ? (["user1_revealed", "user2_revealed"] as const) : (["user2_revealed", "user1_revealed"] as const)
+    const { count } = await db.private_conversations.updateMany({
+      where: { id: conversationId, closed_at: null, [mine]: true, [theirs]: false },
+      data: { [mine]: false },
+    })
+    if (count === 0) {
+      const now = await db.private_conversations.findUniqueOrThrow({
+        where: { id: conversationId },
+        select: { [mine]: true, [theirs]: true },
+      })
+      if (now[mine] && now[theirs]) return conflictResponse("You have already swapped names")
+      // Nothing to take back: already not tapped. Answered as done, so a repeat is harmless.
+      return successResponse({ revealed: false })
+    }
+    // Their open DM stops showing "they want to swap".
+    emitPrivateRevealed(conversationId, [isUser1 ? conversation.user2_id : conversation.user1_id])
+    return successResponse({ revealed: false })
+  } catch (error) {
+    logger.error("Reveal cancel error", { error: error instanceof Error ? error.message : String(error) })
     return serverErrorResponse("Failed to update reveal state")
   }
 }

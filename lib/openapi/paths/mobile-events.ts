@@ -980,6 +980,7 @@ registry.registerPath({
         "application/json": {
           schema: z.object({
             message: z.string().max(300).optional(),
+            namesOnAccept: z.literal(true).optional().describe("The app showed \"If they say yes, you'll both see each other's first name and photo.\" Needed (with the accepter's) for the chat to open swapped."),
           }),
         },
       },
@@ -1179,7 +1180,7 @@ registry.registerPath({
     body: {
       content: {
         "application/json": {
-          schema: z.object({ action: z.enum(["accept", "decline", "withdraw"]) }),
+          schema: z.object({ action: z.enum(["accept", "decline", "withdraw"]), namesOnAccept: z.literal(true).optional().describe("On accept: the app showed that both will see each other's first name and photo. With the ask's own `namesOnAccept` the chat opens swapped; otherwise unswapped.") }),
         },
       },
     },

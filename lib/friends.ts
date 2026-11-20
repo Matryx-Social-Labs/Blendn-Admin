@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger"
 import { db } from "@/lib/db"
 import { conversationPair } from "@/lib/conversations"
 import { sendPushNotification } from "@/lib/push-notifications"
-import { UNNAMED, cameFromMatch, holdingPair, matchSelect, mayShowRealName } from "@/lib/conversation-identity"
+import { UNNAMED, cameFromMatch, holdingPair, matchSelect } from "@/lib/conversation-identity"
 import { dropCrewInvitesBetween } from "@/lib/crews/blocks"
 import { notifyFriendshipChanged } from "@/lib/room-friends"
 import { recordEndedFriendship } from "@/lib/room-people"
@@ -326,28 +326,19 @@ export const isRevealedMatch = (c: MatchFacts) => isOpenMatch(c) && c.user1_reve
 /** Where a pair stands on the match rule, from the asker's side. */
 export interface MatchStanding {
   /**
-   * - `revealed`: an open match, both sides have shown their names, and nothing
+   * - `revealed`: an open match, both sides have swapped names, and nothing
    *   (a block, a deleted account, an unmatch) stands between them.
    * - `pending`: the same, but a side has not revealed yet.
    * - `none`: anything else.
    */
   standing: "revealed" | "pending" | "none"
-  /**
-   * The asker may already see who the other is: they revealed to them
-   * (`mayShowRealName`). Only then is saying "you matched but not both
-   * revealed" no news — for a pseudonym the asker cannot name, it would say who
-   * the pseudonym is (an id found elsewhere, a friend's, a room handle).
-   */
-  askerSeesThem: boolean
 }
 
 /** Three queries, whatever the answer: see `readPair`. */
 export async function matchStanding(askerId: string, otherId: string): Promise<MatchStanding> {
   const { connectable, conversation } = await readPair(db, askerId, otherId)
-  if (!connectable || !conversation || !isOpenMatch(conversation)) return { standing: "none", askerSeesThem: false }
-  return isRevealedMatch(conversation)
-    ? { standing: "revealed", askerSeesThem: true }
-    : { standing: "pending", askerSeesThem: mayShowRealName(conversation, otherId) }
+  if (!connectable || !conversation || !isOpenMatch(conversation)) return { standing: "none" }
+  return { standing: isRevealedMatch(conversation) ? "revealed" : "pending" }
 }
 
 /**

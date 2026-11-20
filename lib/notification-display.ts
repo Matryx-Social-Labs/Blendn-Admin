@@ -233,9 +233,9 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
   }
 
   /*
-   * A reveal request waits on you until you have shown who you are, or the
-   * conversation is gone: "Waiting on you" holds open requests only (SCRUM-859).
-   * Answering it is `*_revealed`, so that is what closes the row.
+   * A swap request waits on you while they have tapped Swap names and you have
+   * not, and the conversation is open: "Waiting on you" holds open requests
+   * only (SCRUM-859). Your tap closes it, and so does theirs taken back.
    */
   if (revealRows.length) {
     const asked = await db.private_conversations.findMany({
@@ -246,7 +246,11 @@ export async function decorateNotifications(viewerId: string, rows: readonly Row
       },
       select: { id: true, user1_id: true, user1_revealed: true, user2_revealed: true },
     })
-    const waiting = new Set(asked.filter((c) => !(c.user1_id === viewerId ? c.user1_revealed : c.user2_revealed)).map((c) => c.id))
+    const waiting = new Set(
+      asked
+        .filter((c) => (c.user1_id === viewerId ? c.user2_revealed && !c.user1_revealed : c.user1_revealed && !c.user2_revealed))
+        .map((c) => c.id)
+    )
     for (const row of revealRows) set(row.id, { open: waiting.has(uuidOf(row.payload, "conversationId") ?? "") })
   }
 
